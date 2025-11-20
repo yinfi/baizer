@@ -1,0 +1,148 @@
+﻿import { App } from 'obsidian';
+import { FunctionDeclaration, SchemaType } from '@google/generative-ai';
+
+export class ToolManager {
+    constructor(private app: App, private allowPluginControl: boolean) { }
+
+    getToolsDefinitions(): FunctionDeclaration[] {
+        const tools: FunctionDeclaration[] = [
+            // 1. Read Note
+            {
+                name: 'read_note',
+                description: 'Read the full content of a specific markdown note.',
+                parameters: {
+                    type: SchemaType.OBJECT,
+                    properties: {
+                        path: { type: SchemaType.STRING, description: 'The file path or wiki-link name' }
+                    },
+                    required: ['path']
+                }
+            },
+            // 2. Create Note
+            {
+                name: 'create_note',
+                description: 'Create a new note with content. Automatically creates parent folders if needed.',
+                parameters: {
+                    type: SchemaType.OBJECT,
+                    properties: {
+                        filename: { type: SchemaType.STRING, description: 'Path/Filename.md (e.g., "Study/MyNote.md")' },
+                        content: { type: SchemaType.STRING, description: 'Markdown content' }
+                    },
+                    required: ['filename', 'content']
+                }
+            },
+            // 3. Search
+            {
+                name: 'search_vault',
+                description: 'Fuzzy search for files in the vault.',
+                parameters: {
+                    type: SchemaType.OBJECT,
+                    properties: {
+                        query: { type: SchemaType.STRING }
+                    },
+                    required: ['query']
+                }
+            }
+        ];
+
+        // 鏉′欢鍔犺浇锛氬鏋滃紑鍚簡鎻掍欢鎺у埗鏉冮檺
+        if (this.allowPluginControl) {
+            tools.push({
+                name: 'execute_command',
+                description: 'Execute an Obsidian command ID.',
+                parameters: {
+                    type: SchemaType.OBJECT,
+                    properties: {
+                        id: { type: SchemaType.STRING, description: 'The command ID to run' }
+                    },
+                    required: ['id']
+                }
+            });
+            tools.push({
+                name: 'list_available_commands',
+                description: 'List commands matching a keyword to find their IDs.',
+                parameters: {
+                    type: SchemaType.OBJECT,
+                    properties: {
+                        keyword: { type: SchemaType.STRING }
+                    },
+                    required: ['keyword']
+                }
+            });
+        }
+
+        return tools;
+    }
+
+    async execute(name: string, args: any): Promise<any> {
+        try {
+            switch (name) {
+                case 'read_note':
+                    const file = this.app.metadataCache.getFirstLinkpathDest(args.path, "");
+                    if (!file) return { error: 'File not found' };
+                    const content = await this.app.vault.read(file);
+                    return { path: file.path, content: content.substring(0, 5000) }; // Limit context
+
+                case 'create_note':
+                    let path = args.filename;
+                    if (!path.endsWith('.md')) path += '.md';
+
+                    // 妫€鏌ユ枃浠舵槸鍚﹀凡瀛樺湪
+                    const existingFile = this.app.vault.getAbstractFileByPath(path);
+                    if (existingFile) {
+                        return {
+                            status: 'error',
+                            message: `鏂囦欢宸插瓨鍦? ${path}銆傝浣跨敤涓嶅悓鐨勬枃浠跺悕鎴栧厛鍒犻櫎鐜版湁鏂囦欢銆俙
+                        };
+                    }
+
+                    // 纭繚鐖舵枃浠跺す瀛樺湪
+                    const pathParts = path.split('/');
+                    if (pathParts.length > 1) {
+                        const folderPath = pathParts.slice(0, -1).join('/');
+                        const folder = this.app.vault.getAbstractFileByPath(folderPath);
+                        if (!folder) {
+                            // 鍒涘缓鐖舵枃浠跺す锛堥€掑綊鍒涘缓鎵€鏈夐渶瑕佺殑鏂囦欢澶癸級
+                            try {
+                                await this.app.vault.createFolder(folderPath);
+                            } catch (e) {
+                                // 鏂囦欢澶瑰彲鑳藉凡瀛樺湪锛屽拷鐣ラ敊璇?
+                                console.log('Folder creation note:', e);
+                            }
+                        }
+                    }
+
+                    // 鍒涘缓鏂囦欢
+                    await this.app.vault.create(path, args.content || '');
+                    return { status: 'success', message: `鉁?绗旇宸叉垚鍔熶繚瀛樿嚦 ${path}` };
+
+                case 'search_vault':
+                    // Simple fuzzy search simulation using files cache
+                    const matches = this.app.vault.getFiles()
+                        .filter(f => f.basename.toLowerCase().includes(args.query.toLowerCase()))
+                        .map(f => f.path)
+                        .slice(0, 5);
+                    return { matches };
+
+                case 'list_available_commands':
+                    if (!this.allowPluginControl) return { error: 'Permission denied' };
+                    const cmds = this.app.commands.listCommands()
+                        .filter(c => c.name.toLowerCase().includes(args.keyword.toLowerCase()))
+                        .map(c => ({ id: c.id, name: c.name }))
+                        .slice(0, 10);
+                    return { commands: cmds };
+
+                case 'execute_command':
+                    if (!this.allowPluginControl) return { error: 'Permission denied' };
+                    const success = this.app.commands.executeCommandById(args.id);
+                    return { success, command_id: args.id };
+
+                default:
+                    return { error: 'Unknown tool' };
+            }
+        } catch (e: any) {
+            console.error(`Tool execution error [${name}]:`, e);
+            return { error: e.message };
+        }
+    }
+}

@@ -1,4 +1,4 @@
-import { App, TFile } from 'obsidian';
+﻿import { App } from 'obsidian';
 import { FunctionDeclaration, SchemaType } from '@google/generative-ai';
 
 export class ToolManager {
@@ -31,71 +31,7 @@ export class ToolManager {
                     required: ['filename', 'content']
                 }
             },
-            // 3. Update Note
-            {
-                name: 'update_note',
-                description: 'Update the content of an existing note. Completely replaces the file content.',
-                parameters: {
-                    type: SchemaType.OBJECT,
-                    properties: {
-                        path: { type: SchemaType.STRING, description: 'File path' },
-                        content: { type: SchemaType.STRING, description: 'New content' }
-                    },
-                    required: ['path', 'content']
-                }
-            },
-            // 4. Append to Note
-            {
-                name: 'append_to_note',
-                description: 'Append content to the end of an existing note.',
-                parameters: {
-                    type: SchemaType.OBJECT,
-                    properties: {
-                        path: { type: SchemaType.STRING, description: 'File path' },
-                        content: { type: SchemaType.STRING, description: 'Content to append' }
-                    },
-                    required: ['path', 'content']
-                }
-            },
-            // 5. Delete Note
-            {
-                name: 'delete_note',
-                description: 'Delete a note file. Moves to trash if available.',
-                parameters: {
-                    type: SchemaType.OBJECT,
-                    properties: {
-                        path: { type: SchemaType.STRING, description: 'File path to delete' }
-                    },
-                    required: ['path']
-                }
-            },
-            // 6. Rename Note
-            {
-                name: 'rename_note',
-                description: 'Rename or move a note to a different location.',
-                parameters: {
-                    type: SchemaType.OBJECT,
-                    properties: {
-                        oldPath: { type: SchemaType.STRING, description: 'Current file path' },
-                        newPath: { type: SchemaType.STRING, description: 'New file path' }
-                    },
-                    required: ['oldPath', 'newPath']
-                }
-            },
-            // 7. List Notes
-            {
-                name: 'list_notes',
-                description: 'List markdown files in the vault or a specific folder.',
-                parameters: {
-                    type: SchemaType.OBJECT,
-                    properties: {
-                        folder: { type: SchemaType.STRING, description: 'Folder path (optional, defaults to root)' },
-                        limit: { type: SchemaType.NUMBER, description: 'Max number of files to return (optional, default 20)' }
-                    },
-                    required: []
-                }
-            },
-            // 8. Search
+            // 3. Search
             {
                 name: 'search_vault',
                 description: 'Fuzzy search for files in the vault.',
@@ -107,7 +43,7 @@ export class ToolManager {
                     required: ['query']
                 }
             },
-            // 9. Open File
+            // 4. Open File
             {
                 name: 'open_file',
                 description: 'Open a file in the Obsidian editor. Supports file path or filename.',
@@ -168,7 +104,7 @@ export class ToolManager {
                     if (existingFile) {
                         return {
                             status: 'error',
-                            message: `File already exists: ${path}. Use update_note to modify existing files.`
+                            message: `File already exists: ${path}. Please use a different filename or delete the existing file.`
                         };
                     }
 
@@ -178,71 +114,22 @@ export class ToolManager {
                         const folderPath = pathParts.slice(0, -1).join('/');
                         const folder = this.app.vault.getAbstractFileByPath(folderPath);
                         if (!folder) {
+                            // Create parent folder (recursively create all needed folders)
                             try {
                                 await this.app.vault.createFolder(folderPath);
                             } catch (e) {
+                                // Folder may already exist, ignore error
                                 console.log('Folder creation note:', e);
                             }
                         }
                     }
 
+                    // Create file
                     await this.app.vault.create(path, args.content || '');
-                    return { status: 'success', message: `✓ Note created: ${path}` };
-
-                case 'update_note':
-                    const updateFile = this.app.vault.getAbstractFileByPath(args.path);
-                    if (!updateFile || !(updateFile instanceof TFile)) {
-                        return { success: false, error: 'File not found' };
-                    }
-                    await this.app.vault.modify(updateFile, args.content);
-                    return { success: true, message: `✓ Updated: ${args.path}` };
-
-                case 'append_to_note':
-                    const appendFile = this.app.vault.getAbstractFileByPath(args.path);
-                    if (!appendFile || !(appendFile instanceof TFile)) {
-                        return { success: false, error: 'File not found' };
-                    }
-                    const existingContent = await this.app.vault.read(appendFile);
-                    await this.app.vault.modify(appendFile, existingContent + '\n' + args.content);
-                    return { success: true, message: `✓ Appended to: ${args.path}` };
-
-                case 'delete_note':
-                    const deleteFile = this.app.vault.getAbstractFileByPath(args.path);
-                    if (!deleteFile) {
-                        return { success: false, error: 'File not found' };
-                    }
-                    await this.app.vault.trash(deleteFile, true); // Move to system trash
-                    return { success: true, message: `✓ Deleted: ${args.path}` };
-
-                case 'rename_note':
-                    const renameFile = this.app.vault.getAbstractFileByPath(args.oldPath);
-                    if (!renameFile) {
-                        return { success: false, error: 'File not found' };
-                    }
-                    await this.app.vault.rename(renameFile, args.newPath);
-                    return { success: true, message: `✓ Renamed: ${args.oldPath} -> ${args.newPath}` };
-
-                case 'list_notes':
-                    const folderPath = args.folder || '/';
-                    const limit = args.limit || 20;
-                    let files = this.app.vault.getMarkdownFiles();
-
-                    if (folderPath !== '/') {
-                        files = files.filter(f => f.path.startsWith(folderPath));
-                    }
-
-                    const fileList = files
-                        .slice(0, limit)
-                        .map(f => ({
-                            path: f.path,
-                            name: f.basename,
-                            size: f.stat.size,
-                            modified: new Date(f.stat.mtime).toISOString()
-                        }));
-
-                    return { success: true, files: fileList, total: files.length };
+                    return { status: 'success', message: `鉁?Note successfully saved to ${path}` };
 
                 case 'search_vault':
+                    // Simple fuzzy search simulation using files cache
                     const matches = this.app.vault.getFiles()
                         .filter(f => f.basename.toLowerCase().includes(args.query.toLowerCase()))
                         .map(f => f.path)
@@ -250,13 +137,16 @@ export class ToolManager {
                     return { matches };
 
                 case 'open_file':
-                    const allFiles = this.app.vault.getFiles();
-                    let targetFile = allFiles.find(f => f.path === args.path);
+                    const files = this.app.vault.getFiles();
+                    // Try exact path match
+                    let targetFile = files.find(f => f.path === args.path);
+                    // Try basename match
                     if (!targetFile) {
-                        targetFile = allFiles.find(f => f.basename === args.path || f.basename === args.path.replace('.md', ''));
+                        targetFile = files.find(f => f.basename === args.path || f.basename === args.path.replace('.md', ''));
                     }
+                    // Try fuzzy match
                     if (!targetFile) {
-                        const fuzzyMatches = allFiles.filter(f => f.path.toLowerCase().includes(args.path.toLowerCase()));
+                        const fuzzyMatches = files.filter(f => f.path.toLowerCase().includes(args.path.toLowerCase()));
                         if (fuzzyMatches.length === 1) {
                             targetFile = fuzzyMatches[0];
                         } else if (fuzzyMatches.length > 1) {
@@ -272,7 +162,7 @@ export class ToolManager {
                     }
                     const leaf = this.app.workspace.getLeaf(false);
                     await leaf.openFile(targetFile);
-                    return { success: true, path: targetFile.path, message: `✓ Opened: ${targetFile.path}` };
+                    return { success: true, path: targetFile.path, message: `Opened file: ${targetFile.path}` };
 
                 case 'list_available_commands':
                     if (!this.allowPluginControl) return { error: 'Permission denied' };

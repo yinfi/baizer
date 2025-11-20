@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, MarkdownRenderer } from 'obsidian';
+import { ItemView, WorkspaceLeaf, MarkdownRenderer, TFile } from 'obsidian';
 import { GeminiAPI } from '../gemini-api';
 
 export const VIEW_TYPE_GEMINI_SHELL = 'gemini-shell-view';
@@ -16,6 +16,9 @@ export class GeminiShellView extends ItemView {
     private suggestionType: 'command' | 'file' | null = null;
     private selectedIndex = 0;
     private suggestions: any[] = [];
+
+    // File Selection State
+    private pendingFileSelection: TFile[] | null = null;
 
     constructor(leaf: WorkspaceLeaf, api: GeminiAPI) {
         super(leaf);
@@ -37,21 +40,23 @@ export class GeminiShellView extends ItemView {
     async onOpen() {
         const { contentEl } = this;
         contentEl.empty();
-        contentEl.addClass('gemini-shell-view');
+
+        // Create a wrapper container to ensure proper flexbox layout
+        const container = contentEl.createDiv({ cls: 'gemini-shell-view' });
 
         // 1. Header
-        const header = contentEl.createDiv({ cls: 'shell-header' });
+        const header = container.createDiv({ cls: 'shell-header' });
         header.createSpan({ text: 'GEMINI SHELL' });
         header.createSpan({ text: '● ONLINE', attr: { style: 'color: #00e676;' } });
 
         // 2. Output Area (Scrollable)
-        this.outputContainer = contentEl.createDiv({ cls: 'shell-output-area' });
+        this.outputContainer = container.createDiv({ cls: 'shell-output-area' });
 
         // Welcome Message
         this.appendLog('System', 'Kernel initialized.', 'system');
 
         // 3. Input Area (Fixed at bottom)
-        const inputContainer = contentEl.createDiv({ cls: 'shell-input-container' });
+        const inputContainer = container.createDiv({ cls: 'shell-input-container' });
 
         // Suggestion Popup
         this.suggestionContainer = inputContainer.createDiv({ cls: 'shell-suggestions' });
@@ -70,8 +75,8 @@ export class GeminiShellView extends ItemView {
             }
         });
 
-        // 4. Action Bar
-        const footer = contentEl.createDiv({ cls: 'shell-footer' });
+        // 4. Action Bar (inside inputContainer)
+        const footer = inputContainer.createDiv({ cls: 'shell-footer' });
         const rightActions = footer.createDiv({ cls: 'action-group' });
 
         const createAction = (container: HTMLElement, key: string, label: string) => {
@@ -121,7 +126,7 @@ export class GeminiShellView extends ItemView {
         });
 
         // Focus input on click
-        contentEl.addEventListener('click', (e) => {
+        container.addEventListener('click', (e) => {
             if (window.getSelection()?.toString()) return;
             // Don't focus if clicking on suggestions
             if ((e.target as HTMLElement).closest('.shell-suggestions')) return;
@@ -167,7 +172,8 @@ export class GeminiShellView extends ItemView {
                 { label: '/profile', desc: 'View user profile' },
                 { label: '/forget', desc: 'Forget context' },
                 { label: '/new', desc: 'Create new note' },
-                { label: '/edit', desc: 'Edit current selection' }
+                { label: '/edit', desc: 'Edit current selection' },
+                { label: '/open', desc: 'Open file' }
             ];
             this.suggestions = commands.filter(c => c.label.toLowerCase().includes(query.toLowerCase()));
         } else {
@@ -248,6 +254,33 @@ export class GeminiShellView extends ItemView {
 
     async processCommand(query: string) {
         this.appendLog('You', query, 'user');
+
+        // ==================== File Selection ====================
+
+        // Check if user is selecting from file list
+        if (this.pendingFileSelection && /^\d+$/.test(query)) {
+            const index = parseInt(query) - 1;
+            if (index >= 0 && index < this.pendingFileSelection.length) {
+                await this.openFile(this.pendingFileSelection[index]);
+                this.pendingFileSelection = null;
+            } else {
+                this.appendLog('System', `✗ 无效的选择。请输入 1-${this.pendingFileSelection.length} 之间的数字`, 'system');
+            }
+            return;
+        }
+
+        // ==================== File Opening ====================
+
+        // /open - 打开文件
+        if (query.startsWith('/open ')) {
+            const searchTerm = query.substring(6).trim();
+            if (!searchTerm) {
+                this.appendLog('System', '✗ 请提供文件名或路径，例如：/open readme', 'system');
+                return;
+            }
+            await this.handleOpenFile(searchTerm);
+            return;
+        }
 
         // ==================== Memory Commands ====================
 
@@ -340,6 +373,51 @@ export class GeminiShellView extends ItemView {
 
     scrollToBottom() {
         this.outputContainer.scrollTop = this.outputContainer.scrollHeight;
+    }
+
+    // ==================== File Opening Methods ====================
+
+    private async handleOpenFile(searchTerm: string) {
+        const files = this.app.vault.getFiles();
+        const matches = files.filter(f =>
+            f.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            f.basename.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+
+        if (matches.length === 0) {
+            this.appendLog('System', `✗ 未找到匹配 "${searchTerm}" 的文件`, 'system');
+            return;
+        }
+
+        if (matches.length === 1) {
+            await this.openFile(matches[0]);
+            return;
+        }
+
+        // Multiple matches - show selection list
+        this.showFileSelection(matches, searchTerm);
+    }
+
+    private showFileSelection(files: TFile[], searchTerm: string) {
+        let message = `找到 ${files.length} 个匹配 "${searchTerm}" 的文件：\n\n`;
+        files.forEach((f, i) => {
+            message += `  ${i + 1}. ${f.path}\n`;
+        });
+        message += '\n输入数字选择文件';
+
+        this.appendLog('System', message, 'system');
+        this.pendingFileSelection = files;
+    }
+
+    private async openFile(file: TFile) {
+        try {
+            const leaf = this.app.workspace.getLeaf(false);
+            await leaf.openFile(file);
+            this.appendLog('System', `✓ 已打开: ${file.path}`, 'system');
+            this.pendingFileSelection = null; // Clear selection state
+        } catch (e) {
+            this.appendLog('System', `✗ 打开失败: ${e.message}`, 'system');
+        }
     }
 
     async onClose() {

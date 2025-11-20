@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Shell Layout Demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: sans-serif;
+            background: #1e1e1e;
+            color: #fff;
+        }
+        
+        .demo-container {
+            width: 400px;
+            height: 600px;
+            border: 2px solid #00e676;
+            margin: 0 auto;
+        }
+        
+        /* 复制自 styles.css 的关键样式 */
+        .gemini-shell-view {
+            display: flex !important;
+            flex-direction: column !important;
+            height: 100% !important;
+            width: 100% !important;
+            background-color: #2d2d2d;
+            overflow: hidden !important;
+        }
+        
+        .shell-header {
+            padding: 8px 16px;
+            background: #1e1e1e;
+            border-bottom: 1px solid #444;
+            font-size: 10px;
+            display: flex;
+            justify-content: space-between;
+            text-transform: uppercase;
+            flex-shrink: 0 !important;
+        }
+        
+        .shell-output-area {
+            flex: 1 1 auto !important;
+            padding: 16px;
+            overflow-y: auto;
+            background: #252525;
+            min-height: 0 !important;
+        }
+        
+        .shell-input-container {
+            background: #1e1e1e;
+            border-top: 1px solid #444;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            flex-shrink: 0 !important;
+            flex-grow: 0 !important;
+        }
+        
+        .shell-input-wrapper {
+            display: flex;
+            gap: 8px;
+            background: #2d2d2d;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #444;
+        }
+        
+        textarea {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-family: monospace;
+            resize: none;
+            min-height: 24px;
+        }
+        
+        .shell-footer {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: #888;
+        }
+        
+        .explanation {
+            margin-top: 20px;
+            padding: 20px;
+            background: #2d2d2d;
+            border-radius: 8px;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        code {
+            background: #1e1e1e;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #00e676;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <div class="gemini-shell-view">
+            <div class="shell-header">
+                <span>GEMINI SHELL</span>
+                <span style="color: #00e676;">● ONLINE</span>
+            </div>
+            
+            <div class="shell-output-area">
+                <div style="margin-bottom: 16px; color: #888; font-style: italic;">
+                    [System] Kernel initialized.
+                </div>
+                <div style="margin-bottom: 16px; border-left: 2px solid #00e676; padding-left: 12px;">
+                    你好
+                </div>
+                <div style="margin-bottom: 16px; padding-left: 14px;">
+                    你好！我是 Gemini。有什么我可以帮助你的吗？
+                </div>
+                <div style="margin-bottom: 16px; color: #888; font-style: italic;">
+                    [System] 这个区域会自动滚动...
+                </div>
+                <div style="margin-bottom: 16px; color: #888; font-style: italic;">
+                    添加更多内容来测试滚动...
+                </div>
+            </div>
+            
+            <div class="shell-input-container">
+                <div class="shell-input-wrapper">
+                    <span style="color: #00e676; font-weight: bold;">>_</span>
+                    <textarea placeholder="Ask Gemini... (/ for commands, @ for files)" rows="1"></textarea>
+                </div>
+                <div class="shell-footer">
+                    <div></div>
+                    <div style="display: flex; gap: 12px;">
+                        <span><span style="background: #444; padding: 1px 4px; border-radius: 3px;">↵</span> Send</span>
+                        <span><span style="background: #444; padding: 1px 4px; border-radius: 3px;">⇧↵</span> New Line</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="explanation">
+        <h2>布局说明</h2>
+        <p><strong>关键点：</strong></p>
+        <ul>
+            <li><code>.gemini-shell-view</code> 必须有 <code>height: 100%</code> 和 <code>display: flex</code></li>
+            <li><code>.shell-output-area</code> 使用 <code>flex: 1 1 auto</code> 占据所有剩余空间</li>
+            <li><code>.shell-input-container</code> 使用 <code>flex-shrink: 0</code> 防止被压缩</li>
+            <li>所有关键属性都使用 <code>!important</code> 来覆盖 Obsidian 的默认样式</li>
+        </ul>
+        
+        <h3>如果还是不工作，请检查：</h3>
+        <ol>
+            <li>确保 Obsidian 已经重新加载（Ctrl+R 或重启）</li>
+            <li>打开开发者工具（Ctrl+Shift+I）检查 DOM 结构</li>
+            <li>查看 <code>.gemini-shell-view</code> 的计算高度是否为 100%</li>
+            <li>确认没有其他插件的 CSS 冲突</li>
+        </ol>
+    </div>
+</body>
+</html>

@@ -2,22 +2,10 @@
    Gemini Shell - Sidebar UI
    ========================================================================== */
 
-/* Fix Obsidian parent containers to enable flexbox layout */
-.workspace-leaf-content:has(.gemini-shell-view) {
-    display: flex !important;
-    flex-direction: column !important;
-}
-
-.workspace-leaf-content:has(.gemini-shell-view)>.view-content {
-    display: flex !important;
-    flex-direction: column !important;
-    flex: 1 !important;
-}
-
 .gemini-shell-view {
-    display: flex !important;
-    flex-direction: column !important;
-    height: 100% !important;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
     width: 100%;
     background-color: var(--background-primary);
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
@@ -41,7 +29,7 @@
 
 /* 2. Output Area */
 .shell-output-area {
-    flex: 1 1 auto !important;
+    flex-grow: 1;
     padding: 16px;
     overflow-y: auto;
     scroll-behavior: smooth;
@@ -117,12 +105,15 @@
     gap: 8px;
     flex-shrink: 0;
     position: relative;
+    /* For suggestions popup */
+    margin-top: auto;
     z-index: 10;
 }
 
 .shell-input-wrapper {
     display: flex;
     align-items: flex-start;
+    /* Align top for textarea */
     gap: 8px;
     background: var(--background-primary);
     padding: 8px;
@@ -135,6 +126,7 @@
     font-weight: bold;
     font-size: 16px;
     padding-top: 2px;
+    /* Align with text */
     user-select: none;
 }
 
@@ -202,6 +194,7 @@ textarea.shell-input::placeholder {
     overflow-y: auto;
     z-index: 100;
     display: none;
+    /* Hidden by default */
     margin-bottom: 8px;
 }
 
