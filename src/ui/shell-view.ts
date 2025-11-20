@@ -173,7 +173,8 @@ export class GeminiShellView extends ItemView {
                 { label: '/forget', desc: 'Forget context' },
                 { label: '/new', desc: 'Create new note' },
                 { label: '/edit', desc: 'Edit current selection' },
-                { label: '/open', desc: 'Open file' }
+                { label: '/open', desc: 'Open file' },
+                { label: '/tools', desc: 'List available MCP tools' }
             ];
             this.suggestions = commands.filter(c => c.label.toLowerCase().includes(query.toLowerCase()));
         } else {
@@ -309,6 +310,27 @@ export class GeminiShellView extends ItemView {
                 profileText += `**回答风格**: ${profile.preferences.responseStyle}\n`;
             }
             this.appendLog('System', profileText, 'system');
+            return;
+        }
+
+        // /tools - List available MCP tools
+        if (query === '/tools') {
+            const tools = this.api.getAvailableTools();
+            let toolsText = '## Available MCP Tools\n\n';
+            tools.forEach((tool: any) => {
+                toolsText += `### ${tool.name}\n`;
+                toolsText += `${tool.description}\n\n`;
+                if (tool.parameters && tool.parameters.properties) {
+                    toolsText += '**Parameters:**\n';
+                    Object.keys(tool.parameters.properties).forEach(param => {
+                        const prop = tool.parameters.properties[param];
+                        const required = tool.parameters.required?.includes(param) ? ' (required)' : '';
+                        toolsText += `- \`${param}\`${required}: ${prop.description || 'No description'}\n`;
+                    });
+                }
+                toolsText += '\n';
+            });
+            this.appendLog('System', toolsText, 'system');
             return;
         }
 
