@@ -33,15 +33,31 @@ export class GeminiShellSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     this.plugin.settings.apiKey = value;
                     await this.plugin.saveSettings();
+                }))
+            .addButton(btn => btn
+                .setButtonText('Test Connection')
+                .onClick(async () => {
+                    if (!this.plugin.settings.apiKey) {
+                        new Notice('⚠️ Please enter an API key first.');
+                        return;
+                    }
+                    try {
+                        new Notice('Testing connection...');
+                        await this.plugin.geminiApi.checkAvailability();
+                        new Notice('✅ Connection successful!');
+                    } catch (error: any) {
+                        new Notice(`❌ Connection failed: ${error.message}`);
+                    }
                 }));
 
         new Setting(containerEl)
             .setName('Model Selection')
             .setDesc('Choose the Gemini model to use.')
             .addDropdown(drop => drop
-                .addOption('gemini-2.0-flash', 'Gemini 2.0 Flash (Fastest)')
-                .addOption('gemini-2.0-flash-thinking-exp-01-21', 'Gemini 2.0 Flash Thinking (Reasoning)')
-                .addOption('gemini-1.5-pro', 'Gemini 1.5 Pro (Balanced)')
+                .addOption('gemini-2.5-flash', 'Gemini 2.5 Flash (Fastest)')
+                .addOption('gemini-2.5-pro', 'Gemini 2.5 Pro (Reasoning)')
+                .addOption('gemini-2.0-flash', 'Gemini 2.0 Flash')
+                .addOption('gemini-1.5-pro', 'Gemini 1.5 Pro')
                 .setValue(this.plugin.settings.primaryModel)
                 .onChange(async (value) => {
                     this.plugin.settings.primaryModel = value;

@@ -6,12 +6,14 @@ export class MemoryManager {
     private chatSession: ChatSession | null = null;
     private userProfile: UserProfile;
     private sessionSummaries: SessionSummary[] = [];
+    public chatHistory: ChatMessage[] = [];
     private currentSessionMessages: number = 0;
     private lastProfileUpdateTime: number = 0;
 
     private readonly MEMORY_DIR = '.obsidian/gemini-memory';
     private readonly PROFILE_FILE = 'user-profile.json';
     private readonly SUMMARY_FILE = 'session-summaries.json';
+    private readonly HISTORY_FILE = 'chat-history.json';
     private readonly PROFILE_UPDATE_INTERVAL = 20;
     private readonly PROFILE_UPDATE_MIN_TIME = 10 * 60 * 1000;
 
@@ -22,6 +24,7 @@ export class MemoryManager {
         this.userProfile = { ...DEFAULT_USER_PROFILE };
         this.loadProfile();
         this.loadSummaries();
+        this.loadChatHistory();
     }
 
     // ==================== Session Management ====================
@@ -91,6 +94,14 @@ export class MemoryManager {
     async recordMessage(role: 'user' | 'model', content: string) {
         this.currentSessionMessages++;
         this.userProfile.metadata.totalInteractions++;
+
+        // Record to history
+        this.chatHistory.push({
+            role,
+            content,
+            timestamp: Date.now()
+        });
+        await this.saveChatHistory();
 
         // 自动画像更新 - 需同时满足两个条件：
         // 1. 至少 20 轮对话
@@ -321,5 +332,38 @@ export class MemoryManager {
         } catch (e) {
             console.error('Failed to save summaries:', e);
         }
+    }
+
+    private async loadChatHistory() {
+        try {
+            const path = `${this.MEMORY_DIR}/${this.HISTORY_FILE}`;
+            const exists = await this.app.vault.adapter.exists(path);
+
+            if (exists) {
+                const content = await this.app.vault.adapter.read(path);
+                this.chatHistory = JSON.parse(content);
+            }
+        } catch (e) {
+            console.error('Failed to load chat history:', e);
+            this.chatHistory = [];
+        }
+    }
+
+    private async saveChatHistory() {
+        try {
+            await this.ensureMemoryDir();
+            const path = `${this.MEMORY_DIR}/${this.HISTORY_FILE}`;
+            await this.app.vault.adapter.write(
+                path,
+                JSON.stringify(this.chatHistory, null, 2)
+            );
+        } catch (e) {
+            console.error('Failed to save chat history:', e);
+        }
+    }
+
+    async clearChatHistory() {
+        this.chatHistory = [];
+        await this.saveChatHistory();
     }
 }
