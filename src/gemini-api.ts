@@ -32,14 +32,14 @@ export class GeminiAPI {
         this.memoryManager = new MemoryManager(this.app, this.model);
     }
 
-    async testConnection(): Promise<boolean> {
+    async checkAvailability(): Promise<boolean> {
         try {
             this.init();
             const result = await this.model.generateContent("Hello");
             return !!result.response.text();
         } catch (e) {
             console.error(e);
-            return false;
+            throw e;
         }
     }
 
