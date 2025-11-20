@@ -1,4 +1,4 @@
-import { App, TFile } from 'obsidian';
+﻿import { App, TFile } from 'obsidian';
 import { FunctionDeclaration, SchemaType } from '@google/generative-ai';
 
 export class ToolManager {
@@ -187,7 +187,7 @@ export class ToolManager {
                     }
 
                     await this.app.vault.create(path, args.content || '');
-                    return { status: 'success', message: `✓ Note created: ${path}` };
+                    return { status: 'success', message: `鉁?Note created: ${path}` };
 
                 case 'update_note':
                     const updateFile = this.app.vault.getAbstractFileByPath(args.path);
@@ -195,7 +195,7 @@ export class ToolManager {
                         return { success: false, error: 'File not found' };
                     }
                     await this.app.vault.modify(updateFile, args.content);
-                    return { success: true, message: `✓ Updated: ${args.path}` };
+                    return { success: true, message: `鉁?Updated: ${args.path}` };
 
                 case 'append_to_note':
                     const appendFile = this.app.vault.getAbstractFileByPath(args.path);
@@ -204,7 +204,7 @@ export class ToolManager {
                     }
                     const existingContent = await this.app.vault.read(appendFile);
                     await this.app.vault.modify(appendFile, existingContent + '\n' + args.content);
-                    return { success: true, message: `✓ Appended to: ${args.path}` };
+                    return { success: true, message: `鉁?Appended to: ${args.path}` };
 
                 case 'delete_note':
                     const deleteFile = this.app.vault.getAbstractFileByPath(args.path);
@@ -212,7 +212,7 @@ export class ToolManager {
                         return { success: false, error: 'File not found' };
                     }
                     await this.app.vault.trash(deleteFile, true); // Move to system trash
-                    return { success: true, message: `✓ Deleted: ${args.path}` };
+                    return { success: true, message: `鉁?Deleted: ${args.path}` };
 
                 case 'rename_note':
                     const renameFile = this.app.vault.getAbstractFileByPath(args.oldPath);
@@ -220,7 +220,7 @@ export class ToolManager {
                         return { success: false, error: 'File not found' };
                     }
                     await this.app.vault.rename(renameFile, args.newPath);
-                    return { success: true, message: `✓ Renamed: ${args.oldPath} -> ${args.newPath}` };
+                    return { success: true, message: `鉁?Renamed: ${args.oldPath} -> ${args.newPath}` };
 
                 case 'list_notes':
                     const folderPath = args.folder || '/';
@@ -272,7 +272,7 @@ export class ToolManager {
                     }
                     const leaf = this.app.workspace.getLeaf(false);
                     await leaf.openFile(targetFile);
-                    return { success: true, path: targetFile.path, message: `✓ Opened: ${targetFile.path}` };
+                    return { success: true, path: targetFile.path, message: `鉁?Opened: ${targetFile.path}` };
 
                 case 'list_available_commands':
                     if (!this.allowPluginControl) return { error: 'Permission denied' };

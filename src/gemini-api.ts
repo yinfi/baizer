@@ -146,4 +146,8 @@ export class GeminiAPI {
         }
         return null;
     }
+
+    getAvailableTools() {
+        return this.toolManager.getToolsDefinitions();
+    }
 }
