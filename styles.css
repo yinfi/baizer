@@ -1,4 +1,238 @@
-﻿/* ==========================================================================   Gemini Shell - The Omni-Terminal (Raycast/Hacker Style)   ========================================================================== *//* 1. 妯℃€佹瀹瑰櫒锛氱Щ闄ら粯璁ゆ牱寮忥紝鏀逛负娌夋蹈寮?Overlay */.gemini-shell-modal {    /* 寮哄埗娣辫壊纾ㄧ爞鑳屾櫙 */    background-color: rgba(18, 18, 18, 0.85) !important;    backdrop-filter: blur(16px) saturate(180%);    -webkit-backdrop-filter: blur(16px) saturate(180%);    /* 杈规涓庨槾褰?*/    border: 1px solid rgba(255, 255, 255, 0.1);    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.3);    border-radius: 12px;    /* 灏哄涓庡竷灞€ */    width: 750px !important;    max-width: 90vw;    height: 550px !important;    padding: 0 !important;    display: flex;    flex-direction: column;    overflow: hidden;    /* 瀛椾綋鍩虹 */    font-family: 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;    color: #e0e0e0;}/* 闅愯棌 Obsidian 榛樿鐨勫叧闂寜閽?*/.gemini-shell-modal .modal-close-button {    display: none;}/* 2. 椤堕儴鐘舵€佹爮/澶撮儴 (鍙€? */.shell-header {    padding: 8px 16px;    background: rgba(255, 255, 255, 0.03);    border-bottom: 1px solid rgba(255, 255, 255, 0.05);    font-size: 10px;    color: rgba(255, 255, 255, 0.3);    display: flex;    justify-content: space-between;    text-transform: uppercase;    letter-spacing: 1px;    user-select: none;}/* 3. 杈撳嚭鍖哄煙 (鏃ュ織娴? */.shell-output-area {    flex: 1;    padding: 20px;    overflow-y: auto;    scroll-behavior: smooth;    font-size: 13px;    line-height: 1.6;}/* 闅愯棌婊氬姩鏉′絾鍏佽婊氬姩 */.shell-output-area::-webkit-scrollbar {    width: 6px;    background: transparent;}.shell-output-area::-webkit-scrollbar-thumb {    background: rgba(255, 255, 255, 0.1);    border-radius: 3px;}/* 鍗曟潯鏃ュ織 */.shell-entry {    margin-bottom: 16px;    animation: fadeIn 0.2s ease-out;}@keyframes fadeIn {    from {        opacity: 0;        transform: translateY(5px);    }    to {        opacity: 1;        transform: translateY(0);    }}/* 鐢ㄦ埛杈撳叆璁板綍 */.shell-entry.user {    color: #a5d6a7;    /* 娴呯豢鑹?*/    border-left: 2px solid #4caf50;    /* 寮虹豢鑹茶竟妗?*/    padding-left: 12px;    font-weight: 600;}/* 绯荤粺娑堟伅 */.shell-entry.system {    color: rgba(255, 255, 255, 0.4);    font-size: 11px;    font-style: italic;    padding-left: 14px;    /* 瀵归綈 */}/* AI 鍥炲 (Markdown 娓叉煋鍖? */.shell-entry.ai {    color: #e0e0e0;    padding-left: 14px;    position: relative;}/* 閽堝 AI 鍥炲涓殑 Markdown 鏍峰紡寰皟 */.shell-entry.ai h1,.shell-entry.ai h2,.shell-entry.ai h3 {    margin-top: 10px;    margin-bottom: 5px;    font-size: 1.1em;    color: #fff;}.shell-entry.ai code {    background: rgba(255, 255, 255, 0.1);    color: #ffab91;    /* 浠ｇ爜楂樹寒鑹?*/    padding: 2px 4px;    border-radius: 4px;    font-size: 0.9em;}.shell-entry.ai pre {    background: rgba(0, 0, 0, 0.3);    padding: 10px;    border-radius: 6px;    border: 1px solid rgba(255, 255, 255, 0.05);}/* 4. 杈撳叆鍖哄煙 (鍥哄畾鍦ㄥ簳閮? */.shell-input-container {    background: rgba(0, 0, 0, 0.4);    /* 姣旇儗鏅洿娣变竴鐐?*/    border-top: 1px solid rgba(255, 255, 255, 0.1);    padding: 16px 20px;    display: flex;    align-items: center;    gap: 12px;}/* 鎻愮ず绗?>_ */.shell-prompt {    color: #00e676;    /* 鑽у厜缁?*/    font-weight: bold;    font-size: 16px;    text-shadow: 0 0 8px rgba(0, 230, 118, 0.4);    /* 闇撹櫣鍏夋檿 */}/* 杈撳叆妗嗘湰浣?*/input.shell-input {    flex: 1;    background: transparent;    border: none;    outline: none;    color: #fff;    font-family: 'JetBrains Mono', monospace;    font-size: 15px;    padding: 0;    margin: 0;    box-shadow: none !important;    /* 绉婚櫎 Obsidian 榛樿闃村奖 */}input.shell-input::placeholder {    color: rgba(255, 255, 255, 0.2);}/* 5. 鍔犺浇鍔ㄧ敾 */.shell-loading {    display: inline-block;    width: 6px;    height: 6px;}/* 2. 椤堕儴鐘舵€佹爮/澶撮儴 (鍙€? */.shell-header {    padding: 8px 16px;    background: rgba(255, 255, 255, 0.03);    border-bottom: 1px solid rgba(255, 255, 255, 0.05);    font-size: 10px;    color: rgba(255, 255, 255, 0.3);    display: flex;    justify-content: space-between;    text-transform: uppercase;    letter-spacing: 1px;    user-select: none;}/* 3. 杈撳嚭鍖哄煙 (鏃ュ織娴? */.shell-output-area {    flex: 1;    padding: 20px;    overflow-y: auto;    scroll-behavior: smooth;    font-size: 13px;    line-height: 1.6;}/* 闅愯棌婊氬姩鏉′絾鍏佽婊氬姩 */.shell-output-area::-webkit-scrollbar {    width: 6px;    background: transparent;}.shell-output-area::-webkit-scrollbar-thumb {    background: rgba(255, 255, 255, 0.1);    border-radius: 3px;}/* 鍗曟潯鏃ュ織 */.shell-entry {    margin-bottom: 16px;    animation: fadeIn 0.2s ease-out;}@keyframes fadeIn {    from {        opacity: 0;        transform: translateY(5px);    }    to {        opacity: 1;        transform: translateY(0);    }}/* 鐢ㄦ埛杈撳叆璁板綍 */.shell-entry.user {    color: #a5d6a7;    /* 娴呯豢鑹?*/    border-left: 2px solid #4caf50;    /* 寮虹豢鑹茶竟妗?*/    padding-left: 12px;    font-weight: 600;}/* 绯荤粺娑堟伅 */.shell-entry.system {    color: rgba(255, 255, 255, 0.4);    font-size: 11px;    font-style: italic;    padding-left: 14px;    /* 瀵归綈 */}/* AI 鍥炲 (Markdown 娓叉煋鍖? */.shell-entry.ai {    color: #e0e0e0;    padding-left: 14px;    position: relative;}/* 閽堝 AI 鍥炲涓殑 Markdown 鏍峰紡寰皟 */.shell-entry.ai h1,.shell-entry.ai h2,.shell-entry.ai h3 {    margin-top: 10px;    margin-bottom: 5px;    font-size: 1.1em;    color: #fff;}.shell-entry.ai code {    background: rgba(255, 255, 255, 0.1);    color: #ffab91;    /* 浠ｇ爜楂樹寒鑹?*/    padding: 2px 4px;    border-radius: 4px;    font-size: 0.9em;}.shell-entry.ai pre {    background: rgba(0, 0, 0, 0.3);    padding: 10px;    border-radius: 6px;    border: 1px solid rgba(255, 255, 255, 0.05);}/* 4. 杈撳叆鍖哄煙 (鍥哄畾鍦ㄥ簳閮? */.shell-input-container {    background: rgba(0, 0, 0, 0.4);    /* 姣旇儗鏅洿娣变竴鐐?*/    border-top: 1px solid rgba(255, 255, 255, 0.1);    padding: 16px 20px;    display: flex;    align-items: center;    gap: 12px;}/* 鎻愮ず绗?>_ */.shell-prompt {    color: #00e676;    /* 鑽у厜缁?*/    font-weight: bold;    font-size: 16px;    text-shadow: 0 0 8px rgba(0, 230, 118, 0.4);    /* 闇撹櫣鍏夋檿 */}/* 杈撳叆妗嗘湰浣?*/input.shell-input {    flex: 1;    background: transparent;    border: none;    outline: none;    color: #fff;    font-family: 'JetBrains Mono', monospace;    font-size: 15px;    padding: 0;    margin: 0;    box-shadow: none !important;    /* 绉婚櫎 Obsidian 榛樿闃村奖 */}input.shell-input::placeholder {    color: rgba(255, 255, 255, 0.2);}/* 5. 鍔犺浇鍔ㄧ敾 */.shell-loading {    display: inline-block;    width: 6px;    height: 6px;    border-radius: 50%;    background-color: #4caf50;    box-shadow: 0 0 10px #4caf50;    animation: pulse 1s infinite;    margin-right: 8px;}@keyframes pulse {    0% {        transform: scale(0.95);        opacity: 0.7;    }    50% {        transform: scale(1.2);        opacity: 1;    }    100% {        transform: scale(0.95);        opacity: 0.7;    }}/* 6. 搴曢儴鎿嶄綔鏍?(Action Bar) */.shell-footer {    background: rgba(0, 0, 0, 0.6);    border-top: 1px solid rgba(255, 255, 255, 0.05);    padding: 8px 16px;    display: flex;    gap: 16px;    justify-content: flex-end;    font-size: 11px;    user-select: none;}.action-item {    display: flex;    align-items: center;    gap: 6px;    color: rgba(255, 255, 255, 0.5);}.action-item.primary {    color: #00e676;    /* Green for Apply */}.action-item.secondary {    color: rgba(255, 255, 255, 0.4);}.key-badge {    justify-content: space-between;    text-transform: uppercase;    letter-spacing: 1px;    user-select: none;}/* 3. 杈撳嚭鍖哄煙 (鏃ュ織娴? */.shell-output-area {    flex: 1;    padding: 20px;    overflow-y: auto;    scroll-behavior: smooth;    font-size: 13px;    line-height: 1.6;}/* 闅愯棌婊氬姩鏉′絾鍏佽婊氬姩 */.shell-output-area::-webkit-scrollbar {    width: 6px;    background: transparent;}.shell-output-area::-webkit-scrollbar-thumb {    background: rgba(255, 255, 255, 0.1);    border-radius: 3px;}/* 鍗曟潯鏃ュ織 */.shell-entry {    margin-bottom: 16px;    animation: fadeIn 0.2s ease-out;}@keyframes fadeIn {    from {        opacity: 0;        transform: translateY(5px);    }    to {        opacity: 1;        transform: translateY(0);    }}/* 鐢ㄦ埛杈撳叆璁板綍 */.shell-entry.user {    color: #a5d6a7;    /* 娴呯豢鑹?*/    border-left: 2px solid #4caf50;    /* 寮虹豢鑹茶竟妗?*/    padding-left: 12px;    font-weight: 600;}/* 绯荤粺娑堟伅 */.shell-entry.system {    color: rgba(255, 255, 255, 0.4);    font-size: 11px;    font-style: italic;    padding-left: 14px;    /* 瀵归綈 */}/* AI 鍥炲 (Markdown 娓叉煋鍖? */.shell-entry.ai {    color: #e0e0e0;    padding-left: 14px;    position: relative;}/* 閽堝 AI 鍥炲涓殑 Markdown 鏍峰紡寰皟 */.shell-entry.ai h1,.shell-entry.ai h2,.shell-entry.ai h3 {    margin-top: 10px;    margin-bottom: 5px;    font-size: 1.1em;    color: #fff;}.shell-entry.ai code {    background: rgba(255, 255, 255, 0.1);    color: #ffab91;    /* 浠ｇ爜楂樹寒鑹?*/    padding: 2px 4px;    border-radius: 4px;    font-size: 0.9em;}.shell-entry.ai pre {    background: rgba(0, 0, 0, 0.3);    padding: 10px;    border-radius: 6px;    border: 1px solid rgba(255, 255, 255, 0.05);}/* 4. 杈撳叆鍖哄煙 (鍥哄畾鍦ㄥ簳閮? */.shell-input-container {    background: rgba(0, 0, 0, 0.4);    /* 姣旇儗鏅洿娣变竴鐐?*/    border-top: 1px solid rgba(255, 255, 255, 0.1);    padding: 16px 20px;    display: flex;    align-items: center;    gap: 12px;}/* 鎻愮ず绗?>_ */.shell-prompt {    color: #00e676;    /* 鑽у厜缁?*/    font-weight: bold;    font-size: 16px;    text-shadow: 0 0 8px rgba(0, 230, 118, 0.4);    /* 闇撹櫣鍏夋檿 */}/* 杈撳叆妗嗘湰浣?*/input.shell-input {    flex: 1;    background: transparent;    border: none;    outline: none;    color: #fff;    font-family: 'JetBrains Mono', monospace;    font-size: 15px;    padding: 0;    margin: 0;    box-shadow: none !important;    /* 绉婚櫎 Obsidian 榛樿闃村奖 */}input.shell-input::placeholder {    color: rgba(255, 255, 255, 0.2);}/* 5. 鍔犺浇鍔ㄧ敾 */.shell-loading {    display: inline-block;    width: 6px;    height: 6px;    border-radius: 50%;    background-color: #4caf50;    box-shadow: 0 0 10px #4caf50;    animation: pulse 1s infinite;    margin-right: 8px;}@keyframes pulse {    0% {        transform: scale(0.95);        opacity: 0.7;    }    50% {        transform: scale(1.2);        opacity: 1;    }    100% {        transform: scale(0.95);        opacity: 0.7;    }}/* 6. 搴曢儴鎿嶄綔鏍?(Action Bar) */.shell-footer {    background: rgba(0, 0, 0, 0.6);    border-top: 1px solid rgba(255, 255, 255, 0.05);    padding: 8px 16px;    display: flex;    gap: 16px;    justify-content: flex-end;    font-size: 11px;    text-align: center;}      width:  8px;      height:  8px;      border-radius:  50%;      margin-top:  6px;      cursor:  pointer;      transition:  all 0.3s ease;  }    /* Idle state - hidden */  .guardian-gutter-marker.guardian-idle  {          display:  none;      }    /* Thinking state - pulsing green */  .guardian-gutter-marker.guardian-thinking  {          background:  #00e676;          box-shadow:  0 0 8px rgba(0,  230,  118,  0.6);          animation:  guardian-pulse 1.5s ease-in-out infinite;      }    /* Has suggestion state - solid green */  .guardian-gutter-marker.guardian-has-suggestion  {          background:  #00e676;          box-shadow:  0 0 12px rgba(0,  230,  118,  0.8);      }    @keyframes guardian-pulse  {            0%,          100%  {                  transform:  scale(1);                  opacity:  1;                  }            50%  {                  transform:  scale(1.3);                  opacity:  0.7;                  }      }    /* Ghost Text Styles */  .guardian-ghost-text  {          color:  rgba(255,  255,  255,  0.3);          font-style:  italic;          pointer-events:  none;          user-select:  none;      }    /* Dark theme adjustments */  .theme-dark .guardian-ghost-text  {          color:  rgba(255,  255,  255,  0.25);      }    /* Light theme adjustments */  .theme-light .guardian-ghost-text  {          color:  rgba(0,  0,  0,  0.25);      }    .theme-light .guardian-gutter-marker.guardian-thinking,  .theme-light .guardian-gutter-marker.guardian-has-suggestion  {          background:  #00c853;          box-shadow:  0 0 8px rgba(0,  200,  83,  0.6);      }  /* Guardian Gutter & Ghost Text Styles */
+﻿/* ==========================================================================
+   Gemini Shell - Sidebar UI
+   ========================================================================== */
+
+.gemini-shell-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    background-color: var(--background-primary);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    overflow: hidden;
+}
+
+/* 1. Header */
+.shell-header {
+    padding: 8px 16px;
+    background: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border);
+    font-size: 10px;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+/* 2. Output Area */
+.shell-output-area {
+    flex-grow: 1;
+    padding: 16px;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    font-size: 13px;
+    line-height: 1.6;
+    min-height: 0;
+}
+
+.shell-output-area::-webkit-scrollbar {
+    width: 6px;
+    background: transparent;
+}
+
+.shell-output-area::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb-bg);
+    border-radius: 3px;
+}
+
+/* Entries */
+.shell-entry {
+    margin-bottom: 16px;
+    word-wrap: break-word;
+}
+
+.shell-entry.user {
+    color: var(--text-accent);
+    border-left: 2px solid var(--interactive-accent);
+    padding-left: 12px;
+    font-weight: 600;
+}
+
+.shell-entry.system {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-style: italic;
+    padding-left: 14px;
+}
+
+.shell-entry.ai {
+    color: var(--text-normal);
+    padding-left: 14px;
+}
+
+/* Markdown Styles in AI Response */
+.shell-entry.ai h1,
+.shell-entry.ai h2,
+.shell-entry.ai h3 {
+    margin-top: 10px;
+    margin-bottom: 5px;
+    font-size: 1.1em;
+    color: var(--text-normal);
+}
+
+.shell-entry.ai code {
+    color: var(--text-accent);
+    font-size: 0.9em;
+}
+
+.shell-entry.ai pre {
+    background: var(--background-primary-alt);
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+/* 3. Input Area (Fixed Bottom) */
+.shell-input-container {
+    background: var(--background-secondary);
+    border-top: 1px solid var(--background-modifier-border);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+    position: relative;
+    /* For suggestions popup */
+    margin-top: auto;
+    z-index: 10;
+}
+
+.shell-input-wrapper {
+    display: flex;
+    align-items: flex-start;
+    /* Align top for textarea */
+    gap: 8px;
+    background: var(--background-primary);
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.shell-prompt {
+    color: var(--interactive-accent);
+    font-weight: bold;
+    font-size: 16px;
+    padding-top: 2px;
+    /* Align with text */
+    user-select: none;
+}
+
+textarea.shell-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-normal);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    padding: 0;
+    margin: 0;
+    resize: none;
+    min-height: 24px;
+    max-height: 150px;
+    box-shadow: none !important;
+}
+
+textarea.shell-input::placeholder {
+    color: var(--text-muted) !important;
+    opacity: 0.5 !important;
+}
+
+/* 4. Footer / Action Bar */
+.shell-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.action-group {
+    display: flex;
+    gap: 12px;
+}
+
+.action-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.key-badge {
+    background: var(--background-modifier-border);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 9px;
+    min-width: 16px;
+    text-align: center;
+}
+
+/* 5. Suggestions Popup */
+.shell-suggestions {
+    position: absolute;
+    bottom: 100%;
+    left: 12px;
+    right: 12px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 100;
+    display: none;
+    /* Hidden by default */
+    margin-bottom: 8px;
+}
+
+.suggestion-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-normal);
+    font-size: 13px;
+}
+
+.suggestion-item:hover,
+.suggestion-item.is-selected {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.suggestion-icon {
+    opacity: 0.7;
+    width: 16px;
+    text-align: center;
+}
+
+.suggestion-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.suggestion-desc {
+    font-size: 11px;
+    opacity: 0.6;
+}
+
+/* Guardian Styles */
 .guardian-gutter {
     width: 20px;
     padding-left: 4px;
@@ -42,7 +276,6 @@
     }
 }
 
-/* Ghost Text - 浣跨敤 !important 纭繚浼樺厛绾?*/
 .cm-line .guardian-ghost-text,
 .guardian-ghost-text {
     color: #00e676 !important;
@@ -53,4 +286,33 @@
     pointer-events: none !important;
     user-select: none !important;
     opacity: 0.8 !important;
+}
+
+/* Loading Indicator */
+.shell-loading {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background-color: #00e676;
+    border-radius: 50%;
+    margin-right: 8px;
+    box-shadow: 0 0 8px rgba(0, 230, 118, 0.6);
+    animation: shell-pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes shell-pulse {
+    0% {
+        transform: scale(0.8);
+        opacity: 0.5;
+    }
+
+    50% {
+        transform: scale(1.2);
+        opacity: 1;
+    }
+
+    100% {
+        transform: scale(0.8);
+        opacity: 0.5;
+    }
 }

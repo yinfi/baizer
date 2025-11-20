@@ -35,7 +35,7 @@ export class GeminiAPI {
     async checkAvailability(): Promise<boolean> {
         try {
             this.init();
-            const result = await this.model.generateContent("Hello");
+            const result = await this.retryOperation(() => this.model.generateContent("Hello"));
             return !!result.response.text();
         } catch (e) {
             console.error(e);
@@ -71,7 +71,7 @@ export class GeminiAPI {
                 ? this.memoryManager.getOrCreateSession()
                 : this.model.startChat();
 
-            let result = await chat.sendMessage(fullPrompt);
+            let result = await this.retryOperation(() => chat.sendMessage(fullPrompt));
             let response = result.response;
             let functionCalls = response.functionCalls();
 
@@ -79,14 +79,14 @@ export class GeminiAPI {
             if (functionCalls && functionCalls.length > 0) {
                 for (const call of functionCalls) {
                     const toolResult = await this.toolManager.execute(call.name, call.args);
-                    result = await chat.sendMessage([
+                    result = await this.retryOperation(() => chat.sendMessage([
                         {
                             functionResponse: {
                                 name: call.name,
                                 response: toolResult
                             }
                         }
-                    ]);
+                    ]));
                 }
                 response = result.response;
             }
@@ -102,7 +102,23 @@ export class GeminiAPI {
             return responseText;
         } catch (e: any) {
             console.error("Gemini Error:", e);
+            if (e.message?.includes('503') || e.message?.includes('overloaded')) {
+                return "Error: The AI model is currently overloaded (503). Please try again in a moment.";
+            }
             return `Error: ${e.message}`;
+        }
+    }
+
+    private async retryOperation<T>(operation: () => Promise<T>, retries = 3, delay = 2000): Promise<T> {
+        try {
+            return await operation();
+        } catch (error: any) {
+            if (retries > 0 && (error.message?.includes('503') || error.message?.includes('overloaded'))) {
+                new Notice(`⚠️ Model overloaded. Retrying... (${retries} attempts left)`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return this.retryOperation(operation, retries - 1, delay * 2);
+            }
+            throw error;
         }
     }
 
