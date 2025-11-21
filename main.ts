@@ -8,6 +8,7 @@ import { GeminiShellView, VIEW_TYPE_GEMINI_SHELL } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
 import { ghostTextExtension, showGhostText } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
+import { selectionMenuExtension, setSelectionActionCallback, resetSelectionMenu } from './src/ui/selection-menu';
 
 export default class GeminiShellPlugin extends Plugin {
     settings: GeminiSettings;
@@ -49,8 +50,12 @@ export default class GeminiShellPlugin extends Plugin {
 
         this.registerEditorExtension([
             guardianGutterExtension(),
-            ghostTextExtension()
+            ghostTextExtension(),
+            selectionMenuExtension()
         ]);
+
+        // Register Selection Callback
+        setSelectionActionCallback(this.runGuardianSelectionAction.bind(this));
 
         // Always register the event; runGuardianCheck will check the setting
         this.registerEvent(
@@ -91,6 +96,65 @@ export default class GeminiShellPlugin extends Plugin {
         await this.saveData(this.settings);
         this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
         this.geminiApi = new GeminiAPI(this.app, this.settings, this.toolManager);
+    }
+
+    // Handle Manual Selection Action
+    async runGuardianSelectionAction(view: EditorView, selection: { from: number, to: number }, instruction: string) {
+        const selectedText = view.state.doc.sliceString(selection.from, selection.to);
+
+        // Context: Get some surrounding text for better understanding
+        const startLine = view.state.doc.lineAt(selection.from).number;
+        const contextStart = Math.max(1, startLine - 5);
+        const contextEnd = Math.min(view.state.doc.lines, startLine + 5);
+
+        const contextLines = [];
+        for (let i = contextStart; i <= contextEnd; i++) {
+            contextLines.push(view.state.doc.line(i).text);
+        }
+        const contextText = contextLines.join('\n');
+
+        const prompt = `User Instruction: "${instruction}"
+Selected Text: "${selectedText}"
+Context:
+"${contextText}"
+
+Task: Execute the user's instruction on the selected text.
+- If the user wants to edit/rewrite/translate the text, return JSON: {"type":"edit", "suggestion":"REPLACED_TEXT"}
+- If the user asks a question, return JSON: {"type":"answer", "suggestion":"ANSWER_TEXT"}
+- Ensure the suggestion uses proper Markdown formatting.
+- Return ONLY JSON.`;
+
+        try {
+            const response = await this.geminiApi.chat(prompt, "GuardianSelection", "You are a helpful assistant. Return ONLY JSON.");
+            const jsonMatch = response.match(/\{[\s\S]*\}/);
+
+            if (jsonMatch) {
+                const data = JSON.parse(jsonMatch[0]);
+
+                if (data.type === 'edit' && data.suggestion) {
+                    // Show Ghost Text REPLACING the selection
+                    // We need to pass the replaceRange to showGhostText
+                    const line = view.state.doc.lineAt(selection.from).number;
+                    const ch = selection.from - view.state.doc.line(line).from;
+
+                    showGhostText(view, data.suggestion, line, ch, { from: selection.from, to: selection.to });
+                    resetSelectionMenu(view); // Hide the menu
+                } else if (data.type === 'answer') {
+                    new Notice("Guardian: " + data.suggestion, 5000);
+                    resetSelectionMenu(view);
+                } else {
+                    new Notice("Guardian: No action taken.");
+                    resetSelectionMenu(view);
+                }
+            } else {
+                new Notice("Guardian: Failed to parse response.");
+                resetSelectionMenu(view);
+            }
+        } catch (error) {
+            console.error("Guardian Selection Error:", error);
+            new Notice("Guardian Error: " + error.message);
+            resetSelectionMenu(view);
+        }
     }
 
     async runGuardianCheck(editor: any, info: any, manualInstruction?: string) {

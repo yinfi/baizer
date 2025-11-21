@@ -7,6 +7,7 @@ export interface GhostTextSuggestion {
     text: string;
     line: number;
     ch: number;
+    replaceRange?: { from: number; to: number }; // Optional replacement range
 }
 
 // 更新 Ghost Text 的 Effect
@@ -77,36 +78,44 @@ const ghostTextField = StateField.define<DecorationSet>({
     provide: f => EditorView.decorations.from(f)
 });
 
-// Tab 键接受建议的处理
-function acceptGhostText(view: EditorView): boolean {
-    const decorations = view.state.field(ghostTextField);
+// New StateField to store the full suggestion data (not just decoration)
+const ghostTextStateField = StateField.define<GhostTextSuggestion | null>({
+    create() { return null; },
+    update(value, tr) {
+        for (let effect of tr.effects) {
+            if (effect.is(setGhostText)) {
+                return effect.value;
+            }
+        }
+        if (tr.docChanged) return null;
+        return value;
+    }
+});
 
-    if (decorations.size === 0) {
-        return false;
+// Redefined acceptGhostText using the new data field
+function acceptGhostTextReal(view: EditorView): boolean {
+    const suggestion = view.state.field(ghostTextStateField);
+    if (!suggestion) return false;
+
+    const { text, replaceRange, line, ch } = suggestion;
+
+    // Calculate insert position if not replacing
+    let from = replaceRange ? replaceRange.from : 0;
+    let to = replaceRange ? replaceRange.to : 0;
+
+    if (!replaceRange) {
+        const lineBlock = view.state.doc.line(line);
+        from = Math.min(lineBlock.from + ch, lineBlock.to);
+        to = from;
     }
 
-    // 获取 ghost text 内容和位置
-    let ghostText = '';
-    let insertPos = 0;
-
-    decorations.between(0, view.state.doc.length, (from, to, value) => {
-        if (value.spec.widget instanceof GhostTextWidget) {
-            ghostText = (value.spec.widget as any).text;
-            insertPos = from;
-        }
+    view.dispatch({
+        changes: { from, to, insert: text },
+        selection: EditorSelection.cursor(from + text.length),
+        effects: setGhostText.of(null)
     });
 
-    if (ghostText) {
-        // 插入文本
-        view.dispatch({
-            changes: { from: insertPos, insert: ghostText },
-            selection: EditorSelection.cursor(insertPos + ghostText.length),
-            effects: setGhostText.of(null) // 清除 ghost text
-        });
-        return true;
-    }
-
-    return false;
+    return true;
 }
 
 // 键盘事件处理 - 使用最高优先级覆盖 Obsidian 默认 Tab 行为
@@ -116,14 +125,14 @@ const ghostTextKeymap = Prec.highest(keymap.of([
     {
         key: 'Tab',
         run: (view: EditorView) => {
-            return acceptGhostText(view);
+            return acceptGhostTextReal(view);
         }
     },
     {
         key: 'Escape',
         run: (view: EditorView) => {
-            const decorations = view.state.field(ghostTextField);
-            if (decorations.size > 0) {
+            const suggestion = view.state.field(ghostTextStateField);
+            if (suggestion) {
                 view.dispatch({
                     effects: setGhostText.of(null)
                 });
@@ -138,14 +147,15 @@ const ghostTextKeymap = Prec.highest(keymap.of([
 export function ghostTextExtension(): Extension {
     return [
         ghostTextField,
+        ghostTextStateField,
         ghostTextKeymap
     ];
 }
 
 // 导出辅助函数：显示 Ghost Text
-export function showGhostText(view: EditorView, text: string, line: number, ch: number) {
+export function showGhostText(view: EditorView, text: string, line: number, ch: number, replaceRange?: { from: number; to: number }) {
     view.dispatch({
-        effects: setGhostText.of({ text, line, ch })
+        effects: setGhostText.of({ text, line, ch, replaceRange })
     });
 }
 
