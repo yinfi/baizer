@@ -38,30 +38,40 @@ const ghostTextField = StateField.define<DecorationSet>({
     },
 
     update(decorations, tr) {
-        decorations = decorations.map(tr.changes);
-
+        // 1. Check for explicit effects (highest priority)
         for (let effect of tr.effects) {
             if (effect.is(setGhostText)) {
                 if (effect.value) {
                     const { text, line, ch } = effect.value;
 
-                    // 计算插入位置
+                    // Validate line number
+                    if (line < 1 || line > tr.state.doc.lines) {
+                        continue;
+                    }
+
+                    // Calculate position
                     const lineBlock = tr.state.doc.line(line);
-                    const pos = lineBlock.from + ch;
+                    const pos = Math.min(lineBlock.from + ch, lineBlock.to);
 
                     const widget = Decoration.widget({
-                        widget: new GhostTextWidget(text),
+                        widget: new GhostTextWidget(text || ''),
                         side: 1
                     });
 
-                    decorations = Decoration.set([widget.range(pos)]);
+                    return Decoration.set([widget.range(pos)]);
                 } else {
-                    decorations = Decoration.none;
+                    return Decoration.none;
                 }
             }
         }
 
-        return decorations;
+        // 2. If document changed (user typing), clear suggestions
+        if (tr.docChanged) {
+            return Decoration.none;
+        }
+
+        // 3. Otherwise map existing decorations
+        return decorations.map(tr.changes);
     },
 
     provide: f => EditorView.decorations.from(f)
@@ -107,6 +117,19 @@ const ghostTextKeymap = Prec.highest(keymap.of([
         key: 'Tab',
         run: (view: EditorView) => {
             return acceptGhostText(view);
+        }
+    },
+    {
+        key: 'Escape',
+        run: (view: EditorView) => {
+            const decorations = view.state.field(ghostTextField);
+            if (decorations.size > 0) {
+                view.dispatch({
+                    effects: setGhostText.of(null)
+                });
+                return true;
+            }
+            return false;
         }
     }
 ]));

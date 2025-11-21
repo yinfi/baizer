@@ -1,11 +1,10 @@
 import { App, PluginSettingTab, Setting, Notice } from 'obsidian';
-import GeminiShellPlugin from '../main';
-import { DEFAULT_SETTINGS } from './mcp/types';
+import { IGeminiShellPlugin, DEFAULT_SETTINGS } from './mcp/types';
 
 export class GeminiShellSettingTab extends PluginSettingTab {
-    plugin: GeminiShellPlugin;
+    plugin: IGeminiShellPlugin;
 
-    constructor(app: App, plugin: GeminiShellPlugin) {
+    constructor(app: App, plugin: IGeminiShellPlugin) {
         super(app, plugin);
         this.plugin = plugin;
     }
@@ -94,8 +93,31 @@ export class GeminiShellSettingTab extends PluginSettingTab {
                 }));
 
         if (this.plugin.settings.enableGuardian) {
+            console.log('Guardian Enabled. AutoMode:', this.plugin.settings.guardianAutoMode);
+
             new Setting(containerEl)
-                .setName('Trigger Sensitivity')
+                .setName('Auto Mode')
+                .setDesc('Automatically analyze text after 5 seconds of inactivity.')
+                .addToggle(toggle => toggle
+                    .setValue(!!this.plugin.settings.guardianAutoMode)
+                    .onChange(async (value) => {
+                        this.plugin.settings.guardianAutoMode = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Manual Mode Hotkey')
+                .setDesc('Configure the hotkey to manually trigger Guardian (Default: Mod+Shift+G).')
+                .addButton(btn => btn
+                    .setButtonText('Configure Hotkey')
+                    .onClick(() => {
+                        // Open Obsidian's Hotkeys settings and search for our command
+                        (this.app as any).setting.openTabById('hotkeys');
+                        (this.app as any).setting.activeTab.setQuery('Guardian: Manual Trigger');
+                    }));
+
+            new Setting(containerEl)
+                .setName('Guardian Sensitivity')
                 .setDesc('Low (Manual) <-> High (Copilot Style)')
                 .addSlider(slider => slider
                     .setLimits(0, 100, 25)

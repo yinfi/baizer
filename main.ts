@@ -1,12 +1,13 @@
-import { Plugin, debounce, Notice } from 'obsidian';
+import { Plugin, debounce, Notice, MarkdownView } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { GeminiAPI } from './src/gemini-api';
 import { ToolManager } from './src/mcp/tools';
 import { GeminiSettings, DEFAULT_SETTINGS } from './src/mcp/types';
 import { GeminiShellSettingTab } from './src/settings';
 import { GeminiShellView, VIEW_TYPE_GEMINI_SHELL } from './src/ui/shell-view';
-import { guardianGutterExtension, updateGuardianState, GuardianState } from './src/ui/guardian-gutter';
+import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
 import { ghostTextExtension, showGhostText } from './src/ui/ghost-text';
+import { GuardianModal } from './src/ui/guardian-modal';
 
 export default class GeminiShellPlugin extends Plugin {
     settings: GeminiSettings;
@@ -14,10 +15,12 @@ export default class GeminiShellPlugin extends Plugin {
     toolManager: ToolManager;
     private lastGuardianError: number = 0;
 
-    private onEditorChangeDebounced = debounce(this.runGuardianCheck.bind(this), 2000, true);
+    // Debounce with trailing edge (default/false) for inactivity trigger
+    private onEditorChangeDebounced = debounce(this.runGuardianCheck.bind(this), 5000);
 
     async onload() {
         await this.loadSettings();
+        new Notice('Gemini Shell: Plugin Loaded (v2)');
 
         this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
         this.geminiApi = new GeminiAPI(this.app, this.settings, this.toolManager);
@@ -34,6 +37,14 @@ export default class GeminiShellPlugin extends Plugin {
             hotkeys: [{ modifiers: ["Mod"], key: "j" }]
         });
 
+        // Manual Guardian Trigger
+        this.addCommand({
+            id: 'guardian-manual-trigger',
+            name: 'Guardian: Manual Trigger',
+            callback: () => this.activateGuardianModal(),
+            hotkeys: [{ modifiers: ["Mod", "Shift"], key: "g" }]
+        });
+
         this.addSettingTab(new GeminiShellSettingTab(this.app, this));
 
         this.registerEditorExtension([
@@ -41,11 +52,10 @@ export default class GeminiShellPlugin extends Plugin {
             ghostTextExtension()
         ]);
 
-        if (this.settings.enableGuardian) {
-            this.registerEvent(
-                this.app.workspace.on('editor-change', this.onEditorChangeDebounced)
-            );
-        }
+        // Always register the event; runGuardianCheck will check the setting
+        this.registerEvent(
+            this.app.workspace.on('editor-change', this.onEditorChangeDebounced)
+        );
     }
 
     async activateView() {
@@ -61,67 +71,16 @@ export default class GeminiShellPlugin extends Plugin {
         }
     }
 
-    async runGuardianCheck(editor: any, info: any) {
-        if (!this.settings.enableGuardian) return;
-
-        const cursor = editor.getCursor();
-        const line = editor.getLine(cursor.line);
-        const lineNumber = cursor.line + 1;
-        const view = (editor as any).cm as EditorView;
-
-        if (!view || !line.trim() || line.trim().length < 3) return;
-
-        updateGuardianState(view, lineNumber, GuardianState.Thinking);
-
-        try {
-            const prompt = `分析文本并提供改进建议（只返回JSON）：
-"${line}"
-
-场景判断：
-1. 待办事项 → {"type":"task","suggestion":"- [ ] 文本"}
-2. 链接 → {"type":"link","suggestion":"[描述](URL)"}
-3. 标签 → {"type":"tag","suggestion":"文本 #标签"}
-4. 代码 → {"type":"code","suggestion":"\`代码\`"}
-5. 引用 → {"type":"quote","suggestion":"> 引用"}
-6. 日期 → {"type":"date","suggestion":"YYYY-MM-DD"}
-7. 无需建议 → {"type":"none"}`;
-
-            const response = await this.geminiApi.chat(prompt, "Guardian", "");
-
-            const jsonMatch = response.trim().match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const result = JSON.parse(jsonMatch[0]);
-
-                if (result.type !== 'none' && result.suggestion) {
-                    updateGuardianState(view, lineNumber, GuardianState.HasSuggestion);
-
-                    const typeNames: Record<string, string> = {
-                        task: '任务', link: '链接', tag: '标签',
-                        code: '代码', quote: '引用', date: '日期'
-                    };
-
-                    showGhostText(view, "\n" + result.suggestion, lineNumber, line.length);
-                    new Notice(`Guardian: ${typeNames[result.type] || ''}建议 - Tab接受`, 3000);
-                } else {
-                    updateGuardianState(view, lineNumber, GuardianState.Idle);
-                }
-            } else {
-                updateGuardianState(view, lineNumber, GuardianState.Idle);
-            }
-        } catch (error: any) {
-            console.error('Guardian failed:', error);
-            updateGuardianState(view, lineNumber, GuardianState.Idle);
-
-            const now = Date.now();
-            if (now - this.lastGuardianError > 300000) {
-                if (error?.message?.includes('503') || error?.message?.includes('overloaded')) {
-                    new Notice('Guardian: API 暂时过载，已自动禁用。请稍后在设置中重新启用。', 8000);
-                    this.settings.enableGuardian = false;
-                    await this.saveSettings();
-                }
-                this.lastGuardianError = now;
-            }
+    activateGuardianModal() {
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!view) {
+            new Notice('Please open a Markdown file first.');
+            return;
         }
+
+        new GuardianModal(this.app, (instruction: string) => {
+            this.runGuardianCheck(view.editor, null, instruction);
+        }).open();
     }
 
     async loadSettings() {
@@ -132,5 +91,108 @@ export default class GeminiShellPlugin extends Plugin {
         await this.saveData(this.settings);
         this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
         this.geminiApi = new GeminiAPI(this.app, this.settings, this.toolManager);
+    }
+
+    async runGuardianCheck(editor: any, info: any, manualInstruction?: string) {
+        if (!this.settings.enableGuardian) return;
+
+        // Auto Mode Check: If not manual instruction and auto mode is disabled, skip.
+        if (!manualInstruction && !this.settings.guardianAutoMode) return;
+
+        const cursor = editor.getCursor();
+        const lineNumber = cursor.line + 1;
+        const view = (editor as any).cm as EditorView;
+
+        if (!view) return;
+
+        // Check Global Guardian Mode (Paused/Active)
+        const isGuardianEnabled = view.state.field(guardianModeField);
+        if (!manualInstruction && !isGuardianEnabled) return;
+
+        const line = editor.getLine(cursor.line);
+        // For auto mode, ensure line has content. For manual mode, we might process empty lines too.
+        if (!manualInstruction && (!line.trim() || line.trim().length < 3)) return;
+
+        // Get context: Last 10 lines (approx) to provide better context
+        const startLine = Math.max(0, cursor.line - 10);
+        const contextLines = [];
+        for (let i = startLine; i <= cursor.line; i++) {
+            contextLines.push(editor.getLine(i));
+        }
+        const contextText = contextLines.join('\n');
+
+        updateGuardianState(view, lineNumber, GuardianState.Thinking);
+
+        try {
+            let prompt = "";
+            let systemPromptOverride = "";
+
+            if (manualInstruction) {
+                prompt = `User Instruction: "${manualInstruction}"
+Context:
+"${contextText}"
+
+Please execute the instruction.
+- If it's an edit, return JSON: {"type":"edit", "suggestion":"REPLACED_TEXT"}
+- If it's a question, return JSON: {"type":"answer", "suggestion":"ANSWER_TEXT"}
+- If no action needed, return JSON: {"type":"none"}
+- Ensure the suggestion uses proper Markdown formatting.`;
+                systemPromptOverride = "You are a helpful assistant. Return ONLY JSON.";
+            } else {
+                // Generalized Co-writer Prompt
+                prompt = `Role: ${this.settings.systemPrompt || "You are a helpful AI assistant."}
+Task: You are a helpful co-writer. Complete the user's thought or continue the text naturally.
+
+Context:
+${contextText}
+
+Instructions:
+1. Suggest a continuation that flows naturally based on the context.
+2. Do NOT repeat the input text.
+3. If the text is complete or you have no good suggestion, return "type": "none".
+4. Output JSON: {"type": "completion", "suggestion": "MARKDOWN_FORMATTED_TEXT"}
+5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
+            }
+
+            const response = await this.geminiApi.chat(prompt, "Guardian", systemPromptOverride);
+
+            const jsonMatch = response.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
+
+            const data = JSON.parse(jsonMatch[0]);
+
+            // For edits/suggestions
+            if (data.suggestion && typeof data.suggestion === 'string') {
+                // Re-validate position as document might have changed
+                const currentLineCount = view.state.doc.lines;
+                if (lineNumber > currentLineCount) {
+                    console.warn("Guardian: Line number out of bounds after generation.");
+                    updateGuardianState(view, lineNumber, GuardianState.Idle);
+                    return;
+                }
+
+                const currentLine = view.state.doc.line(lineNumber);
+                const safeCh = Math.min(cursor.ch, currentLine.length);
+
+                console.log("Guardian: Showing ghost text", { suggestion: data.suggestion, line: lineNumber, ch: safeCh });
+                showGhostText(view, data.suggestion, lineNumber, safeCh);
+                updateGuardianState(view, lineNumber, GuardianState.HasSuggestion);
+            } else {
+                // console.warn("Guardian: Invalid suggestion data", data);
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+            }
+
+            if (data.type === 'none') {
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
+
+        } catch (error: any) {
+            console.error("Guardian Error:", error);
+            updateGuardianState(view, lineNumber, GuardianState.Error);
+        }
     }
 }

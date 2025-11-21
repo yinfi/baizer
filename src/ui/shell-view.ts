@@ -54,7 +54,9 @@ export class GeminiShellView extends ItemView {
         // 1. Header
         const header = container.createDiv({ cls: 'shell-header' });
         header.createSpan({ text: 'GEMINI SHELL' });
-        header.createSpan({ text: '● ONLINE', attr: { style: 'color: #00e676;' } });
+        const statusContainer = header.createDiv({ cls: 'shell-status-container' });
+        statusContainer.createSpan({ cls: 'shell-status-dot' });
+        statusContainer.createSpan({ text: 'ONLINE' });
 
         // 2. Output Area (Scrollable)
         this.outputContainer = container.createDiv({ cls: 'shell-output-area' });
