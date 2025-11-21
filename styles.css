@@ -2,10 +2,22 @@
    Gemini Shell - Sidebar UI
    ========================================================================== */
 
+/* Fix Obsidian parent containers to enable flexbox layout */
+.workspace-leaf-content:has(.gemini-shell-view) {
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.workspace-leaf-content:has(.gemini-shell-view)>.view-content {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 !important;
+}
+
 .gemini-shell-view {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
     width: 100%;
     background-color: var(--background-primary);
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
@@ -230,9 +242,232 @@ textarea.shell-input::placeholder {
     text-overflow: ellipsis;
 }
 
-.suggestion-desc {
+.shell-status-container {
+    display: flex;
+    align-items: center;
+}
+
+.shell-status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background-color: #00e676;
+    border-radius: 50%;
+    background: var(--scrollbar-thumb-bg);
+    border-radius: 3px;
+}
+
+/* Entries */
+.shell-entry {
+    margin-bottom: 16px;
+    word-wrap: break-word;
+    user-select: text;
+}
+
+.shell-entry.user {
+    color: var(--text-accent);
+    border-left: 2px solid var(--interactive-accent);
+    padding-left: 12px;
+    font-weight: 600;
+}
+
+.shell-entry.system {
+    color: var(--text-muted);
     font-size: 11px;
-    opacity: 0.6;
+    font-style: italic;
+    padding-left: 14px;
+}
+
+.shell-entry.ai {
+    color: var(--text-normal);
+    padding-left: 14px;
+}
+
+/* Markdown Styles in AI Response */
+.shell-entry.ai h1,
+.shell-entry.ai h2,
+.shell-entry.ai h3 {
+    margin-top: 10px;
+    margin-bottom: 5px;
+    font-size: 1.1em;
+    color: var(--text-normal);
+}
+
+.shell-entry.ai code {
+    color: var(--text-accent);
+    font-size: 0.9em;
+}
+
+.shell-entry.ai pre {
+    background: var(--background-primary-alt);
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+/* 3. Input Area (Fixed Bottom) */
+.shell-input-container {
+    background: var(--background-secondary);
+    border-top: 1px solid var(--background-modifier-border);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+    position: relative;
+    /* For suggestions popup */
+    margin-top: auto;
+    z-index: 10;
+}
+
+.shell-input-wrapper {
+    display: flex;
+    align-items: flex-start;
+    /* Align top for textarea */
+    gap: 8px;
+    background: var(--background-primary);
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.shell-prompt {
+    color: var(--interactive-accent);
+    font-weight: bold;
+    font-size: 16px;
+    padding-top: 2px;
+    /* Align with text */
+    user-select: none;
+}
+
+textarea.shell-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-normal);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    padding: 0;
+    margin: 0;
+    resize: none;
+    min-height: 24px;
+    max-height: 150px;
+    box-shadow: none !important;
+}
+
+textarea.shell-input::placeholder {
+    color: var(--text-muted) !important;
+    opacity: 0.5 !important;
+}
+
+/* 4. Footer / Action Bar */
+.shell-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.action-group {
+    display: flex;
+    gap: 12px;
+}
+
+.action-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.key-badge {
+    background: var(--background-modifier-border);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 9px;
+    min-width: 16px;
+    text-align: center;
+}
+
+/* 5. Suggestions Popup */
+.shell-suggestions {
+    position: absolute;
+    bottom: 100%;
+    left: 12px;
+    right: 12px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 100;
+    display: none;
+    /* Hidden by default */
+    margin-bottom: 8px;
+}
+
+.suggestion-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-normal);
+    font-size: 13px;
+}
+
+.suggestion-item:hover,
+.suggestion-item.is-selected {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.suggestion-icon {
+    opacity: 0.7;
+    width: 16px;
+    text-align: center;
+}
+
+.suggestion-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.shell-status-container {
+    display: flex;
+    align-items: center;
+}
+
+.shell-status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background-color: #00e676;
+    border-radius: 50%;
+    margin-right: 8px;
+    box-shadow: 0 0 8px rgba(0, 230, 118, 0.6);
+    animation: shell-pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes shell-pulse {
+    0% {
+        transform: scale(0.8);
+        opacity: 0.5;
+    }
+
+    50% {
+        transform: scale(1.2);
+        opacity: 1;
+    }
+
+    100% {
+        transform: scale(0.8);
+        opacity: 0.5;
+    }
 }
 
 /* Guardian Styles */
@@ -251,7 +486,17 @@ textarea.shell-input::placeholder {
 }
 
 .guardian-gutter-marker.guardian-idle {
-    display: none;
+    background: #00e676;
+    box-shadow: 0 0 8px rgba(0, 230, 118, 0.4);
+    animation: guardian-pulse-slow 3s ease-in-out infinite;
+    opacity: 0.6;
+}
+
+.guardian-gutter-marker.guardian-paused {
+    background: #ff5252;
+    box-shadow: 0 0 8px rgba(255, 82, 82, 0.4);
+    animation: guardian-pulse-slow 3s ease-in-out infinite;
+    opacity: 0.6;
 }
 
 .guardian-gutter-marker.guardian-thinking {
@@ -279,6 +524,20 @@ textarea.shell-input::placeholder {
     }
 }
 
+@keyframes guardian-pulse-slow {
+
+    0%,
+    100% {
+        transform: scale(0.8);
+        opacity: 0.4;
+    }
+
+    50% {
+        transform: scale(1.1);
+        opacity: 0.8;
+    }
+}
+
 .cm-line .guardian-ghost-text,
 .guardian-ghost-text {
     color: #00e676 !important;
@@ -289,33 +548,4 @@ textarea.shell-input::placeholder {
     pointer-events: none !important;
     user-select: none !important;
     opacity: 0.8 !important;
-}
-
-/* Loading Indicator */
-.shell-loading {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    background-color: #00e676;
-    border-radius: 50%;
-    margin-right: 8px;
-    box-shadow: 0 0 8px rgba(0, 230, 118, 0.6);
-    animation: shell-pulse 1.5s infinite ease-in-out;
-}
-
-@keyframes shell-pulse {
-    0% {
-        transform: scale(0.8);
-        opacity: 0.5;
-    }
-
-    50% {
-        transform: scale(1.2);
-        opacity: 1;
-    }
-
-    100% {
-        transform: scale(0.8);
-        opacity: 0.5;
-    }
 }

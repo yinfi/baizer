@@ -1,4 +1,4 @@
-// import { PluginManifest, Command } from "obsidian";
+import { PluginManifest, Command, Plugin } from "obsidian";
 
 declare module "obsidian" {
     interface App {
@@ -23,6 +23,7 @@ export interface GeminiSettings {
 
     // --- 🛡️ Guardian Behavior ---
     enableGuardian: boolean;
+    guardianAutoMode: boolean; // New: Auto-trigger toggle
     guardianSensitivity: number;
     guardianUIStyle: 'ghost' | 'gutter' | 'hybrid';
     ignoredFolders: string;
@@ -54,6 +55,7 @@ export const DEFAULT_SETTINGS: GeminiSettings = {
 
     // Guardian
     enableGuardian: false,
+    guardianAutoMode: true, // Default to true
     guardianSensitivity: 50,
     guardianUIStyle: 'hybrid',
     ignoredFolders: '',
@@ -82,3 +84,9 @@ IMPORTANT: Before creating a generic note for tasks, reminders, calendars, or ot
 
 You have access to the internet via the 'web_search' tool. Use it to find up-to-date information, news, or documentation when the user asks for information not present in their vault.`
 };
+
+export interface IGeminiShellPlugin extends Plugin {
+    settings: GeminiSettings;
+    geminiApi: any;
+    saveSettings(): Promise<void>;
+}

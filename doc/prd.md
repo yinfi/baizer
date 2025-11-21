@@ -20,26 +20,6 @@
 这是用户主动交互的唯一入口。
 *   **自然语言转指令**: 用户输入自然语言（“帮我把这个列表变成看板”），系统解析意图并执行。
 *   **伪指令体系 (Pseudo-Commands)**:
-    *   `/do [task]`: 执行复杂任务编排（调用插件）。
-    *   `/find [query]`: 语义搜索库内知识。
-    *   `/new [topic]`: 基于上下文创建新笔记。
-    *   `/edit [instruction]`: 基于指令修改当前选中文本。
-*   **多模态输出**: 支持在终端内渲染 Markdown 表格、Mermaid 图表、数学公式。
-
-### 2.2 模块二：The Guardian (守护进程)
-这是后台静默运行的辅助模块。
-*   **上下文感知**: 实时监控当前编辑文件的变更。
-*   **防打扰机制**: 仅在用户长时间停顿（>5s）或明确请求时触发分析。
-*   **能力**:
-    *   **Backlink Prediction**: 预测当前概念可能关联的旧笔记。
-    *   **Task Radar**: 识别文本中的承诺（“下周要完成...”），建议转化为 `- [ ]` 任务。
-    *   **Logic Check**: 检查前后文逻辑矛盾。
-
-### 2.3 模块三：MCP & Orchestrator (工具与编排)
-这是插件的大脑和手脚。
-*   **Tool Registry (工具注册表)**:
-    *   `read_note`, `write_note`, `append_to_daily_note`.
-    *   `search_vault` (语义/模糊).
     *   `list_plugins` (获取已安装插件清单).
     *   `execute_command` (调用 Obsidian 全局命令).
 *   **Plugin Awareness**: 自动识别 Dataview, Kanban, Templater, Excalidraw 等插件，并学习其语法格式。
