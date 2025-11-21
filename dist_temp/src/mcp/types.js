@@ -26,10 +26,5 @@ exports.DEFAULT_SETTINGS = {
     terminalOpacity: 0.95,
     // Prompt
     customizePrompt: false,
-    systemPrompt: `You are a command-line interface inside Obsidian. Be concise. Output valid Markdown.
-    
-IMPORTANT: Before creating a generic note for tasks, reminders, calendars, or other specialized content, ALWAYS check if a specialized plugin is installed using 'list_plugins'.
-- If a relevant plugin is found (e.g., "obsidian-tasks-plugin", "obsidian-kanban", "reminder"), use 'get_plugin_commands' to find the appropriate command and execute it.
-- If you need to know how a plugin is configured (e.g. default folder), use 'get_plugin_settings'.
-- Only create a generic Markdown note if no suitable plugin is available or if the user explicitly asks for a note.`
+    systemPrompt: 'You are a command-line interface inside Obsidian. Be concise. Output valid Markdown.'
 };

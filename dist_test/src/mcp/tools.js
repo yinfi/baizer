@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ToolManager = void 0;
+const obsidian_1 = require("obsidian");
 const generative_ai_1 = require("@google/generative-ai");
 class ToolManager {
     constructor(app, allowPluginControl) {
@@ -34,7 +35,71 @@ class ToolManager {
                     required: ['filename', 'content']
                 }
             },
-            // 3. Search
+            // 3. Update Note
+            {
+                name: 'update_note',
+                description: 'Update the content of an existing note. Completely replaces the file content.',
+                parameters: {
+                    type: generative_ai_1.SchemaType.OBJECT,
+                    properties: {
+                        path: { type: generative_ai_1.SchemaType.STRING, description: 'File path' },
+                        content: { type: generative_ai_1.SchemaType.STRING, description: 'New content' }
+                    },
+                    required: ['path', 'content']
+                }
+            },
+            // 4. Append to Note
+            {
+                name: 'append_to_note',
+                description: 'Append content to the end of an existing note.',
+                parameters: {
+                    type: generative_ai_1.SchemaType.OBJECT,
+                    properties: {
+                        path: { type: generative_ai_1.SchemaType.STRING, description: 'File path' },
+                        content: { type: generative_ai_1.SchemaType.STRING, description: 'Content to append' }
+                    },
+                    required: ['path', 'content']
+                }
+            },
+            // 5. Delete Note
+            {
+                name: 'delete_note',
+                description: 'Delete a note file. Moves to trash if available.',
+                parameters: {
+                    type: generative_ai_1.SchemaType.OBJECT,
+                    properties: {
+                        path: { type: generative_ai_1.SchemaType.STRING, description: 'File path to delete' }
+                    },
+                    required: ['path']
+                }
+            },
+            // 6. Rename Note
+            {
+                name: 'rename_note',
+                description: 'Rename or move a note to a different location.',
+                parameters: {
+                    type: generative_ai_1.SchemaType.OBJECT,
+                    properties: {
+                        oldPath: { type: generative_ai_1.SchemaType.STRING, description: 'Current file path' },
+                        newPath: { type: generative_ai_1.SchemaType.STRING, description: 'New file path' }
+                    },
+                    required: ['oldPath', 'newPath']
+                }
+            },
+            // 7. List Notes
+            {
+                name: 'list_notes',
+                description: 'List markdown files in the vault or a specific folder.',
+                parameters: {
+                    type: generative_ai_1.SchemaType.OBJECT,
+                    properties: {
+                        folder: { type: generative_ai_1.SchemaType.STRING, description: 'Folder path (optional, defaults to root)' },
+                        limit: { type: generative_ai_1.SchemaType.NUMBER, description: 'Max number of files to return (optional, default 20)' }
+                    },
+                    required: []
+                }
+            },
+            // 8. Search
             {
                 name: 'search_vault',
                 description: 'Fuzzy search for files in the vault.',
@@ -45,9 +110,21 @@ class ToolManager {
                     },
                     required: ['query']
                 }
+            },
+            // 9. Open File
+            {
+                name: 'open_file',
+                description: 'Open a file in the Obsidian editor. Supports file path or filename.',
+                parameters: {
+                    type: generative_ai_1.SchemaType.OBJECT,
+                    properties: {
+                        path: { type: generative_ai_1.SchemaType.STRING, description: 'File path or filename' }
+                    },
+                    required: ['path']
+                }
             }
         ];
-        // 条件加载：如果开启了插件控制权限
+        // Conditional loading: if plugin control is enabled
         if (this.allowPluginControl) {
             tools.push({
                 name: 'execute_command',
@@ -71,7 +148,48 @@ class ToolManager {
                     required: ['keyword']
                 }
             });
+            tools.push({
+                name: 'list_plugins',
+                description: 'List all installed plugins and their status (enabled/disabled).',
+                parameters: {
+                    type: generative_ai_1.SchemaType.OBJECT,
+                    properties: {},
+                    required: []
+                }
+            });
+            tools.push({
+                name: 'get_plugin_commands',
+                description: 'List all commands registered by a specific plugin.',
+                parameters: {
+                    type: generative_ai_1.SchemaType.OBJECT,
+                    properties: {
+                        pluginId: { type: generative_ai_1.SchemaType.STRING, description: 'The ID of the plugin (e.g., "obsidian-kanban")' }
+                    },
+                    required: ['pluginId']
+                }
+            });
+            tools.push({
+                name: 'get_plugin_settings',
+                description: 'Get the settings/configuration for a specific plugin.',
+                parameters: {
+                    type: generative_ai_1.SchemaType.OBJECT,
+                    properties: {
+                        pluginId: { type: generative_ai_1.SchemaType.STRING, description: 'The ID of the plugin' }
+                    },
+                    required: ['pluginId']
+                }
+            });
         }
+        // Always available tools
+        tools.push({
+            name: 'get_current_time',
+            description: 'Get the current local date and time.',
+            parameters: {
+                type: generative_ai_1.SchemaType.OBJECT,
+                properties: {},
+                required: []
+            }
+        });
         return tools;
     }
     async execute(name, args) {
@@ -87,40 +205,106 @@ class ToolManager {
                     let path = args.filename;
                     if (!path.endsWith('.md'))
                         path += '.md';
-                    // 检查文件是否已存在
+                    // Check if file already exists
                     const existingFile = this.app.vault.getAbstractFileByPath(path);
                     if (existingFile) {
                         return {
                             status: 'error',
-                            message: `文件已存在: ${path}。请使用不同的文件名或先删除现有文件。`
+                            message: `File already exists: ${path}. Use update_note to modify existing files.`
                         };
                     }
-                    // 确保父文件夹存在
+                    // Ensure parent folder exists
                     const pathParts = path.split('/');
                     if (pathParts.length > 1) {
                         const folderPath = pathParts.slice(0, -1).join('/');
                         const folder = this.app.vault.getAbstractFileByPath(folderPath);
                         if (!folder) {
-                            // 创建父文件夹（递归创建所有需要的文件夹）
                             try {
                                 await this.app.vault.createFolder(folderPath);
                             }
                             catch (e) {
-                                // 文件夹可能已存在，忽略错误
                                 console.log('Folder creation note:', e);
                             }
                         }
                     }
-                    // 创建文件
                     await this.app.vault.create(path, args.content || '');
-                    return { status: 'success', message: `✓ 笔记已成功保存至 ${path}` };
+                    return { status: 'success', message: `✅Note created: ${path} ` };
+                case 'update_note':
+                    const updateFile = this.app.vault.getAbstractFileByPath(args.path);
+                    if (!updateFile || !(updateFile instanceof obsidian_1.TFile)) {
+                        return { success: false, error: 'File not found' };
+                    }
+                    await this.app.vault.modify(updateFile, args.content);
+                    return { success: true, message: `✅Updated: ${args.path} ` };
+                case 'append_to_note':
+                    const appendFile = this.app.vault.getAbstractFileByPath(args.path);
+                    if (!appendFile || !(appendFile instanceof obsidian_1.TFile)) {
+                        return { success: false, error: 'File not found' };
+                    }
+                    const existingContent = await this.app.vault.read(appendFile);
+                    await this.app.vault.modify(appendFile, existingContent + '\n' + args.content);
+                    return { success: true, message: `✅Appended to: ${args.path} ` };
+                case 'delete_note':
+                    const deleteFile = this.app.vault.getAbstractFileByPath(args.path);
+                    if (!deleteFile) {
+                        return { success: false, error: 'File not found' };
+                    }
+                    await this.app.vault.trash(deleteFile, true); // Move to system trash
+                    return { success: true, message: `✅Deleted: ${args.path} ` };
+                case 'rename_note':
+                    const renameFile = this.app.vault.getAbstractFileByPath(args.oldPath);
+                    if (!renameFile) {
+                        return { success: false, error: 'File not found' };
+                    }
+                    await this.app.vault.rename(renameFile, args.newPath);
+                    return { success: true, message: `✅Renamed: ${args.oldPath} -> ${args.newPath} ` };
+                case 'list_notes':
+                    const folderPath = args.folder || '/';
+                    const limit = args.limit || 20;
+                    let files = this.app.vault.getMarkdownFiles();
+                    if (folderPath !== '/') {
+                        files = files.filter(f => f.path.startsWith(folderPath));
+                    }
+                    const fileList = files
+                        .slice(0, limit)
+                        .map(f => ({
+                        path: f.path,
+                        name: f.basename,
+                        size: f.stat.size,
+                        modified: new Date(f.stat.mtime).toISOString()
+                    }));
+                    return { success: true, files: fileList, total: files.length };
                 case 'search_vault':
-                    // Simple fuzzy search simulation using files cache
                     const matches = this.app.vault.getFiles()
                         .filter(f => f.basename.toLowerCase().includes(args.query.toLowerCase()))
                         .map(f => f.path)
                         .slice(0, 5);
                     return { matches };
+                case 'open_file':
+                    const allFiles = this.app.vault.getFiles();
+                    let targetFile = allFiles.find(f => f.path === args.path);
+                    if (!targetFile) {
+                        targetFile = allFiles.find(f => f.basename === args.path || f.basename === args.path.replace('.md', ''));
+                    }
+                    if (!targetFile) {
+                        const fuzzyMatches = allFiles.filter(f => f.path.toLowerCase().includes(args.path.toLowerCase()));
+                        if (fuzzyMatches.length === 1) {
+                            targetFile = fuzzyMatches[0];
+                        }
+                        else if (fuzzyMatches.length > 1) {
+                            return {
+                                success: false,
+                                error: `Found ${fuzzyMatches.length} matches`,
+                                matches: fuzzyMatches.map(f => f.path)
+                            };
+                        }
+                    }
+                    if (!targetFile) {
+                        return { success: false, error: 'File not found' };
+                    }
+                    const leaf = this.app.workspace.getLeaf(false);
+                    await leaf.openFile(targetFile);
+                    return { success: true, path: targetFile.path, message: `✅Opened: ${targetFile.path} ` };
                 case 'list_available_commands':
                     if (!this.allowPluginControl)
                         return { error: 'Permission denied' };
@@ -134,12 +318,93 @@ class ToolManager {
                         return { error: 'Permission denied' };
                     const success = this.app.commands.executeCommandById(args.id);
                     return { success, command_id: args.id };
+                case 'list_plugins':
+                    if (!this.allowPluginControl)
+                        return { error: 'Permission denied' };
+                    const manifests = this.app.plugins.manifests;
+                    const enabledPlugins = this.app.plugins.enabledPlugins;
+                    const pluginList = Object.values(manifests).map(m => ({
+                        id: m.id,
+                        name: m.name,
+                        version: m.version,
+                        enabled: enabledPlugins.has(m.id),
+                        description: m.description
+                    }));
+                    return { plugins: pluginList, total: pluginList.length };
+                case 'get_plugin_commands':
+                    if (!this.allowPluginControl)
+                        return { error: 'Permission denied' };
+                    const pluginId = args.pluginId;
+                    // Filter commands that start with the plugin ID (standard convention)
+                    // or check if the command definition belongs to the plugin (if accessible, but ID prefix is reliable enough for most)
+                    const pluginCommands = this.app.commands.listCommands()
+                        .filter(c => c.id.startsWith(pluginId + ':'))
+                        .map(c => ({ id: c.id, name: c.name }));
+                    return {
+                        pluginId,
+                        commands: pluginCommands,
+                        count: pluginCommands.length
+                    };
+                case 'get_plugin_settings':
+                    if (!this.allowPluginControl)
+                        return { error: 'Permission denied' };
+                    const plugin = this.app.plugins.getPlugin(args.pluginId);
+                    if (!plugin)
+                        return { error: 'Plugin not found or not enabled' };
+                    // Try to access settings in common locations
+                    // Most plugins store settings in 'settings' property or 'data' property
+                    const settings = plugin.settings || plugin.data || {};
+                    return {
+                        pluginId: args.pluginId,
+                        settings
+                    };
+                case 'get_current_time':
+                    const now = new Date();
+                    return {
+                        iso: now.toISOString(),
+                        local: now.toLocaleString(),
+                        weekday: now.toLocaleDateString(undefined, { weekday: 'long' })
+                    };
+                case 'web_search':
+                    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;
+                    try {
+                        const response = await (0, obsidian_1.requestUrl)({ url: searchUrl });
+                        const html = response.text;
+                        // Simple regex to extract results from DDG HTML
+                        // This is brittle but avoids adding heavy dependencies like cheerio
+                        const results = [];
+                        const resultRegex = /<a class="result__a" href="([^"]+)">([^<]+)<\/a>.*?<a class="result__snippet" href="[^"]+">([^<]+)<\/a>/g;
+                        let match;
+                        let count = 0;
+                        // If the regex is too complex or DDG changes, we might need a fallback or a better parser.
+                        // For now, let's try a simpler extraction if the specific classes aren't found, 
+                        // or just return a truncated version of the text if parsing fails.
+                        // Improved regex to extract results directly from anchor tags, avoiding nested div issues
+                        // Matches: <a class="result__a" ...>Title</a> ... <a class="result__snippet" ...>Snippet</a>
+                        // We scan the whole HTML for these patterns. 
+                        const resultBlockRegex = /<a class="result__a" href="([^"]+)">([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet" href="[^"]+">([\s\S]*?)<\/a>/g;
+                        while ((match = resultBlockRegex.exec(html)) !== null && count < 5) {
+                            results.push({
+                                title: match[2].replace(/<[^>]+>/g, '').trim(),
+                                link: match[1],
+                                snippet: match[3].replace(/<[^>]+>/g, '').trim()
+                            });
+                            count++;
+                        }
+                        if (results.length === 0) {
+                            return { results: [], message: "No results found or parsing failed." };
+                        }
+                        return { results };
+                    }
+                    catch (error) {
+                        return { error: `Search failed: ${error.message}` };
+                    }
                 default:
                     return { error: 'Unknown tool' };
             }
         }
         catch (e) {
-            console.error(`Tool execution error [${name}]:`, e);
+            console.error(`Tool execution error[${name}]: `, e);
             return { error: e.message };
         }
     }

@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, TFile } from 'obsidian';
 import { GeminiAPI } from '../gemini-api';
+import { logger } from '../utils/logger';
 
 export const VIEW_TYPE_GEMINI_SHELL = 'gemini-shell-view';
 
@@ -19,6 +20,12 @@ export class GeminiShellView extends ItemView {
 
     // File Selection State
     private pendingFileSelection: TFile[] | null = null;
+
+    // Heartbeat monitoring
+    private heartbeatInterval: number | null = null;
+    private lastActivityTime: number = Date.now();
+    private heartbeatIntervalMs: number = 30000; // 30秒检查一次
+    private isResponding: boolean = false;
 
     constructor(leaf: WorkspaceLeaf, api: GeminiAPI) {
         super(leaf);
@@ -132,6 +139,9 @@ export class GeminiShellView extends ItemView {
             if ((e.target as HTMLElement).closest('.shell-suggestions')) return;
             this.inputEl.focus();
         });
+
+        // Start heartbeat monitoring
+        this.startHeartbeat();
     }
 
     adjustHeight() {
@@ -361,7 +371,11 @@ export class GeminiShellView extends ItemView {
         loadingDiv.createSpan({ text: 'Thinking...' });
         this.scrollToBottom();
 
+        // 设置响应状态
+        this.isResponding = true;
+
         try {
+            this.updateActivity(); // 更新活动时间
             const response = await this.api.chat(query, contextStr, this.currentSelection);
 
             const loader = document.getElementById(loadingId);
@@ -376,7 +390,9 @@ export class GeminiShellView extends ItemView {
         } catch (e) {
             const loader = document.getElementById(loadingId);
             if (loader) loader.remove();
-            this.appendLog('Error', e.message, 'system');
+            this.handleError(e, 'Gemini API调用');
+        } finally {
+            this.isResponding = false; // 重置响应状态
         }
     }
 
@@ -391,6 +407,7 @@ export class GeminiShellView extends ItemView {
             entry.setText(`[${author}] ${content}`);
         }
         this.scrollToBottom();
+        this.updateActivity(); // 更新活动时间
     }
 
     scrollToBottom() {
@@ -444,5 +461,80 @@ export class GeminiShellView extends ItemView {
 
     async onClose() {
         // Cleanup if needed
+        this.stopHeartbeat();
+    }
+
+    // ==================== Heartbeat Monitoring ====================
+
+    private startHeartbeat() {
+        this.heartbeatInterval = window.setInterval(() => {
+            this.checkHeartbeat();
+        }, this.heartbeatIntervalMs);
+    }
+
+    private stopHeartbeat() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
+    }
+
+    private checkHeartbeat() {
+        const now = Date.now();
+        const timeSinceLastActivity = now - this.lastActivityTime;
+
+        logger.debug(`心跳检查: 距离上次活动 ${timeSinceLastActivity}ms`, 'GeminiShellView.heartbeat');
+
+        // 如果超过2分钟没有响应，显示警告
+        if (this.isResponding && timeSinceLastActivity > 120000) {
+            const warning = '⚠️ 检测到长时间无响应，系统可能出现问题';
+            logger.warn(warning, 'GeminiShellView.heartbeat');
+            this.appendLog('System', warning, 'system');
+            this.isResponding = false;
+        }
+
+        // 如果超过5分钟没有活动，尝试重置状态
+        if (timeSinceLastActivity > 300000) {
+            logger.info('长时间无活动，重置状态', 'GeminiShellView.heartbeat');
+            this.isResponding = false;
+        }
+    }
+
+    private updateActivity() {
+        this.lastActivityTime = Date.now();
+        this.isResponding = true;
+        logger.debug(`活动更新: ${new Date().toISOString()}`, 'GeminiShellView.updateActivity');
+    }
+
+    // ==================== Enhanced Error Handling ====================
+
+    private handleError(error: any, context: string) {
+        logger.error(`${context} 错误`, error, 'GeminiShellView', { context });
+
+        const errorMessage = this.formatErrorMessage(error, context);
+        this.appendLog('Error', errorMessage, 'system');
+
+        // 重置响应状态
+        this.isResponding = false;
+    }
+
+    private formatErrorMessage(error: any, context: string): string {
+        if (error.name === 'AbortError') {
+            return `${context}: 请求超时，请稍后重试`;
+        }
+
+        if (error.message?.includes('503') || error.message?.includes('overloaded')) {
+            return `${context}: AI模型当前过载，请稍后再试`;
+        }
+
+        if (error.message?.includes('401')) {
+            return `${context}: API密钥无效或已过期`;
+        }
+
+        if (error.message?.includes('network')) {
+            return `${context}: 网络连接问题，请检查网络连接`;
+        }
+
+        return `${context}: ${error.message || '未知错误'}`;
     }
 }
