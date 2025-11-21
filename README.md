@@ -1,6 +1,8 @@
 # Obsidian CLI
 
 **Obsidian CLI** is a powerful AI-driven plugin for Obsidian that integrates a terminal-like interface and an intelligent "Guardian" co-writer directly into your workflow. Powered by Google's Gemini AI, it transforms how you interact with your notes, offering context-aware assistance, automated editing, and a persistent memory of your preferences and projects.
+<img width="2816" height="1536" alt="main" src="https://github.com/user-attachments/assets/d0ab9014-ea13-4300-8d76-d8839fd0c046" />
+
 
 ## Features
 
