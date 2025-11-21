@@ -1,0 +1,36 @@
+# 构建产物
+main.js
+data.json
+dist/
+dist_temp/
+dist_test/
+
+# 依赖
+node_modules/
+doc/
+
+# 备份文件
+*.backup
+*.bak
+
+# 临时文件
+*.tmp
+*.temp
+
+# 调试文件
+*.log
+debug/
+ddg.html
+layout-demo.html
+
+# IDE
+.vscode/
+.idea/
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Obsidian
+.obsidian/
