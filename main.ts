@@ -8,13 +8,13 @@ import { GeminiShellView, VIEW_TYPE_GEMINI_SHELL } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
 import { ghostTextExtension, showGhostText } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
-import { selectionMenuExtension, setSelectionActionCallback, resetSelectionMenu } from './src/ui/selection-menu';
+import { selectionMenuExtension, setSelectionActionCallback, resetSelectionMenu, setSelectionMenuState } from './src/ui/selection-menu';
 
 export default class GeminiShellPlugin extends Plugin {
     settings: GeminiSettings;
     geminiApi: GeminiAPI;
     toolManager: ToolManager;
-    private lastGuardianError: number = 0;
+
 
     // Debounce with trailing edge (default/false) for inactivity trigger
     private onEditorChangeDebounced = debounce(this.runGuardianCheck.bind(this), 5000);
@@ -51,7 +51,7 @@ export default class GeminiShellPlugin extends Plugin {
         this.registerEditorExtension([
             guardianGutterExtension(),
             ghostTextExtension(),
-            selectionMenuExtension()
+            selectionMenuExtension(this.app)
         ]);
 
         // Register Selection Callback
@@ -140,8 +140,15 @@ Task: Execute the user's instruction on the selected text.
                     showGhostText(view, data.suggestion, line, ch, { from: selection.from, to: selection.to });
                     resetSelectionMenu(view); // Hide the menu
                 } else if (data.type === 'answer') {
-                    new Notice("Guardian: " + data.suggestion, 5000);
-                    resetSelectionMenu(view);
+                    // Show answer in the selection menu (Result View)
+                    view.dispatch({
+                        effects: setSelectionMenuState.of({
+                            type: 'result',
+                            from: selection.from,
+                            to: selection.to,
+                            content: data.suggestion
+                        })
+                    });
                 } else {
                     new Notice("Guardian: No action taken.");
                     resetSelectionMenu(view);

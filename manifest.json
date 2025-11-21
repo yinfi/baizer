@@ -1,10 +1,10 @@
 {
-    "id": "obsidian-gemini-shell",
-    "name": "Gemini Shell",
+    "id": "obsidian-cli",
+    "name": "Obsidian CLI",
     "version": "1.0.0",
     "minAppVersion": "1.0.0",
-    "description": "A terminal-like interface powered by Gemini to orchestrate your Obsidian vault.",
-    "author": "Your Name",
-    "authorUrl": "https://github.com/yourname/obsidian-gemini-shell",
+    "description": "A terminal-like interface powered by AI to orchestrate your Obsidian vault.",
+    "author": "yinfie",
+    "authorUrl": "https://github.com/yinfie/obsidian-cli",
     "isDesktopOnly": false
 }

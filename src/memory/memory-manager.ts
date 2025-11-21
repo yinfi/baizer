@@ -14,8 +14,8 @@ export class MemoryManager {
     private readonly PROFILE_FILE = 'user-profile.json';
     private readonly SUMMARY_FILE = 'session-summaries.json';
     private readonly HISTORY_FILE = 'chat-history.json';
-    private readonly PROFILE_UPDATE_INTERVAL = 20;
-    private readonly PROFILE_UPDATE_MIN_TIME = 10 * 60 * 1000;
+    private readonly PROFILE_UPDATE_INTERVAL = 5; // Update every 5 messages
+    private readonly PROFILE_UPDATE_MIN_TIME = 60 * 1000; // Minimum 1 minute between updates
 
     constructor(
         private app: App,
@@ -103,21 +103,28 @@ export class MemoryManager {
         });
         await this.saveChatHistory();
 
-        // 自动画像更新 - 需同时满足两个条件：
-        // 1. 至少 20 轮对话
-        // 2. 距离上次更新至少 10 分钟
+        // 自动画像更新
         if (role === 'user') {
             const timeSinceLastUpdate = Date.now() - this.lastProfileUpdateTime;
             const shouldUpdateByTurns = this.currentSessionMessages % this.PROFILE_UPDATE_INTERVAL === 0;
             const shouldUpdateByTime = timeSinceLastUpdate >= this.PROFILE_UPDATE_MIN_TIME;
 
-            if (shouldUpdateByTurns && shouldUpdateByTime) {
+            // More aggressive update for new users
+            const isNewUser = this.userProfile.metadata.totalInteractions < 20;
+
+            if (isNewUser && this.currentSessionMessages % 2 === 0) {
+                try {
+                    await this.updateProfileFromConversation(content);
+                    this.lastProfileUpdateTime = Date.now();
+                } catch (e) {
+                    console.error('Auto profile update (new user) failed:', e);
+                }
+            } else if (shouldUpdateByTurns || (shouldUpdateByTime && this.currentSessionMessages > 0)) {
                 try {
                     await this.updateProfileFromConversation(content);
                     this.lastProfileUpdateTime = Date.now();
                 } catch (e) {
                     console.error('Auto profile update failed:', e);
-                    // 失败不影响正常对话
                 }
             }
         }
@@ -269,6 +276,12 @@ export class MemoryManager {
     }
 
     // ==================== Persistence ====================
+
+    async save() {
+        await this.saveProfile();
+        await this.saveSummaries();
+        await this.saveChatHistory();
+    }
 
     private async ensureMemoryDir() {
         const adapter = this.app.vault.adapter;
