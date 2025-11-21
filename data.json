@@ -2,7 +2,7 @@
   "apiKey": "AIzaSyDQKH4Ve-viXCfMjWE9CmEhvHmvP1DlNGM",
   "primaryModel": "gemini-2.5-flash",
   "thinkingModel": "gemini-2.5-pro",
-  "contextWindow": 10000,
+  "contextWindow": 190000,
   "enableGuardian": true,
   "guardianAutoMode": true,
   "guardianSensitivity": 25,
