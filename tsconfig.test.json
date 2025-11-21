@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "baseUrl": ".",
+        "module": "commonjs",
+        "target": "ES2020",
+        "lib": [
+            "DOM",
+            "ESNext"
+        ],
+        "types": [
+            "node"
+        ],
+        "allowSyntheticDefaultImports": true,
+        "esModuleInterop": true,
+        "outDir": "dist_test",
+        "skipLibCheck": true
+    },
+    "include": [
+        "src/**/*.ts",
+        "test/**/*.ts"
+    ]
+}

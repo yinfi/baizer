@@ -6,16 +6,22 @@ const obsidian_1 = require("obsidian");
 const memory_manager_1 = require("./memory/memory-manager");
 const logger_1 = require("./utils/logger");
 class GeminiAPI {
+    app;
+    settings;
+    toolManager;
+    mockModel;
+    genAI;
+    model;
+    memoryManager = null;
+    lastResponseTime = Date.now();
+    requestTimeout = 30000; // 30秒超时
+    maxRetries = 3;
+    retryDelay = 2000;
     constructor(app, settings, toolManager, mockModel) {
         this.app = app;
         this.settings = settings;
         this.toolManager = toolManager;
         this.mockModel = mockModel;
-        this.memoryManager = null;
-        this.lastResponseTime = Date.now();
-        this.requestTimeout = 30000; // 30秒超时
-        this.maxRetries = 3;
-        this.retryDelay = 2000;
         if (settings.apiKey || mockModel) {
             this.init();
         }
@@ -80,7 +86,6 @@ class GeminiAPI {
             if (memoryContext) {
                 fullPrompt += `${memoryContext}\n\n`;
             }
-            fullPrompt += `[Current Time: ${new Date().toLocaleString()} (${new Date().toLocaleDateString(undefined, { weekday: 'long' })})]\n`;
             fullPrompt += `[Context: ${contextContext}]\n`;
             if (selection) {
                 fullPrompt += `[Selected Text: ${selection}]\n`;
