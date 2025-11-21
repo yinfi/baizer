@@ -17,7 +17,7 @@ export default class GeminiShellPlugin extends Plugin {
 
 
     // Debounce with trailing edge (default/false) for inactivity trigger
-    private onEditorChangeDebounced = debounce(this.runGuardianCheck.bind(this), 5000);
+    private onEditorChangeDebounced = debounce(this.runGuardianCheck.bind(this), 3000);
 
     async onload() {
         await this.loadSettings();
@@ -30,6 +30,11 @@ export default class GeminiShellPlugin extends Plugin {
             VIEW_TYPE_GEMINI_SHELL,
             (leaf) => new GeminiShellView(leaf, this.geminiApi)
         );
+
+        // Add ribbon icon for quick access to Gemini Shell
+        this.addRibbonIcon('terminal', 'Open Gemini Shell', (evt: MouseEvent) => {
+            this.activateView();
+        });
 
         this.addCommand({
             id: 'open-gemini-shell',

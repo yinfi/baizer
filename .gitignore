@@ -16,7 +16,7 @@ doc/
 # 临时文件
 *.tmp
 *.temp
-
+tsconfig.test.json
 # 调试文件
 *.log
 debug/
