@@ -32,7 +32,7 @@ __export(main_exports, {
   default: () => GeminiShellPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian6 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 
 // node_modules/@google/generative-ai/dist/index.mjs
 var SchemaType;
@@ -1028,6 +1028,7 @@ var DEFAULT_USER_PROFILE = {
 
 // src/memory/memory-manager.ts
 var MemoryManager = class {
+  // Minimum 1 minute between updates
   constructor(app, model) {
     this.app = app;
     this.model = model;
@@ -1046,8 +1047,9 @@ var MemoryManager = class {
   PROFILE_FILE = "user-profile.json";
   SUMMARY_FILE = "session-summaries.json";
   HISTORY_FILE = "chat-history.json";
-  PROFILE_UPDATE_INTERVAL = 20;
-  PROFILE_UPDATE_MIN_TIME = 10 * 60 * 1e3;
+  PROFILE_UPDATE_INTERVAL = 5;
+  // Update every 5 messages
+  PROFILE_UPDATE_MIN_TIME = 60 * 1e3;
   // ==================== Session Management ====================
   getOrCreateSession() {
     if (!this.chatSession) {
@@ -1116,7 +1118,15 @@ ${summaryContext}`;
       const timeSinceLastUpdate = Date.now() - this.lastProfileUpdateTime;
       const shouldUpdateByTurns = this.currentSessionMessages % this.PROFILE_UPDATE_INTERVAL === 0;
       const shouldUpdateByTime = timeSinceLastUpdate >= this.PROFILE_UPDATE_MIN_TIME;
-      if (shouldUpdateByTurns && shouldUpdateByTime) {
+      const isNewUser = this.userProfile.metadata.totalInteractions < 20;
+      if (isNewUser && this.currentSessionMessages % 2 === 0) {
+        try {
+          await this.updateProfileFromConversation(content);
+          this.lastProfileUpdateTime = Date.now();
+        } catch (e) {
+          console.error("Auto profile update (new user) failed:", e);
+        }
+      } else if (shouldUpdateByTurns || shouldUpdateByTime && this.currentSessionMessages > 0) {
         try {
           await this.updateProfileFromConversation(content);
           this.lastProfileUpdateTime = Date.now();
@@ -1244,6 +1254,11 @@ ${summaryContext}`;
     }
   }
   // ==================== Persistence ====================
+  async save() {
+    await this.saveProfile();
+    await this.saveSummaries();
+    await this.saveChatHistory();
+  }
   async ensureMemoryDir() {
     const adapter = this.app.vault.adapter;
     const dirExists = await adapter.exists(this.MEMORY_DIR);
@@ -1696,6 +1711,11 @@ var GeminiAPI = class {
   }
   getAvailableTools() {
     return this.toolManager.getToolsDefinitions();
+  }
+  async shutdown() {
+    if (this.memoryManager) {
+      await this.memoryManager.save();
+    }
   }
 };
 
@@ -2972,147 +2992,14 @@ var GuardianModal = class extends import_obsidian5.Modal {
 };
 
 // src/ui/selection-menu.ts
+var import_obsidian6 = require("obsidian");
 var import_view3 = require("@codemirror/view");
 var import_state5 = require("@codemirror/state");
 var globalActionCallback = null;
 function setSelectionActionCallback(callback) {
   globalActionCallback = callback;
 }
-var selectionMenuPlugin = import_view3.ViewPlugin.fromClass(class {
-  constructor(view) {
-    this.view = view;
-    this.updateState(view);
-  }
-  state = { type: "hidden" };
-  tooltip = null;
-  update(update) {
-    if (update.docChanged || update.selectionSet) {
-      this.updateState(update.view);
-    }
-  }
-  updateState(view) {
-    const selection = view.state.selection.main;
-    if (selection.empty) {
-      this.setState(view, { type: "hidden" });
-      return;
-    }
-    if (this.state.type === "hidden") {
-      this.setState(view, { type: "button", from: selection.from, to: selection.to });
-    } else if (this.state.type === "button") {
-      this.setState(view, { type: "button", from: selection.from, to: selection.to });
-    }
-  }
-  setState(view, newState) {
-    this.state = newState;
-    if (newState.type === "hidden") {
-      this.tooltip = null;
-    } else {
-      this.tooltip = {
-        pos: newState.from,
-        above: true,
-        strictSide: true,
-        create: () => {
-          const dom = document.createElement("div");
-          dom.className = "guardian-selection-tooltip";
-          if (newState.type === "button") {
-            this.renderButton(dom, view, newState);
-          } else if (newState.type === "input") {
-            this.renderInput(dom, view, newState);
-          } else if (newState.type === "processing") {
-            this.renderProcessing(dom);
-          }
-          return { dom };
-        }
-      };
-    }
-  }
-  renderButton(container, view, state) {
-    const btn = document.createElement("button");
-    btn.className = "guardian-selection-btn";
-    btn.textContent = "Comment / AI";
-    btn.onclick = () => {
-      this.setState(view, { type: "input", from: state.from, to: state.to });
-      view.dispatch({ effects: [] });
-    };
-    container.appendChild(btn);
-  }
-  renderInput(container, view, state) {
-    const wrapper = document.createElement("div");
-    wrapper.className = "guardian-input-wrapper";
-    const textarea = document.createElement("textarea");
-    textarea.placeholder = "Ask AI to edit or answer...";
-    textarea.className = "guardian-selection-input";
-    setTimeout(() => textarea.focus(), 50);
-    const btnGroup = document.createElement("div");
-    btnGroup.className = "guardian-btn-group";
-    const submitBtn = document.createElement("button");
-    submitBtn.textContent = "Submit";
-    submitBtn.className = "guardian-submit-btn";
-    submitBtn.onclick = () => {
-      const text = textarea.value.trim();
-      if (text && globalActionCallback) {
-        this.setState(view, { type: "processing", from: state.from, to: state.to });
-        view.dispatch({ effects: [] });
-        globalActionCallback(view, { from: state.from, to: state.to }, text);
-      }
-    };
-    const cancelBtn = document.createElement("button");
-    cancelBtn.textContent = "Cancel";
-    cancelBtn.className = "guardian-cancel-btn";
-    cancelBtn.onclick = () => {
-      this.setState(view, { type: "button", from: state.from, to: state.to });
-      view.dispatch({ effects: [] });
-    };
-    textarea.onkeydown = (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        submitBtn.click();
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        cancelBtn.click();
-      }
-    };
-    btnGroup.appendChild(cancelBtn);
-    btnGroup.appendChild(submitBtn);
-    wrapper.appendChild(textarea);
-    wrapper.appendChild(btnGroup);
-    container.appendChild(wrapper);
-  }
-  renderProcessing(container) {
-    const spinner = document.createElement("div");
-    spinner.className = "guardian-spinner";
-    spinner.textContent = "Thinking...";
-    container.appendChild(spinner);
-  }
-});
-var selectionTooltipField = import_state5.StateField.define({
-  create: () => null,
-  update(tooltip, tr) {
-    return tooltip;
-  },
-  provide: (f) => import_view3.showTooltip.from(f)
-});
-var selectionStateField = import_state5.StateField.define({
-  create() {
-    return { type: "hidden" };
-  },
-  update(state, tr) {
-    if (tr.selection) {
-      const selection = tr.newSelection.main;
-      if (selection.empty) {
-        return { type: "hidden" };
-      }
-      if (state.type === "hidden") {
-        return { type: "button", from: selection.from, to: selection.to };
-      }
-      if (state.type === "button") {
-        return { type: "button", from: selection.from, to: selection.to };
-      }
-    }
-    return state;
-  }
-});
+var pluginApp = null;
 var setSelectionMenuState = import_state5.StateEffect.define();
 var selectionMenuField = import_state5.StateField.define({
   create() {
@@ -3205,13 +3092,48 @@ var selectionMenuField = import_state5.StateField.define({
         } else if (state.type === "processing") {
           dom.textContent = "Thinking...";
           dom.className += " guardian-processing";
+        } else if (state.type === "result") {
+          const wrapper = document.createElement("div");
+          wrapper.className = "guardian-result-view";
+          const content = document.createElement("div");
+          content.className = "guardian-result-content";
+          if (pluginApp) {
+            import_obsidian6.MarkdownRenderer.render(pluginApp, state.content, content, "", new import_obsidian6.Component());
+          } else {
+            content.textContent = state.content;
+          }
+          wrapper.appendChild(content);
+          setTimeout(() => {
+            content.scrollTop = 0;
+          }, 0);
+          const actions = document.createElement("div");
+          actions.className = "guardian-result-actions";
+          const copyBtn = document.createElement("button");
+          copyBtn.textContent = "Copy";
+          copyBtn.onclick = () => {
+            navigator.clipboard.writeText(state.content);
+            copyBtn.textContent = "Copied!";
+            setTimeout(() => copyBtn.textContent = "Copy", 2e3);
+          };
+          const closeBtn = document.createElement("button");
+          closeBtn.textContent = "Close";
+          closeBtn.onclick = () => {
+            view.dispatch({
+              effects: setSelectionMenuState.of({ type: "hidden" })
+            });
+          };
+          actions.appendChild(copyBtn);
+          actions.appendChild(closeBtn);
+          wrapper.appendChild(actions);
+          dom.appendChild(wrapper);
         }
         return { dom };
       }
     };
   })
 });
-function selectionMenuExtension() {
+function selectionMenuExtension(app) {
+  pluginApp = app;
   return [
     selectionMenuField
   ];
@@ -3223,16 +3145,15 @@ function resetSelectionMenu(view) {
 }
 
 // main.ts
-var GeminiShellPlugin = class extends import_obsidian6.Plugin {
+var GeminiShellPlugin = class extends import_obsidian7.Plugin {
   settings;
   geminiApi;
   toolManager;
-  lastGuardianError = 0;
   // Debounce with trailing edge (default/false) for inactivity trigger
-  onEditorChangeDebounced = (0, import_obsidian6.debounce)(this.runGuardianCheck.bind(this), 5e3);
+  onEditorChangeDebounced = (0, import_obsidian7.debounce)(this.runGuardianCheck.bind(this), 5e3);
   async onload() {
     await this.loadSettings();
-    new import_obsidian6.Notice("Gemini Shell: Plugin Loaded (v2)");
+    new import_obsidian7.Notice("Gemini Shell: Plugin Loaded (v2)");
     this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
     this.geminiApi = new GeminiAPI(this.app, this.settings, this.toolManager);
     this.registerView(
@@ -3255,7 +3176,7 @@ var GeminiShellPlugin = class extends import_obsidian6.Plugin {
     this.registerEditorExtension([
       guardianGutterExtension(),
       ghostTextExtension(),
-      selectionMenuExtension()
+      selectionMenuExtension(this.app)
     ]);
     setSelectionActionCallback(this.runGuardianSelectionAction.bind(this));
     this.registerEvent(
@@ -3274,9 +3195,9 @@ var GeminiShellPlugin = class extends import_obsidian6.Plugin {
     }
   }
   activateGuardianModal() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
     if (!view) {
-      new import_obsidian6.Notice("Please open a Markdown file first.");
+      new import_obsidian7.Notice("Please open a Markdown file first.");
       return;
     }
     new GuardianModal(this.app, (instruction) => {
@@ -3323,19 +3244,25 @@ Task: Execute the user's instruction on the selected text.
           showGhostText(view, data.suggestion, line, ch, { from: selection.from, to: selection.to });
           resetSelectionMenu(view);
         } else if (data.type === "answer") {
-          new import_obsidian6.Notice("Guardian: " + data.suggestion, 5e3);
-          resetSelectionMenu(view);
+          view.dispatch({
+            effects: setSelectionMenuState.of({
+              type: "result",
+              from: selection.from,
+              to: selection.to,
+              content: data.suggestion
+            })
+          });
         } else {
-          new import_obsidian6.Notice("Guardian: No action taken.");
+          new import_obsidian7.Notice("Guardian: No action taken.");
           resetSelectionMenu(view);
         }
       } else {
-        new import_obsidian6.Notice("Guardian: Failed to parse response.");
+        new import_obsidian7.Notice("Guardian: Failed to parse response.");
         resetSelectionMenu(view);
       }
     } catch (error) {
       console.error("Guardian Selection Error:", error);
-      new import_obsidian6.Notice("Guardian Error: " + error.message);
+      new import_obsidian7.Notice("Guardian Error: " + error.message);
       resetSelectionMenu(view);
     }
   }

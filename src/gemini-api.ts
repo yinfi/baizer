@@ -300,4 +300,10 @@ export class GeminiAPI {
     getAvailableTools() {
         return this.toolManager.getToolsDefinitions();
     }
+
+    async shutdown() {
+        if (this.memoryManager) {
+            await this.memoryManager.save();
+        }
+    }
 }
