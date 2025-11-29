@@ -1,5 +1,6 @@
-﻿import { App, TFile, requestUrl } from 'obsidian';
+﻿import { App, TFile, requestUrl, htmlToMarkdown } from 'obsidian';
 import { FunctionDeclaration, SchemaType } from '@google/generative-ai';
+import { Readability } from '@mozilla/readability';
 
 export class ToolManager {
     constructor(private app: App, private allowPluginControl: boolean) { }
@@ -117,6 +118,19 @@ export class ToolManager {
                         path: { type: SchemaType.STRING, description: 'File path or filename' }
                     },
                     required: ['path']
+                }
+            },
+            // 10. Save Webpage
+            {
+                name: 'save_webpage',
+                description: 'Download a webpage, convert it to Markdown, and save it to the vault. Handles WeChat articles specifically.',
+                parameters: {
+                    type: SchemaType.OBJECT,
+                    properties: {
+                        url: { type: SchemaType.STRING, description: 'The URL to save' },
+                        filename: { type: SchemaType.STRING, description: 'Optional filename (without extension). If not provided, page title will be used.' }
+                    },
+                    required: ['url']
                 }
             }
         ];
@@ -332,6 +346,150 @@ export class ToolManager {
                     const leaf = this.app.workspace.getLeaf(false);
                     await leaf.openFile(targetFile);
                     return { success: true, path: targetFile.path, message: `✅ Opened: ${targetFile.path}` };
+
+                case 'save_webpage':
+                    const url = args.url;
+                    console.log(`Gemini Shell: Saving webpage ${url}`);
+                    try {
+                        const response = await requestUrl({ url: url });
+                        let html = response.text;
+                        console.log(`Gemini Shell: Fetched ${html.length} bytes`);
+
+                        // Extract Title
+                        let title = 'Untitled Webpage';
+                        const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+                        if (titleMatch && titleMatch[1].trim()) {
+                            title = titleMatch[1].trim();
+                        } else {
+                            // Try og:title
+                            const ogTitleMatch = html.match(/<meta[^>]*property="og:title"[^>]*content="([^"]*)"[^>]*>/i);
+                            if (ogTitleMatch && ogTitleMatch[1].trim()) {
+                                title = ogTitleMatch[1].trim();
+                            } else {
+                                // Try h1
+                                const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+                                if (h1Match && h1Match[1].trim()) {
+                                    title = h1Match[1].replace(/<[^>]+>/g, '').trim();
+                                }
+                            }
+                        }
+                        console.log(`Gemini Shell: Extracted title "${title}"`);
+
+                        // Sanitize Title
+                        title = title.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
+
+                        // Fallback if title is still empty or just dashes
+                        if (!title || title.replace(/-/g, '').trim().length === 0) {
+                            const now = new Date();
+                            title = `Clipping ${now.toISOString().split('T')[0]} ${now.getHours()}-${now.getMinutes()}-${now.getSeconds()}`;
+                        }
+
+                        // Handle WeChat Lazy Loading
+                        if (url.includes('mp.weixin.qq.com')) {
+                            html = html.replace(/data-src=/g, 'src=');
+                        }
+
+                        // Parse HTML for Readability
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(html, "text/html");
+
+                        let markdown = "";
+                        let extractionMethod = "none";
+
+                        // Special handling for WeChat: Try #js_content first
+                        if (url.includes('mp.weixin.qq.com')) {
+                            const jsContent = doc.querySelector('#js_content');
+                            if (jsContent) {
+                                console.log("Gemini Shell: Found #js_content for WeChat article");
+                                try {
+                                    // Remove scripts and styles from js_content
+                                    const scripts = jsContent.querySelectorAll('script, style');
+                                    scripts.forEach(s => s.remove());
+
+                                    markdown = htmlToMarkdown(jsContent.innerHTML);
+                                    extractionMethod = "wechat-js_content";
+                                } catch (e) {
+                                    console.error("Gemini Shell: htmlToMarkdown failed on #js_content", e);
+                                }
+                            }
+                        }
+
+                        // If WeChat extraction didn't work or wasn't applicable, try Readability
+                        if (!markdown) {
+                            // Pre-process DOM to remove common clutter that Readability might miss
+                            const clutterSelectors = [
+                                'nav', 'footer', 'aside',
+                                'script', 'style', 'noscript',
+                                '.sidebar', '.navbar', '.nav', '.menu',
+                                '#sidebar', '#nav', '#menu',
+                                '.ads', '.advertisement', '.ad-container'
+                            ];
+
+                            clutterSelectors.forEach(selector => {
+                                try {
+                                    const elements = doc.querySelectorAll(selector);
+                                    elements.forEach(el => el.remove());
+                                } catch (e) {
+                                    // Ignore selector errors
+                                }
+                            });
+
+                            // Use Readability to extract content
+                            // @ts-ignore
+                            const reader = new Readability(doc);
+                            const article = reader.parse();
+
+                            if (article && article.content) {
+                                console.log(`Gemini Shell: Readability extracted content length: ${article.content.length}`);
+                                // Convert extracted content to Markdown
+                                try {
+                                    markdown = htmlToMarkdown(article.content);
+                                    extractionMethod = "readability";
+                                } catch (e) {
+                                    console.error("Gemini Shell: htmlToMarkdown failed on extracted content", e);
+                                    markdown = "Error: Conversion failed.";
+                                }
+                            } else {
+                                console.warn("Gemini Shell: Readability failed to extract content, falling back to full HTML");
+                                try {
+                                    markdown = htmlToMarkdown(html);
+                                    extractionMethod = "fallback-full";
+                                } catch (e) {
+                                    console.error("Gemini Shell: htmlToMarkdown failed on full HTML", e);
+                                    markdown = "Error: Conversion failed.";
+                                }
+                            }
+                        }
+
+                        console.log(`Gemini Shell: Extraction method used: ${extractionMethod}`);
+
+                        if (!markdown || markdown.startsWith("Error:")) {
+                            // Second fallback attempt if conversion failed
+                            if (!markdown) markdown = "Error: Empty markdown result.";
+                        }
+
+                        // Prepare Filename
+                        let filename = args.filename || title;
+                        if (!filename.endsWith('.md')) filename += '.md';
+
+                        // Check for duplicates
+                        let finalPath = filename;
+                        let counter = 1;
+                        while (this.app.vault.getAbstractFileByPath(finalPath)) {
+                            finalPath = filename.replace('.md', ` (${counter}).md`);
+                            counter++;
+                        }
+
+                        console.log(`Gemini Shell: Saving to ${finalPath}`);
+                        await this.app.vault.create(finalPath, `Source: ${url}\n\n${markdown}`);
+                        console.log(`Gemini Shell: Save successful`);
+
+                        return { success: true, path: finalPath, message: `✅ Saved: ${finalPath}` };
+
+                    } catch (error: any) {
+                        console.error(`Gemini Shell: Save failed`, error);
+                        return { success: false, error: `Failed to save webpage: ${error.message}` };
+                    }
 
                 case 'list_available_commands':
                     if (!this.allowPluginControl) return { error: 'Permission denied' };
