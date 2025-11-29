@@ -16,14 +16,18 @@ export const setGuardianMode = StateEffect.define<boolean>();
 // Effect to update the specific line state (Thinking/Suggestion)
 export const setGuardianLineState = StateEffect.define<{ line: number; state: GuardianState } | null>();
 
+// Global State for Guardian Mode
+let globalGuardianEnabled = true;
+
 // StateField for Global Mode
 export const guardianModeField = StateField.define<boolean>({
     create() {
-        return true; // Default to Active
+        return globalGuardianEnabled; // Initialize from global state
     },
     update(value, tr) {
         for (let effect of tr.effects) {
             if (effect.is(setGuardianMode)) {
+                globalGuardianEnabled = effect.value; // Update global state
                 return effect.value;
             }
         }
