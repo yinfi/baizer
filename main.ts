@@ -1,4 +1,4 @@
-import { Plugin, debounce, Notice, MarkdownView } from 'obsidian';
+import { Plugin, debounce, Notice, MarkdownView, TFile } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { GeminiAPI } from './src/gemini-api';
 import { ToolManager } from './src/mcp/tools';
@@ -65,6 +65,15 @@ export default class GeminiShellPlugin extends Plugin {
         // Always register the event; runGuardianCheck will check the setting
         this.registerEvent(
             this.app.workspace.on('editor-change', this.onEditorChangeDebounced)
+        );
+
+        // Register Inbox Monitor
+        this.registerEvent(
+            this.app.vault.on('modify', (file) => {
+                if (file instanceof TFile && file.extension === 'md') {
+                    this.onFileModify(file);
+                }
+            })
         );
     }
 
@@ -162,10 +171,82 @@ Task: Execute the user's instruction on the selected text.
                 new Notice("Guardian: Failed to parse response.");
                 resetSelectionMenu(view);
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error("Guardian Selection Error:", error);
             new Notice("Guardian Error: " + error.message);
             resetSelectionMenu(view);
+        }
+    }
+
+    async onFileModify(file: TFile) {
+        if (file.path !== this.settings.wechatInboxPath) return;
+
+        const content = await this.app.vault.read(file);
+
+        // Robust Regex: Matches Wikilinks, Markdown Links, OR Raw URLs
+        // Group 1: Wikilink [[...]]
+        // Group 2: Markdown Link [text](url)
+        // Group 3: Raw URL http...
+        const regex = /(\[\[.*?\]\])|(\[.*?\]\(.*?\))|(https?:\/\/[^\s\)]+)/g;
+
+        let newContent = content;
+        let modified = false;
+
+        const rawUrlMatches = [];
+        for (const m of content.matchAll(regex)) {
+            if (!m[1] && !m[2] && m[3]) {
+                rawUrlMatches.push({
+                    url: m[3],
+                    index: m.index,
+                    length: m[0].length
+                });
+            }
+        }
+
+        if (rawUrlMatches.length === 0) return;
+
+        // We process in reverse order so indices remain valid
+        rawUrlMatches.sort((a, b) => b.index! - a.index!);
+
+        for (const m of rawUrlMatches) {
+            new Notice(`📥 Auto-saving: ${m.url}`);
+            const result = await this.toolManager.execute('save_webpage', { url: m.url });
+
+            if (result.success) {
+                let finalPath = result.path;
+                // Move logic (duplicated for now, could be helper)
+                if (this.settings.wechatStoragePath) {
+                    const folder = this.settings.wechatStoragePath;
+                    if (!await this.app.vault.adapter.exists(folder)) {
+                        await this.app.vault.createFolder(folder);
+                    }
+                    const fileName = finalPath.split('/').pop();
+                    const newPath = `${folder}/${fileName}`;
+                    let targetPath = newPath;
+                    let counter = 1;
+                    while (await this.app.vault.adapter.exists(targetPath)) {
+                        targetPath = `${folder}/${fileName.replace('.md', '')} (${counter}).md`;
+                        counter++;
+                    }
+                    const fileToMove = this.app.vault.getAbstractFileByPath(finalPath);
+                    if (fileToMove) {
+                        await this.app.vault.rename(fileToMove, targetPath);
+                        finalPath = targetPath;
+                    }
+                }
+
+                const linkText = `[[${finalPath}|Saved: ${finalPath.split('/').pop()?.replace('.md', '')}]]`;
+
+                // Apply replacement at specific index
+                newContent = newContent.substring(0, m.index) + linkText + newContent.substring(m.index! + m.length);
+                modified = true;
+            } else {
+                new Notice(`❌ Failed to save ${m.url}: ${result.error}`);
+            }
+        }
+
+        if (modified) {
+            await this.app.vault.modify(file, newContent);
         }
     }
 

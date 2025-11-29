@@ -44,6 +44,10 @@ export interface GeminiSettings {
     // --- 🧠 System Prompt ---
     customizePrompt: boolean;
     systemPrompt: string;
+
+    // --- 📨 WeChat Inbox ---
+    wechatInboxPath: string;
+    wechatStoragePath: string;
 }
 
 export const DEFAULT_SETTINGS: GeminiSettings = {
@@ -82,7 +86,11 @@ IMPORTANT: Before creating a generic note for tasks, reminders, calendars, or ot
 - If you need to know how a plugin is configured (e.g. default folder), use 'get_plugin_settings'.
 - Only create a generic Markdown note if no suitable plugin is available or if the user explicitly asks for a note.
 
-You have access to the internet via the 'web_search' tool. Use it to find up-to-date information, news, or documentation when the user asks for information not present in their vault.`
+You have access to the internet via the 'web_search' tool. Use it to find up-to-date information, news, or documentation when the user asks for information not present in their vault.`,
+
+    // WeChat
+    wechatInboxPath: 'Inbox.md',
+    wechatStoragePath: 'Clippings'
 };
 
 export interface IGeminiShellPlugin extends Plugin {

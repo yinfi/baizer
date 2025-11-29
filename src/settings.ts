@@ -93,8 +93,6 @@ export class GeminiShellSettingTab extends PluginSettingTab {
                 }));
 
         if (this.plugin.settings.enableGuardian) {
-            console.log('Guardian Enabled. AutoMode:', this.plugin.settings.guardianAutoMode);
-
             new Setting(containerEl)
                 .setName('Auto Mode')
                 .setDesc('Automatically analyze text after 5 seconds of inactivity.')
@@ -111,7 +109,6 @@ export class GeminiShellSettingTab extends PluginSettingTab {
                 .addButton(btn => btn
                     .setButtonText('Configure Hotkey')
                     .onClick(() => {
-                        // Open Obsidian's Hotkeys settings and search for our command
                         (this.app as any).setting.openTabById('hotkeys');
                         (this.app as any).setting.activeTab.setQuery('Guardian: Manual Trigger');
                     }));
@@ -286,5 +283,32 @@ export class GeminiShellSettingTab extends PluginSettingTab {
                         this.display();
                     }));
         }
+
+        // ============================================================
+        // 6. 📨 WeChat Inbox
+        // ============================================================
+        containerEl.createEl('h3', { text: '📨 WeChat Inbox', cls: 'gemini-settings-header' });
+
+        new Setting(containerEl)
+            .setName('WeChat Inbox Path')
+            .setDesc('The file to monitor for new WeChat links (e.g., "Inbox.md").')
+            .addText(text => text
+                .setPlaceholder('Inbox.md')
+                .setValue(this.plugin.settings.wechatInboxPath)
+                .onChange(async (value) => {
+                    this.plugin.settings.wechatInboxPath = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('WeChat Storage Path')
+            .setDesc('The folder to store saved articles (e.g., "Clippings").')
+            .addText(text => text
+                .setPlaceholder('Clippings')
+                .setValue(this.plugin.settings.wechatStoragePath)
+                .onChange(async (value) => {
+                    this.plugin.settings.wechatStoragePath = value;
+                    await this.plugin.saveSettings();
+                }));
     }
 }
