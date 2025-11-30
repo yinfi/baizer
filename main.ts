@@ -25,6 +25,7 @@ export default class GeminiShellPlugin extends Plugin {
 
         this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
         this.geminiApi = new GeminiAPI(this.app, this.settings, this.toolManager);
+        this.toolManager.setGeminiApi(this.geminiApi);
 
         this.registerView(
             VIEW_TYPE_GEMINI_SHELL,
@@ -110,6 +111,7 @@ export default class GeminiShellPlugin extends Plugin {
         await this.saveData(this.settings);
         this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
         this.geminiApi = new GeminiAPI(this.app, this.settings, this.toolManager);
+        this.toolManager.setGeminiApi(this.geminiApi);
     }
 
     // Handle Manual Selection Action

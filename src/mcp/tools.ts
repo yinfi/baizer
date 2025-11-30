@@ -1,9 +1,17 @@
-﻿import { App, TFile, requestUrl, htmlToMarkdown } from 'obsidian';
+﻿import { App, TFile, requestUrl, htmlToMarkdown, Notice } from 'obsidian';
 import { FunctionDeclaration, SchemaType } from '@google/generative-ai';
 import { Readability } from '@mozilla/readability';
+import { getVideoTranscript, VideoTranscript } from '../utils/video_utils';
+import { GeminiAPI } from '../gemini-api';
 
 export class ToolManager {
+    private geminiApi: GeminiAPI;
+
     constructor(private app: App, private allowPluginControl: boolean) { }
+
+    setGeminiApi(api: GeminiAPI) {
+        this.geminiApi = api;
+    }
 
     getToolsDefinitions(): FunctionDeclaration[] {
         const tools: FunctionDeclaration[] = [
@@ -123,7 +131,7 @@ export class ToolManager {
             // 10. Save Webpage
             {
                 name: 'save_webpage',
-                description: 'Download a webpage, convert it to Markdown, and save it to the vault. Handles WeChat articles specifically.',
+                description: 'Download a webpage or video transcript, convert/summarize it, and save it to the vault.',
                 parameters: {
                     type: SchemaType.OBJECT,
                     properties: {
@@ -351,6 +359,95 @@ export class ToolManager {
                     const url = args.url;
                     console.log(`Gemini Shell: Saving webpage ${url}`);
                     try {
+                        // Check if it's a video URL
+                        const videoTranscript = await getVideoTranscript(url);
+
+                        if (videoTranscript) {
+                            console.log(`Gemini Shell: Found video info for ${videoTranscript.platform}`);
+
+                            let content = "";
+
+                            // If we have text, try to summarize
+                            if (videoTranscript.text && videoTranscript.text.length > 0) {
+                                if (!this.geminiApi) {
+                                    return { success: false, error: "Gemini API not initialized for summarization." };
+                                }
+
+                                new Notice(`🎥 Summarizing ${videoTranscript.platform} video...`);
+
+                                // Summarize using Gemini
+                                const prompt = `Please summarize the following video transcript. 
+Title: ${videoTranscript.title}
+Transcript:
+${videoTranscript.text.substring(0, 30000)}... (truncated if too long)
+
+Task:
+1. Provide a concise summary of the video content.
+2. List key takeaways or bullet points.
+3. Format the output in Markdown.`;
+
+                                try {
+                                    const summary = await this.geminiApi.chat(prompt, "VideoSummarization", "You are a helpful assistant that summarizes videos.");
+                                    const created = new Date().toISOString();
+                                    const yamlFrontmatter = `---
+created: ${created}
+tags: video, ${videoTranscript.platform}
+source: ${url}
+author: ${videoTranscript.platform}
+---
+
+`;
+                                    content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n${summary}\n\n## Transcript Excerpt\n\n${videoTranscript.text.substring(0, 1000)}...`;
+                                } catch (e) {
+                                    console.error("Gemini Shell: Summarization failed", e);
+                                    // Fallback to video embed if summarization fails
+                                    const created = new Date().toISOString();
+                                    const yamlFrontmatter = `---
+created: ${created}
+tags: video, ${videoTranscript.platform}
+source: ${url}
+author: ${videoTranscript.platform}
+---
+
+`;
+                                    content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n![](${url})`;
+                                }
+
+                            } else {
+                                // No transcript: Save Title and URL with media-extended format
+                                console.log("Gemini Shell: No transcript text available, saving video embed.");
+                                new Notice(`💾 Saving video link...`);
+
+                                const created = new Date().toISOString();
+                                const yamlFrontmatter = `---
+created: ${created}
+tags: video, ${videoTranscript.platform}
+source: ${url}
+author: ${videoTranscript.platform}
+---
+
+`;
+                                // Use media-extended compatible format: ![](video_url)
+                                content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n![](${url})`;
+                            }
+
+                            // Save
+                            let filename = args.filename || videoTranscript.title;
+                            filename = filename.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
+                            if (!filename.endsWith('.md')) filename += '.md';
+
+                            let finalPath = filename;
+                            let counter = 1;
+                            while (this.app.vault.getAbstractFileByPath(finalPath)) {
+                                finalPath = filename.replace('.md', ` (${counter}).md`);
+                                counter++;
+                            }
+
+                            await this.app.vault.create(finalPath, content);
+                            return { success: true, path: finalPath, message: `✅ Video Note Saved: ${finalPath}` };
+                        }
+
+                        // Fallback to normal webpage saving
                         const response = await requestUrl({ url: url });
                         let html = response.text;
                         console.log(`Gemini Shell: Fetched ${html.length} bytes`);
