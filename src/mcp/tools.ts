@@ -367,7 +367,7 @@ export class ToolManager {
 
                             let content = "";
 
-                            // If we have text, try to summarize
+                            // 1. Try to get summary if text exists
                             if (videoTranscript.text && videoTranscript.text.length > 0) {
                                 if (!this.geminiApi) {
                                     return { success: false, error: "Gemini API not initialized for summarization." };
@@ -375,7 +375,6 @@ export class ToolManager {
 
                                 new Notice(`🎥 Summarizing ${videoTranscript.platform} video...`);
 
-                                // Summarize using Gemini
                                 const prompt = `Please summarize the following video transcript. 
 Title: ${videoTranscript.title}
 Transcript:
@@ -393,7 +392,7 @@ Task:
 created: ${created}
 tags: video, ${videoTranscript.platform}
 source: ${url}
-author: ${videoTranscript.platform}
+author: ${videoTranscript.author || videoTranscript.platform}
 ---
 
 `;
@@ -406,15 +405,16 @@ author: ${videoTranscript.platform}
 created: ${created}
 tags: video, ${videoTranscript.platform}
 source: ${url}
-author: ${videoTranscript.platform}
+author: ${videoTranscript.author || videoTranscript.platform}
 ---
 
 `;
-                                    content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n![](${url})`;
+                                    // Add mx-open link as fallback
+                                    const encodedUrl = encodeURIComponent(url);
+                                    content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n![](${url})\n\n[▶️ Play with Media Extended](obsidian://mx-open?url=${encodedUrl})`;
                                 }
-
                             } else {
-                                // No transcript: Save Title and URL with media-extended format
+                                // 2. No transcript: Save Title and URL with media-extended format
                                 console.log("Gemini Shell: No transcript text available, saving video embed.");
                                 new Notice(`💾 Saving video link...`);
 
@@ -423,15 +423,17 @@ author: ${videoTranscript.platform}
 created: ${created}
 tags: video, ${videoTranscript.platform}
 source: ${url}
-author: ${videoTranscript.platform}
+author: ${videoTranscript.author || videoTranscript.platform}
 ---
 
 `;
                                 // Use media-extended compatible format: ![](video_url)
-                                content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n![](${url})`;
+                                // Also add a direct link to open with Media Extended (obsidian://mx-open)
+                                const encodedUrl = encodeURIComponent(url);
+                                content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n![](${url})\n\n[▶️ Play with Media Extended](obsidian://mx-open?url=${encodedUrl})`;
                             }
 
-                            // Save
+                            // Save logic
                             let filename = args.filename || videoTranscript.title;
                             filename = filename.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
                             if (!filename.endsWith('.md')) filename += '.md';
@@ -448,7 +450,13 @@ author: ${videoTranscript.platform}
                         }
 
                         // Fallback to normal webpage saving
-                        const response = await requestUrl({ url: url });
+                        const response = await requestUrl({
+                            url: url,
+                            headers: {
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+                            }
+                        });
                         let html = response.text;
                         console.log(`Gemini Shell: Fetched ${html.length} bytes`);
 
@@ -470,7 +478,47 @@ author: ${videoTranscript.platform}
                                 }
                             }
                         }
-                        console.log(`Gemini Shell: Extracted title "${title}"`);
+                        // Extract Author
+                        let author = '';
+
+                        // WeChat specific author extraction
+                        if (url.includes('mp.weixin.qq.com')) {
+                            // 1. Try variable definition (common in older/standard templates)
+                            // Matches: var nickname = "Name"; or var nickname = 'Name';
+                            const varMatch = html.match(/var\s+nickname\s*=\s*["']([^"']+)["']/);
+                            if (varMatch && varMatch[1]) {
+                                author = varMatch[1].trim();
+                            }
+
+                            // 2. Try profile link/text (common in newer templates)
+                            // Matches: <strong class="profile_nickname">Name</strong> or <a ... class="profile_nickname">Name</a>
+                            if (!author) {
+                                const profileMatch = html.match(/class="profile_nickname"[^>]*>([^<]+)</);
+                                if (profileMatch && profileMatch[1]) {
+                                    author = profileMatch[1].trim();
+                                }
+                            }
+
+                            // 3. Try js_name (sometimes used)
+                            if (!author) {
+                                const jsNameMatch = html.match(/class="js_name"[^>]*>([^<]+)</);
+                                if (jsNameMatch && jsNameMatch[1]) {
+                                    author = jsNameMatch[1].trim();
+                                }
+                            }
+                        }
+
+                        // Generic fallback if no author found yet
+                        if (!author) {
+                            const authorMatch = html.match(/<meta name="author" content="([^"]*)"/i) ||
+                                html.match(/<meta property="article:author" content="([^"]*)"/i) ||
+                                html.match(/<meta property="og:site_name" content="([^"]*)"/i);
+                            if (authorMatch && authorMatch[1]) {
+                                author = authorMatch[1].trim();
+                            }
+                        }
+
+                        console.log(`Gemini Shell: Extracted title "${title}", author "${author}"`);
 
                         // Sanitize Title
                         title = title.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
@@ -577,8 +625,19 @@ author: ${videoTranscript.platform}
                             counter++;
                         }
 
+                        // Create YAML Frontmatter
+                        const created = new Date().toISOString();
+                        const yamlFrontmatter = `---
+created: ${created}
+source: ${url}
+author: ${author}
+tags: clipping
+---
+
+`;
+
                         console.log(`Gemini Shell: Saving to ${finalPath}`);
-                        await this.app.vault.create(finalPath, `Source: ${url}\n\n${markdown}`);
+                        await this.app.vault.create(finalPath, `${yamlFrontmatter}# ${title}\n\n${markdown}`);
                         console.log(`Gemini Shell: Save successful`);
 
                         return { success: true, path: finalPath, message: `✅ Saved: ${finalPath}` };
