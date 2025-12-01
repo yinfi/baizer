@@ -4,12 +4,13 @@ export interface VideoTranscript {
     text: string;
     title: string;
     platform: 'youtube' | 'bilibili';
+    author?: string;
 }
 
 export async function getVideoTranscript(url: string): Promise<VideoTranscript | null> {
     if (url.includes('youtube.com') || url.includes('youtu.be')) {
         return await getYoutubeTranscript(url);
-    } else if (url.includes('bilibili.com')) {
+    } else if (url.includes('bilibili.com') || url.includes('b23.tv')) {
         return await getBilibiliTranscript(url);
     }
     return null;
@@ -36,19 +37,26 @@ async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null
             title = titleMatch[1].replace(' - YouTube', '');
         }
 
+        // Extract Author
+        let author = "YouTube";
+        const authorMatch = html.match(/<link itemprop="name" content="(.*?)">/) || html.match(/<meta name="author" content="(.*?)">/);
+        if (authorMatch && authorMatch[1]) {
+            author = authorMatch[1];
+        }
+
         // 3. Extract Captions JSON
         // Look for "captionTracks" inside the HTML (usually in ytInitialPlayerResponse)
         const captionsMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
         if (!captionsMatch) {
             console.warn("Gemini Shell: No captionTracks found in YouTube page.");
             // Return partial result if title was found
-            return { text: "", title, platform: 'youtube' };
+            return { text: "", title, platform: 'youtube', author };
         }
 
         const captionTracks = JSON.parse(captionsMatch[1]);
         if (!captionTracks || captionTracks.length === 0) {
             console.warn("Gemini Shell: Empty captionTracks.");
-            return { text: "", title, platform: 'youtube' };
+            return { text: "", title, platform: 'youtube', author };
         }
 
         // Prefer English or Auto-generated English, or just the first one
@@ -98,7 +106,8 @@ async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null
                         return {
                             text,
                             title,
-                            platform: 'youtube'
+                            platform: 'youtube',
+                            author
                         };
                     }
                 }
@@ -130,13 +139,14 @@ async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null
         if (!text) {
             console.warn("Gemini Shell: Parsed transcript is empty. XML Preview: ", transcriptXml.substring(0, 200));
             // Return title and platform even if text is empty
-            return { text: "", title, platform: 'youtube' };
+            return { text: "", title, platform: 'youtube', author };
         }
 
         return {
             text,
             title,
-            platform: 'youtube'
+            platform: 'youtube',
+            author
         };
 
     } catch (e) {
@@ -163,6 +173,13 @@ async function getBilibiliTranscript(url: string): Promise<VideoTranscript | nul
         const titleMatch = html.match(/<title data-vue-meta="true">([^<]+)<\/title>/) || html.match(/<title>([^<]+)<\/title>/);
         if (titleMatch && titleMatch[1]) {
             title = titleMatch[1].replace('_哔哩哔哩_bilibili', '');
+        }
+
+        // Extract Author
+        let author = "Bilibili";
+        const authorMatch = html.match(/<meta name="author" content="(.*?)">/) || html.match(/<meta name="author" content="(.*?)" \/>/);
+        if (authorMatch && authorMatch[1]) {
+            author = authorMatch[1];
         }
 
         // Extract CID (can be in window.__INITIAL_STATE__ or similar)
@@ -193,7 +210,8 @@ async function getBilibiliTranscript(url: string): Promise<VideoTranscript | nul
 
         if (!playerData.data || !playerData.data.subtitle || !playerData.data.subtitle.subtitles || playerData.data.subtitle.subtitles.length === 0) {
             console.warn("No subtitles found for Bilibili video");
-            return null;
+            // Return partial result so we can still save the video embed
+            return { text: "", title, platform: 'bilibili', author };
         }
 
         // 3. Fetch the first subtitle track
@@ -203,18 +221,27 @@ async function getBilibiliTranscript(url: string): Promise<VideoTranscript | nul
 
         // 4. Parse subtitles
         // Format: { body: [ { from: 0, to: 1, content: "text" } ] }
-        if (!subtitleData.body) return null;
+        if (!subtitleData.body) {
+            return { text: "", title, platform: 'bilibili', author };
+        }
 
         const text = subtitleData.body.map((item: any) => item.content).join(' ');
 
         return {
             text,
             title,
-            platform: 'bilibili'
+            platform: 'bilibili',
+            author
         };
 
     } catch (e) {
         console.error("Failed to get Bilibili transcript", e);
+        // Try to return at least the title if we found it before the error
+        // But since title is local to the try block, we might return null here if it failed early.
+        // However, if we fail, returning null is safer unless we want to parse title from error context which is hard.
+        // Let's try to be robust: if we have a title from step 1, we should return it.
+        // But 'title' variable is inside try block. 
+        // For now, let's just return null on catastrophic failure, but handle the "no subtitle" case gracefully above.
         return null;
     }
 }
