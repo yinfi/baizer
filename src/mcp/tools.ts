@@ -1,215 +1,185 @@
-﻿import { App, TFile, requestUrl, htmlToMarkdown, Notice } from 'obsidian';
-import { FunctionDeclaration, SchemaType } from '@google/generative-ai';
+﻿import { App, Notice, TFile, requestUrl, htmlToMarkdown } from 'obsidian';
 import { Readability } from '@mozilla/readability';
-import { getVideoTranscript, VideoTranscript } from '../utils/video_utils';
-import { GeminiAPI } from '../gemini-api';
+import { getVideoTranscript } from '../utils/video_utils';
 
-export class ToolManager {
-    private geminiApi: GeminiAPI;
+export enum SchemaType {
+    STRING = 'string',
+    NUMBER = 'number',
+    INTEGER = 'integer',
+    BOOLEAN = 'boolean',
+    ARRAY = 'array',
+    OBJECT = 'object'
+}
 
-    constructor(private app: App, private allowPluginControl: boolean) { }
+export class Tools {
+    app: App;
+    geminiApi: any;
+    allowPluginControl: boolean;
 
-    setGeminiApi(api: GeminiAPI) {
-        this.geminiApi = api;
+    constructor(app: App, geminiApi: any, allowPluginControl: boolean = false) {
+        this.app = app;
+        this.geminiApi = geminiApi;
+        this.allowPluginControl = allowPluginControl;
     }
 
-    getToolsDefinitions(): FunctionDeclaration[] {
-        const tools: FunctionDeclaration[] = [
-            // 1. Read Note
+    getTools(): any[] {
+        const tools = [
             {
                 name: 'read_note',
-                description: 'Read the full content of a specific markdown note.',
+                description: 'Read the content of a specific note in the vault.',
                 parameters: {
                     type: SchemaType.OBJECT,
                     properties: {
-                        path: { type: SchemaType.STRING, description: 'The file path or wiki-link name' }
+                        path: { type: SchemaType.STRING, description: 'The path to the note (e.g., "Folder/Note.md")' }
                     },
                     required: ['path']
                 }
             },
-            // 2. Create Note
             {
                 name: 'create_note',
-                description: 'Create a new note with content. Automatically creates parent folders if needed.',
+                description: 'Create a new note with the specified content.',
                 parameters: {
                     type: SchemaType.OBJECT,
                     properties: {
-                        filename: { type: SchemaType.STRING, description: 'Path/Filename.md (e.g., "Study/MyNote.md")' },
-                        content: { type: SchemaType.STRING, description: 'Markdown content' }
+                        filename: { type: SchemaType.STRING, description: 'The name/path of the new note' },
+                        content: { type: SchemaType.STRING, description: 'The content to write to the note' }
                     },
                     required: ['filename', 'content']
                 }
             },
-            // 3. Update Note
             {
                 name: 'update_note',
-                description: 'Update the content of an existing note. Completely replaces the file content.',
+                description: 'Update the content of an existing note. Replaces the entire content.',
                 parameters: {
                     type: SchemaType.OBJECT,
                     properties: {
-                        path: { type: SchemaType.STRING, description: 'File path' },
-                        content: { type: SchemaType.STRING, description: 'New content' }
+                        path: { type: SchemaType.STRING, description: 'The path to the note to update' },
+                        content: { type: SchemaType.STRING, description: 'The new content for the note' }
                     },
                     required: ['path', 'content']
                 }
             },
-            // 4. Append to Note
             {
                 name: 'append_to_note',
                 description: 'Append content to the end of an existing note.',
                 parameters: {
                     type: SchemaType.OBJECT,
                     properties: {
-                        path: { type: SchemaType.STRING, description: 'File path' },
-                        content: { type: SchemaType.STRING, description: 'Content to append' }
+                        path: { type: SchemaType.STRING, description: 'The path to the note' },
+                        content: { type: SchemaType.STRING, description: 'The content to append' }
                     },
                     required: ['path', 'content']
                 }
             },
-            // 5. Delete Note
             {
                 name: 'delete_note',
-                description: 'Delete a note file. Moves to trash if available.',
+                description: 'Delete a note from the vault.',
                 parameters: {
                     type: SchemaType.OBJECT,
                     properties: {
-                        path: { type: SchemaType.STRING, description: 'File path to delete' }
+                        path: { type: SchemaType.STRING, description: 'The path to the note to delete' }
                     },
                     required: ['path']
                 }
             },
-            // 6. Rename Note
             {
                 name: 'rename_note',
-                description: 'Rename or move a note to a different location.',
+                description: 'Rename or move a note.',
                 parameters: {
                     type: SchemaType.OBJECT,
                     properties: {
-                        oldPath: { type: SchemaType.STRING, description: 'Current file path' },
-                        newPath: { type: SchemaType.STRING, description: 'New file path' }
+                        oldPath: { type: SchemaType.STRING, description: 'The current path of the note' },
+                        newPath: { type: SchemaType.STRING, description: 'The new path/name for the note' }
                     },
                     required: ['oldPath', 'newPath']
                 }
             },
-            // 7. List Notes
             {
                 name: 'list_notes',
-                description: 'List markdown files in the vault or a specific folder.',
+                description: 'List notes in a specific folder or the entire vault.',
                 parameters: {
                     type: SchemaType.OBJECT,
                     properties: {
-                        folder: { type: SchemaType.STRING, description: 'Folder path (optional, defaults to root)' },
-                        limit: { type: SchemaType.NUMBER, description: 'Max number of files to return (optional, default 20)' }
-                    },
-                    required: []
+                        folder: { type: SchemaType.STRING, description: 'The folder to list (optional, defaults to root)' },
+                        limit: { type: SchemaType.INTEGER, description: 'Maximum number of notes to return (default 20)' }
+                    }
                 }
             },
-            // 8. Search
             {
                 name: 'search_vault',
-                description: 'Fuzzy search for files in the vault.',
+                description: 'Search for files in the vault by name.',
                 parameters: {
                     type: SchemaType.OBJECT,
                     properties: {
-                        query: { type: SchemaType.STRING }
+                        query: { type: SchemaType.STRING, description: 'The search query' }
                     },
                     required: ['query']
                 }
             },
-            // 9. Open File
             {
                 name: 'open_file',
-                description: 'Open a file in the Obsidian editor. Supports file path or filename.',
+                description: 'Open a file in the Obsidian workspace.',
                 parameters: {
                     type: SchemaType.OBJECT,
                     properties: {
-                        path: { type: SchemaType.STRING, description: 'File path or filename' }
+                        path: { type: SchemaType.STRING, description: 'The path or name of the file to open' }
                     },
                     required: ['path']
                 }
             },
-            // 10. Save Webpage
             {
                 name: 'save_webpage',
-                description: 'Download a webpage or video transcript, convert/summarize it, and save it to the vault.',
+                description: 'Save a webpage or video transcript to a new note. Supports YouTube, Bilibili, and WeChat articles.',
                 parameters: {
                     type: SchemaType.OBJECT,
                     properties: {
-                        url: { type: SchemaType.STRING, description: 'The URL to save' },
-                        filename: { type: SchemaType.STRING, description: 'Optional filename (without extension). If not provided, page title will be used.' }
+                        url: { type: SchemaType.STRING, description: 'The URL of the webpage or video' },
+                        filename: { type: SchemaType.STRING, description: 'Optional filename for the note' }
                     },
                     required: ['url']
+                }
+            },
+            {
+                name: 'get_current_time',
+                description: 'Get the current local time and date.',
+                parameters: {
+                    type: SchemaType.OBJECT,
+                    properties: {}
                 }
             }
         ];
 
-        // Conditional loading: if plugin control is enabled
         if (this.allowPluginControl) {
-            tools.push({
-                name: 'execute_command',
-                description: 'Execute an Obsidian command ID.',
-                parameters: {
-                    type: SchemaType.OBJECT,
-                    properties: {
-                        id: { type: SchemaType.STRING, description: 'The command ID to run' }
-                    },
-                    required: ['id']
+            tools.push(
+                {
+                    name: 'list_plugins',
+                    description: 'List all installed plugins and their status.',
+                    parameters: { type: SchemaType.OBJECT, properties: {} }
+                },
+                {
+                    name: 'get_plugin_commands',
+                    description: 'Get available commands for a specific plugin.',
+                    parameters: {
+                        type: SchemaType.OBJECT,
+                        properties: {
+                            pluginId: { type: SchemaType.STRING, description: 'The ID of the plugin' }
+                        },
+                        required: ['pluginId']
+                    }
+                },
+                {
+                    name: 'get_plugin_settings',
+                    description: 'Get settings for a specific plugin.',
+                    parameters: {
+                        type: SchemaType.OBJECT,
+                        properties: {
+                            pluginId: { type: SchemaType.STRING, description: 'The ID of the plugin' }
+                        },
+                        required: ['pluginId']
+                    }
                 }
-            });
-            tools.push({
-                name: 'list_available_commands',
-                description: 'List commands matching a keyword to find their IDs.',
-                parameters: {
-                    type: SchemaType.OBJECT,
-                    properties: {
-                        keyword: { type: SchemaType.STRING }
-                    },
-                    required: ['keyword']
-                }
-            });
-            tools.push({
-                name: 'list_plugins',
-                description: 'List all installed plugins and their status (enabled/disabled).',
-                parameters: {
-                    type: SchemaType.OBJECT,
-                    properties: {},
-                    required: []
-                }
-            });
-            tools.push({
-                name: 'get_plugin_commands',
-                description: 'List all commands registered by a specific plugin.',
-                parameters: {
-                    type: SchemaType.OBJECT,
-                    properties: {
-                        pluginId: { type: SchemaType.STRING, description: 'The ID of the plugin (e.g., "obsidian-kanban")' }
-                    },
-                    required: ['pluginId']
-                }
-            });
-            tools.push({
-                name: 'get_plugin_settings',
-                description: 'Get the settings/configuration for a specific plugin.',
-                parameters: {
-                    type: SchemaType.OBJECT,
-                    properties: {
-                        pluginId: { type: SchemaType.STRING, description: 'The ID of the plugin' }
-                    },
-                    required: ['pluginId']
-                }
-            });
+            );
         }
-
-        // Always available tools
-        tools.push({
-            name: 'get_current_time',
-            description: 'Get the current local date and time.',
-            parameters: {
-                type: SchemaType.OBJECT,
-                properties: {},
-                required: []
-            }
-        });
 
         tools.push({
             name: 'web_search',
@@ -365,6 +335,9 @@ export class ToolManager {
                         if (videoTranscript) {
                             console.log(`Gemini Shell: Found video info for ${videoTranscript.platform}`);
 
+                            // Use resolved URL if available, otherwise original URL
+                            const finalUrl = videoTranscript.url || url;
+
                             let content = "";
 
                             // 1. Try to get summary if text exists
@@ -391,7 +364,7 @@ Task:
                                     const yamlFrontmatter = `---
 created: ${created}
 tags: video, ${videoTranscript.platform}
-source: ${url}
+source: ${finalUrl}
 author: ${videoTranscript.author || videoTranscript.platform}
 ---
 
@@ -404,14 +377,14 @@ author: ${videoTranscript.author || videoTranscript.platform}
                                     const yamlFrontmatter = `---
 created: ${created}
 tags: video, ${videoTranscript.platform}
-source: ${url}
+source: ${finalUrl}
 author: ${videoTranscript.author || videoTranscript.platform}
 ---
 
 `;
                                     // Add mx-open link as fallback
-                                    const encodedUrl = encodeURIComponent(url);
-                                    content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n![](${url})\n\n[▶️ Play with Media Extended](obsidian://mx-open?url=${encodedUrl})`;
+                                    const encodedUrl = encodeURIComponent(finalUrl);
+                                    content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n[${videoTranscript.title}](${finalUrl})\n\n[▶️ Play with Media Extended](obsidian://mx-open?url=${encodedUrl})`;
                                 }
                             } else {
                                 // 2. No transcript: Save Title and URL with media-extended format
@@ -422,15 +395,15 @@ author: ${videoTranscript.author || videoTranscript.platform}
                                 const yamlFrontmatter = `---
 created: ${created}
 tags: video, ${videoTranscript.platform}
-source: ${url}
+source: ${finalUrl}
 author: ${videoTranscript.author || videoTranscript.platform}
 ---
 
 `;
                                 // Use media-extended compatible format: ![](video_url)
                                 // Also add a direct link to open with Media Extended (obsidian://mx-open)
-                                const encodedUrl = encodeURIComponent(url);
-                                content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n![](${url})\n\n[▶️ Play with Media Extended](obsidian://mx-open?url=${encodedUrl})`;
+                                const encodedUrl = encodeURIComponent(finalUrl);
+                                content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n[${videoTranscript.title}](${finalUrl})\n\n[▶️ Play with Media Extended](obsidian://mx-open?url=${encodedUrl})`;
                             }
 
                             // Save logic
@@ -635,30 +608,15 @@ tags: clipping
 ---
 
 `;
+                        const finalContent = `${yamlFrontmatter}# ${title}\n\n${markdown}`;
 
-                        console.log(`Gemini Shell: Saving to ${finalPath}`);
-                        await this.app.vault.create(finalPath, `${yamlFrontmatter}# ${title}\n\n${markdown}`);
-                        console.log(`Gemini Shell: Save successful`);
+                        await this.app.vault.create(finalPath, finalContent);
+                        return { success: true, path: finalPath, message: `✅ Webpage Saved: ${finalPath}` };
 
-                        return { success: true, path: finalPath, message: `✅ Saved: ${finalPath}` };
-
-                    } catch (error: any) {
-                        console.error(`Gemini Shell: Save failed`, error);
-                        return { success: false, error: `Failed to save webpage: ${error.message}` };
+                    } catch (e) {
+                        console.error("Gemini Shell: Error saving webpage", e);
+                        return { success: false, error: e.message };
                     }
-
-                case 'list_available_commands':
-                    if (!this.allowPluginControl) return { error: 'Permission denied' };
-                    const cmds = this.app.commands.listCommands()
-                        .filter(c => c.name.toLowerCase().includes(args.keyword.toLowerCase()))
-                        .map(c => ({ id: c.id, name: c.name }))
-                        .slice(0, 10);
-                    return { commands: cmds };
-
-                case 'execute_command':
-                    if (!this.allowPluginControl) return { error: 'Permission denied' };
-                    const success = this.app.commands.executeCommandById(args.id);
-                    return { success, command_id: args.id };
 
                 case 'list_plugins':
                     if (!this.allowPluginControl) return { error: 'Permission denied' };
