@@ -254,8 +254,8 @@ async function getBilibiliTranscript(url: string): Promise<VideoTranscript | nul
             }
         }
 
-        // Construct canonical URL with trailing slash and query params
-        const canonicalUrl = `https://www.bilibili.com/video/${bvid}/${queryParams}`;
+        // Construct canonical URL with query params (no trailing slash)
+        const canonicalUrl = `https://www.bilibili.com/video/${bvid}${queryParams}`;
 
         return {
             text,
