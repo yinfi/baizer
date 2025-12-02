@@ -11,18 +11,22 @@ export enum SchemaType {
     OBJECT = 'object'
 }
 
-export class Tools {
+export class ToolManager {
     app: App;
     geminiApi: any;
     allowPluginControl: boolean;
 
-    constructor(app: App, geminiApi: any, allowPluginControl: boolean = false) {
+    constructor(app: App, allowPluginControl: boolean = false) {
         this.app = app;
-        this.geminiApi = geminiApi;
+        this.geminiApi = null;
         this.allowPluginControl = allowPluginControl;
     }
 
-    getTools(): any[] {
+    setGeminiApi(api: any) {
+        this.geminiApi = api;
+    }
+
+    getToolsDefinitions(): any[] {
         const tools = [
             {
                 name: 'read_note',
