@@ -1,28 +1,19 @@
-import { App, MarkdownRenderer, Component } from 'obsidian';
+import { App, MarkdownRenderer, Component, Notice } from 'obsidian';
 import { EditorView, showTooltip } from '@codemirror/view';
 import { StateField, Extension, StateEffect } from '@codemirror/state';
+import { GeminiAPI } from '../gemini-api';
+import { ChatController, ChatMessage } from './chat-controller';
 
 // Define the states for our UI
 type SelectionMenuState =
     | { type: 'hidden' }
     | { type: 'button', from: number, to: number }
-    | { type: 'input', from: number, to: number }
-    | { type: 'processing', from: number, to: number }
-    | { type: 'result', from: number, to: number, content: string };
-
-// Callback type for when user submits an instruction
-export type SelectionActionCallback = (view: EditorView, selection: { from: number, to: number }, instruction: string) => void;
-
-let globalActionCallback: SelectionActionCallback | null = null;
-
-export function setSelectionActionCallback(callback: SelectionActionCallback) {
-    globalActionCallback = callback;
-}
+    | { type: 'chat', from: number, to: number, controller: ChatController };
 
 let pluginApp: App | null = null;
+let pluginApi: GeminiAPI | null = null;
 
 // We need a way to manually update the state (e.g. button click -> input)
-// We can use StateEffects for this.
 export const setSelectionMenuState = StateEffect.define<SelectionMenuState>();
 
 const selectionMenuField = StateField.define<SelectionMenuState>({
@@ -42,8 +33,8 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
                 return { type: 'hidden' };
             }
 
-            // If we are in input/processing mode, do we cancel on selection change?
-            // Usually yes, unless it's a minor adjustment? Let's be strict: selection change resets UI.
+            // If we are in chat mode, do we cancel on selection change?
+            // Yes, strict behavior: selection change resets UI.
             if (state.type !== 'hidden' && (selection.from !== state.from || selection.to !== state.to)) {
                 return { type: 'button', from: selection.from, to: selection.to };
             }
@@ -71,32 +62,125 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
                     btn.className = 'guardian-selection-btn';
                     btn.textContent = 'Comment / AI';
                     btn.onclick = () => {
+                        if (!pluginApp || !pluginApi) {
+                            new Notice('Gemini API not initialized');
+                            return;
+                        }
+
+                        // Initialize ChatController
+                        const controller = new ChatController({
+                            app: pluginApp,
+                            api: pluginApi,
+                            onMessageAdded: (msg) => {
+                                // We need to re-render or update the UI when message is added
+                                // Since we are inside create(), we can manipulate the DOM directly if we had reference
+                                // But here we are creating the DOM.
+                                // The ChatController will be passed to the 'chat' state.
+                                // The 'chat' state render logic will handle the UI.
+                                // However, for *updates* (streaming), we need a way to trigger UI update.
+                                // A simple way is to dispatch a state update with the SAME controller,
+                                // forcing a re-render? No, that's heavy.
+                                // Better: The UI component subscribes to the controller.
+                            },
+                            onStatusChanged: (isResponding) => {
+                                // Same here, update UI loading state
+                            }
+                        });
+
                         view.dispatch({
-                            effects: setSelectionMenuState.of({ type: 'input', from: state.from, to: state.to })
+                            effects: setSelectionMenuState.of({
+                                type: 'chat',
+                                from: state.from,
+                                to: state.to,
+                                controller: controller
+                            })
                         });
                     };
                     dom.appendChild(btn);
-                } else if (state.type === 'input') {
-                    const wrapper = document.createElement('div');
-                    wrapper.className = 'guardian-input-wrapper';
+                } else if (state.type === 'chat') {
+                    const container = document.createElement('div');
+                    container.className = 'guardian-chat-view';
 
-                    const textarea = document.createElement('textarea');
-                    textarea.placeholder = 'Ask AI to edit...';
-                    textarea.className = 'guardian-selection-input';
+                    // 1. Header
+                    const header = container.createDiv({ cls: 'guardian-chat-header' });
+                    header.createSpan({ text: 'Gemini Context' });
+                    const closeBtn = header.createEl('button', { text: '×', cls: 'guardian-close-btn' });
+                    closeBtn.onclick = () => {
+                        view.dispatch({
+                            effects: setSelectionMenuState.of({ type: 'hidden' })
+                        });
+                    };
 
-                    // Prevent Enter from propagating to editor
-                    textarea.onkeydown = (e) => {
-                        e.stopPropagation(); // Stop CM from handling it
+                    // 2. Message List
+                    const messageList = container.createDiv({ cls: 'guardian-message-list' });
+
+                    const renderMessages = () => {
+                        messageList.empty();
+                        const messages = state.controller.getMessages();
+                        if (messages.length === 0) {
+                            const welcome = messageList.createDiv({ cls: 'guardian-message system' });
+                            welcome.setText('Ask about the selected text...');
+                        } else {
+                            messages.forEach(msg => {
+                                const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
+                                if (msg.role === 'ai') {
+                                    MarkdownRenderer.render(pluginApp!, msg.content, msgEl, '', new Component());
+                                } else {
+                                    msgEl.setText(msg.content);
+                                }
+                            });
+                        }
+                        // Scroll to bottom
+                        setTimeout(() => messageList.scrollTop = messageList.scrollHeight, 0);
+                    };
+
+                    renderMessages();
+
+                    // Hook up callbacks to update UI
+                    // Note: This is a bit hacky as we are modifying the controller's callbacks *after* creation
+                    // Ideally ChatController supports multiple listeners or we pass a delegate.
+                    // For now, let's just override/wrap.
+                    // Actually, we can just re-assign them since we have the instance.
+                    // BUT, the controller was created in the previous step.
+                    // We need to ensure we don't overwrite if we re-render?
+                    // The state persists, so the controller persists.
+
+                    // Let's just assign the callbacks here.
+                    state.controller['onMessageAdded'] = (msg: ChatMessage) => {
+                        renderMessages();
+                    };
+
+                    // Loading indicator
+                    const statusContainer = container.createDiv({ cls: 'guardian-status-bar' });
+                    statusContainer.style.display = 'none';
+                    statusContainer.setText('Thinking...');
+
+                    state.controller['onStatusChanged'] = (isResponding: boolean) => {
+                        statusContainer.style.display = isResponding ? 'block' : 'none';
+                    };
+
+
+                    // 3. Input Area
+                    const inputWrapper = container.createDiv({ cls: 'guardian-input-wrapper' });
+                    const textarea = inputWrapper.createEl('textarea', {
+                        cls: 'guardian-chat-input',
+                        attr: { placeholder: 'Type a message...' }
+                    });
+
+                    textarea.onkeydown = async (e) => {
+                        e.stopPropagation();
                         if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
-                            // Submit
                             const text = textarea.value.trim();
-                            if (text && globalActionCallback) {
-                                view.dispatch({
-                                    effects: setSelectionMenuState.of({ type: 'processing', from: state.from, to: state.to })
-                                });
-                                globalActionCallback(view, { from: state.from, to: state.to }, text);
-                            }
+                            if (!text) return;
+
+                            textarea.value = '';
+
+                            // Context: The selected text
+                            const selectionText = view.state.doc.sliceString(state.from, state.to);
+                            const contextStr = `Selected Text:\n${selectionText}`;
+
+                            await state.controller.processCommand(text, contextStr, selectionText);
                         }
                         if (e.key === 'Escape') {
                             e.preventDefault();
@@ -106,75 +190,34 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
                         }
                     };
 
-                    const btnGroup = document.createElement('div');
-                    btnGroup.className = 'guardian-btn-group';
+                    // 4. Actions
+                    const actions = container.createDiv({ cls: 'guardian-chat-actions' });
 
-                    const submitBtn = document.createElement('button');
-                    submitBtn.textContent = 'Submit';
-                    submitBtn.className = 'guardian-submit-btn';
-                    submitBtn.onclick = () => {
-                        const text = textarea.value.trim();
-                        if (text && globalActionCallback) {
+                    const copyBtn = actions.createEl('button', { text: 'Copy Selection' });
+                    copyBtn.onclick = () => {
+                        const selectionText = view.state.doc.sliceString(state.from, state.to);
+                        navigator.clipboard.writeText(selectionText);
+                        new Notice('Selection copied');
+                    };
+
+                    const replaceBtn = actions.createEl('button', { text: 'Replace with Last Response' });
+                    replaceBtn.onclick = () => {
+                        const msgs = state.controller.getMessages();
+                        const lastAiMsg = [...msgs].reverse().find(m => m.role === 'ai');
+                        if (lastAiMsg) {
                             view.dispatch({
-                                effects: setSelectionMenuState.of({ type: 'processing', from: state.from, to: state.to })
+                                changes: { from: state.from, to: state.to, insert: lastAiMsg.content },
+                                effects: setSelectionMenuState.of({ type: 'hidden' })
                             });
-                            globalActionCallback(view, { from: state.from, to: state.to }, text);
+                        } else {
+                            new Notice('No AI response to replace with.');
                         }
                     };
 
-                    btnGroup.appendChild(submitBtn);
-                    wrapper.appendChild(textarea);
-                    wrapper.appendChild(btnGroup);
-                    dom.appendChild(wrapper);
+                    dom.appendChild(container);
 
-                    // Focus
-                    setTimeout(() => textarea.focus(), 20);
-                } else if (state.type === 'processing') {
-                    dom.textContent = 'Thinking...';
-                    dom.className += ' guardian-processing';
-                } else if (state.type === 'result') {
-                    const wrapper = document.createElement('div');
-                    wrapper.className = 'guardian-result-view';
-
-                    const content = document.createElement('div');
-                    content.className = 'guardian-result-content';
-
-                    if (pluginApp) {
-                        MarkdownRenderer.render(pluginApp, state.content, content, '', new Component());
-                    } else {
-                        content.textContent = state.content;
-                    }
-
-                    wrapper.appendChild(content);
-
-                    // Ensure we start at the top
-                    setTimeout(() => {
-                        content.scrollTop = 0;
-                    }, 0);
-
-                    const actions = document.createElement('div');
-                    actions.className = 'guardian-result-actions';
-
-                    const copyBtn = document.createElement('button');
-                    copyBtn.textContent = 'Copy';
-                    copyBtn.onclick = () => {
-                        navigator.clipboard.writeText(state.content);
-                        copyBtn.textContent = 'Copied!';
-                        setTimeout(() => copyBtn.textContent = 'Copy', 2000);
-                    };
-
-                    const closeBtn = document.createElement('button');
-                    closeBtn.textContent = 'Close';
-                    closeBtn.onclick = () => {
-                        view.dispatch({
-                            effects: setSelectionMenuState.of({ type: 'hidden' })
-                        });
-                    };
-
-                    actions.appendChild(copyBtn);
-                    actions.appendChild(closeBtn);
-                    wrapper.appendChild(actions);
-                    dom.appendChild(wrapper);
+                    // Focus input
+                    setTimeout(() => textarea.focus(), 50);
                 }
 
                 return { dom };
@@ -183,8 +226,9 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
     })
 });
 
-export function selectionMenuExtension(app: App): Extension {
+export function selectionMenuExtension(app: App, api: GeminiAPI): Extension {
     pluginApp = app;
+    pluginApi = api;
     return [
         selectionMenuField
     ];
