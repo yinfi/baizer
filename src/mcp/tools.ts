@@ -330,6 +330,17 @@ export class ToolManager {
                     return { success: true, path: targetFile.path, message: `✅ Opened: ${targetFile.path}` };
 
                 case 'save_webpage':
+                    const extractTags = (text: string) => {
+                        const tags: string[] = [];
+                        const words = text.split(/\s+/);
+                        for (const word of words) {
+                            if (word.startsWith('#') && word.length > 1) {
+                                tags.push(word.substring(1));
+                            }
+                        }
+                        return tags;
+                    };
+
                     const url = args.url;
                     console.log(`Gemini Shell: Saving webpage ${url}`);
                     try {
@@ -365,9 +376,11 @@ Task:
                                 try {
                                     const summary = await this.geminiApi.chat(prompt, "VideoSummarization", "You are a helpful assistant that summarizes videos.");
                                     const created = new Date().toISOString();
+                                    const titleTags = extractTags(videoTranscript.title);
+                                    const tagString = titleTags.length > 0 ? `, ${titleTags.join(', ')}` : '';
                                     const yamlFrontmatter = `---
 created: ${created}
-tags: video, ${videoTranscript.platform}
+tags: video, ${videoTranscript.platform}${tagString}
 source: ${finalUrl}
 author: ${videoTranscript.author || videoTranscript.platform}
 ---
@@ -378,9 +391,11 @@ author: ${videoTranscript.author || videoTranscript.platform}
                                     console.error("Gemini Shell: Summarization failed", e);
                                     // Fallback to video embed if summarization fails
                                     const created = new Date().toISOString();
+                                    const titleTags = extractTags(videoTranscript.title);
+                                    const tagString = titleTags.length > 0 ? `, ${titleTags.join(', ')}` : '';
                                     const yamlFrontmatter = `---
 created: ${created}
-tags: video, ${videoTranscript.platform}
+tags: video, ${videoTranscript.platform}${tagString}
 source: ${finalUrl}
 author: ${videoTranscript.author || videoTranscript.platform}
 ---
@@ -396,9 +411,11 @@ author: ${videoTranscript.author || videoTranscript.platform}
                                 new Notice(`💾 Saving video link...`);
 
                                 const created = new Date().toISOString();
+                                const titleTags = extractTags(videoTranscript.title);
+                                const tagString = titleTags.length > 0 ? `, ${titleTags.join(', ')}` : '';
                                 const yamlFrontmatter = `---
 created: ${created}
-tags: video, ${videoTranscript.platform}
+tags: video, ${videoTranscript.platform}${tagString}
 source: ${finalUrl}
 author: ${videoTranscript.author || videoTranscript.platform}
 ---
@@ -412,7 +429,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
 
                             // Save logic
                             let filename = args.filename || videoTranscript.title;
-                            filename = filename.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
+                            filename = filename.replace(/[\\/:*?"<>|#^\[\]]/g, '-').replace(/\s+/g, ' ').trim();
                             if (!filename.endsWith('.md')) filename += '.md';
 
                             let finalPath = filename;
@@ -497,8 +514,10 @@ author: ${videoTranscript.author || videoTranscript.platform}
 
                         console.log(`Gemini Shell: Extracted title "${title}", author "${author}"`);
 
+                        const webpageTags = extractTags(title);
+
                         // Sanitize Title
-                        title = title.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
+                        title = title.replace(/[\\/:*?"<>|#^\[\]]/g, '-').replace(/\s+/g, ' ').trim();
 
                         // Fallback if title is still empty or just dashes
                         if (!title || title.replace(/-/g, '').trim().length === 0) {
@@ -602,13 +621,13 @@ author: ${videoTranscript.author || videoTranscript.platform}
                             counter++;
                         }
 
-                        // Create YAML Frontmatter
                         const created = new Date().toISOString();
+                        const webpageTagString = webpageTags.length > 0 ? `, ${webpageTags.join(', ')}` : '';
                         const yamlFrontmatter = `---
 created: ${created}
 source: ${url}
 author: ${author}
-tags: clipping
+tags: clipping${webpageTagString}
 ---
 
 `;

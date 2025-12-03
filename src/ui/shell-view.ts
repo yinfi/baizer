@@ -1,16 +1,18 @@
-import { ItemView, WorkspaceLeaf, MarkdownRenderer, TFile } from 'obsidian';
+import { ItemView, WorkspaceLeaf, MarkdownRenderer } from 'obsidian';
 import { GeminiAPI } from '../gemini-api';
 import { logger } from '../utils/logger';
+import { ChatController, ChatMessage } from './chat-controller';
 
 export const VIEW_TYPE_GEMINI_SHELL = 'gemini-shell-view';
 
 export class GeminiShellView extends ItemView {
     private api: GeminiAPI;
+    private chatController: ChatController;
     private outputContainer: HTMLElement;
     private inputEl: HTMLTextAreaElement;
     private suggestionContainer: HTMLElement;
     private currentSelection: string = "";
-    private editor: any = null;
+    // private editor: any = null; // Removed as it was unused in the new implementation
 
     // Suggestion State
     private isSuggesting = false;
@@ -18,13 +20,10 @@ export class GeminiShellView extends ItemView {
     private selectedIndex = 0;
     private suggestions: any[] = [];
 
-    // File Selection State
-    private pendingFileSelection: TFile[] | null = null;
-
     // Heartbeat monitoring
     private heartbeatInterval: number | null = null;
     private lastActivityTime: number = Date.now();
-    private heartbeatIntervalMs: number = 30000; // 30秒检查一次
+    private heartbeatIntervalMs: number = 30000; // 30s check
     private isResponding: boolean = false;
 
     constructor(leaf: WorkspaceLeaf, api: GeminiAPI) {
@@ -48,6 +47,14 @@ export class GeminiShellView extends ItemView {
         const { contentEl } = this;
         contentEl.empty();
 
+        // Initialize ChatController
+        this.chatController = new ChatController({
+            app: this.app,
+            api: this.api,
+            onMessageAdded: (msg) => this.appendMessage(msg),
+            onStatusChanged: (status) => this.handleStatusChange(status)
+        });
+
         // Create a wrapper container to ensure proper flexbox layout
         const container = contentEl.createDiv({ cls: 'gemini-shell-view' });
 
@@ -61,8 +68,13 @@ export class GeminiShellView extends ItemView {
         // 2. Output Area (Scrollable)
         this.outputContainer = container.createDiv({ cls: 'shell-output-area' });
 
-        // Welcome Message
-        this.appendLog('System', 'Kernel initialized.', 'system');
+        // Welcome Message (Simulated)
+        this.appendMessage({
+            id: 'init',
+            role: 'system',
+            content: 'Kernel initialized.',
+            timestamp: Date.now()
+        });
 
         // 3. Input Area (Fixed at bottom)
         const inputContainer = container.createDiv({ cls: 'shell-input-container' });
@@ -182,7 +194,7 @@ export class GeminiShellView extends ItemView {
             const commands = [
                 { label: '/clear', desc: 'Clear session history' },
                 { label: '/profile', desc: 'View user profile' },
-                { label: '/forget', desc: 'Forget context' },
+                { label: '/forget', desc: 'Forget context' }, // Note: ChatController doesn't implement forget yet, but keeping for UI consistency or future
                 { label: '/new', desc: 'Create new note' },
                 { label: '/edit', desc: 'Edit current selection' },
                 { label: '/open', desc: 'Open file' },
@@ -265,87 +277,10 @@ export class GeminiShellView extends ItemView {
         this.suggestionContainer.empty();
     }
 
+    // ==================== Chat Logic ====================
+
     async processCommand(query: string) {
-        this.appendLog('You', query, 'user');
-
-        // ==================== File Selection ====================
-
-        // Check if user is selecting from file list
-        if (this.pendingFileSelection && /^\d+$/.test(query)) {
-            const index = parseInt(query) - 1;
-            if (index >= 0 && index < this.pendingFileSelection.length) {
-                await this.openFile(this.pendingFileSelection[index]);
-                this.pendingFileSelection = null;
-            } else {
-                this.appendLog('System', `✗ 无效的选择。请输入 1-${this.pendingFileSelection.length} 之间的数字`, 'system');
-            }
-            return;
-        }
-
-        // ==================== File Opening ====================
-
-        // /open - 打开文件
-        if (query.startsWith('/open ')) {
-            const searchTerm = query.substring(6).trim();
-            if (!searchTerm) {
-                this.appendLog('System', '✗ 请提供文件名或路径，例如：/open readme', 'system');
-                return;
-            }
-            await this.handleOpenFile(searchTerm);
-            return;
-        }
-
-        // ==================== Memory Commands ====================
-
-        // /clear - 清除当前会话
-        if (query === '/clear') {
-            await this.api.clearSession();
-            this.appendLog('System', '✓ 会话已清除，用户画像保留', 'system');
-            return;
-        }
-
-        // /profile - 查看用户画像
-        if (query === '/profile') {
-            const profile = this.api.getUserProfile();
-            if (!profile) {
-                this.appendLog('System', '暂无用户画像数据', 'system');
-                return;
-            }
-
-            let profileText = '## 用户画像\n\n';
-            if (profile.name) profileText += `**姓名**: ${profile.name}\n`;
-            if (profile.profession) profileText += `**职业**: ${profile.profession}\n`;
-            if (profile.expertise.length > 0) {
-                profileText += `**专业领域**: ${profile.expertise.join(', ')}\n`;
-            }
-            if (profile.preferences.responseStyle) {
-                profileText += `**回答风格**: ${profile.preferences.responseStyle}\n`;
-            }
-            this.appendLog('System', profileText, 'system');
-            return;
-        }
-
-        // /tools - List available MCP tools
-        if (query === '/tools') {
-            const tools = this.api.getAvailableTools();
-            let toolsText = '## Available MCP Tools\n\n';
-            tools.forEach((tool: any) => {
-                toolsText += `### ${tool.name}\n`;
-                toolsText += `${tool.description}\n\n`;
-                if (tool.parameters && tool.parameters.properties) {
-                    toolsText += '**Parameters:**\n';
-                    Object.keys(tool.parameters.properties).forEach(param => {
-                        const prop = tool.parameters.properties[param];
-                        const required = tool.parameters.required?.includes(param) ? ' (required)' : '';
-                        toolsText += `- \`${param}\`${required}: ${prop.description || 'No description'}\n`;
-                    });
-                }
-                toolsText += '\n';
-            });
-            this.appendLog('System', toolsText, 'system');
-            return;
-        }
-
+        // Context gathering
         let contextStr = '';
         const activeFile = this.app.workspace.getActiveFile();
         if (activeFile) {
@@ -357,112 +292,60 @@ export class GeminiShellView extends ItemView {
         if (activeLeaf && activeLeaf.view) {
             const editor = (activeLeaf.view as any).editor;
             if (editor) {
-                this.editor = editor;
+                // this.editor = editor; // Unused
                 this.currentSelection = editor.getSelection();
                 if (this.currentSelection) {
-                    this.appendLog('System', `With selection (${this.currentSelection.length} chars)`, 'system');
+                    // We don't need to log this explicitly as system message anymore, 
+                    // or we can if we want to mimic exact previous behavior.
+                    // Let's keep it clean for now.
                 }
             }
         }
 
-        // Loading Indicator
-        const loadingId = 'loading-' + Date.now();
-        const loadingDiv = this.outputContainer.createDiv({ cls: 'shell-entry system' });
-        loadingDiv.id = loadingId;
-        loadingDiv.createSpan({ cls: 'shell-loading' });
-        loadingDiv.createSpan({ text: 'Thinking...' });
-        this.scrollToBottom();
-
-        // 设置响应状态
-        this.isResponding = true;
-
-        try {
-            this.updateActivity(); // 更新活动时间
-            const response = await this.api.chat(query, contextStr, this.currentSelection);
-
-            const loader = document.getElementById(loadingId);
-            if (loader) loader.remove();
-
-            if (query.startsWith("/edit") && this.editor && this.currentSelection) {
-                this.editor.replaceSelection(response);
-                this.appendLog('System', 'Text replaced.', 'system');
-            } else {
-                this.appendLog('Gemini', response, 'ai');
-            }
-        } catch (e) {
-            const loader = document.getElementById(loadingId);
-            if (loader) loader.remove();
-            this.handleError(e, 'Gemini API调用');
-        } finally {
-            this.isResponding = false; // 重置响应状态
-        }
+        this.updateActivity();
+        await this.chatController.processCommand(query, contextStr, this.currentSelection);
     }
 
-    appendLog(author: string, content: string, type: 'user' | 'ai' | 'system') {
-        const entry = this.outputContainer.createDiv({ cls: `shell-entry ${type}` });
+    appendMessage(msg: ChatMessage) {
+        const entry = this.outputContainer.createDiv({ cls: `shell-entry ${msg.role}` });
 
-        if (type === 'ai') {
-            MarkdownRenderer.render(this.app, content, entry, '', this as any);
-        } else if (type === 'user') {
-            entry.setText(content);
+        if (msg.role === 'ai') {
+            MarkdownRenderer.render(this.app, msg.content, entry, '', this as any);
+        } else if (msg.role === 'user') {
+            entry.setText(msg.content);
         } else {
-            entry.setText(`[${author}] ${content}`);
+            entry.setText(`[System] ${msg.content}`);
         }
+
         this.scrollToBottom();
-        this.updateActivity(); // 更新活动时间
+        this.updateActivity();
+    }
+
+    handleStatusChange(isResponding: boolean) {
+        this.isResponding = isResponding;
+        if (isResponding) {
+            // Show loading indicator
+            const loadingId = 'loading-indicator';
+            let loadingDiv = document.getElementById(loadingId);
+            if (!loadingDiv) {
+                loadingDiv = this.outputContainer.createDiv({ cls: 'shell-entry system' });
+                loadingDiv.id = loadingId;
+                loadingDiv.createSpan({ cls: 'shell-loading' });
+                loadingDiv.createSpan({ text: 'Thinking...' });
+            }
+            this.scrollToBottom();
+        } else {
+            // Remove loading indicator
+            const loadingDiv = document.getElementById('loading-indicator');
+            if (loadingDiv) loadingDiv.remove();
+        }
     }
 
     scrollToBottom() {
         this.outputContainer.scrollTop = this.outputContainer.scrollHeight;
     }
 
-    // ==================== File Opening Methods ====================
-
-    private async handleOpenFile(searchTerm: string) {
-        const files = this.app.vault.getFiles();
-        const matches = files.filter(f =>
-            f.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            f.basename.toLowerCase().includes(searchTerm.toLowerCase())
-        );
-
-        if (matches.length === 0) {
-            this.appendLog('System', `✗ 未找到匹配 "${searchTerm}" 的文件`, 'system');
-            return;
-        }
-
-        if (matches.length === 1) {
-            await this.openFile(matches[0]);
-            return;
-        }
-
-        // Multiple matches - show selection list
-        this.showFileSelection(matches, searchTerm);
-    }
-
-    private showFileSelection(files: TFile[], searchTerm: string) {
-        let message = `找到 ${files.length} 个匹配 "${searchTerm}" 的文件：\n\n`;
-        files.forEach((f, i) => {
-            message += `  ${i + 1}. ${f.path}\n`;
-        });
-        message += '\n输入数字选择文件';
-
-        this.appendLog('System', message, 'system');
-        this.pendingFileSelection = files;
-    }
-
-    private async openFile(file: TFile) {
-        try {
-            const leaf = this.app.workspace.getLeaf(false);
-            await leaf.openFile(file);
-            this.appendLog('System', `✓ 已打开: ${file.path}`, 'system');
-            this.pendingFileSelection = null; // Clear selection state
-        } catch (e) {
-            this.appendLog('System', `✗ 打开失败: ${e.message}`, 'system');
-        }
-    }
-
     async onClose() {
-        // Cleanup if needed
         this.stopHeartbeat();
     }
 
@@ -485,58 +368,20 @@ export class GeminiShellView extends ItemView {
         const now = Date.now();
         const timeSinceLastActivity = now - this.lastActivityTime;
 
-        logger.debug(`心跳检查: 距离上次活动 ${timeSinceLastActivity}ms`, 'GeminiShellView.heartbeat');
-
-        // 如果超过2分钟没有响应，显示警告
         if (this.isResponding && timeSinceLastActivity > 120000) {
             const warning = '⚠️ 检测到长时间无响应，系统可能出现问题';
             logger.warn(warning, 'GeminiShellView.heartbeat');
-            this.appendLog('System', warning, 'system');
-            this.isResponding = false;
-        }
-
-        // 如果超过5分钟没有活动，尝试重置状态
-        if (timeSinceLastActivity > 300000) {
-            logger.info('长时间无活动，重置状态', 'GeminiShellView.heartbeat');
+            this.appendMessage({
+                id: 'warn',
+                role: 'system',
+                content: warning,
+                timestamp: Date.now()
+            });
             this.isResponding = false;
         }
     }
 
     private updateActivity() {
         this.lastActivityTime = Date.now();
-        this.isResponding = true;
-        logger.debug(`活动更新: ${new Date().toISOString()}`, 'GeminiShellView.updateActivity');
-    }
-
-    // ==================== Enhanced Error Handling ====================
-
-    private handleError(error: any, context: string) {
-        logger.error(`${context} 错误`, error, 'GeminiShellView', { context });
-
-        const errorMessage = this.formatErrorMessage(error, context);
-        this.appendLog('Error', errorMessage, 'system');
-
-        // 重置响应状态
-        this.isResponding = false;
-    }
-
-    private formatErrorMessage(error: any, context: string): string {
-        if (error.name === 'AbortError') {
-            return `${context}: 请求超时，请稍后重试`;
-        }
-
-        if (error.message?.includes('503') || error.message?.includes('overloaded')) {
-            return `${context}: AI模型当前过载，请稍后再试`;
-        }
-
-        if (error.message?.includes('401')) {
-            return `${context}: API密钥无效或已过期`;
-        }
-
-        if (error.message?.includes('network')) {
-            return `${context}: 网络连接问题，请检查网络连接`;
-        }
-
-        return `${context}: ${error.message || '未知错误'}`;
     }
 }
