@@ -24,43 +24,174 @@ export class GeminiShellSettingTab extends PluginSettingTab {
         containerEl.createEl('h3', { text: '🔑 API Configuration', cls: 'gemini-settings-header' });
 
         new Setting(containerEl)
-            .setName('Gemini API Key')
-            .setDesc('Enter your Google Gemini API key.')
-            .addText(text => text
-                .setPlaceholder('AIzaSy...')
-                .setValue(this.plugin.settings.apiKey)
-                .onChange(async (value) => {
-                    this.plugin.settings.apiKey = value;
+            .setName('AI Provider')
+            .setDesc('Select the AI provider to use.')
+            .addDropdown(drop => drop
+                .addOption('gemini', 'Google Gemini')
+                .addOption('openai', 'OpenAI Compatible')
+                .addOption('deepseek', 'DeepSeek')
+                .addOption('qwen', 'Qwen (Tongyi Qianwen)')
+                .setValue(this.plugin.settings.provider)
+                .onChange(async (value: any) => {
+                    this.plugin.settings.provider = value;
                     await this.plugin.saveSettings();
-                }))
+                    this.plugin.modelService.reloadProvider();
+                    this.display(); // Refresh to show/hide relevant settings
+                }));
+
+        // --- Gemini Settings ---
+        if (this.plugin.settings.provider === 'gemini') {
+            new Setting(containerEl)
+                .setName('Gemini API Key')
+                .setDesc('Enter your Google Gemini API key.')
+                .addText(text => text
+                    .setPlaceholder('AIzaSy...')
+                    .setValue(this.plugin.settings.apiKey)
+                    .onChange(async (value) => {
+                        this.plugin.settings.apiKey = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Model')
+                .setDesc('Choose the Gemini model.')
+                .addDropdown(drop => drop
+                    .addOption('gemini-2.5-flash', 'Gemini 2.5 Flash (Fastest)')
+                    .addOption('gemini-2.5-pro', 'Gemini 2.5 Pro (Reasoning)')
+                    .addOption('gemini-2.0-flash', 'Gemini 2.0 Flash')
+                    .addOption('gemini-1.5-pro', 'Gemini 1.5 Pro')
+                    .setValue(this.plugin.settings.primaryModel)
+                    .onChange(async (value) => {
+                        this.plugin.settings.primaryModel = value;
+                        await this.plugin.saveSettings();
+                    }));
+        }
+
+        // --- OpenAI Settings ---
+        if (this.plugin.settings.provider === 'openai') {
+            new Setting(containerEl)
+                .setName('OpenAI API Key')
+                .setDesc('Enter your OpenAI API key.')
+                .addText(text => text
+                    .setPlaceholder('sk-...')
+                    .setValue(this.plugin.settings.openaiApiKey)
+                    .onChange(async (value) => {
+                        this.plugin.settings.openaiApiKey = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Base URL')
+                .setDesc('API Base URL (optional).')
+                .addText(text => text
+                    .setPlaceholder('https://api.openai.com/v1')
+                    .setValue(this.plugin.settings.openaiBaseUrl)
+                    .onChange(async (value) => {
+                        this.plugin.settings.openaiBaseUrl = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Model Name')
+                .setDesc('Enter the model ID (e.g., gpt-4o, gpt-3.5-turbo).')
+                .addText(text => text
+                    .setPlaceholder('gpt-4o')
+                    .setValue(this.plugin.settings.openaiModel)
+                    .onChange(async (value) => {
+                        this.plugin.settings.openaiModel = value;
+                        await this.plugin.saveSettings();
+                    }));
+        }
+
+        // --- DeepSeek Settings ---
+        if (this.plugin.settings.provider === 'deepseek') {
+            new Setting(containerEl)
+                .setName('DeepSeek API Key')
+                .setDesc('Enter your DeepSeek API key.')
+                .addText(text => text
+                    .setPlaceholder('sk-...')
+                    .setValue(this.plugin.settings.deepseekApiKey)
+                    .onChange(async (value) => {
+                        this.plugin.settings.deepseekApiKey = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Base URL')
+                .setDesc('DeepSeek API Base URL.')
+                .addText(text => text
+                    .setPlaceholder('https://api.deepseek.com')
+                    .setValue(this.plugin.settings.deepseekBaseUrl)
+                    .onChange(async (value) => {
+                        this.plugin.settings.deepseekBaseUrl = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Model Name')
+                .setDesc('e.g., deepseek-chat, deepseek-coder')
+                .addText(text => text
+                    .setPlaceholder('deepseek-chat')
+                    .setValue(this.plugin.settings.deepseekModel)
+                    .onChange(async (value) => {
+                        this.plugin.settings.deepseekModel = value;
+                        await this.plugin.saveSettings();
+                    }));
+        }
+
+        // --- Qwen Settings ---
+        if (this.plugin.settings.provider === 'qwen') {
+            new Setting(containerEl)
+                .setName('Qwen API Key')
+                .setDesc('Enter your DashScope API key.')
+                .addText(text => text
+                    .setPlaceholder('sk-...')
+                    .setValue(this.plugin.settings.qwenApiKey)
+                    .onChange(async (value) => {
+                        this.plugin.settings.qwenApiKey = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Base URL')
+                .setDesc('DashScope Compatible API URL.')
+                .addText(text => text
+                    .setPlaceholder('https://dashscope.aliyuncs.com/compatible-mode/v1')
+                    .setValue(this.plugin.settings.qwenBaseUrl)
+                    .onChange(async (value) => {
+                        this.plugin.settings.qwenBaseUrl = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Model Name')
+                .setDesc('e.g., qwen-turbo, qwen-plus')
+                .addText(text => text
+                    .setPlaceholder('qwen-turbo')
+                    .setValue(this.plugin.settings.qwenModel)
+                    .onChange(async (value) => {
+                        this.plugin.settings.qwenModel = value;
+                        await this.plugin.saveSettings();
+                    }));
+        }
+
+        new Setting(containerEl)
             .addButton(btn => btn
                 .setButtonText('Test Connection')
                 .onClick(async () => {
-                    if (!this.plugin.settings.apiKey) {
-                        new Notice('⚠️ Please enter an API key first.');
-                        return;
-                    }
                     try {
-                        new Notice('Testing connection...');
-                        await this.plugin.geminiApi.checkAvailability();
-                        new Notice('✅ Connection successful!');
+                        new Notice(`Testing connection to ${this.plugin.settings.provider}...`);
+                        // Force reload to ensure latest settings are used
+                        this.plugin.modelService.reloadProvider();
+                        const success = await this.plugin.modelService.checkAvailability();
+                        if (success) {
+                            new Notice('✅ Connection successful!');
+                        } else {
+                            new Notice('❌ Connection failed. Check API key and settings.');
+                        }
                     } catch (error: any) {
                         new Notice(`❌ Connection failed: ${error.message}`);
                     }
-                }));
-
-        new Setting(containerEl)
-            .setName('Model Selection')
-            .setDesc('Choose the Gemini model to use.')
-            .addDropdown(drop => drop
-                .addOption('gemini-2.5-flash', 'Gemini 2.5 Flash (Fastest)')
-                .addOption('gemini-2.5-pro', 'Gemini 2.5 Pro (Reasoning)')
-                .addOption('gemini-2.0-flash', 'Gemini 2.0 Flash')
-                .addOption('gemini-1.5-pro', 'Gemini 1.5 Pro')
-                .setValue(this.plugin.settings.primaryModel)
-                .onChange(async (value) => {
-                    this.plugin.settings.primaryModel = value;
-                    await this.plugin.saveSettings();
                 }));
 
         new Setting(containerEl)

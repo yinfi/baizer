@@ -26,6 +26,10 @@ export class ToolManager {
         this.geminiApi = api;
     }
 
+    updateSettings(allowPluginControl: boolean) {
+        this.allowPluginControl = allowPluginControl;
+    }
+
     getToolsDefinitions(): any[] {
         const tools = [
             {
