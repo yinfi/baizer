@@ -2104,7 +2104,477 @@ __export(main_exports, {
   default: () => GeminiShellPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
+
+// src/services/model-service.ts
+var import_obsidian2 = require("obsidian");
+
+// src/memory/types.ts
+var DEFAULT_USER_PROFILE = {
+  name: "",
+  profession: "",
+  expertise: [],
+  preferences: {
+    language: "zh-CN",
+    responseStyle: "balanced",
+    topics: []
+  },
+  workflows: [],
+  context: {
+    currentProjects: [],
+    goals: [],
+    challenges: []
+  },
+  metadata: {
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    totalInteractions: 0,
+    lastProfileUpdate: Date.now()
+  }
+};
+
+// src/memory/memory-manager.ts
+var MemoryManager = class {
+  // Minimum 1 minute between updates
+  constructor(app, model) {
+    this.app = app;
+    this.model = model;
+    this.userProfile = { ...DEFAULT_USER_PROFILE };
+    this.loadProfile();
+    this.loadSummaries();
+    this.loadChatHistory();
+  }
+  chatSession = null;
+  userProfile;
+  sessionSummaries = [];
+  chatHistory = [];
+  currentSessionMessages = 0;
+  lastProfileUpdateTime = 0;
+  MEMORY_DIR = ".obsidian/gemini-memory";
+  PROFILE_FILE = "user-profile.json";
+  SUMMARY_FILE = "session-summaries.json";
+  HISTORY_FILE = "chat-history.json";
+  PROFILE_UPDATE_INTERVAL = 5;
+  // Update every 5 messages
+  PROFILE_UPDATE_MIN_TIME = 60 * 1e3;
+  // ==================== Session Management ====================
+  getOrCreateSession() {
+    if (!this.chatSession) {
+      this.chatSession = this.model.startChat();
+      this.currentSessionMessages = 0;
+    }
+    return this.chatSession;
+  }
+  async clearSession() {
+    if (this.chatSession && this.currentSessionMessages > 0) {
+      await this.endSession();
+    }
+    this.chatSession = null;
+    this.currentSessionMessages = 0;
+  }
+  // ==================== Context Building ====================
+  buildContext() {
+    const profileContext = this.formatProfileForContext();
+    const summaryContext = this.formatSummariesForContext();
+    return `[User Profile]
+${profileContext}
+
+[Recent Context]
+${summaryContext}`;
+  }
+  formatProfileForContext() {
+    const p = this.userProfile;
+    const parts = [];
+    if (p.name)
+      parts.push(`Name: ${p.name}`);
+    if (p.profession)
+      parts.push(`Profession: ${p.profession}`);
+    if (p.expertise.length > 0)
+      parts.push(`Expertise: ${p.expertise.join(", ")}`);
+    if (p.preferences.responseStyle) {
+      parts.push(`Preferred Style: ${p.preferences.responseStyle}`);
+    }
+    if (p.context.currentProjects.length > 0) {
+      parts.push(`Current Projects: ${p.context.currentProjects.join(", ")}`);
+    }
+    if (p.context.goals.length > 0) {
+      parts.push(`Goals: ${p.context.goals.join(", ")}`);
+    }
+    return parts.length > 0 ? parts.join("\n") : "No profile information yet.";
+  }
+  formatSummariesForContext() {
+    if (this.sessionSummaries.length === 0) {
+      return "No previous sessions.";
+    }
+    const recent = this.sessionSummaries.slice(-3);
+    return recent.map(
+      (s, i) => `Session ${i + 1}: ${s.summary}`
+    ).join("\n");
+  }
+  // ==================== Message Recording ====================
+  async recordMessage(role, content) {
+    this.currentSessionMessages++;
+    this.userProfile.metadata.totalInteractions++;
+    this.chatHistory.push({
+      role,
+      content,
+      timestamp: Date.now()
+    });
+    await this.saveChatHistory();
+    if (role === "user") {
+      const timeSinceLastUpdate = Date.now() - this.lastProfileUpdateTime;
+      const shouldUpdateByTurns = this.currentSessionMessages % this.PROFILE_UPDATE_INTERVAL === 0;
+      const shouldUpdateByTime = timeSinceLastUpdate >= this.PROFILE_UPDATE_MIN_TIME;
+      const isNewUser = this.userProfile.metadata.totalInteractions < 20;
+      if (isNewUser && this.currentSessionMessages % 2 === 0) {
+        try {
+          await this.updateProfileFromConversation(content);
+          this.lastProfileUpdateTime = Date.now();
+        } catch (e) {
+          console.error("Auto profile update (new user) failed:", e);
+        }
+      } else if (shouldUpdateByTurns || shouldUpdateByTime && this.currentSessionMessages > 0) {
+        try {
+          await this.updateProfileFromConversation(content);
+          this.lastProfileUpdateTime = Date.now();
+        } catch (e) {
+          console.error("Auto profile update failed:", e);
+        }
+      }
+    }
+  }
+  // ==================== Profile Management ====================
+  // 手动触发画像提取（从最近的对话中学习）
+  async learnFromRecentMessages(recentMessages) {
+    try {
+      const combinedMessage = recentMessages.join("\n");
+      await this.updateProfileFromConversation(combinedMessage);
+    } catch (e) {
+      console.error("Manual profile extraction failed:", e);
+      throw e;
+    }
+  }
+  async updateProfileFromConversation(userMessage) {
+    try {
+      const extractionPrompt = `\u5206\u6790\u4EE5\u4E0B\u7528\u6237\u6D88\u606F\uFF0C\u63D0\u53D6\u53EF\u80FD\u7684\u7528\u6237\u4FE1\u606F\u3002\u53EA\u8FD4\u56DE JSON \u683C\u5F0F\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\uFF1A
+
+\u7528\u6237\u6D88\u606F: "${userMessage}"
+
+\u63D0\u53D6\u4EE5\u4E0B\u4FE1\u606F\uFF08\u5982\u679C\u6D88\u606F\u4E2D\u5305\u542B\uFF09\uFF1A
+{
+  "profession": "\u804C\u4E1A\uFF08\u5982\u679C\u63D0\u5230\uFF09",
+  "expertise": ["\u4E13\u4E1A\u9886\u57DF\u6570\u7EC4"],
+  "currentProjects": ["\u5F53\u524D\u9879\u76EE"],
+  "goals": ["\u76EE\u6807"],
+  "preferences": {
+    "responseStyle": "concise/detailed\uFF08\u5982\u679C\u7528\u6237\u8868\u8FBE\u4E86\u504F\u597D\uFF09"
+  }
+}
+
+\u5982\u679C\u6CA1\u6709\u63D0\u53D6\u5230\u4EFB\u4F55\u4FE1\u606F\uFF0C\u8FD4\u56DE {}`;
+      const result = await this.model.generateContent(extractionPrompt);
+      const responseText = result.text.trim();
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const extracted = JSON.parse(jsonMatch[0]);
+        this.mergeProfile(extracted);
+        await this.saveProfile();
+        return extracted;
+      }
+      return null;
+    } catch (e) {
+      console.error("Profile extraction failed:", e);
+      throw e;
+    }
+  }
+  mergeProfile(extracted) {
+    if (!extracted || Object.keys(extracted).length === 0)
+      return;
+    if (extracted.profession) {
+      this.userProfile.profession = extracted.profession;
+    }
+    if (extracted.expertise && Array.isArray(extracted.expertise)) {
+      const newExpertise = extracted.expertise.filter(
+        (e) => !this.userProfile.expertise.includes(e)
+      );
+      this.userProfile.expertise.push(...newExpertise);
+    }
+    if (extracted.currentProjects && Array.isArray(extracted.currentProjects)) {
+      const newProjects = extracted.currentProjects.filter(
+        (p) => !this.userProfile.context.currentProjects.includes(p)
+      );
+      this.userProfile.context.currentProjects.push(...newProjects);
+    }
+    if (extracted.goals && Array.isArray(extracted.goals)) {
+      const newGoals = extracted.goals.filter(
+        (g) => !this.userProfile.context.goals.includes(g)
+      );
+      this.userProfile.context.goals.push(...newGoals);
+    }
+    if (extracted.preferences) {
+      if (extracted.preferences.responseStyle) {
+        this.userProfile.preferences.responseStyle = extracted.preferences.responseStyle;
+      }
+    }
+    this.userProfile.metadata.updatedAt = Date.now();
+    this.userProfile.metadata.lastProfileUpdate = Date.now();
+  }
+  getProfile() {
+    return { ...this.userProfile };
+  }
+  async updateProfile(updates) {
+    this.userProfile = { ...this.userProfile, ...updates };
+    this.userProfile.metadata.updatedAt = Date.now();
+    await this.saveProfile();
+  }
+  // ==================== Session Summary ====================
+  async endSession() {
+    if (this.currentSessionMessages === 0)
+      return;
+    try {
+      const summary = await this.generateSessionSummary();
+      this.sessionSummaries.push(summary);
+      if (this.sessionSummaries.length > 10) {
+        this.sessionSummaries = this.sessionSummaries.slice(-10);
+      }
+      await this.saveSummaries();
+    } catch (e) {
+      console.error("Failed to generate session summary:", e);
+    }
+  }
+  async generateSessionSummary() {
+    const summaryPrompt = `\u603B\u7ED3\u8FD9\u6B21\u5BF9\u8BDD\u7684\u5173\u952E\u5185\u5BB9\uFF0850\u5B57\u4EE5\u5185\uFF0C\u4E00\u53E5\u8BDD\uFF09`;
+    try {
+      const result = await this.model.generateContent(summaryPrompt);
+      const summary = result.text.trim();
+      return {
+        timestamp: Date.now(),
+        messageCount: this.currentSessionMessages,
+        summary
+      };
+    } catch (e) {
+      return {
+        timestamp: Date.now(),
+        messageCount: this.currentSessionMessages,
+        summary: `\u5BF9\u8BDD\u5305\u542B ${this.currentSessionMessages} \u6761\u6D88\u606F`
+      };
+    }
+  }
+  // ==================== Persistence ====================
+  async save() {
+    await this.saveProfile();
+    await this.saveSummaries();
+    await this.saveChatHistory();
+  }
+  async ensureMemoryDir() {
+    const adapter = this.app.vault.adapter;
+    const dirExists = await adapter.exists(this.MEMORY_DIR);
+    if (!dirExists) {
+      await adapter.mkdir(this.MEMORY_DIR);
+    }
+  }
+  async loadProfile() {
+    try {
+      const path = `${this.MEMORY_DIR}/${this.PROFILE_FILE}`;
+      const exists = await this.app.vault.adapter.exists(path);
+      if (exists) {
+        const content = await this.app.vault.adapter.read(path);
+        this.userProfile = JSON.parse(content);
+      }
+    } catch (e) {
+      console.error("Failed to load profile:", e);
+      this.userProfile = { ...DEFAULT_USER_PROFILE };
+    }
+  }
+  async saveProfile() {
+    try {
+      await this.ensureMemoryDir();
+      const path = `${this.MEMORY_DIR}/${this.PROFILE_FILE}`;
+      await this.app.vault.adapter.write(
+        path,
+        JSON.stringify(this.userProfile, null, 2)
+      );
+    } catch (e) {
+      console.error("Failed to save profile:", e);
+    }
+  }
+  async loadSummaries() {
+    try {
+      const path = `${this.MEMORY_DIR}/${this.SUMMARY_FILE}`;
+      const exists = await this.app.vault.adapter.exists(path);
+      if (exists) {
+        const content = await this.app.vault.adapter.read(path);
+        this.sessionSummaries = JSON.parse(content);
+      }
+    } catch (e) {
+      console.error("Failed to load summaries:", e);
+      this.sessionSummaries = [];
+    }
+  }
+  async saveSummaries() {
+    try {
+      await this.ensureMemoryDir();
+      const path = `${this.MEMORY_DIR}/${this.SUMMARY_FILE}`;
+      await this.app.vault.adapter.write(
+        path,
+        JSON.stringify(this.sessionSummaries, null, 2)
+      );
+    } catch (e) {
+      console.error("Failed to save summaries:", e);
+    }
+  }
+  async loadChatHistory() {
+    try {
+      const path = `${this.MEMORY_DIR}/${this.HISTORY_FILE}`;
+      const exists = await this.app.vault.adapter.exists(path);
+      if (exists) {
+        const content = await this.app.vault.adapter.read(path);
+        this.chatHistory = JSON.parse(content);
+      }
+    } catch (e) {
+      console.error("Failed to load chat history:", e);
+      this.chatHistory = [];
+    }
+  }
+  async saveChatHistory() {
+    try {
+      await this.ensureMemoryDir();
+      const path = `${this.MEMORY_DIR}/${this.HISTORY_FILE}`;
+      await this.app.vault.adapter.write(
+        path,
+        JSON.stringify(this.chatHistory, null, 2)
+      );
+    } catch (e) {
+      console.error("Failed to save chat history:", e);
+    }
+  }
+  async clearChatHistory() {
+    this.chatHistory = [];
+    await this.saveChatHistory();
+  }
+};
+
+// src/utils/logger.ts
+var _Logger = class {
+  logs = [];
+  maxLogs = 1e3;
+  enableConsole = true;
+  enableStorage = true;
+  constructor() {
+  }
+  static getInstance() {
+    if (!_Logger.instance) {
+      _Logger.instance = new _Logger();
+    }
+    return _Logger.instance;
+  }
+  debug(message, context, metadata) {
+    this.log("debug", message, context, void 0, metadata);
+  }
+  info(message, context, metadata) {
+    this.log("info", message, context, void 0, metadata);
+  }
+  warn(message, context, metadata) {
+    this.log("warn", message, context, void 0, metadata);
+  }
+  error(message, error, context, metadata) {
+    this.log("error", message, context, error, metadata);
+  }
+  log(level, message, context, error, metadata) {
+    const entry = {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      level,
+      message,
+      context,
+      error: error ? this.serializeError(error) : void 0,
+      metadata
+    };
+    this.logs.push(entry);
+    if (this.logs.length > this.maxLogs) {
+      this.logs.shift();
+    }
+    if (this.enableConsole) {
+      this.outputToConsole(entry);
+    }
+    if (this.enableStorage) {
+      this.saveToStorage(entry);
+    }
+  }
+  serializeError(error) {
+    if (error instanceof Error) {
+      return {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+        cause: error.cause ? this.serializeError(error.cause) : void 0
+      };
+    }
+    return {
+      message: error?.toString() || "Unknown error",
+      data: error
+    };
+  }
+  outputToConsole(entry) {
+    const consoleMessage = `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.context ? `[${entry.context}] ` : ""}${entry.message}`;
+    switch (entry.level) {
+      case "debug":
+        console.debug(consoleMessage, entry.metadata || "", entry.error || "");
+        break;
+      case "info":
+        console.info(consoleMessage, entry.metadata || "", entry.error || "");
+        break;
+      case "warn":
+        console.warn(consoleMessage, entry.metadata || "", entry.error || "");
+        break;
+      case "error":
+        console.error(consoleMessage, entry.metadata || "", entry.error || "");
+        break;
+    }
+  }
+  saveToStorage(entry) {
+    try {
+      const key = `gemini_log_${Date.now()}`;
+      localStorage.setItem(key, JSON.stringify(entry));
+      this.cleanupOldStorageLogs();
+    } catch (error) {
+      console.warn("\u65E0\u6CD5\u4FDD\u5B58\u65E5\u5FD7\u5230\u672C\u5730\u5B58\u50A8:", error);
+    }
+  }
+  cleanupOldStorageLogs() {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith("gemini_log_")) {
+        keys.push(key);
+      }
+    }
+    keys.sort().reverse();
+    const keysToRemove = keys.slice(100);
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
+  }
+  getRecentLogs(level, limit = 100) {
+    let filteredLogs = this.logs;
+    if (level) {
+      filteredLogs = this.logs.filter((log) => log.level === level);
+    }
+    return filteredLogs.slice(-limit);
+  }
+  clearLogs() {
+    this.logs = [];
+  }
+  exportLogs() {
+    return JSON.stringify(this.logs, null, 2);
+  }
+  setConsoleOutput(enabled) {
+    this.enableConsole = enabled;
+  }
+  setStorage(enabled) {
+    this.enableStorage = enabled;
+  }
+};
+var Logger = _Logger;
+__publicField(Logger, "instance");
+var logger = Logger.getInstance();
 
 // node_modules/@google/generative-ai/dist/index.mjs
 var SchemaType;
@@ -3071,540 +3541,309 @@ var GoogleGenerativeAI = class {
   }
 };
 
-// src/gemini-api.ts
-var import_obsidian = require("obsidian");
-
-// src/memory/types.ts
-var DEFAULT_USER_PROFILE = {
-  name: "",
-  profession: "",
-  expertise: [],
-  preferences: {
-    language: "zh-CN",
-    responseStyle: "balanced",
-    topics: []
-  },
-  workflows: [],
-  context: {
-    currentProjects: [],
-    goals: [],
-    challenges: []
-  },
-  metadata: {
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    totalInteractions: 0,
-    lastProfileUpdate: Date.now()
-  }
-};
-
-// src/memory/memory-manager.ts
-var MemoryManager = class {
-  // Minimum 1 minute between updates
-  constructor(app, model) {
-    this.app = app;
-    this.model = model;
-    this.userProfile = { ...DEFAULT_USER_PROFILE };
-    this.loadProfile();
-    this.loadSummaries();
-    this.loadChatHistory();
-  }
-  chatSession = null;
-  userProfile;
-  sessionSummaries = [];
-  chatHistory = [];
-  currentSessionMessages = 0;
-  lastProfileUpdateTime = 0;
-  MEMORY_DIR = ".obsidian/gemini-memory";
-  PROFILE_FILE = "user-profile.json";
-  SUMMARY_FILE = "session-summaries.json";
-  HISTORY_FILE = "chat-history.json";
-  PROFILE_UPDATE_INTERVAL = 5;
-  // Update every 5 messages
-  PROFILE_UPDATE_MIN_TIME = 60 * 1e3;
-  // ==================== Session Management ====================
-  getOrCreateSession() {
-    if (!this.chatSession) {
-      this.chatSession = this.model.startChat();
-      this.currentSessionMessages = 0;
-    }
-    return this.chatSession;
-  }
-  async clearSession() {
-    if (this.chatSession && this.currentSessionMessages > 0) {
-      await this.endSession();
-    }
-    this.chatSession = null;
-    this.currentSessionMessages = 0;
-  }
-  // ==================== Context Building ====================
-  buildContext() {
-    const profileContext = this.formatProfileForContext();
-    const summaryContext = this.formatSummariesForContext();
-    return `[User Profile]
-${profileContext}
-
-[Recent Context]
-${summaryContext}`;
-  }
-  formatProfileForContext() {
-    const p = this.userProfile;
-    const parts = [];
-    if (p.name)
-      parts.push(`Name: ${p.name}`);
-    if (p.profession)
-      parts.push(`Profession: ${p.profession}`);
-    if (p.expertise.length > 0)
-      parts.push(`Expertise: ${p.expertise.join(", ")}`);
-    if (p.preferences.responseStyle) {
-      parts.push(`Preferred Style: ${p.preferences.responseStyle}`);
-    }
-    if (p.context.currentProjects.length > 0) {
-      parts.push(`Current Projects: ${p.context.currentProjects.join(", ")}`);
-    }
-    if (p.context.goals.length > 0) {
-      parts.push(`Goals: ${p.context.goals.join(", ")}`);
-    }
-    return parts.length > 0 ? parts.join("\n") : "No profile information yet.";
-  }
-  formatSummariesForContext() {
-    if (this.sessionSummaries.length === 0) {
-      return "No previous sessions.";
-    }
-    const recent = this.sessionSummaries.slice(-3);
-    return recent.map(
-      (s, i) => `Session ${i + 1}: ${s.summary}`
-    ).join("\n");
-  }
-  // ==================== Message Recording ====================
-  async recordMessage(role, content) {
-    this.currentSessionMessages++;
-    this.userProfile.metadata.totalInteractions++;
-    this.chatHistory.push({
-      role,
-      content,
-      timestamp: Date.now()
-    });
-    await this.saveChatHistory();
-    if (role === "user") {
-      const timeSinceLastUpdate = Date.now() - this.lastProfileUpdateTime;
-      const shouldUpdateByTurns = this.currentSessionMessages % this.PROFILE_UPDATE_INTERVAL === 0;
-      const shouldUpdateByTime = timeSinceLastUpdate >= this.PROFILE_UPDATE_MIN_TIME;
-      const isNewUser = this.userProfile.metadata.totalInteractions < 20;
-      if (isNewUser && this.currentSessionMessages % 2 === 0) {
-        try {
-          await this.updateProfileFromConversation(content);
-          this.lastProfileUpdateTime = Date.now();
-        } catch (e) {
-          console.error("Auto profile update (new user) failed:", e);
-        }
-      } else if (shouldUpdateByTurns || shouldUpdateByTime && this.currentSessionMessages > 0) {
-        try {
-          await this.updateProfileFromConversation(content);
-          this.lastProfileUpdateTime = Date.now();
-        } catch (e) {
-          console.error("Auto profile update failed:", e);
-        }
-      }
-    }
-  }
-  // ==================== Profile Management ====================
-  // 手动触发画像提取（从最近的对话中学习）
-  async learnFromRecentMessages(recentMessages) {
-    try {
-      const combinedMessage = recentMessages.join("\n");
-      await this.updateProfileFromConversation(combinedMessage);
-    } catch (e) {
-      console.error("Manual profile extraction failed:", e);
-      throw e;
-    }
-  }
-  async updateProfileFromConversation(userMessage) {
-    try {
-      const extractionPrompt = `\u5206\u6790\u4EE5\u4E0B\u7528\u6237\u6D88\u606F\uFF0C\u63D0\u53D6\u53EF\u80FD\u7684\u7528\u6237\u4FE1\u606F\u3002\u53EA\u8FD4\u56DE JSON \u683C\u5F0F\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\uFF1A
-
-\u7528\u6237\u6D88\u606F: "${userMessage}"
-
-\u63D0\u53D6\u4EE5\u4E0B\u4FE1\u606F\uFF08\u5982\u679C\u6D88\u606F\u4E2D\u5305\u542B\uFF09\uFF1A
-{
-  "profession": "\u804C\u4E1A\uFF08\u5982\u679C\u63D0\u5230\uFF09",
-  "expertise": ["\u4E13\u4E1A\u9886\u57DF\u6570\u7EC4"],
-  "currentProjects": ["\u5F53\u524D\u9879\u76EE"],
-  "goals": ["\u76EE\u6807"],
-  "preferences": {
-    "responseStyle": "concise/detailed\uFF08\u5982\u679C\u7528\u6237\u8868\u8FBE\u4E86\u504F\u597D\uFF09"
-  }
-}
-
-\u5982\u679C\u6CA1\u6709\u63D0\u53D6\u5230\u4EFB\u4F55\u4FE1\u606F\uFF0C\u8FD4\u56DE {}`;
-      const result = await this.model.generateContent(extractionPrompt);
-      const responseText = result.response.text().trim();
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const extracted = JSON.parse(jsonMatch[0]);
-        this.mergeProfile(extracted);
-        await this.saveProfile();
-        return extracted;
-      }
-      return null;
-    } catch (e) {
-      console.error("Profile extraction failed:", e);
-      throw e;
-    }
-  }
-  mergeProfile(extracted) {
-    if (!extracted || Object.keys(extracted).length === 0)
-      return;
-    if (extracted.profession) {
-      this.userProfile.profession = extracted.profession;
-    }
-    if (extracted.expertise && Array.isArray(extracted.expertise)) {
-      const newExpertise = extracted.expertise.filter(
-        (e) => !this.userProfile.expertise.includes(e)
-      );
-      this.userProfile.expertise.push(...newExpertise);
-    }
-    if (extracted.currentProjects && Array.isArray(extracted.currentProjects)) {
-      const newProjects = extracted.currentProjects.filter(
-        (p) => !this.userProfile.context.currentProjects.includes(p)
-      );
-      this.userProfile.context.currentProjects.push(...newProjects);
-    }
-    if (extracted.goals && Array.isArray(extracted.goals)) {
-      const newGoals = extracted.goals.filter(
-        (g) => !this.userProfile.context.goals.includes(g)
-      );
-      this.userProfile.context.goals.push(...newGoals);
-    }
-    if (extracted.preferences) {
-      if (extracted.preferences.responseStyle) {
-        this.userProfile.preferences.responseStyle = extracted.preferences.responseStyle;
-      }
-    }
-    this.userProfile.metadata.updatedAt = Date.now();
-    this.userProfile.metadata.lastProfileUpdate = Date.now();
-  }
-  getProfile() {
-    return { ...this.userProfile };
-  }
-  async updateProfile(updates) {
-    this.userProfile = { ...this.userProfile, ...updates };
-    this.userProfile.metadata.updatedAt = Date.now();
-    await this.saveProfile();
-  }
-  // ==================== Session Summary ====================
-  async endSession() {
-    if (this.currentSessionMessages === 0)
-      return;
-    try {
-      const summary = await this.generateSessionSummary();
-      this.sessionSummaries.push(summary);
-      if (this.sessionSummaries.length > 10) {
-        this.sessionSummaries = this.sessionSummaries.slice(-10);
-      }
-      await this.saveSummaries();
-    } catch (e) {
-      console.error("Failed to generate session summary:", e);
-    }
-  }
-  async generateSessionSummary() {
-    const summaryPrompt = `\u603B\u7ED3\u8FD9\u6B21\u5BF9\u8BDD\u7684\u5173\u952E\u5185\u5BB9\uFF0850\u5B57\u4EE5\u5185\uFF0C\u4E00\u53E5\u8BDD\uFF09`;
-    try {
-      const result = await this.model.generateContent(summaryPrompt);
-      const summary = result.response.text().trim();
-      return {
-        timestamp: Date.now(),
-        messageCount: this.currentSessionMessages,
-        summary
-      };
-    } catch (e) {
-      return {
-        timestamp: Date.now(),
-        messageCount: this.currentSessionMessages,
-        summary: `\u5BF9\u8BDD\u5305\u542B ${this.currentSessionMessages} \u6761\u6D88\u606F`
-      };
-    }
-  }
-  // ==================== Persistence ====================
-  async save() {
-    await this.saveProfile();
-    await this.saveSummaries();
-    await this.saveChatHistory();
-  }
-  async ensureMemoryDir() {
-    const adapter = this.app.vault.adapter;
-    const dirExists = await adapter.exists(this.MEMORY_DIR);
-    if (!dirExists) {
-      await adapter.mkdir(this.MEMORY_DIR);
-    }
-  }
-  async loadProfile() {
-    try {
-      const path = `${this.MEMORY_DIR}/${this.PROFILE_FILE}`;
-      const exists = await this.app.vault.adapter.exists(path);
-      if (exists) {
-        const content = await this.app.vault.adapter.read(path);
-        this.userProfile = JSON.parse(content);
-      }
-    } catch (e) {
-      console.error("Failed to load profile:", e);
-      this.userProfile = { ...DEFAULT_USER_PROFILE };
-    }
-  }
-  async saveProfile() {
-    try {
-      await this.ensureMemoryDir();
-      const path = `${this.MEMORY_DIR}/${this.PROFILE_FILE}`;
-      await this.app.vault.adapter.write(
-        path,
-        JSON.stringify(this.userProfile, null, 2)
-      );
-    } catch (e) {
-      console.error("Failed to save profile:", e);
-    }
-  }
-  async loadSummaries() {
-    try {
-      const path = `${this.MEMORY_DIR}/${this.SUMMARY_FILE}`;
-      const exists = await this.app.vault.adapter.exists(path);
-      if (exists) {
-        const content = await this.app.vault.adapter.read(path);
-        this.sessionSummaries = JSON.parse(content);
-      }
-    } catch (e) {
-      console.error("Failed to load summaries:", e);
-      this.sessionSummaries = [];
-    }
-  }
-  async saveSummaries() {
-    try {
-      await this.ensureMemoryDir();
-      const path = `${this.MEMORY_DIR}/${this.SUMMARY_FILE}`;
-      await this.app.vault.adapter.write(
-        path,
-        JSON.stringify(this.sessionSummaries, null, 2)
-      );
-    } catch (e) {
-      console.error("Failed to save summaries:", e);
-    }
-  }
-  async loadChatHistory() {
-    try {
-      const path = `${this.MEMORY_DIR}/${this.HISTORY_FILE}`;
-      const exists = await this.app.vault.adapter.exists(path);
-      if (exists) {
-        const content = await this.app.vault.adapter.read(path);
-        this.chatHistory = JSON.parse(content);
-      }
-    } catch (e) {
-      console.error("Failed to load chat history:", e);
-      this.chatHistory = [];
-    }
-  }
-  async saveChatHistory() {
-    try {
-      await this.ensureMemoryDir();
-      const path = `${this.MEMORY_DIR}/${this.HISTORY_FILE}`;
-      await this.app.vault.adapter.write(
-        path,
-        JSON.stringify(this.chatHistory, null, 2)
-      );
-    } catch (e) {
-      console.error("Failed to save chat history:", e);
-    }
-  }
-  async clearChatHistory() {
-    this.chatHistory = [];
-    await this.saveChatHistory();
-  }
-};
-
-// src/utils/logger.ts
-var _Logger = class {
-  logs = [];
-  maxLogs = 1e3;
-  enableConsole = true;
-  enableStorage = true;
-  constructor() {
-  }
-  static getInstance() {
-    if (!_Logger.instance) {
-      _Logger.instance = new _Logger();
-    }
-    return _Logger.instance;
-  }
-  debug(message, context, metadata) {
-    this.log("debug", message, context, void 0, metadata);
-  }
-  info(message, context, metadata) {
-    this.log("info", message, context, void 0, metadata);
-  }
-  warn(message, context, metadata) {
-    this.log("warn", message, context, void 0, metadata);
-  }
-  error(message, error, context, metadata) {
-    this.log("error", message, context, error, metadata);
-  }
-  log(level, message, context, error, metadata) {
-    const entry = {
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      level,
-      message,
-      context,
-      error: error ? this.serializeError(error) : void 0,
-      metadata
-    };
-    this.logs.push(entry);
-    if (this.logs.length > this.maxLogs) {
-      this.logs.shift();
-    }
-    if (this.enableConsole) {
-      this.outputToConsole(entry);
-    }
-    if (this.enableStorage) {
-      this.saveToStorage(entry);
-    }
-  }
-  serializeError(error) {
-    if (error instanceof Error) {
-      return {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-        cause: error.cause ? this.serializeError(error.cause) : void 0
-      };
-    }
-    return {
-      message: error?.toString() || "Unknown error",
-      data: error
-    };
-  }
-  outputToConsole(entry) {
-    const consoleMessage = `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.context ? `[${entry.context}] ` : ""}${entry.message}`;
-    switch (entry.level) {
-      case "debug":
-        console.debug(consoleMessage, entry.metadata || "", entry.error || "");
-        break;
-      case "info":
-        console.info(consoleMessage, entry.metadata || "", entry.error || "");
-        break;
-      case "warn":
-        console.warn(consoleMessage, entry.metadata || "", entry.error || "");
-        break;
-      case "error":
-        console.error(consoleMessage, entry.metadata || "", entry.error || "");
-        break;
-    }
-  }
-  saveToStorage(entry) {
-    try {
-      const key = `gemini_log_${Date.now()}`;
-      localStorage.setItem(key, JSON.stringify(entry));
-      this.cleanupOldStorageLogs();
-    } catch (error) {
-      console.warn("\u65E0\u6CD5\u4FDD\u5B58\u65E5\u5FD7\u5230\u672C\u5730\u5B58\u50A8:", error);
-    }
-  }
-  cleanupOldStorageLogs() {
-    const keys = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith("gemini_log_")) {
-        keys.push(key);
-      }
-    }
-    keys.sort().reverse();
-    const keysToRemove = keys.slice(100);
-    keysToRemove.forEach((key) => localStorage.removeItem(key));
-  }
-  getRecentLogs(level, limit = 100) {
-    let filteredLogs = this.logs;
-    if (level) {
-      filteredLogs = this.logs.filter((log) => log.level === level);
-    }
-    return filteredLogs.slice(-limit);
-  }
-  clearLogs() {
-    this.logs = [];
-  }
-  exportLogs() {
-    return JSON.stringify(this.logs, null, 2);
-  }
-  setConsoleOutput(enabled) {
-    this.enableConsole = enabled;
-  }
-  setStorage(enabled) {
-    this.enableStorage = enabled;
-  }
-};
-var Logger = _Logger;
-__publicField(Logger, "instance");
-var logger = Logger.getInstance();
-
-// src/gemini-api.ts
-var GeminiAPI = class {
-  constructor(app, settings, toolManager, mockModel) {
-    this.app = app;
-    this.settings = settings;
-    this.toolManager = toolManager;
-    this.mockModel = mockModel;
-    if (settings.apiKey || mockModel) {
-      this.init();
-    }
-    this.setupErrorHandlers();
-  }
+// src/models/gemini.ts
+var GeminiProvider = class {
+  id = "gemini";
+  name = "Google Gemini";
   genAI;
   model;
-  memoryManager = null;
-  lastResponseTime = Date.now();
-  requestTimeout = 3e4;
-  // 30秒超时
-  maxRetries = 3;
-  retryDelay = 2e3;
-  init() {
-    if (this.mockModel) {
-      this.model = this.mockModel;
-      return;
-    }
-    this.genAI = new GoogleGenerativeAI(this.settings.apiKey);
+  config;
+  configure(config) {
+    this.config = config;
+    this.genAI = new GoogleGenerativeAI(config.apiKey);
     this.model = this.genAI.getGenerativeModel({
-      model: this.settings.primaryModel,
-      systemInstruction: this.settings.systemPrompt,
-      tools: [{ functionDeclarations: this.toolManager.getToolsDefinitions() }]
-    });
-    this.memoryManager = new MemoryManager(this.app, this.model);
-  }
-  setupErrorHandlers() {
-    window.addEventListener("unhandledrejection", (event) => {
-      logger.error("\u672A\u5904\u7406\u7684Promise\u62D2\u7EDD", event.reason, "GlobalErrorHandler");
-    });
-    window.addEventListener("error", (event) => {
-      logger.error("\u5168\u5C40\u9519\u8BEF", event.error, "GlobalErrorHandler");
+      model: config.modelName,
+      systemInstruction: config.systemPrompt
     });
   }
   async checkAvailability() {
     try {
-      logger.info("\u5F00\u59CB\u68C0\u67E5API\u53EF\u7528\u6027", "GeminiAPI.checkAvailability");
-      this.init();
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
-      const result = await this.retryOperationWithTimeout(() => this.model.generateContent("Hello"), controller.signal);
-      clearTimeout(timeoutId);
-      this.lastResponseTime = Date.now();
-      const isAvailable = !!result.response.text();
-      logger.info(`API\u53EF\u7528\u6027\u68C0\u67E5\u7ED3\u679C: ${isAvailable}`, "GeminiAPI.checkAvailability");
-      return isAvailable;
+      const result = await this.model.generateContent("Hello");
+      return !!result.response.text();
     } catch (e) {
-      logger.error("API\u53EF\u7528\u6027\u68C0\u67E5\u5931\u8D25", e, "GeminiAPI.checkAvailability");
-      throw e;
+      logger.error("Gemini availability check failed", e, "GeminiProvider");
+      return false;
     }
   }
+  async generateContent(prompt) {
+    const result = await this.model.generateContent(prompt);
+    return {
+      text: result.response.text()
+    };
+  }
+  startChat(tools) {
+    const modelWithTools = tools ? this.genAI.getGenerativeModel({
+      model: this.config.modelName,
+      systemInstruction: this.config.systemPrompt,
+      tools: [{ functionDeclarations: tools }]
+    }) : this.model;
+    const chat = modelWithTools.startChat();
+    return new GeminiChatSession(chat);
+  }
+};
+var GeminiChatSession = class {
+  constructor(chat) {
+    this.chat = chat;
+  }
+  async sendMessage(text) {
+    let result;
+    if (typeof text === "string") {
+      result = await this.chat.sendMessage(text);
+    } else {
+      const toolResponse = text.map((t) => ({
+        functionResponse: {
+          name: t.name,
+          response: t.response
+        }
+      }));
+      result = await this.chat.sendMessage(toolResponse);
+    }
+    const response = result.response;
+    const functionCalls = response.functionCalls();
+    return {
+      text: response.text ? response.text() : "",
+      functionCalls: functionCalls ? functionCalls.map((fc) => ({
+        name: fc.name,
+        args: fc.args
+      })) : void 0
+    };
+  }
+  async getHistory() {
+    const history = await this.chat.getHistory();
+    return history.map((h) => ({
+      role: h.role === "user" ? "user" : "model",
+      content: h.parts.map((p) => p.text).join("")
+    }));
+  }
+  async clearHistory() {
+  }
+};
+
+// src/models/openai.ts
+var import_obsidian = require("obsidian");
+var OpenAIProvider = class {
+  id = "openai";
+  name = "OpenAI Compatible";
+  config;
+  configure(config) {
+    this.config = config;
+  }
+  async checkAvailability() {
+    try {
+      await this.generateContent("Hello");
+      return true;
+    } catch (e) {
+      logger.error("OpenAI availability check failed", e, "OpenAIProvider");
+      return false;
+    }
+  }
+  async generateContent(prompt) {
+    const messages = [
+      { role: "system", content: this.config.systemPrompt || "" },
+      { role: "user", content: prompt }
+    ];
+    return this.chatCompletion(messages);
+  }
+  startChat(tools) {
+    return new OpenAIChatSession(this.config, tools, this);
+  }
+  async chatCompletion(messages, tools) {
+    const url = `${this.config.baseUrl || "https://api.openai.com/v1"}/chat/completions`;
+    const body = {
+      model: this.config.modelName,
+      messages,
+      temperature: 0.7
+    };
+    if (tools && tools.length > 0) {
+      body.tools = tools.map((t) => ({
+        type: "function",
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters
+        }
+      }));
+    }
+    const headers = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${this.config.apiKey}`
+    };
+    const params = {
+      url,
+      method: "POST",
+      headers,
+      body: JSON.stringify(body)
+    };
+    const response = await (0, import_obsidian.requestUrl)(params);
+    if (response.status !== 200) {
+      throw new Error(`OpenAI API Error: ${response.status} - ${response.text}`);
+    }
+    const data = JSON.parse(response.text);
+    const choice = data.choices[0];
+    const message = choice.message;
+    const result = {
+      text: message.content || ""
+    };
+    if (message.tool_calls) {
+      result.functionCalls = message.tool_calls.map((tc) => ({
+        name: tc.function.name,
+        args: JSON.parse(tc.function.arguments)
+      }));
+    }
+    return result;
+  }
+};
+var OpenAIChatSession = class {
+  constructor(config, tools, provider) {
+    this.config = config;
+    this.tools = tools;
+    this.provider = provider;
+    if (config.systemPrompt) {
+      this.history.push({ role: "system", content: config.systemPrompt });
+    }
+  }
+  history = [];
+  async sendMessage(text) {
+    if (typeof text === "string") {
+      this.history.push({ role: "user", content: text });
+    } else {
+      const lastMsg = this.history[this.history.length - 1];
+      if (lastMsg.role === "assistant" && lastMsg.tool_calls) {
+        text.forEach((t) => {
+          const call = lastMsg.tool_calls.find((tc) => tc.function.name === t.name);
+          if (call) {
+            this.history.push({
+              role: "tool",
+              tool_call_id: call.id,
+              name: t.name,
+              content: JSON.stringify(t.response)
+            });
+          }
+        });
+      }
+    }
+    const result = await this.provider.chatCompletion(this.history, this.tools);
+    const assistantMsg = { role: "assistant", content: result.text };
+    if (result.functionCalls) {
+    }
+    return result;
+  }
+  async getHistory() {
+    return this.history.filter((h) => h.role !== "system" && h.role !== "tool").map((h) => ({
+      role: h.role,
+      content: h.content || ""
+    }));
+  }
+  async clearHistory() {
+    this.history = [];
+    if (this.config.systemPrompt) {
+      this.history.push({ role: "system", content: this.config.systemPrompt });
+    }
+  }
+};
+
+// src/services/model-service.ts
+var ModelService = class {
+  constructor(app, settings, toolManager) {
+    this.app = app;
+    this.settings = settings;
+    this.toolManager = toolManager;
+    this.initializeProvider();
+    this.setupErrorHandlers();
+  }
+  provider;
+  memoryManager = null;
+  lastResponseTime = Date.now();
+  requestTimeout = 3e4;
+  // 30s timeout
+  maxRetries = 3;
+  retryDelay = 2e3;
+  initializeProvider() {
+    const providerType = this.settings.provider;
+    switch (providerType) {
+      case "gemini":
+        this.provider = new GeminiProvider();
+        this.provider.configure({
+          apiKey: this.settings.apiKey,
+          modelName: this.settings.primaryModel,
+          systemPrompt: this.settings.systemPrompt,
+          contextWindow: this.settings.contextWindow
+        });
+        break;
+      case "openai":
+        this.provider = new OpenAIProvider();
+        this.provider.configure({
+          apiKey: this.settings.openaiApiKey,
+          baseUrl: this.settings.openaiBaseUrl,
+          modelName: this.settings.openaiModel,
+          systemPrompt: this.settings.systemPrompt
+        });
+        break;
+      case "deepseek":
+        this.provider = new OpenAIProvider();
+        this.provider.id = "deepseek";
+        this.provider.name = "DeepSeek";
+        this.provider.configure({
+          apiKey: this.settings.deepseekApiKey,
+          baseUrl: this.settings.deepseekBaseUrl,
+          modelName: this.settings.deepseekModel,
+          systemPrompt: this.settings.systemPrompt
+        });
+        break;
+      case "qwen":
+        this.provider = new OpenAIProvider();
+        this.provider.id = "qwen";
+        this.provider.name = "Qwen";
+        this.provider.configure({
+          apiKey: this.settings.qwenApiKey,
+          baseUrl: this.settings.qwenBaseUrl,
+          modelName: this.settings.qwenModel,
+          systemPrompt: this.settings.systemPrompt
+        });
+        break;
+      default:
+        logger.error(`Unknown provider: ${providerType}`, null, "ModelService");
+        this.provider = new GeminiProvider();
+    }
+    if (this.hasValidConfig()) {
+      this.memoryManager = new MemoryManager(this.app, this.provider);
+    }
+  }
+  hasValidConfig() {
+    switch (this.settings.provider) {
+      case "gemini":
+        return !!this.settings.apiKey;
+      case "openai":
+        return !!this.settings.openaiApiKey;
+      case "deepseek":
+        return !!this.settings.deepseekApiKey;
+      case "qwen":
+        return !!this.settings.qwenApiKey;
+      default:
+        return false;
+    }
+  }
+  reloadProvider() {
+    this.initializeProvider();
+  }
+  updateSettings(settings) {
+    this.settings = settings;
+    this.initializeProvider();
+  }
+  setupErrorHandlers() {
+    window.addEventListener("unhandledrejection", (event) => {
+      logger.error("Unhandled Promise Rejection", event.reason, "GlobalErrorHandler");
+    });
+  }
+  async checkAvailability() {
+    return await this.provider.checkAvailability();
+  }
   async chat(userMessage, contextContext, selection = "") {
-    logger.info(`\u5F00\u59CB\u5904\u7406\u804A\u5929\u6D88\u606F: ${userMessage.substring(0, 50)}...`, "GeminiAPI.chat");
-    if (!this.genAI && !this.mockModel) {
-      const error = "Gemini API Key not configured!";
-      logger.error(error, new Error(error), "GeminiAPI.chat");
-      new import_obsidian.Notice(error);
+    logger.info(`Processing chat message: ${userMessage.substring(0, 50)}...`, "ModelService.chat");
+    if (!this.hasValidConfig()) {
+      const error = `${this.provider.name} API Key not configured!`;
+      logger.error(error, new Error(error), "ModelService.chat");
+      new import_obsidian2.Notice(error);
       return "Error: API Key missing.";
     }
     try {
@@ -3627,139 +3866,45 @@ var GeminiAPI = class {
 `;
       }
       fullPrompt += `User Request: ${userMessage}`;
-      logger.debug(`\u6784\u5EFA\u7684\u63D0\u793A: ${fullPrompt.substring(0, 200)}...`, "GeminiAPI.chat");
-      const chat = this.memoryManager ? this.memoryManager.getOrCreateSession() : this.model.startChat();
-      let result = await this.retryOperationWithTimeout(() => chat.sendMessage(fullPrompt));
-      let response = result.response;
-      let functionCalls = response.functionCalls();
+      const chat = this.memoryManager ? this.memoryManager.getOrCreateSession() : this.provider.startChat(this.toolManager.getToolsDefinitions());
+      let result = await chat.sendMessage(fullPrompt);
       let loopCount = 0;
       const MAX_LOOPS = 10;
-      while (functionCalls && functionCalls.length > 0) {
+      while (result.functionCalls && result.functionCalls.length > 0) {
         loopCount++;
         if (loopCount > MAX_LOOPS) {
-          logger.warn(`Function call loop limit reached (${MAX_LOOPS})`, "GeminiAPI.chat");
+          logger.warn(`Function call loop limit reached (${MAX_LOOPS})`, "ModelService.chat");
           break;
         }
-        logger.info(`Processing function calls (Loop ${loopCount}): ${functionCalls.map((c) => c.name).join(", ")}`, "GeminiAPI.chat");
-        const toolResults = await Promise.all(functionCalls.map(async (call) => {
+        logger.info(`Processing function calls (Loop ${loopCount}): ${result.functionCalls.map((c) => c.name).join(", ")}`, "ModelService.chat");
+        const toolResults = await Promise.all(result.functionCalls.map(async (call) => {
           try {
             const toolResult = await this.toolManager.execute(call.name, call.args);
             return {
-              functionResponse: {
-                name: call.name,
-                response: toolResult
-              }
+              name: call.name,
+              response: toolResult
             };
           } catch (error) {
-            logger.error(`Tool execution failed: ${call.name}`, error, "GeminiAPI.chat");
+            logger.error(`Tool execution failed: ${call.name}`, error, "ModelService.chat");
             return {
-              functionResponse: {
-                name: call.name,
-                response: { error: error.message || "Unknown error" }
-              }
+              name: call.name,
+              response: { error: error.message || "Unknown error" }
             };
           }
         }));
-        result = await this.retryOperationWithTimeout(() => chat.sendMessage(toolResults));
-        response = result.response;
-        functionCalls = response.functionCalls();
+        result = await chat.sendMessage(toolResults);
       }
-      let responseText = "";
-      try {
-        responseText = response.text();
-      } catch (e) {
-        logger.warn("Failed to get text from response, possibly blocked or empty.", e, "GeminiAPI.chat");
-      }
-      if (!responseText && loopCount > 0) {
-        if (loopCount > MAX_LOOPS) {
-          responseText = "I've finished the requested tasks, but I cannot generate a text summary right now (loop limit reached).";
-        } else {
-          responseText = "Task completed.";
-        }
-      }
+      const responseText = result.text;
       if (this.memoryManager) {
         await this.memoryManager.recordMessage("user", userMessage);
         await this.memoryManager.recordMessage("model", responseText);
       }
       this.lastResponseTime = Date.now();
-      logger.info(`\u6210\u529F\u5904\u7406\u804A\u5929\u6D88\u606F\uFF0C\u56DE\u590D\u957F\u5EA6: ${responseText.length}`, "GeminiAPI.chat");
       return responseText;
     } catch (e) {
-      logger.error("\u804A\u5929\u5904\u7406\u5931\u8D25", e, "GeminiAPI.chat");
-      if (e.name === "AbortError") {
-        return "Error: \u8BF7\u6C42\u8D85\u65F6\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002";
-      }
-      if (e.message?.includes("503") || e.message?.includes("overloaded")) {
-        return "Error: The AI model is currently overloaded (503). Please try again in a moment.";
-      }
+      logger.error("Chat processing failed", e, "ModelService.chat");
       return `Error: ${e.message}`;
     }
-  }
-  async retryOperation(operation, retries = 3, delay = 2e3) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (retries > 0 && (error.message?.includes("503") || error.message?.includes("overloaded"))) {
-        logger.warn(`\u6A21\u578B\u8FC7\u8F7D\uFF0C\u6B63\u5728\u91CD\u8BD5... (${retries} \u6B21\u5C1D\u8BD5\u5269\u4F59)`, "GeminiAPI.retryOperation");
-        new import_obsidian.Notice(`\u26A0\uFE0F Model overloaded. Retrying... (${retries} attempts left)`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        return this.retryOperation(operation, retries - 1, delay * 2);
-      }
-      throw error;
-    }
-  }
-  async retryOperationWithTimeout(operation, signal, retries = 3) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
-    const combinedSignal = signal ? this.combineSignals(controller.signal, signal) : controller.signal;
-    try {
-      return await this.executeWithTimeout(operation, combinedSignal);
-    } catch (error) {
-      clearTimeout(timeoutId);
-      if (error.name === "AbortError") {
-        throw new Error("\u8BF7\u6C42\u8D85\u65F6\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5");
-      }
-      if (retries > 0 && (error.message?.includes("503") || error.message?.includes("overloaded"))) {
-        logger.warn(`\u6A21\u578B\u8FC7\u8F7D\uFF0C\u6B63\u5728\u91CD\u8BD5... (${retries} \u6B21\u5C1D\u8BD5\u5269\u4F59)`, "GeminiAPI.retryOperationWithTimeout");
-        new import_obsidian.Notice(`\u26A0\uFE0F Model overloaded. Retrying... (${retries} attempts left)`);
-        await new Promise((resolve) => setTimeout(resolve, this.retryDelay));
-        return this.retryOperationWithTimeout(operation, signal, retries - 1);
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-  async executeWithTimeout(operation, signal) {
-    return new Promise(async (resolve, reject) => {
-      if (signal.aborted) {
-        reject(new Error("\u8BF7\u6C42\u5DF2\u88AB\u53D6\u6D88"));
-        return;
-      }
-      const handleAbort = () => {
-        reject(new Error("\u8BF7\u6C42\u8D85\u65F6"));
-      };
-      signal.addEventListener("abort", handleAbort);
-      try {
-        const result = await operation();
-        signal.removeEventListener("abort", handleAbort);
-        resolve(result);
-      } catch (error) {
-        signal.removeEventListener("abort", handleAbort);
-        reject(error);
-      }
-    });
-  }
-  combineSignals(signal1, signal2) {
-    const controller = new AbortController();
-    const onAbort = () => controller.abort();
-    signal1.addEventListener("abort", onAbort);
-    signal2.addEventListener("abort", onAbort);
-    controller.signal.addEventListener("abort", () => {
-      signal1.removeEventListener("abort", onAbort);
-      signal2.removeEventListener("abort", onAbort);
-    });
-    return controller.signal;
   }
   // ==================== Memory Management Methods ====================
   async clearSession() {
@@ -3792,11 +3937,11 @@ var GeminiAPI = class {
 };
 
 // src/mcp/tools.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 var import_readability = __toESM(require_readability());
 
 // src/utils/video_utils.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 async function getVideoTranscript(url) {
   if (url.includes("youtube.com") || url.includes("youtu.be")) {
     return await getYoutubeTranscript(url);
@@ -3809,7 +3954,7 @@ async function getYoutubeTranscript(url) {
   try {
     const userAgent = navigator.userAgent;
     console.log(`Gemini Shell: Using User-Agent: ${userAgent}`);
-    const response = await (0, import_obsidian2.requestUrl)({
+    const response = await (0, import_obsidian3.requestUrl)({
       url,
       headers: {
         "User-Agent": userAgent
@@ -3844,7 +3989,7 @@ async function getYoutubeTranscript(url) {
     console.log(`Gemini Shell: Fetching transcript from: ${selectedTrack.baseUrl}`);
     let transcriptResponse;
     try {
-      transcriptResponse = await (0, import_obsidian2.requestUrl)({
+      transcriptResponse = await (0, import_obsidian3.requestUrl)({
         url: selectedTrack.baseUrl,
         headers: {
           "User-Agent": userAgent
@@ -3852,7 +3997,7 @@ async function getYoutubeTranscript(url) {
       });
     } catch (e) {
       console.warn("Gemini Shell: Failed to fetch transcript with User-Agent, trying without...", e);
-      transcriptResponse = await (0, import_obsidian2.requestUrl)({ url: selectedTrack.baseUrl });
+      transcriptResponse = await (0, import_obsidian3.requestUrl)({ url: selectedTrack.baseUrl });
     }
     let transcriptXml = transcriptResponse.text;
     console.log(`Gemini Shell: Transcript Response Status: ${transcriptResponse.status}`);
@@ -3861,7 +4006,7 @@ async function getYoutubeTranscript(url) {
       console.warn("Gemini Shell: Empty XML response. Trying fmt=json3...");
       try {
         const jsonUrl = selectedTrack.baseUrl + "&fmt=json3";
-        const jsonResponse = await (0, import_obsidian2.requestUrl)({
+        const jsonResponse = await (0, import_obsidian3.requestUrl)({
           url: jsonUrl,
           headers: { "User-Agent": userAgent }
         });
@@ -3913,13 +4058,13 @@ async function getYoutubeTranscript(url) {
     };
   } catch (e) {
     console.error("Failed to get YouTube transcript", e);
-    new import_obsidian2.Notice(`YouTube Transcript Error: ${e.message}`);
+    new import_obsidian3.Notice(`YouTube Transcript Error: ${e.message}`);
     return null;
   }
 }
 async function getBilibiliTranscript(url) {
   try {
-    const response = await (0, import_obsidian2.requestUrl)({
+    const response = await (0, import_obsidian3.requestUrl)({
       url,
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -3957,7 +4102,7 @@ async function getBilibiliTranscript(url) {
       return null;
     }
     const subtitleApiUrl = `https://api.bilibili.com/x/player/v2?cid=${cid}&bvid=${bvid}`;
-    const subtitleResponse = await (0, import_obsidian2.requestUrl)({
+    const subtitleResponse = await (0, import_obsidian3.requestUrl)({
       url: subtitleApiUrl,
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -3970,7 +4115,7 @@ async function getBilibiliTranscript(url) {
       const selectedSubtitle = subtitles[0];
       const subtitleUrl = `https:${selectedSubtitle.url}`;
       console.log(`Gemini Shell: Fetching Bilibili subtitle from ${subtitleUrl}`);
-      const transcriptResponse = await (0, import_obsidian2.requestUrl)({ url: subtitleUrl });
+      const transcriptResponse = await (0, import_obsidian3.requestUrl)({ url: subtitleUrl });
       const transcriptJson = JSON.parse(transcriptResponse.text);
       if (transcriptJson.body) {
         text = transcriptJson.body.map((item) => item.content).join(" ");
@@ -3996,7 +4141,7 @@ async function getBilibiliTranscript(url) {
     };
   } catch (e) {
     console.error("Failed to get Bilibili transcript", e);
-    new import_obsidian2.Notice(`Bilibili Transcript Error: ${e.message}`);
+    new import_obsidian3.Notice(`Bilibili Transcript Error: ${e.message}`);
     return null;
   }
 }
@@ -4013,6 +4158,9 @@ var ToolManager = class {
   }
   setGeminiApi(api) {
     this.geminiApi = api;
+  }
+  updateSettings(allowPluginControl) {
+    this.allowPluginControl = allowPluginControl;
   }
   getToolsDefinitions() {
     const tools = [
@@ -4225,14 +4373,14 @@ var ToolManager = class {
           return { status: "success", message: `\u2705 Note created: ${path}` };
         case "update_note":
           const updateFile = this.app.vault.getAbstractFileByPath(args.path);
-          if (!updateFile || !(updateFile instanceof import_obsidian3.TFile)) {
+          if (!updateFile || !(updateFile instanceof import_obsidian4.TFile)) {
             return { success: false, error: "File not found" };
           }
           await this.app.vault.modify(updateFile, args.content);
           return { success: true, message: `\u2705 Updated: ${args.path}` };
         case "append_to_note":
           const appendFile = this.app.vault.getAbstractFileByPath(args.path);
-          if (!appendFile || !(appendFile instanceof import_obsidian3.TFile)) {
+          if (!appendFile || !(appendFile instanceof import_obsidian4.TFile)) {
             return { success: false, error: "File not found" };
           }
           const existingContent = await this.app.vault.read(appendFile);
@@ -4316,7 +4464,7 @@ var ToolManager = class {
                 if (!this.geminiApi) {
                   return { success: false, error: "Gemini API not initialized for summarization." };
                 }
-                new import_obsidian3.Notice(`\u{1F3A5} Summarizing ${videoTranscript.platform} video...`);
+                new import_obsidian4.Notice(`\u{1F3A5} Summarizing ${videoTranscript.platform} video...`);
                 const prompt = `Please summarize the following video transcript. 
 Title: ${videoTranscript.title}
 Transcript:
@@ -4368,7 +4516,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
                 }
               } else {
                 console.log("Gemini Shell: No transcript text available, saving video embed.");
-                new import_obsidian3.Notice(`\u{1F4BE} Saving video link...`);
+                new import_obsidian4.Notice(`\u{1F4BE} Saving video link...`);
                 const created2 = (/* @__PURE__ */ new Date()).toISOString();
                 const titleTags = extractTags(videoTranscript.title);
                 const tagString = titleTags.length > 0 ? `, ${titleTags.join(", ")}` : "";
@@ -4400,7 +4548,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
               await this.app.vault.create(finalPath2, content2);
               return { success: true, path: finalPath2, message: `\u2705 Video Note Saved: ${finalPath2}` };
             }
-            const response = await (0, import_obsidian3.requestUrl)({
+            const response = await (0, import_obsidian4.requestUrl)({
               url,
               headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -4470,7 +4618,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
                 try {
                   const scripts = jsContent.querySelectorAll("script, style");
                   scripts.forEach((s) => s.remove());
-                  markdown = (0, import_obsidian3.htmlToMarkdown)(jsContent.innerHTML);
+                  markdown = (0, import_obsidian4.htmlToMarkdown)(jsContent.innerHTML);
                   extractionMethod = "wechat-js_content";
                 } catch (e) {
                   console.error("Gemini Shell: htmlToMarkdown failed on #js_content", e);
@@ -4508,7 +4656,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
               if (article && article.content) {
                 console.log(`Gemini Shell: Readability extracted content length: ${article.content.length}`);
                 try {
-                  markdown = (0, import_obsidian3.htmlToMarkdown)(article.content);
+                  markdown = (0, import_obsidian4.htmlToMarkdown)(article.content);
                   extractionMethod = "readability";
                 } catch (e) {
                   console.error("Gemini Shell: htmlToMarkdown failed on extracted content", e);
@@ -4517,7 +4665,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
               } else {
                 console.warn("Gemini Shell: Readability failed to extract content, falling back to full HTML");
                 try {
-                  markdown = (0, import_obsidian3.htmlToMarkdown)(html);
+                  markdown = (0, import_obsidian4.htmlToMarkdown)(html);
                   extractionMethod = "fallback-full";
                 } catch (e) {
                   console.error("Gemini Shell: htmlToMarkdown failed on full HTML", e);
@@ -4605,7 +4753,7 @@ ${markdown}`;
             searchUrl += `&df=${args.time_range}`;
           }
           try {
-            const response = await (0, import_obsidian3.requestUrl)({ url: searchUrl });
+            const response = await (0, import_obsidian4.requestUrl)({ url: searchUrl });
             const html = response.text;
             const results = [];
             let match;
@@ -4639,11 +4787,19 @@ ${markdown}`;
 // src/mcp/types.ts
 var DEFAULT_SETTINGS = {
   // Core
+  provider: "gemini",
   apiKey: "",
   primaryModel: "gemini-2.5-flash",
-  // 2.5 Flash
+  openaiApiKey: "",
+  openaiBaseUrl: "https://api.openai.com/v1",
+  openaiModel: "gpt-4o",
+  deepseekApiKey: "",
+  deepseekBaseUrl: "https://api.deepseek.com",
+  deepseekModel: "deepseek-chat",
+  qwenApiKey: "",
+  qwenBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  qwenModel: "qwen-turbo",
   thinkingModel: "gemini-2.5-pro",
-  // 2.5 Pro
   contextWindow: 1e5,
   // Guardian
   enableGuardian: false,
@@ -4679,8 +4835,8 @@ You have access to the internet via the 'web_search' tool. Use it to find up-to-
 };
 
 // src/settings.ts
-var import_obsidian4 = require("obsidian");
-var GeminiShellSettingTab = class extends import_obsidian4.PluginSettingTab {
+var import_obsidian5 = require("obsidian");
+var GeminiShellSettingTab = class extends import_obsidian5.PluginSettingTab {
   plugin;
   constructor(app, plugin) {
     super(app, plugin);
@@ -4693,117 +4849,169 @@ var GeminiShellSettingTab = class extends import_obsidian4.PluginSettingTab {
     const desc = containerEl.createEl("p", { cls: "setting-item-description" });
     desc.setText("Powered by Google Gemini 2.5. acting as your Vault OS.");
     containerEl.createEl("h3", { text: "\u{1F511} API Configuration", cls: "gemini-settings-header" });
-    new import_obsidian4.Setting(containerEl).setName("Gemini API Key").setDesc("Enter your Google Gemini API key.").addText((text) => text.setPlaceholder("AIzaSy...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
-      this.plugin.settings.apiKey = value;
+    new import_obsidian5.Setting(containerEl).setName("AI Provider").setDesc("Select the AI provider to use.").addDropdown((drop) => drop.addOption("gemini", "Google Gemini").addOption("openai", "OpenAI Compatible").addOption("deepseek", "DeepSeek").addOption("qwen", "Qwen (Tongyi Qianwen)").setValue(this.plugin.settings.provider).onChange(async (value) => {
+      this.plugin.settings.provider = value;
       await this.plugin.saveSettings();
-    })).addButton((btn) => btn.setButtonText("Test Connection").onClick(async () => {
-      if (!this.plugin.settings.apiKey) {
-        new import_obsidian4.Notice("\u26A0\uFE0F Please enter an API key first.");
-        return;
-      }
+      this.plugin.modelService.reloadProvider();
+      this.display();
+    }));
+    if (this.plugin.settings.provider === "gemini") {
+      new import_obsidian5.Setting(containerEl).setName("Gemini API Key").setDesc("Enter your Google Gemini API key.").addText((text) => text.setPlaceholder("AIzaSy...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
+        this.plugin.settings.apiKey = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian5.Setting(containerEl).setName("Model").setDesc("Choose the Gemini model.").addDropdown((drop) => drop.addOption("gemini-2.5-flash", "Gemini 2.5 Flash (Fastest)").addOption("gemini-2.5-pro", "Gemini 2.5 Pro (Reasoning)").addOption("gemini-2.0-flash", "Gemini 2.0 Flash").addOption("gemini-1.5-pro", "Gemini 1.5 Pro").setValue(this.plugin.settings.primaryModel).onChange(async (value) => {
+        this.plugin.settings.primaryModel = value;
+        await this.plugin.saveSettings();
+      }));
+    }
+    if (this.plugin.settings.provider === "openai") {
+      new import_obsidian5.Setting(containerEl).setName("OpenAI API Key").setDesc("Enter your OpenAI API key.").addText((text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.openaiApiKey).onChange(async (value) => {
+        this.plugin.settings.openaiApiKey = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian5.Setting(containerEl).setName("Base URL").setDesc("API Base URL (optional).").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(this.plugin.settings.openaiBaseUrl).onChange(async (value) => {
+        this.plugin.settings.openaiBaseUrl = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian5.Setting(containerEl).setName("Model Name").setDesc("Enter the model ID (e.g., gpt-4o, gpt-3.5-turbo).").addText((text) => text.setPlaceholder("gpt-4o").setValue(this.plugin.settings.openaiModel).onChange(async (value) => {
+        this.plugin.settings.openaiModel = value;
+        await this.plugin.saveSettings();
+      }));
+    }
+    if (this.plugin.settings.provider === "deepseek") {
+      new import_obsidian5.Setting(containerEl).setName("DeepSeek API Key").setDesc("Enter your DeepSeek API key.").addText((text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.deepseekApiKey).onChange(async (value) => {
+        this.plugin.settings.deepseekApiKey = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian5.Setting(containerEl).setName("Base URL").setDesc("DeepSeek API Base URL.").addText((text) => text.setPlaceholder("https://api.deepseek.com").setValue(this.plugin.settings.deepseekBaseUrl).onChange(async (value) => {
+        this.plugin.settings.deepseekBaseUrl = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian5.Setting(containerEl).setName("Model Name").setDesc("e.g., deepseek-chat, deepseek-coder").addText((text) => text.setPlaceholder("deepseek-chat").setValue(this.plugin.settings.deepseekModel).onChange(async (value) => {
+        this.plugin.settings.deepseekModel = value;
+        await this.plugin.saveSettings();
+      }));
+    }
+    if (this.plugin.settings.provider === "qwen") {
+      new import_obsidian5.Setting(containerEl).setName("Qwen API Key").setDesc("Enter your DashScope API key.").addText((text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.qwenApiKey).onChange(async (value) => {
+        this.plugin.settings.qwenApiKey = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian5.Setting(containerEl).setName("Base URL").setDesc("DashScope Compatible API URL.").addText((text) => text.setPlaceholder("https://dashscope.aliyuncs.com/compatible-mode/v1").setValue(this.plugin.settings.qwenBaseUrl).onChange(async (value) => {
+        this.plugin.settings.qwenBaseUrl = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian5.Setting(containerEl).setName("Model Name").setDesc("e.g., qwen-turbo, qwen-plus").addText((text) => text.setPlaceholder("qwen-turbo").setValue(this.plugin.settings.qwenModel).onChange(async (value) => {
+        this.plugin.settings.qwenModel = value;
+        await this.plugin.saveSettings();
+      }));
+    }
+    new import_obsidian5.Setting(containerEl).addButton((btn) => btn.setButtonText("Test Connection").onClick(async () => {
       try {
-        new import_obsidian4.Notice("Testing connection...");
-        await this.plugin.geminiApi.checkAvailability();
-        new import_obsidian4.Notice("\u2705 Connection successful!");
+        new import_obsidian5.Notice(`Testing connection to ${this.plugin.settings.provider}...`);
+        this.plugin.modelService.reloadProvider();
+        const success = await this.plugin.modelService.checkAvailability();
+        if (success) {
+          new import_obsidian5.Notice("\u2705 Connection successful!");
+        } else {
+          new import_obsidian5.Notice("\u274C Connection failed. Check API key and settings.");
+        }
       } catch (error) {
-        new import_obsidian4.Notice(`\u274C Connection failed: ${error.message}`);
+        new import_obsidian5.Notice(`\u274C Connection failed: ${error.message}`);
       }
     }));
-    new import_obsidian4.Setting(containerEl).setName("Model Selection").setDesc("Choose the Gemini model to use.").addDropdown((drop) => drop.addOption("gemini-2.5-flash", "Gemini 2.5 Flash (Fastest)").addOption("gemini-2.5-pro", "Gemini 2.5 Pro (Reasoning)").addOption("gemini-2.0-flash", "Gemini 2.0 Flash").addOption("gemini-1.5-pro", "Gemini 1.5 Pro").setValue(this.plugin.settings.primaryModel).onChange(async (value) => {
-      this.plugin.settings.primaryModel = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian4.Setting(containerEl).setName("Context Window Limit").setDesc("Limit token usage. Higher values allow reading larger files but cost more.").addSlider((slider) => slider.setLimits(1e4, 1e6, 1e4).setValue(this.plugin.settings.contextWindow).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Context Window Limit").setDesc("Limit token usage. Higher values allow reading larger files but cost more.").addSlider((slider) => slider.setLimits(1e4, 1e6, 1e4).setValue(this.plugin.settings.contextWindow).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.contextWindow = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "\u{1F6E1}\uFE0F Guardian Behavior", cls: "gemini-settings-header" });
-    new import_obsidian4.Setting(containerEl).setName("Enable Guardian").setDesc("Allow AI to passively analyze text and offer suggestions.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableGuardian).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Enable Guardian").setDesc("Allow AI to passively analyze text and offer suggestions.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableGuardian).onChange(async (value) => {
       this.plugin.settings.enableGuardian = value;
       await this.plugin.saveSettings();
       this.display();
     }));
     if (this.plugin.settings.enableGuardian) {
-      new import_obsidian4.Setting(containerEl).setName("Auto Mode").setDesc("Automatically analyze text after 5 seconds of inactivity.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.guardianAutoMode).onChange(async (value) => {
+      new import_obsidian5.Setting(containerEl).setName("Auto Mode").setDesc("Automatically analyze text after 5 seconds of inactivity.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.guardianAutoMode).onChange(async (value) => {
         this.plugin.settings.guardianAutoMode = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian4.Setting(containerEl).setName("Manual Mode Hotkey").setDesc("Configure the hotkey to manually trigger Guardian (Default: Mod+Shift+G).").addButton((btn) => btn.setButtonText("Configure Hotkey").onClick(() => {
+      new import_obsidian5.Setting(containerEl).setName("Manual Mode Hotkey").setDesc("Configure the hotkey to manually trigger Guardian (Default: Mod+Shift+G).").addButton((btn) => btn.setButtonText("Configure Hotkey").onClick(() => {
         this.app.setting.openTabById("hotkeys");
         this.app.setting.activeTab.setQuery("Guardian: Manual Trigger");
       }));
-      new import_obsidian4.Setting(containerEl).setName("Guardian Sensitivity").setDesc("Low (Manual) <-> High (Copilot Style)").addSlider((slider) => slider.setLimits(0, 100, 25).setValue(this.plugin.settings.guardianSensitivity).setDynamicTooltip().onChange(async (value) => {
+      new import_obsidian5.Setting(containerEl).setName("Guardian Sensitivity").setDesc("Low (Manual) <-> High (Copilot Style)").addSlider((slider) => slider.setLimits(0, 100, 25).setValue(this.plugin.settings.guardianSensitivity).setDynamicTooltip().onChange(async (value) => {
         this.plugin.settings.guardianSensitivity = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian4.Setting(containerEl).setName("UI Style").setDesc("How suggestions appear in the editor.").addDropdown((drop) => drop.addOption("ghost", "Ghost Text (Inline)").addOption("gutter", "Gutter Dot (Subtle)").addOption("hybrid", "Hybrid (Both)").setValue(this.plugin.settings.guardianUIStyle).onChange(async (value) => {
+      new import_obsidian5.Setting(containerEl).setName("UI Style").setDesc("How suggestions appear in the editor.").addDropdown((drop) => drop.addOption("ghost", "Ghost Text (Inline)").addOption("gutter", "Gutter Dot (Subtle)").addOption("hybrid", "Hybrid (Both)").setValue(this.plugin.settings.guardianUIStyle).onChange(async (value) => {
         this.plugin.settings.guardianUIStyle = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian4.Setting(containerEl).setName("Privacy Mode").setDesc("Anonymize data before sending (Replace names/emails). Reduces accuracy.").addToggle((toggle) => toggle.setValue(this.plugin.settings.privacyMode).onChange(async (value) => {
+      new import_obsidian5.Setting(containerEl).setName("Privacy Mode").setDesc("Anonymize data before sending (Replace names/emails). Reduces accuracy.").addToggle((toggle) => toggle.setValue(this.plugin.settings.privacyMode).onChange(async (value) => {
         this.plugin.settings.privacyMode = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian4.Setting(containerEl).setName("Ignored Folders").setDesc('Path patterns to ignore (one per line). e.g. "Private/"').setClass("gemini-full-width-textarea").addTextArea((text) => text.setPlaceholder("Private/\nSecrets/\nTemplates/").setValue(this.plugin.settings.ignoredFolders).onChange(async (value) => {
+      new import_obsidian5.Setting(containerEl).setName("Ignored Folders").setDesc('Path patterns to ignore (one per line). e.g. "Private/"').setClass("gemini-full-width-textarea").addTextArea((text) => text.setPlaceholder("Private/\nSecrets/\nTemplates/").setValue(this.plugin.settings.ignoredFolders).onChange(async (value) => {
         this.plugin.settings.ignoredFolders = value;
         await this.plugin.saveSettings();
       }));
     }
     containerEl.createEl("h3", { text: "\u26A1 Permissions & Capabilities", cls: "gemini-settings-header" });
-    new import_obsidian4.Setting(containerEl).setName("Allow File Creation").setDesc("Let AI create new notes (`/new`).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileCreation).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Allow File Creation").setDesc("Let AI create new notes (`/new`).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileCreation).onChange(async (value) => {
       this.plugin.settings.allowFileCreation = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Allow File Modification").setDesc("Let AI modify notes other than the one you are editing (e.g. Append to Daily Note).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileModification).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Allow File Modification").setDesc("Let AI modify notes other than the one you are editing (e.g. Append to Daily Note).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileModification).onChange(async (value) => {
       this.plugin.settings.allowFileModification = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Allow Plugin Control").setDesc("WARNING: Let AI execute commands from OTHER plugins (Dataview, Kanban, etc).").setClass("gemini-danger-setting").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowPluginControl).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Allow Plugin Control").setDesc("WARNING: Let AI execute commands from OTHER plugins (Dataview, Kanban, etc).").setClass("gemini-danger-setting").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowPluginControl).onChange(async (value) => {
       if (value)
-        new import_obsidian4.Notice("\u26A0\uFE0F Permission Granted: AI can now control your plugins.");
+        new import_obsidian5.Notice("\u26A0\uFE0F Permission Granted: AI can now control your plugins.");
       this.plugin.settings.allowPluginControl = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Confirm Executions").setDesc("Human-in-the-loop: Always ask for confirmation before writing files or running commands.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmExecutions).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Confirm Executions").setDesc("Human-in-the-loop: Always ask for confirmation before writing files or running commands.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmExecutions).onChange(async (value) => {
       this.plugin.settings.confirmExecutions = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "\u{1F5A5}\uFE0F Terminal Appearance", cls: "gemini-settings-header" });
-    new import_obsidian4.Setting(containerEl).setName("Theme Style").addDropdown((drop) => drop.addOption("hacker-green", "Hacker Green").addOption("cyberpunk", "Cyberpunk Neon").addOption("obsidian-native", "Obsidian Native").setValue(this.plugin.settings.terminalTheme).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Theme Style").addDropdown((drop) => drop.addOption("hacker-green", "Hacker Green").addOption("cyberpunk", "Cyberpunk Neon").addOption("obsidian-native", "Obsidian Native").setValue(this.plugin.settings.terminalTheme).onChange(async (value) => {
       this.plugin.settings.terminalTheme = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Font Size").addSlider((slider) => slider.setLimits(12, 24, 1).setValue(this.plugin.settings.terminalFontSize).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Font Size").addSlider((slider) => slider.setLimits(12, 24, 1).setValue(this.plugin.settings.terminalFontSize).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.terminalFontSize = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Background Opacity").addSlider((slider) => slider.setLimits(0.5, 1, 0.05).setValue(this.plugin.settings.terminalOpacity).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Background Opacity").addSlider((slider) => slider.setLimits(0.5, 1, 0.05).setValue(this.plugin.settings.terminalOpacity).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.terminalOpacity = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "\u{1F9E0} System Persona", cls: "gemini-settings-header" });
-    new import_obsidian4.Setting(containerEl).setName("Customize System Prompt").setDesc("Override the default AI personality.").addToggle((toggle) => toggle.setValue(this.plugin.settings.customizePrompt).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("Customize System Prompt").setDesc("Override the default AI personality.").addToggle((toggle) => toggle.setValue(this.plugin.settings.customizePrompt).onChange(async (value) => {
       this.plugin.settings.customizePrompt = value;
       await this.plugin.saveSettings();
       this.display();
     }));
     if (this.plugin.settings.customizePrompt) {
-      new import_obsidian4.Setting(containerEl).setClass("gemini-full-width-textarea").addTextArea((text) => text.setPlaceholder("You are a helpful assistant...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
+      new import_obsidian5.Setting(containerEl).setClass("gemini-full-width-textarea").addTextArea((text) => text.setPlaceholder("You are a helpful assistant...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
         this.plugin.settings.systemPrompt = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian4.Setting(containerEl).addButton((btn) => btn.setButtonText("Restore Default Prompt").onClick(async () => {
+      new import_obsidian5.Setting(containerEl).addButton((btn) => btn.setButtonText("Restore Default Prompt").onClick(async () => {
         this.plugin.settings.systemPrompt = DEFAULT_SETTINGS.systemPrompt;
         await this.plugin.saveSettings();
         this.display();
       }));
     }
     containerEl.createEl("h3", { text: "\u{1F4E8} WeChat Inbox", cls: "gemini-settings-header" });
-    new import_obsidian4.Setting(containerEl).setName("WeChat Inbox Path").setDesc('The file to monitor for new WeChat links (e.g., "Inbox.md").').addText((text) => text.setPlaceholder("Inbox.md").setValue(this.plugin.settings.wechatInboxPath).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("WeChat Inbox Path").setDesc('The file to monitor for new WeChat links (e.g., "Inbox.md").').addText((text) => text.setPlaceholder("Inbox.md").setValue(this.plugin.settings.wechatInboxPath).onChange(async (value) => {
       this.plugin.settings.wechatInboxPath = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("WeChat Storage Path").setDesc('The folder to store saved articles (e.g., "Clippings").').addText((text) => text.setPlaceholder("Clippings").setValue(this.plugin.settings.wechatStoragePath).onChange(async (value) => {
+    new import_obsidian5.Setting(containerEl).setName("WeChat Storage Path").setDesc('The folder to store saved articles (e.g., "Clippings").').addText((text) => text.setPlaceholder("Clippings").setValue(this.plugin.settings.wechatStoragePath).onChange(async (value) => {
       this.plugin.settings.wechatStoragePath = value;
       await this.plugin.saveSettings();
     }));
@@ -4811,14 +5019,14 @@ var GeminiShellSettingTab = class extends import_obsidian4.PluginSettingTab {
 };
 
 // src/ui/shell-view.ts
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 
 // src/ui/chat-controller.ts
 var ChatController = class {
   app;
   api;
   messages = [];
-  isResponding = false;
+  // private isResponding: boolean = false; // Unused
   onMessageAdded;
   onStatusChanged;
   constructor(options) {
@@ -4923,7 +5131,6 @@ ${list}`);
     }
   }
   setResponding(status) {
-    this.isResponding = status;
     if (this.onStatusChanged) {
       this.onStatusChanged(status);
     }
@@ -4939,8 +5146,8 @@ ${list}`);
 
 // src/ui/shell-view.ts
 var VIEW_TYPE_GEMINI_SHELL = "gemini-shell-view";
-var GeminiShellView = class extends import_obsidian5.ItemView {
-  api;
+var GeminiShellView = class extends import_obsidian6.ItemView {
+  modelService;
   chatController;
   outputContainer;
   inputEl;
@@ -4958,9 +5165,9 @@ var GeminiShellView = class extends import_obsidian5.ItemView {
   heartbeatIntervalMs = 3e4;
   // 30s check
   isResponding = false;
-  constructor(leaf, api) {
+  constructor(leaf, modelService) {
     super(leaf);
-    this.api = api;
+    this.modelService = modelService;
   }
   getViewType() {
     return VIEW_TYPE_GEMINI_SHELL;
@@ -4976,7 +5183,7 @@ var GeminiShellView = class extends import_obsidian5.ItemView {
     contentEl.empty();
     this.chatController = new ChatController({
       app: this.app,
-      api: this.api,
+      api: this.modelService,
       onMessageAdded: (msg) => this.appendMessage(msg),
       onStatusChanged: (status) => this.handleStatusChange(status)
     });
@@ -5176,7 +5383,7 @@ var GeminiShellView = class extends import_obsidian5.ItemView {
   appendMessage(msg) {
     const entry = this.outputContainer.createDiv({ cls: `shell-entry ${msg.role}` });
     if (msg.role === "ai") {
-      import_obsidian5.MarkdownRenderer.render(this.app, msg.content, entry, "", this);
+      import_obsidian6.MarkdownRenderer.render(this.app, msg.content, entry, "", this);
     } else if (msg.role === "user") {
       entry.setText(msg.content);
     } else {
@@ -5483,8 +5690,8 @@ function showGhostText(view, text, line, ch, replaceRange) {
 }
 
 // src/ui/guardian-modal.ts
-var import_obsidian6 = require("obsidian");
-var GuardianModal = class extends import_obsidian6.Modal {
+var import_obsidian7 = require("obsidian");
+var GuardianModal = class extends import_obsidian7.Modal {
   result;
   onSubmit;
   constructor(app, onSubmit) {
@@ -5494,20 +5701,20 @@ var GuardianModal = class extends import_obsidian6.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h2", { text: "Guardian Manual Trigger" });
-    new import_obsidian6.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
+    new import_obsidian7.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
       this.result = value;
     }).inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         this.submit();
       }
     }));
-    new import_obsidian6.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
+    new import_obsidian7.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
       this.submit();
     }));
   }
   submit() {
     if (!this.result) {
-      new import_obsidian6.Notice("Please enter an instruction.");
+      new import_obsidian7.Notice("Please enter an instruction.");
       return;
     }
     this.close();
@@ -5520,11 +5727,11 @@ var GuardianModal = class extends import_obsidian6.Modal {
 };
 
 // src/ui/selection-menu.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 var import_view3 = require("@codemirror/view");
 var import_state5 = require("@codemirror/state");
 var pluginApp = null;
-var pluginApi = null;
+var pluginModelService = null;
 var setSelectionMenuState = import_state5.StateEffect.define();
 var selectionMenuField = import_state5.StateField.define({
   create() {
@@ -5565,13 +5772,13 @@ var selectionMenuField = import_state5.StateField.define({
           btn.className = "guardian-selection-btn";
           btn.textContent = "Comment / AI";
           btn.onclick = () => {
-            if (!pluginApp || !pluginApi) {
-              new import_obsidian7.Notice("Gemini API not initialized");
+            if (!pluginApp || !pluginModelService) {
+              new import_obsidian8.Notice("Model Service not initialized");
               return;
             }
             const controller = new ChatController({
               app: pluginApp,
-              api: pluginApi,
+              api: pluginModelService,
               onMessageAdded: (msg) => {
               },
               onStatusChanged: (isResponding) => {
@@ -5609,7 +5816,7 @@ var selectionMenuField = import_state5.StateField.define({
               messages.forEach((msg) => {
                 const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
                 if (msg.role === "ai") {
-                  import_obsidian7.MarkdownRenderer.render(pluginApp, msg.content, msgEl, "", new import_obsidian7.Component());
+                  import_obsidian8.MarkdownRenderer.render(pluginApp, msg.content, msgEl, "", new import_obsidian8.Component());
                 } else {
                   msgEl.setText(msg.content);
                 }
@@ -5657,7 +5864,7 @@ ${selectionText}`;
           copyBtn.onclick = () => {
             const selectionText = view.state.doc.sliceString(state.from, state.to);
             navigator.clipboard.writeText(selectionText);
-            new import_obsidian7.Notice("Selection copied");
+            new import_obsidian8.Notice("Selection copied");
           };
           const replaceBtn = actions.createEl("button", { text: "Replace with Last Response" });
           replaceBtn.onclick = () => {
@@ -5669,7 +5876,7 @@ ${selectionText}`;
                 effects: setSelectionMenuState.of({ type: "hidden" })
               });
             } else {
-              new import_obsidian7.Notice("No AI response to replace with.");
+              new import_obsidian8.Notice("No AI response to replace with.");
             }
           };
           dom.appendChild(container);
@@ -5680,30 +5887,30 @@ ${selectionText}`;
     };
   })
 });
-function selectionMenuExtension(app, api) {
+function selectionMenuExtension(app, modelService) {
   pluginApp = app;
-  pluginApi = api;
+  pluginModelService = modelService;
   return [
     selectionMenuField
   ];
 }
 
 // main.ts
-var GeminiShellPlugin = class extends import_obsidian8.Plugin {
+var GeminiShellPlugin = class extends import_obsidian9.Plugin {
   settings;
-  geminiApi;
+  modelService;
   toolManager;
   // Debounce with trailing edge (default/false) for inactivity trigger
-  onEditorChangeDebounced = (0, import_obsidian8.debounce)(this.runGuardianCheck.bind(this), 3e3);
+  onEditorChangeDebounced = (0, import_obsidian9.debounce)(this.runGuardianCheck.bind(this), 3e3);
   async onload() {
     await this.loadSettings();
-    new import_obsidian8.Notice("Gemini Shell: Plugin Loaded (v2)");
+    new import_obsidian9.Notice("Gemini Shell: Plugin Loaded (v2)");
     this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
-    this.geminiApi = new GeminiAPI(this.app, this.settings, this.toolManager);
-    this.toolManager.setGeminiApi(this.geminiApi);
+    this.modelService = new ModelService(this.app, this.settings, this.toolManager);
+    this.toolManager.setGeminiApi(this.modelService);
     this.registerView(
       VIEW_TYPE_GEMINI_SHELL,
-      (leaf) => new GeminiShellView(leaf, this.geminiApi)
+      (leaf) => new GeminiShellView(leaf, this.modelService)
     );
     this.addRibbonIcon("terminal", "Open Gemini Shell", (evt) => {
       this.activateView();
@@ -5724,14 +5931,14 @@ var GeminiShellPlugin = class extends import_obsidian8.Plugin {
     this.registerEditorExtension([
       guardianGutterExtension(),
       ghostTextExtension(),
-      selectionMenuExtension(this.app, this.geminiApi)
+      selectionMenuExtension(this.app, this.modelService)
     ]);
     this.registerEvent(
       this.app.workspace.on("editor-change", this.onEditorChangeDebounced)
     );
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (file instanceof import_obsidian8.TFile && file.extension === "md") {
+        if (file instanceof import_obsidian9.TFile && file.extension === "md") {
           this.onFileModify(file);
         }
       })
@@ -5749,9 +5956,9 @@ var GeminiShellPlugin = class extends import_obsidian8.Plugin {
     }
   }
   activateGuardianModal() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
     if (!view) {
-      new import_obsidian8.Notice("Please open a Markdown file first.");
+      new import_obsidian9.Notice("Please open a Markdown file first.");
       return;
     }
     new GuardianModal(this.app, (instruction) => {
@@ -5763,9 +5970,8 @@ var GeminiShellPlugin = class extends import_obsidian8.Plugin {
   }
   async saveSettings() {
     await this.saveData(this.settings);
-    this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
-    this.geminiApi = new GeminiAPI(this.app, this.settings, this.toolManager);
-    this.toolManager.setGeminiApi(this.geminiApi);
+    this.toolManager.updateSettings(this.settings.allowPluginControl);
+    this.modelService.updateSettings(this.settings);
   }
   async onFileModify(file) {
     if (file.path !== this.settings.wechatInboxPath)
@@ -5788,7 +5994,7 @@ var GeminiShellPlugin = class extends import_obsidian8.Plugin {
       return;
     rawUrlMatches.sort((a, b) => b.index - a.index);
     for (const m of rawUrlMatches) {
-      new import_obsidian8.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
+      new import_obsidian9.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
       const result = await this.toolManager.execute("save_webpage", { url: m.url });
       if (result.success) {
         let finalPath = result.path;
@@ -5815,7 +6021,7 @@ var GeminiShellPlugin = class extends import_obsidian8.Plugin {
         newContent = newContent.substring(0, m.index) + linkText + newContent.substring(m.index + m.length);
         modified = true;
       } else {
-        new import_obsidian8.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
+        new import_obsidian9.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
       }
     }
     if (modified) {
@@ -5873,7 +6079,7 @@ Instructions:
 4. Output JSON: {"type": "completion", "suggestion": "MARKDOWN_FORMATTED_TEXT"}
 5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
       }
-      const response = await this.geminiApi.chat(prompt, "Guardian", systemPromptOverride);
+      const response = await this.modelService.chat(prompt, "Guardian", systemPromptOverride);
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         updateGuardianState(view, lineNumber, "idle" /* Idle */);

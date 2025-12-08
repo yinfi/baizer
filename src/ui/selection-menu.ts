@@ -1,7 +1,7 @@
 import { App, MarkdownRenderer, Component, Notice } from 'obsidian';
 import { EditorView, showTooltip } from '@codemirror/view';
 import { StateField, Extension, StateEffect } from '@codemirror/state';
-import { GeminiAPI } from '../gemini-api';
+import { ModelService } from '../services/model-service';
 import { ChatController, ChatMessage } from './chat-controller';
 
 // Define the states for our UI
@@ -11,7 +11,7 @@ type SelectionMenuState =
     | { type: 'chat', from: number, to: number, controller: ChatController };
 
 let pluginApp: App | null = null;
-let pluginApi: GeminiAPI | null = null;
+let pluginModelService: ModelService | null = null;
 
 // We need a way to manually update the state (e.g. button click -> input)
 export const setSelectionMenuState = StateEffect.define<SelectionMenuState>();
@@ -62,15 +62,15 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
                     btn.className = 'guardian-selection-btn';
                     btn.textContent = 'Comment / AI';
                     btn.onclick = () => {
-                        if (!pluginApp || !pluginApi) {
-                            new Notice('Gemini API not initialized');
+                        if (!pluginApp || !pluginModelService) {
+                            new Notice('Model Service not initialized');
                             return;
                         }
 
                         // Initialize ChatController
                         const controller = new ChatController({
                             app: pluginApp,
-                            api: pluginApi,
+                            api: pluginModelService,
                             onMessageAdded: (msg) => {
                                 // We need to re-render or update the UI when message is added
                                 // Since we are inside create(), we can manipulate the DOM directly if we had reference
@@ -226,9 +226,9 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
     })
 });
 
-export function selectionMenuExtension(app: App, api: GeminiAPI): Extension {
+export function selectionMenuExtension(app: App, modelService: ModelService): Extension {
     pluginApp = app;
-    pluginApi = api;
+    pluginModelService = modelService;
     return [
         selectionMenuField
     ];

@@ -16,8 +16,25 @@ declare module "obsidian" {
 
 export interface GeminiSettings {
     // --- 🤖 Core Connection ---
+    provider: 'gemini' | 'openai' | 'deepseek' | 'qwen';
     apiKey: string;
     primaryModel: string;
+
+    // OpenAI Compatible
+    openaiApiKey: string;
+    openaiBaseUrl: string;
+    openaiModel: string;
+
+    // DeepSeek
+    deepseekApiKey: string;
+    deepseekBaseUrl: string;
+    deepseekModel: string;
+
+    // Qwen
+    qwenApiKey: string;
+    qwenBaseUrl: string;
+    qwenModel: string;
+
     thinkingModel: string;
     contextWindow: number;
 
@@ -52,9 +69,23 @@ export interface GeminiSettings {
 
 export const DEFAULT_SETTINGS: GeminiSettings = {
     // Core
+    provider: 'gemini',
     apiKey: '',
-    primaryModel: 'gemini-2.5-flash',  // 2.5 Flash
-    thinkingModel: 'gemini-2.5-pro',   // 2.5 Pro
+    primaryModel: 'gemini-2.5-flash',
+
+    openaiApiKey: '',
+    openaiBaseUrl: 'https://api.openai.com/v1',
+    openaiModel: 'gpt-4o',
+
+    deepseekApiKey: '',
+    deepseekBaseUrl: 'https://api.deepseek.com',
+    deepseekModel: 'deepseek-chat',
+
+    qwenApiKey: '',
+    qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    qwenModel: 'qwen-turbo',
+
+    thinkingModel: 'gemini-2.5-pro',
     contextWindow: 100000,
 
     // Guardian
@@ -95,6 +126,6 @@ You have access to the internet via the 'web_search' tool. Use it to find up-to-
 
 export interface IGeminiShellPlugin extends Plugin {
     settings: GeminiSettings;
-    geminiApi: any;
+    modelService: any;
     saveSettings(): Promise<void>;
 }

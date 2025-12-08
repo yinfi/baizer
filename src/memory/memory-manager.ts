@@ -1,9 +1,9 @@
 import { App } from 'obsidian';
-import { GenerativeModel, ChatSession } from '@google/generative-ai';
+import { IModelProvider, IChatSession } from '../models/interfaces';
 import { UserProfile, SessionSummary, ChatMessage, DEFAULT_USER_PROFILE } from './types';
 
 export class MemoryManager {
-    private chatSession: ChatSession | null = null;
+    private chatSession: IChatSession | null = null;
     private userProfile: UserProfile;
     private sessionSummaries: SessionSummary[] = [];
     public chatHistory: ChatMessage[] = [];
@@ -19,7 +19,7 @@ export class MemoryManager {
 
     constructor(
         private app: App,
-        private model: GenerativeModel
+        private model: IModelProvider
     ) {
         this.userProfile = { ...DEFAULT_USER_PROFILE };
         this.loadProfile();
@@ -29,7 +29,7 @@ export class MemoryManager {
 
     // ==================== Session Management ====================
 
-    getOrCreateSession(): ChatSession {
+    getOrCreateSession(): IChatSession {
         if (!this.chatSession) {
             this.chatSession = this.model.startChat();
             this.currentSessionMessages = 0;
@@ -163,7 +163,7 @@ export class MemoryManager {
 如果没有提取到任何信息，返回 {}`;
 
             const result = await this.model.generateContent(extractionPrompt);
-            const responseText = result.response.text().trim();
+            const responseText = result.text.trim();
 
             // 提取 JSON
             const jsonMatch = responseText.match(/\{[\s\S]*\}/);
@@ -259,7 +259,7 @@ export class MemoryManager {
 
         try {
             const result = await this.model.generateContent(summaryPrompt);
-            const summary = result.response.text().trim();
+            const summary = result.text.trim();
 
             return {
                 timestamp: Date.now(),

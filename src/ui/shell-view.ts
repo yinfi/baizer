@@ -1,12 +1,12 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer } from 'obsidian';
-import { GeminiAPI } from '../gemini-api';
+import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
 import { ChatController, ChatMessage } from './chat-controller';
 
 export const VIEW_TYPE_GEMINI_SHELL = 'gemini-shell-view';
 
 export class GeminiShellView extends ItemView {
-    private api: GeminiAPI;
+    private modelService: ModelService;
     private chatController: ChatController;
     private outputContainer: HTMLElement;
     private inputEl: HTMLTextAreaElement;
@@ -26,9 +26,9 @@ export class GeminiShellView extends ItemView {
     private heartbeatIntervalMs: number = 30000; // 30s check
     private isResponding: boolean = false;
 
-    constructor(leaf: WorkspaceLeaf, api: GeminiAPI) {
+    constructor(leaf: WorkspaceLeaf, modelService: ModelService) {
         super(leaf);
-        this.api = api;
+        this.modelService = modelService;
     }
 
     getViewType() {
@@ -50,7 +50,7 @@ export class GeminiShellView extends ItemView {
         // Initialize ChatController
         this.chatController = new ChatController({
             app: this.app,
-            api: this.api,
+            api: this.modelService,
             onMessageAdded: (msg) => this.appendMessage(msg),
             onStatusChanged: (status) => this.handleStatusChange(status)
         });

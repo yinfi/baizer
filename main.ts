@@ -1,6 +1,6 @@
 import { Plugin, debounce, Notice, MarkdownView, TFile } from 'obsidian';
 import { EditorView } from '@codemirror/view';
-import { GeminiAPI } from './src/gemini-api';
+import { ModelService } from './src/services/model-service';
 import { ToolManager } from './src/mcp/tools';
 import { GeminiSettings, DEFAULT_SETTINGS } from './src/mcp/types';
 import { GeminiShellSettingTab } from './src/settings';
@@ -12,7 +12,7 @@ import { selectionMenuExtension, resetSelectionMenu, setSelectionMenuState } fro
 
 export default class GeminiShellPlugin extends Plugin {
     settings: GeminiSettings;
-    geminiApi: GeminiAPI;
+    modelService: ModelService;
     toolManager: ToolManager;
 
 
@@ -24,12 +24,12 @@ export default class GeminiShellPlugin extends Plugin {
         new Notice('Gemini Shell: Plugin Loaded (v2)');
 
         this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
-        this.geminiApi = new GeminiAPI(this.app, this.settings, this.toolManager);
-        this.toolManager.setGeminiApi(this.geminiApi);
+        this.modelService = new ModelService(this.app, this.settings, this.toolManager);
+        this.toolManager.setGeminiApi(this.modelService);
 
         this.registerView(
             VIEW_TYPE_GEMINI_SHELL,
-            (leaf) => new GeminiShellView(leaf, this.geminiApi)
+            (leaf) => new GeminiShellView(leaf, this.modelService)
         );
 
         // Add ribbon icon for quick access to Gemini Shell
@@ -57,7 +57,7 @@ export default class GeminiShellPlugin extends Plugin {
         this.registerEditorExtension([
             guardianGutterExtension(),
             ghostTextExtension(),
-            selectionMenuExtension(this.app, this.geminiApi)
+            selectionMenuExtension(this.app, this.modelService)
         ]);
 
         // Always register the event; runGuardianCheck will check the setting
@@ -106,9 +106,8 @@ export default class GeminiShellPlugin extends Plugin {
 
     async saveSettings() {
         await this.saveData(this.settings);
-        this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
-        this.geminiApi = new GeminiAPI(this.app, this.settings, this.toolManager);
-        this.toolManager.setGeminiApi(this.geminiApi);
+        this.toolManager.updateSettings(this.settings.allowPluginControl);
+        this.modelService.updateSettings(this.settings);
     }
 
     async onFileModify(file: TFile) {
@@ -244,7 +243,7 @@ Instructions:
 5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
             }
 
-            const response = await this.geminiApi.chat(prompt, "Guardian", systemPromptOverride);
+            const response = await this.modelService.chat(prompt, "Guardian", systemPromptOverride);
 
             const jsonMatch = response.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {

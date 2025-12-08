@@ -1,5 +1,5 @@
-import { App, TFile, Notice } from 'obsidian';
-import { GeminiAPI } from '../gemini-api';
+import { App } from 'obsidian';
+import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
 
 export interface ChatMessage {
@@ -11,16 +11,16 @@ export interface ChatMessage {
 
 export interface ChatControllerOptions {
     app: App;
-    api: GeminiAPI;
+    api: ModelService;
     onMessageAdded?: (message: ChatMessage) => void;
     onStatusChanged?: (isResponding: boolean) => void;
 }
 
 export class ChatController {
     private app: App;
-    private api: GeminiAPI;
+    private api: ModelService;
     private messages: ChatMessage[] = [];
-    private isResponding: boolean = false;
+    // private isResponding: boolean = false; // Unused
     private onMessageAdded?: (message: ChatMessage) => void;
     private onStatusChanged?: (isResponding: boolean) => void;
 
@@ -134,7 +134,7 @@ export class ChatController {
     }
 
     private setResponding(status: boolean) {
-        this.isResponding = status;
+        // this.isResponding = status;
         if (this.onStatusChanged) {
             this.onStatusChanged(status);
         }
