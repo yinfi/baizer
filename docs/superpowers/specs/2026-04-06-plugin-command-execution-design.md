@@ -49,8 +49,58 @@ The design does **not** preserve the older `list_available_commands` tool name o
 Discovery and execution semantics are intentionally aligned:
 
 - `get_plugin_commands` only returns commands for enabled plugins
-- if a plugin is installed but disabled, `get_plugin_commands` returns an explicit non-executable result such as `enabled: false`, `commands: []`, `count: 0`
+- if a plugin is installed but disabled, `get_plugin_commands` returns an explicit non-executable result
 - `execute_command` only executes commands that are discoverable under those same enabled-plugin rules
+
+Canonical `get_plugin_commands` response shapes:
+
+- enabled plugin with commands:
+
+```json
+{
+  "pluginId": "obsidian-kanban",
+  "enabled": true,
+  "commands": [{ "id": "obsidian-kanban:create-new-board", "name": "Create new board" }],
+  "count": 1
+}
+```
+
+- enabled plugin with zero commands:
+
+```json
+{
+  "pluginId": "some-plugin",
+  "enabled": true,
+  "commands": [],
+  "count": 0
+}
+```
+
+- installed but disabled plugin:
+
+```json
+{
+  "pluginId": "dataview",
+  "enabled": false,
+  "commands": [],
+  "count": 0,
+  "error_code": "plugin_disabled",
+  "error": "Plugin is not enabled"
+}
+```
+
+- unknown plugin:
+
+```json
+{
+  "pluginId": "missing-plugin",
+  "enabled": false,
+  "commands": [],
+  "count": 0,
+  "error_code": "plugin_not_found",
+  "error": "Plugin not found"
+}
+```
 
 ## Why This Approach
 
@@ -176,6 +226,17 @@ Canonical failure messages should be stable and human-readable, for example:
 - `Plugin is not enabled`
 - `Command not found`
 - `Command could not be executed`
+
+Thrown execution errors must still use the same full failure envelope, for example:
+
+```json
+{
+  "success": false,
+  "command_id": "plugin-id:command-name",
+  "error_code": "execution_error",
+  "error": "Original error message"
+}
+```
 
 Decision table for `execute_command` failures:
 
@@ -304,7 +365,9 @@ Ownership and interface rule:
 - `MemoryManager` must accept built-in tool definitions when creating or refreshing a session
 - this guarantee applies only to built-in tools required for the restored feature; dynamic MCP tool parity is out of scope for this recovery
 - the implementation must make it impossible for the memory-backed chat path to reuse a session that was created without the current built-in tool declarations
-- a memory-backed session must be recreated when the provider changes, when the built-in tool signature changes, or when the cached session predates the restored tool wiring
+- `ModelService` computes a concrete `toolsVersion` value from the current built-in tool definitions relevant to this feature
+- `MemoryManager` stores the last `toolsVersion` used to create the cached session
+- a memory-backed session must be recreated when the provider changes, when `toolsVersion` changes, or when the cached session predates the restored tool wiring
 
 ### Unit 4: Contract Verification
 
@@ -353,6 +416,12 @@ Boundary:
 
 - copy and prompt-text alignment only
 - no new runtime behavior beyond wording and prompt-content updates needed to match the restored contract
+
+Prompt alignment rule:
+
+- the default prompt text in `src/mcp/types.ts` must not instruct the model to use plugin-control tools when those tools are unavailable
+- the implementation may achieve this either by neutralizing the static default prompt or by conditionally adding plugin-control guidance only when `allowPluginControl` is enabled
+- after this change, prompt behavior and runtime tool availability must not contradict each other
 
 ## Runtime Data Flow
 
@@ -412,6 +481,7 @@ Update `test/plugin-tools.test.ts` to verify:
 
 - plugin command discovery still works
 - command execution result shape is stable and explicit
+- `get_plugin_commands` follows the canonical response matrix for enabled, disabled, unknown, and zero-command plugin cases
 
 Create or update `test/plugin-control.contract.js` as the authoritative executable feature-contract test for:
 
@@ -431,14 +501,18 @@ The test fixtures and mocks are expected to include:
 
 ### Secondary Validation
 
-Use `npx tsc --noEmit` as the minimum repository-wide typecheck acceptance command for this work.
+The implementation must provide feature-scoped verification commands so this recovery is not blocked by unrelated repository-wide test debt.
 
-The implementation must also provide a repeatable runtime contract test command dedicated to this feature. The blocking executable acceptance endpoint for this feature is:
+The blocking executable acceptance endpoints for this feature are:
 
-- `npx tsc --noEmit`
+- `npm run typecheck:plugin-control`
 - `npm run test:plugin-control`
 
-`npm run test:plugin-control` must run the single authoritative runtime contract test entrypoint for this feature. If the repository does not already have that script, adding it and wiring it to `test/plugin-control.contract.js` is in scope.
+`npm run test:plugin-control` must run the single authoritative runtime contract test entrypoint for this feature.
+
+`npm run typecheck:plugin-control` must typecheck the files and wiring directly affected by this feature rather than relying on unrelated repo-wide failures.
+
+If the repository does not already have these scripts, adding them and wiring them to focused feature checks is in scope.
 
 ## Documentation Strategy
 
