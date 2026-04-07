@@ -1,0 +1,867 @@
+# Knowledge Compiler Design
+
+**Date:** 2026-04-06
+**Project:** `obsidian-cli`
+**Status:** Proposed design, pending spec review
+
+## Goal
+
+Evolve the current clipping-first Obsidian plugin into a two-layer knowledge system that keeps raw web clippings immutable while continuously compiling them into a separate, navigable wiki layer.
+
+## Why This Change
+
+The current project already has useful building blocks:
+
+- web and video clipping through `save_webpage` in `src/mcp/tools.ts`
+- a shell UI in `src/ui/shell-view.ts`
+- model orchestration in `src/services/model-service.ts`
+- persistent local memory in `src/memory/memory-manager.ts`
+
+What it does not have is a durable knowledge compilation layer. Today the plugin can save content, chat about content, and assist writing, but it does not turn incoming material into an accumulating, structured knowledge base.
+
+The referenced article argues for an `LLM Wiki` model:
+
+- raw sources stay explicit and file-based
+- AI compiles those sources into structured wiki pages
+- the system maintains indexes, links, and health checks over time
+- users keep control because the output remains local, inspectable Markdown
+
+That model fits Obsidian well and aligns with the plugin’s current strengths better than a generic RAG database would.
+
+## Product Direction
+
+Phase 1 should optimize for one thing:
+
+**Convert saved web clippings into an explicit, maintainable second knowledge layer.**
+
+This is not a general “AI knows my vault” project yet. It is a focused knowledge compiler for clipped material.
+
+Phase-1 source boundary:
+
+- phase 1 supports web clipping notes only
+- video-derived notes created by the existing `save_webpage` flow are explicitly out of scope for the first compiler iteration
+
+Source-type integration matrix:
+
+| Source type | `knowledge_source_id` | Registry entry | Queue eligible | Manual compile eligible |
+|-------------|------------------------|----------------|----------------|-------------------------|
+| new web clipping | yes | yes | yes | yes |
+| legacy web clipping with clipping markers | on first registration | yes | yes after registration | yes |
+| video-derived note | no in phase 1 | no | no | no |
+
+## Scope Decisions
+
+### Included in Phase 1
+
+- web clipping as the first supported raw source type
+- a separate wiki layer instead of mutating source clippings
+- queue-based compilation from raw clipping to structured summary page
+- global and topic-level indexes
+- lint and health reporting
+- controlled background maintenance
+- explicit user actions for compile, batch compile, open index, and lint
+
+### Explicitly Out of Scope for Phase 1
+
+- generic RAG/vector infrastructure
+- image understanding
+- autonomous all-day agent behavior
+- automatic rewrite of raw clipping files
+- full entity modeling for people, companies, and projects
+- broad support for every vault note type
+- aggressive self-healing that silently edits large parts of the wiki
+
+## High-Level Architecture
+
+The design introduces a two-layer knowledge system.
+
+### Layer 1: Raw Layer
+
+This remains the source-of-truth layer.
+
+- existing web clipping notes remain immutable raw sources
+- the current `save_webpage` flow continues to create Markdown notes
+- raw files are treated as ingest inputs, not as generated knowledge pages
+
+Phase-1 raw mutability rule:
+
+- raw body content is immutable after creation
+- raw frontmatter may receive one-time system metadata needed for onboarding, specifically `knowledge_source_id`
+- this frontmatter exception applies only during initial creation or first-time legacy registration
+- beyond that onboarding metadata, the system does not rewrite raw clipping notes
+
+### Layer 2: Wiki Layer
+
+This is the new compiled layer.
+
+It contains AI-generated, structured notes such as:
+
+- article summary pages
+- global knowledge index
+- one page per normalized topic
+- lint / health reports
+
+The wiki layer is derived, rebuildable, and reviewable.
+
+## System Units
+
+### Unit 1: Raw Registry
+
+**Purpose:** Track which raw clippings have entered the knowledge pipeline and what state they are in.
+
+**Responsibilities:**
+
+- register newly saved clippings
+- track status: `pending`, `processing`, `partial`, `done`, `failed`, `missing_source`
+- store timestamps and lightweight compile metadata
+- prevent duplicate work for the same clipping
+
+**Identity model:**
+
+- each raw clipping gets a stable `knowledge_source_id`
+- for newly saved clippings, that ID is written when the clipping note is first created
+- for pre-existing clippings brought into the system later, first-time legacy registration may add `knowledge_source_id` to frontmatter as the only allowed onboarding mutation
+- the registry is keyed by `knowledge_source_id`, not by current file path
+- the registry also stores the current vault path as a mutable locator
+
+**ID generation rule:**
+
+- `knowledge_source_id` is generated by the plugin, not by the model
+- phase 1 uses a deterministic prefix plus a uniqueness-safe suffix, for example `ksrc_<generated-id>`
+- one clipping note always maps to one knowledge source, even if two notes share the same `source_url`
+- clipping the same URL twice creates two separate knowledge sources unless the exact same note is being reprocessed
+- if a note already carries an existing `knowledge_source_id`, that ID is reused only when it refers to the same physical note being relinked or reprocessed
+- duplicate ID collisions fail registration and surface an explicit registry error instead of silently merging records
+
+**Persistence model:**
+
+- the registry is stored in `.obsidian/obsidian-cli/knowledge-registry.json`
+- registry state persists across plugin restarts
+- the Raw Registry unit owns this file and exposes read/write operations to the orchestrator and compile flow
+
+Registry bootstrap rules:
+
+- if the registry file does not exist, the plugin creates an empty registry with the current schema version
+- if the registry file is malformed or partially unreadable, the compiler runtime does not start background processing and surfaces an error to the user
+- if the registry schema version is newer than the running plugin understands, the runtime enters safe read-only failure for registry-backed operations until migrated
+
+**Lifecycle rules:**
+
+- rename or move updates the stored path for the same `knowledge_source_id`
+- delete marks the registry item as `missing_source`
+- pre-existing unregistered clippings enter through manual compile only in phase 1
+
+**Why it exists:**
+
+Without a registry, background compilation becomes opaque and duplicate-prone.
+
+**Canonical registry state enum:**
+
+- `pending`
+- `processing`
+- `partial`
+- `done`
+- `failed`
+- `missing_source`
+
+### Unit 2: Article Compiler
+
+**Purpose:** Compile one raw clipping into one structured wiki summary page.
+
+**Input:** a raw clipping note
+
+**Output:** a summary page plus structured extraction data
+
+**Phase 1 extraction fields:**
+
+- title
+- source URL
+- author
+- creation time
+- topic tags
+- key concepts
+- key claims / takeaways
+- review flags / uncertain conclusions
+
+**Artifact contract:**
+
+- the compiler writes one generated summary note per raw clipping
+- the structured extraction data lives in that summary note's frontmatter
+- the summary note body contains generated prose sections derived from the same extraction
+- the registry stores processing status and pointers, but it is not the canonical home of extracted knowledge fields
+- the indexer and linter both read summary-page frontmatter as their primary structured source
+
+**Canonical summary frontmatter contract:**
+
+```yaml
+---
+knowledge_generated: true
+knowledge_artifact_type: "summary"
+knowledge_source_id: "ksrc_abc123"
+source_url: "https://mp.weixin.qq.com/..."
+title: "Karpathy ..."
+author: "..."
+created_at: "2026-04-05T09:46:50.416Z"
+compiled_at: "2026-04-07T10:00:00.000Z"
+topics:
+  - slug: "second-brain"
+    label: "Second Brain"
+  - slug: "llm-wiki"
+    label: "LLM Wiki"
+concepts:
+  - "raw sources"
+  - "knowledge compiler"
+topic_candidates:
+  - "Second Brain"
+  - "LLM Wiki"
+key_claims:
+  - "LLM Wiki turns raw materials into a maintained knowledge layer"
+  - "Raw files remain explicit and local"
+review_flags:
+  - "low_confidence_author"
+---
+```
+
+Required summary frontmatter fields:
+
+- `knowledge_generated`
+- `knowledge_artifact_type`
+- `knowledge_source_id`
+- `source_url`
+- `title`
+- `compiled_at`
+
+Optional or nullable fields:
+
+- `author`
+- `created_at`
+- `topics`
+- `concepts`
+- `topic_candidates`
+- `key_claims`
+- `review_flags`
+
+Valid compiled artifact rule:
+
+- a summary note is considered valid when all required fields are present
+- array fields may be empty arrays
+- nullable scalar fields may be omitted or null
+- the note body must include a `## Summary` section and a `## Raw Source` section
+
+Canonical generated summary body contract:
+
+- `# <Title>`
+- `## Summary`
+- `## Key Claims`
+- `## Concepts`
+- `## Raw Source`
+
+Raw-source backlink rule:
+
+- when the source exists, `## Raw Source` contains a wiki link or markdown link to the current raw clipping path
+- when the source is missing, `## Raw Source` renders an explicit missing-source notice instead of a stale path
+
+**Model invocation rule:**
+
+- article compilation uses a fresh stateless model invocation
+- it does not reuse memory-backed chat history
+- it does not depend on shell session state
+- it does not run tool-calling loops during summary compilation
+- the compile call is owned by a dedicated knowledge-compilation runtime surface rather than the normal interactive chat path
+
+**Compiler runtime contract:**
+
+- input: raw clipping content plus minimal source metadata
+- output: validated structured extraction matching the summary frontmatter schema plus generated body sections
+- prompt template version and extraction schema version are owned by the compiler runtime surface
+- the compiler runtime uses the existing provider layer only as a stateless generation dependency
+
+**Rules:**
+
+- raw note body is never mutated by compilation
+- the compiler is idempotent
+- low-confidence output is marked, not promoted as fact
+- recompilation fully overwrites generated summary content for that clipping
+- manual edits inside generated summary pages are unsupported in phase 1 and may be replaced on recompile
+
+### Unit 3: Wiki Indexer
+
+**Purpose:** Maintain lightweight aggregation pages from compiler output.
+
+**Phase 1 outputs:**
+
+- one global index page
+- one topic page per normalized topic under a dedicated topic index area
+
+**Topic page contract:**
+
+- one topic page per normalized topic slug
+- each topic page lists linked summary pages for that slug
+- topic pages are generated artifacts and may be fully rewritten on reindex
+- when a topic loses its last linked summary, reindex deletes the now-empty generated topic page
+
+**Global index contract:**
+
+- the global index is a generated note
+- it includes an `Articles` section listing compiled summaries sorted by `compiled_at` descending
+- it includes a `Topics` section listing topic pages sorted alphabetically by topic label
+- it links only to active compiled artifacts and suppresses `missing_source` items
+
+**Canonical topic normalization rule:**
+
+- topic labels are normalized through one shared pure slug function
+- the function lowercases text, trims whitespace, removes punctuation, and converts internal whitespace runs to `-`
+- the same normalization logic is reused by compiler output shaping, topic-page identity, and lint checks
+
+Canonical topic page schema:
+
+```yaml
+---
+knowledge_generated: true
+knowledge_artifact_type: "topic_page"
+topic_slug: "second-brain"
+topic_label: "Second Brain"
+compiled_at: "2026-04-07T10:00:00.000Z"
+---
+```
+
+Display-label rule:
+
+- topic identity is always the normalized slug
+- topic label is deterministically derived from the slug by title-casing slug segments
+- compiler-provided topic labels are advisory inputs, not the final source of truth for page identity
+
+**Responsibilities:**
+
+- register new compiled pages
+- update topic membership
+- avoid duplicate index entries
+- preserve stable links from index pages to summary pages
+
+### Unit 4: Knowledge Linter
+
+**Purpose:** Inspect the compiled knowledge layer and report health issues.
+
+**Phase 1 checks:**
+
+- missing summary pages
+- missing source metadata
+- concept islands with no useful linkage
+- duplicate normalized topic grouping
+- low-confidence extractions needing review
+
+**Measurement model:**
+
+- summary frontmatter stores `topics` as normalized topic slugs plus display labels
+- summary frontmatter stores `concepts` as explicit arrays
+- a concept island is a concept that appears in exactly one compiled summary page
+- `topic_candidates` stores pre-normalization topic labels for lint purposes
+- a duplicate topic issue is raised when multiple `topic_candidates` collapse to the same normalized slug before final persistence
+
+**Lint report contract:**
+
+- lint writes one generated report note under the wiki health area
+- each issue entry includes `knowledge_source_id` when applicable, issue type, severity, and suggested follow-up
+
+**Phase 1 rule:**
+
+Lint reports problems only. It does not auto-fix them.
+
+### Unit 5: Background Orchestrator
+
+**Purpose:** Run queue work in a controlled way without turning the plugin into an unbounded autonomous agent.
+
+**Responsibilities:**
+
+- consume pending items slowly in the background
+- serialize or rate-limit model work
+- record failure state instead of thrashing retries
+- trigger lint on a controlled cadence
+
+**Lifecycle rules:**
+
+- the orchestrator starts on plugin load
+- if pending work exists, it schedules a delayed drain
+- saving a new clipping enqueues the item and schedules a delayed drain if one is not already running
+- phase 1 processes one item at a time
+- failed items are not auto-retried indefinitely
+- manual compile actions can requeue failed items
+- lint runs manually and once after a queue drain that produced changes
+- on plugin startup, any item left in `processing` from a previous run is reset to `pending` with an interruption marker
+
+**Phase 1 boundary:**
+
+This is a task scheduler, not a general-purpose AI agent runtime.
+
+## Artifact Map
+
+Phase 1 should create these concrete artifacts:
+
+- raw clipping note
+  - location: existing clipping area
+  - identity: `knowledge_source_id` in frontmatter
+- registry record
+  - location: `.obsidian/obsidian-cli/knowledge-registry.json`
+  - purpose: queue state and current path tracking for one raw clipping
+- generated summary note
+  - location: `Knowledge Wiki/Articles/<knowledge_source_id>.md`
+  - identity: `knowledge_source_id`
+- global index note
+  - location: `Knowledge Wiki/index.md`
+- topic note
+  - location: `Knowledge Wiki/Topics/<topic-slug>.md`
+  - one page per normalized topic
+- lint / health report note
+  - location: `Knowledge Wiki/Health/report.md`
+
+Phase-1 path rule:
+
+- these wiki-layer paths are fixed defaults, not user-configurable in phase 1
+
+Canonical raw clipping frontmatter example:
+
+```yaml
+---
+created: 2026-04-05T09:46:50.416Z
+source: https://mp.weixin.qq.com/...
+author: Example Author
+tags: clipping
+knowledge_source_id: ksrc_abc123
+---
+```
+
+Canonical registry record example:
+
+```json
+{
+  "knowledge_source_id": "ksrc_abc123",
+  "path": "Clippings/karpathy-second-brain.md",
+  "status": "pending",
+  "source_type": "web_clipping",
+  "last_error": null,
+  "last_error_code": null,
+  "summary_path": "Knowledge Wiki/Articles/ksrc_abc123.md",
+  "created_at": "2026-04-07T10:00:00.000Z",
+  "attempt_count": 0,
+  "updated_at": "2026-04-07T10:00:00.000Z"
+}
+```
+
+Canonical registry schema:
+
+- required fields:
+  - `knowledge_source_id`
+  - `path`
+  - `status`
+  - `source_type`
+  - `created_at`
+  - `updated_at`
+- optional fields:
+  - `summary_path`
+  - `last_error`
+  - `last_error_code`
+  - `attempt_count`
+  - `interruption_marker`
+  - `permission_blocked`
+
+Registry checkpoint order:
+
+1. write or update the source record with `pending`
+2. move to `processing` before compile starts
+3. write artifact paths and final status after compile/index outcome is known
+4. write `updated_at` on every state transition
+
+Canonical registry file envelope example:
+
+```json
+{
+  "schema_version": 1,
+  "records": {
+    "ksrc_abc123": {
+      "knowledge_source_id": "ksrc_abc123",
+      "path": "Clippings/karpathy-second-brain.md",
+      "status": "pending",
+      "source_type": "web_clipping",
+      "last_error": null,
+      "last_error_code": null,
+      "summary_path": "Knowledge Wiki/Articles/ksrc_abc123.md",
+      "created_at": "2026-04-07T10:00:00.000Z",
+      "attempt_count": 0,
+      "updated_at": "2026-04-07T10:00:00.000Z"
+    }
+  }
+}
+```
+
+Path ownership rule:
+
+- the registry is the single source of truth for the mutable current raw-note path
+- generated summary and topic pages refer to raw sources by `knowledge_source_id` and `source_url`
+- rename and relink behavior updates the registry first
+- generated summary pages include a `Raw Source` section that is rewritten when relink or rename handling updates the source path
+
+Managed-artifact ownership rule:
+
+- generated wiki notes are identified by `knowledge_generated: true` and `knowledge_artifact_type`
+- the plugin may overwrite only notes that already carry those managed-artifact markers
+- if a target wiki path already contains a user-authored note without those markers, phase 1 fails with a collision instead of taking over the file
+
+Canonical global index frontmatter example:
+
+```yaml
+---
+knowledge_generated: true
+knowledge_artifact_type: "global_index"
+compiled_at: "2026-04-07T10:00:00.000Z"
+---
+```
+
+Canonical health report frontmatter example:
+
+```yaml
+---
+knowledge_generated: true
+knowledge_artifact_type: "health_report"
+generated_at: "2026-04-07T10:00:00.000Z"
+---
+```
+
+## Data Flow
+
+The intended flow is:
+
+1. User clips a webpage through the existing clipping flow.
+2. The raw clipping note is saved and assigned `knowledge_source_id`.
+3. The Raw Registry records a new `pending` work item after the final clipping path is known.
+4. The Background Orchestrator or a manual user action picks up the item.
+5. The Article Compiler generates the structured summary page and extraction data.
+6. The Wiki Indexer updates the global index and topic index.
+7. Separately, the Knowledge Linter scans the compiled layer and writes a health report.
+
+Short form:
+
+`save_webpage -> raw clipping -> registry -> compiler -> indexer`
+
+and separately:
+
+`wiki layer -> linter -> health report`
+
+Trigger model:
+
+- new-item registration happens after the clipping workflow has finished any immediate move/rename into its final folder
+- path tracking for later moves/renames uses vault rename events keyed by `knowledge_source_id`
+- source deletion uses vault delete events to mark `missing_source`
+
+## Registry State Machine
+
+Phase 1 registry states:
+
+| State | Meaning | Next states |
+|-------|---------|-------------|
+| `pending` | waiting to compile | `processing`, `missing_source` |
+| `processing` | currently compiling | `done`, `partial`, `failed`, `missing_source` |
+| `done` | summary and indexing completed | `pending`, `missing_source` |
+| `partial` | summary exists, but indexing failed | `pending`, `missing_source` |
+| `failed` | summary generation failed before a valid compiled artifact was written | `pending`, `missing_source` |
+| `missing_source` | raw source was moved without successful relink or was deleted | `pending` if relinked |
+
+Retry policy:
+
+- no unbounded automatic retries
+- `failed` and `partial` items move back to `pending` only through manual requeue or explicit retry logic
+
+Partial-failure rule:
+
+- if summary generation succeeds but indexing fails, registry status becomes `partial`
+- lint does not gate item status because it is a separate compiled-layer maintenance pass
+- `partial` means a summary artifact exists and indexing needs retry
+
+Missing-source relink rule:
+
+- a `missing_source` item returns to `pending` when the system finds a note carrying the same `knowledge_source_id`
+- this can happen through vault rename/recreate detection or through `Compile this clipping` on a matching note
+
+Race rule during processing:
+
+- if the source disappears during `processing`, the current run stops at the next safe checkpoint
+- any already-written generated summary artifact is retained as a stale managed artifact
+- the registry moves to `missing_source`
+- global and topic indexes suppress links to `missing_source` items
+- lint reports stale compiled artifacts until relink or retry completes
+
+## User-Facing Behavior
+
+Phase 1 should expose explicit actions instead of hiding everything in the background.
+
+### Manual Actions
+
+- `Compile this clipping`
+- `Compile pending knowledge items`
+- `Open knowledge index`
+- `Run knowledge lint`
+
+**Integration surface:**
+
+- all four actions are phase-1 Obsidian commands in the command palette
+- `Compile this clipping` runs as a foreground command on the active Markdown note when that note is recognized as a registered or registerable raw clipping
+- on success or failure it surfaces status through Obsidian notices and registry updates
+- `Compile pending knowledge items` drains the queue in the controlled background runner
+- `Open knowledge index` opens the global index note
+- shell integration is optional future work, not required for phase 1
+
+Execution contract:
+
+- manual compile and batch compile use the same underlying compile worker
+- `Compile this clipping` registers or relinks the active clipping if needed, then invokes the worker immediately for that single item
+- `Compile pending knowledge items` invokes the same worker over queued items
+
+**Recognition rule for registerable clipping notes:**
+
+- the note is Markdown
+- it has clipping-style frontmatter including `source`
+- its frontmatter tags include `clipping`
+- it is either already registered or eligible for legacy registration under those same clipping markers
+- notes that do not satisfy both `source` and `clipping` markers are out of scope for phase 1
+
+Tag parsing rule:
+
+- `tags` may be either a YAML array or a string-like frontmatter value
+- string-like `tags` values are normalized by splitting on commas and trimming whitespace
+- clipping eligibility checks run against the normalized tag array
+
+**Legacy onboarding path:**
+
+- `Compile this clipping` can register and compile a single legacy clipping
+- bulk legacy backfill is out of scope for phase 1
+
+### Controlled Automation
+
+- saving a clipping automatically enqueues it
+- background processing runs slowly and safely
+- failed items are recorded, not spam-retried
+
+This preserves the “explicit, inspectable system” quality that motivated the change.
+
+## Storage Model
+
+The system should keep raw and compiled knowledge clearly separate.
+
+### Raw Source Principle
+
+- raw clipping files are source material
+- they remain local Markdown files
+- they are never overwritten by compiler output after creation
+
+### Compiled Wiki Principle
+
+- compiled pages live in a dedicated wiki area
+- compiled pages are derivations, not originals
+- future recompile or rebuild should be possible without data loss
+- generated compiled pages are treated as managed artifacts, not hand-edited canonical notes
+- generated summary pages, topic pages, the global index, and the health report may all be fully rewritten by the system
+
+This keeps the design portable, inspectable, and compatible with the article’s “file over app” principle.
+
+## Reliability Rules
+
+Phase 1 should prioritize stability over intelligence theatrics.
+
+### Required Reliability Behaviors
+
+- compile failure must not corrupt raw content
+- repeated compilation must not create duplicate summary pages
+- index update failure must not erase a successful summary page
+- low-confidence extraction must be visible in the health layer
+- background work must be rate-limited
+- generated summary and index pages must be schema-stable and idempotent under the same raw input and pinned compiler prompt/settings, even if wording is not byte-identical
+
+### Failure Handling
+
+- registry state updates are mandatory for success and failure
+- failures go to `failed` state with enough context for debugging
+- lint findings are separate from runtime failures
+
+## Integration Contracts
+
+### Raw Creation And Registration
+
+- the existing clipping save flow owns raw note creation
+- that same flow writes `knowledge_source_id` during creation for new supported web clippings
+- registry registration happens only after the clipping workflow has resolved the final note path
+- the knowledge compiler must not register a raw note before that final path handoff
+
+Ownership table:
+
+- `save_webpage` owns creation of new raw clipping notes and assignment of `knowledge_source_id`
+- any immediate post-save relocation inside the clipping flow owns final-path resolution
+- the knowledge registry service owns registration after final-path resolution and receives the final path as its only registration input
+- vault rename/delete listeners own later path maintenance for already-registered sources
+
+### Vault Event Handling
+
+- vault rename events update the registry path for known `knowledge_source_id` values
+- vault delete events move known items to `missing_source`
+- no additional registry entries are created from rename events alone
+- relink recovery is supported through rename events for tracked notes and through explicit `Compile this clipping` on a note carrying an existing `knowledge_source_id`
+
+### Compiler Runtime Surface
+
+- the knowledge compiler uses a dedicated one-shot compile path
+- that path is separate from normal interactive chat
+- it uses a stateless model request with no memory context and no tool loop
+
+Runtime owner:
+
+- phase 1 introduces a dedicated knowledge-runtime owner service
+- that service owns command registration, vault rename/delete listener wiring, registry bootstrapping, and orchestrator lifecycle control
+- `main.ts` should only instantiate and delegate to that runtime owner rather than absorb new queue logic directly
+
+### Settings And Permission Gating
+
+- automatic and manual wiki writes are gated by both `allowFileCreation` and `allowFileModification`
+- if either setting is disabled, compile actions fail fast without creating or rewriting wiki artifacts
+- `confirmExecutions` continues to describe interactive confirmation behavior and does not control background knowledge-compilation writes
+- first-time legacy registration also requires `allowFileModification` because it adds `knowledge_source_id` to an existing raw note
+
+Dedicated knowledge-compilation setting:
+
+- phase 1 introduces a separate knowledge-compilation automation setting
+- background queue processing runs only when that setting is enabled
+- settings copy must make the difference between interactive confirmation and background knowledge automation explicit
+
+Canonical setting contract:
+
+- key: `knowledgeCompilerAutoRun`
+- default: `false`
+- persistence: stored in the plugin settings payload
+- UI placement: a dedicated `Knowledge Compiler` settings subsection
+
+Permission matrix:
+
+| Operation | `allowFileCreation` | `allowFileModification` | Allowed? |
+|-----------|---------------------|-------------------------|----------|
+| create new raw clipping with `knowledge_source_id` at creation time | required | not required | yes if creation allowed |
+| first-time legacy `knowledge_source_id` injection | not required | required | yes if modification allowed |
+| registry writes and queue state persistence | not gated by these toggles | not gated by these toggles | always allowed |
+| create or rewrite wiki summary/index/topic/health artifacts | required | required | yes only if both enabled |
+| relink registry metadata only | not gated by these toggles | not gated by these toggles | always allowed |
+
+Permission-blocked queue rule:
+
+- if a clipping is queued but wiki writes are blocked by settings, the item remains `pending`
+- the registry records a permission-blocked error marker for visibility
+- background scheduling backs off until settings allow writes again or the user manually retries
+
+Manual-command confirmation rule:
+
+- `Compile this clipping`, `Compile pending knowledge items`, and `Run knowledge lint` are explicit user-invoked commands
+- in phase 1, those commands count as direct user approval and do not trigger an additional `confirmExecutions` prompt
+
+## Verification Strategy
+
+The feature is successful when the knowledge layer grows predictably and remains inspectable.
+
+### Required Phase 1 Validation
+
+The implementation plan should add a repo-local clipping fixture that represents the provided Karpathy “second brain” article, for example under:
+
+`test/fixtures/knowledge-clippings/karpathy-second-brain.md`
+
+The external file provided by the user is design input, not the portable automated test dependency.
+
+Automated test boundary:
+
+- automated tests must not depend on live model output
+- the implementation plan should use a stubbed compiler adapter or fixed extraction fixture for automated compile/index/lint tests
+- live model checks, if any, are manual smoke tests rather than blocking automated acceptance
+
+Test harness contract:
+
+- phase 1 may add dedicated knowledge-compiler test scripts
+- the implementation plan must define one authoritative automated command for knowledge-compiler tests
+- test-infrastructure additions needed to support fixture-driven compiler testing are in scope
+
+Minimum checks:
+
+1. a raw clipping produces one separate summary page
+2. that page appears in the global index
+3. that page contributes to a topic index
+4. recompiling the same clipping does not create duplicates
+5. lint can surface at least missing-field and low-confidence conditions
+6. rename/delete handling updates registry state correctly
+7. restart recovery resets stale `processing` items safely
+8. `partial` and `missing_source` states are observable and retryable
+
+### Phase 1 Success Criteria
+
+- raw clipping body remains untouched after creation
+- wiki layer gains structured summary output
+- index pages remain stable and deduplicated
+- health reporting exists and is understandable
+- user can manually inspect and re-run the system
+
+## Design Tradeoffs
+
+### Why separate wiki pages instead of in-place clipping enrichment
+
+Recommended because:
+
+- source files stay immutable
+- rebuilds are safer
+- generated knowledge is easier to audit
+- future schema changes do not force destructive edits to raw notes
+
+Tradeoff:
+
+- more files to manage
+- requires index pages and clear organization
+
+### Why controlled background maintenance instead of full autonomy
+
+Recommended because:
+
+- current codebase is not yet a safe autonomous runtime
+- the project already has some fragility around tools and session wiring
+- explicit review is more important than ambition in phase 1
+
+Tradeoff:
+
+- less magical user experience in the short term
+- some actions still need manual triggering or review
+
+## Impact on Current Project
+
+This design does not replace the current shell, guardian, or clipping flows.
+
+It extends the project in a way that fits existing patterns:
+
+- clipping remains the ingest entry
+- model-driven transformation remains central
+- file-based outputs remain first-class
+- Obsidian stays the review surface
+
+The biggest project-level shift is conceptual:
+
+The plugin stops being only a chat and clipping assistant and starts becoming a local knowledge compiler.
+
+## Open Implementation Constraints
+
+These are constraints, not unresolved product decisions:
+
+- the current project has large, responsibility-heavy files, so the new subsystem should avoid further bloating `main.ts` and `src/mcp/tools.ts`
+- background processing must not lock the UI
+- any new compiled structure should remain plain Markdown and easy to inspect
+
+## Summary
+
+Phase 1 should build a clipping-first knowledge compiler with:
+
+- immutable raw clippings
+- a separate compiled wiki layer
+- article summary generation
+- global and topic indexes
+- lint and health reporting
+- controlled background maintenance
+- explicit user actions for compile and review
+
+This is the smallest coherent step that moves the project toward the “LLM Wiki / second brain” model from the provided article without turning the first iteration into an unbounded agent platform.
