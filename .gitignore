@@ -27,6 +27,7 @@ layout-demo.html
 .vscode/
 .idea/
 .claude/
+.worktrees/
 
 # OS
 .DS_Store
