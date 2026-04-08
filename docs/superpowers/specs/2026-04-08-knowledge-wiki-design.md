@@ -29,6 +29,7 @@
 - 健康检查和 lint 报告
 - Shell 问答通过 `query_knowledge` 工具消费知识库
 - Guardian 补全时预注入知识上下文
+- 回填机制：Shell 对话中的高质量回答自动归档回 Wiki，知识库越用越丰富
 - 默认关闭自动编译，可在设置中开启
 - wiki 优先检索 + vault 搜索补充
 
@@ -311,6 +312,66 @@ Guardian 不走多轮 function calling，需要快速响应。采用预注入方
 
 关键：Guardian 的知识注入是轻量的文件读取 + 关键词匹配，不额外调用 AI 做检索。只有 Shell 对话才走完整的 function calling 路径。
 
+### Unit 9：回填（File Back）
+
+**职责：** 将 Shell 对话中产出的高质量回答存回 Wiki，让知识库随使用不断增长。
+
+核心理念（引自 Karpathy）：你的每一次提问，都在让知识库变得更丰富。查询不是消耗，是投资。
+
+触发方式：
+- Shell 对话结束后，AI 判断本次回答是否产出了有价值的综合分析（如跨多篇 summary 的对比、新的洞察、结构化总结）
+- 如果有价值，AI 调用新增的 `file_back_knowledge` 工具，将回答归档为一篇新的 wiki 页
+
+`file_back_knowledge` 工具定义：
+
+```typescript
+{
+  name: "file_back_knowledge",
+  description: "将当前对话中产出的高质量知识回答存回知识库 Wiki，让知识库随使用不断增长。",
+  parameters: {
+    title: "string - 回填文章的标题",
+    content: "string - 要归档的内容（Markdown 格式）",
+    source_queries: "string[] - 触发这次回答的问题列表",
+    related_sources: "string[] - 引用的 knowledge_source_id 列表"
+  }
+}
+```
+
+回填产出：`Knowledge Wiki/Articles/fb_<id>.md`
+
+```yaml
+---
+knowledge_generated: true
+knowledge_artifact_type: "file_back"
+title: "知识编译 vs RAG 对比分析"
+compiled_at: "2026-04-08T15:00:00Z"
+source_queries:
+  - "知识编译和 RAG 的区别是什么？"
+related_sources:
+  - "ksrc_abc123"
+  - "ksrc_def456"
+topics:
+  - slug: "knowledge-management"
+    label: "Knowledge Management"
+concepts: ["RAG", "知识编译", "向量检索"]
+---
+```
+
+回填规则：
+- 回填页和编译产出的 summary 页一样，是 wiki 层的派生产物
+- 回填页同样带 `knowledge_generated: true` 标记，可被覆盖和重建
+- 回填页会被索引器纳入 index.md 和 topic 页
+- AI 自主判断是否值得回填，不是每次对话都回填——只有综合性、跨源的高质量回答才值得
+- 回填不修改任何原始笔记，只在 wiki 层新增页面
+
+系统提示词中追加引导：
+
+```
+当你的回答综合了多个知识来源、产出了有价值的新洞察或对比分析时，
+使用 file_back_knowledge 工具将回答归档到知识库。
+不要对简单的事实查询做回填，只回填有综合价值的内容。
+```
+
 ## 设置与权限
 
 ### 新增设置项
@@ -384,6 +445,8 @@ Indexer 更新 index.md + topic 页
     │
     ▼
 Shell 对话时 → AI 调用 query_knowledge → 读 index → 选 summary → 综合回答
+                                        ↓ 如果回答有综合价值
+                              AI 调用 file_back_knowledge → 归档回 Wiki → Indexer 更新索引
 Guardian 补全时 → 关键词匹配 index → 读 frontmatter → 注入上下文 → 个性化建议
 ```
 
@@ -398,6 +461,7 @@ src/knowledge/
 ├── linter.ts          # 健康检查和报告
 ├── watcher.ts         # 文件夹监听和入队
 ├── query.ts           # query_knowledge 工具实现
+├── file-back.ts       # file_back_knowledge 回填工具实现
 └── runtime.ts         # 生命周期管理、命令注册、事件监听
 ```
 
