@@ -20,7 +20,7 @@ export async function getVideoTranscript(url: string): Promise<VideoTranscript |
 async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null> {
     try {
         const userAgent = navigator.userAgent;
-        console.log(`Gemini Shell: Using User-Agent: ${userAgent}`);
+        console.log(`Obsidian Shell: Using User-Agent: ${userAgent}`);
 
         // 1. Fetch the video page using requestUrl (bypasses CORS)
         const response = await requestUrl({
@@ -49,14 +49,14 @@ async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null
         // Look for "captionTracks" inside the HTML (usually in ytInitialPlayerResponse)
         const captionsMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
         if (!captionsMatch) {
-            console.warn("Gemini Shell: No captionTracks found in YouTube page.");
+            console.warn("Obsidian Shell: No captionTracks found in YouTube page.");
             // Return partial result if title was found
             return { text: "", title, platform: 'youtube', author, url };
         }
 
         const captionTracks = JSON.parse(captionsMatch[1]);
         if (!captionTracks || captionTracks.length === 0) {
-            console.warn("Gemini Shell: Empty captionTracks.");
+            console.warn("Obsidian Shell: Empty captionTracks.");
             return { text: "", title, platform: 'youtube', author, url };
         }
 
@@ -67,8 +67,8 @@ async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null
             selectedTrack = captionTracks[0];
         }
 
-        console.log(`Gemini Shell: Selected caption track: ${selectedTrack.name?.simpleText} (${selectedTrack.languageCode})`);
-        console.log(`Gemini Shell: Fetching transcript from: ${selectedTrack.baseUrl}`);
+        console.log(`Obsidian Shell: Selected caption track: ${selectedTrack.name?.simpleText} (${selectedTrack.languageCode})`);
+        console.log(`Obsidian Shell: Fetching transcript from: ${selectedTrack.baseUrl}`);
 
         // 4. Fetch Transcript
         let transcriptResponse;
@@ -80,16 +80,16 @@ async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null
                 }
             });
         } catch (e) {
-            console.warn("Gemini Shell: Failed to fetch transcript with User-Agent, trying without...", e);
+            console.warn("Obsidian Shell: Failed to fetch transcript with User-Agent, trying without...", e);
             transcriptResponse = await requestUrl({ url: selectedTrack.baseUrl });
         }
 
         let transcriptXml = transcriptResponse.text;
-        console.log(`Gemini Shell: Transcript Response Status: ${transcriptResponse.status}`);
-        console.log(`Gemini Shell: Transcript Response Headers:`, transcriptResponse.headers);
+        console.log(`Obsidian Shell: Transcript Response Status: ${transcriptResponse.status}`);
+        console.log(`Obsidian Shell: Transcript Response Headers:`, transcriptResponse.headers);
 
         if (!transcriptXml || transcriptXml.length === 0) {
-            console.warn("Gemini Shell: Empty XML response. Trying fmt=json3...");
+            console.warn("Obsidian Shell: Empty XML response. Trying fmt=json3...");
             try {
                 const jsonUrl = selectedTrack.baseUrl + '&fmt=json3';
                 const jsonResponse = await requestUrl({
@@ -98,7 +98,7 @@ async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null
                 });
                 const jsonText = jsonResponse.text;
                 if (jsonText && jsonText.length > 0) {
-                    console.log("Gemini Shell: Found JSON transcript, parsing...");
+                    console.log("Obsidian Shell: Found JSON transcript, parsing...");
                     const jsonData = JSON.parse(jsonText);
                     // Parse JSON3 format: { events: [ { tStartMs: 1000, dDurationMs: 2000, segs: [ { utf8: "text" } ] } ] }
                     if (jsonData.events) {
@@ -114,13 +114,13 @@ async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null
                     }
                 }
             } catch (e) {
-                console.error("Gemini Shell: Failed to fetch/parse JSON3 transcript", e);
+                console.error("Obsidian Shell: Failed to fetch/parse JSON3 transcript", e);
             }
         }
 
-        console.log(`Gemini Shell: Transcript XML length: ${transcriptXml.length}`);
+        console.log(`Obsidian Shell: Transcript XML length: ${transcriptXml.length}`);
         if (transcriptXml.length < 100) {
-            console.log(`Gemini Shell: Transcript XML preview: ${transcriptXml}`);
+            console.log(`Obsidian Shell: Transcript XML preview: ${transcriptXml}`);
         }
 
         // 5. Parse XML to Text using DOMParser
@@ -139,7 +139,7 @@ async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null
         const text = lines.join(' ');
 
         if (!text) {
-            console.warn("Gemini Shell: Parsed transcript is empty. XML Preview: ", transcriptXml.substring(0, 200));
+            console.warn("Obsidian Shell: Parsed transcript is empty. XML Preview: ", transcriptXml.substring(0, 200));
             // Return title and platform even if text is empty
             return { text: "", title, platform: 'youtube', author, url };
         }
@@ -231,7 +231,7 @@ async function getBilibiliTranscript(url: string): Promise<VideoTranscript | nul
             const selectedSubtitle = subtitles[0]; // Just take the first one for now
             const subtitleUrl = `https:${selectedSubtitle.url}`;
 
-            console.log(`Gemini Shell: Fetching Bilibili subtitle from ${subtitleUrl}`);
+            console.log(`Obsidian Shell: Fetching Bilibili subtitle from ${subtitleUrl}`);
             const transcriptResponse = await requestUrl({ url: subtitleUrl });
             const transcriptJson = JSON.parse(transcriptResponse.text);
 
@@ -240,7 +240,7 @@ async function getBilibiliTranscript(url: string): Promise<VideoTranscript | nul
                 text = transcriptJson.body.map((item: any) => item.content).join(' ');
             }
         } else {
-            console.warn("Gemini Shell: No subtitles found for Bilibili video");
+            console.warn("Obsidian Shell: No subtitles found for Bilibili video");
         }
 
         // Preserve query parameters (like p=2) from the original URL if it was a long link

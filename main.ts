@@ -2,18 +2,20 @@ import { Plugin, debounce, Notice, MarkdownView, TFile } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
 import { ToolManager } from './src/mcp/tools';
-import { GeminiSettings, DEFAULT_SETTINGS } from './src/mcp/types';
-import { GeminiShellSettingTab } from './src/settings';
-import { GeminiShellView, VIEW_TYPE_GEMINI_SHELL } from './src/ui/shell-view';
+import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL } from './src/mcp/types';
+import { SettingTab } from './src/settings';
+import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
 import { ghostTextExtension, showGhostText } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
 import { selectionMenuExtension, resetSelectionMenu, setSelectionMenuState } from './src/ui/selection-menu';
+import { KnowledgeRuntime } from './src/knowledge/runtime';
 
-export default class GeminiShellPlugin extends Plugin {
-    settings: GeminiSettings;
+export default class ObsidianCliPlugin extends Plugin {
+    settings: PluginSettings;
     modelService: ModelService;
     toolManager: ToolManager;
+    knowledgeRuntime: KnowledgeRuntime | null = null;
 
 
     // Debounce with trailing edge (default/false) for inactivity trigger
@@ -21,25 +23,36 @@ export default class GeminiShellPlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
-        new Notice('Gemini Shell: Plugin Loaded (v2)');
+        new Notice('Obsidian Shell: Plugin Loaded (v2)');
 
-        this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
+        this.toolManager = new ToolManager(this.app, this.settings);
         this.modelService = new ModelService(this.app, this.settings, this.toolManager);
         this.toolManager.setGeminiApi(this.modelService);
 
+        // Initialize Knowledge Runtime
+        this.knowledgeRuntime = new KnowledgeRuntime(
+            this.app,
+            this.settings,
+            this.modelService,
+            this.toolManager
+        );
+        await this.knowledgeRuntime.initialize();
+        this.knowledgeRuntime.registerCommands(this);
+        this.knowledgeRuntime.registerEvents(this);
+
         this.registerView(
-            VIEW_TYPE_GEMINI_SHELL,
-            (leaf) => new GeminiShellView(leaf, this.modelService)
+            VIEW_TYPE_SHELL,
+            (leaf) => new ShellView(leaf, this.modelService)
         );
 
-        // Add ribbon icon for quick access to Gemini Shell
-        this.addRibbonIcon('terminal', 'Open Gemini Shell', (evt: MouseEvent) => {
+        // Add ribbon icon for quick access to Obsidian Shell
+        this.addRibbonIcon('terminal', 'Open Obsidian Shell', (evt: MouseEvent) => {
             this.activateView();
         });
 
         this.addCommand({
-            id: 'open-gemini-shell',
-            name: 'Open Shell',
+            id: 'open-shell',
+            name: 'Open Obsidian Shell',
             callback: () => this.activateView(),
             hotkeys: [{ modifiers: ["Mod"], key: "j" }]
         });
@@ -52,7 +65,7 @@ export default class GeminiShellPlugin extends Plugin {
             hotkeys: [{ modifiers: ["Mod", "Shift"], key: "g" }]
         });
 
-        this.addSettingTab(new GeminiShellSettingTab(this.app, this));
+        this.addSettingTab(new SettingTab(this.app, this));
 
         this.registerEditorExtension([
             guardianGutterExtension(),
@@ -75,15 +88,22 @@ export default class GeminiShellPlugin extends Plugin {
         );
     }
 
+    onunload() {
+        if (this.knowledgeRuntime) {
+            this.knowledgeRuntime.cleanup();
+        }
+        this.modelService.shutdown();
+    }
+
     async activateView() {
         const { workspace } = this.app;
-        const leaves = workspace.getLeavesOfType(VIEW_TYPE_GEMINI_SHELL);
+        const leaves = workspace.getLeavesOfType(VIEW_TYPE_SHELL);
 
         if (leaves.length > 0) {
             leaves[0].detach();
         } else {
             const leaf = workspace.getRightLeaf(false);
-            await leaf?.setViewState({ type: VIEW_TYPE_GEMINI_SHELL, active: true });
+            await leaf?.setViewState({ type: VIEW_TYPE_SHELL, active: true });
             workspace.revealLeaf(leaf!);
         }
     }
@@ -106,8 +126,11 @@ export default class GeminiShellPlugin extends Plugin {
 
     async saveSettings() {
         await this.saveData(this.settings);
-        this.toolManager.updateSettings(this.settings.allowPluginControl);
+        this.toolManager.updateSettings(this.settings);
         this.modelService.updateSettings(this.settings);
+        if (this.knowledgeRuntime) {
+            this.knowledgeRuntime.updateSettings(this.settings);
+        }
     }
 
     async onFileModify(file: TFile) {
@@ -243,7 +266,7 @@ Instructions:
 5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
             }
 
-            const response = await this.modelService.chat(prompt, "Guardian", systemPromptOverride);
+            const response = await this.modelService.chat(prompt, [], systemPromptOverride);
 
             const jsonMatch = response.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {

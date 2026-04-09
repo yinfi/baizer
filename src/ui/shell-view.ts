@@ -1,13 +1,17 @@
-import { ItemView, WorkspaceLeaf, MarkdownRenderer } from 'obsidian';
+import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice } from 'obsidian';
 import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
 import { ChatController, ChatMessage } from './chat-controller';
+import { ContextManager, ContextItem } from '../services/context-manager';
+import { DiffModal } from './diff-modal';
+import { VIEW_TYPE_SHELL } from '../mcp/types';
 
-export const VIEW_TYPE_GEMINI_SHELL = 'gemini-shell-view';
+export { VIEW_TYPE_SHELL };
 
-export class GeminiShellView extends ItemView {
+export class ShellView extends ItemView {
     private modelService: ModelService;
     private chatController: ChatController;
+    private contextManager: ContextManager;
     private outputContainer: HTMLElement;
     private inputEl: HTMLTextAreaElement;
     private suggestionContainer: HTMLElement;
@@ -25,18 +29,74 @@ export class GeminiShellView extends ItemView {
     private lastActivityTime: number = Date.now();
     private heartbeatIntervalMs: number = 30000; // 30s check
     private isResponding: boolean = false;
+    private modelSelectEl: HTMLSelectElement | null = null;
+    private providerSelectEl: HTMLSelectElement | null = null;
+
+    // Event Handlers
+    private handleInputBound = () => {
+        this.adjustHeight();
+        this.handleInput();
+    };
+
+    private handleKeyDownBound = async (e: KeyboardEvent) => {
+        if (this.isSuggesting) {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.navigateSuggestions(-1);
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.navigateSuggestions(1);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                this.selectSuggestion();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                this.hideSuggestions();
+            }
+            return;
+        }
+
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault(); // Prevent newline
+            if (e.isComposing) return;
+
+            const query = this.inputEl.value.trim();
+            if (!query) return;
+
+            this.inputEl.value = '';
+            this.adjustHeight(); // Reset height
+            await this.processCommand(query);
+        }
+    };
+
+    private handleContainerClickBound = (e: MouseEvent) => {
+        if (window.getSelection()?.toString()) return;
+        // Don't focus if clicking on suggestions or context chips
+        const target = e.target as HTMLElement;
+        if (
+            target.closest('.shell-suggestions') ||
+            target.closest('.shell-context-chips') ||
+            target.closest('.shell-model-select-container') ||
+            target.closest('.shell-action-buttons')
+        ) return;
+        this.inputEl.focus();
+    };
+
+    private handlePasteBound = (e: ClipboardEvent) => this.handlePaste(e);
+    private handleDropBound = (e: DragEvent) => this.handleDrop(e);
 
     constructor(leaf: WorkspaceLeaf, modelService: ModelService) {
         super(leaf);
         this.modelService = modelService;
+        this.contextManager = new ContextManager();
     }
 
     getViewType() {
-        return VIEW_TYPE_GEMINI_SHELL;
+        return VIEW_TYPE_SHELL;
     }
 
     getDisplayText() {
-        return 'Gemini Shell';
+        return 'Obsidian Shell';
     }
 
     getIcon() {
@@ -56,14 +116,59 @@ export class GeminiShellView extends ItemView {
         });
 
         // Create a wrapper container to ensure proper flexbox layout
-        const container = contentEl.createDiv({ cls: 'gemini-shell-view' });
+        const container = contentEl.createDiv({ cls: 'ocli-shell-view' });
 
         // 1. Header
         const header = container.createDiv({ cls: 'shell-header' });
-        header.createSpan({ text: 'GEMINI SHELL' });
-        const statusContainer = header.createDiv({ cls: 'shell-status-container' });
-        statusContainer.createSpan({ cls: 'shell-status-dot' });
-        statusContainer.createSpan({ text: 'ONLINE' });
+        const headerTitle = header.createDiv({ cls: 'shell-header-title' });
+        headerTitle.createEl('h1', { text: 'Obsidian Shell', cls: 'shell-title' });
+
+        const headerButtons = header.createDiv({ cls: 'shell-header-buttons' });
+
+        // Clear button
+        const clearBtn = headerButtons.createEl('button', {
+            cls: 'clickable-icon',
+            attr: { 'aria-label': 'Clear Chat' }
+        });
+        clearBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
+        clearBtn.addEventListener('click', () => {
+            this.clearChat();
+        });
+
+        // Tools button
+        const toolsBtn = headerButtons.createEl('button', {
+            cls: 'clickable-icon',
+            attr: { 'aria-label': 'Tools' }
+        });
+        toolsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>';
+        toolsBtn.addEventListener('click', async () => {
+            const tools = await this.chatController.getTools();
+            if (tools && tools.length > 0) {
+                let toolsList = 'Available Tools:\n';
+                tools.forEach(tool => {
+                    toolsList += `\n${tool.name}: ${tool.description}\n`;
+                    if (tool.input_schema && tool.input_schema.properties) {
+                        toolsList += `  Parameters: ${Object.keys(tool.input_schema.properties).join(', ')}\n`;
+                    }
+                });
+                new Notice(toolsList, 8000);
+            } else {
+                new Notice('No tools available or tools not loaded yet.');
+            }
+        });
+
+        // Settings button
+        const settingsBtn = headerButtons.createEl('button', {
+            cls: 'clickable-icon',
+            attr: { 'aria-label': 'Settings' }
+        });
+        settingsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 .6 1v.51a2 2 0 0 1-.6 1l-.15.15a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-.6-1v-.5a2 2 0 0 1 .6-1l.15-.15a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+        settingsBtn.addEventListener('click', () => {
+            // @ts-ignore - app setting tab activation
+            this.app.setting.open();
+            // @ts-ignore - activate plugin settings tab
+            this.app.setting.openTabById('obsidian-cli');
+        });
 
         // 2. Output Area (Scrollable)
         this.outputContainer = container.createDiv({ cls: 'shell-output-area' });
@@ -79,80 +184,82 @@ export class GeminiShellView extends ItemView {
         // 3. Input Area (Fixed at bottom)
         const inputContainer = container.createDiv({ cls: 'shell-input-container' });
 
+        // Context Chips Container
+        const contextContainer = inputContainer.createDiv({ cls: 'shell-context-chips' });
+        this.renderContextChips(contextContainer);
+
         // Suggestion Popup
         this.suggestionContainer = inputContainer.createDiv({ cls: 'shell-suggestions' });
 
+        // Input wrapper (contains the textarea)
         const inputWrapper = inputContainer.createDiv({ cls: 'shell-input-wrapper' });
-        const promptIcon = inputWrapper.createSpan({ cls: 'shell-prompt' });
-        promptIcon.setText('>_');
 
         this.inputEl = inputWrapper.createEl('textarea', {
             cls: 'shell-input',
             attr: {
-                placeholder: 'Ask Gemini... (/ for commands, @ for files)',
+                placeholder: 'Ask AI... (/ for commands, @ for files)',
                 spellcheck: 'false',
                 autocomplete: 'off',
                 rows: '1'
             }
         });
+        // Set provider-specific placeholder.
+        this.updatePlaceholder();
 
-        // 4. Action Bar (inside inputContainer)
-        const footer = inputContainer.createDiv({ cls: 'shell-footer' });
-        const rightActions = footer.createDiv({ cls: 'action-group' });
+        // 4. Input Controls (below the textarea)
+        const inputControls = inputContainer.createDiv({ cls: 'shell-input-controls' });
 
-        const createAction = (container: HTMLElement, key: string, label: string) => {
-            const item = container.createDiv({ cls: 'action-item' });
-            item.createSpan({ cls: 'key-badge', text: key });
-            item.createSpan({ cls: 'action-label', text: label });
-        };
+        // Left side: Provider selector + Model selector
+        const modelSelectContainer = inputControls.createDiv({ cls: 'shell-model-select-container' });
 
-        createAction(rightActions, '↵', 'Send');
-        createAction(rightActions, '⇧↵', 'New Line');
+        // Provider selector
+        this.providerSelectEl = modelSelectContainer.createEl('select', {
+            cls: 'shell-model-select',
+            attr: { title: 'Select AI Provider' }
+        });
+        this.populateProviderOptions(this.providerSelectEl);
+        this.providerSelectEl.addEventListener('change', async (e) => {
+            const target = e.target as HTMLSelectElement;
+            await this.changeProvider(target.value);
+            new Notice(`Switched provider to ${target.options[target.selectedIndex].text}`);
+            // Refresh models list for the new provider
+            if (this.modelSelectEl) this.populateModelOptions(this.modelSelectEl);
+            this.updatePlaceholder();
+        });
+
+        // Model selector
+        this.modelSelectEl = modelSelectContainer.createEl('select', {
+            cls: 'shell-model-select',
+            attr: { title: 'Select AI Model' }
+        });
+
+        // Populate model options based on current provider
+        this.populateModelOptions(this.modelSelectEl);
+
+        // Update model when selection changes
+        this.modelSelectEl.addEventListener('change', async (e) => {
+            const target = e.target as HTMLSelectElement;
+            await this.changeModel(target.value);
+            new Notice(`Switched to ${target.options[target.selectedIndex].text}`);
+        });
+
+        // Right side: Action buttons
+        const actionButtons = inputControls.createDiv({ cls: 'shell-action-buttons' });
+
+        // TODO: Add image upload button
+        // TODO: Add submit button
+        // TODO: Add vault search button
 
         // Event Listeners
-        this.inputEl.addEventListener('input', () => {
-            this.adjustHeight();
-            this.handleInput();
-        });
-
-        this.inputEl.addEventListener('keydown', async (e) => {
-            if (this.isSuggesting) {
-                if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    this.navigateSuggestions(-1);
-                } else if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    this.navigateSuggestions(1);
-                } else if (e.key === 'Enter') {
-                    e.preventDefault();
-                    this.selectSuggestion();
-                } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    this.hideSuggestions();
-                }
-                return;
-            }
-
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault(); // Prevent newline
-                if (e.isComposing) return;
-
-                const query = this.inputEl.value.trim();
-                if (!query) return;
-
-                this.inputEl.value = '';
-                this.adjustHeight(); // Reset height
-                await this.processCommand(query);
-            }
-        });
+        this.inputEl.addEventListener('input', this.handleInputBound);
+        this.inputEl.addEventListener('keydown', this.handleKeyDownBound);
 
         // Focus input on click
-        container.addEventListener('click', (e) => {
-            if (window.getSelection()?.toString()) return;
-            // Don't focus if clicking on suggestions
-            if ((e.target as HTMLElement).closest('.shell-suggestions')) return;
-            this.inputEl.focus();
-        });
+        container.addEventListener('click', this.handleContainerClickBound);
+
+        // Paste & Drop Handlers
+        this.inputEl.addEventListener('paste', this.handlePasteBound);
+        this.inputEl.addEventListener('drop', this.handleDropBound);
 
         // Start heartbeat monitoring
         this.startHeartbeat();
@@ -194,11 +301,16 @@ export class GeminiShellView extends ItemView {
             const commands = [
                 { label: '/clear', desc: 'Clear session history' },
                 { label: '/profile', desc: 'View user profile' },
-                { label: '/forget', desc: 'Forget context' }, // Note: ChatController doesn't implement forget yet, but keeping for UI consistency or future
+                { label: '/forget', desc: 'Forget user memory (name/profession/all...)' },
                 { label: '/new', desc: 'Create new note' },
-                { label: '/edit', desc: 'Edit current selection' },
+                { label: '/edit', desc: 'AI edit selected text' },
                 { label: '/open', desc: 'Open file' },
-                { label: '/tools', desc: 'List available MCP tools' }
+                { label: '/save', desc: 'Save webpage/video to vault' },
+                { label: '/tools', desc: 'List available MCP tools' },
+                { label: '/help', desc: 'Show all commands' },
+                { label: '/wiki:compile', desc: 'Compile notes to knowledge wiki' },
+                { label: '/wiki:index', desc: 'Open knowledge wiki index' },
+                { label: '/wiki:lint', desc: 'Run knowledge health check' }
             ];
             this.suggestions = commands.filter(c => c.label.toLowerCase().includes(query.toLowerCase()));
         } else {
@@ -280,45 +392,173 @@ export class GeminiShellView extends ItemView {
     // ==================== Chat Logic ====================
 
     async processCommand(query: string) {
-        // Context gathering
-        let contextStr = '';
-        const activeFile = this.app.workspace.getActiveFile();
-        if (activeFile) {
-            contextStr = `Current Note: [[${activeFile.path}]]`;
-        }
+        try {
+            // Context gathering
+            let contextStr = '';
+            const activeFile = this.app.workspace.getActiveFile();
 
-        // Try to get selection from the active editor
-        const activeLeaf = this.app.workspace.getMostRecentLeaf();
-        if (activeLeaf && activeLeaf.view) {
-            const editor = (activeLeaf.view as any).editor;
-            if (editor) {
-                // this.editor = editor; // Unused
-                this.currentSelection = editor.getSelection();
-                if (this.currentSelection) {
-                    // We don't need to log this explicitly as system message anymore, 
-                    // or we can if we want to mimic exact previous behavior.
-                    // Let's keep it clean for now.
+            // Add active file as context if not already present
+            // Actually, let's keep the implicit context as string for now,
+            // but also resolve explicit context items.
+            if (activeFile) {
+                contextStr = `Current Note: [[${activeFile.path}]]`;
+            }
+
+            // Resolve context items
+            const contextItems = await this.contextManager.resolveContexts();
+
+            // Add active file as a ContextItem if we want to be consistent,
+            // but for now let's pass it as the legacy string context or add to items.
+            // Let's add it to items to unify.
+            if (activeFile) {
+                contextItems.push({
+                    id: 'active-file',
+                    type: 'file',
+                    data: activeFile.path,
+                    content: await this.app.vault.read(activeFile)
+                });
+            }
+
+            // Try to get selection from the active editor
+            const activeLeaf = this.app.workspace.getMostRecentLeaf();
+            if (activeLeaf && activeLeaf.view) {
+                const editor = (activeLeaf.view as any).editor;
+                if (editor) {
+                    // this.editor = editor; // Unused
+                    this.currentSelection = editor.getSelection();
+                    if (this.currentSelection) {
+                        // We don't need to log this explicitly as system message anymore,
+                        // or we can if we want to mimic exact previous behavior.
+                        // Let's keep it clean for now.
+                    }
                 }
             }
-        }
 
-        this.updateActivity();
-        await this.chatController.processCommand(query, contextStr, this.currentSelection);
+            this.updateActivity();
+            await this.chatController.processCommand(query, contextItems, this.currentSelection);
+
+            // Clear context after sending (optional, maybe keep for multi-turn?)
+            // Smart Composer clears context after send usually, unless pinned.
+            // Let's clear for now.
+            this.contextManager.clearContexts();
+            this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
+        } catch (error) {
+            logger.error('Command processing failed', error, 'ShellView.processCommand');
+            this.appendMessage({
+                id: 'error-' + Date.now(),
+                role: 'system',
+                content: `Error processing command: ${error.message}`,
+                timestamp: Date.now()
+            });
+        }
     }
 
     appendMessage(msg: ChatMessage) {
         const entry = this.outputContainer.createDiv({ cls: `shell-entry ${msg.role}` });
 
         if (msg.role === 'ai') {
-            MarkdownRenderer.render(this.app, msg.content, entry, '', this as any);
+            MarkdownRenderer.render(this.app, msg.content, entry, '', this as any).then(() => {
+                // Post-processing for code blocks
+                const codeBlocks = entry.querySelectorAll('pre > code');
+                codeBlocks.forEach((codeBlock) => {
+                    const pre = codeBlock.parentElement;
+                    if (pre) {
+                        // Create code block header
+                        const header = pre.createDiv({ cls: 'shell-code-block-header' });
+
+                        // Detect language from class name
+                        const langClass = Array.from(codeBlock.classList).find(cls => cls.startsWith('language-'));
+                        const lang = langClass ? langClass.replace('language-', '') : 'text';
+                        const filename = `untitled.${lang === 'text' ? 'txt' : lang}`;
+
+                        header.createDiv({
+                            cls: 'shell-code-block-filename',
+                            text: filename
+                        });
+
+                        // Create button container
+                        const buttons = header.createDiv({ cls: 'shell-code-block-buttons' });
+
+                        // Create apply button
+                        const btn = buttons.createEl('button', {
+                            cls: 'shell-apply-btn clickable-icon',
+                            title: 'Review Changes'
+                        });
+                        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="16" x2="12" y2="12"></line><line x1="10" y1="14" x2="10" y2="10"></line></svg>';
+                        btn.addEventListener('click', async () => {
+                            const activeFile = this.app.workspace.getActiveFile();
+                            if (!activeFile) {
+                                new Notice('No active file to apply changes to.');
+                                return;
+                            }
+                            const originalContent = await this.app.vault.read(activeFile);
+                            const newContent = codeBlock.textContent || '';
+
+                            new DiffModal(this.app, originalContent, newContent, async () => {
+                                await this.app.vault.modify(activeFile, newContent);
+                                new Notice('Changes applied.');
+                            }).open();
+                        });
+
+                        // Move the code below the header
+                        pre.insertBefore(header, codeBlock);
+                    }
+                });
+                // Delay scroll to ensure rendering is complete
+                requestAnimationFrame(() => {
+                    this.scrollToBottom();
+                });
+
+                // Add feedback buttons for AI messages
+                const feedbackBar = entry.createDiv({ cls: 'shell-feedback-bar' });
+
+                const thumbsUpBtn = feedbackBar.createEl('button', {
+                    cls: 'shell-feedback-btn shell-thumbs-up',
+                    title: 'Useful - save to knowledge wiki'
+                });
+                thumbsUpBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>';
+
+                const thumbsDownBtn = feedbackBar.createEl('button', {
+                    cls: 'shell-feedback-btn shell-thumbs-down',
+                    title: 'Not useful'
+                });
+                thumbsDownBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
+
+                thumbsUpBtn.addEventListener('click', () => {
+                    msg.feedback = 'up';
+                    thumbsUpBtn.addClass('active');
+                    thumbsDownBtn.removeClass('active');
+                    this.chatController.processCommand(
+                        `/file-back ${msg.id}`,
+                        [], ''
+                    );
+                });
+
+                thumbsDownBtn.addEventListener('click', () => {
+                    msg.feedback = 'down';
+                    thumbsDownBtn.addClass('active');
+                    thumbsUpBtn.removeClass('active');
+                });
+            }).catch(error => {
+                logger.error('Markdown rendering failed', error, 'ShellView');
+                entry.setText('Error rendering message');
+            });
         } else if (msg.role === 'user') {
             entry.setText(msg.content);
+            this.scrollToEnd();
         } else {
             entry.setText(`[System] ${msg.content}`);
+            this.scrollToEnd();
         }
 
-        this.scrollToBottom();
         this.updateActivity();
+    }
+
+    private scrollToEnd() {
+        // Use setTimeout to ensure DOM is ready
+        setTimeout(() => {
+            this.outputContainer.scrollTop = this.outputContainer.scrollHeight;
+        }, 50);
     }
 
     handleStatusChange(isResponding: boolean) {
@@ -333,7 +573,7 @@ export class GeminiShellView extends ItemView {
                 loadingDiv.createSpan({ cls: 'shell-loading' });
                 loadingDiv.createSpan({ text: 'Thinking...' });
             }
-            this.scrollToBottom();
+            this.scrollToEnd();
         } else {
             // Remove loading indicator
             const loadingDiv = document.getElementById('loading-indicator');
@@ -341,12 +581,22 @@ export class GeminiShellView extends ItemView {
         }
     }
 
-    scrollToBottom() {
-        this.outputContainer.scrollTop = this.outputContainer.scrollHeight;
-    }
-
     async onClose() {
         this.stopHeartbeat();
+        // Prevent interval leaks from ChatController
+        if (this.chatController) {
+            this.chatController.cleanup();
+        }
+        if (this.inputEl) {
+            this.inputEl.removeEventListener('input', this.handleInputBound);
+            this.inputEl.removeEventListener('keydown', this.handleKeyDownBound);
+            this.inputEl.removeEventListener('paste', this.handlePasteBound);
+            this.inputEl.removeEventListener('drop', this.handleDropBound);
+        }
+        const container = this.contentEl.querySelector('.ocli-shell-view');
+        if (container) {
+            container.removeEventListener('click', this.handleContainerClickBound as EventListener);
+        }
     }
 
     // ==================== Heartbeat Monitoring ====================
@@ -370,7 +620,7 @@ export class GeminiShellView extends ItemView {
 
         if (this.isResponding && timeSinceLastActivity > 120000) {
             const warning = '⚠️ 检测到长时间无响应，系统可能出现问题';
-            logger.warn(warning, 'GeminiShellView.heartbeat');
+            logger.warn(warning, 'ObsidianShellView.heartbeat');
             this.appendMessage({
                 id: 'warn',
                 role: 'system',
@@ -383,5 +633,279 @@ export class GeminiShellView extends ItemView {
 
     private updateActivity() {
         this.lastActivityTime = Date.now();
+    }
+
+    // ==================== Context Handling ====================
+
+    private renderContextChips(container: HTMLElement) {
+        if (!container) return;
+        container.empty();
+
+        const contexts = this.contextManager.getContexts();
+        contexts.forEach(ctx => {
+            const chip = container.createDiv({ cls: 'context-chip' });
+            chip.createSpan({ cls: 'chip-icon', text: this.getIconForType(ctx.type) });
+            chip.createSpan({ cls: 'chip-label', text: ctx.summary || ctx.data });
+            const removeBtn = chip.createSpan({ cls: 'chip-remove', text: '×' });
+
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.contextManager.removeContext(ctx.id);
+                this.renderContextChips(container);
+            });
+        });
+    }
+
+    private getIconForType(type: string): string {
+        switch (type) {
+            case 'image': return '🖼️';
+            case 'url': return '🌐';
+            case 'youtube': return '▶️';
+            case 'file': return '📄';
+            default: return '📎';
+        }
+    }
+
+    private async handlePaste(e: ClipboardEvent) {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.type.indexOf('image') !== -1) {
+                e.preventDefault();
+                const blob = item.getAsFile();
+                if (blob) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const base64 = event.target?.result as string;
+                        this.contextManager.addContext({
+                            id: Date.now().toString(),
+                            type: 'image',
+                            data: base64,
+                            summary: 'Pasted Image'
+                        });
+                        this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
+                    };
+                    reader.readAsDataURL(blob);
+                }
+            } else if (item.type === 'text/plain') {
+                // Check if it's a URL
+                item.getAsString((text) => {
+                    if (this.isValidUrl(text)) {
+                        // Don't prevent default, let it paste into input, 
+                        // but also maybe suggest adding as context?
+                        // Smart Composer detects URLs and converts them.
+                        // Let's just detect YouTube or Web URLs and add them as context if they are standalone?
+                        // Or maybe just let user type it.
+                        // For now, let's only handle explicit image paste.
+                        // If it's a YouTube URL, maybe we can auto-add it?
+                        if (text.includes('youtube.com') || text.includes('youtu.be')) {
+                            this.contextManager.addContext({
+                                id: Date.now().toString(),
+                                type: 'youtube',
+                                data: text,
+                                summary: text
+                            });
+                            this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    private handleDrop(e: DragEvent) {
+        e.preventDefault();
+        // Handle files dropped
+        if (e.dataTransfer?.files) {
+            for (let i = 0; i < e.dataTransfer.files.length; i++) {
+                const file = e.dataTransfer.files[i];
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const base64 = event.target?.result as string;
+                        this.contextManager.addContext({
+                            id: Date.now().toString(),
+                            type: 'image',
+                            data: base64,
+                            summary: file.name
+                        });
+                        this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }
+        }
+    }
+
+    private isValidUrl(str: string) {
+        try {
+            new URL(str);
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    private populateModelOptions(selectEl: HTMLSelectElement) {
+        const settings = (this.app as any).plugins.plugins['obsidian-cli']?.settings;
+        if (!settings) return;
+
+        selectEl.empty();
+
+        const provider = settings.provider || 'gemini';
+        let currentModel = '';
+        let models: { value: string; label: string }[] = [];
+
+        switch (provider) {
+            case 'gemini':
+                currentModel = settings.primaryModel;
+                models = [
+                    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+                    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+                    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+                    { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' }
+                ];
+                break;
+            case 'openai':
+                currentModel = settings.openaiModel;
+                models = [
+                    { value: 'gpt-4o', label: 'GPT-4o' },
+                    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+                    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+                    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
+                ];
+                break;
+            case 'deepseek':
+                currentModel = settings.deepseekModel;
+                models = [
+                    { value: 'deepseek-chat', label: 'DeepSeek Chat' },
+                    { value: 'deepseek-coder', label: 'DeepSeek Coder' }
+                ];
+                break;
+            case 'qwen':
+                currentModel = settings.qwenModel;
+                models = [
+                    { value: 'qwen-turbo', label: 'Qwen Turbo' },
+                    { value: 'qwen-plus', label: 'Qwen Plus' },
+                    { value: 'qwen-max', label: 'Qwen Max' }
+                ];
+                break;
+        }
+
+        // If current model isn't in our curated list (custom model), keep it selectable.
+        if (currentModel && !models.some(m => m.value === currentModel)) {
+            models.unshift({ value: currentModel, label: currentModel });
+        }
+
+        // Add models to dropdown
+        models.forEach(model => {
+            const option = selectEl.createEl('option', {
+                value: model.value,
+                text: model.label
+            });
+            if (model.value === currentModel) {
+                option.selected = true;
+            }
+        });
+    }
+
+    private populateProviderOptions(selectEl: HTMLSelectElement) {
+        const settings = (this.app as any).plugins.plugins['obsidian-cli']?.settings;
+        if (!settings) return;
+
+        selectEl.empty();
+        const provider = settings.provider || 'gemini';
+
+        const providers: { value: string; label: string }[] = [
+            { value: 'gemini', label: 'Gemini' },
+            { value: 'openai', label: 'OpenAI Compatible' },
+            { value: 'deepseek', label: 'DeepSeek' },
+            { value: 'qwen', label: 'Qwen' }
+        ];
+
+        providers.forEach(p => {
+            const option = selectEl.createEl('option', {
+                value: p.value,
+                text: p.label
+            });
+            if (p.value === provider) option.selected = true;
+        });
+    }
+
+    private async changeProvider(providerId: string) {
+        const plugin = (this.app as any).plugins.plugins['obsidian-cli'];
+        if (!plugin) return;
+
+        plugin.settings.provider = providerId;
+        await plugin.saveSettings();
+        this.modelService.updateSettings(plugin.settings);
+
+        // Refresh provider selector UI to reflect any normalization.
+        if (this.providerSelectEl) {
+            this.populateProviderOptions(this.providerSelectEl);
+        }
+    }
+
+    private updatePlaceholder() {
+        if (!this.inputEl) return;
+        const settings = (this.app as any).plugins.plugins['obsidian-cli']?.settings;
+        const provider = settings?.provider || 'gemini';
+        const providerLabelMap: Record<string, string> = {
+            gemini: 'Gemini',
+            openai: 'OpenAI',
+            deepseek: 'DeepSeek',
+            qwen: 'Qwen',
+        };
+        const label = providerLabelMap[provider] || 'AI';
+        this.inputEl.setAttr('placeholder', `Ask ${label}... (/ for commands, @ for files)`);
+    }
+
+    private async changeModel(modelId: string) {
+        const plugin = (this.app as any).plugins.plugins['obsidian-cli'];
+        if (!plugin) return;
+
+        const settings = plugin.settings;
+        const provider = settings.provider || 'gemini';
+
+        switch (provider) {
+            case 'gemini':
+                settings.primaryModel = modelId;
+                break;
+            case 'openai':
+                settings.openaiModel = modelId;
+                break;
+            case 'deepseek':
+                settings.deepseekModel = modelId;
+                break;
+            case 'qwen':
+                settings.qwenModel = modelId;
+                break;
+        }
+
+        await plugin.saveSettings();
+        this.modelService.updateSettings(settings);
+    }
+
+    public updateModelSelector() {
+        if (this.providerSelectEl) {
+            this.populateProviderOptions(this.providerSelectEl);
+        }
+        if (this.modelSelectEl) {
+            this.populateModelOptions(this.modelSelectEl);
+        }
+    }
+
+    private clearChat() {
+        this.outputContainer.empty();
+        // Re-add welcome message
+        this.appendMessage({
+            id: 'init',
+            role: 'system',
+            content: 'Chat cleared.',
+            timestamp: Date.now()
+        });
+        new Notice('Chat cleared');
     }
 }
