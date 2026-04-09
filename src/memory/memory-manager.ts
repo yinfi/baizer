@@ -1,6 +1,7 @@
 import { App } from 'obsidian';
 import { IModelProvider, IChatSession } from '../models/interfaces';
 import { UserProfile, SessionSummary, ChatMessage, DEFAULT_USER_PROFILE } from './types';
+import { MEMORY_DIR } from '../mcp/types';
 
 export class MemoryManager {
     private chatSession: IChatSession | null = null;
@@ -10,7 +11,10 @@ export class MemoryManager {
     private currentSessionMessages: number = 0;
     private lastProfileUpdateTime: number = 0;
 
-    private readonly MEMORY_DIR = '.obsidian/gemini-memory';
+    // 限制内存中保留的聊天历史数量，防止内存泄漏
+    private readonly MAX_MEMORY_CHAT_HISTORY = 100; // 只保留最近100条消息在内存中
+
+    private readonly MEMORY_DIR = MEMORY_DIR;
     private readonly PROFILE_FILE = 'user-profile.json';
     private readonly SUMMARY_FILE = 'session-summaries.json';
     private readonly HISTORY_FILE = 'chat-history.json';
@@ -101,6 +105,10 @@ export class MemoryManager {
             content,
             timestamp: Date.now()
         });
+
+        // 清理过旧的聊天记录，防止内存泄漏
+        this.cleanupOldChatHistory();
+
         await this.saveChatHistory();
 
         // 自动画像更新
@@ -127,6 +135,18 @@ export class MemoryManager {
                     console.error('Auto profile update failed:', e);
                 }
             }
+        }
+    }
+
+    // 清理过旧的聊天历史，只保留最近的消息在内存中
+    private cleanupOldChatHistory() {
+        if (this.chatHistory.length > this.MAX_MEMORY_CHAT_HISTORY) {
+            // 只保留最近的消息
+            const excessCount = this.chatHistory.length - this.MAX_MEMORY_CHAT_HISTORY;
+            // 保留最近的消息在数组末尾
+            this.chatHistory = this.chatHistory.slice(-this.MAX_MEMORY_CHAT_HISTORY);
+
+            console.log(`[MemoryManager] Cleaned up ${excessCount} old messages from memory. Keeping ${this.MAX_MEMORY_CHAT_HISTORY} most recent messages.`);
         }
     }
 

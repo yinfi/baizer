@@ -1,5 +1,13 @@
 import { PluginManifest, Command, Plugin } from "obsidian";
 
+// ===== 品牌配置 — 改名只需改这里 =====
+export const PLUGIN_ID = 'obsidian-cli';
+export const PLUGIN_NAME = 'Obsidian CLI';
+export const PLUGIN_PREFIX = 'obsidian-cli';
+export const VIEW_TYPE_SHELL = `${PLUGIN_ID}-shell-view`;
+export const MEMORY_DIR = `.obsidian/${PLUGIN_ID}-memory`;
+export const CSS_PREFIX = 'ocli';
+
 declare module "obsidian" {
     interface App {
         plugins: {
@@ -14,7 +22,7 @@ declare module "obsidian" {
     }
 }
 
-export interface GeminiSettings {
+export interface PluginSettings {
     // --- 🤖 Core Connection ---
     provider: 'gemini' | 'openai' | 'deepseek' | 'qwen';
     apiKey: string;
@@ -65,9 +73,18 @@ export interface GeminiSettings {
     // --- 📨 WeChat Inbox ---
     wechatInboxPath: string;
     wechatStoragePath: string;
+
+    // --- 🔌 MCP Servers ---
+    mcpServers: Record<string, { command: string; args: string[] }>;
+
+    // --- 📚 Knowledge Compiler ---
+    knowledgeSourceFolders: string[];
+    knowledgeAutoCompile: boolean;
+    knowledgeWikiFolder: string;
+    knowledgeMaxCompileBatch: number;
 }
 
-export const DEFAULT_SETTINGS: GeminiSettings = {
+export const DEFAULT_SETTINGS: PluginSettings = {
     // Core
     provider: 'gemini',
     apiKey: '',
@@ -117,15 +134,35 @@ IMPORTANT: Before creating a generic note for tasks, reminders, calendars, or ot
 - If you need to know how a plugin is configured (e.g. default folder), use 'get_plugin_settings'.
 - Only create a generic Markdown note if no suitable plugin is available or if the user explicitly asks for a note.
 
-You have access to the internet via the 'web_search' tool. Use it to find up-to-date information, news, or documentation when the user asks for information not present in their vault.`,
+You have access to the internet via the 'web_search' tool. Use it to find up-to-date information, news, or documentation when the user asks for information not present in their vault.
+
+你有一个个人知识库可用。当用户的问题可能与你之前积累的知识相关时，
+使用 query_knowledge 工具查阅知识库。回答时引用具体来源。
+如果知识库中没有相关内容，正常回答即可，不要强行引用。
+知识库检索不足时，可以用 search_vault 搜索整个 vault 补充。
+
+当你的回答综合了多个知识来源、产出了有价值的新洞察或对比分析时，
+使用 file_back_knowledge 工具将回答归档到知识库。
+不要对简单的事实查询做回填，只回填有综合价值的内容。
+注意：如果用户对回答点赞，无论你的判断如何都执行回填；
+如果用户点踩，则不回填。用户反馈优先于你的判断。`,
 
     // WeChat
     wechatInboxPath: 'Inbox.md',
-    wechatStoragePath: 'Clippings'
+    wechatStoragePath: 'Clippings',
+
+    // MCP
+    mcpServers: {},
+
+    // Knowledge Compiler
+    knowledgeSourceFolders: [],
+    knowledgeAutoCompile: false,
+    knowledgeWikiFolder: 'Knowledge Wiki',
+    knowledgeMaxCompileBatch: 50
 };
 
-export interface IGeminiShellPlugin extends Plugin {
-    settings: GeminiSettings;
+export interface IPlugin extends Plugin {
+    settings: PluginSettings;
     modelService: any;
     saveSettings(): Promise<void>;
 }

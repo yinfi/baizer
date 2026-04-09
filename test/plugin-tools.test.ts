@@ -1,5 +1,6 @@
 import { ToolManager } from '../src/mcp/tools';
 import { App } from 'obsidian';
+import { DEFAULT_SETTINGS } from '../src/mcp/types';
 
 // Simple mock for jest.fn()
 function mockFn(impl?: Function) {
@@ -120,7 +121,8 @@ const mockApp = {
 
 async function runTests() {
     console.log('Plugin Tools Integration Test');
-    const toolManager = new ToolManager(mockApp, true);
+    const mockSettings = { ...DEFAULT_SETTINGS, allowPluginControl: true };
+    const toolManager = new ToolManager(mockApp, mockSettings);
 
     async function test(name: string, fn: () => Promise<void>) {
         try {

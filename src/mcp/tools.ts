@@ -1,6 +1,10 @@
 ﻿import { App, Notice, TFile, requestUrl, htmlToMarkdown } from 'obsidian';
 import { Readability } from '@mozilla/readability';
 import { getVideoTranscript } from '../utils/video_utils';
+import { StdioMcpClient } from './mcp-client';
+import { PluginSettings } from './types';
+import { QueryKnowledgeExecutor } from '../knowledge/query';
+import { FileBackExecutor } from '../knowledge/file-back';
 
 export enum SchemaType {
     STRING = 'string',
@@ -15,19 +19,76 @@ export class ToolManager {
     app: App;
     geminiApi: any;
     allowPluginControl: boolean;
+    private mcpClients: Map<string, StdioMcpClient> = new Map();
+    private settings: PluginSettings;
+    private queryExecutor: QueryKnowledgeExecutor | null = null;
+    private fileBackExecutor: FileBackExecutor | null = null;
 
-    constructor(app: App, allowPluginControl: boolean = false) {
+    constructor(app: App, settings: PluginSettings) {
         this.app = app;
+        this.settings = settings;
         this.geminiApi = null;
-        this.allowPluginControl = allowPluginControl;
+        this.allowPluginControl = settings.allowPluginControl;
+        this.initializeMcpClients();
+    }
+
+    setKnowledgeExecutors(
+        queryExecutor: QueryKnowledgeExecutor,
+        fileBackExecutor: FileBackExecutor
+    ): void {
+        this.queryExecutor = queryExecutor;
+        this.fileBackExecutor = fileBackExecutor;
+    }
+
+    async initializeMcpClients() {
+        // 先清理现有的 MCP 客户端，避免进程泄漏
+        await this.cleanupMcpClients();
+
+        if (!this.settings.mcpServers) return;
+
+        for (const [name, config] of Object.entries(this.settings.mcpServers)) {
+            try {
+                const client = new StdioMcpClient(config.command, config.args);
+                await client.connect();
+                this.mcpClients.set(name, client);
+            } catch (e) {
+                console.error(`Failed to initialize MCP server ${name}`, e);
+            }
+        }
+    }
+
+    // 添加清理 MCP 客户端的方法
+    async cleanupMcpClients() {
+        // 先清理现有的 MCP 客户端，确保进程被正确终止
+        if (this.mcpClients && this.mcpClients.size > 0) {
+            console.log(`[ToolManager] Cleaning up ${this.mcpClients.size} MCP clients...`);
+            const cleanupPromises = Array.from(this.mcpClients.entries()).map(async ([name, client]) => {
+                try {
+                    // 断开客户端连接，这会kill子进程
+                    await client.disconnect();
+                    console.log(`[ToolManager] Successfully disconnected MCP client: ${name}`);
+                } catch (e) {
+                    console.error(`[ToolManager] Error disconnecting MCP client ${name}:`, e);
+                }
+            });
+
+            // 等待所有客户端断开连接
+            await Promise.allSettled(cleanupPromises);
+
+            // 清空客户端Map
+            this.mcpClients.clear();
+            console.log('[ToolManager] All MCP clients have been cleaned up.');
+        }
     }
 
     setGeminiApi(api: any) {
         this.geminiApi = api;
     }
 
-    updateSettings(allowPluginControl: boolean) {
-        this.allowPluginControl = allowPluginControl;
+    updateSettings(settings: PluginSettings) {
+        this.settings = settings;
+        this.allowPluginControl = settings.allowPluginControl;
+        this.initializeMcpClients();
     }
 
     getToolsDefinitions(): any[] {
@@ -189,6 +250,44 @@ export class ToolManager {
             );
         }
 
+        // Knowledge Wiki tools
+        tools.push(
+            {
+                name: 'query_knowledge',
+                description: '从个人知识库中检索相关知识。先读取全局索引了解有哪些文章和主题，再根据需要读取具体的 summary 全文。当用户的问题可能与已积累的知识相关时使用此工具。',
+                parameters: {
+                    type: SchemaType.OBJECT,
+                    properties: {
+                        query: { type: SchemaType.STRING, description: '检索关键词或问题' },
+                        max_results: { type: SchemaType.INTEGER, description: '最多返回几篇 summary，默认 3' }
+                    },
+                    required: ['query']
+                }
+            },
+            {
+                name: 'file_back_knowledge',
+                description: '将当前对话中产出的高质量知识回答存回知识库 Wiki，让知识库随使用不断增长。只对综合了多个知识来源、产出有价值新洞察的回答使用。',
+                parameters: {
+                    type: SchemaType.OBJECT,
+                    properties: {
+                        title: { type: SchemaType.STRING, description: '回填文章的标题' },
+                        content: { type: SchemaType.STRING, description: '要归档的内容（Markdown 格式）' },
+                        source_queries: {
+                            type: SchemaType.ARRAY,
+                            items: { type: SchemaType.STRING },
+                            description: '触发这次回答的问题列表'
+                        },
+                        related_sources: {
+                            type: SchemaType.ARRAY,
+                            items: { type: SchemaType.STRING },
+                            description: '引用的 knowledge_source_id 列表'
+                        }
+                    },
+                    required: ['title', 'content', 'source_queries']
+                }
+            }
+        );
+
         tools.push({
             name: 'web_search',
             description: 'Search the web for information. Use this to find up-to-date info, news, or documentation. IMPORTANT: When providing links in the output, YOU MUST use standard Markdown link syntax: [Title](URL). Do not use bare URLs.',
@@ -206,10 +305,59 @@ export class ToolManager {
             }
         });
 
+        // Add MCP tools
+        for (const [serverName, client] of this.mcpClients) {
+            try {
+                // We need to make this async compatible, but getToolsDefinitions is synchronous currently.
+                // This is a problem. We need to make getToolsDefinitions async or cache tools.
+                // For now, let's assume we cache tools on connect, or we change getToolsDefinitions to async.
+                // Changing to async might ripple through ModelService.
+                // Let's check ModelService. It calls getToolsDefinitions() in startChat.
+                // startChat expects ToolDefinition[].
+
+                // Hack: We can't easily make this async without refactoring ModelService.
+                // Let's assume we cache tools in initializeMcpClients?
+                // But initializeMcpClients is async.
+                // Let's just fetch them on demand if we can, or cache them.
+                // I'll add a cache.
+            } catch (e) {
+                console.error(`Failed to list tools for ${serverName}`, e);
+            }
+        }
+
+        return tools;
+    }
+
+    // New method to get tools async
+    async getToolsDefinitionsAsync(): Promise<any[]> {
+        const tools = this.getToolsDefinitions(); // Get built-in tools
+
+        for (const [serverName, client] of this.mcpClients) {
+            try {
+                const mcpTools = await client.listTools();
+                for (const tool of mcpTools) {
+                    tools.push({
+                        name: `${serverName}_${tool.name}`,
+                        description: tool.description || `Tool from ${serverName}`,
+                        parameters: tool.inputSchema
+                    });
+                }
+            } catch (e) {
+                console.error(`Failed to list tools for ${serverName}`, e);
+            }
+        }
         return tools;
     }
 
     async execute(name: string, args: any): Promise<any> {
+        // Check if it's an MCP tool
+        for (const [serverName, client] of this.mcpClients) {
+            if (name.startsWith(`${serverName}_`)) {
+                const toolName = name.substring(serverName.length + 1);
+                return await client.callTool(toolName, args);
+            }
+        }
+
         try {
             switch (name) {
                 case 'read_note':
@@ -346,13 +494,13 @@ export class ToolManager {
                     };
 
                     const url = args.url;
-                    console.log(`Gemini Shell: Saving webpage ${url}`);
+                    console.log(`Obsidian Shell: Saving webpage ${url}`);
                     try {
                         // Check if it's a video URL
                         const videoTranscript = await getVideoTranscript(url);
 
                         if (videoTranscript) {
-                            console.log(`Gemini Shell: Found video info for ${videoTranscript.platform}`);
+                            console.log(`Obsidian Shell: Found video info for ${videoTranscript.platform}`);
 
                             // Use resolved URL if available, otherwise original URL
                             const finalUrl = videoTranscript.url || url;
@@ -392,7 +540,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
 `;
                                     content = `${yamlFrontmatter}# ${videoTranscript.title}\n\n${summary}\n\n## Transcript Excerpt\n\n${videoTranscript.text.substring(0, 1000)}...`;
                                 } catch (e) {
-                                    console.error("Gemini Shell: Summarization failed", e);
+                                    console.error("Obsidian Shell: Summarization failed", e);
                                     // Fallback to video embed if summarization fails
                                     const created = new Date().toISOString();
                                     const titleTags = extractTags(videoTranscript.title);
@@ -411,7 +559,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
                                 }
                             } else {
                                 // 2. No transcript: Save Title and URL with media-extended format
-                                console.log("Gemini Shell: No transcript text available, saving video embed.");
+                                console.log("Obsidian Shell: No transcript text available, saving video embed.");
                                 new Notice(`💾 Saving video link...`);
 
                                 const created = new Date().toISOString();
@@ -456,7 +604,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
                             }
                         });
                         let html = response.text;
-                        console.log(`Gemini Shell: Fetched ${html.length} bytes`);
+                        console.log(`Obsidian Shell: Fetched ${html.length} bytes`);
 
                         // Extract Title
                         let title = 'Untitled Webpage';
@@ -516,7 +664,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
                             }
                         }
 
-                        console.log(`Gemini Shell: Extracted title "${title}", author "${author}"`);
+                        console.log(`Obsidian Shell: Extracted title "${title}", author "${author}"`);
 
                         const webpageTags = extractTags(title);
 
@@ -545,7 +693,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
                         if (url.includes('mp.weixin.qq.com')) {
                             const jsContent = doc.querySelector('#js_content');
                             if (jsContent) {
-                                console.log("Gemini Shell: Found #js_content for WeChat article");
+                                console.log("Obsidian Shell: Found #js_content for WeChat article");
                                 try {
                                     // Remove scripts and styles from js_content
                                     const scripts = jsContent.querySelectorAll('script, style');
@@ -554,7 +702,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
                                     markdown = htmlToMarkdown(jsContent.innerHTML);
                                     extractionMethod = "wechat-js_content";
                                 } catch (e) {
-                                    console.error("Gemini Shell: htmlToMarkdown failed on #js_content", e);
+                                    console.error("Obsidian Shell: htmlToMarkdown failed on #js_content", e);
                                 }
                             }
                         }
@@ -585,28 +733,28 @@ author: ${videoTranscript.author || videoTranscript.platform}
                             const article = reader.parse();
 
                             if (article && article.content) {
-                                console.log(`Gemini Shell: Readability extracted content length: ${article.content.length}`);
+                                console.log(`Obsidian Shell: Readability extracted content length: ${article.content.length}`);
                                 // Convert extracted content to Markdown
                                 try {
                                     markdown = htmlToMarkdown(article.content);
                                     extractionMethod = "readability";
                                 } catch (e) {
-                                    console.error("Gemini Shell: htmlToMarkdown failed on extracted content", e);
+                                    console.error("Obsidian Shell: htmlToMarkdown failed on extracted content", e);
                                     markdown = "Error: Conversion failed.";
                                 }
                             } else {
-                                console.warn("Gemini Shell: Readability failed to extract content, falling back to full HTML");
+                                console.warn("Obsidian Shell: Readability failed to extract content, falling back to full HTML");
                                 try {
                                     markdown = htmlToMarkdown(html);
                                     extractionMethod = "fallback-full";
                                 } catch (e) {
-                                    console.error("Gemini Shell: htmlToMarkdown failed on full HTML", e);
+                                    console.error("Obsidian Shell: htmlToMarkdown failed on full HTML", e);
                                     markdown = "Error: Conversion failed.";
                                 }
                             }
                         }
 
-                        console.log(`Gemini Shell: Extraction method used: ${extractionMethod}`);
+                        console.log(`Obsidian Shell: Extraction method used: ${extractionMethod}`);
 
                         if (!markdown || markdown.startsWith("Error:")) {
                             // Second fallback attempt if conversion failed
@@ -641,7 +789,7 @@ tags: clipping${webpageTagString}
                         return { success: true, path: finalPath, message: `✅ Webpage Saved: ${finalPath}` };
 
                     } catch (e) {
-                        console.error("Gemini Shell: Error saving webpage", e);
+                        console.error("Obsidian Shell: Error saving webpage", e);
                         return { success: false, error: e.message };
                     }
 
@@ -688,6 +836,18 @@ tags: clipping${webpageTagString}
                         local: now.toLocaleString(),
                         weekday: now.toLocaleDateString(undefined, { weekday: 'long' })
                     };
+
+                case 'query_knowledge':
+                    if (!this.queryExecutor) {
+                        return { error: 'Knowledge system not initialized' };
+                    }
+                    return await this.queryExecutor.execute(args);
+
+                case 'file_back_knowledge':
+                    if (!this.fileBackExecutor) {
+                        return { error: 'Knowledge system not initialized' };
+                    }
+                    return await this.fileBackExecutor.execute(args);
 
                 case 'web_search':
                     let searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;

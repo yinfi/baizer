@@ -1,5 +1,5 @@
 import { App, Notice } from 'obsidian';
-import { GeminiSettings } from '../mcp/types';
+import { PluginSettings } from '../mcp/types';
 import { ToolManager } from '../mcp/tools';
 import { MemoryManager } from '../memory/memory-manager';
 import { UserProfile } from '../memory/types';
@@ -16,7 +16,34 @@ export class ModelService {
     private maxRetries: number = 3;
     private retryDelay: number = 2000;
 
-    constructor(private app: App, private settings: GeminiSettings, private toolManager: ToolManager) {
+    // 创建超时工具函数，使用 AbortController 确保定时器被清理
+    private async withTimeout<T>(
+        promise: Promise<T>,
+        timeoutMs: number,
+        errorMessage: string
+    ): Promise<T> {
+        const controller = new AbortController();
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            const timeoutId = setTimeout(() => {
+                reject(new Error(errorMessage));
+            }, timeoutMs);
+
+            // 如果控制器被中止，清理定时器
+            controller.signal.addEventListener('abort', () => {
+                clearTimeout(timeoutId);
+            });
+        });
+
+        try {
+            return await Promise.race([promise, timeoutPromise]);
+        } finally {
+            // 清理定时器
+            controller.abort();
+        }
+    }
+
+    constructor(private app: App, private settings: PluginSettings, private toolManager: ToolManager) {
         this.initializeProvider();
         this.setupErrorHandlers();
     }
@@ -88,25 +115,39 @@ export class ModelService {
     }
 
     public reloadProvider() {
+        this.cleanup();
         this.initializeProvider();
     }
 
-    public updateSettings(settings: GeminiSettings) {
+    public updateSettings(settings: PluginSettings) {
         this.settings = settings;
+        this.cleanup();
         this.initializeProvider();
     }
+
+    private unhandledRejectionHandler = (event: PromiseRejectionEvent) => {
+        logger.error('Unhandled Promise Rejection', event.reason, 'GlobalErrorHandler');
+    };
 
     private setupErrorHandlers() {
-        window.addEventListener('unhandledrejection', (event) => {
-            logger.error('Unhandled Promise Rejection', event.reason, 'GlobalErrorHandler');
-        });
+        // 先移除已存在的监听器，避免重复注册
+        window.removeEventListener('unhandledrejection', this.unhandledRejectionHandler);
+        // 再添加新的监听器
+        window.addEventListener('unhandledrejection', this.unhandledRejectionHandler);
+    }
+
+    private cleanup() {
+        // 移除事件监听器
+        window.removeEventListener('unhandledrejection', this.unhandledRejectionHandler);
+        // 清理MemoryManager引用，让垃圾回收器可以回收
+        this.memoryManager = null;
     }
 
     async checkAvailability(): Promise<boolean> {
         return await this.provider.checkAvailability();
     }
 
-    async chat(userMessage: string, contextContext: string, selection: string = ""): Promise<string> {
+    async chat(userMessage: string, contextItems: any[], selection: string = ""): Promise<string> {
         logger.info(`Processing chat message: ${userMessage.substring(0, 50)}...`, 'ModelService.chat');
 
         if (!this.hasValidConfig()) {
@@ -128,7 +169,16 @@ export class ModelService {
                 fullPrompt += `${memoryContext}\n\n`;
             }
             fullPrompt += `[Current Time: ${new Date().toLocaleString()} (${new Date().toLocaleDateString(undefined, { weekday: 'long' })})]\n`;
-            fullPrompt += `[Context: ${contextContext}]\n`;
+            // Format context items
+            let contextStr = '';
+            if (contextItems && contextItems.length > 0) {
+                contextStr = contextItems.map(item => {
+                    if (item.type === 'image') return `[Image: ${item.summary || 'Attached Image'}]`; // Placeholder for now, real image handling later
+                    return `[Context (${item.type}): ${item.data}]\n${item.content || ''}`;
+                }).join('\n\n');
+            }
+
+            fullPrompt += `[Context: ${contextStr}]\n`;
             if (selection) {
                 fullPrompt += `[Selected Text: ${selection}]\n`;
             }
@@ -155,9 +205,14 @@ export class ModelService {
 
                 logger.info(`Processing function calls (Loop ${loopCount}): ${result.functionCalls.map(c => c.name).join(', ')}`, 'ModelService.chat');
 
+                // 使用超时控制执行工具调用
                 const toolResults = await Promise.all(result.functionCalls.map(async (call) => {
                     try {
-                        const toolResult = await this.toolManager.execute(call.name, call.args);
+                        const toolResult = await this.withTimeout(
+                            this.toolManager.execute(call.name, call.args),
+                            30000,  // 30秒超时
+                            `Tool ${call.name} execution timed out`
+                        );
                         return {
                             name: call.name,
                             response: toolResult
@@ -191,6 +246,74 @@ export class ModelService {
         }
     }
 
+    /**
+     * 无状态单次生成：不走 MemoryManager，不走 function calling
+     * 用于 Knowledge Compiler 等需要独立 AI 调用的场景
+     */
+    async generate(prompt: string, systemPrompt?: string): Promise<string> {
+        if (!this.hasValidConfig()) {
+            throw new Error(`${this.provider.name} API Key not configured`);
+        }
+
+        try {
+            if (systemPrompt) {
+                const currentConfig = this.getCurrentConfig();
+                this.provider.configure({ ...currentConfig, systemPrompt });
+            }
+
+            const result = await this.provider.generateContent(prompt);
+
+            if (systemPrompt) {
+                const currentConfig = this.getCurrentConfig();
+                this.provider.configure({ ...currentConfig, systemPrompt: this.settings.systemPrompt });
+            }
+
+            return result.text;
+        } catch (e: any) {
+            logger.error('Stateless generation failed', e, 'ModelService.generate');
+            throw e;
+        }
+    }
+
+    private getCurrentConfig(): ModelConfig {
+        switch (this.settings.provider) {
+            case 'gemini':
+                return {
+                    apiKey: this.settings.apiKey,
+                    modelName: this.settings.primaryModel,
+                    systemPrompt: this.settings.systemPrompt,
+                    contextWindow: this.settings.contextWindow
+                };
+            case 'openai':
+                return {
+                    apiKey: this.settings.openaiApiKey,
+                    baseUrl: this.settings.openaiBaseUrl,
+                    modelName: this.settings.openaiModel,
+                    systemPrompt: this.settings.systemPrompt
+                };
+            case 'deepseek':
+                return {
+                    apiKey: this.settings.deepseekApiKey,
+                    baseUrl: this.settings.deepseekBaseUrl,
+                    modelName: this.settings.deepseekModel,
+                    systemPrompt: this.settings.systemPrompt
+                };
+            case 'qwen':
+                return {
+                    apiKey: this.settings.qwenApiKey,
+                    baseUrl: this.settings.qwenBaseUrl,
+                    modelName: this.settings.qwenModel,
+                    systemPrompt: this.settings.systemPrompt
+                };
+            default:
+                return {
+                    apiKey: this.settings.apiKey,
+                    modelName: this.settings.primaryModel,
+                    systemPrompt: this.settings.systemPrompt
+                };
+        }
+    }
+
     // ==================== Memory Management Methods ====================
 
     async clearSession() {
@@ -221,8 +344,17 @@ export class ModelService {
     }
 
     async shutdown() {
+        // 移除事件监听器
+        window.removeEventListener('unhandledrejection', this.unhandledRejectionHandler);
+
+        // 保存内存数据
         if (this.memoryManager) {
             await this.memoryManager.save();
+        }
+
+        // 清理 MCP 客户端（这将断开所有 MCP 连接）
+        if (this.toolManager) {
+            await this.toolManager.cleanupMcpClients();
         }
     }
 }

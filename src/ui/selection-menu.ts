@@ -10,8 +10,8 @@ type SelectionMenuState =
     | { type: 'button', from: number, to: number }
     | { type: 'chat', from: number, to: number, controller: ChatController };
 
-let pluginApp: App | null = null;
-let pluginModelService: ModelService | null = null;
+// 使用 WeakMap 存储插件上下文，避免内存泄漏
+const pluginContextMap = new WeakMap<EditorView, { app: App; modelService: ModelService }>();
 
 // We need a way to manually update the state (e.g. button click -> input)
 export const setSelectionMenuState = StateEffect.define<SelectionMenuState>();
@@ -46,14 +46,17 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
 
         return state;
     },
-    provide: f => showTooltip.from(f, state => {
+    provide: f => showTooltip.from(f, (state, view) => {
         if (state.type === 'hidden') return null;
+
+        const context = view ? pluginContextMap.get(view) : undefined;
+        if (!context) return null;
 
         return {
             pos: state.from,
             above: true,
             strictSide: true,
-            create: (view) => {
+            create: () => {
                 const dom = document.createElement('div');
                 dom.className = 'guardian-selection-tooltip';
 
@@ -62,28 +65,15 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
                     btn.className = 'guardian-selection-btn';
                     btn.textContent = 'Comment / AI';
                     btn.onclick = () => {
-                        if (!pluginApp || !pluginModelService) {
-                            new Notice('Model Service not initialized');
-                            return;
-                        }
-
                         // Initialize ChatController
                         const controller = new ChatController({
-                            app: pluginApp,
-                            api: pluginModelService,
+                            app: context.app,
+                            api: context.modelService,
                             onMessageAdded: (msg) => {
-                                // We need to re-render or update the UI when message is added
-                                // Since we are inside create(), we can manipulate the DOM directly if we had reference
-                                // But here we are creating the DOM.
-                                // The ChatController will be passed to the 'chat' state.
-                                // The 'chat' state render logic will handle the UI.
-                                // However, for *updates* (streaming), we need a way to trigger UI update.
-                                // A simple way is to dispatch a state update with the SAME controller,
-                                // forcing a re-render? No, that's heavy.
-                                // Better: The UI component subscribes to the controller.
+                                // 重新渲染逻辑...
                             },
                             onStatusChanged: (isResponding) => {
-                                // Same here, update UI loading state
+                                // 状态更新逻辑...
                             }
                         });
 
@@ -124,7 +114,7 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
                             messages.forEach(msg => {
                                 const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
                                 if (msg.role === 'ai') {
-                                    MarkdownRenderer.render(pluginApp!, msg.content, msgEl, '', new Component());
+                                    MarkdownRenderer.render(context.app, msg.content, msgEl, '', new Component());
                                 } else {
                                     msgEl.setText(msg.content);
                                 }
@@ -137,15 +127,6 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
                     renderMessages();
 
                     // Hook up callbacks to update UI
-                    // Note: This is a bit hacky as we are modifying the controller's callbacks *after* creation
-                    // Ideally ChatController supports multiple listeners or we pass a delegate.
-                    // For now, let's just override/wrap.
-                    // Actually, we can just re-assign them since we have the instance.
-                    // BUT, the controller was created in the previous step.
-                    // We need to ensure we don't overwrite if we re-render?
-                    // The state persists, so the controller persists.
-
-                    // Let's just assign the callbacks here.
                     state.controller['onMessageAdded'] = (msg: ChatMessage) => {
                         renderMessages();
                     };
@@ -227,10 +208,15 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
 });
 
 export function selectionMenuExtension(app: App, modelService: ModelService): Extension {
-    pluginApp = app;
-    pluginModelService = modelService;
+    // 使用 WeakMap 存储 context，避免静态变量持有强引用
     return [
-        selectionMenuField
+        selectionMenuField,
+        // 使用 EditorView.updateListener 来存储 context
+        EditorView.updateListener.of((update) => {
+            if (update.view) {
+                pluginContextMap.set(update.view, { app, modelService });
+            }
+        })
     ];
 }
 

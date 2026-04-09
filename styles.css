@@ -1,20 +1,20 @@
 ﻿/* ==========================================================================
-   Gemini Shell - Sidebar UI
+   Obsidian Shell - Sidebar UI
    ========================================================================== */
 
 /* Fix Obsidian parent containers to enable flexbox layout */
-.workspace-leaf-content:has(.gemini-shell-view) {
+.workspace-leaf-content:has(.ocli-shell-view) {
     display: flex !important;
     flex-direction: column !important;
 }
 
-.workspace-leaf-content:has(.gemini-shell-view)>.view-content {
+.workspace-leaf-content:has(.ocli-shell-view)>.view-content {
     display: flex !important;
     flex-direction: column !important;
     flex: 1 !important;
 }
 
-.gemini-shell-view {
+.ocli-shell-view {
     display: flex !important;
     flex-direction: column !important;
     height: 100% !important;
@@ -26,30 +26,45 @@
 
 /* 1. Header */
 .shell-header {
-    padding: 8px 16px;
-    background: var(--background-secondary);
-    border-bottom: 1px solid var(--background-modifier-border);
-    font-size: 10px;
-    color: var(--text-muted);
     display: flex;
     justify-content: space-between;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    user-select: none;
+    align-items: center;
+    margin-bottom: var(--size-4-2);
     flex-shrink: 0;
+}
+
+.shell-header-title {
+    flex-grow: 1;
+}
+
+.shell-title {
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-medium);
+    margin: 0;
+}
+
+.shell-header-buttons {
+    display: flex;
+    gap: var(--size-2-1);
+}
+
+.shell-header-buttons svg {
+    height: var(--icon-l);
+    width: var(--icon-l);
+    stroke-width: var(--icon-stroke);
 }
 
 /* 2. Output Area */
 .shell-output-area {
     flex-grow: 1;
-    padding: 16px;
     overflow-y: auto;
     scroll-behavior: smooth;
-    font-size: 13px;
-    line-height: 1.6;
-    min-height: 0;
     user-select: text;
-    cursor: text;
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-1);
+    padding: var(--size-4-1);
+    margin: calc(var(--size-4-1) * -1);
 }
 
 .shell-output-area::-webkit-scrollbar {
@@ -62,87 +77,169 @@
     border-radius: 3px;
 }
 
-/* Entries */
+/* Chat Entries */
 .shell-entry {
-    margin-bottom: 16px;
     word-wrap: break-word;
     user-select: text;
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-1);
 }
 
 .shell-entry.user {
     color: var(--text-accent);
-    border-left: 2px solid var(--interactive-accent);
-    padding-left: 12px;
-    font-weight: 600;
+    font-weight: var(--font-medium);
+    padding: var(--size-4-1) var(--size-4-3);
+    margin: 0 calc(var(--size-4-1) * -1);
+    background-color: var(--background-primary-alt);
+    border-left: 3px solid var(--interactive-accent);
 }
 
 .shell-entry.system {
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--font-smaller);
     font-style: italic;
-    padding-left: 14px;
+    padding: var(--size-2-2) var(--size-4-3);
+    margin: 0 calc(var(--size-4-1) * -1);
 }
 
 .shell-entry.ai {
     color: var(--text-normal);
-    padding-left: 14px;
+    padding: var(--size-4-1) var(--size-4-3);
+    margin: 0 calc(var(--size-4-1) * -1);
 }
 
 /* Markdown Styles in AI Response */
 .shell-entry.ai h1,
 .shell-entry.ai h2,
-.shell-entry.ai h3 {
-    margin-top: 10px;
-    margin-bottom: 5px;
-    font-size: 1.1em;
+.shell-entry.ai h3,
+.shell-entry.ai h4,
+.shell-entry.ai h5,
+.shell-entry.ai h6 {
+    margin-top: var(--size-2-3);
+    margin-bottom: var(--size-2-1);
+    font-size: var(--font-ui-medium);
     color: var(--text-normal);
 }
 
+.shell-entry.ai p {
+    font-size: var(--font-ui-small);
+    line-height: var(--line-height-normal);
+    margin-top: var(--size-2-2);
+    margin-bottom: var(--size-2-2);
+}
+
 .shell-entry.ai code {
-    color: var(--text-accent);
-    font-size: 0.9em;
+    color: var(--code-normal);
+    font-size: var(--code-size);
+    border-radius: var(--code-radius);
+    padding: 0.1em 0.25em;
+    background-color: var(--code-background);
+    vertical-align: baseline;
 }
 
 .shell-entry.ai pre {
     background: var(--background-primary-alt);
-    padding: 10px;
-    border-radius: 6px;
+    padding: 0;
+    border-radius: var(--radius-s);
     border: 1px solid var(--background-modifier-border);
+    position: relative;
+    margin: var(--size-4-1) 0;
+}
+
+.shell-entry.ai pre code {
+    display: block;
+    padding: var(--size-4-2);
+    overflow-x: auto;
+}
+
+/* Code Block Header */
+.shell-code-block-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: var(--font-smallest);
+    background-color: var(--background-primary);
+    border-bottom: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s) var(--radius-s) 0 0;
+    height: calc(var(--size-4-8) - var(--size-4-1));
+    padding: 0 var(--size-4-1);
+}
+
+.shell-code-block-filename {
+    padding-left: var(--size-4-1);
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.shell-code-block-buttons {
+    display: flex;
+    gap: var(--size-2-1);
+    align-items: center;
+    padding-right: var(--size-2-1);
+}
+
+.shell-apply-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--size-2-1);
+    font-size: var(--font-smaller);
+    color: var(--text-muted);
+    padding: var(--size-2-1) var(--size-4-1);
+    border-radius: var(--radius-s);
+    cursor: pointer;
+    transition: all 0.1s ease-in-out;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+}
+
+.shell-apply-btn:hover {
+    color: var(--text-normal);
+    background-color: var(--background-modifier-hover);
+    border-color: var(--background-modifier-border-hover);
+}
+
+.shell-entry.ai ul,
+.shell-entry.ai ol {
+    padding-left: var(--size-4-4);
+}
+
+.shell-entry.ai li {
+    font-size: var(--font-ui-small);
+    line-height: var(--line-height-normal);
 }
 
 /* 3. Input Area (Fixed Bottom) */
 .shell-input-container {
-    background: var(--background-secondary);
-    border-top: 1px solid var(--background-modifier-border);
-    padding: 12px;
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    flex-shrink: 0;
-    position: relative;
-    /* For suggestions popup */
+    gap: var(--size-4-1);
+    -webkit-app-region: no-drag;
+    background: var(--background-modifier-form-field);
+    border: var(--input-border-width) solid var(--background-modifier-border);
+    color: var(--text-normal);
+    font-family: inherit;
+    padding: calc(var(--size-2-3) + 1px);
+    font-size: var(--font-ui-small);
+    border-radius: var(--radius-s);
+    outline: none;
     margin-top: auto;
-    z-index: 10;
+    flex-shrink: 0;
+}
+
+.shell-input-container:focus-within {
+    box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+    transition: box-shadow 0.15s ease-in-out;
 }
 
 .shell-input-wrapper {
     display: flex;
-    align-items: flex-start;
-    /* Align top for textarea */
-    gap: 8px;
-    background: var(--background-primary);
-    padding: 8px;
-    border-radius: 6px;
-    border: 1px solid var(--background-modifier-border);
-}
-
-.shell-prompt {
-    color: var(--interactive-accent);
-    font-weight: bold;
-    font-size: 16px;
-    padding-top: 2px;
-    /* Align with text */
-    user-select: none;
+    flex-direction: column;
+    gap: var(--size-4-1);
 }
 
 textarea.shell-input {
@@ -150,49 +247,58 @@ textarea.shell-input {
     background: transparent;
     border: none;
     outline: none;
+    resize: none;
     color: var(--text-normal);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
+    font-family: inherit;
+    font-size: var(--font-ui-small);
+    line-height: var(--line-height-tight);
     padding: 0;
     margin: 0;
-    resize: none;
-    min-height: 24px;
-    max-height: 150px;
+    overflow-y: auto;
+    min-height: 80px;
+    max-height: 200px;
     box-shadow: none !important;
 }
 
 textarea.shell-input::placeholder {
-    color: var(--text-muted) !important;
-    opacity: 0.5 !important;
+    color: var(--text-faint);
+    opacity: 0.7;
 }
 
-/* 4. Footer / Action Bar */
-.shell-footer {
+/* 4. Input Controls */
+.shell-input-controls {
     display: flex;
+    flex-direction: row;
+    gap: var(--size-4-1);
     justify-content: space-between;
     align-items: center;
-    font-size: 10px;
+    height: var(--size-4-4);
+    flex-shrink: 0;
+}
+
+.shell-model-select-container {
+    flex-shrink: 1;
+    overflow: hidden;
+}
+
+.shell-model-select {
+    font-size: var(--font-smallest);
     color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0 var(--size-2-1);
 }
 
-.action-group {
-    display: flex;
-    gap: 12px;
+.shell-model-select:hover {
+    color: var(--text-normal);
 }
 
-.action-item {
+.shell-action-buttons {
+    flex-shrink: 0;
     display: flex;
+    gap: var(--size-4-2);
     align-items: center;
-    gap: 4px;
-}
-
-.key-badge {
-    background: var(--background-modifier-border);
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-size: 9px;
-    min-width: 16px;
-    text-align: center;
 }
 
 /* 5. Suggestions Popup */
@@ -510,4 +616,193 @@ textarea.shell-input::placeholder {
 .guardian-chat-actions button:hover {
     background: var(--background-modifier-hover);
     color: var(--text-normal);
+}
+
+/* ==================== New Features Styles ==================== */
+
+/* Context Chips */
+.shell-context-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--size-4-1);
+    margin-bottom: var(--size-4-1);
+    min-height: 0;
+    padding: 0 1px;
+}
+
+.context-chip {
+    display: flex;
+    align-items: center;
+    gap: var(--size-2-1);
+    background-color: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    font-size: var(--font-smallest);
+    padding: var(--size-2-1) var(--size-4-1);
+    color: var(--text-normal);
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.1s ease-in-out;
+}
+
+.context-chip:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.chip-icon {
+    font-size: var(--font-ui-small);
+    flex-shrink: 0;
+}
+
+.chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chip-remove {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-weight: var(--font-bold);
+    padding: 0 var(--size-2-1);
+    margin-right: calc(var(--size-2-1) * -1);
+}
+
+.chip-remove:hover {
+    color: var(--text-normal);
+    background-color: var(--background-modifier-hover);
+    border-radius: 0 var(--radius-s) var(--radius-s) 0;
+}
+
+.chip-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;
+}
+
+.chip-remove {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-weight: bold;
+    margin-left: 2px;
+}
+
+.chip-remove:hover {
+    color: var(--text-error);
+}
+
+/* Apply Edit Button */
+.shell-apply-btn {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font-interface);
+    transition: opacity 0.2s;
+    z-index: 5;
+}
+
+.shell-apply-btn:hover {
+    opacity: 1 !important;
+}
+
+/* Diff Modal */
+.ocli-diff-modal {
+    width: 80vw;
+    max-width: 1000px;
+    height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.diff-container {
+    flex: 1;
+    background-color: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    padding: 10px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.diff-line {
+    white-space: pre-wrap;
+    padding: 0 4px;
+}
+
+.diff-added {
+    background-color: rgba(var(--color-green-rgb), 0.15);
+    color: var(--text-success);
+}
+
+.diff-removed {
+    background-color: rgba(var(--color-red-rgb), 0.15);
+    color: var(--text-error);
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+.diff-unchanged {
+    color: var(--text-muted);
+}
+
+.diff-actions {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Knowledge Wiki - Feedback Buttons */
+.shell-feedback-bar {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.shell-entry.ai:hover .shell-feedback-bar {
+    opacity: 1;
+}
+
+.shell-feedback-btn {
+    background: transparent;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    cursor: pointer;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    transition: all 0.15s ease;
+}
+
+.shell-feedback-btn:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.shell-feedback-btn.active {
+    border-color: var(--interactive-accent);
+    color: var(--interactive-accent);
+}
+
+.shell-thumbs-up.active {
+    color: var(--color-green);
+    border-color: var(--color-green);
+}
+
+.shell-thumbs-down.active {
+    color: var(--color-red);
+    border-color: var(--color-red);
 }

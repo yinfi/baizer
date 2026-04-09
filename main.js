@@ -2101,10 +2101,10 @@ var require_readability = __commonJS({
 // main.ts
 var main_exports = {};
 __export(main_exports, {
-  default: () => GeminiShellPlugin
+  default: () => ObsidianCliPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian9 = require("obsidian");
+var import_obsidian18 = require("obsidian");
 
 // src/services/model-service.ts
 var import_obsidian2 = require("obsidian");
@@ -2133,6 +2133,77 @@ var DEFAULT_USER_PROFILE = {
   }
 };
 
+// src/mcp/types.ts
+var PLUGIN_ID = "obsidian-cli";
+var VIEW_TYPE_SHELL = `${PLUGIN_ID}-shell-view`;
+var MEMORY_DIR = `.obsidian/${PLUGIN_ID}-memory`;
+var DEFAULT_SETTINGS = {
+  // Core
+  provider: "gemini",
+  apiKey: "",
+  primaryModel: "gemini-2.5-flash",
+  openaiApiKey: "",
+  openaiBaseUrl: "https://api.openai.com/v1",
+  openaiModel: "gpt-4o",
+  deepseekApiKey: "",
+  deepseekBaseUrl: "https://api.deepseek.com",
+  deepseekModel: "deepseek-chat",
+  qwenApiKey: "",
+  qwenBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  qwenModel: "qwen-turbo",
+  thinkingModel: "gemini-2.5-pro",
+  contextWindow: 1e5,
+  // Guardian
+  enableGuardian: false,
+  guardianAutoMode: true,
+  // Default to true
+  guardianSensitivity: 50,
+  guardianUIStyle: "hybrid",
+  ignoredFolders: "",
+  privacyMode: false,
+  // Permissions
+  allowFileCreation: true,
+  allowFileModification: false,
+  allowPluginControl: false,
+  confirmExecutions: true,
+  // Terminal
+  terminalTheme: "hacker-green",
+  terminalFont: "JetBrains Mono",
+  terminalFontSize: 14,
+  terminalOpacity: 0.95,
+  // Prompt
+  customizePrompt: false,
+  systemPrompt: `You are a command-line interface inside Obsidian. Be concise. Output valid Markdown.
+    
+IMPORTANT: Before creating a generic note for tasks, reminders, calendars, or other specialized content, ALWAYS check if a specialized plugin is installed using 'list_plugins'.
+- If a relevant plugin is found (e.g., "obsidian-tasks-plugin", "obsidian-kanban", "reminder"), use 'get_plugin_commands' to find the appropriate command and execute it.
+- If you need to know how a plugin is configured (e.g. default folder), use 'get_plugin_settings'.
+- Only create a generic Markdown note if no suitable plugin is available or if the user explicitly asks for a note.
+
+You have access to the internet via the 'web_search' tool. Use it to find up-to-date information, news, or documentation when the user asks for information not present in their vault.
+
+\u4F60\u6709\u4E00\u4E2A\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u53EF\u7528\u3002\u5F53\u7528\u6237\u7684\u95EE\u9898\u53EF\u80FD\u4E0E\u4F60\u4E4B\u524D\u79EF\u7D2F\u7684\u77E5\u8BC6\u76F8\u5173\u65F6\uFF0C
+\u4F7F\u7528 query_knowledge \u5DE5\u5177\u67E5\u9605\u77E5\u8BC6\u5E93\u3002\u56DE\u7B54\u65F6\u5F15\u7528\u5177\u4F53\u6765\u6E90\u3002
+\u5982\u679C\u77E5\u8BC6\u5E93\u4E2D\u6CA1\u6709\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5E38\u56DE\u7B54\u5373\u53EF\uFF0C\u4E0D\u8981\u5F3A\u884C\u5F15\u7528\u3002
+\u77E5\u8BC6\u5E93\u68C0\u7D22\u4E0D\u8DB3\u65F6\uFF0C\u53EF\u4EE5\u7528 search_vault \u641C\u7D22\u6574\u4E2A vault \u8865\u5145\u3002
+
+\u5F53\u4F60\u7684\u56DE\u7B54\u7EFC\u5408\u4E86\u591A\u4E2A\u77E5\u8BC6\u6765\u6E90\u3001\u4EA7\u51FA\u4E86\u6709\u4EF7\u503C\u7684\u65B0\u6D1E\u5BDF\u6216\u5BF9\u6BD4\u5206\u6790\u65F6\uFF0C
+\u4F7F\u7528 file_back_knowledge \u5DE5\u5177\u5C06\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002
+\u4E0D\u8981\u5BF9\u7B80\u5355\u7684\u4E8B\u5B9E\u67E5\u8BE2\u505A\u56DE\u586B\uFF0C\u53EA\u56DE\u586B\u6709\u7EFC\u5408\u4EF7\u503C\u7684\u5185\u5BB9\u3002
+\u6CE8\u610F\uFF1A\u5982\u679C\u7528\u6237\u5BF9\u56DE\u7B54\u70B9\u8D5E\uFF0C\u65E0\u8BBA\u4F60\u7684\u5224\u65AD\u5982\u4F55\u90FD\u6267\u884C\u56DE\u586B\uFF1B
+\u5982\u679C\u7528\u6237\u70B9\u8E29\uFF0C\u5219\u4E0D\u56DE\u586B\u3002\u7528\u6237\u53CD\u9988\u4F18\u5148\u4E8E\u4F60\u7684\u5224\u65AD\u3002`,
+  // WeChat
+  wechatInboxPath: "Inbox.md",
+  wechatStoragePath: "Clippings",
+  // MCP
+  mcpServers: {},
+  // Knowledge Compiler
+  knowledgeSourceFolders: [],
+  knowledgeAutoCompile: false,
+  knowledgeWikiFolder: "Knowledge Wiki",
+  knowledgeMaxCompileBatch: 50
+};
+
 // src/memory/memory-manager.ts
 var MemoryManager = class {
   // Minimum 1 minute between updates
@@ -2150,7 +2221,10 @@ var MemoryManager = class {
   chatHistory = [];
   currentSessionMessages = 0;
   lastProfileUpdateTime = 0;
-  MEMORY_DIR = ".obsidian/gemini-memory";
+  // 限制内存中保留的聊天历史数量，防止内存泄漏
+  MAX_MEMORY_CHAT_HISTORY = 100;
+  // 只保留最近100条消息在内存中
+  MEMORY_DIR = MEMORY_DIR;
   PROFILE_FILE = "user-profile.json";
   SUMMARY_FILE = "session-summaries.json";
   HISTORY_FILE = "chat-history.json";
@@ -2220,6 +2294,7 @@ ${summaryContext}`;
       content,
       timestamp: Date.now()
     });
+    this.cleanupOldChatHistory();
     await this.saveChatHistory();
     if (role === "user") {
       const timeSinceLastUpdate = Date.now() - this.lastProfileUpdateTime;
@@ -2241,6 +2316,14 @@ ${summaryContext}`;
           console.error("Auto profile update failed:", e);
         }
       }
+    }
+  }
+  // 清理过旧的聊天历史，只保留最近的消息在内存中
+  cleanupOldChatHistory() {
+    if (this.chatHistory.length > this.MAX_MEMORY_CHAT_HISTORY) {
+      const excessCount = this.chatHistory.length - this.MAX_MEMORY_CHAT_HISTORY;
+      this.chatHistory = this.chatHistory.slice(-this.MAX_MEMORY_CHAT_HISTORY);
+      console.log(`[MemoryManager] Cleaned up ${excessCount} old messages from memory. Keeping ${this.MAX_MEMORY_CHAT_HISTORY} most recent messages.`);
     }
   }
   // ==================== Profile Management ====================
@@ -3758,6 +3841,23 @@ var ModelService = class {
   // 30s timeout
   maxRetries = 3;
   retryDelay = 2e3;
+  // 创建超时工具函数，使用 AbortController 确保定时器被清理
+  async withTimeout(promise, timeoutMs, errorMessage) {
+    const controller = new AbortController();
+    const timeoutPromise = new Promise((_, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(errorMessage));
+      }, timeoutMs);
+      controller.signal.addEventListener("abort", () => {
+        clearTimeout(timeoutId);
+      });
+    });
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      controller.abort();
+    }
+  }
   initializeProvider() {
     const providerType = this.settings.provider;
     switch (providerType) {
@@ -3824,21 +3924,29 @@ var ModelService = class {
     }
   }
   reloadProvider() {
+    this.cleanup();
     this.initializeProvider();
   }
   updateSettings(settings) {
     this.settings = settings;
+    this.cleanup();
     this.initializeProvider();
   }
+  unhandledRejectionHandler = (event) => {
+    logger.error("Unhandled Promise Rejection", event.reason, "GlobalErrorHandler");
+  };
   setupErrorHandlers() {
-    window.addEventListener("unhandledrejection", (event) => {
-      logger.error("Unhandled Promise Rejection", event.reason, "GlobalErrorHandler");
-    });
+    window.removeEventListener("unhandledrejection", this.unhandledRejectionHandler);
+    window.addEventListener("unhandledrejection", this.unhandledRejectionHandler);
+  }
+  cleanup() {
+    window.removeEventListener("unhandledrejection", this.unhandledRejectionHandler);
+    this.memoryManager = null;
   }
   async checkAvailability() {
     return await this.provider.checkAvailability();
   }
-  async chat(userMessage, contextContext, selection = "") {
+  async chat(userMessage, contextItems, selection = "") {
     logger.info(`Processing chat message: ${userMessage.substring(0, 50)}...`, "ModelService.chat");
     if (!this.hasValidConfig()) {
       const error = `${this.provider.name} API Key not configured!`;
@@ -3859,7 +3967,16 @@ var ModelService = class {
       }
       fullPrompt += `[Current Time: ${(/* @__PURE__ */ new Date()).toLocaleString()} (${(/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { weekday: "long" })})]
 `;
-      fullPrompt += `[Context: ${contextContext}]
+      let contextStr = "";
+      if (contextItems && contextItems.length > 0) {
+        contextStr = contextItems.map((item) => {
+          if (item.type === "image")
+            return `[Image: ${item.summary || "Attached Image"}]`;
+          return `[Context (${item.type}): ${item.data}]
+${item.content || ""}`;
+        }).join("\n\n");
+      }
+      fullPrompt += `[Context: ${contextStr}]
 `;
       if (selection) {
         fullPrompt += `[Selected Text: ${selection}]
@@ -3879,7 +3996,12 @@ var ModelService = class {
         logger.info(`Processing function calls (Loop ${loopCount}): ${result.functionCalls.map((c) => c.name).join(", ")}`, "ModelService.chat");
         const toolResults = await Promise.all(result.functionCalls.map(async (call) => {
           try {
-            const toolResult = await this.toolManager.execute(call.name, call.args);
+            const toolResult = await this.withTimeout(
+              this.toolManager.execute(call.name, call.args),
+              3e4,
+              // 30秒超时
+              `Tool ${call.name} execution timed out`
+            );
             return {
               name: call.name,
               response: toolResult
@@ -3906,6 +4028,68 @@ var ModelService = class {
       return `Error: ${e.message}`;
     }
   }
+  /**
+   * 无状态单次生成：不走 MemoryManager，不走 function calling
+   * 用于 Knowledge Compiler 等需要独立 AI 调用的场景
+   */
+  async generate(prompt, systemPrompt) {
+    if (!this.hasValidConfig()) {
+      throw new Error(`${this.provider.name} API Key not configured`);
+    }
+    try {
+      if (systemPrompt) {
+        const currentConfig = this.getCurrentConfig();
+        this.provider.configure({ ...currentConfig, systemPrompt });
+      }
+      const result = await this.provider.generateContent(prompt);
+      if (systemPrompt) {
+        const currentConfig = this.getCurrentConfig();
+        this.provider.configure({ ...currentConfig, systemPrompt: this.settings.systemPrompt });
+      }
+      return result.text;
+    } catch (e) {
+      logger.error("Stateless generation failed", e, "ModelService.generate");
+      throw e;
+    }
+  }
+  getCurrentConfig() {
+    switch (this.settings.provider) {
+      case "gemini":
+        return {
+          apiKey: this.settings.apiKey,
+          modelName: this.settings.primaryModel,
+          systemPrompt: this.settings.systemPrompt,
+          contextWindow: this.settings.contextWindow
+        };
+      case "openai":
+        return {
+          apiKey: this.settings.openaiApiKey,
+          baseUrl: this.settings.openaiBaseUrl,
+          modelName: this.settings.openaiModel,
+          systemPrompt: this.settings.systemPrompt
+        };
+      case "deepseek":
+        return {
+          apiKey: this.settings.deepseekApiKey,
+          baseUrl: this.settings.deepseekBaseUrl,
+          modelName: this.settings.deepseekModel,
+          systemPrompt: this.settings.systemPrompt
+        };
+      case "qwen":
+        return {
+          apiKey: this.settings.qwenApiKey,
+          baseUrl: this.settings.qwenBaseUrl,
+          modelName: this.settings.qwenModel,
+          systemPrompt: this.settings.systemPrompt
+        };
+      default:
+        return {
+          apiKey: this.settings.apiKey,
+          modelName: this.settings.primaryModel,
+          systemPrompt: this.settings.systemPrompt
+        };
+    }
+  }
   // ==================== Memory Management Methods ====================
   async clearSession() {
     if (this.memoryManager) {
@@ -3930,8 +4114,12 @@ var ModelService = class {
     return this.toolManager.getToolsDefinitions();
   }
   async shutdown() {
+    window.removeEventListener("unhandledrejection", this.unhandledRejectionHandler);
     if (this.memoryManager) {
       await this.memoryManager.save();
+    }
+    if (this.toolManager) {
+      await this.toolManager.cleanupMcpClients();
     }
   }
 };
@@ -3953,7 +4141,7 @@ async function getVideoTranscript(url) {
 async function getYoutubeTranscript(url) {
   try {
     const userAgent = navigator.userAgent;
-    console.log(`Gemini Shell: Using User-Agent: ${userAgent}`);
+    console.log(`Obsidian Shell: Using User-Agent: ${userAgent}`);
     const response = await (0, import_obsidian3.requestUrl)({
       url,
       headers: {
@@ -3973,20 +4161,20 @@ async function getYoutubeTranscript(url) {
     }
     const captionsMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
     if (!captionsMatch) {
-      console.warn("Gemini Shell: No captionTracks found in YouTube page.");
+      console.warn("Obsidian Shell: No captionTracks found in YouTube page.");
       return { text: "", title, platform: "youtube", author, url };
     }
     const captionTracks = JSON.parse(captionsMatch[1]);
     if (!captionTracks || captionTracks.length === 0) {
-      console.warn("Gemini Shell: Empty captionTracks.");
+      console.warn("Obsidian Shell: Empty captionTracks.");
       return { text: "", title, platform: "youtube", author, url };
     }
     let selectedTrack = captionTracks.find((track) => track.languageCode === "en");
     if (!selectedTrack) {
       selectedTrack = captionTracks[0];
     }
-    console.log(`Gemini Shell: Selected caption track: ${selectedTrack.name?.simpleText} (${selectedTrack.languageCode})`);
-    console.log(`Gemini Shell: Fetching transcript from: ${selectedTrack.baseUrl}`);
+    console.log(`Obsidian Shell: Selected caption track: ${selectedTrack.name?.simpleText} (${selectedTrack.languageCode})`);
+    console.log(`Obsidian Shell: Fetching transcript from: ${selectedTrack.baseUrl}`);
     let transcriptResponse;
     try {
       transcriptResponse = await (0, import_obsidian3.requestUrl)({
@@ -3996,14 +4184,14 @@ async function getYoutubeTranscript(url) {
         }
       });
     } catch (e) {
-      console.warn("Gemini Shell: Failed to fetch transcript with User-Agent, trying without...", e);
+      console.warn("Obsidian Shell: Failed to fetch transcript with User-Agent, trying without...", e);
       transcriptResponse = await (0, import_obsidian3.requestUrl)({ url: selectedTrack.baseUrl });
     }
     let transcriptXml = transcriptResponse.text;
-    console.log(`Gemini Shell: Transcript Response Status: ${transcriptResponse.status}`);
-    console.log(`Gemini Shell: Transcript Response Headers:`, transcriptResponse.headers);
+    console.log(`Obsidian Shell: Transcript Response Status: ${transcriptResponse.status}`);
+    console.log(`Obsidian Shell: Transcript Response Headers:`, transcriptResponse.headers);
     if (!transcriptXml || transcriptXml.length === 0) {
-      console.warn("Gemini Shell: Empty XML response. Trying fmt=json3...");
+      console.warn("Obsidian Shell: Empty XML response. Trying fmt=json3...");
       try {
         const jsonUrl = selectedTrack.baseUrl + "&fmt=json3";
         const jsonResponse = await (0, import_obsidian3.requestUrl)({
@@ -4012,7 +4200,7 @@ async function getYoutubeTranscript(url) {
         });
         const jsonText = jsonResponse.text;
         if (jsonText && jsonText.length > 0) {
-          console.log("Gemini Shell: Found JSON transcript, parsing...");
+          console.log("Obsidian Shell: Found JSON transcript, parsing...");
           const jsonData = JSON.parse(jsonText);
           if (jsonData.events) {
             const lines2 = jsonData.events.map((e) => e.segs ? e.segs.map((s) => s.utf8).join("") : "").filter((t) => t);
@@ -4027,12 +4215,12 @@ async function getYoutubeTranscript(url) {
           }
         }
       } catch (e) {
-        console.error("Gemini Shell: Failed to fetch/parse JSON3 transcript", e);
+        console.error("Obsidian Shell: Failed to fetch/parse JSON3 transcript", e);
       }
     }
-    console.log(`Gemini Shell: Transcript XML length: ${transcriptXml.length}`);
+    console.log(`Obsidian Shell: Transcript XML length: ${transcriptXml.length}`);
     if (transcriptXml.length < 100) {
-      console.log(`Gemini Shell: Transcript XML preview: ${transcriptXml}`);
+      console.log(`Obsidian Shell: Transcript XML preview: ${transcriptXml}`);
     }
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(transcriptXml, "text/xml");
@@ -4046,7 +4234,7 @@ async function getYoutubeTranscript(url) {
     }
     const text = lines.join(" ");
     if (!text) {
-      console.warn("Gemini Shell: Parsed transcript is empty. XML Preview: ", transcriptXml.substring(0, 200));
+      console.warn("Obsidian Shell: Parsed transcript is empty. XML Preview: ", transcriptXml.substring(0, 200));
       return { text: "", title, platform: "youtube", author, url };
     }
     return {
@@ -4114,14 +4302,14 @@ async function getBilibiliTranscript(url) {
       const subtitles = subtitleData.data.subtitle.subtitles;
       const selectedSubtitle = subtitles[0];
       const subtitleUrl = `https:${selectedSubtitle.url}`;
-      console.log(`Gemini Shell: Fetching Bilibili subtitle from ${subtitleUrl}`);
+      console.log(`Obsidian Shell: Fetching Bilibili subtitle from ${subtitleUrl}`);
       const transcriptResponse = await (0, import_obsidian3.requestUrl)({ url: subtitleUrl });
       const transcriptJson = JSON.parse(transcriptResponse.text);
       if (transcriptJson.body) {
         text = transcriptJson.body.map((item) => item.content).join(" ");
       }
     } else {
-      console.warn("Gemini Shell: No subtitles found for Bilibili video");
+      console.warn("Obsidian Shell: No subtitles found for Bilibili video");
     }
     let queryParams = "";
     if (url.includes("?")) {
@@ -4146,21 +4334,212 @@ async function getBilibiliTranscript(url) {
   }
 }
 
+// src/mcp/mcp-client.ts
+var StdioMcpClient = class {
+  // 1MB-ish safety cap
+  constructor(command, args) {
+    this.command = command;
+    this.args = args;
+  }
+  process;
+  requestId = 0;
+  pendingRequests = /* @__PURE__ */ new Map();
+  buffer = "";
+  requestTimeoutMs = 3e4;
+  maxBufferChars = 1e6;
+  async connect() {
+    try {
+      const cp = require("child_process");
+      this.process = cp.spawn(this.command, this.args, {
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      this.process.stdout.on("data", (data) => {
+        this.handleData(data);
+      });
+      this.process.stderr.on("data", (data) => {
+        logger.warn(`MCP Stderr [${this.command}]: ${data.toString()}`, "McpClient");
+      });
+      this.process.on("error", (err) => {
+        logger.error(`MCP Process Error [${this.command}]`, err, "McpClient");
+        this.rejectAllPending(err);
+      });
+      this.process.on("close", (code) => {
+        logger.info(`MCP Process exited with code ${code}`, "McpClient");
+        this.rejectAllPending(new Error(`MCP process closed with code ${code}`));
+      });
+      const initResult = await this.sendRequest("initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "obsidian-cli", version: "1.0.0" }
+      });
+      logger.info(`MCP Initialized: ${JSON.stringify(initResult)}`, "McpClient");
+      await this.sendNotification("notifications/initialized");
+    } catch (e) {
+      logger.error(`Failed to connect to MCP server: ${this.command}`, e, "McpClient");
+      try {
+        this.process?.kill();
+      } catch (_) {
+      }
+      throw e;
+    }
+  }
+  async listTools() {
+    const result = await this.sendRequest("tools/list", {});
+    return result.tools || [];
+  }
+  async callTool(name, args) {
+    const result = await this.sendRequest("tools/call", {
+      name,
+      arguments: args
+    });
+    return result.content;
+  }
+  handleData(data) {
+    this.buffer += data.toString();
+    if (this.buffer.length > this.maxBufferChars) {
+      logger.warn(`MCP buffer exceeded ${this.maxBufferChars} chars, resetting`, "McpClient");
+      this.buffer = "";
+    }
+    const lines = this.buffer.split("\n");
+    this.buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.trim())
+        continue;
+      try {
+        const message = JSON.parse(line);
+        if (message.id !== void 0) {
+          const pending = this.pendingRequests.get(message.id);
+          if (pending) {
+            if (message.error) {
+              pending.reject(message.error);
+            } else {
+              pending.resolve(message.result);
+            }
+            this.pendingRequests.delete(message.id);
+          }
+        } else {
+        }
+      } catch (e) {
+        logger.error("Failed to parse MCP message", e, "McpClient");
+      }
+    }
+  }
+  sendRequest(method, params = {}) {
+    return new Promise((resolve, reject) => {
+      const id = this.requestId++;
+      const timeoutId = setTimeout(() => {
+        if (this.pendingRequests.has(id)) {
+          this.pendingRequests.delete(id);
+          reject(new Error(`MCP request timed out: ${method}`));
+        }
+      }, this.requestTimeoutMs);
+      this.pendingRequests.set(id, {
+        resolve: (value) => {
+          clearTimeout(timeoutId);
+          resolve(value);
+        },
+        reject: (err) => {
+          clearTimeout(timeoutId);
+          reject(err);
+        }
+      });
+      const message = {
+        jsonrpc: "2.0",
+        id,
+        method,
+        params
+      };
+      try {
+        this.process.stdin.write(JSON.stringify(message) + "\n");
+      } catch (e) {
+        clearTimeout(timeoutId);
+        this.pendingRequests.delete(id);
+        reject(e);
+      }
+    });
+  }
+  async sendNotification(method, params = {}) {
+    const message = {
+      jsonrpc: "2.0",
+      method,
+      params
+    };
+    this.process.stdin.write(JSON.stringify(message) + "\n");
+  }
+  disconnect() {
+    if (this.process) {
+      this.process.kill();
+    }
+  }
+  rejectAllPending(err) {
+    for (const [id, pending] of this.pendingRequests) {
+      try {
+        pending.reject(err);
+      } catch (_) {
+      }
+      this.pendingRequests.delete(id);
+    }
+  }
+};
+
 // src/mcp/tools.ts
 var ToolManager = class {
   app;
   geminiApi;
   allowPluginControl;
-  constructor(app, allowPluginControl = false) {
+  mcpClients = /* @__PURE__ */ new Map();
+  settings;
+  queryExecutor = null;
+  fileBackExecutor = null;
+  constructor(app, settings) {
     this.app = app;
+    this.settings = settings;
     this.geminiApi = null;
-    this.allowPluginControl = allowPluginControl;
+    this.allowPluginControl = settings.allowPluginControl;
+    this.initializeMcpClients();
+  }
+  setKnowledgeExecutors(queryExecutor, fileBackExecutor) {
+    this.queryExecutor = queryExecutor;
+    this.fileBackExecutor = fileBackExecutor;
+  }
+  async initializeMcpClients() {
+    await this.cleanupMcpClients();
+    if (!this.settings.mcpServers)
+      return;
+    for (const [name, config] of Object.entries(this.settings.mcpServers)) {
+      try {
+        const client = new StdioMcpClient(config.command, config.args);
+        await client.connect();
+        this.mcpClients.set(name, client);
+      } catch (e) {
+        console.error(`Failed to initialize MCP server ${name}`, e);
+      }
+    }
+  }
+  // 添加清理 MCP 客户端的方法
+  async cleanupMcpClients() {
+    if (this.mcpClients && this.mcpClients.size > 0) {
+      console.log(`[ToolManager] Cleaning up ${this.mcpClients.size} MCP clients...`);
+      const cleanupPromises = Array.from(this.mcpClients.entries()).map(async ([name, client]) => {
+        try {
+          await client.disconnect();
+          console.log(`[ToolManager] Successfully disconnected MCP client: ${name}`);
+        } catch (e) {
+          console.error(`[ToolManager] Error disconnecting MCP client ${name}:`, e);
+        }
+      });
+      await Promise.allSettled(cleanupPromises);
+      this.mcpClients.clear();
+      console.log("[ToolManager] All MCP clients have been cleaned up.");
+    }
   }
   setGeminiApi(api) {
     this.geminiApi = api;
   }
-  updateSettings(allowPluginControl) {
-    this.allowPluginControl = allowPluginControl;
+  updateSettings(settings) {
+    this.settings = settings;
+    this.allowPluginControl = settings.allowPluginControl;
+    this.initializeMcpClients();
   }
   getToolsDefinitions() {
     const tools = [
@@ -4319,6 +4698,42 @@ var ToolManager = class {
         }
       );
     }
+    tools.push(
+      {
+        name: "query_knowledge",
+        description: "\u4ECE\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u4E2D\u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\u3002\u5148\u8BFB\u53D6\u5168\u5C40\u7D22\u5F15\u4E86\u89E3\u6709\u54EA\u4E9B\u6587\u7AE0\u548C\u4E3B\u9898\uFF0C\u518D\u6839\u636E\u9700\u8981\u8BFB\u53D6\u5177\u4F53\u7684 summary \u5168\u6587\u3002\u5F53\u7528\u6237\u7684\u95EE\u9898\u53EF\u80FD\u4E0E\u5DF2\u79EF\u7D2F\u7684\u77E5\u8BC6\u76F8\u5173\u65F6\u4F7F\u7528\u6B64\u5DE5\u5177\u3002",
+        parameters: {
+          type: "object" /* OBJECT */,
+          properties: {
+            query: { type: "string" /* STRING */, description: "\u68C0\u7D22\u5173\u952E\u8BCD\u6216\u95EE\u9898" },
+            max_results: { type: "integer" /* INTEGER */, description: "\u6700\u591A\u8FD4\u56DE\u51E0\u7BC7 summary\uFF0C\u9ED8\u8BA4 3" }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "file_back_knowledge",
+        description: "\u5C06\u5F53\u524D\u5BF9\u8BDD\u4E2D\u4EA7\u51FA\u7684\u9AD8\u8D28\u91CF\u77E5\u8BC6\u56DE\u7B54\u5B58\u56DE\u77E5\u8BC6\u5E93 Wiki\uFF0C\u8BA9\u77E5\u8BC6\u5E93\u968F\u4F7F\u7528\u4E0D\u65AD\u589E\u957F\u3002\u53EA\u5BF9\u7EFC\u5408\u4E86\u591A\u4E2A\u77E5\u8BC6\u6765\u6E90\u3001\u4EA7\u51FA\u6709\u4EF7\u503C\u65B0\u6D1E\u5BDF\u7684\u56DE\u7B54\u4F7F\u7528\u3002",
+        parameters: {
+          type: "object" /* OBJECT */,
+          properties: {
+            title: { type: "string" /* STRING */, description: "\u56DE\u586B\u6587\u7AE0\u7684\u6807\u9898" },
+            content: { type: "string" /* STRING */, description: "\u8981\u5F52\u6863\u7684\u5185\u5BB9\uFF08Markdown \u683C\u5F0F\uFF09" },
+            source_queries: {
+              type: "array" /* ARRAY */,
+              items: { type: "string" /* STRING */ },
+              description: "\u89E6\u53D1\u8FD9\u6B21\u56DE\u7B54\u7684\u95EE\u9898\u5217\u8868"
+            },
+            related_sources: {
+              type: "array" /* ARRAY */,
+              items: { type: "string" /* STRING */ },
+              description: "\u5F15\u7528\u7684 knowledge_source_id \u5217\u8868"
+            }
+          },
+          required: ["title", "content", "source_queries"]
+        }
+      }
+    );
     tools.push({
       name: "web_search",
       description: "Search the web for information. Use this to find up-to-date info, news, or documentation. IMPORTANT: When providing links in the output, YOU MUST use standard Markdown link syntax: [Title](URL). Do not use bare URLs.",
@@ -4335,9 +4750,40 @@ var ToolManager = class {
         required: ["query"]
       }
     });
+    for (const [serverName, client] of this.mcpClients) {
+      try {
+      } catch (e) {
+        console.error(`Failed to list tools for ${serverName}`, e);
+      }
+    }
+    return tools;
+  }
+  // New method to get tools async
+  async getToolsDefinitionsAsync() {
+    const tools = this.getToolsDefinitions();
+    for (const [serverName, client] of this.mcpClients) {
+      try {
+        const mcpTools = await client.listTools();
+        for (const tool of mcpTools) {
+          tools.push({
+            name: `${serverName}_${tool.name}`,
+            description: tool.description || `Tool from ${serverName}`,
+            parameters: tool.inputSchema
+          });
+        }
+      } catch (e) {
+        console.error(`Failed to list tools for ${serverName}`, e);
+      }
+    }
     return tools;
   }
   async execute(name, args) {
+    for (const [serverName, client] of this.mcpClients) {
+      if (name.startsWith(`${serverName}_`)) {
+        const toolName = name.substring(serverName.length + 1);
+        return await client.callTool(toolName, args);
+      }
+    }
     try {
       switch (name) {
         case "read_note":
@@ -4453,11 +4899,11 @@ var ToolManager = class {
             return tags;
           };
           const url = args.url;
-          console.log(`Gemini Shell: Saving webpage ${url}`);
+          console.log(`Obsidian Shell: Saving webpage ${url}`);
           try {
             const videoTranscript = await getVideoTranscript(url);
             if (videoTranscript) {
-              console.log(`Gemini Shell: Found video info for ${videoTranscript.platform}`);
+              console.log(`Obsidian Shell: Found video info for ${videoTranscript.platform}`);
               const finalUrl = videoTranscript.url || url;
               let content2 = "";
               if (videoTranscript.text && videoTranscript.text.length > 0) {
@@ -4495,7 +4941,7 @@ ${summary}
 
 ${videoTranscript.text.substring(0, 1e3)}...`;
                 } catch (e) {
-                  console.error("Gemini Shell: Summarization failed", e);
+                  console.error("Obsidian Shell: Summarization failed", e);
                   const created2 = (/* @__PURE__ */ new Date()).toISOString();
                   const titleTags = extractTags(videoTranscript.title);
                   const tagString = titleTags.length > 0 ? `, ${titleTags.join(", ")}` : "";
@@ -4515,7 +4961,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
 [\u25B6\uFE0F Play with Media Extended](obsidian://mx-open?url=${encodedUrl})`;
                 }
               } else {
-                console.log("Gemini Shell: No transcript text available, saving video embed.");
+                console.log("Obsidian Shell: No transcript text available, saving video embed.");
                 new import_obsidian4.Notice(`\u{1F4BE} Saving video link...`);
                 const created2 = (/* @__PURE__ */ new Date()).toISOString();
                 const titleTags = extractTags(videoTranscript.title);
@@ -4556,7 +5002,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
               }
             });
             let html = response.text;
-            console.log(`Gemini Shell: Fetched ${html.length} bytes`);
+            console.log(`Obsidian Shell: Fetched ${html.length} bytes`);
             let title = "Untitled Webpage";
             const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
             if (titleMatch && titleMatch[1].trim()) {
@@ -4597,7 +5043,7 @@ author: ${videoTranscript.author || videoTranscript.platform}
                 author = authorMatch[1].trim();
               }
             }
-            console.log(`Gemini Shell: Extracted title "${title}", author "${author}"`);
+            console.log(`Obsidian Shell: Extracted title "${title}", author "${author}"`);
             const webpageTags = extractTags(title);
             title = title.replace(/[\\/:*?"<>|#^\[\]]/g, "-").replace(/\s+/g, " ").trim();
             if (!title || title.replace(/-/g, "").trim().length === 0) {
@@ -4614,14 +5060,14 @@ author: ${videoTranscript.author || videoTranscript.platform}
             if (url.includes("mp.weixin.qq.com")) {
               const jsContent = doc.querySelector("#js_content");
               if (jsContent) {
-                console.log("Gemini Shell: Found #js_content for WeChat article");
+                console.log("Obsidian Shell: Found #js_content for WeChat article");
                 try {
                   const scripts = jsContent.querySelectorAll("script, style");
                   scripts.forEach((s) => s.remove());
                   markdown = (0, import_obsidian4.htmlToMarkdown)(jsContent.innerHTML);
                   extractionMethod = "wechat-js_content";
                 } catch (e) {
-                  console.error("Gemini Shell: htmlToMarkdown failed on #js_content", e);
+                  console.error("Obsidian Shell: htmlToMarkdown failed on #js_content", e);
                 }
               }
             }
@@ -4654,26 +5100,26 @@ author: ${videoTranscript.author || videoTranscript.platform}
               const reader = new import_readability.Readability(doc);
               const article = reader.parse();
               if (article && article.content) {
-                console.log(`Gemini Shell: Readability extracted content length: ${article.content.length}`);
+                console.log(`Obsidian Shell: Readability extracted content length: ${article.content.length}`);
                 try {
                   markdown = (0, import_obsidian4.htmlToMarkdown)(article.content);
                   extractionMethod = "readability";
                 } catch (e) {
-                  console.error("Gemini Shell: htmlToMarkdown failed on extracted content", e);
+                  console.error("Obsidian Shell: htmlToMarkdown failed on extracted content", e);
                   markdown = "Error: Conversion failed.";
                 }
               } else {
-                console.warn("Gemini Shell: Readability failed to extract content, falling back to full HTML");
+                console.warn("Obsidian Shell: Readability failed to extract content, falling back to full HTML");
                 try {
                   markdown = (0, import_obsidian4.htmlToMarkdown)(html);
                   extractionMethod = "fallback-full";
                 } catch (e) {
-                  console.error("Gemini Shell: htmlToMarkdown failed on full HTML", e);
+                  console.error("Obsidian Shell: htmlToMarkdown failed on full HTML", e);
                   markdown = "Error: Conversion failed.";
                 }
               }
             }
-            console.log(`Gemini Shell: Extraction method used: ${extractionMethod}`);
+            console.log(`Obsidian Shell: Extraction method used: ${extractionMethod}`);
             if (!markdown || markdown.startsWith("Error:")) {
               if (!markdown)
                 markdown = "Error: Empty markdown result.";
@@ -4703,7 +5149,7 @@ ${markdown}`;
             await this.app.vault.create(finalPath, finalContent);
             return { success: true, path: finalPath, message: `\u2705 Webpage Saved: ${finalPath}` };
           } catch (e) {
-            console.error("Gemini Shell: Error saving webpage", e);
+            console.error("Obsidian Shell: Error saving webpage", e);
             return { success: false, error: e.message };
           }
         case "list_plugins":
@@ -4747,6 +5193,16 @@ ${markdown}`;
             local: now.toLocaleString(),
             weekday: now.toLocaleDateString(void 0, { weekday: "long" })
           };
+        case "query_knowledge":
+          if (!this.queryExecutor) {
+            return { error: "Knowledge system not initialized" };
+          }
+          return await this.queryExecutor.execute(args);
+        case "file_back_knowledge":
+          if (!this.fileBackExecutor) {
+            return { error: "Knowledge system not initialized" };
+          }
+          return await this.fileBackExecutor.execute(args);
         case "web_search":
           let searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;
           if (args.time_range) {
@@ -4784,59 +5240,9 @@ ${markdown}`;
   }
 };
 
-// src/mcp/types.ts
-var DEFAULT_SETTINGS = {
-  // Core
-  provider: "gemini",
-  apiKey: "",
-  primaryModel: "gemini-2.5-flash",
-  openaiApiKey: "",
-  openaiBaseUrl: "https://api.openai.com/v1",
-  openaiModel: "gpt-4o",
-  deepseekApiKey: "",
-  deepseekBaseUrl: "https://api.deepseek.com",
-  deepseekModel: "deepseek-chat",
-  qwenApiKey: "",
-  qwenBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  qwenModel: "qwen-turbo",
-  thinkingModel: "gemini-2.5-pro",
-  contextWindow: 1e5,
-  // Guardian
-  enableGuardian: false,
-  guardianAutoMode: true,
-  // Default to true
-  guardianSensitivity: 50,
-  guardianUIStyle: "hybrid",
-  ignoredFolders: "",
-  privacyMode: false,
-  // Permissions
-  allowFileCreation: true,
-  allowFileModification: false,
-  allowPluginControl: false,
-  confirmExecutions: true,
-  // Terminal
-  terminalTheme: "hacker-green",
-  terminalFont: "JetBrains Mono",
-  terminalFontSize: 14,
-  terminalOpacity: 0.95,
-  // Prompt
-  customizePrompt: false,
-  systemPrompt: `You are a command-line interface inside Obsidian. Be concise. Output valid Markdown.
-    
-IMPORTANT: Before creating a generic note for tasks, reminders, calendars, or other specialized content, ALWAYS check if a specialized plugin is installed using 'list_plugins'.
-- If a relevant plugin is found (e.g., "obsidian-tasks-plugin", "obsidian-kanban", "reminder"), use 'get_plugin_commands' to find the appropriate command and execute it.
-- If you need to know how a plugin is configured (e.g. default folder), use 'get_plugin_settings'.
-- Only create a generic Markdown note if no suitable plugin is available or if the user explicitly asks for a note.
-
-You have access to the internet via the 'web_search' tool. Use it to find up-to-date information, news, or documentation when the user asks for information not present in their vault.`,
-  // WeChat
-  wechatInboxPath: "Inbox.md",
-  wechatStoragePath: "Clippings"
-};
-
 // src/settings.ts
 var import_obsidian5 = require("obsidian");
-var GeminiShellSettingTab = class extends import_obsidian5.PluginSettingTab {
+var SettingTab = class extends import_obsidian5.PluginSettingTab {
   plugin;
   constructor(app, plugin) {
     super(app, plugin);
@@ -4845,10 +5251,10 @@ var GeminiShellSettingTab = class extends import_obsidian5.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Gemini Shell Configuration" });
+    containerEl.createEl("h2", { text: "Obsidian Shell Configuration" });
     const desc = containerEl.createEl("p", { cls: "setting-item-description" });
-    desc.setText("Powered by Google Gemini 2.5. acting as your Vault OS.");
-    containerEl.createEl("h3", { text: "\u{1F511} API Configuration", cls: "gemini-settings-header" });
+    desc.setText("Powered by multiple AI providers. Acting as your Vault OS.");
+    containerEl.createEl("h3", { text: "\u{1F511} API Configuration", cls: "ocli-settings-header" });
     new import_obsidian5.Setting(containerEl).setName("AI Provider").setDesc("Select the AI provider to use.").addDropdown((drop) => drop.addOption("gemini", "Google Gemini").addOption("openai", "OpenAI Compatible").addOption("deepseek", "DeepSeek").addOption("qwen", "Qwen (Tongyi Qianwen)").setValue(this.plugin.settings.provider).onChange(async (value) => {
       this.plugin.settings.provider = value;
       await this.plugin.saveSettings();
@@ -4925,7 +5331,7 @@ var GeminiShellSettingTab = class extends import_obsidian5.PluginSettingTab {
       this.plugin.settings.contextWindow = value;
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "\u{1F6E1}\uFE0F Guardian Behavior", cls: "gemini-settings-header" });
+    containerEl.createEl("h3", { text: "\u{1F6E1}\uFE0F Guardian Behavior", cls: "ocli-settings-header" });
     new import_obsidian5.Setting(containerEl).setName("Enable Guardian").setDesc("Allow AI to passively analyze text and offer suggestions.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableGuardian).onChange(async (value) => {
       this.plugin.settings.enableGuardian = value;
       await this.plugin.saveSettings();
@@ -4952,12 +5358,12 @@ var GeminiShellSettingTab = class extends import_obsidian5.PluginSettingTab {
         this.plugin.settings.privacyMode = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian5.Setting(containerEl).setName("Ignored Folders").setDesc('Path patterns to ignore (one per line). e.g. "Private/"').setClass("gemini-full-width-textarea").addTextArea((text) => text.setPlaceholder("Private/\nSecrets/\nTemplates/").setValue(this.plugin.settings.ignoredFolders).onChange(async (value) => {
+      new import_obsidian5.Setting(containerEl).setName("Ignored Folders").setDesc('Path patterns to ignore (one per line). e.g. "Private/"').setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Private/\nSecrets/\nTemplates/").setValue(this.plugin.settings.ignoredFolders).onChange(async (value) => {
         this.plugin.settings.ignoredFolders = value;
         await this.plugin.saveSettings();
       }));
     }
-    containerEl.createEl("h3", { text: "\u26A1 Permissions & Capabilities", cls: "gemini-settings-header" });
+    containerEl.createEl("h3", { text: "\u26A1 Permissions & Capabilities", cls: "ocli-settings-header" });
     new import_obsidian5.Setting(containerEl).setName("Allow File Creation").setDesc("Let AI create new notes (`/new`).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileCreation).onChange(async (value) => {
       this.plugin.settings.allowFileCreation = value;
       await this.plugin.saveSettings();
@@ -4976,7 +5382,7 @@ var GeminiShellSettingTab = class extends import_obsidian5.PluginSettingTab {
       this.plugin.settings.confirmExecutions = value;
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "\u{1F5A5}\uFE0F Terminal Appearance", cls: "gemini-settings-header" });
+    containerEl.createEl("h3", { text: "\u{1F5A5}\uFE0F Terminal Appearance", cls: "ocli-settings-header" });
     new import_obsidian5.Setting(containerEl).setName("Theme Style").addDropdown((drop) => drop.addOption("hacker-green", "Hacker Green").addOption("cyberpunk", "Cyberpunk Neon").addOption("obsidian-native", "Obsidian Native").setValue(this.plugin.settings.terminalTheme).onChange(async (value) => {
       this.plugin.settings.terminalTheme = value;
       await this.plugin.saveSettings();
@@ -4989,14 +5395,14 @@ var GeminiShellSettingTab = class extends import_obsidian5.PluginSettingTab {
       this.plugin.settings.terminalOpacity = value;
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "\u{1F9E0} System Persona", cls: "gemini-settings-header" });
+    containerEl.createEl("h3", { text: "\u{1F9E0} System Persona", cls: "ocli-settings-header" });
     new import_obsidian5.Setting(containerEl).setName("Customize System Prompt").setDesc("Override the default AI personality.").addToggle((toggle) => toggle.setValue(this.plugin.settings.customizePrompt).onChange(async (value) => {
       this.plugin.settings.customizePrompt = value;
       await this.plugin.saveSettings();
       this.display();
     }));
     if (this.plugin.settings.customizePrompt) {
-      new import_obsidian5.Setting(containerEl).setClass("gemini-full-width-textarea").addTextArea((text) => text.setPlaceholder("You are a helpful assistant...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
+      new import_obsidian5.Setting(containerEl).setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("You are a helpful assistant...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
         this.plugin.settings.systemPrompt = value;
         await this.plugin.saveSettings();
       }));
@@ -5006,7 +5412,7 @@ var GeminiShellSettingTab = class extends import_obsidian5.PluginSettingTab {
         this.display();
       }));
     }
-    containerEl.createEl("h3", { text: "\u{1F4E8} WeChat Inbox", cls: "gemini-settings-header" });
+    containerEl.createEl("h3", { text: "\u{1F4E8} WeChat Inbox", cls: "ocli-settings-header" });
     new import_obsidian5.Setting(containerEl).setName("WeChat Inbox Path").setDesc('The file to monitor for new WeChat links (e.g., "Inbox.md").').addText((text) => text.setPlaceholder("Inbox.md").setValue(this.plugin.settings.wechatInboxPath).onChange(async (value) => {
       this.plugin.settings.wechatInboxPath = value;
       await this.plugin.saveSettings();
@@ -5015,13 +5421,98 @@ var GeminiShellSettingTab = class extends import_obsidian5.PluginSettingTab {
       this.plugin.settings.wechatStoragePath = value;
       await this.plugin.saveSettings();
     }));
+    containerEl.createEl("h3", { text: "\u{1F4DA} Knowledge Compiler", cls: "ocli-settings-header" });
+    const knowledgeDesc = containerEl.createEl("p", { cls: "setting-item-description" });
+    knowledgeDesc.setText("Compile notes from watched folders into a structured knowledge wiki.");
+    new import_obsidian5.Setting(containerEl).setName("Auto Compile").setDesc("Automatically compile notes when they are created or modified in watched folders.").addToggle((toggle) => toggle.setValue(this.plugin.settings.knowledgeAutoCompile).onChange(async (value) => {
+      this.plugin.settings.knowledgeAutoCompile = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Wiki Output Folder").setDesc("The folder where compiled wiki pages are stored.").addText((text) => text.setPlaceholder("Knowledge Wiki").setValue(this.plugin.settings.knowledgeWikiFolder).onChange(async (value) => {
+      this.plugin.settings.knowledgeWikiFolder = value || "Knowledge Wiki";
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Max Compile Batch").setDesc("Maximum number of notes to compile in a single batch.").addSlider((slider) => slider.setLimits(1, 200, 1).setValue(this.plugin.settings.knowledgeMaxCompileBatch).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.knowledgeMaxCompileBatch = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian5.Setting(containerEl).setName("Source Folders").setDesc("Folders to watch for notes to compile (one per line).").setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Clippings\nReading Notes").setValue((this.plugin.settings.knowledgeSourceFolders || []).join("\n")).onChange(async (value) => {
+      this.plugin.settings.knowledgeSourceFolders = value.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
+      await this.plugin.saveSettings();
+    }));
+    containerEl.createEl("h3", { text: "\u{1F50C} MCP Servers", cls: "ocli-settings-header" });
+    const mcpDesc = containerEl.createEl("p", { cls: "setting-item-description" });
+    mcpDesc.setText("Connect to external tools via Model Context Protocol (MCP).");
+    const servers = this.plugin.settings.mcpServers || {};
+    for (const [name, config] of Object.entries(servers)) {
+      new import_obsidian5.Setting(containerEl).setName(name).setDesc(`${config.command} ${config.args.join(" ")}`).addButton((btn) => btn.setButtonText("Edit").setIcon("pencil").onClick(() => {
+        this.removeMcpServer(name);
+        this.addMcpServerModal(name, config);
+      })).addButton((btn) => btn.setButtonText("Remove").setIcon("trash").setWarning().onClick(async () => {
+        await this.removeMcpServer(name);
+      }));
+    }
+    new import_obsidian5.Setting(containerEl).addButton((btn) => btn.setButtonText("Add MCP Server").setCta().onClick(() => {
+      this.addMcpServerModal();
+    }));
+  }
+  async removeMcpServer(name) {
+    const settings = this.plugin.settings;
+    if (settings.mcpServers && settings.mcpServers[name]) {
+      delete settings.mcpServers[name];
+      await this.plugin.saveSettings();
+      this.display();
+    }
+  }
+  addMcpServerModal(existingName, existingConfig) {
+    class McpModal extends import_obsidian5.Modal {
+      name;
+      command;
+      args;
+      onSubmit;
+      constructor(app, onSubmit, name = "", command = "", args = "") {
+        super(app);
+        this.onSubmit = onSubmit;
+        this.name = name;
+        this.command = command;
+        this.args = args;
+      }
+      onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl("h2", { text: existingName ? "Edit MCP Server" : "Add MCP Server" });
+        new import_obsidian5.Setting(contentEl).setName("Server Name").setDesc('Unique identifier (e.g., "weather")').addText((text) => text.setValue(this.name).onChange((value) => this.name = value));
+        new import_obsidian5.Setting(contentEl).setName("Command").setDesc('Executable (e.g., "node", "python", "uv")').addText((text) => text.setValue(this.command).onChange((value) => this.command = value));
+        new import_obsidian5.Setting(contentEl).setName("Arguments").setDesc('Space-separated arguments (e.g., "path/to/server.js")').addText((text) => text.setValue(this.args).onChange((value) => this.args = value));
+        new import_obsidian5.Setting(contentEl).addButton((btn) => btn.setButtonText("Save").setCta().onClick(() => {
+          if (this.name && this.command) {
+            const argsList = this.args.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((a) => a.replace(/^"|"$/g, "")) || [];
+            this.onSubmit(this.name, this.command, argsList);
+            this.close();
+          } else {
+            new import_obsidian5.Notice("Name and Command are required.");
+          }
+        }));
+      }
+      onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+      }
+    }
+    new McpModal(this.app, async (name, command, args) => {
+      if (!this.plugin.settings.mcpServers)
+        this.plugin.settings.mcpServers = {};
+      this.plugin.settings.mcpServers[name] = { command, args };
+      await this.plugin.saveSettings();
+      this.display();
+    }, existingName || "", existingConfig?.command || "", existingConfig?.args.join(" ") || "").open();
   }
 };
 
 // src/ui/shell-view.ts
-var import_obsidian6 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/ui/chat-controller.ts
+var import_obsidian6 = require("obsidian");
 var ChatController = class {
   app;
   api;
@@ -5029,11 +5520,19 @@ var ChatController = class {
   // private isResponding: boolean = false; // Unused
   onMessageAdded;
   onStatusChanged;
+  // 文件搜索缓存
+  fileSearchCache = null;
+  FILE_SEARCH_CACHE_TTL = 5e3;
+  // 5秒缓存
+  fileSearchCacheCleanupTimer = null;
   constructor(options) {
     this.app = options.app;
     this.api = options.api;
     this.onMessageAdded = options.onMessageAdded;
     this.onStatusChanged = options.onStatusChanged;
+    this.fileSearchCacheCleanupTimer = window.setInterval(() => {
+      this.cleanupExpiredFileSearchCache();
+    }, 6e4);
   }
   getMessages() {
     return [...this.messages];
@@ -5043,7 +5542,25 @@ var ChatController = class {
     this.api.clearSession();
     this.addMessage("system", "Session cleared.");
   }
-  async processCommand(query, context = "", selection = "") {
+  // 清理过期的文件搜索缓存
+  cleanupExpiredFileSearchCache() {
+    if (this.fileSearchCache) {
+      const now = Date.now();
+      if (now - this.fileSearchCache.timestamp > this.FILE_SEARCH_CACHE_TTL) {
+        this.fileSearchCache = null;
+        console.log("[ChatController] Cleaned up expired file search cache.");
+      }
+    }
+  }
+  // 清理资源（在组件卸载时调用）
+  cleanup() {
+    if (this.fileSearchCacheCleanupTimer !== null) {
+      window.clearInterval(this.fileSearchCacheCleanupTimer);
+      this.fileSearchCacheCleanupTimer = null;
+    }
+    this.fileSearchCache = null;
+  }
+  async processCommand(query, context = [], selection = "") {
     if (!query.trim())
       return;
     if (query.startsWith("/")) {
@@ -5091,6 +5608,49 @@ var ChatController = class {
 
 ${toolsList}`);
         break;
+      case "/file-back":
+        const targetMsgId = argStr.trim();
+        const targetMsg = this.messages.find((m) => m.id === targetMsgId && m.role === "ai");
+        if (targetMsg) {
+          this.setResponding(true);
+          try {
+            const fileBackPrompt = `\u7528\u6237\u5BF9\u4EE5\u4E0B\u56DE\u7B54\u70B9\u8D5E\uFF0C\u8BF7\u5C06\u5176\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\u4F7F\u7528 file_back_knowledge \u5DE5\u5177\uFF0C\u63D0\u53D6\u6807\u9898\u548C\u6838\u5FC3\u5185\u5BB9\u3002
+
+\u56DE\u7B54\u5185\u5BB9\uFF1A
+${targetMsg.content}`;
+            await this.api.chat(fileBackPrompt, [], "");
+            this.addMessage("system", "\u5DF2\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002");
+          } catch (error) {
+            this.addMessage("system", `\u5F52\u6863\u5931\u8D25: ${error.message}`);
+          } finally {
+            this.setResponding(false);
+          }
+        }
+        break;
+      case "/wiki:compile":
+        await this.handleWikiCompile(argStr);
+        break;
+      case "/wiki:index":
+        this.app.commands.executeCommandById("obsidian-cli:knowledge-open-index");
+        break;
+      case "/wiki:lint":
+        this.app.commands.executeCommandById("obsidian-cli:knowledge-lint");
+        break;
+      case "/forget":
+        await this.handleForget(argStr);
+        break;
+      case "/new":
+        await this.handleNewNote(argStr);
+        break;
+      case "/edit":
+        await this.handleEdit(argStr);
+        break;
+      case "/save":
+        await this.handleSave(argStr);
+        break;
+      case "/help":
+        this.showHelp();
+        break;
       case "/open":
         if (!argStr) {
           this.addMessage("system", "Usage: /open <filename>");
@@ -5103,10 +5663,30 @@ ${toolsList}`);
     }
   }
   async handleOpenFile(searchTerm) {
+    const now = Date.now();
+    if (this.fileSearchCache && this.fileSearchCache.term === searchTerm && now - this.fileSearchCache.timestamp < this.FILE_SEARCH_CACHE_TTL) {
+      const matches2 = this.fileSearchCache.results;
+      if (matches2.length === 0) {
+        this.addMessage("system", `No files found matching "${searchTerm}"`);
+      } else if (matches2.length === 1) {
+        await this.app.workspace.getLeaf(false).openFile(matches2[0]);
+        this.addMessage("system", `Opened [[${matches2[0].path}]]`);
+      } else {
+        const list = matches2.slice(0, 10).map((f) => `- [[${f.path}]]`).join("\n");
+        this.addMessage("system", `Found multiple files:
+${list}`);
+      }
+      return;
+    }
     const files = this.app.vault.getFiles();
     const matches = files.filter(
       (f) => f.path.toLowerCase().includes(searchTerm.toLowerCase()) || f.basename.toLowerCase().includes(searchTerm.toLowerCase())
     );
+    this.fileSearchCache = {
+      term: searchTerm,
+      results: matches,
+      timestamp: now
+    };
     if (matches.length === 0) {
       this.addMessage("system", `No files found matching "${searchTerm}"`);
     } else if (matches.length === 1) {
@@ -5142,13 +5722,387 @@ ${list}`);
       msg = error.message;
     this.addMessage("system", `Error: ${msg}`);
   }
+  /**
+   * /wiki:compile [path] — 编译笔记到知识 wiki
+   * 无参数：编译当前笔记 + 所有 pending
+   * 文件路径：编译指定文件
+   * 目录路径：扫描目录下所有 .md 注册并编译
+   */
+  async handleForget(field) {
+    const f = field.trim().toLowerCase();
+    if (!f) {
+      this.addMessage("system", "\u7528\u6CD5: `/forget <field>` \u6216 `/forget all`\n\n\u53EF\u9057\u5FD8\u5B57\u6BB5: name, profession, expertise, preferences, workflows, projects, goals, all");
+      return;
+    }
+    const profile = this.api.getUserProfile();
+    if (!profile) {
+      this.addMessage("system", "\u6682\u65E0\u7528\u6237\u8BB0\u5FC6\u6570\u636E\u3002");
+      return;
+    }
+    if (f === "all") {
+      await this.api.updateProfile({
+        name: "",
+        profession: "",
+        expertise: [],
+        preferences: { language: "zh-CN", responseStyle: "balanced", topics: [] },
+        workflows: [],
+        context: { currentProjects: [], goals: [], challenges: [] }
+      });
+      this.addMessage("system", "\u5DF2\u6E05\u9664\u6240\u6709\u7528\u6237\u8BB0\u5FC6\u3002");
+    } else if (f === "name") {
+      await this.api.updateProfile({ name: "" });
+      this.addMessage("system", "\u5DF2\u9057\u5FD8: name");
+    } else if (f === "profession") {
+      await this.api.updateProfile({ profession: "" });
+      this.addMessage("system", "\u5DF2\u9057\u5FD8: profession");
+    } else if (f === "expertise") {
+      await this.api.updateProfile({ expertise: [] });
+      this.addMessage("system", "\u5DF2\u9057\u5FD8: expertise");
+    } else if (f === "preferences") {
+      await this.api.updateProfile({ preferences: { language: "zh-CN", responseStyle: "balanced", topics: [] } });
+      this.addMessage("system", "\u5DF2\u9057\u5FD8: preferences");
+    } else if (f === "workflows") {
+      await this.api.updateProfile({ workflows: [] });
+      this.addMessage("system", "\u5DF2\u9057\u5FD8: workflows");
+    } else if (f === "projects") {
+      await this.api.updateProfile({ context: { ...profile.context, currentProjects: [] } });
+      this.addMessage("system", "\u5DF2\u9057\u5FD8: projects");
+    } else if (f === "goals") {
+      await this.api.updateProfile({ context: { ...profile.context, goals: [] } });
+      this.addMessage("system", "\u5DF2\u9057\u5FD8: goals");
+    } else {
+      this.addMessage("system", `\u672A\u77E5\u5B57\u6BB5: ${f}
+\u53EF\u9057\u5FD8\u5B57\u6BB5: name, profession, expertise, preferences, workflows, projects, goals, all`);
+    }
+  }
+  async handleNewNote(argStr) {
+    if (!argStr.trim()) {
+      this.addMessage("system", "\u7528\u6CD5: `/new <title>` \u6216 `/new <title> <content>`");
+      return;
+    }
+    const firstNewline = argStr.indexOf("\n");
+    const title = firstNewline > 0 ? argStr.substring(0, firstNewline).trim() : argStr.trim();
+    const content = firstNewline > 0 ? argStr.substring(firstNewline + 1) : "";
+    const path = `${title}.md`;
+    try {
+      const existing = this.app.vault.getAbstractFileByPath(path);
+      if (existing) {
+        this.addMessage("system", `\u6587\u4EF6\u5DF2\u5B58\u5728: ${path}`);
+        return;
+      }
+      const file = await this.app.vault.create(path, content);
+      const leaf = this.app.workspace.getLeaf(false);
+      await leaf.openFile(file);
+      this.addMessage("system", `\u5DF2\u521B\u5EFA\u5E76\u6253\u5F00: [[${path}]]`);
+    } catch (e) {
+      this.addMessage("system", `\u521B\u5EFA\u5931\u8D25: ${e.message}`);
+    }
+  }
+  async handleEdit(instruction) {
+    if (!instruction.trim()) {
+      this.addMessage("system", "\u7528\u6CD5: \u5148\u5728\u7F16\u8F91\u5668\u4E2D\u9009\u4E2D\u6587\u672C\uFF0C\u7136\u540E `/edit <\u6307\u4EE4>`\n\u4F8B: `/edit \u7FFB\u8BD1\u6210\u82F1\u6587`");
+      return;
+    }
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
+    const editor = activeView?.editor;
+    const selection = editor?.getSelection();
+    if (!selection) {
+      this.addMessage("system", "\u8BF7\u5148\u5728\u7F16\u8F91\u5668\u4E2D\u9009\u4E2D\u8981\u7F16\u8F91\u7684\u6587\u672C\u3002");
+      return;
+    }
+    this.setResponding(true);
+    try {
+      const prompt = `\u8BF7\u6839\u636E\u4EE5\u4E0B\u6307\u4EE4\u4FEE\u6539\u6587\u672C\uFF0C\u53EA\u8FD4\u56DE\u4FEE\u6539\u540E\u7684\u6587\u672C\uFF0C\u4E0D\u8981\u89E3\u91CA\u3002
+
+\u6307\u4EE4: ${instruction}
+
+\u539F\u6587:
+${selection}`;
+      const result = await this.api.chat(prompt, [], selection);
+      this.addMessage("ai", result);
+    } catch (e) {
+      this.addMessage("system", `\u7F16\u8F91\u5931\u8D25: ${e.message}`);
+    } finally {
+      this.setResponding(false);
+    }
+  }
+  async handleSave(url) {
+    if (!url.trim()) {
+      this.addMessage("system", "\u7528\u6CD5: `/save <url>`\n\u652F\u6301: \u7F51\u9875\u3001YouTube\u3001Bilibili\u3001\u5FAE\u4FE1\u516C\u4F17\u53F7");
+      return;
+    }
+    this.setResponding(true);
+    try {
+      const prompt = `\u8BF7\u4F7F\u7528 save_webpage \u5DE5\u5177\u4FDD\u5B58\u8FD9\u4E2A\u94FE\u63A5: ${url.trim()}`;
+      const result = await this.api.chat(prompt, [], "");
+      this.addMessage("ai", result);
+    } catch (e) {
+      this.addMessage("system", `\u4FDD\u5B58\u5931\u8D25: ${e.message}`);
+    } finally {
+      this.setResponding(false);
+    }
+  }
+  showHelp() {
+    const help = `## Shell Commands
+
+| \u547D\u4EE4 | \u8BF4\u660E |
+|------|------|
+| \`/clear\` | \u6E05\u9664\u4F1A\u8BDD\u5386\u53F2 |
+| \`/profile\` | \u67E5\u770B\u7528\u6237\u753B\u50CF |
+| \`/forget [field]\` | \u9057\u5FD8\u7528\u6237\u8BB0\u5FC6 (name/profession/expertise/preferences/workflows/projects/goals/all) |
+| \`/new <title>\` | \u521B\u5EFA\u65B0\u7B14\u8BB0 |
+| \`/edit <\u6307\u4EE4>\` | AI \u7F16\u8F91\u9009\u4E2D\u6587\u672C |
+| \`/open <file>\` | \u6253\u5F00\u6587\u4EF6 |
+| \`/save <url>\` | \u4FDD\u5B58\u7F51\u9875/\u89C6\u9891\u5230 vault |
+| \`/tools\` | \u5217\u51FA\u53EF\u7528\u5DE5\u5177 |
+| \`/wiki:compile [path]\` | \u7F16\u8BD1\u7B14\u8BB0\u5230\u77E5\u8BC6 wiki |
+| \`/wiki:index\` | \u6253\u5F00\u77E5\u8BC6\u7D22\u5F15 |
+| \`/wiki:lint\` | \u77E5\u8BC6\u5E93\u5065\u5EB7\u68C0\u67E5 |
+| \`/help\` | \u663E\u793A\u672C\u5E2E\u52A9 |
+
+**\u63D0\u793A**: \u8F93\u5165 \`/\` \u67E5\u770B\u547D\u4EE4\u81EA\u52A8\u8865\u5168\uFF0C\u8F93\u5165 \`@\` \u5F15\u7528\u6587\u4EF6\u3002`;
+    this.addMessage("system", help);
+  }
+  async handleWikiCompile(pathArg) {
+    const path = pathArg.trim();
+    const plugin = this.app.plugins?.plugins?.["obsidian-cli"];
+    const runtime = plugin?.knowledgeRuntime;
+    if (!runtime) {
+      this.addMessage("system", "Knowledge \u7CFB\u7EDF\u672A\u521D\u59CB\u5316\u3002");
+      return;
+    }
+    this.setResponding(true);
+    try {
+      if (!path) {
+        const activeFile = this.app.workspace.getActiveFile();
+        if (activeFile) {
+          this.addMessage("system", `\u7F16\u8BD1: ${activeFile.path}...`);
+          const r = await runtime.compileByPath(activeFile.path);
+          this.addMessage("system", `\u5B8C\u6210: \u6CE8\u518C ${r.registered}\uFF0C\u6210\u529F ${r.success}\uFF0C\u5931\u8D25 ${r.failed}`);
+        }
+        const maxBatch = runtime.settings.knowledgeMaxCompileBatch || 50;
+        const result = await runtime.compiler.compileAllPending(maxBatch, (current, total, noteId) => {
+          this.addMessage("system", `[${current}/${total}] \u7F16\u8BD1: ${noteId}`);
+        });
+        if (result.success > 0) {
+          await runtime.indexer.rebuildIndex();
+        }
+        this.addMessage("system", `\u6279\u91CF\u7F16\u8BD1\u5B8C\u6210: ${result.success} \u6210\u529F, ${result.failed} \u5931\u8D25`);
+      } else {
+        this.addMessage("system", `\u7F16\u8BD1: ${path}...`);
+        const r = await runtime.compileByPath(path);
+        this.addMessage("system", `\u5B8C\u6210: \u6CE8\u518C ${r.registered}\uFF0C\u6210\u529F ${r.success}\uFF0C\u5931\u8D25 ${r.failed}`);
+      }
+    } catch (e) {
+      this.addMessage("system", `\u7F16\u8BD1\u5931\u8D25: ${e.message}`);
+    } finally {
+      this.setResponding(false);
+    }
+  }
+};
+
+// src/services/context-manager.ts
+var import_obsidian7 = require("obsidian");
+var ContextManager = class {
+  activeContexts = [];
+  // 限制活动上下文的数量，防止内存泄漏
+  MAX_ACTIVE_CONTEXTS = 50;
+  // 最多保留50个活动上下文
+  constructor() {
+  }
+  addContext(item) {
+    if (!this.activeContexts.find((c) => c.id === item.id)) {
+      this.activeContexts.push(item);
+      if (this.activeContexts.length > this.MAX_ACTIVE_CONTEXTS) {
+        const removed = this.activeContexts.splice(0, this.activeContexts.length - this.MAX_ACTIVE_CONTEXTS);
+        console.log(`[ContextManager] Removed ${removed.length} old contexts to prevent memory leak. Keeping ${this.MAX_ACTIVE_CONTEXTS} most recent contexts.`);
+      }
+    }
+  }
+  removeContext(id) {
+    this.activeContexts = this.activeContexts.filter((c) => c.id !== id);
+  }
+  getContexts() {
+    return this.activeContexts;
+  }
+  clearContexts() {
+    this.activeContexts = [];
+  }
+  // 清理资源
+  cleanup() {
+    this.clearContexts();
+  }
+  async resolveContexts() {
+    for (const ctx of this.activeContexts) {
+      if (!ctx.content) {
+        if (ctx.type === "url") {
+          ctx.content = await this.fetchWebContent(ctx.data);
+        } else if (ctx.type === "youtube") {
+          ctx.content = await this.fetchYouTubeTranscript(ctx.data);
+        }
+      }
+    }
+    return this.activeContexts;
+  }
+  async fetchWebContent(url) {
+    try {
+      const res = await (0, import_obsidian7.requestUrl)({ url });
+      const html = res.text;
+      return this.stripHtml(html);
+    } catch (e) {
+      logger.error(`Failed to fetch web content: ${url}`, e);
+      return `[Error fetching content from ${url}]`;
+    }
+  }
+  stripHtml(html) {
+    return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  }
+  async fetchYouTubeTranscript(url) {
+    try {
+      const res = await (0, import_obsidian7.requestUrl)({
+        url,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      });
+      const html = res.text;
+      const captionsMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
+      if (!captionsMatch) {
+        return "[No captions found for this video]";
+      }
+      const captionTracks = JSON.parse(captionsMatch[1]);
+      let selectedTrack = captionTracks.find((track) => track.languageCode === "en");
+      if (!selectedTrack)
+        selectedTrack = captionTracks[0];
+      if (!selectedTrack)
+        return "[No suitable caption track found]";
+      const transcriptUrl = selectedTrack.baseUrl + "&fmt=xml";
+      const xmlRes = await (0, import_obsidian7.requestUrl)({
+        url: transcriptUrl,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      });
+      const xml = xmlRes.text;
+      const text = xml.replace(/<text[^>]*>/g, "\n").replace(/<\/text>/g, "").replace(/&amp;#39;/g, "'").replace(/&amp;quot;/g, '"');
+      return `YouTube Transcript for ${url}:
+
+${text}`;
+    } catch (e) {
+      logger.error(`Failed to fetch YouTube transcript: ${url}`, e);
+      return `[Error fetching transcript for ${url}]`;
+    }
+  }
+};
+
+// src/ui/diff-modal.ts
+var import_obsidian8 = require("obsidian");
+var DiffModal = class extends import_obsidian8.Modal {
+  constructor(app, original, modified, onApply) {
+    super(app);
+    this.original = original;
+    this.modified = modified;
+    this.onApply = onApply;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("ocli-diff-modal");
+    contentEl.createEl("h2", { text: "Review Changes" });
+    const diffContainer = contentEl.createDiv({ cls: "diff-container" });
+    this.renderDiff(diffContainer);
+    const buttonContainer = contentEl.createDiv({ cls: "diff-actions" });
+    buttonContainer.style.display = "flex";
+    buttonContainer.style.justifyContent = "flex-end";
+    buttonContainer.style.gap = "10px";
+    buttonContainer.style.marginTop = "20px";
+    new import_obsidian8.ButtonComponent(buttonContainer).setButtonText("Cancel").onClick(() => this.close());
+    new import_obsidian8.ButtonComponent(buttonContainer).setButtonText("Apply Changes").setCta().onClick(() => {
+      this.onApply();
+      this.close();
+    });
+  }
+  renderDiff(container) {
+    container.style.maxHeight = "60vh";
+    container.style.overflowY = "auto";
+    container.style.fontFamily = "monospace";
+    container.style.whiteSpace = "pre-wrap";
+    container.style.backgroundColor = "var(--background-primary)";
+    container.style.padding = "10px";
+    container.style.borderRadius = "4px";
+    container.style.border = "1px solid var(--background-modifier-border)";
+    const oldLines = this.original.split("\n");
+    const newLines = this.modified.split("\n");
+    let i = 0;
+    let j = 0;
+    while (i < oldLines.length || j < newLines.length) {
+      const oldLine = oldLines[i];
+      const newLine = newLines[j];
+      if (oldLine === newLine) {
+        this.createLine(container, "  " + (oldLine || ""), "diff-unchanged");
+        i++;
+        j++;
+      } else {
+        let matchFound = false;
+        for (let k = 1; k < 5; k++) {
+          if (j + k < newLines.length && oldLine === newLines[j + k]) {
+            for (let m = 0; m < k; m++) {
+              this.createLine(container, "+ " + newLines[j + m], "diff-added");
+            }
+            j += k;
+            matchFound = true;
+            break;
+          }
+        }
+        if (!matchFound) {
+          for (let k = 1; k < 5; k++) {
+            if (i + k < oldLines.length && oldLines[i + k] === newLine) {
+              for (let m = 0; m < k; m++) {
+                this.createLine(container, "- " + oldLines[i + m], "diff-removed");
+              }
+              i += k;
+              matchFound = true;
+              break;
+            }
+          }
+        }
+        if (!matchFound) {
+          if (i < oldLines.length) {
+            this.createLine(container, "- " + oldLines[i], "diff-removed");
+            i++;
+          }
+          if (j < newLines.length) {
+            this.createLine(container, "+ " + newLines[j], "diff-added");
+            j++;
+          }
+        }
+      }
+    }
+  }
+  createLine(container, text, type) {
+    const div = container.createDiv({ cls: `diff-line ${type}` });
+    div.setText(text);
+    if (type === "diff-added") {
+      div.style.backgroundColor = "rgba(0, 255, 0, 0.1)";
+      div.style.color = "var(--text-success)";
+    } else if (type === "diff-removed") {
+      div.style.backgroundColor = "rgba(255, 0, 0, 0.1)";
+      div.style.color = "var(--text-error)";
+      div.style.textDecoration = "line-through";
+    } else {
+      div.style.color = "var(--text-muted)";
+    }
+  }
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
 };
 
 // src/ui/shell-view.ts
-var VIEW_TYPE_GEMINI_SHELL = "gemini-shell-view";
-var GeminiShellView = class extends import_obsidian6.ItemView {
+var ShellView = class extends import_obsidian9.ItemView {
   modelService;
   chatController;
+  contextManager;
   outputContainer;
   inputEl;
   suggestionContainer;
@@ -5165,15 +6119,62 @@ var GeminiShellView = class extends import_obsidian6.ItemView {
   heartbeatIntervalMs = 3e4;
   // 30s check
   isResponding = false;
+  modelSelectEl = null;
+  providerSelectEl = null;
+  // Event Handlers
+  handleInputBound = () => {
+    this.adjustHeight();
+    this.handleInput();
+  };
+  handleKeyDownBound = async (e) => {
+    if (this.isSuggesting) {
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        this.navigateSuggestions(-1);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        this.navigateSuggestions(1);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        this.selectSuggestion();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        this.hideSuggestions();
+      }
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (e.isComposing)
+        return;
+      const query = this.inputEl.value.trim();
+      if (!query)
+        return;
+      this.inputEl.value = "";
+      this.adjustHeight();
+      await this.processCommand(query);
+    }
+  };
+  handleContainerClickBound = (e) => {
+    if (window.getSelection()?.toString())
+      return;
+    const target = e.target;
+    if (target.closest(".shell-suggestions") || target.closest(".shell-context-chips") || target.closest(".shell-model-select-container") || target.closest(".shell-action-buttons"))
+      return;
+    this.inputEl.focus();
+  };
+  handlePasteBound = (e) => this.handlePaste(e);
+  handleDropBound = (e) => this.handleDrop(e);
   constructor(leaf, modelService) {
     super(leaf);
     this.modelService = modelService;
+    this.contextManager = new ContextManager();
   }
   getViewType() {
-    return VIEW_TYPE_GEMINI_SHELL;
+    return VIEW_TYPE_SHELL;
   }
   getDisplayText() {
-    return "Gemini Shell";
+    return "Obsidian Shell";
   }
   getIcon() {
     return "terminal-square";
@@ -5187,12 +6188,51 @@ var GeminiShellView = class extends import_obsidian6.ItemView {
       onMessageAdded: (msg) => this.appendMessage(msg),
       onStatusChanged: (status) => this.handleStatusChange(status)
     });
-    const container = contentEl.createDiv({ cls: "gemini-shell-view" });
+    const container = contentEl.createDiv({ cls: "ocli-shell-view" });
     const header = container.createDiv({ cls: "shell-header" });
-    header.createSpan({ text: "GEMINI SHELL" });
-    const statusContainer = header.createDiv({ cls: "shell-status-container" });
-    statusContainer.createSpan({ cls: "shell-status-dot" });
-    statusContainer.createSpan({ text: "ONLINE" });
+    const headerTitle = header.createDiv({ cls: "shell-header-title" });
+    headerTitle.createEl("h1", { text: "Obsidian Shell", cls: "shell-title" });
+    const headerButtons = header.createDiv({ cls: "shell-header-buttons" });
+    const clearBtn = headerButtons.createEl("button", {
+      cls: "clickable-icon",
+      attr: { "aria-label": "Clear Chat" }
+    });
+    clearBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
+    clearBtn.addEventListener("click", () => {
+      this.clearChat();
+    });
+    const toolsBtn = headerButtons.createEl("button", {
+      cls: "clickable-icon",
+      attr: { "aria-label": "Tools" }
+    });
+    toolsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>';
+    toolsBtn.addEventListener("click", async () => {
+      const tools = await this.chatController.getTools();
+      if (tools && tools.length > 0) {
+        let toolsList = "Available Tools:\n";
+        tools.forEach((tool) => {
+          toolsList += `
+${tool.name}: ${tool.description}
+`;
+          if (tool.input_schema && tool.input_schema.properties) {
+            toolsList += `  Parameters: ${Object.keys(tool.input_schema.properties).join(", ")}
+`;
+          }
+        });
+        new import_obsidian9.Notice(toolsList, 8e3);
+      } else {
+        new import_obsidian9.Notice("No tools available or tools not loaded yet.");
+      }
+    });
+    const settingsBtn = headerButtons.createEl("button", {
+      cls: "clickable-icon",
+      attr: { "aria-label": "Settings" }
+    });
+    settingsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 .6 1v.51a2 2 0 0 1-.6 1l-.15.15a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-.6-1v-.5a2 2 0 0 1 .6-1l.15-.15a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+    settingsBtn.addEventListener("click", () => {
+      this.app.setting.open();
+      this.app.setting.openTabById("obsidian-cli");
+    });
     this.outputContainer = container.createDiv({ cls: "shell-output-area" });
     this.appendMessage({
       id: "init",
@@ -5201,68 +6241,51 @@ var GeminiShellView = class extends import_obsidian6.ItemView {
       timestamp: Date.now()
     });
     const inputContainer = container.createDiv({ cls: "shell-input-container" });
+    const contextContainer = inputContainer.createDiv({ cls: "shell-context-chips" });
+    this.renderContextChips(contextContainer);
     this.suggestionContainer = inputContainer.createDiv({ cls: "shell-suggestions" });
     const inputWrapper = inputContainer.createDiv({ cls: "shell-input-wrapper" });
-    const promptIcon = inputWrapper.createSpan({ cls: "shell-prompt" });
-    promptIcon.setText(">_");
     this.inputEl = inputWrapper.createEl("textarea", {
       cls: "shell-input",
       attr: {
-        placeholder: "Ask Gemini... (/ for commands, @ for files)",
+        placeholder: "Ask AI... (/ for commands, @ for files)",
         spellcheck: "false",
         autocomplete: "off",
         rows: "1"
       }
     });
-    const footer = inputContainer.createDiv({ cls: "shell-footer" });
-    const rightActions = footer.createDiv({ cls: "action-group" });
-    const createAction = (container2, key, label) => {
-      const item = container2.createDiv({ cls: "action-item" });
-      item.createSpan({ cls: "key-badge", text: key });
-      item.createSpan({ cls: "action-label", text: label });
-    };
-    createAction(rightActions, "\u21B5", "Send");
-    createAction(rightActions, "\u21E7\u21B5", "New Line");
-    this.inputEl.addEventListener("input", () => {
-      this.adjustHeight();
-      this.handleInput();
+    this.updatePlaceholder();
+    const inputControls = inputContainer.createDiv({ cls: "shell-input-controls" });
+    const modelSelectContainer = inputControls.createDiv({ cls: "shell-model-select-container" });
+    this.providerSelectEl = modelSelectContainer.createEl("select", {
+      cls: "shell-model-select",
+      attr: { title: "Select AI Provider" }
     });
-    this.inputEl.addEventListener("keydown", async (e) => {
-      if (this.isSuggesting) {
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          this.navigateSuggestions(-1);
-        } else if (e.key === "ArrowDown") {
-          e.preventDefault();
-          this.navigateSuggestions(1);
-        } else if (e.key === "Enter") {
-          e.preventDefault();
-          this.selectSuggestion();
-        } else if (e.key === "Escape") {
-          e.preventDefault();
-          this.hideSuggestions();
-        }
-        return;
-      }
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        if (e.isComposing)
-          return;
-        const query = this.inputEl.value.trim();
-        if (!query)
-          return;
-        this.inputEl.value = "";
-        this.adjustHeight();
-        await this.processCommand(query);
-      }
+    this.populateProviderOptions(this.providerSelectEl);
+    this.providerSelectEl.addEventListener("change", async (e) => {
+      const target = e.target;
+      await this.changeProvider(target.value);
+      new import_obsidian9.Notice(`Switched provider to ${target.options[target.selectedIndex].text}`);
+      if (this.modelSelectEl)
+        this.populateModelOptions(this.modelSelectEl);
+      this.updatePlaceholder();
     });
-    container.addEventListener("click", (e) => {
-      if (window.getSelection()?.toString())
-        return;
-      if (e.target.closest(".shell-suggestions"))
-        return;
-      this.inputEl.focus();
+    this.modelSelectEl = modelSelectContainer.createEl("select", {
+      cls: "shell-model-select",
+      attr: { title: "Select AI Model" }
     });
+    this.populateModelOptions(this.modelSelectEl);
+    this.modelSelectEl.addEventListener("change", async (e) => {
+      const target = e.target;
+      await this.changeModel(target.value);
+      new import_obsidian9.Notice(`Switched to ${target.options[target.selectedIndex].text}`);
+    });
+    const actionButtons = inputControls.createDiv({ cls: "shell-action-buttons" });
+    this.inputEl.addEventListener("input", this.handleInputBound);
+    this.inputEl.addEventListener("keydown", this.handleKeyDownBound);
+    container.addEventListener("click", this.handleContainerClickBound);
+    this.inputEl.addEventListener("paste", this.handlePasteBound);
+    this.inputEl.addEventListener("drop", this.handleDropBound);
     this.startHeartbeat();
   }
   adjustHeight() {
@@ -5293,12 +6316,16 @@ var GeminiShellView = class extends import_obsidian6.ItemView {
       const commands = [
         { label: "/clear", desc: "Clear session history" },
         { label: "/profile", desc: "View user profile" },
-        { label: "/forget", desc: "Forget context" },
-        // Note: ChatController doesn't implement forget yet, but keeping for UI consistency or future
+        { label: "/forget", desc: "Forget user memory (name/profession/all...)" },
         { label: "/new", desc: "Create new note" },
-        { label: "/edit", desc: "Edit current selection" },
+        { label: "/edit", desc: "AI edit selected text" },
         { label: "/open", desc: "Open file" },
-        { label: "/tools", desc: "List available MCP tools" }
+        { label: "/save", desc: "Save webpage/video to vault" },
+        { label: "/tools", desc: "List available MCP tools" },
+        { label: "/help", desc: "Show all commands" },
+        { label: "/wiki:compile", desc: "Compile notes to knowledge wiki" },
+        { label: "/wiki:index", desc: "Open knowledge wiki index" },
+        { label: "/wiki:lint", desc: "Run knowledge health check" }
       ];
       this.suggestions = commands.filter((c) => c.label.toLowerCase().includes(query.toLowerCase()));
     } else {
@@ -5363,34 +6390,128 @@ var GeminiShellView = class extends import_obsidian6.ItemView {
   }
   // ==================== Chat Logic ====================
   async processCommand(query) {
-    let contextStr = "";
-    const activeFile = this.app.workspace.getActiveFile();
-    if (activeFile) {
-      contextStr = `Current Note: [[${activeFile.path}]]`;
-    }
-    const activeLeaf = this.app.workspace.getMostRecentLeaf();
-    if (activeLeaf && activeLeaf.view) {
-      const editor = activeLeaf.view.editor;
-      if (editor) {
-        this.currentSelection = editor.getSelection();
-        if (this.currentSelection) {
+    try {
+      let contextStr = "";
+      const activeFile = this.app.workspace.getActiveFile();
+      if (activeFile) {
+        contextStr = `Current Note: [[${activeFile.path}]]`;
+      }
+      const contextItems = await this.contextManager.resolveContexts();
+      if (activeFile) {
+        contextItems.push({
+          id: "active-file",
+          type: "file",
+          data: activeFile.path,
+          content: await this.app.vault.read(activeFile)
+        });
+      }
+      const activeLeaf = this.app.workspace.getMostRecentLeaf();
+      if (activeLeaf && activeLeaf.view) {
+        const editor = activeLeaf.view.editor;
+        if (editor) {
+          this.currentSelection = editor.getSelection();
+          if (this.currentSelection) {
+          }
         }
       }
+      this.updateActivity();
+      await this.chatController.processCommand(query, contextItems, this.currentSelection);
+      this.contextManager.clearContexts();
+      this.renderContextChips(this.outputContainer.parentElement?.querySelector(".shell-context-chips"));
+    } catch (error) {
+      logger.error("Command processing failed", error, "ShellView.processCommand");
+      this.appendMessage({
+        id: "error-" + Date.now(),
+        role: "system",
+        content: `Error processing command: ${error.message}`,
+        timestamp: Date.now()
+      });
     }
-    this.updateActivity();
-    await this.chatController.processCommand(query, contextStr, this.currentSelection);
   }
   appendMessage(msg) {
     const entry = this.outputContainer.createDiv({ cls: `shell-entry ${msg.role}` });
     if (msg.role === "ai") {
-      import_obsidian6.MarkdownRenderer.render(this.app, msg.content, entry, "", this);
+      import_obsidian9.MarkdownRenderer.render(this.app, msg.content, entry, "", this).then(() => {
+        const codeBlocks = entry.querySelectorAll("pre > code");
+        codeBlocks.forEach((codeBlock) => {
+          const pre = codeBlock.parentElement;
+          if (pre) {
+            const header = pre.createDiv({ cls: "shell-code-block-header" });
+            const langClass = Array.from(codeBlock.classList).find((cls) => cls.startsWith("language-"));
+            const lang = langClass ? langClass.replace("language-", "") : "text";
+            const filename = `untitled.${lang === "text" ? "txt" : lang}`;
+            header.createDiv({
+              cls: "shell-code-block-filename",
+              text: filename
+            });
+            const buttons = header.createDiv({ cls: "shell-code-block-buttons" });
+            const btn = buttons.createEl("button", {
+              cls: "shell-apply-btn clickable-icon",
+              title: "Review Changes"
+            });
+            btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="16" x2="12" y2="12"></line><line x1="10" y1="14" x2="10" y2="10"></line></svg>';
+            btn.addEventListener("click", async () => {
+              const activeFile = this.app.workspace.getActiveFile();
+              if (!activeFile) {
+                new import_obsidian9.Notice("No active file to apply changes to.");
+                return;
+              }
+              const originalContent = await this.app.vault.read(activeFile);
+              const newContent = codeBlock.textContent || "";
+              new DiffModal(this.app, originalContent, newContent, async () => {
+                await this.app.vault.modify(activeFile, newContent);
+                new import_obsidian9.Notice("Changes applied.");
+              }).open();
+            });
+            pre.insertBefore(header, codeBlock);
+          }
+        });
+        requestAnimationFrame(() => {
+          this.scrollToBottom();
+        });
+        const feedbackBar = entry.createDiv({ cls: "shell-feedback-bar" });
+        const thumbsUpBtn = feedbackBar.createEl("button", {
+          cls: "shell-feedback-btn shell-thumbs-up",
+          title: "Useful - save to knowledge wiki"
+        });
+        thumbsUpBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>';
+        const thumbsDownBtn = feedbackBar.createEl("button", {
+          cls: "shell-feedback-btn shell-thumbs-down",
+          title: "Not useful"
+        });
+        thumbsDownBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
+        thumbsUpBtn.addEventListener("click", () => {
+          msg.feedback = "up";
+          thumbsUpBtn.addClass("active");
+          thumbsDownBtn.removeClass("active");
+          this.chatController.processCommand(
+            `/file-back ${msg.id}`,
+            [],
+            ""
+          );
+        });
+        thumbsDownBtn.addEventListener("click", () => {
+          msg.feedback = "down";
+          thumbsDownBtn.addClass("active");
+          thumbsUpBtn.removeClass("active");
+        });
+      }).catch((error) => {
+        logger.error("Markdown rendering failed", error, "ShellView");
+        entry.setText("Error rendering message");
+      });
     } else if (msg.role === "user") {
       entry.setText(msg.content);
+      this.scrollToEnd();
     } else {
       entry.setText(`[System] ${msg.content}`);
+      this.scrollToEnd();
     }
-    this.scrollToBottom();
     this.updateActivity();
+  }
+  scrollToEnd() {
+    setTimeout(() => {
+      this.outputContainer.scrollTop = this.outputContainer.scrollHeight;
+    }, 50);
   }
   handleStatusChange(isResponding) {
     this.isResponding = isResponding;
@@ -5403,18 +6524,28 @@ var GeminiShellView = class extends import_obsidian6.ItemView {
         loadingDiv.createSpan({ cls: "shell-loading" });
         loadingDiv.createSpan({ text: "Thinking..." });
       }
-      this.scrollToBottom();
+      this.scrollToEnd();
     } else {
       const loadingDiv = document.getElementById("loading-indicator");
       if (loadingDiv)
         loadingDiv.remove();
     }
   }
-  scrollToBottom() {
-    this.outputContainer.scrollTop = this.outputContainer.scrollHeight;
-  }
   async onClose() {
     this.stopHeartbeat();
+    if (this.chatController) {
+      this.chatController.cleanup();
+    }
+    if (this.inputEl) {
+      this.inputEl.removeEventListener("input", this.handleInputBound);
+      this.inputEl.removeEventListener("keydown", this.handleKeyDownBound);
+      this.inputEl.removeEventListener("paste", this.handlePasteBound);
+      this.inputEl.removeEventListener("drop", this.handleDropBound);
+    }
+    const container = this.contentEl.querySelector(".ocli-shell-view");
+    if (container) {
+      container.removeEventListener("click", this.handleContainerClickBound);
+    }
   }
   // ==================== Heartbeat Monitoring ====================
   startHeartbeat() {
@@ -5433,7 +6564,7 @@ var GeminiShellView = class extends import_obsidian6.ItemView {
     const timeSinceLastActivity = now - this.lastActivityTime;
     if (this.isResponding && timeSinceLastActivity > 12e4) {
       const warning = "\u26A0\uFE0F \u68C0\u6D4B\u5230\u957F\u65F6\u95F4\u65E0\u54CD\u5E94\uFF0C\u7CFB\u7EDF\u53EF\u80FD\u51FA\u73B0\u95EE\u9898";
-      logger.warn(warning, "GeminiShellView.heartbeat");
+      logger.warn(warning, "ObsidianShellView.heartbeat");
       this.appendMessage({
         id: "warn",
         role: "system",
@@ -5445,6 +6576,251 @@ var GeminiShellView = class extends import_obsidian6.ItemView {
   }
   updateActivity() {
     this.lastActivityTime = Date.now();
+  }
+  // ==================== Context Handling ====================
+  renderContextChips(container) {
+    if (!container)
+      return;
+    container.empty();
+    const contexts = this.contextManager.getContexts();
+    contexts.forEach((ctx) => {
+      const chip = container.createDiv({ cls: "context-chip" });
+      chip.createSpan({ cls: "chip-icon", text: this.getIconForType(ctx.type) });
+      chip.createSpan({ cls: "chip-label", text: ctx.summary || ctx.data });
+      const removeBtn = chip.createSpan({ cls: "chip-remove", text: "\xD7" });
+      removeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.contextManager.removeContext(ctx.id);
+        this.renderContextChips(container);
+      });
+    });
+  }
+  getIconForType(type) {
+    switch (type) {
+      case "image":
+        return "\u{1F5BC}\uFE0F";
+      case "url":
+        return "\u{1F310}";
+      case "youtube":
+        return "\u25B6\uFE0F";
+      case "file":
+        return "\u{1F4C4}";
+      default:
+        return "\u{1F4CE}";
+    }
+  }
+  async handlePaste(e) {
+    const items = e.clipboardData?.items;
+    if (!items)
+      return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.indexOf("image") !== -1) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (blob) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const base64 = event.target?.result;
+            this.contextManager.addContext({
+              id: Date.now().toString(),
+              type: "image",
+              data: base64,
+              summary: "Pasted Image"
+            });
+            this.renderContextChips(this.outputContainer.parentElement?.querySelector(".shell-context-chips"));
+          };
+          reader.readAsDataURL(blob);
+        }
+      } else if (item.type === "text/plain") {
+        item.getAsString((text) => {
+          if (this.isValidUrl(text)) {
+            if (text.includes("youtube.com") || text.includes("youtu.be")) {
+              this.contextManager.addContext({
+                id: Date.now().toString(),
+                type: "youtube",
+                data: text,
+                summary: text
+              });
+              this.renderContextChips(this.outputContainer.parentElement?.querySelector(".shell-context-chips"));
+            }
+          }
+        });
+      }
+    }
+  }
+  handleDrop(e) {
+    e.preventDefault();
+    if (e.dataTransfer?.files) {
+      for (let i = 0; i < e.dataTransfer.files.length; i++) {
+        const file = e.dataTransfer.files[i];
+        if (file.type.startsWith("image/")) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const base64 = event.target?.result;
+            this.contextManager.addContext({
+              id: Date.now().toString(),
+              type: "image",
+              data: base64,
+              summary: file.name
+            });
+            this.renderContextChips(this.outputContainer.parentElement?.querySelector(".shell-context-chips"));
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  }
+  isValidUrl(str) {
+    try {
+      new URL(str);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+  populateModelOptions(selectEl) {
+    const settings = this.app.plugins.plugins["obsidian-cli"]?.settings;
+    if (!settings)
+      return;
+    selectEl.empty();
+    const provider = settings.provider || "gemini";
+    let currentModel = "";
+    let models = [];
+    switch (provider) {
+      case "gemini":
+        currentModel = settings.primaryModel;
+        models = [
+          { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+          { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+          { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+          { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro" }
+        ];
+        break;
+      case "openai":
+        currentModel = settings.openaiModel;
+        models = [
+          { value: "gpt-4o", label: "GPT-4o" },
+          { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+          { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
+          { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" }
+        ];
+        break;
+      case "deepseek":
+        currentModel = settings.deepseekModel;
+        models = [
+          { value: "deepseek-chat", label: "DeepSeek Chat" },
+          { value: "deepseek-coder", label: "DeepSeek Coder" }
+        ];
+        break;
+      case "qwen":
+        currentModel = settings.qwenModel;
+        models = [
+          { value: "qwen-turbo", label: "Qwen Turbo" },
+          { value: "qwen-plus", label: "Qwen Plus" },
+          { value: "qwen-max", label: "Qwen Max" }
+        ];
+        break;
+    }
+    if (currentModel && !models.some((m) => m.value === currentModel)) {
+      models.unshift({ value: currentModel, label: currentModel });
+    }
+    models.forEach((model) => {
+      const option = selectEl.createEl("option", {
+        value: model.value,
+        text: model.label
+      });
+      if (model.value === currentModel) {
+        option.selected = true;
+      }
+    });
+  }
+  populateProviderOptions(selectEl) {
+    const settings = this.app.plugins.plugins["obsidian-cli"]?.settings;
+    if (!settings)
+      return;
+    selectEl.empty();
+    const provider = settings.provider || "gemini";
+    const providers = [
+      { value: "gemini", label: "Gemini" },
+      { value: "openai", label: "OpenAI Compatible" },
+      { value: "deepseek", label: "DeepSeek" },
+      { value: "qwen", label: "Qwen" }
+    ];
+    providers.forEach((p) => {
+      const option = selectEl.createEl("option", {
+        value: p.value,
+        text: p.label
+      });
+      if (p.value === provider)
+        option.selected = true;
+    });
+  }
+  async changeProvider(providerId) {
+    const plugin = this.app.plugins.plugins["obsidian-cli"];
+    if (!plugin)
+      return;
+    plugin.settings.provider = providerId;
+    await plugin.saveSettings();
+    this.modelService.updateSettings(plugin.settings);
+    if (this.providerSelectEl) {
+      this.populateProviderOptions(this.providerSelectEl);
+    }
+  }
+  updatePlaceholder() {
+    if (!this.inputEl)
+      return;
+    const settings = this.app.plugins.plugins["obsidian-cli"]?.settings;
+    const provider = settings?.provider || "gemini";
+    const providerLabelMap = {
+      gemini: "Gemini",
+      openai: "OpenAI",
+      deepseek: "DeepSeek",
+      qwen: "Qwen"
+    };
+    const label = providerLabelMap[provider] || "AI";
+    this.inputEl.setAttr("placeholder", `Ask ${label}... (/ for commands, @ for files)`);
+  }
+  async changeModel(modelId) {
+    const plugin = this.app.plugins.plugins["obsidian-cli"];
+    if (!plugin)
+      return;
+    const settings = plugin.settings;
+    const provider = settings.provider || "gemini";
+    switch (provider) {
+      case "gemini":
+        settings.primaryModel = modelId;
+        break;
+      case "openai":
+        settings.openaiModel = modelId;
+        break;
+      case "deepseek":
+        settings.deepseekModel = modelId;
+        break;
+      case "qwen":
+        settings.qwenModel = modelId;
+        break;
+    }
+    await plugin.saveSettings();
+    this.modelService.updateSettings(settings);
+  }
+  updateModelSelector() {
+    if (this.providerSelectEl) {
+      this.populateProviderOptions(this.providerSelectEl);
+    }
+    if (this.modelSelectEl) {
+      this.populateModelOptions(this.modelSelectEl);
+    }
+  }
+  clearChat() {
+    this.outputContainer.empty();
+    this.appendMessage({
+      id: "init",
+      role: "system",
+      content: "Chat cleared.",
+      timestamp: Date.now()
+    });
+    new import_obsidian9.Notice("Chat cleared");
   }
 };
 
@@ -5690,8 +7066,8 @@ function showGhostText(view, text, line, ch, replaceRange) {
 }
 
 // src/ui/guardian-modal.ts
-var import_obsidian7 = require("obsidian");
-var GuardianModal = class extends import_obsidian7.Modal {
+var import_obsidian10 = require("obsidian");
+var GuardianModal = class extends import_obsidian10.Modal {
   result;
   onSubmit;
   constructor(app, onSubmit) {
@@ -5701,20 +7077,20 @@ var GuardianModal = class extends import_obsidian7.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h2", { text: "Guardian Manual Trigger" });
-    new import_obsidian7.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
+    new import_obsidian10.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
       this.result = value;
     }).inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         this.submit();
       }
     }));
-    new import_obsidian7.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
+    new import_obsidian10.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
       this.submit();
     }));
   }
   submit() {
     if (!this.result) {
-      new import_obsidian7.Notice("Please enter an instruction.");
+      new import_obsidian10.Notice("Please enter an instruction.");
       return;
     }
     this.close();
@@ -5727,11 +7103,10 @@ var GuardianModal = class extends import_obsidian7.Modal {
 };
 
 // src/ui/selection-menu.ts
-var import_obsidian8 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 var import_view3 = require("@codemirror/view");
 var import_state5 = require("@codemirror/state");
-var pluginApp = null;
-var pluginModelService = null;
+var pluginContextMap = /* @__PURE__ */ new WeakMap();
 var setSelectionMenuState = import_state5.StateEffect.define();
 var selectionMenuField = import_state5.StateField.define({
   create() {
@@ -5757,14 +7132,17 @@ var selectionMenuField = import_state5.StateField.define({
     }
     return state;
   },
-  provide: (f) => import_view3.showTooltip.from(f, (state) => {
+  provide: (f) => import_view3.showTooltip.from(f, (state, view) => {
     if (state.type === "hidden")
+      return null;
+    const context = view ? pluginContextMap.get(view) : void 0;
+    if (!context)
       return null;
     return {
       pos: state.from,
       above: true,
       strictSide: true,
-      create: (view) => {
+      create: () => {
         const dom = document.createElement("div");
         dom.className = "guardian-selection-tooltip";
         if (state.type === "button") {
@@ -5772,13 +7150,9 @@ var selectionMenuField = import_state5.StateField.define({
           btn.className = "guardian-selection-btn";
           btn.textContent = "Comment / AI";
           btn.onclick = () => {
-            if (!pluginApp || !pluginModelService) {
-              new import_obsidian8.Notice("Model Service not initialized");
-              return;
-            }
             const controller = new ChatController({
-              app: pluginApp,
-              api: pluginModelService,
+              app: context.app,
+              api: context.modelService,
               onMessageAdded: (msg) => {
               },
               onStatusChanged: (isResponding) => {
@@ -5816,7 +7190,7 @@ var selectionMenuField = import_state5.StateField.define({
               messages.forEach((msg) => {
                 const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
                 if (msg.role === "ai") {
-                  import_obsidian8.MarkdownRenderer.render(pluginApp, msg.content, msgEl, "", new import_obsidian8.Component());
+                  import_obsidian11.MarkdownRenderer.render(context.app, msg.content, msgEl, "", new import_obsidian11.Component());
                 } else {
                   msgEl.setText(msg.content);
                 }
@@ -5864,7 +7238,7 @@ ${selectionText}`;
           copyBtn.onclick = () => {
             const selectionText = view.state.doc.sliceString(state.from, state.to);
             navigator.clipboard.writeText(selectionText);
-            new import_obsidian8.Notice("Selection copied");
+            new import_obsidian11.Notice("Selection copied");
           };
           const replaceBtn = actions.createEl("button", { text: "Replace with Last Response" });
           replaceBtn.onclick = () => {
@@ -5876,7 +7250,7 @@ ${selectionText}`;
                 effects: setSelectionMenuState.of({ type: "hidden" })
               });
             } else {
-              new import_obsidian8.Notice("No AI response to replace with.");
+              new import_obsidian11.Notice("No AI response to replace with.");
             }
           };
           dom.appendChild(container);
@@ -5888,36 +7262,1288 @@ ${selectionText}`;
   })
 });
 function selectionMenuExtension(app, modelService) {
-  pluginApp = app;
-  pluginModelService = modelService;
   return [
-    selectionMenuField
+    selectionMenuField,
+    // 使用 EditorView.updateListener 来存储 context
+    import_view3.EditorView.updateListener.of((update) => {
+      if (update.view) {
+        pluginContextMap.set(update.view, { app, modelService });
+      }
+    })
   ];
 }
 
+// src/knowledge/runtime.ts
+var import_obsidian17 = require("obsidian");
+
+// src/knowledge/types.ts
+var VALID_STATUS_TRANSITIONS = {
+  pending: ["processing", "missing_source"],
+  processing: ["done", "failed", "partial", "missing_source"],
+  done: ["stale", "missing_source"],
+  stale: ["pending", "missing_source"],
+  failed: ["pending", "missing_source"],
+  partial: ["pending", "missing_source"],
+  missing_source: ["pending"]
+};
+function isValidTransition(from, to) {
+  return VALID_STATUS_TRANSITIONS[from]?.includes(to) ?? false;
+}
+function normalizeTopicSlug(raw) {
+  return raw.trim().toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+}
+var KNOWLEDGE_REGISTRY_PATH = ".obsidian/obsidian-cli/knowledge-registry.json";
+var DEFAULT_WIKI_FOLDER = "Knowledge Wiki";
+var WIKI_ARTICLES_SUBFOLDER = "Articles";
+var WIKI_TOPICS_SUBFOLDER = "Topics";
+var WIKI_HEALTH_SUBFOLDER = "Health";
+var WIKI_INDEX_FILENAME = "index.md";
+
+// src/knowledge/registry.ts
+var KnowledgeRegistryManager = class {
+  constructor(adapter) {
+    this.adapter = adapter;
+  }
+  registry = { schema_version: 1, records: {} };
+  pathIndex = /* @__PURE__ */ new Map();
+  static generateId() {
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+    let suffix = "";
+    for (let i = 0; i < 12; i++) {
+      suffix += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return `ksrc_${suffix}`;
+  }
+  async load() {
+    try {
+      if (await this.adapter.exists(KNOWLEDGE_REGISTRY_PATH)) {
+        const raw = await this.adapter.read(KNOWLEDGE_REGISTRY_PATH);
+        this.registry = JSON.parse(raw);
+      } else {
+        this.registry = { schema_version: 1, records: {} };
+      }
+    } catch {
+      this.registry = { schema_version: 1, records: {} };
+    }
+    this.rebuildPathIndex();
+  }
+  async save() {
+    const dir = KNOWLEDGE_REGISTRY_PATH.split("/").slice(0, -1).join("/");
+    try {
+      await this.adapter.mkdir(dir);
+    } catch {
+    }
+    await this.adapter.write(KNOWLEDGE_REGISTRY_PATH, JSON.stringify(this.registry, null, 2));
+  }
+  rebuildPathIndex() {
+    this.pathIndex.clear();
+    for (const [id, record] of Object.entries(this.registry.records)) {
+      this.pathIndex.set(record.path, id);
+    }
+  }
+  register(path) {
+    const existing = this.findByPath(path);
+    if (existing)
+      return existing;
+    const id = KnowledgeRegistryManager.generateId();
+    if (this.registry.records[id]) {
+      throw new Error(`Registry ID collision: ${id}`);
+    }
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const record = {
+      id,
+      path,
+      status: "pending",
+      created_at: now,
+      updated_at: now,
+      summary_path: null,
+      error: null
+    };
+    this.registry.records[id] = record;
+    this.pathIndex.set(path, id);
+    return record;
+  }
+  transition(id, to, error) {
+    const record = this.registry.records[id];
+    if (!record)
+      throw new Error(`Record not found: ${id}`);
+    if (!isValidTransition(record.status, to)) {
+      throw new Error(`Invalid transition: ${record.status} -> ${to} for ${id}`);
+    }
+    record.status = to;
+    record.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+    record.error = error ?? null;
+  }
+  setSummaryPath(id, summaryPath) {
+    const record = this.registry.records[id];
+    if (!record)
+      throw new Error(`Record not found: ${id}`);
+    record.summary_path = summaryPath;
+    record.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+  }
+  getRecord(id) {
+    return this.registry.records[id] ?? null;
+  }
+  findByPath(path) {
+    const id = this.pathIndex.get(path);
+    if (!id)
+      return null;
+    return this.registry.records[id] ?? null;
+  }
+  getAllRecords() {
+    return { ...this.registry.records };
+  }
+  getByStatus(status) {
+    return Object.values(this.registry.records).filter((r) => r.status === status);
+  }
+  updatePath(id, newPath) {
+    const record = this.registry.records[id];
+    if (!record)
+      throw new Error(`Record not found: ${id}`);
+    this.pathIndex.delete(record.path);
+    record.path = newPath;
+    record.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+    this.pathIndex.set(newPath, id);
+  }
+  /** 插件重启时，processing 状态重置为 pending */
+  resetProcessingOnStartup() {
+    for (const record of Object.values(this.registry.records)) {
+      if (record.status === "processing") {
+        record.status = "pending";
+        record.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+      }
+    }
+  }
+  /** 获取所有已完成编译且有 summary 的记录 */
+  getCompletedRecords() {
+    return Object.values(this.registry.records).filter((r) => r.status === "done" && r.summary_path);
+  }
+};
+
+// src/knowledge/compiler.ts
+var import_obsidian12 = require("obsidian");
+function buildCompilerPrompt(noteContent, notePath) {
+  return `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u7F16\u8BD1\u5668\u3002\u8BF7\u4ECE\u4EE5\u4E0B\u7B14\u8BB0\u4E2D\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002
+
+\u7B14\u8BB0\u8DEF\u5F84: ${notePath}
+
+\u7B14\u8BB0\u5185\u5BB9:
+---
+${noteContent.substring(0, 3e4)}
+---
+
+\u8BF7\u63D0\u53D6\u4EE5\u4E0B\u5B57\u6BB5\uFF0C\u4EE5 JSON \u683C\u5F0F\u8FD4\u56DE\uFF08\u4E0D\u8981\u6DFB\u52A0\u4EFB\u4F55\u5176\u4ED6\u6587\u5B57\uFF09\uFF1A
+
+\`\`\`json
+{
+  "title": "\u6587\u7AE0\u6807\u9898",
+  "author": "\u4F5C\u8005\uFF08\u5982\u679C\u80FD\u8BC6\u522B\uFF09",
+  "source_url": "\u6765\u6E90 URL\uFF08\u5982\u679C frontmatter \u4E2D\u6709 source \u5B57\u6BB5\uFF09",
+  "created_at": "\u521B\u5EFA\u65F6\u95F4\uFF08ISO 8601\uFF0C\u5982\u679C\u80FD\u8BC6\u522B\uFF09",
+  "topics": [
+    {"slug": "\u6807\u51C6\u5316\u7684-slug", "label": "\u663E\u793A\u6807\u7B7E"}
+  ],
+  "concepts": ["\u5173\u952E\u6982\u5FF51", "\u5173\u952E\u6982\u5FF52"],
+  "key_claims": ["\u6838\u5FC3\u89C2\u70B91", "\u6838\u5FC3\u89C2\u70B92"],
+  "review_flags": ["\u4F4E\u7F6E\u4FE1\u5EA6\u63D0\u53D6\u8BF4\u660E\uFF08\u5982\u6709\uFF09"]
+}
+\`\`\`
+
+\u89C4\u5219\uFF1A
+- topics \u7684 slug \u5FC5\u987B\u662F\u5C0F\u5199\u3001\u8FDE\u5B57\u7B26\u5206\u9694\u7684\u82F1\u6587\u6216\u4E2D\u6587
+- \u5982\u679C\u65E0\u6CD5\u786E\u5B9A\u67D0\u4E2A\u5B57\u6BB5\uFF0C\u7559\u7A7A\u5B57\u7B26\u4E32\u6216\u7A7A\u6570\u7EC4
+- review_flags \u7528\u4E8E\u6807\u8BB0\u4F60\u4E0D\u786E\u5B9A\u7684\u63D0\u53D6\u7ED3\u679C
+- \u4E0D\u8981\u7F16\u9020\u4FE1\u606F\uFF0C\u53EA\u63D0\u53D6\u7B14\u8BB0\u4E2D\u5B9E\u9645\u5B58\u5728\u7684\u5185\u5BB9`;
+}
+function parseCompilerResponse(response) {
+  try {
+    const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
+    const parsed = JSON.parse(jsonStr);
+    if (typeof parsed.title !== "string")
+      return null;
+    const topics = (parsed.topics || []).map((t) => ({
+      slug: normalizeTopicSlug(t.slug || t.label || ""),
+      label: t.label || t.slug || ""
+    })).filter((t) => t.slug.length > 0);
+    return {
+      title: parsed.title || "",
+      author: parsed.author || "",
+      source_url: parsed.source_url || "",
+      created_at: parsed.created_at || "",
+      topics,
+      concepts: Array.isArray(parsed.concepts) ? parsed.concepts : [],
+      key_claims: Array.isArray(parsed.key_claims) ? parsed.key_claims : [],
+      review_flags: Array.isArray(parsed.review_flags) ? parsed.review_flags : []
+    };
+  } catch {
+    return null;
+  }
+}
+function buildSummaryMarkdown(sourceId, extraction, sourcePath) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let fm = "---\n";
+  fm += "knowledge_generated: true\n";
+  fm += `knowledge_source_id: "${sourceId}"
+`;
+  fm += `title: "${extraction.title.replace(/"/g, '\\"')}"
+`;
+  if (extraction.source_url)
+    fm += `source_url: "${extraction.source_url}"
+`;
+  if (extraction.author)
+    fm += `author: "${extraction.author.replace(/"/g, '\\"')}"
+`;
+  if (extraction.created_at)
+    fm += `created_at: "${extraction.created_at}"
+`;
+  fm += `compiled_at: "${now}"
+`;
+  if (extraction.topics.length > 0) {
+    fm += "topics:\n";
+    for (const t of extraction.topics) {
+      fm += `  - slug: "${t.slug}"
+    label: "${t.label}"
+`;
+    }
+  }
+  if (extraction.concepts.length > 0) {
+    fm += `concepts: ${JSON.stringify(extraction.concepts)}
+`;
+  }
+  if (extraction.key_claims.length > 0) {
+    fm += "key_claims:\n";
+    for (const claim of extraction.key_claims) {
+      fm += `  - "${claim.replace(/"/g, '\\"')}"
+`;
+    }
+  }
+  if (extraction.review_flags.length > 0) {
+    fm += `review_flags: ${JSON.stringify(extraction.review_flags)}
+`;
+  } else {
+    fm += "review_flags: []\n";
+  }
+  fm += "---\n";
+  let body = `# ${extraction.title}
+
+`;
+  body += "## \u6458\u8981\n\n";
+  if (extraction.key_claims.length > 0) {
+    body += extraction.key_claims.map((c) => `- ${c}`).join("\n") + "\n";
+  } else {
+    body += "\uFF08\u65E0\u6838\u5FC3\u89C2\u70B9\u63D0\u53D6\uFF09\n";
+  }
+  body += "\n## \u6838\u5FC3\u89C2\u70B9\n\n";
+  if (extraction.key_claims.length > 0) {
+    body += extraction.key_claims.map((c) => `- ${c}`).join("\n") + "\n";
+  } else {
+    body += "\uFF08\u65E0\uFF09\n";
+  }
+  body += "\n## \u5173\u952E\u6982\u5FF5\n\n";
+  if (extraction.concepts.length > 0) {
+    body += extraction.concepts.map((c) => `- ${c}`).join("\n") + "\n";
+  } else {
+    body += "\uFF08\u65E0\uFF09\n";
+  }
+  body += "\n## \u539F\u59CB\u6765\u6E90\n\n";
+  if (sourcePath) {
+    body += `[[${sourcePath}]]
+`;
+  } else {
+    body += "\u539F\u59CB\u6765\u6E90\u5DF2\u5220\u9664\u3002\n";
+  }
+  return fm + body;
+}
+var KnowledgeCompiler = class {
+  constructor(app, registry, generateFn, wikiFolder) {
+    this.app = app;
+    this.registry = registry;
+    this.generateFn = generateFn;
+    this.wikiFolder = wikiFolder;
+  }
+  /**
+   * 编译单篇笔记
+   * @returns summary 文件路径，或 null（失败时）
+   */
+  async compileNote(sourceId) {
+    const record = this.registry.getRecord(sourceId);
+    if (!record)
+      throw new Error(`Record not found: ${sourceId}`);
+    const file = this.app.vault.getAbstractFileByPath(record.path);
+    if (!file || !(file instanceof import_obsidian12.TFile)) {
+      this.registry.transition(sourceId, "missing_source");
+      await this.registry.save();
+      return null;
+    }
+    this.registry.transition(sourceId, "processing");
+    await this.registry.save();
+    try {
+      const content = await this.app.vault.read(file);
+      const prompt = buildCompilerPrompt(content, record.path);
+      const response = await this.generateFn(prompt);
+      const extraction = parseCompilerResponse(response);
+      if (!extraction) {
+        this.registry.transition(sourceId, "failed", "Failed to parse AI response");
+        await this.registry.save();
+        return null;
+      }
+      const summaryPath = `${this.wikiFolder}/Articles/${sourceId}.md`;
+      const summaryContent = buildSummaryMarkdown(sourceId, extraction, record.path);
+      const articlesDir = `${this.wikiFolder}/Articles`;
+      if (!this.app.vault.getAbstractFileByPath(articlesDir)) {
+        await this.app.vault.createFolder(articlesDir);
+      }
+      const existingFile = this.app.vault.getAbstractFileByPath(summaryPath);
+      if (existingFile && existingFile instanceof import_obsidian12.TFile) {
+        const existingContent = await this.app.vault.read(existingFile);
+        if (!existingContent.includes("knowledge_generated: true")) {
+          this.registry.transition(sourceId, "failed", "Target file exists and is not a generated file");
+          await this.registry.save();
+          return null;
+        }
+        await this.app.vault.modify(existingFile, summaryContent);
+      } else {
+        await this.app.vault.create(summaryPath, summaryContent);
+      }
+      this.registry.setSummaryPath(sourceId, summaryPath);
+      this.registry.transition(sourceId, "done");
+      await this.registry.save();
+      return summaryPath;
+    } catch (e) {
+      try {
+        this.registry.transition(sourceId, "failed", e.message);
+      } catch {
+      }
+      await this.registry.save();
+      return null;
+    }
+  }
+  /**
+   * 批量编译所有 pending 和 stale 项
+   */
+  async compileAllPending(maxBatch = 50, onProgress) {
+    const staleRecords = this.registry.getByStatus("stale");
+    for (const r of staleRecords) {
+      this.registry.transition(r.id, "pending");
+    }
+    await this.registry.save();
+    const pendingRecords = this.registry.getByStatus("pending").slice(0, maxBatch);
+    let success = 0;
+    let failed = 0;
+    for (let i = 0; i < pendingRecords.length; i++) {
+      const record = pendingRecords[i];
+      onProgress?.(i + 1, pendingRecords.length, record.id);
+      const result = await this.compileNote(record.id);
+      if (result) {
+        success++;
+      } else {
+        failed++;
+      }
+    }
+    return { success, failed };
+  }
+};
+
+// src/knowledge/indexer.ts
+var import_obsidian13 = require("obsidian");
+
+// src/knowledge/topic-utils.ts
+function buildTopicPageContent(slug, label, entries) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let md = `---
+knowledge_generated: true
+knowledge_artifact_type: "topic_page"
+topic_slug: "${slug}"
+compiled_at: "${now}"
+---
+# ${label}
+
+`;
+  if (entries.length === 0) {
+    md += "\u6682\u65E0\u76F8\u5173\u6587\u7AE0\u3002\n";
+  } else {
+    md += "## \u76F8\u5173\u6587\u7AE0\n\n";
+    for (const entry of entries) {
+      md += `- [[${entry.summaryPath}|${entry.title}]]
+`;
+    }
+  }
+  return md;
+}
+function collectAllTopics(topicSets) {
+  const map = /* @__PURE__ */ new Map();
+  for (const topics of topicSets) {
+    for (const t of topics) {
+      if (!map.has(t.slug)) {
+        map.set(t.slug, t.label);
+      }
+    }
+  }
+  return map;
+}
+
+// src/knowledge/indexer.ts
+function buildGlobalIndexContent(articles, topics) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let md = `---
+knowledge_generated: true
+knowledge_artifact_type: "global_index"
+compiled_at: "${now}"
+---
+# Knowledge Wiki
+
+`;
+  md += "## Articles\n\n";
+  if (articles.length === 0) {
+    md += "\u6682\u65E0\u5DF2\u7F16\u8BD1\u7684\u6587\u7AE0\u3002\n\n";
+  } else {
+    const sorted = [...articles].sort(
+      (a, b) => new Date(b.compiledAt).getTime() - new Date(a.compiledAt).getTime()
+    );
+    for (const a of sorted) {
+      md += `- [[${a.summaryPath}|${a.title}]] (${a.compiledAt.split("T")[0]})
+`;
+    }
+    md += "\n";
+  }
+  md += "## Topics\n\n";
+  if (topics.length === 0) {
+    md += "\u6682\u65E0\u4E3B\u9898\u5206\u7C7B\u3002\n\n";
+  } else {
+    const sorted = [...topics].sort((a, b) => a.slug.localeCompare(b.slug));
+    for (const t of sorted) {
+      md += `- [[${t.topicPagePath}|${t.label}]]
+`;
+    }
+    md += "\n";
+  }
+  return md;
+}
+var WikiIndexer = class {
+  constructor(app, registry, wikiFolder = DEFAULT_WIKI_FOLDER) {
+    this.app = app;
+    this.registry = registry;
+    this.wikiFolder = wikiFolder;
+  }
+  async rebuildIndex() {
+    const completedRecords = this.registry.getCompletedRecords();
+    const articles = [];
+    const allTopicSets = [];
+    const summaryMeta = /* @__PURE__ */ new Map();
+    for (const record of completedRecords) {
+      if (!record.summary_path)
+        continue;
+      const file = this.app.vault.getAbstractFileByPath(record.summary_path);
+      if (!file || !(file instanceof import_obsidian13.TFile))
+        continue;
+      try {
+        const content = await this.app.vault.read(file);
+        const fm = this.parseFrontmatter(content);
+        if (!fm)
+          continue;
+        const title = fm.title || record.path.split("/").pop()?.replace(".md", "") || "Untitled";
+        const compiledAt = fm.compiled_at || record.updated_at;
+        const topics = fm.topics || [];
+        articles.push({ sourceId: record.id, title, summaryPath: record.summary_path, compiledAt });
+        allTopicSets.push(topics);
+        summaryMeta.set(record.summary_path, { title, topics });
+      } catch {
+        continue;
+      }
+    }
+    const topicMap = collectAllTopics(allTopicSets);
+    await this.ensureFolder(`${this.wikiFolder}`);
+    await this.ensureFolder(`${this.wikiFolder}/${WIKI_TOPICS_SUBFOLDER}`);
+    const topicEntries = [];
+    const activeTopicSlugs = /* @__PURE__ */ new Set();
+    for (const [slug, label] of topicMap) {
+      const entries = [];
+      for (const [summaryPath, meta] of summaryMeta) {
+        if (meta.topics.some((t) => t.slug === slug)) {
+          entries.push({ title: meta.title, summaryPath });
+        }
+      }
+      if (entries.length === 0)
+        continue;
+      activeTopicSlugs.add(slug);
+      const topicPagePath = `${this.wikiFolder}/${WIKI_TOPICS_SUBFOLDER}/${slug}.md`;
+      const topicContent = buildTopicPageContent(slug, label, entries);
+      await this.writeGeneratedFile(topicPagePath, topicContent);
+      topicEntries.push({ slug, label, topicPagePath });
+    }
+    await this.removeOrphanTopicPages(activeTopicSlugs);
+    const indexContent = buildGlobalIndexContent(articles, topicEntries);
+    const indexPath = `${this.wikiFolder}/${WIKI_INDEX_FILENAME}`;
+    await this.writeGeneratedFile(indexPath, indexContent);
+  }
+  parseFrontmatter(content) {
+    const match = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!match)
+      return null;
+    const fm = {};
+    const lines = match[1].split("\n");
+    let currentKey = "";
+    let currentArray = null;
+    for (const line of lines) {
+      const kvMatch = line.match(/^(\w[\w_]*)\s*:\s*(.*)$/);
+      if (kvMatch) {
+        if (currentArray && currentKey) {
+          fm[currentKey] = currentArray;
+          currentArray = null;
+        }
+        currentKey = kvMatch[1];
+        const value = kvMatch[2].trim();
+        if (value === "") {
+          currentArray = [];
+        } else {
+          fm[currentKey] = value.replace(/^["']|["']$/g, "");
+          currentKey = "";
+        }
+      } else if (currentArray !== null && line.trim().startsWith("- ")) {
+        const item = line.trim().substring(2).trim();
+        if (item.startsWith("{") || item.startsWith("slug:")) {
+          const slugMatch = item.match(/slug:\s*"([^"]+)"/);
+          const labelMatch = item.match(/label:\s*"([^"]+)"/);
+          if (slugMatch) {
+            const obj = { slug: slugMatch[1] };
+            if (labelMatch)
+              obj.label = labelMatch[1];
+            currentArray.push(obj);
+          }
+        } else {
+          currentArray.push(item.replace(/^["']|["']$/g, ""));
+        }
+      } else if (currentArray !== null) {
+        const labelMatch = line.match(/\s+label:\s*"([^"]+)"/);
+        if (labelMatch && currentArray.length > 0) {
+          const last = currentArray[currentArray.length - 1];
+          if (typeof last === "object")
+            last.label = labelMatch[1];
+        }
+      }
+    }
+    if (currentArray && currentKey) {
+      fm[currentKey] = currentArray;
+    }
+    for (const [key, value] of Object.entries(fm)) {
+      if (typeof value === "string" && value.startsWith("[")) {
+        try {
+          fm[key] = JSON.parse(value);
+        } catch {
+        }
+      }
+    }
+    return fm;
+  }
+  async ensureFolder(path) {
+    if (!this.app.vault.getAbstractFileByPath(path)) {
+      try {
+        await this.app.vault.createFolder(path);
+      } catch {
+      }
+    }
+  }
+  async writeGeneratedFile(path, content) {
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing && existing instanceof import_obsidian13.TFile) {
+      const existingContent = await this.app.vault.read(existing);
+      if (existingContent.includes("knowledge_generated: true")) {
+        await this.app.vault.modify(existing, content);
+        return;
+      }
+      console.warn(`[WikiIndexer] Skipping ${path}: not a generated file`);
+      return;
+    }
+    await this.app.vault.create(path, content);
+  }
+  async removeOrphanTopicPages(activeSlugs) {
+    const topicsDir = `${this.wikiFolder}/${WIKI_TOPICS_SUBFOLDER}`;
+    const folder = this.app.vault.getAbstractFileByPath(topicsDir);
+    if (!folder)
+      return;
+    const files = this.app.vault.getFiles().filter(
+      (f) => f.path.startsWith(topicsDir + "/") && f.extension === "md"
+    );
+    for (const file of files) {
+      const slug = file.basename;
+      if (!activeSlugs.has(slug)) {
+        const content = await this.app.vault.read(file);
+        if (content.includes("knowledge_generated: true")) {
+          await this.app.vault.trash(file, true);
+        }
+      }
+    }
+  }
+};
+
+// src/knowledge/linter.ts
+var import_obsidian14 = require("obsidian");
+function checkMissingSummaries(records, existingFiles) {
+  return records.filter((r) => r.status === "done" && r.summary_path && !existingFiles.has(r.summary_path)).map((r) => ({
+    type: "missing_summary",
+    severity: "error",
+    recordId: r.id,
+    message: `Summary file missing for "${r.path}" (expected: ${r.summary_path})`
+  }));
+}
+function checkLowConfidenceExtractions(summaries) {
+  return summaries.filter((s) => s.reviewFlags.length > 0).map((s) => ({
+    type: "low_confidence",
+    severity: "warning",
+    recordId: s.sourceId,
+    message: `Low confidence extraction in "${s.title}": ${s.reviewFlags.join(", ")}`
+  }));
+}
+function checkOrphanConcepts(conceptMap) {
+  return Object.entries(conceptMap).filter(([_, sources]) => sources.length === 1).map(([concept, sources]) => ({
+    type: "orphan_concept",
+    severity: "info",
+    recordId: sources[0],
+    message: `Orphan concept "${concept}" only appears in one summary`
+  }));
+}
+function buildHealthReportContent(issues) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let md = `---
+knowledge_generated: true
+knowledge_artifact_type: "health_report"
+generated_at: "${now}"
+---
+# Knowledge Wiki Health Report
+
+`;
+  if (issues.length === 0) {
+    md += "\u77E5\u8BC6\u5E93\u5065\u5EB7\u72B6\u51B5\u826F\u597D\uFF0C\u672A\u53D1\u73B0\u95EE\u9898\u3002\n";
+    return md;
+  }
+  md += `\u5171\u53D1\u73B0 ${issues.length} \u4E2A\u95EE\u9898\u3002
+
+`;
+  const errors = issues.filter((i) => i.severity === "error");
+  const warnings = issues.filter((i) => i.severity === "warning");
+  const infos = issues.filter((i) => i.severity === "info");
+  if (errors.length > 0) {
+    md += "## Errors\n\n";
+    for (const e of errors) {
+      md += `- **[${e.type}]** ${e.message}${e.recordId ? ` (${e.recordId})` : ""}
+`;
+    }
+    md += "\n";
+  }
+  if (warnings.length > 0) {
+    md += "## Warnings\n\n";
+    for (const w of warnings) {
+      md += `- **[${w.type}]** ${w.message}${w.recordId ? ` (${w.recordId})` : ""}
+`;
+    }
+    md += "\n";
+  }
+  if (infos.length > 0) {
+    md += "## Info\n\n";
+    for (const i of infos) {
+      md += `- **[${i.type}]** ${i.message}${i.recordId ? ` (${i.recordId})` : ""}
+`;
+    }
+    md += "\n";
+  }
+  return md;
+}
+var KnowledgeLinter = class {
+  constructor(app, registry, wikiFolder) {
+    this.app = app;
+    this.registry = registry;
+    this.wikiFolder = wikiFolder;
+  }
+  async runLint() {
+    const allIssues = [];
+    const doneRecords = this.registry.getByStatus("done");
+    const existingFiles = new Set(
+      this.app.vault.getFiles().map((f) => f.path)
+    );
+    allIssues.push(...checkMissingSummaries(doneRecords, existingFiles));
+    const summaries = [];
+    const conceptMap = {};
+    for (const record of doneRecords) {
+      if (!record.summary_path)
+        continue;
+      const file = this.app.vault.getAbstractFileByPath(record.summary_path);
+      if (!file || !(file instanceof import_obsidian14.TFile))
+        continue;
+      try {
+        const content = await this.app.vault.read(file);
+        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+        if (!fmMatch)
+          continue;
+        const fmText = fmMatch[1];
+        const flagsMatch = fmText.match(/review_flags:\s*(\[.*\])/);
+        let reviewFlags = [];
+        if (flagsMatch) {
+          try {
+            reviewFlags = JSON.parse(flagsMatch[1]);
+          } catch {
+          }
+        }
+        const titleMatch = fmText.match(/title:\s*"([^"]+)"/);
+        const title = titleMatch ? titleMatch[1] : record.path;
+        summaries.push({ sourceId: record.id, title, reviewFlags });
+        const conceptsMatch = fmText.match(/concepts:\s*(\[.*\])/);
+        if (conceptsMatch) {
+          try {
+            const concepts = JSON.parse(conceptsMatch[1]);
+            for (const c of concepts) {
+              if (!conceptMap[c])
+                conceptMap[c] = [];
+              conceptMap[c].push(record.id);
+            }
+          } catch {
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+    allIssues.push(...checkLowConfidenceExtractions(summaries));
+    allIssues.push(...checkOrphanConcepts(conceptMap));
+    const missingRecords = this.registry.getByStatus("missing_source");
+    for (const r of missingRecords) {
+      if (r.summary_path && existingFiles.has(r.summary_path)) {
+        allIssues.push({
+          type: "stale_missing_source",
+          severity: "warning",
+          recordId: r.id,
+          message: `Source deleted but summary still exists: ${r.summary_path}`
+        });
+      }
+    }
+    return allIssues;
+  }
+  async generateReport() {
+    const issues = await this.runLint();
+    const reportContent = buildHealthReportContent(issues);
+    const reportDir = `${this.wikiFolder}/${WIKI_HEALTH_SUBFOLDER}`;
+    const reportPath = `${reportDir}/report.md`;
+    if (!this.app.vault.getAbstractFileByPath(reportDir)) {
+      try {
+        await this.app.vault.createFolder(reportDir);
+      } catch {
+      }
+    }
+    const existing = this.app.vault.getAbstractFileByPath(reportPath);
+    if (existing && existing instanceof import_obsidian14.TFile) {
+      await this.app.vault.modify(existing, reportContent);
+    } else {
+      await this.app.vault.create(reportPath, reportContent);
+    }
+    return reportPath;
+  }
+};
+
+// src/knowledge/watcher.ts
+var import_obsidian15 = require("obsidian");
+function isInWatchedFolder(filePath, watchedFolders) {
+  return watchedFolders.some((folder) => {
+    const normalized = folder.endsWith("/") ? folder : folder + "/";
+    return filePath.startsWith(normalized);
+  });
+}
+function shouldEnqueueFile(filePath, watchedFolders, wikiFolder = DEFAULT_WIKI_FOLDER) {
+  if (!filePath.endsWith(".md"))
+    return false;
+  if (filePath.startsWith(wikiFolder + "/"))
+    return false;
+  return isInWatchedFolder(filePath, watchedFolders);
+}
+var KnowledgeWatcher = class {
+  constructor(app, registry, watchedFolders, wikiFolder = DEFAULT_WIKI_FOLDER, debounceMs = 6e4) {
+    this.app = app;
+    this.registry = registry;
+    this.watchedFolders = watchedFolders;
+    this.wikiFolder = wikiFolder;
+    this.debounceMs = debounceMs;
+  }
+  debouncedHandlers = /* @__PURE__ */ new Map();
+  async onFileCreate(file) {
+    if (!shouldEnqueueFile(file.path, this.watchedFolders, this.wikiFolder))
+      return;
+    const existing = this.registry.findByPath(file.path);
+    if (existing)
+      return;
+    this.registry.register(file.path);
+    await this.registry.save();
+    console.log(`[KnowledgeWatcher] Registered new file: ${file.path}`);
+  }
+  onFileModify(file) {
+    if (!shouldEnqueueFile(file.path, this.watchedFolders, this.wikiFolder))
+      return;
+    const key = file.path;
+    if (this.debouncedHandlers.has(key))
+      return;
+    const handler = (0, import_obsidian15.debounce)(async () => {
+      const record = this.registry.findByPath(file.path);
+      if (record && record.status === "done") {
+        this.registry.transition(record.id, "stale");
+        await this.registry.save();
+        console.log(`[KnowledgeWatcher] Marked stale: ${file.path}`);
+      }
+      this.debouncedHandlers.delete(key);
+    }, this.debounceMs, true);
+    this.debouncedHandlers.set(key, handler);
+    handler();
+  }
+  async onFileDelete(filePath) {
+    const record = this.registry.findByPath(filePath);
+    if (!record)
+      return;
+    if (record.status !== "missing_source") {
+      try {
+        this.registry.transition(record.id, "missing_source");
+        await this.registry.save();
+        console.log(`[KnowledgeWatcher] Marked missing_source: ${filePath}`);
+      } catch {
+      }
+    }
+  }
+  async onFileRename(oldPath, newPath) {
+    const record = this.registry.findByPath(oldPath);
+    if (!record) {
+      if (shouldEnqueueFile(newPath, this.watchedFolders, this.wikiFolder)) {
+        this.registry.register(newPath);
+        await this.registry.save();
+      }
+      return;
+    }
+    this.registry.updatePath(record.id, newPath);
+    await this.registry.save();
+    console.log(`[KnowledgeWatcher] Updated path: ${oldPath} -> ${newPath}`);
+  }
+  updateWatchedFolders(folders) {
+    this.watchedFolders = folders;
+  }
+  cleanup() {
+    this.debouncedHandlers.clear();
+  }
+};
+
+// src/knowledge/query.ts
+var import_obsidian16 = require("obsidian");
+function buildQueryResult(query, indexContent, maxResults) {
+  const max = maxResults ?? 3;
+  if (!indexContent || indexContent.trim().length === 0) {
+    return {
+      query,
+      indexContent: "",
+      maxResults: max,
+      instruction: "\u77E5\u8BC6\u5E93\u4E3A\u7A7A\uFF0C\u6682\u65E0\u53EF\u68C0\u7D22\u7684\u5185\u5BB9\u3002\u53EF\u4EE5\u5EFA\u8BAE\u7528\u6237\u5148\u7F16\u8BD1\u4E00\u4E9B\u7B14\u8BB0\u3002"
+    };
+  }
+  return {
+    query,
+    indexContent,
+    maxResults: max,
+    instruction: `\u4EE5\u4E0A\u662F\u77E5\u8BC6\u5E93\u7D22\u5F15\u3002\u8BF7\u6839\u636E\u7528\u6237\u7684\u95EE\u9898"${query}"\uFF0C\u4ECE\u7D22\u5F15\u4E2D\u627E\u51FA\u6700\u76F8\u5173\u7684\u6587\u7AE0\uFF08\u6700\u591A ${max} \u7BC7\uFF09\uFF0C\u7136\u540E\u4F7F\u7528 read_note \u5DE5\u5177\u8BFB\u53D6\u8FD9\u4E9B summary \u7684\u5168\u6587\u6765\u56DE\u7B54\u7528\u6237\u95EE\u9898\u3002\u56DE\u7B54\u65F6\u8BF7\u5F15\u7528\u5177\u4F53\u6765\u6E90\u3002`
+  };
+}
+var QueryKnowledgeExecutor = class {
+  constructor(app, wikiFolder = DEFAULT_WIKI_FOLDER) {
+    this.app = app;
+    this.wikiFolder = wikiFolder;
+  }
+  async execute(args) {
+    const indexPath = `${this.wikiFolder}/${WIKI_INDEX_FILENAME}`;
+    const file = this.app.vault.getAbstractFileByPath(indexPath);
+    let indexContent = "";
+    if (file && file instanceof import_obsidian16.TFile) {
+      indexContent = await this.app.vault.read(file);
+    }
+    return buildQueryResult(args.query, indexContent, args.max_results);
+  }
+};
+
+// src/knowledge/file-back.ts
+function generateFileBackId() {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let suffix = "";
+  for (let i = 0; i < 12; i++) {
+    suffix += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `fb_${suffix}`;
+}
+function buildFileBackMarkdown(fileBackId, title, content, sourceQueries, relatedSources) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let fm = "---\n";
+  fm += "knowledge_generated: true\n";
+  fm += 'knowledge_artifact_type: "file_back"\n';
+  fm += `title: "${title.replace(/"/g, '\\"')}"
+`;
+  fm += `compiled_at: "${now}"
+`;
+  fm += "source_queries:\n";
+  for (const q of sourceQueries) {
+    fm += `  - "${q.replace(/"/g, '\\"')}"
+`;
+  }
+  if (relatedSources.length > 0) {
+    fm += "related_sources:\n";
+    for (const s of relatedSources) {
+      fm += `  - "${s}"
+`;
+    }
+  } else {
+    fm += "related_sources: []\n";
+  }
+  fm += "---\n";
+  return `${fm}# ${title}
+
+${content}
+`;
+}
+var FileBackExecutor = class {
+  constructor(app, indexer, wikiFolder = DEFAULT_WIKI_FOLDER) {
+    this.app = app;
+    this.indexer = indexer;
+    this.wikiFolder = wikiFolder;
+  }
+  async execute(args) {
+    try {
+      const fileBackId = generateFileBackId();
+      const filePath = `${this.wikiFolder}/${WIKI_ARTICLES_SUBFOLDER}/${fileBackId}.md`;
+      const markdown = buildFileBackMarkdown(
+        fileBackId,
+        args.title,
+        args.content,
+        args.source_queries || [],
+        args.related_sources || []
+      );
+      const articlesDir = `${this.wikiFolder}/${WIKI_ARTICLES_SUBFOLDER}`;
+      if (!this.app.vault.getAbstractFileByPath(articlesDir)) {
+        try {
+          await this.app.vault.createFolder(articlesDir);
+        } catch {
+        }
+      }
+      await this.app.vault.create(filePath, markdown);
+      await this.indexer.rebuildIndex();
+      return { success: true, path: filePath };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+};
+
+// src/knowledge/runtime.ts
+var KnowledgeRuntime = class {
+  constructor(app, settings, modelService, toolManager) {
+    this.app = app;
+    this.settings = settings;
+    this.modelService = modelService;
+    this.toolManager = toolManager;
+    const wikiFolder = settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
+    this.registry = new KnowledgeRegistryManager(app.vault.adapter);
+    this.compiler = new KnowledgeCompiler(
+      app,
+      this.registry,
+      (prompt) => modelService.generate(prompt, "\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u7F16\u8BD1\u5668\uFF0C\u8BF7\u4E25\u683C\u6309\u7167\u8981\u6C42\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002"),
+      wikiFolder
+    );
+    this.indexer = new WikiIndexer(app, this.registry, wikiFolder);
+    this.linter = new KnowledgeLinter(app, this.registry, wikiFolder);
+    this.watcher = new KnowledgeWatcher(
+      app,
+      this.registry,
+      settings.knowledgeSourceFolders || [],
+      wikiFolder
+    );
+    this.queryExecutor = new QueryKnowledgeExecutor(app, wikiFolder);
+    this.fileBackExecutor = new FileBackExecutor(app, this.indexer, wikiFolder);
+    toolManager.setKnowledgeExecutors(this.queryExecutor, this.fileBackExecutor);
+  }
+  registry;
+  compiler;
+  indexer;
+  linter;
+  watcher;
+  queryExecutor;
+  fileBackExecutor;
+  async initialize() {
+    await this.registry.load();
+    this.registry.resetProcessingOnStartup();
+    await this.registry.save();
+    console.log("[KnowledgeRuntime] Initialized");
+  }
+  registerCommands(plugin) {
+    plugin.addCommand({
+      id: "knowledge-compile-this",
+      name: "Knowledge: Compile this note",
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) {
+          new import_obsidian17.Notice("Please open a note first.");
+          return;
+        }
+        new import_obsidian17.Notice(`Compiling: ${file.path}...`);
+        let record = this.registry.findByPath(file.path);
+        if (!record) {
+          record = this.registry.register(file.path);
+          await this.registry.save();
+        } else if (record.status === "done") {
+          this.registry.transition(record.id, "stale");
+          this.registry.transition(record.id, "pending");
+          await this.registry.save();
+        } else if (record.status === "stale") {
+          this.registry.transition(record.id, "pending");
+          await this.registry.save();
+        }
+        const result = await this.compiler.compileNote(record.id);
+        if (result) {
+          await this.indexer.rebuildIndex();
+          new import_obsidian17.Notice(`Compiled: ${result}`);
+        } else {
+          const updated = this.registry.getRecord(record.id);
+          new import_obsidian17.Notice(`Compilation failed: ${updated?.error || "Unknown error"}`);
+        }
+      }
+    });
+    plugin.addCommand({
+      id: "knowledge-compile-all",
+      name: "Knowledge: Compile all pending",
+      callback: async () => {
+        new import_obsidian17.Notice("Compiling all pending notes...");
+        const maxBatch = this.settings.knowledgeMaxCompileBatch || 10;
+        const result = await this.compiler.compileAllPending(maxBatch);
+        if (result.success > 0) {
+          await this.indexer.rebuildIndex();
+        }
+        new import_obsidian17.Notice(`Compiled: ${result.success} success, ${result.failed} failed`);
+      }
+    });
+    plugin.addCommand({
+      id: "knowledge-open-index",
+      name: "Knowledge: Open knowledge index",
+      callback: async () => {
+        const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
+        const indexPath = `${wikiFolder}/${WIKI_INDEX_FILENAME}`;
+        const file = this.app.vault.getAbstractFileByPath(indexPath);
+        if (file && file instanceof import_obsidian17.TFile) {
+          const leaf = this.app.workspace.getLeaf(false);
+          await leaf.openFile(file);
+        } else {
+          new import_obsidian17.Notice("Knowledge index not found. Compile some notes first.");
+        }
+      }
+    });
+    plugin.addCommand({
+      id: "knowledge-lint",
+      name: "Knowledge: Run knowledge lint",
+      callback: async () => {
+        new import_obsidian17.Notice("Running knowledge lint...");
+        const reportPath = await this.linter.generateReport();
+        new import_obsidian17.Notice(`Health report generated: ${reportPath}`);
+        const file = this.app.vault.getAbstractFileByPath(reportPath);
+        if (file && file instanceof import_obsidian17.TFile) {
+          const leaf = this.app.workspace.getLeaf(false);
+          await leaf.openFile(file);
+        }
+      }
+    });
+  }
+  registerEvents(plugin) {
+    plugin.registerEvent(
+      this.app.vault.on("create", (file) => {
+        if (file instanceof import_obsidian17.TFile && file.extension === "md") {
+          if (this.settings.knowledgeAutoCompile) {
+            this.watcher.onFileCreate(file);
+          }
+        }
+      })
+    );
+    plugin.registerEvent(
+      this.app.vault.on("modify", (file) => {
+        if (file instanceof import_obsidian17.TFile && file.extension === "md") {
+          if (this.settings.knowledgeAutoCompile) {
+            this.watcher.onFileModify(file);
+          }
+        }
+      })
+    );
+    plugin.registerEvent(
+      this.app.vault.on("delete", (file) => {
+        if (file instanceof import_obsidian17.TFile) {
+          this.watcher.onFileDelete(file.path);
+        }
+      })
+    );
+    plugin.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => {
+        if (file instanceof import_obsidian17.TFile && file.extension === "md") {
+          this.watcher.onFileRename(oldPath, file.path);
+        }
+      })
+    );
+  }
+  async getGuardianKnowledgeContext(editorContext) {
+    const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
+    const indexPath = `${wikiFolder}/${WIKI_INDEX_FILENAME}`;
+    const indexFile = this.app.vault.getAbstractFileByPath(indexPath);
+    if (!indexFile || !(indexFile instanceof import_obsidian17.TFile))
+      return "";
+    const indexContent = await this.app.vault.read(indexFile);
+    const keywords = editorContext.split(/[\s,，。！？、；：""''（）\[\]{}]+/).filter((w) => w.length >= 2).slice(0, 10);
+    if (keywords.length === 0)
+      return "";
+    const matchedArticles = [];
+    const lines = indexContent.split("\n");
+    for (const line of lines) {
+      const linkMatch = line.match(/\[\[([^\]|]+)\|([^\]]+)\]\]/);
+      if (!linkMatch)
+        continue;
+      const [, path, title] = linkMatch;
+      const titleLower = title.toLowerCase();
+      if (keywords.some((kw) => titleLower.includes(kw.toLowerCase()))) {
+        matchedArticles.push(path);
+      }
+    }
+    if (matchedArticles.length === 0)
+      return "";
+    let context = "[\u77E5\u8BC6\u5E93\u53C2\u8003]\n";
+    for (const articlePath of matchedArticles.slice(0, 3)) {
+      const file = this.app.vault.getAbstractFileByPath(articlePath);
+      if (!file || !(file instanceof import_obsidian17.TFile))
+        continue;
+      try {
+        const content = await this.app.vault.read(file);
+        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+        if (!fmMatch)
+          continue;
+        const fm = fmMatch[1];
+        const titleMatch = fm.match(/title:\s*"([^"]+)"/);
+        const title = titleMatch ? titleMatch[1] : articlePath;
+        const claims = [];
+        const claimRegex = /^\s+-\s+"([^"]+)"/gm;
+        let claimMatch;
+        if (fm.includes("key_claims:")) {
+          const afterClaims = fm.substring(fm.indexOf("key_claims:"));
+          while ((claimMatch = claimRegex.exec(afterClaims)) !== null) {
+            claims.push(claimMatch[1]);
+            if (claims.length >= 3)
+              break;
+          }
+        }
+        const conceptsMatch = fm.match(/concepts:\s*(\[.*\])/);
+        let concepts = [];
+        if (conceptsMatch) {
+          try {
+            concepts = JSON.parse(conceptsMatch[1]);
+          } catch {
+          }
+        }
+        context += `\u6765\u81EA\u300A${title}\u300B\uFF1A
+`;
+        if (claims.length > 0) {
+          context += `- \u6838\u5FC3\u89C2\u70B9\uFF1A${claims.join("\uFF1B")}
+`;
+        }
+        if (concepts.length > 0) {
+          context += `- \u5173\u952E\u6982\u5FF5\uFF1A${concepts.join("\u3001")}
+`;
+        }
+        context += "\n";
+      } catch {
+        continue;
+      }
+    }
+    context += "\u8BF7\u5728\u8865\u5168\u5EFA\u8BAE\u4E2D\u81EA\u7136\u878D\u5165\u4E0A\u8FF0\u4E2A\u4EBA\u77E5\u8BC6\uFF0C\u800C\u4E0D\u662F\u7ED9\u51FA\u901A\u7528\u56DE\u7B54\u3002\n";
+    return context;
+  }
+  updateSettings(settings) {
+    this.watcher.updateWatchedFolders(settings.knowledgeSourceFolders || []);
+  }
+  /**
+   * 按路径编译：支持文件或目录
+   * 文件 → 注册并编译该文件
+   * 目录 → 扫描目录下所有 .md，注册未注册的，然后编译所有 pending
+   * @returns { registered: number, success: number, failed: number }
+   */
+  async compileByPath(path) {
+    const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
+    const abstractFile = this.app.vault.getAbstractFileByPath(path);
+    if (!abstractFile)
+      throw new Error(`\u8DEF\u5F84\u4E0D\u5B58\u5728: ${path}`);
+    let registered = 0;
+    if (abstractFile instanceof import_obsidian17.TFile) {
+      let record = this.registry.findByPath(path);
+      if (!record) {
+        record = this.registry.register(path);
+        registered = 1;
+      } else if (record.status === "done") {
+        this.registry.transition(record.id, "stale");
+        this.registry.transition(record.id, "pending");
+      } else if (record.status === "stale") {
+        this.registry.transition(record.id, "pending");
+      }
+      await this.registry.save();
+      const result2 = await this.compiler.compileNote(record.id);
+      if (result2) {
+        await this.indexer.rebuildIndex();
+        return { registered, success: 1, failed: 0 };
+      }
+      return { registered, success: 0, failed: 1 };
+    }
+    const files = this.app.vault.getFiles().filter(
+      (f) => f.path.startsWith(path + "/") && f.extension === "md" && !f.path.startsWith(wikiFolder + "/")
+    );
+    for (const file of files) {
+      if (!this.registry.findByPath(file.path)) {
+        this.registry.register(file.path);
+        registered++;
+      }
+    }
+    await this.registry.save();
+    const maxBatch = this.settings.knowledgeMaxCompileBatch || 10;
+    const result = await this.compiler.compileAllPending(maxBatch);
+    if (result.success > 0) {
+      await this.indexer.rebuildIndex();
+    }
+    return { registered, ...result };
+  }
+  cleanup() {
+    this.watcher.cleanup();
+  }
+};
+
 // main.ts
-var GeminiShellPlugin = class extends import_obsidian9.Plugin {
+var ObsidianCliPlugin = class extends import_obsidian18.Plugin {
   settings;
   modelService;
   toolManager;
+  knowledgeRuntime = null;
   // Debounce with trailing edge (default/false) for inactivity trigger
-  onEditorChangeDebounced = (0, import_obsidian9.debounce)(this.runGuardianCheck.bind(this), 3e3);
+  onEditorChangeDebounced = (0, import_obsidian18.debounce)(this.runGuardianCheck.bind(this), 3e3);
   async onload() {
     await this.loadSettings();
-    new import_obsidian9.Notice("Gemini Shell: Plugin Loaded (v2)");
-    this.toolManager = new ToolManager(this.app, this.settings.allowPluginControl);
+    new import_obsidian18.Notice("Obsidian Shell: Plugin Loaded (v2)");
+    this.toolManager = new ToolManager(this.app, this.settings);
     this.modelService = new ModelService(this.app, this.settings, this.toolManager);
     this.toolManager.setGeminiApi(this.modelService);
-    this.registerView(
-      VIEW_TYPE_GEMINI_SHELL,
-      (leaf) => new GeminiShellView(leaf, this.modelService)
+    this.knowledgeRuntime = new KnowledgeRuntime(
+      this.app,
+      this.settings,
+      this.modelService,
+      this.toolManager
     );
-    this.addRibbonIcon("terminal", "Open Gemini Shell", (evt) => {
+    await this.knowledgeRuntime.initialize();
+    this.knowledgeRuntime.registerCommands(this);
+    this.knowledgeRuntime.registerEvents(this);
+    this.registerView(
+      VIEW_TYPE_SHELL,
+      (leaf) => new ShellView(leaf, this.modelService)
+    );
+    this.addRibbonIcon("terminal", "Open Obsidian Shell", (evt) => {
       this.activateView();
     });
     this.addCommand({
-      id: "open-gemini-shell",
-      name: "Open Shell",
+      id: "open-shell",
+      name: "Open Obsidian Shell",
       callback: () => this.activateView(),
       hotkeys: [{ modifiers: ["Mod"], key: "j" }]
     });
@@ -5927,7 +8553,7 @@ var GeminiShellPlugin = class extends import_obsidian9.Plugin {
       callback: () => this.activateGuardianModal(),
       hotkeys: [{ modifiers: ["Mod", "Shift"], key: "g" }]
     });
-    this.addSettingTab(new GeminiShellSettingTab(this.app, this));
+    this.addSettingTab(new SettingTab(this.app, this));
     this.registerEditorExtension([
       guardianGutterExtension(),
       ghostTextExtension(),
@@ -5938,27 +8564,33 @@ var GeminiShellPlugin = class extends import_obsidian9.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (file instanceof import_obsidian9.TFile && file.extension === "md") {
+        if (file instanceof import_obsidian18.TFile && file.extension === "md") {
           this.onFileModify(file);
         }
       })
     );
   }
+  onunload() {
+    if (this.knowledgeRuntime) {
+      this.knowledgeRuntime.cleanup();
+    }
+    this.modelService.shutdown();
+  }
   async activateView() {
     const { workspace } = this.app;
-    const leaves = workspace.getLeavesOfType(VIEW_TYPE_GEMINI_SHELL);
+    const leaves = workspace.getLeavesOfType(VIEW_TYPE_SHELL);
     if (leaves.length > 0) {
       leaves[0].detach();
     } else {
       const leaf = workspace.getRightLeaf(false);
-      await leaf?.setViewState({ type: VIEW_TYPE_GEMINI_SHELL, active: true });
+      await leaf?.setViewState({ type: VIEW_TYPE_SHELL, active: true });
       workspace.revealLeaf(leaf);
     }
   }
   activateGuardianModal() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian18.MarkdownView);
     if (!view) {
-      new import_obsidian9.Notice("Please open a Markdown file first.");
+      new import_obsidian18.Notice("Please open a Markdown file first.");
       return;
     }
     new GuardianModal(this.app, (instruction) => {
@@ -5970,8 +8602,11 @@ var GeminiShellPlugin = class extends import_obsidian9.Plugin {
   }
   async saveSettings() {
     await this.saveData(this.settings);
-    this.toolManager.updateSettings(this.settings.allowPluginControl);
+    this.toolManager.updateSettings(this.settings);
     this.modelService.updateSettings(this.settings);
+    if (this.knowledgeRuntime) {
+      this.knowledgeRuntime.updateSettings(this.settings);
+    }
   }
   async onFileModify(file) {
     if (file.path !== this.settings.wechatInboxPath)
@@ -5994,7 +8629,7 @@ var GeminiShellPlugin = class extends import_obsidian9.Plugin {
       return;
     rawUrlMatches.sort((a, b) => b.index - a.index);
     for (const m of rawUrlMatches) {
-      new import_obsidian9.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
+      new import_obsidian18.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
       const result = await this.toolManager.execute("save_webpage", { url: m.url });
       if (result.success) {
         let finalPath = result.path;
@@ -6021,7 +8656,7 @@ var GeminiShellPlugin = class extends import_obsidian9.Plugin {
         newContent = newContent.substring(0, m.index) + linkText + newContent.substring(m.index + m.length);
         modified = true;
       } else {
-        new import_obsidian9.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
+        new import_obsidian18.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
       }
     }
     if (modified) {
@@ -6079,7 +8714,7 @@ Instructions:
 4. Output JSON: {"type": "completion", "suggestion": "MARKDOWN_FORMATTED_TEXT"}
 5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
       }
-      const response = await this.modelService.chat(prompt, "Guardian", systemPromptOverride);
+      const response = await this.modelService.chat(prompt, [], systemPromptOverride);
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         updateGuardianState(view, lineNumber, "idle" /* Idle */);
