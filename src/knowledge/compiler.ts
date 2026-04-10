@@ -94,7 +94,7 @@ export function buildSummaryMarkdown(
   if (extraction.topics.length > 0) {
     fm += 'topics:\n';
     for (const t of extraction.topics) {
-      fm += `  - slug: "${t.slug}"\n    label: "${t.label}"\n`;
+      fm += `  - "${t.label.replace(/"/g, '\\"')}"\n`;
     }
   }
 
@@ -121,7 +121,7 @@ export function buildSummaryMarkdown(
 
   body += '## 摘要\n\n';
   if (extraction.key_claims.length > 0) {
-    body += extraction.key_claims.map(c => `- ${c}`).join('\n') + '\n';
+    body += extraction.key_claims.slice(0, 2).map(c => `- ${c}`).join('\n') + '\n';
   } else {
     body += '（无核心观点提取）\n';
   }

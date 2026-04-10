@@ -1,15 +1,82 @@
-import { App, PluginSettingTab, Setting, Notice, Modal } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice, Modal, DropdownComponent } from 'obsidian';
 import { IPlugin, DEFAULT_SETTINGS } from './mcp/types';
+import { ModelOption } from './models/interfaces';
 
 export class SettingTab extends PluginSettingTab {
     plugin: IPlugin;
+    private renderToken: number = 0;
 
     constructor(app: App, plugin: IPlugin) {
         super(app, plugin);
         this.plugin = plugin;
     }
 
+    private getCurrentModelByProvider(): string {
+        switch (this.plugin.settings.provider) {
+            case 'gemini':
+                return this.plugin.settings.primaryModel;
+            case 'openai':
+                return this.plugin.settings.openaiModel;
+            case 'deepseek':
+                return this.plugin.settings.deepseekModel;
+            case 'qwen':
+                return this.plugin.settings.qwenModel;
+            default:
+                return '';
+        }
+    }
+
+    private async loadDynamicModelOptions(
+        dropdown: DropdownComponent,
+        provider: 'gemini' | 'openai' | 'deepseek' | 'qwen',
+        token: number,
+        forceRefresh: boolean = false
+    ) {
+        dropdown.selectEl.empty();
+        dropdown.addOption('__loading__', `Loading ${provider} models...`);
+        dropdown.setValue('__loading__');
+        dropdown.setDisabled(true);
+
+        const currentModel = this.getCurrentModelByProvider();
+
+        try {
+            const models = await this.plugin.modelService.getAvailableModels(forceRefresh);
+            if (token !== this.renderToken) return;
+
+            dropdown.selectEl.empty();
+
+            const options: ModelOption[] = models.length > 0
+                ? models
+                : [{ value: currentModel, label: `${currentModel} (Current)` }];
+
+            options.forEach(option => {
+                dropdown.addOption(option.value, option.label);
+            });
+
+            if (currentModel && !options.some(option => option.value === currentModel)) {
+                dropdown.addOption(currentModel, `${currentModel} (Current)`);
+            }
+
+            dropdown.setValue(currentModel || options[0]?.value || '');
+            dropdown.setDisabled(false);
+        } catch (error: any) {
+            if (token !== this.renderToken) return;
+
+            dropdown.selectEl.empty();
+            if (currentModel) {
+                dropdown.addOption(currentModel, `${currentModel} (Current)`);
+                dropdown.setValue(currentModel);
+                dropdown.setDisabled(false);
+            } else {
+                dropdown.addOption('__failed__', 'Model list unavailable');
+                dropdown.setValue('__failed__');
+                dropdown.setDisabled(true);
+            }
+        }
+    }
+
     display(): void {
+        const token = ++this.renderToken;
         const { containerEl } = this;
         containerEl.empty();
 
@@ -54,17 +121,19 @@ export class SettingTab extends PluginSettingTab {
 
             new Setting(containerEl)
                 .setName('Model')
-                .setDesc('Choose the Gemini model.')
-                .addDropdown(drop => drop
-                    .addOption('gemini-2.5-flash', 'Gemini 2.5 Flash (Fastest)')
-                    .addOption('gemini-2.5-pro', 'Gemini 2.5 Pro (Reasoning)')
-                    .addOption('gemini-2.0-flash', 'Gemini 2.0 Flash')
-                    .addOption('gemini-1.5-pro', 'Gemini 1.5 Pro')
-                    .setValue(this.plugin.settings.primaryModel)
-                    .onChange(async (value) => {
+                .setDesc('Choose the Gemini model (loaded dynamically from API).')
+                .addDropdown(drop => {
+                    drop.addOption(this.plugin.settings.primaryModel, `${this.plugin.settings.primaryModel} (Current)`);
+                    drop.setValue(this.plugin.settings.primaryModel);
+
+                    void this.loadDynamicModelOptions(drop, 'gemini', token);
+
+                    drop.onChange(async (value) => {
+                        if (value === '__loading__' || value === '__failed__') return;
                         this.plugin.settings.primaryModel = value;
                         await this.plugin.saveSettings();
-                    }));
+                    });
+                });
         }
 
         // --- OpenAI Settings ---

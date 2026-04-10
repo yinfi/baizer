@@ -1,6 +1,6 @@
 // src/knowledge/runtime.ts
 
-import { App, TFile, Notice, debounce } from 'obsidian';
+import { App, TFile, Notice } from 'obsidian';
 import { PluginSettings } from '../mcp/types';
 import { ModelService } from '../services/model-service';
 import { ToolManager } from '../mcp/tools';
@@ -11,29 +11,30 @@ import { KnowledgeLinter } from './linter';
 import { KnowledgeWatcher } from './watcher';
 import { QueryKnowledgeExecutor } from './query';
 import { FileBackExecutor } from './file-back';
+import { MetadataIndex } from './metadata-index';
 import {
   DEFAULT_WIKI_FOLDER,
-  WIKI_INDEX_FILENAME
+  WIKI_INDEX_BASE_FILENAME,
 } from './types';
 
 /**
  * Knowledge Wiki 生命周期管理器
- * main.ts 只做一件事：实例化 KnowledgeRuntime 并委托生命周期
  */
 export class KnowledgeRuntime {
   private registry: KnowledgeRegistryManager;
-  private compiler: KnowledgeCompiler;
-  private indexer: WikiIndexer;
+  public compiler: KnowledgeCompiler;
+  public indexer: WikiIndexer;
   private linter: KnowledgeLinter;
   private watcher: KnowledgeWatcher;
   private queryExecutor: QueryKnowledgeExecutor;
   private fileBackExecutor: FileBackExecutor;
+  private metadataIndex: MetadataIndex;
 
   constructor(
     private app: App,
-    private settings: PluginSettings,
-    private modelService: ModelService,
-    private toolManager: ToolManager
+    public settings: PluginSettings,
+    modelService: ModelService,
+    toolManager: ToolManager
   ) {
     const wikiFolder = settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
 
@@ -46,7 +47,8 @@ export class KnowledgeRuntime {
       wikiFolder
     );
 
-    this.indexer = new WikiIndexer(app, this.registry, wikiFolder);
+    this.metadataIndex = new MetadataIndex(app, wikiFolder);
+    this.indexer = new WikiIndexer(app, this.registry, this.metadataIndex, wikiFolder);
     this.linter = new KnowledgeLinter(app, this.registry, wikiFolder);
 
     this.watcher = new KnowledgeWatcher(
@@ -56,7 +58,7 @@ export class KnowledgeRuntime {
       wikiFolder
     );
 
-    this.queryExecutor = new QueryKnowledgeExecutor(app, wikiFolder);
+    this.queryExecutor = new QueryKnowledgeExecutor(this.metadataIndex);
     this.fileBackExecutor = new FileBackExecutor(app, this.indexer, wikiFolder);
 
     toolManager.setKnowledgeExecutors(this.queryExecutor, this.fileBackExecutor);
@@ -66,7 +68,30 @@ export class KnowledgeRuntime {
     await this.registry.load();
     this.registry.resetProcessingOnStartup();
     await this.registry.save();
-    console.log('[KnowledgeRuntime] Initialized');
+
+    // 等待 metadataCache 就绪后再构建索引
+    // Obsidian 的 metadataCache 是异步填充的，插件 onload 时可能还没准备好
+    if ((this.app.metadataCache as any).initialized) {
+      this.metadataIndex.rebuild();
+    } else {
+      // resolved 事件在 vault 所有文件的 cache 都就绪后触发一次
+      const ref = this.app.metadataCache.on('resolved', () => {
+        this.metadataIndex.rebuild();
+        this.app.metadataCache.offref(ref);
+        console.log(`[KnowledgeRuntime] MetadataCache resolved, ${this.metadataIndex.size} articles indexed`);
+      });
+    }
+
+    // 迁移旧索引
+    await this.indexer.migrateLegacyIndex();
+
+    // 检测 Bases 插件
+    this.indexer.checkBasesPlugin();
+
+    // 确保 .base 文件存在（不触发内存索引重建，等 metadataCache 就绪后再建）
+    await this.indexer.ensureBaseFile();
+
+    console.log(`[KnowledgeRuntime] Initialized, ${this.metadataIndex.size} articles indexed`);
   }
 
   registerCommands(plugin: any): void {
@@ -125,8 +150,8 @@ export class KnowledgeRuntime {
       name: 'Knowledge: Open knowledge index',
       callback: async () => {
         const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
-        const indexPath = `${wikiFolder}/${WIKI_INDEX_FILENAME}`;
-        const file = this.app.vault.getAbstractFileByPath(indexPath);
+        const basePath = `${wikiFolder}/${WIKI_INDEX_BASE_FILENAME}`;
+        const file = this.app.vault.getAbstractFileByPath(basePath);
         if (file && file instanceof TFile) {
           const leaf = this.app.workspace.getLeaf(false);
           await leaf.openFile(file);
@@ -153,6 +178,7 @@ export class KnowledgeRuntime {
   }
 
   registerEvents(plugin: any): void {
+    // 文件变更事件
     plugin.registerEvent(
       this.app.vault.on('create', (file: any) => {
         if (file instanceof TFile && file.extension === 'md') {
@@ -177,6 +203,7 @@ export class KnowledgeRuntime {
       this.app.vault.on('delete', (file: any) => {
         if (file instanceof TFile) {
           this.watcher.onFileDelete(file.path);
+          this.metadataIndex.onFileDeleted(file.path);
         }
       })
     );
@@ -188,79 +215,39 @@ export class KnowledgeRuntime {
         }
       })
     );
+
+    // metadataCache 变更事件：增量更新内存索引
+    plugin.registerEvent(
+      this.app.metadataCache.on('changed', (file: TFile) => {
+        this.metadataIndex.onFileChanged(file);
+      })
+    );
   }
 
+  /** Guardian 知识上下文：从内存索引搜索，通过 metadataCache 读取详情 */
   async getGuardianKnowledgeContext(editorContext: string): Promise<string> {
-    const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
-    const indexPath = `${wikiFolder}/${WIKI_INDEX_FILENAME}`;
-    const indexFile = this.app.vault.getAbstractFileByPath(indexPath);
-    if (!indexFile || !(indexFile instanceof TFile)) return '';
-
-    const indexContent = await this.app.vault.read(indexFile);
-
     const keywords = editorContext
       .split(/[\s,，。！？、；：""''（）\[\]{}]+/)
       .filter(w => w.length >= 2)
-      .slice(0, 10);
+      .slice(0, 10)
+      .join(' ');
 
-    if (keywords.length === 0) return '';
+    if (!keywords) return '';
 
-    const matchedArticles: string[] = [];
-    const lines = indexContent.split('\n');
-    for (const line of lines) {
-      const linkMatch = line.match(/\[\[([^\]|]+)\|([^\]]+)\]\]/);
-      if (!linkMatch) continue;
-      const [, path, title] = linkMatch;
-      const titleLower = title.toLowerCase();
-      if (keywords.some(kw => titleLower.includes(kw.toLowerCase()))) {
-        matchedArticles.push(path);
-      }
-    }
-
-    if (matchedArticles.length === 0) return '';
+    const articles = this.metadataIndex.search(keywords, 3);
+    if (articles.length === 0) return '';
 
     let context = '[知识库参考]\n';
-    for (const articlePath of matchedArticles.slice(0, 3)) {
-      const file = this.app.vault.getAbstractFileByPath(articlePath);
-      if (!file || !(file instanceof TFile)) continue;
-
-      try {
-        const content = await this.app.vault.read(file);
-        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-        if (!fmMatch) continue;
-
-        const fm = fmMatch[1];
-        const titleMatch = fm.match(/title:\s*"([^"]+)"/);
-        const title = titleMatch ? titleMatch[1] : articlePath;
-
-        const claims: string[] = [];
-        const claimRegex = /^\s+-\s+"([^"]+)"/gm;
-        let claimMatch;
-        if (fm.includes('key_claims:')) {
-          const afterClaims = fm.substring(fm.indexOf('key_claims:'));
-          while ((claimMatch = claimRegex.exec(afterClaims)) !== null) {
-            claims.push(claimMatch[1]);
-            if (claims.length >= 3) break;
-          }
-        }
-
-        const conceptsMatch = fm.match(/concepts:\s*(\[.*\])/);
-        let concepts: string[] = [];
-        if (conceptsMatch) {
-          try { concepts = JSON.parse(conceptsMatch[1]); } catch {}
-        }
-
-        context += `来自《${title}》：\n`;
-        if (claims.length > 0) {
-          context += `- 核心观点：${claims.join('；')}\n`;
-        }
-        if (concepts.length > 0) {
-          context += `- 关键概念：${concepts.join('、')}\n`;
-        }
-        context += '\n';
-      } catch { continue; }
+    for (const article of articles) {
+      context += `来自《${article.title}》：\n`;
+      if (article.keyClaims.length > 0) {
+        context += `- 核心观点：${article.keyClaims.slice(0, 3).join('；')}\n`;
+      }
+      if (article.concepts.length > 0) {
+        context += `- 关键概念：${article.concepts.join('、')}\n`;
+      }
+      context += '\n';
     }
-
     context += '请在补全建议中自然融入上述个人知识，而不是给出通用回答。\n';
     return context;
   }
@@ -269,12 +256,6 @@ export class KnowledgeRuntime {
     this.watcher.updateWatchedFolders(settings.knowledgeSourceFolders || []);
   }
 
-  /**
-   * 按路径编译：支持文件或目录
-   * 文件 → 注册并编译该文件
-   * 目录 → 扫描目录下所有 .md，注册未注册的，然后编译所有 pending
-   * @returns { registered: number, success: number, failed: number }
-   */
   async compileByPath(path: string): Promise<{ registered: number; success: number; failed: number }> {
     const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
     const abstractFile = this.app.vault.getAbstractFileByPath(path);
@@ -283,7 +264,6 @@ export class KnowledgeRuntime {
     let registered = 0;
 
     if (abstractFile instanceof TFile) {
-      // 单文件
       let record = this.registry.findByPath(path);
       if (!record) {
         record = this.registry.register(path);

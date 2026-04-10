@@ -1,6 +1,6 @@
 // src/knowledge/file-back.ts
 
-import { App, TFile } from 'obsidian';
+import { App } from 'obsidian';
 import { DEFAULT_WIKI_FOLDER, WIKI_ARTICLES_SUBFOLDER } from './types';
 import { WikiIndexer } from './indexer';
 
@@ -24,7 +24,9 @@ export function buildFileBackMarkdown(
   title: string,
   content: string,
   sourceQueries: string[],
-  relatedSources: string[]
+  relatedSources: string[],
+  topics: string[] = [],
+  sourceUrl?: string
 ): string {
   const now = new Date().toISOString();
 
@@ -33,6 +35,19 @@ export function buildFileBackMarkdown(
   fm += 'knowledge_artifact_type: "file_back"\n';
   fm += `title: "${title.replace(/"/g, '\\"')}"\n`;
   fm += `compiled_at: "${now}"\n`;
+
+  if (topics.length > 0) {
+    fm += 'topics:\n';
+    for (const t of topics) {
+      fm += `  - "${t.replace(/"/g, '\\"')}"\n`;
+    }
+  } else {
+    fm += 'topics: []\n';
+  }
+
+  if (sourceUrl) {
+    fm += `source_url: "${sourceUrl.replace(/"/g, '\\"')}"\n`;
+  }
 
   fm += 'source_queries:\n';
   for (const q of sourceQueries) {
@@ -68,6 +83,8 @@ export class FileBackExecutor {
     content: string;
     source_queries: string[];
     related_sources: string[];
+    topics?: string[];
+    source_url?: string;
   }): Promise<{ success: boolean; path?: string; error?: string }> {
     try {
       const fileBackId = generateFileBackId();
@@ -78,7 +95,9 @@ export class FileBackExecutor {
         args.title,
         args.content,
         args.source_queries || [],
-        args.related_sources || []
+        args.related_sources || [],
+        args.topics || [],
+        args.source_url
       );
 
       const articlesDir = `${this.wikiFolder}/${WIKI_ARTICLES_SUBFOLDER}`;

@@ -5,6 +5,7 @@ import { StdioMcpClient } from './mcp-client';
 import { PluginSettings } from './types';
 import { QueryKnowledgeExecutor } from '../knowledge/query';
 import { FileBackExecutor } from '../knowledge/file-back';
+import { resolveSavedNotePath } from './save-path';
 
 export enum SchemaType {
     STRING = 'string',
@@ -85,6 +86,20 @@ export class ToolManager {
         this.geminiApi = api;
     }
 
+    private async ensureParentFolder(path: string) {
+        const pathParts = path.split('/');
+        if (pathParts.length <= 1) return;
+
+        const folderPath = pathParts.slice(0, -1).join('/');
+        if (!folderPath || this.app.vault.getAbstractFileByPath(folderPath)) return;
+
+        try {
+            await this.app.vault.createFolder(folderPath);
+        } catch (e) {
+            console.log('Folder creation note:', e);
+        }
+    }
+
     updateSettings(settings: PluginSettings) {
         this.settings = settings;
         this.allowPluginControl = settings.allowPluginControl;
@@ -92,7 +107,7 @@ export class ToolManager {
     }
 
     getToolsDefinitions(): any[] {
-        const tools = [
+        const tools: any[] = [
             {
                 name: 'read_note',
                 description: 'Read the content of a specific note in the vault.',
@@ -272,6 +287,11 @@ export class ToolManager {
                     properties: {
                         title: { type: SchemaType.STRING, description: '回填文章的标题' },
                         content: { type: SchemaType.STRING, description: '要归档的内容（Markdown 格式）' },
+                        topics: {
+                            type: SchemaType.ARRAY,
+                            items: { type: SchemaType.STRING },
+                            description: '文章的主题标签，如 ["LLM", "RAG", "知识管理"]'
+                        },
                         source_queries: {
                             type: SchemaType.ARRAY,
                             items: { type: SchemaType.STRING },
@@ -281,7 +301,8 @@ export class ToolManager {
                             type: SchemaType.ARRAY,
                             items: { type: SchemaType.STRING },
                             description: '引用的 knowledge_source_id 列表'
-                        }
+                        },
+                        source_url: { type: SchemaType.STRING, description: '内容的原始来源 URL（如有）' }
                     },
                     required: ['title', 'content', 'source_queries']
                 }
@@ -581,16 +602,16 @@ author: ${videoTranscript.author || videoTranscript.platform}
 
                             // Save logic
                             let filename = args.filename || videoTranscript.title;
-                            filename = filename.replace(/[\\/:*?"<>|#^\[\]]/g, '-').replace(/\s+/g, ' ').trim();
+                            filename = filename.replace(/[\\:*?"<>|#^\[\]]/g, '-').replace(/\s+/g, ' ').trim();
                             if (!filename.endsWith('.md')) filename += '.md';
 
-                            let finalPath = filename;
-                            let counter = 1;
-                            while (this.app.vault.getAbstractFileByPath(finalPath)) {
-                                finalPath = filename.replace('.md', ` (${counter}).md`);
-                                counter++;
-                            }
+                            const finalPath = resolveSavedNotePath(
+                                filename,
+                                this.settings.wechatStoragePath,
+                                (path) => !!this.app.vault.getAbstractFileByPath(path)
+                            );
 
+                            await this.ensureParentFolder(finalPath);
                             await this.app.vault.create(finalPath, content);
                             return { success: true, path: finalPath, message: `✅ Video Note Saved: ${finalPath}` };
                         }
@@ -765,13 +786,11 @@ author: ${videoTranscript.author || videoTranscript.platform}
                         let filename = args.filename || title;
                         if (!filename.endsWith('.md')) filename += '.md';
 
-                        // Check for duplicates
-                        let finalPath = filename;
-                        let counter = 1;
-                        while (this.app.vault.getAbstractFileByPath(finalPath)) {
-                            finalPath = filename.replace('.md', ` (${counter}).md`);
-                            counter++;
-                        }
+                        const finalPath = resolveSavedNotePath(
+                            filename,
+                            this.settings.wechatStoragePath,
+                            (path) => !!this.app.vault.getAbstractFileByPath(path)
+                        );
 
                         const created = new Date().toISOString();
                         const webpageTagString = webpageTags.length > 0 ? `, ${webpageTags.join(', ')}` : '';
@@ -782,9 +801,10 @@ author: ${author}
 tags: clipping${webpageTagString}
 ---
 
-`;
+                        `;
                         const finalContent = `${yamlFrontmatter}# ${title}\n\n${markdown}`;
 
+                        await this.ensureParentFolder(finalPath);
                         await this.app.vault.create(finalPath, finalContent);
                         return { success: true, path: finalPath, message: `✅ Webpage Saved: ${finalPath}` };
 

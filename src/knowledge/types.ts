@@ -88,6 +88,22 @@ export interface FileBackMetadata {
   content: string;
   source_queries: string[];
   related_sources: string[];
+  topics?: string[];
+  source_url?: string;
+}
+
+// ===== MetadataIndex Article =====
+
+export interface ArticleMeta {
+  sourceId: string;
+  title: string;
+  summaryPath: string;
+  topics: string[];
+  concepts: string[];
+  keyClaims: string[];
+  compiledAt: string;
+  sourceUrl?: string;
+  author?: string;
 }
 
 // ===== Constants =====
@@ -98,4 +114,5 @@ export const WIKI_ARTICLES_SUBFOLDER = 'Articles';
 export const WIKI_TOPICS_SUBFOLDER = 'Topics';
 export const WIKI_HEALTH_SUBFOLDER = 'Health';
 export const WIKI_INDEX_FILENAME = 'index.md';
+export const WIKI_INDEX_BASE_FILENAME = 'index.base';
 export const KNOWLEDGE_GENERATED_MARKER = 'knowledge_generated';

@@ -1,5 +1,5 @@
 import { App } from 'obsidian';
-import { IModelProvider, IChatSession } from '../models/interfaces';
+import { IModelProvider, IChatSession, ToolDefinition } from '../models/interfaces';
 import { UserProfile, SessionSummary, ChatMessage, DEFAULT_USER_PROFILE } from './types';
 import { MEMORY_DIR } from '../mcp/types';
 
@@ -33,9 +33,9 @@ export class MemoryManager {
 
     // ==================== Session Management ====================
 
-    getOrCreateSession(): IChatSession {
+    getOrCreateSession(tools?: ToolDefinition[]): IChatSession {
         if (!this.chatSession) {
-            this.chatSession = this.model.startChat();
+            this.chatSession = this.model.startChat(tools);
             this.currentSessionMessages = 0;
         }
         return this.chatSession;

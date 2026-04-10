@@ -4,17 +4,17 @@ import { ToolManager } from '../mcp/tools';
 import { MemoryManager } from '../memory/memory-manager';
 import { UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
-import { IModelProvider, IChatSession, ModelConfig, ToolDefinition } from '../models/interfaces';
+import { IModelProvider, ModelOption } from '../models/interfaces';
 import { GeminiProvider } from '../models/gemini';
 import { OpenAIProvider } from '../models/openai';
+
+type ProviderType = PluginSettings['provider'];
 
 export class ModelService {
     private provider: IModelProvider;
     private memoryManager: MemoryManager | null = null;
-    private lastResponseTime: number = Date.now();
-    private requestTimeout: number = 30000; // 30s timeout
-    private maxRetries: number = 3;
-    private retryDelay: number = 2000;
+    private readonly modelListCache = new Map<string, { timestamp: number; models: ModelOption[] }>();
+    private readonly modelListCacheTtlMs = 10 * 60 * 1000;
 
     // 创建超时工具函数，使用 AbortController 确保定时器被清理
     private async withTimeout<T>(
@@ -117,12 +117,14 @@ export class ModelService {
     public reloadProvider() {
         this.cleanup();
         this.initializeProvider();
+        this.modelListCache.clear();
     }
 
     public updateSettings(settings: PluginSettings) {
         this.settings = settings;
         this.cleanup();
         this.initializeProvider();
+        this.modelListCache.clear();
     }
 
     private unhandledRejectionHandler = (event: PromiseRejectionEvent) => {
@@ -145,6 +147,134 @@ export class ModelService {
 
     async checkAvailability(): Promise<boolean> {
         return await this.provider.checkAvailability();
+    }
+
+    async getAvailableModels(forceRefresh: boolean = false): Promise<ModelOption[]> {
+        const providerType = this.settings.provider;
+        const cacheKey = this.buildModelListCacheKey(providerType);
+        const now = Date.now();
+
+        if (!forceRefresh) {
+            const cached = this.modelListCache.get(cacheKey);
+            if (cached && now - cached.timestamp < this.modelListCacheTtlMs) {
+                return this.ensureCurrentModelInList(cached.models, providerType);
+            }
+        }
+
+        let models: ModelOption[] = [];
+        if (typeof this.provider.listModels === 'function') {
+            try {
+                models = await this.provider.listModels();
+            } catch (error: any) {
+                logger.warn(
+                    `Failed to fetch model list for provider ${providerType}: ${error?.message || 'Unknown error'}`,
+                    'ModelService.getAvailableModels'
+                );
+            }
+        }
+
+        if (!models.length) {
+            models = this.getFallbackModels(providerType);
+        }
+
+        const normalized = this.ensureCurrentModelInList(this.normalizeModelOptions(models), providerType);
+        this.modelListCache.set(cacheKey, {
+            timestamp: now,
+            models: normalized
+        });
+        return normalized;
+    }
+
+    private buildModelListCacheKey(providerType: ProviderType): string {
+        switch (providerType) {
+            case 'gemini':
+                return `gemini:${this.settings.apiKey.slice(0, 8)}`;
+            case 'openai':
+                return `openai:${this.settings.openaiBaseUrl}:${this.settings.openaiApiKey.slice(0, 8)}`;
+            case 'deepseek':
+                return `deepseek:${this.settings.deepseekBaseUrl}:${this.settings.deepseekApiKey.slice(0, 8)}`;
+            case 'qwen':
+                return `qwen:${this.settings.qwenBaseUrl}:${this.settings.qwenApiKey.slice(0, 8)}`;
+            default:
+                return providerType;
+        }
+    }
+
+    private getFallbackModels(providerType: ProviderType): ModelOption[] {
+        switch (providerType) {
+            case 'gemini':
+                return [
+                    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+                    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+                    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+                    { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' }
+                ];
+            case 'openai':
+                return [
+                    { value: 'gpt-4o', label: 'GPT-4o' },
+                    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+                    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+                    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
+                ];
+            case 'deepseek':
+                return [
+                    { value: 'deepseek-chat', label: 'DeepSeek Chat' },
+                    { value: 'deepseek-coder', label: 'DeepSeek Coder' }
+                ];
+            case 'qwen':
+                return [
+                    { value: 'qwen-turbo', label: 'Qwen Turbo' },
+                    { value: 'qwen-plus', label: 'Qwen Plus' },
+                    { value: 'qwen-max', label: 'Qwen Max' }
+                ];
+            default:
+                return [];
+        }
+    }
+
+    private normalizeModelOptions(options: ModelOption[]): ModelOption[] {
+        const deduped = new Map<string, ModelOption>();
+
+        options.forEach((option: ModelOption) => {
+            if (!option || typeof option.value !== 'string') return;
+            const value = option.value.trim();
+            if (!value) return;
+
+            const label = typeof option.label === 'string' && option.label.trim().length > 0
+                ? option.label.trim()
+                : value;
+
+            if (!deduped.has(value)) {
+                deduped.set(value, { value, label });
+            }
+        });
+
+        return Array.from(deduped.values());
+    }
+
+    private ensureCurrentModelInList(options: ModelOption[], providerType: ProviderType): ModelOption[] {
+        const currentModel = this.getCurrentModel(providerType);
+        if (!currentModel) return options;
+
+        const exists = options.some(option => option.value === currentModel);
+        if (exists) return options;
+
+        return [{ value: currentModel, label: `${currentModel} (Current)` }, ...options];
+    }
+
+    private getCurrentModel(providerType: ProviderType): string {
+        switch (providerType) {
+            case 'gemini':
+                return this.settings.primaryModel || '';
+            case 'openai':
+                return this.settings.openaiModel || '';
+            case 'deepseek':
+                return this.settings.deepseekModel || '';
+            case 'qwen':
+                return this.settings.qwenModel || '';
+            default:
+                return '';
+        }
     }
 
     async chat(userMessage: string, contextItems: any[], selection: string = ""): Promise<string> {
@@ -185,9 +315,10 @@ export class ModelService {
             fullPrompt += `User Request: ${userMessage}`;
 
             // 2. Get or Create Session
+            const tools = this.toolManager.getToolsDefinitions();
             const chat = this.memoryManager
-                ? this.memoryManager.getOrCreateSession()
-                : this.provider.startChat(this.toolManager.getToolsDefinitions());
+                ? this.memoryManager.getOrCreateSession(tools)
+                : this.provider.startChat(tools);
 
             // 3. Send Message
             let result = await chat.sendMessage(fullPrompt);
@@ -237,7 +368,6 @@ export class ModelService {
                 await this.memoryManager.recordMessage('model', responseText);
             }
 
-            this.lastResponseTime = Date.now();
             return responseText;
 
         } catch (e: any) {
@@ -256,61 +386,11 @@ export class ModelService {
         }
 
         try {
-            if (systemPrompt) {
-                const currentConfig = this.getCurrentConfig();
-                this.provider.configure({ ...currentConfig, systemPrompt });
-            }
-
-            const result = await this.provider.generateContent(prompt);
-
-            if (systemPrompt) {
-                const currentConfig = this.getCurrentConfig();
-                this.provider.configure({ ...currentConfig, systemPrompt: this.settings.systemPrompt });
-            }
-
+            const result = await this.provider.generateContent(prompt, systemPrompt);
             return result.text;
         } catch (e: any) {
             logger.error('Stateless generation failed', e, 'ModelService.generate');
             throw e;
-        }
-    }
-
-    private getCurrentConfig(): ModelConfig {
-        switch (this.settings.provider) {
-            case 'gemini':
-                return {
-                    apiKey: this.settings.apiKey,
-                    modelName: this.settings.primaryModel,
-                    systemPrompt: this.settings.systemPrompt,
-                    contextWindow: this.settings.contextWindow
-                };
-            case 'openai':
-                return {
-                    apiKey: this.settings.openaiApiKey,
-                    baseUrl: this.settings.openaiBaseUrl,
-                    modelName: this.settings.openaiModel,
-                    systemPrompt: this.settings.systemPrompt
-                };
-            case 'deepseek':
-                return {
-                    apiKey: this.settings.deepseekApiKey,
-                    baseUrl: this.settings.deepseekBaseUrl,
-                    modelName: this.settings.deepseekModel,
-                    systemPrompt: this.settings.systemPrompt
-                };
-            case 'qwen':
-                return {
-                    apiKey: this.settings.qwenApiKey,
-                    baseUrl: this.settings.qwenBaseUrl,
-                    modelName: this.settings.qwenModel,
-                    systemPrompt: this.settings.systemPrompt
-                };
-            default:
-                return {
-                    apiKey: this.settings.apiKey,
-                    modelName: this.settings.primaryModel,
-                    systemPrompt: this.settings.systemPrompt
-                };
         }
     }
 

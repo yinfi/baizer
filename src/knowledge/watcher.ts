@@ -2,7 +2,7 @@
 
 import { App, TFile, debounce } from 'obsidian';
 import { KnowledgeRegistryManager } from './registry';
-import { DEFAULT_WIKI_FOLDER, KNOWLEDGE_GENERATED_MARKER } from './types';
+import { DEFAULT_WIKI_FOLDER } from './types';
 
 /**
  * 检查文件路径是否在监听文件夹列表中
@@ -34,7 +34,7 @@ export class KnowledgeWatcher {
   private debouncedHandlers: Map<string, () => void> = new Map();
 
   constructor(
-    private app: App,
+    app: App,
     private registry: KnowledgeRegistryManager,
     private watchedFolders: string[],
     private wikiFolder: string = DEFAULT_WIKI_FOLDER,

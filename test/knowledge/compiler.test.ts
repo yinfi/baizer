@@ -90,7 +90,7 @@ test('buildSummaryMarkdown generates correct frontmatter and body', () => {
   expect(md).toContain('title: "Karpathy 的第二大脑"');
   expect(md).toContain('author: "新智元"');
   expect(md).toContain('source_url: "https://mp.weixin.qq.com/test"');
-  expect(md).toContain('slug: "second-brain"');
+  expect(md).toContain('- "Second Brain"');
   expect(md).toContain('# Karpathy 的第二大脑');
   expect(md).toContain('## 核心观点');
   expect(md).toContain('- 原始文件保持本地可控');
