@@ -141,33 +141,29 @@ export class KnowledgeLinter {
       const file = this.app.vault.getAbstractFileByPath(record.summary_path);
       if (!file || !(file instanceof TFile)) continue;
 
-      try {
-        const content = await this.app.vault.read(file);
-        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-        if (!fmMatch) continue;
+      const cache = this.app.metadataCache.getFileCache(file as TFile);
+      const fm = cache?.frontmatter;
+      if (!fm) continue;
 
-        const fmText = fmMatch[1];
-        const flagsMatch = fmText.match(/review_flags:\s*(\[.*\])/);
-        let reviewFlags: string[] = [];
-        if (flagsMatch) {
-          try { reviewFlags = JSON.parse(flagsMatch[1]); } catch {}
-        }
+      const title = fm.title || record.path;
+      let reviewFlags: string[] = [];
+      if (Array.isArray(fm.review_flags)) {
+        reviewFlags = fm.review_flags;
+      } else if (typeof fm.review_flags === 'string') {
+        try { reviewFlags = JSON.parse(fm.review_flags); } catch {}
+      }
+      summaries.push({ sourceId: record.id, title, reviewFlags });
 
-        const titleMatch = fmText.match(/title:\s*"([^"]+)"/);
-        const title = titleMatch ? titleMatch[1] : record.path;
-        summaries.push({ sourceId: record.id, title, reviewFlags });
-
-        const conceptsMatch = fmText.match(/concepts:\s*(\[.*\])/);
-        if (conceptsMatch) {
-          try {
-            const concepts: string[] = JSON.parse(conceptsMatch[1]);
-            for (const c of concepts) {
-              if (!conceptMap[c]) conceptMap[c] = [];
-              conceptMap[c].push(record.id);
-            }
-          } catch {}
-        }
-      } catch { continue; }
+      let concepts: string[] = [];
+      if (Array.isArray(fm.concepts)) {
+        concepts = fm.concepts;
+      } else if (typeof fm.concepts === 'string') {
+        try { concepts = JSON.parse(fm.concepts); } catch {}
+      }
+      for (const c of concepts) {
+        if (!conceptMap[c]) conceptMap[c] = [];
+        conceptMap[c].push(record.id);
+      }
     }
 
     allIssues.push(...checkLowConfidenceExtractions(summaries));

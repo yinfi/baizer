@@ -18,3 +18,4 @@ export class ItemView {}
 export class WorkspaceLeaf {}
 export class MarkdownView {}
 export class Vault {}
+export async function requestUrl(_options: any): Promise<any> { return { text: '' }; }

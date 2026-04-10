@@ -1,0 +1,385 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1775699851822,
+  "projectRoot": "D:\\code\\obsidian-cli",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "esbuild",
+        "version": "0.17.19",
+        "category": "build"
+      }
+    ],
+    "packageManager": "npm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "npm run build",
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": "npm run dev",
+    "scripts": {
+      "dev": "node esbuild.config.mjs",
+      "build": "node esbuild.config.mjs production"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": "*.test.ts",
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "src",
+      "test"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "doc": {
+      "path": "doc",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1775699851573,
+      "keyFiles": [
+        "prd.md",
+        "UX.md"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 0,
+      "lastAccessed": 1775699851574,
+      "keyFiles": []
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 1,
+      "lastAccessed": 1775699851648,
+      "keyFiles": [
+        "settings.ts"
+      ]
+    },
+    "test": {
+      "path": "test",
+      "purpose": "Test files",
+      "fileCount": 10,
+      "lastAccessed": 1775699851649,
+      "keyFiles": [
+        "context-manager.test.ts",
+        "functional-test.js",
+        "functional-test.ts",
+        "gemini-api-chat.test.ts",
+        "mcp-integration.test.ts"
+      ]
+    },
+    "src\\models": {
+      "path": "src\\models",
+      "purpose": "Data models",
+      "fileCount": 3,
+      "lastAccessed": 1775699851651,
+      "keyFiles": [
+        "gemini.ts",
+        "interfaces.ts",
+        "openai.ts"
+      ]
+    },
+    "src\\services": {
+      "path": "src\\services",
+      "purpose": "Business logic services",
+      "fileCount": 2,
+      "lastAccessed": 1775699851652,
+      "keyFiles": [
+        "context-manager.ts",
+        "model-service.ts"
+      ]
+    },
+    "src\\utils": {
+      "path": "src\\utils",
+      "purpose": "Utility functions",
+      "fileCount": 2,
+      "lastAccessed": 1775699851653,
+      "keyFiles": [
+        "logger.ts",
+        "video_utils.ts"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "src\\mcp\\tools.ts",
+      "accessCount": 26,
+      "lastAccessed": 1775731933508,
+      "type": "file"
+    },
+    {
+      "path": "src\\ui\\shell-view.ts",
+      "accessCount": 26,
+      "lastAccessed": 1775732882791,
+      "type": "file"
+    },
+    {
+      "path": "src\\ui\\chat-controller.ts",
+      "accessCount": 21,
+      "lastAccessed": 1775732875733,
+      "type": "file"
+    },
+    {
+      "path": "src\\knowledge\\runtime.ts",
+      "accessCount": 20,
+      "lastAccessed": 1775731494446,
+      "type": "file"
+    },
+    {
+      "path": "FORYF.md",
+      "accessCount": 19,
+      "lastAccessed": 1775732925932,
+      "type": "file"
+    },
+    {
+      "path": "src\\knowledge\\indexer.ts",
+      "accessCount": 18,
+      "lastAccessed": 1775731792575,
+      "type": "file"
+    },
+    {
+      "path": "src\\knowledge\\metadata-index.ts",
+      "accessCount": 17,
+      "lastAccessed": 1775731803165,
+      "type": "file"
+    },
+    {
+      "path": "src\\services\\model-service.ts",
+      "accessCount": 16,
+      "lastAccessed": 1775730238577,
+      "type": "file"
+    },
+    {
+      "path": "src",
+      "accessCount": 15,
+      "lastAccessed": 1775731477307,
+      "type": "directory"
+    },
+    {
+      "path": "src\\knowledge\\query.ts",
+      "accessCount": 15,
+      "lastAccessed": 1775732901455,
+      "type": "file"
+    },
+    {
+      "path": "src\\knowledge\\compiler.ts",
+      "accessCount": 12,
+      "lastAccessed": 1775728253535,
+      "type": "file"
+    },
+    {
+      "path": "src\\mcp\\types.ts",
+      "accessCount": 12,
+      "lastAccessed": 1775729771272,
+      "type": "file"
+    },
+    {
+      "path": "src\\knowledge\\file-back.ts",
+      "accessCount": 12,
+      "lastAccessed": 1775731959345,
+      "type": "file"
+    },
+    {
+      "path": "src\\knowledge\\types.ts",
+      "accessCount": 10,
+      "lastAccessed": 1775731966760,
+      "type": "file"
+    },
+    {
+      "path": "src\\knowledge\\watcher.ts",
+      "accessCount": 7,
+      "lastAccessed": 1775725635119,
+      "type": "file"
+    },
+    {
+      "path": "main.ts",
+      "accessCount": 7,
+      "lastAccessed": 1775728190438,
+      "type": "directory"
+    },
+    {
+      "path": "src\\models\\openai.ts",
+      "accessCount": 6,
+      "lastAccessed": 1775727229400,
+      "type": "file"
+    },
+    {
+      "path": "test\\knowledge\\query.test.ts",
+      "accessCount": 5,
+      "lastAccessed": 1775729109615,
+      "type": "file"
+    },
+    {
+      "path": "src\\knowledge\\linter.ts",
+      "accessCount": 4,
+      "lastAccessed": 1775723068090,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 4,
+      "lastAccessed": 1775725493981,
+      "type": "directory"
+    },
+    {
+      "path": "src\\models\\interfaces.ts",
+      "accessCount": 4,
+      "lastAccessed": 1775730245069,
+      "type": "file"
+    },
+    {
+      "path": "src\\services\\context-manager.ts",
+      "accessCount": 3,
+      "lastAccessed": 1775725639227,
+      "type": "file"
+    },
+    {
+      "path": "test\\knowledge\\compiler.test.ts",
+      "accessCount": 3,
+      "lastAccessed": 1775725840814,
+      "type": "file"
+    },
+    {
+      "path": "src\\settings.ts",
+      "accessCount": 3,
+      "lastAccessed": 1775727237915,
+      "type": "directory"
+    },
+    {
+      "path": "src\\models\\gemini.ts",
+      "accessCount": 3,
+      "lastAccessed": 1775730211291,
+      "type": "file"
+    },
+    {
+      "path": "src\\memory\\memory-manager.ts",
+      "accessCount": 3,
+      "lastAccessed": 1775730226177,
+      "type": "file"
+    },
+    {
+      "path": "src\\knowledge\\topic-utils.ts",
+      "accessCount": 2,
+      "lastAccessed": 1775719066378,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\Administrator\\.claude\\plans\\clever-nibbling-nebula.md",
+      "accessCount": 2,
+      "lastAccessed": 1775720194090,
+      "type": "file"
+    },
+    {
+      "path": "package.json",
+      "accessCount": 2,
+      "lastAccessed": 1775725493304,
+      "type": "directory"
+    },
+    {
+      "path": "test\\knowledge\\indexer.test.ts",
+      "accessCount": 2,
+      "lastAccessed": 1775725548632,
+      "type": "file"
+    },
+    {
+      "path": "test\\context-manager.test.ts",
+      "accessCount": 2,
+      "lastAccessed": 1775725572445,
+      "type": "file"
+    },
+    {
+      "path": "test\\mock-obsidian.ts",
+      "accessCount": 2,
+      "lastAccessed": 1775725600081,
+      "type": "file"
+    },
+    {
+      "path": "src\\knowledge\\registry.ts",
+      "accessCount": 2,
+      "lastAccessed": 1775725639182,
+      "type": "file"
+    },
+    {
+      "path": "test\\__mocks__\\obsidian.ts",
+      "accessCount": 2,
+      "lastAccessed": 1775725647817,
+      "type": "file"
+    },
+    {
+      "path": "tsconfig.test.json",
+      "accessCount": 2,
+      "lastAccessed": 1775725678569,
+      "type": "file"
+    },
+    {
+      "path": "test\\obsidian-mock.ts",
+      "accessCount": 1,
+      "lastAccessed": 1775718996006,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\Administrator\\.claude\\plans\\async-zooming-corbato.md",
+      "accessCount": 1,
+      "lastAccessed": 1775724444838,
+      "type": "file"
+    },
+    {
+      "path": "tsconfig.json",
+      "accessCount": 1,
+      "lastAccessed": 1775725503595,
+      "type": "file"
+    },
+    {
+      "path": "test\\knowledge\\types.test.ts",
+      "accessCount": 1,
+      "lastAccessed": 1775725503650,
+      "type": "file"
+    },
+    {
+      "path": "test\\knowledge\\linter.test.ts",
+      "accessCount": 1,
+      "lastAccessed": 1775725606643,
+      "type": "file"
+    },
+    {
+      "path": "test\\knowledge\\registry.test.ts",
+      "accessCount": 1,
+      "lastAccessed": 1775725606707,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

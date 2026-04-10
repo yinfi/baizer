@@ -7,6 +7,11 @@ export interface ModelConfig {
     contextWindow?: number;
 }
 
+export interface ModelOption {
+    value: string;
+    label: string;
+}
+
 export interface ChatMessage {
     role: 'user' | 'model' | 'system';
     content: string;
@@ -45,7 +50,8 @@ export interface IModelProvider {
 
     configure(config: ModelConfig): void;
     checkAvailability(): Promise<boolean>;
+    listModels?(): Promise<ModelOption[]>;
 
-    generateContent(prompt: string): Promise<GenerationResult>;
+    generateContent(prompt: string, systemPrompt?: string): Promise<GenerationResult>;
     startChat(tools?: ToolDefinition[]): IChatSession;
 }

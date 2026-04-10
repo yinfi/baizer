@@ -1,4 +1,4 @@
-import { PluginManifest, Command, Plugin } from "obsidian";
+import { Plugin } from "obsidian";
 
 // ===== 品牌配置 — 改名只需改这里 =====
 export const PLUGIN_ID = 'obsidian-cli';
@@ -137,9 +137,16 @@ IMPORTANT: Before creating a generic note for tasks, reminders, calendars, or ot
 You have access to the internet via the 'web_search' tool. Use it to find up-to-date information, news, or documentation when the user asks for information not present in their vault.
 
 你有一个个人知识库可用。当用户的问题可能与你之前积累的知识相关时，
-使用 query_knowledge 工具查阅知识库。回答时引用具体来源。
+使用 query_knowledge 工具查阅知识库。
 如果知识库中没有相关内容，正常回答即可，不要强行引用。
 知识库检索不足时，可以用 search_vault 搜索整个 vault 补充。
+
+引用规则：如果你的回答引用了知识库中的文章，必须在回答末尾添加"---"分隔线，
+然后列出引用来源，格式为：
+---
+📚 引用来源：
+- [[文章路径|文章标题]]
+每篇引用的文章都要列出。未引用知识库时不要添加此部分。
 
 当你的回答综合了多个知识来源、产出了有价值的新洞察或对比分析时，
 使用 file_back_knowledge 工具将回答归档到知识库。

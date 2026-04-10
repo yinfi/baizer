@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice } from 'obsidian';
 import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
 import { ChatController, ChatMessage } from './chat-controller';
-import { ContextManager, ContextItem } from '../services/context-manager';
+import { ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
 import { VIEW_TYPE_SHELL } from '../mcp/types';
 
@@ -31,6 +31,7 @@ export class ShellView extends ItemView {
     private isResponding: boolean = false;
     private modelSelectEl: HTMLSelectElement | null = null;
     private providerSelectEl: HTMLSelectElement | null = null;
+    private modelLoadRequestId: number = 0;
 
     // Event Handlers
     private handleInputBound = () => {
@@ -142,7 +143,7 @@ export class ShellView extends ItemView {
         });
         toolsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>';
         toolsBtn.addEventListener('click', async () => {
-            const tools = await this.chatController.getTools();
+            const tools = this.modelService.getAvailableTools();
             if (tools && tools.length > 0) {
                 let toolsList = 'Available Tools:\n';
                 tools.forEach(tool => {
@@ -214,7 +215,7 @@ export class ShellView extends ItemView {
 
         // Provider selector
         this.providerSelectEl = modelSelectContainer.createEl('select', {
-            cls: 'shell-model-select',
+            cls: 'shell-model-select shell-provider-select',
             attr: { title: 'Select AI Provider' }
         });
         this.populateProviderOptions(this.providerSelectEl);
@@ -223,18 +224,20 @@ export class ShellView extends ItemView {
             await this.changeProvider(target.value);
             new Notice(`Switched provider to ${target.options[target.selectedIndex].text}`);
             // Refresh models list for the new provider
-            if (this.modelSelectEl) this.populateModelOptions(this.modelSelectEl);
+            if (this.modelSelectEl) {
+                await this.populateModelOptions(this.modelSelectEl, true);
+            }
             this.updatePlaceholder();
         });
 
         // Model selector
         this.modelSelectEl = modelSelectContainer.createEl('select', {
-            cls: 'shell-model-select',
+            cls: 'shell-model-select shell-main-model-select',
             attr: { title: 'Select AI Model' }
         });
 
         // Populate model options based on current provider
-        this.populateModelOptions(this.modelSelectEl);
+        void this.populateModelOptions(this.modelSelectEl);
 
         // Update model when selection changes
         this.modelSelectEl.addEventListener('change', async (e) => {
@@ -244,7 +247,7 @@ export class ShellView extends ItemView {
         });
 
         // Right side: Action buttons
-        const actionButtons = inputControls.createDiv({ cls: 'shell-action-buttons' });
+        inputControls.createDiv({ cls: 'shell-action-buttons' });
 
         // TODO: Add image upload button
         // TODO: Add submit button
@@ -394,22 +397,12 @@ export class ShellView extends ItemView {
     async processCommand(query: string) {
         try {
             // Context gathering
-            let contextStr = '';
             const activeFile = this.app.workspace.getActiveFile();
-
-            // Add active file as context if not already present
-            // Actually, let's keep the implicit context as string for now,
-            // but also resolve explicit context items.
-            if (activeFile) {
-                contextStr = `Current Note: [[${activeFile.path}]]`;
-            }
 
             // Resolve context items
             const contextItems = await this.contextManager.resolveContexts();
 
-            // Add active file as a ContextItem if we want to be consistent,
-            // but for now let's pass it as the legacy string context or add to items.
-            // Let's add it to items to unify.
+            // Add active file as a ContextItem to unify context handling.
             if (activeFile) {
                 contextItems.push({
                     id: 'active-file',
@@ -504,9 +497,20 @@ export class ShellView extends ItemView {
                         pre.insertBefore(header, codeBlock);
                     }
                 });
+                // 给渲染出的内部链接绑定点击事件，使 [[引用来源]] 可点击跳转
+                entry.querySelectorAll('a.internal-link').forEach((link) => {
+                    link.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const href = link.getAttribute('href') || link.getAttribute('data-href') || '';
+                        if (href) {
+                            this.app.workspace.openLinkText(href, '', false);
+                        }
+                    });
+                });
+
                 // Delay scroll to ensure rendering is complete
                 requestAnimationFrame(() => {
-                    this.scrollToBottom();
+                    this.scrollToEnd();
                 });
 
                 // Add feedback buttons for AI messages
@@ -748,67 +752,90 @@ export class ShellView extends ItemView {
         }
     }
 
-    private populateModelOptions(selectEl: HTMLSelectElement) {
+    private async populateModelOptions(selectEl: HTMLSelectElement, forceRefresh: boolean = false) {
         const settings = (this.app as any).plugins.plugins['obsidian-cli']?.settings;
         if (!settings) return;
 
-        selectEl.empty();
-
+        const requestId = ++this.modelLoadRequestId;
         const provider = settings.provider || 'gemini';
-        let currentModel = '';
-        let models: { value: string; label: string }[] = [];
 
-        switch (provider) {
-            case 'gemini':
-                currentModel = settings.primaryModel;
-                models = [
-                    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-                    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-                    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-                    { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' }
-                ];
-                break;
-            case 'openai':
-                currentModel = settings.openaiModel;
-                models = [
-                    { value: 'gpt-4o', label: 'GPT-4o' },
-                    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-                    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-                    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
-                ];
-                break;
-            case 'deepseek':
-                currentModel = settings.deepseekModel;
-                models = [
-                    { value: 'deepseek-chat', label: 'DeepSeek Chat' },
-                    { value: 'deepseek-coder', label: 'DeepSeek Coder' }
-                ];
-                break;
-            case 'qwen':
-                currentModel = settings.qwenModel;
-                models = [
-                    { value: 'qwen-turbo', label: 'Qwen Turbo' },
-                    { value: 'qwen-plus', label: 'Qwen Plus' },
-                    { value: 'qwen-max', label: 'Qwen Max' }
-                ];
-                break;
-        }
-
-        // If current model isn't in our curated list (custom model), keep it selectable.
-        if (currentModel && !models.some(m => m.value === currentModel)) {
-            models.unshift({ value: currentModel, label: currentModel });
-        }
-
-        // Add models to dropdown
-        models.forEach(model => {
-            const option = selectEl.createEl('option', {
-                value: model.value,
-                text: model.label
-            });
-            if (model.value === currentModel) {
-                option.selected = true;
-            }
+        selectEl.empty();
+        selectEl.disabled = true;
+        const loadingOption = selectEl.createEl('option', {
+            value: '',
+            text: `Loading ${provider} models...`
         });
+        loadingOption.selected = true;
+
+        try {
+            const models = await this.modelService.getAvailableModels(forceRefresh);
+
+            // 用户在请求期间切换了 provider，丢弃旧请求结果
+            if (requestId !== this.modelLoadRequestId) return;
+
+            selectEl.empty();
+
+            if (!models.length) {
+                const emptyOption = selectEl.createEl('option', {
+                    value: '',
+                    text: 'No models available'
+                });
+                emptyOption.selected = true;
+                emptyOption.disabled = true;
+                selectEl.disabled = true;
+                return;
+            }
+
+            let currentModel = '';
+            switch (provider) {
+                case 'gemini':
+                    currentModel = settings.primaryModel;
+                    break;
+                case 'openai':
+                    currentModel = settings.openaiModel;
+                    break;
+                case 'deepseek':
+                    currentModel = settings.deepseekModel;
+                    break;
+                case 'qwen':
+                    currentModel = settings.qwenModel;
+                    break;
+            }
+
+            models.forEach(model => {
+                const option = selectEl.createEl('option', {
+                    value: model.value,
+                    text: model.label
+                });
+                if (model.value === currentModel) {
+                    option.selected = true;
+                }
+            });
+
+            if (currentModel && !models.some(m => m.value === currentModel)) {
+                const current = selectEl.createEl('option', {
+                    value: currentModel,
+                    text: `${currentModel} (Current)`
+                });
+                current.selected = true;
+            }
+
+            selectEl.disabled = false;
+        } catch (error: any) {
+            if (requestId !== this.modelLoadRequestId) return;
+            logger.warn(
+                `Failed to load model list for ${provider}: ${error?.message || 'Unknown error'}`,
+                'ShellView.populateModelOptions'
+            );
+            selectEl.empty();
+            const failedOption = selectEl.createEl('option', {
+                value: '',
+                text: 'Model list unavailable'
+            });
+            failedOption.selected = true;
+            failedOption.disabled = true;
+            selectEl.disabled = true;
+        }
     }
 
     private populateProviderOptions(selectEl: HTMLSelectElement) {
@@ -888,12 +915,12 @@ export class ShellView extends ItemView {
         this.modelService.updateSettings(settings);
     }
 
-    public updateModelSelector() {
+    public async updateModelSelector(forceRefresh: boolean = false) {
         if (this.providerSelectEl) {
             this.populateProviderOptions(this.providerSelectEl);
         }
         if (this.modelSelectEl) {
-            this.populateModelOptions(this.modelSelectEl);
+            await this.populateModelOptions(this.modelSelectEl, forceRefresh);
         }
     }
 

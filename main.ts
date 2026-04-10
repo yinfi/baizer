@@ -8,7 +8,7 @@ import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
 import { ghostTextExtension, showGhostText } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
-import { selectionMenuExtension, resetSelectionMenu, setSelectionMenuState } from './src/ui/selection-menu';
+import { selectionMenuExtension } from './src/ui/selection-menu';
 import { KnowledgeRuntime } from './src/knowledge/runtime';
 
 export default class ObsidianCliPlugin extends Plugin {
@@ -168,28 +168,7 @@ export default class ObsidianCliPlugin extends Plugin {
             const result = await this.toolManager.execute('save_webpage', { url: m.url });
 
             if (result.success) {
-                let finalPath = result.path;
-                // Move logic (duplicated for now, could be helper)
-                if (this.settings.wechatStoragePath) {
-                    const folder = this.settings.wechatStoragePath;
-                    if (!await this.app.vault.adapter.exists(folder)) {
-                        await this.app.vault.createFolder(folder);
-                    }
-                    const fileName = finalPath.split('/').pop();
-                    const newPath = `${folder}/${fileName}`;
-                    let targetPath = newPath;
-                    let counter = 1;
-                    while (await this.app.vault.adapter.exists(targetPath)) {
-                        targetPath = `${folder}/${fileName.replace('.md', '')} (${counter}).md`;
-                        counter++;
-                    }
-                    const fileToMove = this.app.vault.getAbstractFileByPath(finalPath);
-                    if (fileToMove) {
-                        await this.app.vault.rename(fileToMove, targetPath);
-                        finalPath = targetPath;
-                    }
-                }
-
+                const finalPath = result.path;
                 const linkText = `[[${finalPath}|Saved: ${finalPath.split('/').pop()?.replace('.md', '')}]]`;
 
                 // Apply replacement at specific index

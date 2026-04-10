@@ -124,20 +124,8 @@ export class ChatController {
                 this.addMessage('system', `## Available Tools\n\n${toolsList}`);
                 break;
             case '/file-back':
-                const targetMsgId = argStr.trim();
-                const targetMsg = this.messages.find(m => m.id === targetMsgId && m.role === 'ai');
-                if (targetMsg) {
-                    this.setResponding(true);
-                    try {
-                        const fileBackPrompt = `用户对以下回答点赞，请将其归档到知识库。使用 file_back_knowledge 工具，提取标题和核心内容。\n\n回答内容：\n${targetMsg.content}`;
-                        await this.api.chat(fileBackPrompt, [], '');
-                        this.addMessage('system', '已归档到知识库。');
-                    } catch (error: any) {
-                        this.addMessage('system', `归档失败: ${error.message}`);
-                    } finally {
-                        this.setResponding(false);
-                    }
-                }
+                // 后台执行，不阻塞主流程
+                this.runFileBackInBackground(argStr.trim());
                 break;
             case '/wiki:compile':
                 await this.handleWikiCompile(argStr);
@@ -246,6 +234,27 @@ export class ChatController {
         if (error.message) msg = error.message;
         this.addMessage('system', `Error: ${msg}`);
     }
+
+    /**
+     * 后台执行 file-back，不阻塞 UI
+     * 手动模式（👍按钮）和自动模式共用
+     */
+    private runFileBackInBackground(msgId: string) {
+        const targetMsg = this.messages.find(m => m.id === msgId && m.role === 'ai');
+        if (!targetMsg) return;
+
+        const fileBackPrompt = `用户对以下回答点赞，请将其归档到知识库。使用 file_back_knowledge 工具，提取标题和核心内容，并提取相关的 topics 主题标签。\n\n回答内容：\n${targetMsg.content}`;
+        this.api.chat(fileBackPrompt, [], '').then(() => {
+            this.addMessage('system', '已归档到知识库。');
+        }).catch((error: any) => {
+            logger.error('File-back failed', error, 'ChatController');
+        });
+    }
+
+    /**
+     * 自动 file-back 已移除：改为 AI 在 query_knowledge 流程中自主判断是否调用 file_back_knowledge
+     * 手动模式保留：用户点赞（👍）时通过 /file-back 命令触发
+     */
 
     /**
      * /wiki:compile [path] — 编译笔记到知识 wiki

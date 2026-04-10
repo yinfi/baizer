@@ -10,10 +10,14 @@
         "types": [
             "node"
         ],
+        "paths": {
+            "obsidian": ["./test/__mocks__/obsidian.ts"]
+        },
         "allowSyntheticDefaultImports": true,
         "esModuleInterop": true,
         "outDir": "dist_test",
-        "skipLibCheck": true
+        "skipLibCheck": true,
+        "noUnusedLocals": false
     },
     "include": [
         "src/**/*.ts",

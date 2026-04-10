@@ -1,4 +1,4 @@
-import { IModelProvider, ModelConfig, IChatSession, GenerationResult, ToolDefinition, ToolResult, ChatMessage } from './interfaces';
+import { IModelProvider, ModelConfig, IChatSession, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption } from './interfaces';
 import { requestUrl, RequestUrlParam } from 'obsidian';
 import { logger } from '../utils/logger';
 
@@ -22,9 +22,60 @@ export class OpenAIProvider implements IModelProvider {
         }
     }
 
-    async generateContent(prompt: string): Promise<GenerationResult> {
+    async listModels(): Promise<ModelOption[]> {
+        const url = `${this.config.baseUrl || 'https://api.openai.com/v1'}/models`;
+        const headers: Record<string, string> = {
+            'Authorization': `Bearer ${this.config.apiKey}`
+        };
+
+        const response = await requestUrl({
+            url,
+            method: 'GET',
+            headers
+        });
+
+        if (response.status !== 200) {
+            throw new Error(`OpenAI models API error: ${response.status}`);
+        }
+
+        const data = JSON.parse(response.text || '{}');
+        const rows = Array.isArray(data?.data) ? data.data : [];
+
+        const excludedKeywords = [
+            'embedding',
+            'whisper',
+            'tts',
+            'transcribe',
+            'moderation',
+            'dall-e',
+            'image',
+            'audio-preview',
+            'omni-moderation'
+        ];
+
+        const options = rows
+            .map((row: any) => (typeof row?.id === 'string' ? row.id.trim() : ''))
+            .filter((id: string) => {
+                if (!id) return false;
+                const lower = id.toLowerCase();
+                return !excludedKeywords.some(keyword => lower.includes(keyword));
+            })
+            .map((id: string) => ({ value: id, label: id }))
+            .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
+
+        const deduped = new Map<string, ModelOption>();
+        options.forEach((option: ModelOption) => {
+            if (!deduped.has(option.value)) {
+                deduped.set(option.value, option);
+            }
+        });
+
+        return Array.from(deduped.values());
+    }
+
+    async generateContent(prompt: string, systemPrompt?: string): Promise<GenerationResult> {
         const messages = [
-            { role: 'system', content: this.config.systemPrompt || '' },
+            { role: 'system', content: systemPrompt ?? this.config.systemPrompt ?? '' },
             { role: 'user', content: prompt }
         ];
         return this.chatCompletion(messages);
@@ -35,6 +86,12 @@ export class OpenAIProvider implements IModelProvider {
     }
 
     async chatCompletion(messages: any[], tools?: ToolDefinition[]): Promise<GenerationResult> {
+        const raw = await this.chatCompletionRaw(messages, tools);
+        return OpenAIProvider.toGenerationResult(raw);
+    }
+
+    /** 返回原始 assistant message（含 tool_call id），供 ChatSession 维护 history */
+    async chatCompletionRaw(messages: any[], tools?: ToolDefinition[]): Promise<any> {
         const url = `${this.config.baseUrl || 'https://api.openai.com/v1'}/chat/completions`;
 
         const body: any = {
@@ -73,9 +130,10 @@ export class OpenAIProvider implements IModelProvider {
         }
 
         const data = JSON.parse(response.text);
-        const choice = data.choices[0];
-        const message = choice.message;
+        return data.choices[0].message;
+    }
 
+    static toGenerationResult(message: any): GenerationResult {
         const result: GenerationResult = {
             text: message.content || ''
         };
@@ -108,23 +166,9 @@ class OpenAIChatSession implements IChatSession {
         if (typeof text === 'string') {
             this.history.push({ role: 'user', content: text });
         } else {
-            // Handle tool results
-            // We need to append the tool outputs to the history
-            // OpenAI expects tool_outputs to follow the tool_calls
-            // This assumes the previous message in history was the assistant's tool_calls
-
-            // Note: In a real implementation, we need to track tool_call_ids.
-            // But for simplicity and generic compatibility, we might need to be careful.
-            // Most OpenAI compatible APIs require tool_call_id.
-            // Our generic ToolResult interface doesn't have it.
-            // We might need to store the last generation result to get IDs.
-
-            // For now, let's assume we can't easily do tool calls without IDs in OpenAI.
-            // We need to update the interfaces or store state.
-            // Let's try to find the last assistant message with tool calls.
-
+            // 将 tool results 追加到 history，匹配上一条 assistant message 中的 tool_call_id
             const lastMsg = this.history[this.history.length - 1];
-            if (lastMsg.role === 'assistant' && lastMsg.tool_calls) {
+            if (lastMsg?.role === 'assistant' && lastMsg.tool_calls) {
                 text.forEach(t => {
                     const call = lastMsg.tool_calls.find((tc: any) => tc.function.name === t.name);
                     if (call) {
@@ -139,38 +183,13 @@ class OpenAIChatSession implements IChatSession {
             }
         }
 
-        const result = await this.provider.chatCompletion(this.history, this.tools);
+        // 使用 chatCompletionRaw 获取原始 message（含 tool_call id）
+        const rawMessage = await this.provider.chatCompletionRaw(this.history, this.tools);
 
-        // Append assistant response to history
-        const assistantMsg: any = { role: 'assistant', content: result.text };
-        if (result.functionCalls) {
-            // We need to reconstruct the tool_calls object with IDs for history
-            // But the generic result doesn't have IDs.
-            // We need to modify chatCompletion to return the full message object or IDs.
-            // Let's hack it for now by re-fetching or just storing what we got if possible.
-            // Actually, chatCompletion parses the response.
-            // We should probably make chatCompletion return the raw message for history storage.
+        // 将完整的 assistant message（含 tool_calls + id）push 到 history
+        this.history.push(rawMessage);
 
-            // REVISIT: For now, we might break multi-turn tool calls if we don't have IDs.
-            // Let's update the provider to store the raw response in a way we can use.
-        }
-
-        // Wait, I can't easily get the IDs back from the generic interface.
-        // I should probably update the interface to support an "opaque" context or object.
-        // But to keep it simple, I will modify the OpenAIProvider to handle this state internally or 
-        // just accept that I need to fetch the IDs.
-
-        // Actually, let's modify `chatCompletion` to return the full message, 
-        // and `GenerationResult` is just a projection.
-        // But `sendMessage` returns `GenerationResult`.
-
-        // Let's fix this by making `chatCompletion` return the raw message, 
-        // and `OpenAIChatSession` manages the history with that raw message.
-
-        // However, `sendMessage` needs to return `GenerationResult`.
-        // So I will call a private method `_chat` that returns the raw message.
-
-        return result;
+        return OpenAIProvider.toGenerationResult(rawMessage);
     }
 
     async getHistory(): Promise<ChatMessage[]> {
