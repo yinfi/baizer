@@ -1,5 +1,5 @@
-import { App, PluginSettingTab, Setting, Notice, Modal, DropdownComponent } from 'obsidian';
-import { IPlugin, DEFAULT_SETTINGS } from './mcp/types';
+import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, TextComponent } from 'obsidian';
+import { IPlugin, DEFAULT_SETTINGS, ProviderConfig, BUILTIN_PROVIDER_KEYS } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 
 export class SettingTab extends PluginSettingTab {
@@ -11,33 +11,25 @@ export class SettingTab extends PluginSettingTab {
         this.plugin = plugin;
     }
 
-    private getCurrentModelByProvider(): string {
-        switch (this.plugin.settings.provider) {
-            case 'gemini':
-                return this.plugin.settings.primaryModel;
-            case 'openai':
-                return this.plugin.settings.openaiModel;
-            case 'deepseek':
-                return this.plugin.settings.deepseekModel;
-            case 'qwen':
-                return this.plugin.settings.qwenModel;
-            default:
-                return '';
-        }
+    /** 获取当前激活 provider 的配置 */
+    private getActiveConfig(): ProviderConfig | undefined {
+        const s = this.plugin.settings;
+        return s.providers[s.activeProvider];
     }
 
+    /** 动态加载 model 列表到下拉框 */
     private async loadDynamicModelOptions(
         dropdown: DropdownComponent,
-        provider: 'gemini' | 'openai' | 'deepseek' | 'qwen',
         token: number,
         forceRefresh: boolean = false
     ) {
+        const config = this.getActiveConfig();
+        const currentModel = config?.model || '';
+
         dropdown.selectEl.empty();
-        dropdown.addOption('__loading__', `Loading ${provider} models...`);
+        dropdown.addOption('__loading__', `Loading models...`);
         dropdown.setValue('__loading__');
         dropdown.setDisabled(true);
-
-        const currentModel = this.getCurrentModelByProvider();
 
         try {
             const models = await this.plugin.modelService.getAvailableModels(forceRefresh);
@@ -90,158 +82,105 @@ export class SettingTab extends PluginSettingTab {
         // ============================================================
         containerEl.createEl('h3', { text: '🔑 API Configuration', cls: 'ocli-settings-header' });
 
+        const settings = this.plugin.settings;
+        const activeConfig = this.getActiveConfig();
+
+        // Provider 选择
         new Setting(containerEl)
             .setName('AI Provider')
             .setDesc('Select the AI provider to use.')
-            .addDropdown(drop => drop
-                .addOption('gemini', 'Google Gemini')
-                .addOption('openai', 'OpenAI Compatible')
-                .addOption('deepseek', 'DeepSeek')
-                .addOption('qwen', 'Qwen (Tongyi Qianwen)')
-                .setValue(this.plugin.settings.provider)
-                .onChange(async (value: any) => {
-                    this.plugin.settings.provider = value;
-                    await this.plugin.saveSettings();
-                    this.plugin.modelService.reloadProvider();
-                    this.display(); // Refresh to show/hide relevant settings
-                }));
+            .addDropdown(drop => {
+                for (const [id, config] of Object.entries(settings.providers)) {
+                    const configured = !!config.apiKey;
+                    drop.addOption(id, configured ? config.label : `${config.label} ⚠️`);
+                }
+                drop.setValue(settings.activeProvider);
+                drop.onChange(async (value: string) => {
+                    await this.plugin.modelService.switchProvider(value, () => this.plugin.saveSettings());
+                    this.display();
+                });
+            });
 
-        // --- Gemini Settings ---
-        if (this.plugin.settings.provider === 'gemini') {
+        // 当前 provider 的配置项
+        if (activeConfig) {
             new Setting(containerEl)
-                .setName('Gemini API Key')
-                .setDesc('Enter your Google Gemini API key.')
+                .setName('API Key')
+                .setDesc(`Enter your ${activeConfig.label} API key.`)
                 .addText(text => text
-                    .setPlaceholder('AIzaSy...')
-                    .setValue(this.plugin.settings.apiKey)
+                    .setPlaceholder('sk-...')
+                    .setValue(activeConfig.apiKey)
                     .onChange(async (value) => {
-                        this.plugin.settings.apiKey = value;
+                        activeConfig.apiKey = value;
                         await this.plugin.saveSettings();
                     }));
 
+            // Gemini 不需要 Base URL
+            if (activeConfig.type === 'openai-compatible') {
+                new Setting(containerEl)
+                    .setName('Base URL')
+                    .setDesc('API Base URL.')
+                    .addText(text => text
+                        .setPlaceholder('https://api.openai.com/v1')
+                        .setValue(activeConfig.baseUrl)
+                        .onChange(async (value) => {
+                            activeConfig.baseUrl = value;
+                            await this.plugin.saveSettings();
+                        }));
+            }
+
+            // 所有 provider 统一动态 model 下拉
             new Setting(containerEl)
                 .setName('Model')
-                .setDesc('Choose the Gemini model (loaded dynamically from API).')
+                .setDesc('Choose the model (loaded dynamically from API).')
                 .addDropdown(drop => {
-                    drop.addOption(this.plugin.settings.primaryModel, `${this.plugin.settings.primaryModel} (Current)`);
-                    drop.setValue(this.plugin.settings.primaryModel);
+                    drop.addOption(activeConfig.model, `${activeConfig.model} (Current)`);
+                    drop.setValue(activeConfig.model);
 
-                    void this.loadDynamicModelOptions(drop, 'gemini', token);
+                    void this.loadDynamicModelOptions(drop, token);
 
                     drop.onChange(async (value) => {
                         if (value === '__loading__' || value === '__failed__') return;
-                        this.plugin.settings.primaryModel = value;
-                        await this.plugin.saveSettings();
+                        await this.plugin.modelService.switchModel(value, () => this.plugin.saveSettings());
                     });
                 });
         }
 
-        // --- OpenAI Settings ---
-        if (this.plugin.settings.provider === 'openai') {
-            new Setting(containerEl)
-                .setName('OpenAI API Key')
-                .setDesc('Enter your OpenAI API key.')
-                .addText(text => text
-                    .setPlaceholder('sk-...')
-                    .setValue(this.plugin.settings.openaiApiKey)
-                    .onChange(async (value) => {
-                        this.plugin.settings.openaiApiKey = value;
-                        await this.plugin.saveSettings();
-                    }));
+        // 添加/删除 provider 按钮
+        const providerActions = new Setting(containerEl);
 
-            new Setting(containerEl)
-                .setName('Base URL')
-                .setDesc('API Base URL (optional).')
-                .addText(text => text
-                    .setPlaceholder('https://api.openai.com/v1')
-                    .setValue(this.plugin.settings.openaiBaseUrl)
-                    .onChange(async (value) => {
-                        this.plugin.settings.openaiBaseUrl = value;
-                        await this.plugin.saveSettings();
-                    }));
+        providerActions.addButton(btn => btn
+            .setButtonText('+ Add Provider')
+            .onClick(() => {
+                new AddProviderModal(this.app, async (label, baseUrl) => {
+                    const key = 'custom-' + Date.now();
+                    settings.providers[key] = {
+                        type: 'openai-compatible',
+                        label,
+                        apiKey: '',
+                        baseUrl,
+                        model: ''
+                    };
+                    settings.activeProvider = key;
+                    await this.plugin.saveSettings();
+                    this.plugin.modelService.updateSettings(settings);
+                    this.display();
+                }).open();
+            }));
 
-            new Setting(containerEl)
-                .setName('Model Name')
-                .setDesc('Enter the model ID (e.g., gpt-4o, gpt-3.5-turbo).')
-                .addText(text => text
-                    .setPlaceholder('gpt-4o')
-                    .setValue(this.plugin.settings.openaiModel)
-                    .onChange(async (value) => {
-                        this.plugin.settings.openaiModel = value;
-                        await this.plugin.saveSettings();
-                    }));
-        }
-
-        // --- DeepSeek Settings ---
-        if (this.plugin.settings.provider === 'deepseek') {
-            new Setting(containerEl)
-                .setName('DeepSeek API Key')
-                .setDesc('Enter your DeepSeek API key.')
-                .addText(text => text
-                    .setPlaceholder('sk-...')
-                    .setValue(this.plugin.settings.deepseekApiKey)
-                    .onChange(async (value) => {
-                        this.plugin.settings.deepseekApiKey = value;
-                        await this.plugin.saveSettings();
-                    }));
-
-            new Setting(containerEl)
-                .setName('Base URL')
-                .setDesc('DeepSeek API Base URL.')
-                .addText(text => text
-                    .setPlaceholder('https://api.deepseek.com')
-                    .setValue(this.plugin.settings.deepseekBaseUrl)
-                    .onChange(async (value) => {
-                        this.plugin.settings.deepseekBaseUrl = value;
-                        await this.plugin.saveSettings();
-                    }));
-
-            new Setting(containerEl)
-                .setName('Model Name')
-                .setDesc('e.g., deepseek-chat, deepseek-coder')
-                .addText(text => text
-                    .setPlaceholder('deepseek-chat')
-                    .setValue(this.plugin.settings.deepseekModel)
-                    .onChange(async (value) => {
-                        this.plugin.settings.deepseekModel = value;
-                        await this.plugin.saveSettings();
-                    }));
-        }
-
-        // --- Qwen Settings ---
-        if (this.plugin.settings.provider === 'qwen') {
-            new Setting(containerEl)
-                .setName('Qwen API Key')
-                .setDesc('Enter your DashScope API key.')
-                .addText(text => text
-                    .setPlaceholder('sk-...')
-                    .setValue(this.plugin.settings.qwenApiKey)
-                    .onChange(async (value) => {
-                        this.plugin.settings.qwenApiKey = value;
-                        await this.plugin.saveSettings();
-                    }));
-
-            new Setting(containerEl)
-                .setName('Base URL')
-                .setDesc('DashScope Compatible API URL.')
-                .addText(text => text
-                    .setPlaceholder('https://dashscope.aliyuncs.com/compatible-mode/v1')
-                    .setValue(this.plugin.settings.qwenBaseUrl)
-                    .onChange(async (value) => {
-                        this.plugin.settings.qwenBaseUrl = value;
-                        await this.plugin.saveSettings();
-                    }));
-
-            new Setting(containerEl)
-                .setName('Model Name')
-                .setDesc('e.g., qwen-turbo, qwen-plus')
-                .addText(text => text
-                    .setPlaceholder('qwen-turbo')
-                    .setValue(this.plugin.settings.qwenModel)
-                    .onChange(async (value) => {
-                        this.plugin.settings.qwenModel = value;
-                        await this.plugin.saveSettings();
-                    }));
+        // 当前 provider 是自定义的才显示删除按钮
+        const isBuiltin = BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider);
+        if (!isBuiltin && activeConfig) {
+            providerActions.addButton(btn => btn
+                .setButtonText(`Delete "${activeConfig.label}"`)
+                .setWarning()
+                .onClick(async () => {
+                    delete settings.providers[settings.activeProvider];
+                    settings.activeProvider = 'gemini';
+                    await this.plugin.saveSettings();
+                    this.plugin.modelService.updateSettings(settings);
+                    this.display();
+                    new Notice('Provider deleted');
+                }));
         }
 
         new Setting(containerEl)
@@ -249,9 +188,9 @@ export class SettingTab extends PluginSettingTab {
                 .setButtonText('Test Connection')
                 .onClick(async () => {
                     try {
-                        new Notice(`Testing connection to ${this.plugin.settings.provider}...`);
-                        // Force reload to ensure latest settings are used
-                        this.plugin.modelService.reloadProvider();
+                        const label = activeConfig?.label || 'AI';
+                        new Notice(`Testing connection to ${label}...`);
+                        this.plugin.modelService.updateSettings(this.plugin.settings);
                         const success = await this.plugin.modelService.checkAvailability();
                         if (success) {
                             new Notice('✅ Connection successful!');
@@ -267,7 +206,7 @@ export class SettingTab extends PluginSettingTab {
             .setName('Context Window Limit')
             .setDesc('Limit token usage. Higher values allow reading larger files but cost more.')
             .addSlider(slider => slider
-                .setLimits(10000, 1000000, 10000) // 10k to 1M
+                .setLimits(10000, 1000000, 10000)
                 .setValue(this.plugin.settings.contextWindow)
                 .setDynamicTooltip()
                 .onChange(async (value) => {
@@ -568,119 +507,85 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         // ============================================================
-        // 8. 🔌 MCP Servers
+        // 8. 🔌 Plugin Skill Generator
         // ============================================================
-        containerEl.createEl('h3', { text: '🔌 MCP Servers', cls: 'ocli-settings-header' });
-
-        const mcpDesc = containerEl.createEl('p', { cls: 'setting-item-description' });
-        mcpDesc.setText('Connect to external tools via Model Context Protocol (MCP).');
-
-        // List existing servers
-        const servers = this.plugin.settings.mcpServers || {};
-        for (const [name, config] of Object.entries(servers)) {
-            new Setting(containerEl)
-                .setName(name)
-                .setDesc(`${config.command} ${config.args.join(' ')}`)
-                .addButton(btn => btn
-                    .setButtonText('Edit')
-                    .setIcon('pencil')
-                    .onClick(() => {
-                        this.removeMcpServer(name);
-                        this.addMcpServerModal(name, config);
-                    }))
-                .addButton(btn => btn
-                    .setButtonText('Remove')
-                    .setIcon('trash')
-                    .setWarning()
-                    .onClick(async () => {
-                        await this.removeMcpServer(name);
-                    }));
-        }
+        containerEl.createEl('h3', { text: '🔌 Plugin Skill Generator', cls: 'ocli-settings-header' });
 
         new Setting(containerEl)
+            .setName('Auto-generate plugin skills')
+            .setDesc('Automatically generate AI skills for installed plugins on startup.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.autoGeneratePluginSkills)
+                .onChange(async (value) => {
+                    this.plugin.settings.autoGeneratePluginSkills = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Excluded plugins')
+            .setDesc('Plugin IDs to exclude from skill generation (comma-separated).')
+            .addText(text => text
+                .setPlaceholder('plugin-id-1, plugin-id-2')
+                .setValue(this.plugin.settings.pluginSkillExcludeList.join(', '))
+                .onChange(async (value) => {
+                    this.plugin.settings.pluginSkillExcludeList = value
+                        .split(',')
+                        .map(s => s.trim())
+                        .filter(s => s.length > 0);
+                    await this.plugin.saveSettings();
+                }));
+    }
+}
+
+/** 添加自定义 Provider 的弹窗 */
+class AddProviderModal extends Modal {
+    private onSubmit: (label: string, baseUrl: string) => void;
+
+    constructor(app: App, onSubmit: (label: string, baseUrl: string) => void) {
+        super(app);
+        this.onSubmit = onSubmit;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h3', { text: 'Add OpenAI Compatible Provider' });
+
+        let labelValue = '';
+        let baseUrlValue = '';
+
+        new Setting(contentEl)
+            .setName('Provider Name')
+            .setDesc('Display name (e.g., SiliconFlow, Groq, Ollama)')
+            .addText(text => text
+                .setPlaceholder('My Provider')
+                .onChange(v => { labelValue = v; }));
+
+        new Setting(contentEl)
+            .setName('Base URL')
+            .setDesc('API endpoint URL')
+            .addText(text => text
+                .setPlaceholder('https://api.example.com/v1')
+                .onChange(v => { baseUrlValue = v; }));
+
+        new Setting(contentEl)
             .addButton(btn => btn
-                .setButtonText('Add MCP Server')
+                .setButtonText('Add')
                 .setCta()
                 .onClick(() => {
-                    this.addMcpServerModal();
+                    if (!labelValue.trim()) {
+                        new Notice('Please enter a provider name');
+                        return;
+                    }
+                    if (!baseUrlValue.trim()) {
+                        new Notice('Please enter a base URL');
+                        return;
+                    }
+                    this.onSubmit(labelValue.trim(), baseUrlValue.trim());
+                    this.close();
                 }));
     }
 
-    async removeMcpServer(name: string) {
-        const settings = this.plugin.settings;
-        if (settings.mcpServers && settings.mcpServers[name]) {
-            delete settings.mcpServers[name];
-            await this.plugin.saveSettings();
-            this.display();
-        }
-    }
-
-    addMcpServerModal(existingName?: string, existingConfig?: { command: string, args: string[] }) {
-        class McpModal extends Modal {
-            name: string;
-            command: string;
-            args: string;
-            onSubmit: (name: string, command: string, args: string[]) => void;
-
-            constructor(app: App, onSubmit: (name: string, command: string, args: string[]) => void, name = '', command = '', args = '') {
-                super(app);
-                this.onSubmit = onSubmit;
-                this.name = name;
-                this.command = command;
-                this.args = args;
-            }
-
-            onOpen() {
-                const { contentEl } = this;
-                contentEl.createEl('h2', { text: existingName ? 'Edit MCP Server' : 'Add MCP Server' });
-
-                new Setting(contentEl)
-                    .setName('Server Name')
-                    .setDesc('Unique identifier (e.g., "weather")')
-                    .addText(text => text
-                        .setValue(this.name)
-                        .onChange(value => this.name = value));
-
-                new Setting(contentEl)
-                    .setName('Command')
-                    .setDesc('Executable (e.g., "node", "python", "uv")')
-                    .addText(text => text
-                        .setValue(this.command)
-                        .onChange(value => this.command = value));
-
-                new Setting(contentEl)
-                    .setName('Arguments')
-                    .setDesc('Space-separated arguments (e.g., "path/to/server.js")')
-                    .addText(text => text
-                        .setValue(this.args)
-                        .onChange(value => this.args = value));
-
-                new Setting(contentEl)
-                    .addButton(btn => btn
-                        .setButtonText('Save')
-                        .setCta()
-                        .onClick(() => {
-                            if (this.name && this.command) {
-                                const argsList = this.args.match(/(?:[^\s"]+|"[^"]*")+/g)?.map(a => a.replace(/^"|"$/g, '')) || [];
-                                this.onSubmit(this.name, this.command, argsList);
-                                this.close();
-                            } else {
-                                new Notice('Name and Command are required.');
-                            }
-                        }));
-            }
-
-            onClose() {
-                const { contentEl } = this;
-                contentEl.empty();
-            }
-        }
-
-        new McpModal(this.app, async (name, command, args) => {
-            if (!this.plugin.settings.mcpServers) this.plugin.settings.mcpServers = {};
-            this.plugin.settings.mcpServers[name] = { command, args };
-            await this.plugin.saveSettings();
-            this.display();
-        }, existingName || '', existingConfig?.command || '', existingConfig?.args.join(' ') || '').open();
+    onClose() {
+        this.contentEl.empty();
     }
 }
