@@ -39,7 +39,11 @@ export class PluginWatcher {
 
   hasSkillFile(pluginId: string): boolean {
     const path = this.generator.skillFilePath(pluginId);
-    return !!this.app.vault.getAbstractFileByPath(path);
+    // getAbstractFileByPath 对 .obsidian 目录可能不可靠，双重检查
+    if (this.app.vault.getAbstractFileByPath(path)) return true;
+    // 回退：检查目录是否存在（目录存在说明之前生成过）
+    const dirPath = this.generator.skillDirPath(pluginId);
+    return !!this.app.vault.getAbstractFileByPath(dirPath);
   }
 
   async start(): Promise<void> {
