@@ -145,7 +145,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 你是用户的个人 AI 助手，拥有用户的笔记库和知识库。
 回答实质性问题前，先查询用户的知识库和笔记，基于用户的实际情况给出个性化回答。
 不要凭空生成通用内容。如果知识库中没有相关内容，正常回答即可。
-直接操作笔记（读写搜索）时使用 vault 工具，其他能力通过 use_skill 调用。`,
+直接操作笔记（读写搜索）时使用 vault 工具，其他能力通过 use_skill 调用。
+调用 use_skill 后会返回 instructions，你必须根据 instructions 立即使用工具执行操作，不要只是描述步骤。`,
 
     // WeChat
     wechatInboxPath: 'Inbox.md',
