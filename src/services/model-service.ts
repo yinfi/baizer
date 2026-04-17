@@ -1,20 +1,24 @@
 import { App, Notice } from 'obsidian';
-import { PluginSettings } from '../mcp/types';
-import { ToolManager } from '../mcp/tools';
+import { PluginSettings, ProviderConfig } from '../mcp/types';
 import { MemoryManager } from '../memory/memory-manager';
 import { UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
-import { IModelProvider, ModelOption } from '../models/interfaces';
+import { IModelProvider, ModelOption, ToolDefinition } from '../models/interfaces';
 import { GeminiProvider } from '../models/gemini';
 import { OpenAIProvider } from '../models/openai';
-
-type ProviderType = PluginSettings['provider'];
+import { SkillRegistry } from '../skills/skill-registry';
+import { ToolRegistry } from '../skills/tool-registry';
 
 export class ModelService {
     private provider: IModelProvider;
     private memoryManager: MemoryManager | null = null;
     private readonly modelListCache = new Map<string, { timestamp: number; models: ModelOption[] }>();
     private readonly modelListCacheTtlMs = 10 * 60 * 1000;
+    private providerChangedCallbacks: Array<() => void> = [];
+
+    // Skill 架构
+    private skillRegistry: SkillRegistry;
+    private toolRegistry: ToolRegistry;
 
     // 创建超时工具函数，使用 AbortController 确保定时器被清理
     private async withTimeout<T>(
@@ -43,60 +47,40 @@ export class ModelService {
         }
     }
 
-    constructor(private app: App, private settings: PluginSettings, private toolManager: ToolManager) {
+    constructor(private app: App, private settings: PluginSettings, toolRegistry: ToolRegistry, skillRegistry: SkillRegistry) {
+        this.toolRegistry = toolRegistry;
+        this.skillRegistry = skillRegistry;
         this.initializeProvider();
         this.setupErrorHandlers();
     }
 
     private initializeProvider() {
-        const providerType = this.settings.provider;
+        const config = this.getActiveProviderConfig();
+        if (!config) {
+            logger.error(`Unknown provider: ${this.settings.activeProvider}`, null, 'ModelService');
+            this.provider = new GeminiProvider();
+            return;
+        }
 
-        switch (providerType) {
+        switch (config.type) {
             case 'gemini':
                 this.provider = new GeminiProvider();
-                this.provider.configure({
-                    apiKey: this.settings.apiKey,
-                    modelName: this.settings.primaryModel,
-                    systemPrompt: this.settings.systemPrompt,
-                    contextWindow: this.settings.contextWindow
-                });
                 break;
-            case 'openai':
+            case 'openai-compatible':
                 this.provider = new OpenAIProvider();
-                this.provider.configure({
-                    apiKey: this.settings.openaiApiKey,
-                    baseUrl: this.settings.openaiBaseUrl,
-                    modelName: this.settings.openaiModel,
-                    systemPrompt: this.settings.systemPrompt
-                });
-                break;
-            case 'deepseek':
-                this.provider = new OpenAIProvider();
-                // Override ID and Name for clarity if needed, but logic is same
-                this.provider.id = 'deepseek';
-                this.provider.name = 'DeepSeek';
-                this.provider.configure({
-                    apiKey: this.settings.deepseekApiKey,
-                    baseUrl: this.settings.deepseekBaseUrl,
-                    modelName: this.settings.deepseekModel,
-                    systemPrompt: this.settings.systemPrompt
-                });
-                break;
-            case 'qwen':
-                this.provider = new OpenAIProvider();
-                this.provider.id = 'qwen';
-                this.provider.name = 'Qwen';
-                this.provider.configure({
-                    apiKey: this.settings.qwenApiKey,
-                    baseUrl: this.settings.qwenBaseUrl,
-                    modelName: this.settings.qwenModel,
-                    systemPrompt: this.settings.systemPrompt
-                });
                 break;
             default:
-                logger.error(`Unknown provider: ${providerType}`, null, 'ModelService');
-                this.provider = new GeminiProvider(); // Fallback
+                logger.error(`Unknown provider type: ${config.type}`, null, 'ModelService');
+                this.provider = new GeminiProvider();
         }
+
+        this.provider.configure({
+            apiKey: config.apiKey,
+            baseUrl: config.baseUrl,
+            modelName: config.model,
+            systemPrompt: this.settings.systemPrompt,
+            contextWindow: this.settings.contextWindow
+        });
 
         // Initialize MemoryManager with the selected provider
         if (this.hasValidConfig()) {
@@ -105,19 +89,53 @@ export class ModelService {
     }
 
     private hasValidConfig(): boolean {
-        switch (this.settings.provider) {
-            case 'gemini': return !!this.settings.apiKey;
-            case 'openai': return !!this.settings.openaiApiKey;
-            case 'deepseek': return !!this.settings.deepseekApiKey;
-            case 'qwen': return !!this.settings.qwenApiKey;
-            default: return false;
-        }
+        const config = this.getActiveProviderConfig();
+        return !!config?.apiKey;
     }
 
-    public reloadProvider() {
+    /** 获取当前激活的 provider 配置 */
+    getActiveProviderConfig(): ProviderConfig | undefined {
+        return this.settings.providers[this.settings.activeProvider];
+    }
+
+    /** 唯一的 provider 切换入口，设置页和边栏都走这里 */
+    public async switchProvider(providerId: string, saveFn?: () => Promise<void>): Promise<void> {
+        const config = this.settings.providers[providerId];
+        if (!config) return;
+
+        this.settings.activeProvider = providerId;
+        if (saveFn) await saveFn();
+
+        // 清理旧状态
+        this.cleanup();
+        this.modelListCache.clear();
+
+        // 重建 provider
+        this.initializeProvider();
+
+        // 通知所有监听者
+        this.providerChangedCallbacks.forEach(cb => cb());
+    }
+
+    /** 更新 model 选择 */
+    public async switchModel(modelId: string, saveFn?: () => Promise<void>): Promise<void> {
+        const config = this.getActiveProviderConfig();
+        if (!config) return;
+
+        config.model = modelId;
+        if (saveFn) await saveFn();
+
+        // 重建 provider 以使用新 model
         this.cleanup();
         this.initializeProvider();
-        this.modelListCache.clear();
+    }
+
+    /** 注册 provider 变更监听，返回取消注册函数 */
+    public onProviderChanged(callback: () => void): () => void {
+        this.providerChangedCallbacks.push(callback);
+        return () => {
+            this.providerChangedCallbacks = this.providerChangedCallbacks.filter(cb => cb !== callback);
+        };
     }
 
     public updateSettings(settings: PluginSettings) {
@@ -150,14 +168,17 @@ export class ModelService {
     }
 
     async getAvailableModels(forceRefresh: boolean = false): Promise<ModelOption[]> {
-        const providerType = this.settings.provider;
-        const cacheKey = this.buildModelListCacheKey(providerType);
+        const providerId = this.settings.activeProvider;
+        const config = this.getActiveProviderConfig();
+        if (!config) return [];
+
+        const cacheKey = `${providerId}:${config.baseUrl}:${(config.apiKey || '').slice(0, 8)}`;
         const now = Date.now();
 
         if (!forceRefresh) {
             const cached = this.modelListCache.get(cacheKey);
             if (cached && now - cached.timestamp < this.modelListCacheTtlMs) {
-                return this.ensureCurrentModelInList(cached.models, providerType);
+                return this.ensureCurrentModelInList(cached.models);
             }
         }
 
@@ -167,69 +188,46 @@ export class ModelService {
                 models = await this.provider.listModels();
             } catch (error: any) {
                 logger.warn(
-                    `Failed to fetch model list for provider ${providerType}: ${error?.message || 'Unknown error'}`,
+                    `Failed to fetch model list for provider ${providerId}: ${error?.message || 'Unknown error'}`,
                     'ModelService.getAvailableModels'
                 );
             }
         }
 
         if (!models.length) {
-            models = this.getFallbackModels(providerType);
+            models = this.getFallbackModels(providerId);
         }
 
-        const normalized = this.ensureCurrentModelInList(this.normalizeModelOptions(models), providerType);
-        this.modelListCache.set(cacheKey, {
-            timestamp: now,
-            models: normalized
-        });
+        const normalized = this.ensureCurrentModelInList(this.normalizeModelOptions(models));
+        this.modelListCache.set(cacheKey, { timestamp: now, models: normalized });
         return normalized;
     }
 
-    private buildModelListCacheKey(providerType: ProviderType): string {
-        switch (providerType) {
-            case 'gemini':
-                return `gemini:${this.settings.apiKey.slice(0, 8)}`;
-            case 'openai':
-                return `openai:${this.settings.openaiBaseUrl}:${this.settings.openaiApiKey.slice(0, 8)}`;
-            case 'deepseek':
-                return `deepseek:${this.settings.deepseekBaseUrl}:${this.settings.deepseekApiKey.slice(0, 8)}`;
-            case 'qwen':
-                return `qwen:${this.settings.qwenBaseUrl}:${this.settings.qwenApiKey.slice(0, 8)}`;
-            default:
-                return providerType;
-        }
-    }
-
-    private getFallbackModels(providerType: ProviderType): ModelOption[] {
-        switch (providerType) {
-            case 'gemini':
-                return [
-                    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-                    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-                    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-                    { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' }
-                ];
-            case 'openai':
-                return [
-                    { value: 'gpt-4o', label: 'GPT-4o' },
-                    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-                    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-                    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
-                ];
-            case 'deepseek':
-                return [
-                    { value: 'deepseek-chat', label: 'DeepSeek Chat' },
-                    { value: 'deepseek-coder', label: 'DeepSeek Coder' }
-                ];
-            case 'qwen':
-                return [
-                    { value: 'qwen-turbo', label: 'Qwen Turbo' },
-                    { value: 'qwen-plus', label: 'Qwen Plus' },
-                    { value: 'qwen-max', label: 'Qwen Max' }
-                ];
-            default:
-                return [];
-        }
+    private getFallbackModels(providerId: string): ModelOption[] {
+        const fallbacks: Record<string, ModelOption[]> = {
+            'gemini': [
+                { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+                { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+                { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+                { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' }
+            ],
+            'openai': [
+                { value: 'gpt-4o', label: 'GPT-4o' },
+                { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+                { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+                { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
+            ],
+            'deepseek': [
+                { value: 'deepseek-chat', label: 'DeepSeek Chat' },
+                { value: 'deepseek-coder', label: 'DeepSeek Coder' }
+            ],
+            'qwen': [
+                { value: 'qwen-turbo', label: 'Qwen Turbo' },
+                { value: 'qwen-plus', label: 'Qwen Plus' },
+                { value: 'qwen-max', label: 'Qwen Max' }
+            ]
+        };
+        return fallbacks[providerId] || [];
     }
 
     private normalizeModelOptions(options: ModelOption[]): ModelOption[] {
@@ -252,8 +250,8 @@ export class ModelService {
         return Array.from(deduped.values());
     }
 
-    private ensureCurrentModelInList(options: ModelOption[], providerType: ProviderType): ModelOption[] {
-        const currentModel = this.getCurrentModel(providerType);
+    private ensureCurrentModelInList(options: ModelOption[]): ModelOption[] {
+        const currentModel = this.getActiveProviderConfig()?.model || '';
         if (!currentModel) return options;
 
         const exists = options.some(option => option.value === currentModel);
@@ -262,26 +260,12 @@ export class ModelService {
         return [{ value: currentModel, label: `${currentModel} (Current)` }, ...options];
     }
 
-    private getCurrentModel(providerType: ProviderType): string {
-        switch (providerType) {
-            case 'gemini':
-                return this.settings.primaryModel || '';
-            case 'openai':
-                return this.settings.openaiModel || '';
-            case 'deepseek':
-                return this.settings.deepseekModel || '';
-            case 'qwen':
-                return this.settings.qwenModel || '';
-            default:
-                return '';
-        }
-    }
-
     async chat(userMessage: string, contextItems: any[], selection: string = ""): Promise<string> {
         logger.info(`Processing chat message: ${userMessage.substring(0, 50)}...`, 'ModelService.chat');
 
         if (!this.hasValidConfig()) {
-            const error = `${this.provider.name} API Key not configured!`;
+            const providerLabel = this.getActiveProviderConfig()?.label || 'AI';
+            const error = `${providerLabel} API Key not configured!`;
             logger.error(error, new Error(error), 'ModelService.chat');
             new Notice(error);
             return "Error: API Key missing.";
@@ -314,8 +298,8 @@ export class ModelService {
             }
             fullPrompt += `User Request: ${userMessage}`;
 
-            // 2. Get or Create Session
-            const tools = this.toolManager.getToolsDefinitions();
+            // 2. Get or Create Session — Skill 模式
+            const tools = this.buildSkillModeTools();
             const chat = this.memoryManager
                 ? this.memoryManager.getOrCreateSession(tools)
                 : this.provider.startChat(tools);
@@ -339,11 +323,17 @@ export class ModelService {
                 // 使用超时控制执行工具调用
                 const toolResults = await Promise.all(result.functionCalls.map(async (call) => {
                     try {
-                        const toolResult = await this.withTimeout(
-                            this.toolManager.execute(call.name, call.args),
-                            30000,  // 30秒超时
-                            `Tool ${call.name} execution timed out`
-                        );
+                        let toolResult: any;
+
+                        if (call.name === 'use_skill') {
+                            toolResult = await this.executeSkill(call.args);
+                        } else {
+                            toolResult = await this.withTimeout(
+                                this.toolRegistry.execute(call.name, call.args),
+                                30000,
+                                `Tool ${call.name} execution timed out`
+                            );
+                        }
                         return {
                             name: call.name,
                             response: toolResult
@@ -382,7 +372,7 @@ export class ModelService {
      */
     async generate(prompt: string, systemPrompt?: string): Promise<string> {
         if (!this.hasValidConfig()) {
-            throw new Error(`${this.provider.name} API Key not configured`);
+            throw new Error(`${this.getActiveProviderConfig()?.label || 'AI'} API Key not configured`);
         }
 
         try {
@@ -395,6 +385,61 @@ export class ModelService {
     }
 
     // ==================== Memory Management Methods ====================
+
+    // ==================== Skill Architecture Methods ====================
+
+    /**
+     * 构建 Skill 模式的工具列表：
+     * - 所有原子工具（始终暴露）
+     * - use_skill 元工具（获取场景化 instructions）
+     */
+    private buildSkillModeTools(): ToolDefinition[] {
+        const tools: ToolDefinition[] = [];
+
+        // 所有原子工具始终暴露，模型可直接调用
+        tools.push(...this.toolRegistry.getAllDefinitions());
+
+        // use_skill 元工具：返回 skill 的详细 instructions，指导模型如何组合使用工具
+        const skillSummary = this.skillRegistry.getSkillSummaryText();
+        const useSkillDesc = skillSummary
+            ? `获取特定场景的详细工作指引（引用规则、输出格式、工作流程等）。调用后会返回 instructions，按照 instructions 使用已有工具完成任务。\n\n${skillSummary}`
+            : '获取特定场景的详细工作指引。';
+        tools.push({
+            name: 'use_skill',
+            description: useSkillDesc,
+            parameters: {
+                type: 'object',
+                properties: {
+                    name: { type: 'string', description: 'Skill 名称' },
+                },
+                required: ['name'],
+            },
+        });
+
+        return tools;
+    }
+
+    /**
+     * 执行 use_skill 调用：只返回 instructions + 工具提示
+     * 不执行业务逻辑，模型根据 instructions 自行调用原子工具
+     */
+    private async executeSkill(args: any): Promise<any> {
+        const skillName = args?.name;
+        if (!skillName) return { error: 'Missing skill name' };
+
+        const activated = this.skillRegistry.activateSkill(skillName);
+        if (!activated) return { error: `Skill "${skillName}" not found or disabled` };
+
+        const { instructions, tools } = activated;
+
+        return {
+            action_required: '根据以下 instructions 立即使用工具完成用户的请求。不要只是描述步骤，直接调用工具执行。',
+            instructions,
+            available_tools: tools.map(t => t.name),
+        };
+    }
+
+    // ==================== Original Memory Methods ====================
 
     async clearSession() {
         if (this.memoryManager) {
@@ -420,7 +465,7 @@ export class ModelService {
     }
 
     getAvailableTools() {
-        return this.toolManager.getToolsDefinitions();
+        return this.buildSkillModeTools();
     }
 
     async shutdown() {
@@ -430,11 +475,6 @@ export class ModelService {
         // 保存内存数据
         if (this.memoryManager) {
             await this.memoryManager.save();
-        }
-
-        // 清理 MCP 客户端（这将断开所有 MCP 连接）
-        if (this.toolManager) {
-            await this.toolManager.cleanupMcpClients();
         }
     }
 }
