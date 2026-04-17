@@ -1,8 +1,7 @@
 import { Plugin, debounce, Notice, MarkdownView, TFile } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
-import { ToolManager } from './src/mcp/tools';
-import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL } from './src/mcp/types';
+import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, DEFAULT_PROVIDERS, ProviderConfig } from './src/mcp/types';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
@@ -10,12 +9,29 @@ import { ghostTextExtension, showGhostText } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
 import { selectionMenuExtension } from './src/ui/selection-menu';
 import { KnowledgeRuntime } from './src/knowledge/runtime';
+import { ToolRegistry } from './src/skills/tool-registry';
+import { SkillRegistry } from './src/skills/skill-registry';
+import { registerVaultTools } from './src/skills/builtin/vault-ops';
+import { registerTools as registerWebSearchTools } from './src/skills/builtin/web-search/executor';
+import { registerTools as registerWebClipperTools } from './src/skills/builtin/web-clipper/executor';
+import { registerTools as registerKnowledgeTools } from './src/skills/builtin/knowledge/executor';
+import { registerTools as registerPluginCtrlTools } from './src/skills/builtin/plugin-ctrl/executor';
+// SKILL.md 通过 esbuild text loader 导入
+import webSearchSkillMd from './src/skills/builtin/web-search/SKILL.md';
+import webClipperSkillMd from './src/skills/builtin/web-clipper/SKILL.md';
+import knowledgeSkillMd from './src/skills/builtin/knowledge/SKILL.md';
+import pluginCtrlSkillMd from './src/skills/builtin/plugin-ctrl/SKILL.md';
+import { PluginWatcher } from './src/skills/builtin/plugin-ctrl/plugin-watcher';
+import { PluginSkillGenerator } from './src/skills/builtin/plugin-ctrl/skill-generator';
 
 export default class ObsidianCliPlugin extends Plugin {
     settings: PluginSettings;
     modelService: ModelService;
-    toolManager: ToolManager;
     knowledgeRuntime: KnowledgeRuntime | null = null;
+    toolRegistry: ToolRegistry;
+    skillRegistry: SkillRegistry;
+    private editorExtensionsRegistered = false;
+    private pluginWatcher: PluginWatcher | null = null;
 
 
     // Debounce with trailing edge (default/false) for inactivity trigger
@@ -25,25 +41,63 @@ export default class ObsidianCliPlugin extends Plugin {
         await this.loadSettings();
         new Notice('Obsidian Shell: Plugin Loaded (v2)');
 
-        this.toolManager = new ToolManager(this.app, this.settings);
-        this.modelService = new ModelService(this.app, this.settings, this.toolManager);
-        this.toolManager.setGeminiApi(this.modelService);
+        // Initialize Skill Architecture
+        this.toolRegistry = new ToolRegistry(this.app, this.settings);
+        this.skillRegistry = new SkillRegistry(this.toolRegistry);
+        this.modelService = new ModelService(this.app, this.settings, this.toolRegistry, this.skillRegistry);
+
+        // 注册原子工具
+        registerVaultTools(this.toolRegistry);
+        registerWebSearchTools(this.toolRegistry);
+        registerWebClipperTools(this.toolRegistry, this.modelService);
+        registerPluginCtrlTools(this.toolRegistry);
+
+        // 注册 Skill（从 SKILL.md，executor 为 noop — instructions 注入模式）
+        const noopExecutor = { execute: async () => ({}) };
+        this.skillRegistry.registerBuiltinFromMd(webSearchSkillMd, noopExecutor);
+        this.skillRegistry.registerBuiltinFromMd(webClipperSkillMd, noopExecutor);
+        this.skillRegistry.registerBuiltinFromMd(pluginCtrlSkillMd, noopExecutor,
+            (settings) => settings.allowPluginControl,
+        );
+
+        console.log(`[ObsidianCli] SkillRegistry initialized: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
 
         // Initialize Knowledge Runtime
         this.knowledgeRuntime = new KnowledgeRuntime(
             this.app,
             this.settings,
             this.modelService,
-            this.toolManager
         );
         await this.knowledgeRuntime.initialize();
         this.knowledgeRuntime.registerCommands(this);
         this.knowledgeRuntime.registerEvents(this);
 
-        this.registerView(
-            VIEW_TYPE_SHELL,
-            (leaf) => new ShellView(leaf, this.modelService)
+        // Knowledge 工具需要 executor，在 runtime 初始化后注册
+        registerKnowledgeTools(
+            this.toolRegistry,
+            this.knowledgeRuntime.getQueryExecutor(),
+            this.knowledgeRuntime.getFileBackExecutor(),
         );
+        this.skillRegistry.registerBuiltinFromMd(knowledgeSkillMd, noopExecutor);
+
+        console.log(`[ObsidianCli] Final: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
+
+        // 加载用户自定义 Skill
+        await this.skillRegistry.loadUserSkills('.obsidian/obsidian-cli/skills', this.app);
+
+        console.log(`[ObsidianCli] Skill system ready: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
+
+        // 防止 hot reload 时重复注册
+        this.app.workspace.detachLeavesOfType(VIEW_TYPE_SHELL);
+        try {
+            this.registerView(
+                VIEW_TYPE_SHELL,
+                (leaf) => new ShellView(leaf, this.modelService)
+            );
+        } catch (e) {
+            // hot reload 时 view type 可能已注册，忽略
+            console.log('[ObsidianCli] View type already registered, skipping.');
+        }
 
         // Add ribbon icon for quick access to Obsidian Shell
         this.addRibbonIcon('terminal', 'Open Obsidian Shell', (evt: MouseEvent) => {
@@ -67,11 +121,14 @@ export default class ObsidianCliPlugin extends Plugin {
 
         this.addSettingTab(new SettingTab(this.app, this));
 
-        this.registerEditorExtension([
-            guardianGutterExtension(),
-            ghostTextExtension(),
-            selectionMenuExtension(this.app, this.modelService)
-        ]);
+        if (!this.editorExtensionsRegistered) {
+            this.registerEditorExtension([
+                guardianGutterExtension(),
+                ghostTextExtension(),
+                selectionMenuExtension(this.app, this.modelService)
+            ]);
+            this.editorExtensionsRegistered = true;
+        }
 
         // Always register the event; runGuardianCheck will check the setting
         this.registerEvent(
@@ -86,12 +143,23 @@ export default class ObsidianCliPlugin extends Plugin {
                 }
             })
         );
+
+        // 启动插件 Skill 自动生成（后台异步，不阻塞）
+        const skillGenerator = new PluginSkillGenerator(
+            this.app, this.modelService, this.settings,
+        );
+        this.pluginWatcher = new PluginWatcher(
+            this.app, this.skillRegistry, skillGenerator, this.settings,
+        );
+        this.pluginWatcher.start();
     }
 
     onunload() {
+        this.app.workspace.detachLeavesOfType(VIEW_TYPE_SHELL);
         if (this.knowledgeRuntime) {
             this.knowledgeRuntime.cleanup();
         }
+        this.pluginWatcher?.stop();
         this.modelService.shutdown();
     }
 
@@ -121,13 +189,61 @@ export default class ObsidianCliPlugin extends Plugin {
     }
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        const raw = await this.loadData() || {};
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
+
+        // 数据迁移：旧扁平格式 → 新 providers map
+        if (!raw.providers && (raw as any).provider) {
+            const old = raw as any;
+            this.settings.activeProvider = old.provider || 'gemini';
+            this.settings.providers = {
+                'gemini': {
+                    type: 'gemini' as const,
+                    label: 'Google Gemini',
+                    apiKey: old.apiKey || '',
+                    baseUrl: '',
+                    model: old.primaryModel || 'gemini-2.5-flash'
+                },
+                'openai': {
+                    type: 'openai-compatible' as const,
+                    label: 'OpenAI',
+                    apiKey: old.openaiApiKey || '',
+                    baseUrl: old.openaiBaseUrl || 'https://api.openai.com/v1',
+                    model: old.openaiModel || 'gpt-4o'
+                },
+                'deepseek': {
+                    type: 'openai-compatible' as const,
+                    label: 'DeepSeek',
+                    apiKey: old.deepseekApiKey || '',
+                    baseUrl: old.deepseekBaseUrl || 'https://api.deepseek.com',
+                    model: old.deepseekModel || 'deepseek-chat'
+                },
+                'qwen': {
+                    type: 'openai-compatible' as const,
+                    label: 'Qwen',
+                    apiKey: old.qwenApiKey || '',
+                    baseUrl: old.qwenBaseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                    model: old.qwenModel || 'qwen-turbo'
+                }
+            };
+            // 持久化迁移结果
+            await this.saveData(this.settings);
+        }
+
+        // 确保 providers 中包含所有默认 provider（防止新增 provider 时旧数据缺失）
+        if (this.settings.providers) {
+            for (const [id, defaultConfig] of Object.entries(DEFAULT_PROVIDERS)) {
+                if (!this.settings.providers[id]) {
+                    this.settings.providers[id] = { ...defaultConfig };
+                }
+            }
+        }
     }
 
     async saveSettings() {
         await this.saveData(this.settings);
-        this.toolManager.updateSettings(this.settings);
         this.modelService.updateSettings(this.settings);
+        this.toolRegistry.updateContext(this.settings);
         if (this.knowledgeRuntime) {
             this.knowledgeRuntime.updateSettings(this.settings);
         }
@@ -165,7 +281,7 @@ export default class ObsidianCliPlugin extends Plugin {
 
         for (const m of rawUrlMatches) {
             new Notice(`📥 Auto-saving: ${m.url}`);
-            const result = await this.toolManager.execute('save_webpage', { url: m.url });
+            const result = await this.toolRegistry.execute('save_webpage', { url: m.url });
 
             if (result.success) {
                 const finalPath = result.path;
@@ -247,13 +363,36 @@ Instructions:
 
             const response = await this.modelService.chat(prompt, [], systemPromptOverride);
 
-            const jsonMatch = response.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
+            // 提取第一个完整 JSON 对象（平衡括号计数，避免贪婪 regex 抓到多余内容）
+            let data: any;
+            const braceStart = response.indexOf('{');
+            if (braceStart === -1) {
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
-
-            const data = JSON.parse(jsonMatch[0]);
+            let depth = 0;
+            let inString = false;
+            let escape = false;
+            let jsonEnd = -1;
+            for (let i = braceStart; i < response.length; i++) {
+                const ch = response[i];
+                if (escape) { escape = false; continue; }
+                if (ch === '\\' && inString) { escape = true; continue; }
+                if (ch === '"') { inString = !inString; continue; }
+                if (inString) continue;
+                if (ch === '{') depth++;
+                else if (ch === '}') { depth--; if (depth === 0) { jsonEnd = i; break; } }
+            }
+            if (jsonEnd === -1) {
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
+            try {
+                data = JSON.parse(response.substring(braceStart, jsonEnd + 1));
+            } catch {
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
 
             // For edits/suggestions
             if (data.suggestion && typeof data.suggestion === 'string') {
