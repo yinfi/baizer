@@ -1,5 +1,387 @@
 ---
 
+### [2026-04-17 22:15] 修复 Ontology Schema 加载不生效
+
+**1. 刚刚做了什么？ (What was done?)**
+- `ontology.ts` 新增 `extractFrontmatter()` 函数，从原始 markdown 内容自行解析 YAML frontmatter
+- `runtime.ts` 的 `loadOntologySchema()` 改用 `extractFrontmatter` 替代 `metadataCache.getFileCache()`
+- 新增 4 个测试：extractFrontmatter 基础解析、数组对象解析、无 frontmatter 处理、buildOntologyFile → extractFrontmatter → parseOntologySchema roundtrip
+
+**2. 为什么要这么做？ (Why was it done?)**
+- `_ontology.md` 由 `discoverOntology()` 通过 `vault.create()` 创建后，metadataCache 可能尚未解析其 frontmatter，导致 `loadOntologySchema` 返回 null，编译器跳过 ontology 注入，本体模型不生效
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- metadataCache 的异步特性导致新创建文件的 frontmatter 不可立即读取
+
+**4. 如何修复的？ (How was it fixed?)**
+- 自行解析 YAML frontmatter（简易解析器，覆盖 ontology schema 用到的结构），消除对 metadataCache 时序的依赖
+
+---
+
+### [2026-04-17 19:30] Skill 架构重构：use_skill 改为 instructions 注入模式
+
+**1. 刚刚做了什么？ (What was done?)**
+- model-service.ts: buildSkillModeTools() 改为暴露所有原子工具，executeSkill() 只返回 instructions 不再执行 executor
+- skill-registry.ts: 优化 use_skill 描述文案，明确其作用是"获取工作指引"
+- main.ts: 所有 skill 注册改用 noopExecutor，移除不需要的 executor import
+
+**2. 为什么要这么做？ (Why was it done?)**
+- Skill 功能没有生效：模型总是直接调用 search_vault 等核心工具，不走 use_skill
+- 根因是只暴露了 CORE_VAULT_TOOL_NAMES，其他工具藏在 skill 后面，模型没有动机绕道
+- 参考 Claude Code SkillTool 模式：skill 的价值是 instructions（行为指引），不是封装执行逻辑
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 无
+
+**4. 如何修复的？ (How was it fixed?)**
+- 所有原子工具始终暴露 + use_skill 返回 instructions 指导模型如何组合使用工具
+
+---
+
+
+**1. 刚刚做了什么？ (What was done?)**
+- 将 AI 供应商配置从扁平字段（apiKey, openaiApiKey, deepseekApiKey...）重构为 `providers: Record<string, ProviderConfig>` 结构化 map
+- 新增 `switchProvider()` + `onProviderChanged()` 事件机制，实现设置页与边栏的双向同步
+- 设置页从 4 个 per-provider 区块简化为统一遍历渲染，所有 provider 统一动态 model 下拉
+- 边栏切换未配置 provider 时提示并引导到设置页
+- 删除 `thinkingModel` 死字段，消除 DeepSeek/Qwen 运行时修改 id/name 的 hack
+- 新增 `loadSettings()` 数据迁移，旧格式自动转换为新格式
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 旧架构每加一个 provider 需改 6 处 switch/case（4 个文件），维护成本高
+- 设置页和边栏状态不同步，切换 provider 后 UI 不一致
+- 边栏不区分已配置/未配置 provider，切到没 key 的直接报错
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 无重大阻塞
+
+**4. 如何修复的？ (How was it fixed?)**
+- 统一数据结构 + 事件驱动同步 + 一次性数据迁移
+
+---
+
+### [2026-04-17 23:45] 清理 composable mode，统一为 simple mode
+
+**1. 刚刚做了什么？ (What was done?)**
+- 删除 SkillMode 类型、Skill.mode 字段、executeSkill 的 composable 分支
+- 所有 SKILL.md 去掉 mode 字段，plugin-ctrl executor 改为 simple 执行
+
+**2. 为什么要这么做？ (Why was it done?)**
+- composable mode 无法工作：Gemini/OpenAI startChat 后工具列表固定，运行中无法动态注入
+- Claude Skill 用 bash+文件系统实现渐进式加载，我们的环境（浏览器）不支持
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- knowledge skill 的 composable mode 导致 AI 调用 use_skill 后只收到文本消息，无法实际查询知识库
+
+**4. 如何修复的？ (How was it fixed?)**
+- 全部改为 simple mode，use_skill 直接执行 skill.execute() 返回结果
+
+---
+
+### [2026-04-17 23:30] Skill 架构 Phase 5 完成 — 全部迁移结束
+
+**1. 刚刚做了什么？ (What was done?)**
+- 删除 ToolManager（914 行）、StdioMcpClient（176 行）、MCP 设置 UI（120 行）
+- ModelService/KnowledgeRuntime/Inbox Monitor 全部迁移到 Skill 架构
+
+**2. 为什么要这么做？ (Why was it done?)**
+- Phase 5 目标：清理旧代码，完成从 MCP 工具体系到 Skill 架构的完整迁移
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- ToolManager 被 KnowledgeRuntime、ModelService、Inbox Monitor 三处引用，需逐一迁移
+
+**4. 如何修复的？ (How was it fixed?)**
+- KnowledgeRuntime 去掉 toolManager 参数，knowledge 工具通过 ToolRegistry 注册
+- ModelService 构造函数改为 (app, settings, toolRegistry, skillRegistry)
+- Inbox Monitor 改用 toolRegistry.execute('save_webpage', ...)
+
+---
+
+### [2026-04-17 23:00] Skill 架构 Phase 4 实施完成
+
+**1. 刚刚做了什么？ (What was done?)**
+- SkillRegistry.loadUserSkills 接入 SkillLoader，从 vault 目录加载用户自定义 SKILL.md
+- main.ts 启动时扫描 .obsidian/obsidian-cli/skills/ 目录
+
+**2. 为什么要这么做？ (Why was it done?)**
+- Phase 4 目标：用户可以在 vault 中创建 SKILL.md 扩展 AI 能力
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 无
+
+**4. 如何修复的？ (How was it fixed?)**
+- N/A
+
+---
+
+### [2026-04-17 22:45] 内置 Skill 重构为 SKILL.md + executor 格式
+
+**1. 刚刚做了什么？ (What was done?)**
+- 4 个内置 Skill 从平铺 .ts 重构为 SKILL.md + executor.ts 子目录格式
+- esbuild 添加 .md text loader，SkillRegistry 新增 registerBuiltinFromMd()
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 统一内置和用户 Skill 的格式，SKILL.md 可读可检视可覆盖
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- Obsidian 插件运行在浏览器环境无 fs，需要 esbuild text loader 在编译时导入 .md
+
+**4. 如何修复的？ (How was it fixed?)**
+- esbuild.config.mjs 添加 `loader: { '.md': 'text' }`，md.d.ts 声明模块类型
+
+---
+
+### [2026-04-17 22:15] Skill 架构 Phase 3 实施完成
+
+**1. 刚刚做了什么？ (What was done?)**
+- ModelService 接入 Skill 层：buildSkillModeTools + executeSkill + Skill 摘要注入 system prompt
+- AI 现在通过 use_skill 元工具调用 Skill，context 从 ~2000+ tokens 降到 ~800 tokens
+
+**2. 为什么要这么做？ (Why was it done?)**
+- Phase 3 目标：让 AI 通过 Skill 层调用工具，实现渐进式披露
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 斜杠命令路由不需要改——/save 已经通过 AI chat 间接走 use_skill
+
+**4. 如何修复的？ (How was it fixed?)**
+- N/A，设计已覆盖
+
+---
+
+### [2026-04-17 21:45] Skill 架构 Phase 2 实施完成
+
+**1. 刚刚做了什么？ (What was done?)**
+- 新建 4 个 Skill 文件（web-clipper, web-search, knowledge, plugin-ctrl）
+- 14 个原子工具注册到 ToolRegistry，4 个 Skill 注册到 SkillRegistry
+- KnowledgeRuntime 添加 getter 暴露 executor
+
+**2. 为什么要这么做？ (Why was it done?)**
+- Phase 2 目标：将 ToolManager 中的工具拆分为独立模块，为 Phase 3 接入做准备
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- save_webpage 不适合拆成 3 个原子工具让 AI 编排，改为 simple skill 内部封装完整流程
+- knowledge executor 是 private 的，需要添加 getter
+
+**4. 如何修复的？ (How was it fixed?)**
+- web-clipper 作为 simple skill 封装完整 fetch+parse+save 流程
+- KnowledgeRuntime 添加 getQueryExecutor/getFileBackExecutor getter
+
+---
+
+### [2026-04-17 21:15] Skill 架构 Phase 1 实施完成
+
+**1. 刚刚做了什么？ (What was done?)**
+- 新建 5 个文件搭建 Skill 架构骨架：types.ts, tool-registry.ts, skill-registry.ts, skill-loader.ts, vault-ops.ts
+- 在 main.ts 中初始化 SkillRegistry，与现有 ToolManager 并行运行
+
+**2. 为什么要这么做？ (Why was it done?)**
+- Phase 1 目标：搭建骨架，不改变现有行为，为后续迁移打基础
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 无，编译一次通过
+
+**4. 如何修复的？ (How was it fixed?)**
+- N/A
+
+---
+
+### [2026-04-17 20:30] Skill 架构设计（替换 MCP 工具体系）
+
+**1. 刚刚做了什么？ (What was done?)**
+- 深度分析了当前 MCP 工具体系的 5 个核心问题，设计了完整的 Skill 架构方案
+- 输出设计文档 `docs/superpowers/specs/2026-04-17-skill-architecture-design.md`
+
+**2. 为什么要这么做？ (Why was it done?)**
+- ToolManager 914 行 God Object，16 个工具始终占 ~2000+ tokens context
+- 参考 Claude Agent Skills 三级渐进式加载，用两层架构（原子工具 + Skill 编排）替换
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 架构分歧：Skill 替代工具 vs Skill 编排工具，最终确认为后者
+
+**4. 如何修复的？ (How was it fixed?)**
+- 分析 Claude Skill 文档确认三级加载模型，与用户讨论确认分层方案
+
+---
+
+### [2026-04-16 07:10] Ontology auto-discovery 接入 runtime
+
+**1. 刚刚做了什么？ (What was done?)**
+- 将 ontology discovery 纯函数接入 KnowledgeRuntime，启动时自动生成 _ontology.md
+
+**2. 为什么要这么做？ (Why was it done?)**
+- discovery 纯函数已实现但未接入触发入口，vault 里 87 篇文章却没有 ontology 文件
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- modelService 未存为成员变量，需要添加引用
+
+**4. 如何修复的？ (How was it fixed?)**
+- 添加 modelService 成员变量，实现 discoverOntology() 方法（聚合统计 + AI 调用 + 写文件），接入 onMetadataReady 启动流程
+
+---
+
+### [2026-04-16 06:50] Guardian JSON 解析崩溃修复
+
+**1. 刚刚做了什么？ (What was done?)**
+- 修复 main.ts 和 memory-manager.ts 中贪婪 regex JSON 提取导致的 SyntaxError
+
+**2. 为什么要这么做？ (Why was it done?)**
+- AI 返回 JSON 后跟解释文字时，贪婪 regex 抓到非法字符串导致 JSON.parse 崩溃
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 同一 bug 模式存在于两个文件（main.ts Guardian + memory-manager.ts Profile extraction）
+
+**4. 如何修复的？ (How was it fixed?)**
+- 用平衡括号计数器替换贪婪 regex，精确提取第一个完整 JSON 对象，解析失败时优雅降级
+
+---
+
+### [2026-04-15 13:00] 实现 Map-Reduce 编译器 + 增量重编译
+
+**1. 刚刚做了什么？ (What was done?)**
+- 实现 chunkDocument()：按 markdown heading 边界分块，段落兜底，500 字符 overlap，上下文前缀
+- 实现 mergeExtractions()：纯函数合并去重（topics/concepts/claims/entities/categorized_knowledge）
+- 实现 computeContentHash()：排除 frontmatter 的正文 hash
+- 修改 compileNote()：短文章走单次调用，长文章走 Map-Reduce（批次并行 + Promise.allSettled 部分失败处理）
+- 实现 detectStaleFiles()：schema_hash + content_hash 比较触发增量重编译
+- buildSummaryMarkdown 新增 contentHash 参数
+- 移除 buildCompilerPrompt 中的 substring(0, 30000) 硬截断
+- DRY：统一 stuck-file reset 到 startup scan
+- 编写 19 个新测试（29 个 compiler 测试全过）
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 超长文章不再丢失知识，ontology 迭代不再需要全量重跑
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 多次编辑导致函数声明行丢失（buildCompilerPrompt 的 export function 行被吞掉）
+
+**4. 如何修复的？ (How was it fixed?)**
+- 通过 esbuild 编译错误定位到具体行号，手动修复缺失的函数声明
+
+---
+
+### [2026-04-15 12:30] Eng Review: Map-Reduce 编译器设计
+
+**1. 刚刚做了什么？ (What was done?)**
+- 完成 /plan-eng-review，审查 Map-Reduce 编译器 + 增量重编译设计文档，3 issues found and resolved
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 锁定实现前的架构细节，确保启动性能、代码质量、测试覆盖、API 限流都有方案
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- detectStaleFiles 全量扫描会拖慢启动（1000 次文件读取）
+- stuck-file reset 逻辑在 runtime.ts 和 compiler.ts 中重复（DRY violation）
+- Map 并行度硬编码不适配不同 API 计划
+
+**4. 如何修复的？ (How was it fixed?)**
+- 加快速路径：先比较 ontology hash，没变只查 mtime 变化的文件
+- 统一 stuck-file reset 到 startup scan，删除 compileAllPending 中的重复
+- concurrency 改为 settings 可配置（默认 3）
+
+---
+
+### [2026-04-15 12:00] Design: Map-Reduce 编译器 + 增量重编译
+
+**1. 刚刚做了什么？ (What was done?)**
+- 通过 /office-hours 完成了 Map-Reduce 编译器 + 增量重编译的设计文档，经过 2 轮对抗性 spec review（12 issues found & fixed, 8/10）
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 超长文章（>30000 字符）被硬截断丢失知识；ontology schema 变更后只能全量重跑
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- Reviewer 发现 mtime 做内容变更检测会导致无限重编译循环（编译器写 frontmatter 会更新 mtime）
+- 阈值不一致（25000 vs 30000）、部分失败处理缺失、summary 查找路径未指定
+
+**4. 如何修复的？ (How was it fixed?)**
+- 用 content_hash（排除 frontmatter 的正文 hash）替代 mtime；统一阈值为 30000；添加 Promise.allSettled 部分失败策略；明确 knowledge_summary 字段定位 summary 路径
+
+---
+
+### [2026-04-15 11:20] 完成 Ontology 模块测试
+
+**1. 刚刚做了什么？ (What was done?)**
+- 为 ontology.ts 编写 14 个测试用例，覆盖 parseOntologySchema、validateOntologySchema、computeSchemaHash、buildDiscoveryPrompt、parseDiscoveryResponse、buildOntologyFile
+- 为 compiler.ts 新增 4 个 ontology 扩展测试，覆盖 buildCompilerPrompt 带 schema 注入、buildSummaryMarkdown 带 schemaHash/categorized_knowledge/entities
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 确保 ontology 纯函数模块和 compiler ontology 扩展的正确性，为后续 runtime 集成提供信心
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- compiler.ts 新增了 `import { App, TFile } from 'obsidian'`，导致测试直接运行失败（Cannot find module 'obsidian'）
+
+**4. 如何修复的？ (How was it fixed?)**
+- 使用已有的 `test/setup-mock.js` 通过 `--require` 预加载 obsidian mock 解决
+
+---
+
+### [2026-04-15 09:50] Design: Ontology-Driven Knowledge Wiki 设计文档
+
+**1. 刚刚做了什么？ (What was done?)**
+- 通过 /office-hours 完成了"本体模型驱动 Knowledge Wiki"的完整设计文档
+- 经过需求诊断（3 个 forcing questions）、前提挑战、市场搜索、独立第二意见、方案对比、对抗性审查
+- 设计文档存放在 `~/.gstack/projects/yinfi-obsidian-cli/Administrator-main-design-20260415-094500.md`
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 现有 Knowledge Wiki 的 compiler 让 AI 自由提取，提取质量不可控不可预测
+- 引入本体模型（ontology schema）让用户定义"提取什么"，使 AI 成为受控编译器而非自由发挥
+- 逆向优先策略：先 AI 自由提取 → 用户从结果中提炼 ontology → 后续按 ontology 提取
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 第一版设计文档 reviewer 评分 6/10：schema 格式不明确、prompt 模板缺失、relations 是研究级问题、迁移策略未定义
+- P3 前提经历两次修正：正向 → 逆向 → 正向 → 接受第二意见回到逆向
+
+**4. 如何修复的？ (How was it fixed?)**
+- Schema 改为纯 frontmatter YAML（利用 metadataCache 原生解析）
+- 补充了 compiler prompt 模板和 discovery prompt 模板
+- Relations 移到阶段三，linter 只保留结构性检查
+- 新增降级容错、迁移策略、token 成本估算
+- 修复后质量分提升到约 8/10
+
+---
+
+**1. 刚刚做了什么？ (What was done?)**
+- 新建 `src/knowledge/frontmatter.ts`：通过 Obsidian processFrontMatter API 读写编译状态
+- 重写 compiler.ts：compileNote 接收 TFile，通过 frontmatter 管理状态
+- 重写 watcher.ts：用 frontmatter 替代 registry，删除 onFileDelete/onFileRename 的状态跟踪
+- 重写 runtime.ts：移除 registry 生命周期，加启动扫描/迁移/自动编译
+- 简化 linter.ts：直接查 metadataCache，不再依赖 registry
+- 精简 types.ts：删除 registry 相关类型和状态机
+- 删除 registry.ts 和 registry.test.ts
+- indexer.ts 删除未使用的 registry 参数
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 外部 JSON registry 导致大量同步复杂度（路径索引、重命名跟踪、启动扫描对账）
+- frontmatter 方案：状态跟着文件走，重命名/移动零成本，利用 Obsidian 原生 metadataCache
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 无
+
+**4. 如何修复的？ (How was it fixed?)**
+- N/A
+
+---
+
+### [2026-04-13 16:00] Fix: 剪藏目录新文件不自动注册和编译到 Knowledge Wiki
+
+**1. 刚刚做了什么？ (What was done?)**
+- watcher 新增 `onCompileNeeded` 回调 + `triggerCompile()` 方法
+- runtime 构造函数中注入 debounce 5秒的自动编译函数
+- 移除事件注册中的 `knowledgeAutoCompile` 守卫，注册始终执行
+- `onFileModify` 修复：stale 后直接转 pending
+- `initialize()` 启动时扫描监听目录，注册离线期间新增的文件
+- 启动时如有 pending 项且 autoCompile 开启，延迟 10 秒触发编译
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 原代码中注册和编译被同一个 `knowledgeAutoCompile` 开关守卫，默认 false 导致新文件完全不入队
+- 即使开关打开，watcher 也只做注册不触发编译，用户仍需手动执行命令
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 无
+
+**4. 如何修复的？ (How was it fixed?)**
+- 分离关注点：注册始终执行，自动编译通过回调+debounce 在 autoCompile 开启时触发
+
+---
+
 ### [2026-04-09] Optimize: file-back 自动/手动双模式 + 后台执行 + 索引字段补全
 
 **1. 刚刚做了什么？ (What was done?)**
