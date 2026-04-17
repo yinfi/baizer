@@ -22,28 +22,55 @@ declare module "obsidian" {
     }
 }
 
+// --- Provider 配置 ---
+export type ProviderType = 'gemini' | 'openai-compatible';
+
+export interface ProviderConfig {
+    type: ProviderType;
+    label: string;
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+}
+
+export const DEFAULT_PROVIDERS: Record<string, ProviderConfig> = {
+    'gemini': {
+        type: 'gemini',
+        label: 'Google Gemini',
+        apiKey: '',
+        baseUrl: '',
+        model: 'gemini-2.5-flash'
+    },
+    'openai': {
+        type: 'openai-compatible',
+        label: 'OpenAI',
+        apiKey: '',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4o'
+    },
+    'deepseek': {
+        type: 'openai-compatible',
+        label: 'DeepSeek',
+        apiKey: '',
+        baseUrl: 'https://api.deepseek.com',
+        model: 'deepseek-chat'
+    },
+    'qwen': {
+        type: 'openai-compatible',
+        label: 'Qwen',
+        apiKey: '',
+        baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        model: 'qwen-turbo'
+    }
+};
+
+/** 内置 provider key，不可被用户删除 */
+export const BUILTIN_PROVIDER_KEYS = Object.keys(DEFAULT_PROVIDERS);
+
 export interface PluginSettings {
     // --- 🤖 Core Connection ---
-    provider: 'gemini' | 'openai' | 'deepseek' | 'qwen';
-    apiKey: string;
-    primaryModel: string;
-
-    // OpenAI Compatible
-    openaiApiKey: string;
-    openaiBaseUrl: string;
-    openaiModel: string;
-
-    // DeepSeek
-    deepseekApiKey: string;
-    deepseekBaseUrl: string;
-    deepseekModel: string;
-
-    // Qwen
-    qwenApiKey: string;
-    qwenBaseUrl: string;
-    qwenModel: string;
-
-    thinkingModel: string;
+    activeProvider: string;
+    providers: Record<string, ProviderConfig>;
     contextWindow: number;
 
     // --- 🛡️ Guardian Behavior ---
@@ -74,35 +101,21 @@ export interface PluginSettings {
     wechatInboxPath: string;
     wechatStoragePath: string;
 
-    // --- 🔌 MCP Servers ---
-    mcpServers: Record<string, { command: string; args: string[] }>;
-
     // --- 📚 Knowledge Compiler ---
     knowledgeSourceFolders: string[];
     knowledgeAutoCompile: boolean;
     knowledgeWikiFolder: string;
     knowledgeMaxCompileBatch: number;
+
+    // --- 🔌 Plugin Skill Generator ---
+    autoGeneratePluginSkills: boolean;
+    pluginSkillExcludeList: string[];
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
     // Core
-    provider: 'gemini',
-    apiKey: '',
-    primaryModel: 'gemini-2.5-flash',
-
-    openaiApiKey: '',
-    openaiBaseUrl: 'https://api.openai.com/v1',
-    openaiModel: 'gpt-4o',
-
-    deepseekApiKey: '',
-    deepseekBaseUrl: 'https://api.deepseek.com',
-    deepseekModel: 'deepseek-chat',
-
-    qwenApiKey: '',
-    qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    qwenModel: 'qwen-turbo',
-
-    thinkingModel: 'gemini-2.5-pro',
+    activeProvider: 'gemini',
+    providers: { ...DEFAULT_PROVIDERS },
     contextWindow: 100000,
 
     // Guardian
@@ -128,44 +141,25 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     // Prompt
     customizePrompt: false,
     systemPrompt: `You are a command-line interface inside Obsidian. Be concise. Output valid Markdown.
-    
-IMPORTANT: Before creating a generic note for tasks, reminders, calendars, or other specialized content, ALWAYS check if a specialized plugin is installed using 'list_plugins'.
-- If a relevant plugin is found (e.g., "obsidian-tasks-plugin", "obsidian-kanban", "reminder"), use 'get_plugin_commands' to find the appropriate command and execute it.
-- If you need to know how a plugin is configured (e.g. default folder), use 'get_plugin_settings'.
-- Only create a generic Markdown note if no suitable plugin is available or if the user explicitly asks for a note.
 
-You have access to the internet via the 'web_search' tool. Use it to find up-to-date information, news, or documentation when the user asks for information not present in their vault.
-
-你有一个个人知识库可用。当用户的问题可能与你之前积累的知识相关时，
-使用 query_knowledge 工具查阅知识库。
-如果知识库中没有相关内容，正常回答即可，不要强行引用。
-知识库检索不足时，可以用 search_vault 搜索整个 vault 补充。
-
-引用规则：如果你的回答引用了知识库中的文章，必须在回答末尾添加"---"分隔线，
-然后列出引用来源，格式为：
----
-📚 引用来源：
-- [[文章路径|文章标题]]
-每篇引用的文章都要列出。未引用知识库时不要添加此部分。
-
-当你的回答综合了多个知识来源、产出了有价值的新洞察或对比分析时，
-使用 file_back_knowledge 工具将回答归档到知识库。
-不要对简单的事实查询做回填，只回填有综合价值的内容。
-注意：如果用户对回答点赞，无论你的判断如何都执行回填；
-如果用户点踩，则不回填。用户反馈优先于你的判断。`,
+你是用户的个人 AI 助手，拥有用户的笔记库和知识库。
+回答实质性问题前，先查询用户的知识库和笔记，基于用户的实际情况给出个性化回答。
+不要凭空生成通用内容。如果知识库中没有相关内容，正常回答即可。
+直接操作笔记（读写搜索）时使用 vault 工具，其他能力通过 use_skill 调用。`,
 
     // WeChat
     wechatInboxPath: 'Inbox.md',
     wechatStoragePath: 'Clippings',
 
-    // MCP
-    mcpServers: {},
-
     // Knowledge Compiler
     knowledgeSourceFolders: [],
     knowledgeAutoCompile: false,
     knowledgeWikiFolder: 'Knowledge Wiki',
-    knowledgeMaxCompileBatch: 50
+    knowledgeMaxCompileBatch: 50,
+
+    // Plugin Skill Generator
+    autoGeneratePluginSkills: true,
+    pluginSkillExcludeList: []
 };
 
 export interface IPlugin extends Plugin {
