@@ -18,16 +18,23 @@ const SYSTEM_PROMPT = `你是一个 Obsidian 插件专家。根据提供的插�
 
 输出格式要求：
 1. YAML frontmatter：name, description, triggers.keywords, tools
-2. Markdown body：插件能力、可用命令、操作指南
+2. Markdown body：插件能力、文件格式、操作指南
 
 关键原则：
 - name 格式：plugin-{pluginId}，小写+连字符
 - description 简洁（<200字符），说明插件能做什么、什么时候用
 - keywords 包含中英文触发词
-- tools 列出 AI 需要的工具（vault 操作 + execute_plugin_command）
-- 操作指南要具体：用什么工具、写什么格式、存到哪里
-- 如果插件主要通过文件格式工作，重点描述文件格式而非命令
-- 只输出 SKILL.md 的内容，不要包含其他说明文字`;
+- tools 必须包含实际要用的 vault 工具（read_note, create_note, append_to_note, update_note, search_vault）和 execute_plugin_command
+- 只输出 SKILL.md 的内容，不要包含其他说明文字
+
+最重要的原则 — 文件操作指南必须具体：
+- AI 助手通过 vault 工具操作文件来完成任务，不是通过 UI 交互
+- 必须说明：用哪个工具（如 append_to_note）、写什么格式的内容、写到哪个文件路径
+- 如果插件通过特定 Markdown 格式工作（如 checkbox 任务、kanban 列表），必须给出完整的格式示例
+- 如果插件有默认文件夹或文件路径（从 settings 中读取），必须说明
+- 操作指南中的每个步骤都要包含具体的工具调用示例，例如：
+  "用 append_to_note 追加到 Daily/2026-04-18.md：\`- [ ] 任务内容 📅 2026-04-18\`"
+- 如果不确定目标文件路径，说明默认策略（如"追加到今日 Daily Note，路径格式 Daily/YYYY-MM-DD.md"）`;
 
 export class PluginSkillGenerator {
   constructor(
@@ -66,6 +73,13 @@ export class PluginSkillGenerator {
     const settingsJson = Object.keys(info.settings).length > 0
       ? JSON.stringify(info.settings, null, 2)
       : '（无可读设置）';
+
+    // 收集 vault 顶层目录结构，帮助 AI 判断文件该放哪里
+    const vaultFolders = this.getVaultTopFolders();
+    const folderList = vaultFolders.length > 0
+      ? vaultFolders.join(', ')
+      : '（无法获取）';
+
     return `请为以下 Obsidian 插件生成 SKILL.md：
 
 ## 插件信息
@@ -80,7 +94,35 @@ ${cmdList}
 ## 当前设置
 ${settingsJson}
 
-请生成完整的 SKILL.md 内容（以 --- frontmatter --- 开头）。`;
+## Vault 顶层目录
+${folderList}
+
+## AI 助手可用的 vault 工具
+- read_note(path) — 读取笔记内容
+- create_note(path, content) — 创建新笔记
+- update_note(path, content) — 覆盖更新笔记
+- append_to_note(path, content) — 追加内容到笔记末尾
+- search_vault(query) — 搜索 vault 中的文件
+- list_notes(folder) — 列出文件夹中的笔记
+- execute_plugin_command(commandId) — 执行插件命令
+
+请生成完整的 SKILL.md 内容（以 --- frontmatter --- 开头）。
+操作指南中每个步骤必须包含具体的工具调用和文件路径示例。`;
+  }
+
+  /** 获取 vault 顶层文件夹名称 */
+  private getVaultTopFolders(): string[] {
+    try {
+      const root = this.app.vault.getRoot();
+      if (!root || !root.children) return [];
+      return root.children
+        .filter((f: any) => f.children !== undefined) // 只取文件夹
+        .filter((f: any) => !f.name.startsWith('.'))   // 排除隐藏目录
+        .map((f: any) => f.name)
+        .slice(0, 20); // 最多 20 个
+    } catch {
+      return [];
+    }
   }
 
   async generateSkillMd(info: PluginInfo): Promise<string> {
