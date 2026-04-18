@@ -39,7 +39,6 @@ tools: ["read_note", "append_to_note", "execute_plugin_command"]
 - frontmatter 中 description 必须是单行字符串，不要用 | 或 > 多行语法
 - triggers 必须是嵌套格式（triggers:\n  keywords: [...]），不要用 triggers.keywords
 - tools 用 JSON 数组格式 ["tool1", "tool2"]
-- 整个文件控制在 50 行以内
 - 操作指南必须包含具体的工具调用和文件路径示例
 - 重点写"AI 怎么用工具操作文件"，不要写功能介绍
 - 只输出 SKILL.md 内容`;
