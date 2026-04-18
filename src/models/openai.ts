@@ -1,4 +1,4 @@
-import { IModelProvider, ModelConfig, IChatSession, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption } from './interfaces';
+import { IModelProvider, ModelConfig, IChatSession, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption, StreamEvent } from './interfaces';
 import { requestUrl, RequestUrlParam } from 'obsidian';
 import { logger } from '../utils/logger';
 
@@ -147,6 +147,105 @@ export class OpenAIProvider implements IModelProvider {
 
         return result;
     }
+
+    async *chatCompletionStream(messages: any[], tools?: ToolDefinition[]): AsyncGenerator<StreamEvent, void, unknown> {
+        const url = `${this.config.baseUrl || 'https://api.openai.com/v1'}/chat/completions`;
+
+        const body: any = {
+            model: this.config.modelName,
+            messages,
+            temperature: 0.7,
+            stream: true
+        };
+
+        if (tools && tools.length > 0) {
+            body.tools = tools.map(t => ({
+                type: 'function',
+                function: {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.parameters
+                }
+            }));
+        }
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${this.config.apiKey}`
+            },
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            throw new Error(`OpenAI API Error: ${response.status}`);
+        }
+
+        const reader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullText = '';
+        const pendingToolCalls = new Map<number, { name: string; arguments: string }>();
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || !trimmed.startsWith('data: ')) continue;
+                const data = trimmed.slice(6);
+                if (data === '[DONE]') continue;
+
+                try {
+                    const parsed = JSON.parse(data);
+                    const delta = parsed.choices?.[0]?.delta;
+                    if (!delta) continue;
+
+                    if (delta.reasoning_content) {
+                        yield { type: 'thinking' as const, content: delta.reasoning_content };
+                    }
+
+                    if (delta.content) {
+                        fullText += delta.content;
+                        yield { type: 'text_delta' as const, content: delta.content };
+                    }
+
+                    if (delta.tool_calls) {
+                        for (const tc of delta.tool_calls) {
+                            const idx = tc.index ?? 0;
+                            if (!pendingToolCalls.has(idx)) {
+                                pendingToolCalls.set(idx, { name: '', arguments: '' });
+                            }
+                            const pending = pendingToolCalls.get(idx)!;
+                            if (tc.function?.name) pending.name += tc.function.name;
+                            if (tc.function?.arguments) pending.arguments += tc.function.arguments;
+                        }
+                    }
+                } catch {
+                    // 忽略解析错误的行
+                }
+            }
+        }
+
+        for (const [, tc] of pendingToolCalls) {
+            if (tc.name) {
+                try {
+                    const args = tc.arguments ? JSON.parse(tc.arguments) : {};
+                    yield { type: 'tool_call' as const, name: tc.name, args };
+                } catch {
+                    yield { type: 'tool_call' as const, name: tc.name, args: {} };
+                }
+            }
+        }
+
+        yield { type: 'done' as const, text: fullText };
+    }
 }
 
 class OpenAIChatSession implements IChatSession {
@@ -190,6 +289,53 @@ class OpenAIChatSession implements IChatSession {
         this.history.push(rawMessage);
 
         return OpenAIProvider.toGenerationResult(rawMessage);
+    }
+
+    async *sendMessageStream(text: string | ToolResult[]): AsyncGenerator<StreamEvent, void, unknown> {
+        if (typeof text === 'string') {
+            this.history.push({ role: 'user', content: text });
+        } else {
+            const lastMsg = this.history[this.history.length - 1];
+            if (lastMsg?.role === 'assistant' && lastMsg.tool_calls) {
+                text.forEach(t => {
+                    const call = lastMsg.tool_calls.find((tc: any) => tc.function.name === t.name);
+                    if (call) {
+                        this.history.push({
+                            role: 'tool',
+                            tool_call_id: call.id,
+                            name: t.name,
+                            content: JSON.stringify(t.response)
+                        });
+                    }
+                });
+            }
+        }
+
+        let fullText = '';
+        const toolCalls: any[] = [];
+
+        for await (const event of this.provider.chatCompletionStream(this.history, this.tools)) {
+            if (event.type === 'text_delta') {
+                fullText += event.content;
+            } else if (event.type === 'tool_call') {
+                toolCalls.push({
+                    id: `call_${Date.now()}_${toolCalls.length}`,
+                    type: 'function',
+                    function: { name: event.name, arguments: JSON.stringify(event.args) }
+                });
+            }
+            if (event.type !== 'done') {
+                yield event;
+            }
+        }
+
+        const assistantMsg: any = { role: 'assistant', content: fullText || null };
+        if (toolCalls.length > 0) {
+            assistantMsg.tool_calls = toolCalls;
+        }
+        this.history.push(assistantMsg);
+
+        yield { type: 'done' as const, text: fullText };
     }
 
     async getHistory(): Promise<ChatMessage[]> {

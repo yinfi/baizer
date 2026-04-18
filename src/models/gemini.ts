@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI, GenerativeModel, ChatSession } from '@google/generative-ai';
 import { requestUrl } from 'obsidian';
-import { IModelProvider, ModelConfig, IChatSession, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption } from './interfaces';
+import { IModelProvider, ModelConfig, IChatSession, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption, StreamEvent } from './interfaces';
 import { logger } from '../utils/logger';
 
 export class GeminiProvider implements IModelProvider {
@@ -127,6 +127,47 @@ class GeminiChatSession implements IChatSession {
                 args: fc.args
             })) : undefined
         };
+    }
+
+    async *sendMessageStream(text: string | ToolResult[]): AsyncGenerator<StreamEvent, void, unknown> {
+        let streamResult;
+        if (typeof text === 'string') {
+            streamResult = await this.chat.sendMessageStream(text);
+        } else {
+            const toolResponse = text.map(t => ({
+                functionResponse: {
+                    name: t.name,
+                    response: t.response
+                }
+            }));
+            streamResult = await this.chat.sendMessageStream(toolResponse);
+        }
+
+        let fullText = '';
+
+        for await (const chunk of streamResult.stream) {
+            const candidate = chunk.candidates?.[0];
+            if (!candidate?.content?.parts) continue;
+
+            for (const part of candidate.content.parts) {
+                if ((part as any).thought === true && (part as any).text) {
+                    yield { type: 'thinking' as const, content: (part as any).text };
+                } else if (part.text) {
+                    fullText += part.text;
+                    yield { type: 'text_delta' as const, content: part.text };
+                }
+            }
+        }
+
+        const response = await streamResult.response;
+        const functionCalls = response.functionCalls();
+        if (functionCalls && functionCalls.length > 0) {
+            for (const fc of functionCalls) {
+                yield { type: 'tool_call' as const, name: fc.name, args: fc.args };
+            }
+        }
+
+        yield { type: 'done' as const, text: fullText };
     }
 
     async getHistory(): Promise<ChatMessage[]> {
