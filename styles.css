@@ -844,3 +844,137 @@ textarea.shell-input::placeholder {
     color: var(--color-red);
     border-color: var(--color-red);
 }
+
+/* ==================== Think Timeline ==================== */
+
+.shell-stream-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.shell-think-timeline {
+    position: relative;
+    padding: 8px 0 8px 20px;
+    margin-bottom: 8px;
+    border-left: 2px solid var(--background-modifier-border);
+    font-size: 0.85em;
+    color: var(--text-muted);
+}
+
+.shell-think-timeline.is-collapsed .think-node {
+    display: none;
+}
+
+.shell-think-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    padding: 2px 0;
+    user-select: none;
+}
+
+.shell-think-summary:hover {
+    color: var(--text-normal);
+}
+
+.shell-think-summary .think-toggle {
+    transition: transform 0.15s ease;
+    font-size: 10px;
+}
+
+.shell-think-timeline.is-collapsed .think-toggle {
+    transform: rotate(-90deg);
+}
+
+.think-node {
+    position: relative;
+    padding: 4px 0 4px 12px;
+    margin: 2px 0;
+}
+
+.think-node::before {
+    content: '';
+    position: absolute;
+    left: -21px;
+    top: 10px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--background-modifier-border);
+}
+
+.think-node.is-thinking::before {
+    background: var(--text-accent);
+    animation: think-pulse 1.5s ease-in-out infinite;
+}
+
+.think-node.is-tool::before {
+    background: var(--interactive-accent);
+}
+
+@keyframes think-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
+
+.think-node-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.think-node-header:hover {
+    color: var(--text-normal);
+}
+
+.think-node-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.think-node-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.think-node-detail {
+    display: none;
+    margin-top: 4px;
+    padding: 6px 8px;
+    background: var(--background-secondary);
+    border-radius: 4px;
+    font-family: var(--font-monospace);
+    font-size: 0.9em;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.think-node.is-expanded .think-node-detail {
+    display: block;
+}
+
+.shell-response-content {
+    min-height: 1em;
+}
+
+.shell-stream-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1.1em;
+    background: var(--text-accent);
+    margin-left: 1px;
+    vertical-align: text-bottom;
+    animation: cursor-blink 0.8s step-end infinite;
+}
+
+@keyframes cursor-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
