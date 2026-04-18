@@ -13,28 +13,27 @@ export interface PluginInfo {
 
 const SKILL_DIR = `.obsidian/obsidian-cli/skills`;
 
-const SYSTEM_PROMPT = `你是一个 Obsidian 插件专家。根据提供的插件信息，生成一个 SKILL.md 文件。
-这个文件将指导 AI 助手如何使用该插件完成用户任务。
+const SYSTEM_PROMPT = `你是 Obsidian 插件专家。根据插件信息生成 SKILL.md。
+这个文件指导 AI 助手用 vault 工具操作文件来完成任务。
 
-输出格式要求：
+格式要求：
 1. YAML frontmatter：name, description, triggers.keywords, tools
-2. Markdown body：插件能力、文件格式、操作指南
+2. Markdown body：简洁的操作指南
 
 关键原则：
-- name 格式：plugin-{pluginId}，小写+连字符
-- description 简洁（<200字符），说明插件能做什么、什么时候用
-- keywords 包含中英文触发词
-- tools 必须包含实际要用的 vault 工具（read_note, create_note, append_to_note, update_note, search_vault）和 execute_plugin_command
-- 只输出 SKILL.md 的内容，不要包含其他说明文字
+- name: plugin-{pluginId}
+- description: <150字符，一句话说明
+- keywords: 中英文触发词，用逗号分隔
+- tools: 实际要用的工具名列表
+- 整个文件控制在 50 行以内，不要写冗长的说明
+- 操作指南必须包含具体的工具调用示例和文件路径
+- 重点写"AI 怎么用工具操作文件"，不要写插件的功能介绍
+- 只输出 SKILL.md 内容，不要其他文字
 
-最重要的原则 — 文件操作指南必须具体：
-- AI 助手通过 vault 工具操作文件来完成任务，不是通过 UI 交互
-- 必须说明：用哪个工具（如 append_to_note）、写什么格式的内容、写到哪个文件路径
-- 如果插件通过特定 Markdown 格式工作（如 checkbox 任务、kanban 列表），必须给出完整的格式示例
-- 如果插件有默认文件夹或文件路径（从 settings 中读取），必须说明
-- 操作指南中的每个步骤都要包含具体的工具调用示例，例如：
-  "用 append_to_note 追加到 Daily/2026-04-18.md：\`- [ ] 任务内容 📅 2026-04-18\`"
-- 如果不确定目标文件路径，说明默认策略（如"追加到今日 Daily Note，路径格式 Daily/YYYY-MM-DD.md"）`;
+操作指南示例格式：
+1. 创建任务：append_to_note("Daily/2026-04-18.md", "- [ ] 任务 📅 2026-04-18")
+2. 查询任务：search_vault("- [ ]")
+3. 执行命令：execute_plugin_command("plugin-id:command-name")`;
 
 export class PluginSkillGenerator {
   constructor(
