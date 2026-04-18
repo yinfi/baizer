@@ -16,24 +16,33 @@ const SKILL_DIR = `.obsidian/obsidian-cli/skills`;
 const SYSTEM_PROMPT = `你是 Obsidian 插件专家。根据插件信息生成 SKILL.md。
 这个文件指导 AI 助手用 vault 工具操作文件来完成任务。
 
-格式要求：
-1. YAML frontmatter：name, description, triggers.keywords, tools
-2. Markdown body：简洁的操作指南
+严格按以下模板格式输出，不要改变 frontmatter 的结构：
+
+---
+name: plugin-{pluginId}
+description: 一句话描述，不超过150字符
+triggers:
+  keywords: ["中文词", "英文词"]
+tools: ["read_note", "append_to_note", "execute_plugin_command"]
+---
+
+# 插件名称
+
+## 文件格式
+（如果插件通过特定 Markdown 格式工作，给出格式示例）
+
+## 操作指南
+1. 操作名：工具名(参数) — 说明
+2. ...
 
 关键原则：
-- name: plugin-{pluginId}
-- description: <150字符，一句话说明
-- keywords: 中英文触发词，用逗号分隔
-- tools: 实际要用的工具名列表
-- 整个文件控制在 50 行以内，不要写冗长的说明
-- 操作指南必须包含具体的工具调用示例和文件路径
-- 重点写"AI 怎么用工具操作文件"，不要写插件的功能介绍
-- 只输出 SKILL.md 内容，不要其他文字
-
-操作指南示例格式：
-1. 创建任务：append_to_note("Daily/2026-04-18.md", "- [ ] 任务 📅 2026-04-18")
-2. 查询任务：search_vault("- [ ]")
-3. 执行命令：execute_plugin_command("plugin-id:command-name")`;
+- frontmatter 中 description 必须是单行字符串，不要用 | 或 > 多行语法
+- triggers 必须是嵌套格式（triggers:\n  keywords: [...]），不要用 triggers.keywords
+- tools 用 JSON 数组格式 ["tool1", "tool2"]
+- 整个文件控制在 50 行以内
+- 操作指南必须包含具体的工具调用和文件路径示例
+- 重点写"AI 怎么用工具操作文件"，不要写功能介绍
+- 只输出 SKILL.md 内容`;
 
 export class PluginSkillGenerator {
   constructor(
