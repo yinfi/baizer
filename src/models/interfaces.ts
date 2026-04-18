@@ -38,8 +38,17 @@ export interface GenerationResult {
     functionCalls?: ToolCall[];
 }
 
+export type StreamEvent =
+    | { type: 'thinking'; content: string }
+    | { type: 'text_delta'; content: string }
+    | { type: 'tool_call'; name: string; args: any }
+    | { type: 'tool_result'; name: string; result: any; error?: string }
+    | { type: 'done'; text: string }
+    | { type: 'error'; message: string };
+
 export interface IChatSession {
     sendMessage(text: string | ToolResult[]): Promise<GenerationResult>;
+    sendMessageStream(text: string | ToolResult[]): AsyncGenerator<StreamEvent, void, unknown>;
     getHistory(): Promise<ChatMessage[]>;
     clearHistory(): Promise<void>;
 }
