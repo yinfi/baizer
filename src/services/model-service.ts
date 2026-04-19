@@ -3,7 +3,7 @@ import { PluginSettings, ProviderConfig } from '../mcp/types';
 import { MemoryManager } from '../memory/memory-manager';
 import { UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
-import { IModelProvider, ModelOption, ToolDefinition } from '../models/interfaces';
+import { IModelProvider, ModelOption, ToolDefinition, StreamEvent } from '../models/interfaces';
 import { GeminiProvider } from '../models/gemini';
 import { OpenAIProvider } from '../models/openai';
 import { SkillRegistry } from '../skills/skill-registry';
@@ -363,6 +363,115 @@ export class ModelService {
         } catch (e: any) {
             logger.error('Chat processing failed', e, 'ModelService.chat');
             return `Error: ${e.message}`;
+        }
+    }
+
+    async *chatStream(userMessage: string, contextItems: any[], selection: string = ""): AsyncGenerator<StreamEvent, void, unknown> {
+        logger.info(`Processing streaming chat: ${userMessage.substring(0, 50)}...`, 'ModelService.chatStream');
+
+        if (!this.hasValidConfig()) {
+            const providerLabel = this.getActiveProviderConfig()?.label || 'AI';
+            yield { type: 'error' as const, message: `${providerLabel} API Key not configured!` };
+            return;
+        }
+
+        try {
+            // 1. Build prompt (same as chat())
+            let memoryContext = '';
+            if (this.memoryManager) {
+                memoryContext = this.memoryManager.buildContext();
+            }
+
+            let fullPrompt = '';
+            if (memoryContext) fullPrompt += `${memoryContext}\n\n`;
+            fullPrompt += `[Current Time: ${new Date().toLocaleString()} (${new Date().toLocaleDateString(undefined, { weekday: 'long' })})]\n`;
+
+            let contextStr = '';
+            if (contextItems && contextItems.length > 0) {
+                contextStr = contextItems.map(item => {
+                    if (item.type === 'image') return `[Image: ${item.summary || 'Attached Image'}]`;
+                    return `[Context (${item.type}): ${item.data}]\n${item.content || ''}`;
+                }).join('\n\n');
+            }
+            fullPrompt += `[Context: ${contextStr}]\n`;
+            if (selection) fullPrompt += `[Selected Text: ${selection}]\n`;
+            fullPrompt += `User Request: ${userMessage}`;
+
+            // 2. Get or Create Session
+            const tools = this.buildSkillModeTools();
+            const chat = this.memoryManager
+                ? this.memoryManager.getOrCreateSession(tools)
+                : this.provider.startChat(tools);
+
+            // 3. Stream with function call loop
+            let loopCount = 0;
+            const MAX_LOOPS = 10;
+            let input: string | { name: string; response: any }[] = fullPrompt;
+            let fullResponseText = '';
+
+            while (loopCount <= MAX_LOOPS) {
+                const pendingCalls: { name: string; args: any }[] = [];
+
+                for await (const event of chat.sendMessageStream(input)) {
+                    if (event.type === 'tool_call') {
+                        pendingCalls.push({ name: event.name, args: event.args });
+                        yield event;
+                    } else if (event.type === 'text_delta') {
+                        fullResponseText += event.content;
+                        yield event;
+                    } else if (event.type === 'thinking') {
+                        yield event;
+                    } else if (event.type === 'done') {
+                        // don't yield done yet — check for tool calls first
+                    }
+                }
+
+                if (pendingCalls.length === 0) break;
+
+                loopCount++;
+                if (loopCount > MAX_LOOPS) {
+                    logger.warn(`Stream function call loop limit reached (${MAX_LOOPS})`, 'ModelService.chatStream');
+                    break;
+                }
+
+                // Execute tools sequentially (yield requires generator context)
+                const toolResults: { name: string; response: any }[] = [];
+                for (const call of pendingCalls) {
+                    try {
+                        let toolResult: any;
+                        if (call.name === 'use_skill') {
+                            toolResult = await this.executeSkill(call.args);
+                        } else {
+                            toolResult = await this.withTimeout(
+                                this.toolRegistry.execute(call.name, call.args),
+                                30000,
+                                `Tool ${call.name} execution timed out`
+                            );
+                        }
+                        yield { type: 'tool_result' as const, name: call.name, result: toolResult };
+                        toolResults.push({ name: call.name, response: toolResult });
+                    } catch (error: any) {
+                        logger.error(`Tool execution failed: ${call.name}`, error, 'ModelService.chatStream');
+                        yield { type: 'tool_result' as const, name: call.name, result: null, error: error.message };
+                        toolResults.push({ name: call.name, response: { error: error.message || "Unknown error" } });
+                    }
+                }
+
+                input = toolResults;
+                fullResponseText = '';
+            }
+
+            // 4. Record to memory
+            if (this.memoryManager) {
+                await this.memoryManager.recordMessage('user', userMessage);
+                await this.memoryManager.recordMessage('model', fullResponseText);
+            }
+
+            yield { type: 'done' as const, text: fullResponseText };
+
+        } catch (e: any) {
+            logger.error('Stream chat failed', e, 'ModelService.chatStream');
+            yield { type: 'error' as const, message: e.message };
         }
     }
 
