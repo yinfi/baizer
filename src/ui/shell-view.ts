@@ -5,6 +5,7 @@ import { ChatController, ChatMessage } from './chat-controller';
 import { ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
 import { VIEW_TYPE_SHELL } from '../mcp/types';
+import { StreamEvent } from '../models/interfaces';
 
 export { VIEW_TYPE_SHELL };
 
@@ -32,6 +33,16 @@ export class ShellView extends ItemView {
     private modelSelectEl: HTMLSelectElement | null = null;
     private providerSelectEl: HTMLSelectElement | null = null;
     private modelLoadRequestId: number = 0;
+    private unsubscribeProvider: (() => void) | null = null;
+
+    // Streaming state
+    private streamContainer: HTMLElement | null = null;
+    private streamTimeline: HTMLElement | null = null;
+    private streamContent: HTMLElement | null = null;
+    private streamAccumulatedText: string = '';
+    private streamRenderTimer: number | null = null;
+    private streamNodeCount: number = 0;
+    private currentThinkingNode: HTMLElement | null = null;
 
     // Event Handlers
     private handleInputBound = () => {
@@ -113,7 +124,8 @@ export class ShellView extends ItemView {
             app: this.app,
             api: this.modelService,
             onMessageAdded: (msg) => this.appendMessage(msg),
-            onStatusChanged: (status) => this.handleStatusChange(status)
+            onStatusChanged: (status) => this.handleStatusChange(status),
+            onStreamEvent: (event) => this.handleStreamEvent(event)
         });
 
         // Create a wrapper container to ensure proper flexbox layout
@@ -221,13 +233,21 @@ export class ShellView extends ItemView {
         this.populateProviderOptions(this.providerSelectEl);
         this.providerSelectEl.addEventListener('change', async (e) => {
             const target = e.target as HTMLSelectElement;
-            await this.changeProvider(target.value);
-            new Notice(`Switched provider to ${target.options[target.selectedIndex].text}`);
-            // Refresh models list for the new provider
-            if (this.modelSelectEl) {
-                await this.populateModelOptions(this.modelSelectEl, true);
+            const id = target.value;
+            const plugin = (this.app as any).plugins.plugins['obsidian-cli'];
+            const config = plugin?.settings?.providers?.[id];
+            if (!config?.apiKey) {
+                new Notice(`${config?.label || id} 未配置 API Key，请先在设置中配置`);
+                // @ts-ignore
+                this.app.setting.open();
+                // @ts-ignore
+                this.app.setting.openTabById('obsidian-cli');
+                // 恢复选择
+                if (this.providerSelectEl) this.populateProviderOptions(this.providerSelectEl);
+                return;
             }
-            this.updatePlaceholder();
+            await this.modelService.switchProvider(id, () => plugin.saveSettings());
+            new Notice(`已切换到 ${config.label}`);
         });
 
         // Model selector
@@ -242,7 +262,9 @@ export class ShellView extends ItemView {
         // Update model when selection changes
         this.modelSelectEl.addEventListener('change', async (e) => {
             const target = e.target as HTMLSelectElement;
-            await this.changeModel(target.value);
+            if (!target.value) return;
+            const plugin = (this.app as any).plugins.plugins['obsidian-cli'];
+            await this.modelService.switchModel(target.value, () => plugin.saveSettings());
             new Notice(`Switched to ${target.options[target.selectedIndex].text}`);
         });
 
@@ -263,6 +285,13 @@ export class ShellView extends ItemView {
         // Paste & Drop Handlers
         this.inputEl.addEventListener('paste', this.handlePasteBound);
         this.inputEl.addEventListener('drop', this.handleDropBound);
+
+        // Register provider change listener for cross-UI sync
+        this.unsubscribeProvider = this.modelService.onProviderChanged(() => {
+            if (this.providerSelectEl) this.populateProviderOptions(this.providerSelectEl);
+            if (this.modelSelectEl) void this.populateModelOptions(this.modelSelectEl, true);
+            this.updatePlaceholder();
+        });
 
         // Start heartbeat monitoring
         this.startHeartbeat();
@@ -451,98 +480,13 @@ export class ShellView extends ItemView {
 
         if (msg.role === 'ai') {
             MarkdownRenderer.render(this.app, msg.content, entry, '', this as any).then(() => {
-                // Post-processing for code blocks
-                const codeBlocks = entry.querySelectorAll('pre > code');
-                codeBlocks.forEach((codeBlock) => {
-                    const pre = codeBlock.parentElement;
-                    if (pre) {
-                        // Create code block header
-                        const header = pre.createDiv({ cls: 'shell-code-block-header' });
+                this.postProcessAiContent(entry);
 
-                        // Detect language from class name
-                        const langClass = Array.from(codeBlock.classList).find(cls => cls.startsWith('language-'));
-                        const lang = langClass ? langClass.replace('language-', '') : 'text';
-                        const filename = `untitled.${lang === 'text' ? 'txt' : lang}`;
-
-                        header.createDiv({
-                            cls: 'shell-code-block-filename',
-                            text: filename
-                        });
-
-                        // Create button container
-                        const buttons = header.createDiv({ cls: 'shell-code-block-buttons' });
-
-                        // Create apply button
-                        const btn = buttons.createEl('button', {
-                            cls: 'shell-apply-btn clickable-icon',
-                            title: 'Review Changes'
-                        });
-                        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="16" x2="12" y2="12"></line><line x1="10" y1="14" x2="10" y2="10"></line></svg>';
-                        btn.addEventListener('click', async () => {
-                            const activeFile = this.app.workspace.getActiveFile();
-                            if (!activeFile) {
-                                new Notice('No active file to apply changes to.');
-                                return;
-                            }
-                            const originalContent = await this.app.vault.read(activeFile);
-                            const newContent = codeBlock.textContent || '';
-
-                            new DiffModal(this.app, originalContent, newContent, async () => {
-                                await this.app.vault.modify(activeFile, newContent);
-                                new Notice('Changes applied.');
-                            }).open();
-                        });
-
-                        // Move the code below the header
-                        pre.insertBefore(header, codeBlock);
-                    }
-                });
-                // 给渲染出的内部链接绑定点击事件，使 [[引用来源]] 可点击跳转
-                entry.querySelectorAll('a.internal-link').forEach((link) => {
-                    link.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        const href = link.getAttribute('href') || link.getAttribute('data-href') || '';
-                        if (href) {
-                            this.app.workspace.openLinkText(href, '', false);
-                        }
-                    });
-                });
-
-                // Delay scroll to ensure rendering is complete
                 requestAnimationFrame(() => {
                     this.scrollToEnd();
                 });
 
-                // Add feedback buttons for AI messages
-                const feedbackBar = entry.createDiv({ cls: 'shell-feedback-bar' });
-
-                const thumbsUpBtn = feedbackBar.createEl('button', {
-                    cls: 'shell-feedback-btn shell-thumbs-up',
-                    title: 'Useful - save to knowledge wiki'
-                });
-                thumbsUpBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>';
-
-                const thumbsDownBtn = feedbackBar.createEl('button', {
-                    cls: 'shell-feedback-btn shell-thumbs-down',
-                    title: 'Not useful'
-                });
-                thumbsDownBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
-
-                thumbsUpBtn.addEventListener('click', () => {
-                    msg.feedback = 'up';
-                    thumbsUpBtn.addClass('active');
-                    thumbsDownBtn.removeClass('active');
-                    this.chatController.processCommand(
-                        `/file-back ${msg.id}`,
-                        [], ''
-                    );
-                });
-
-                thumbsDownBtn.addEventListener('click', () => {
-                    msg.feedback = 'down';
-                    thumbsDownBtn.addClass('active');
-                    thumbsUpBtn.removeClass('active');
-                });
+                this.addFeedbackBar(entry, msg.content);
             }).catch(error => {
                 logger.error('Markdown rendering failed', error, 'ShellView');
                 entry.setText('Error rendering message');
@@ -585,8 +529,256 @@ export class ShellView extends ItemView {
         }
     }
 
+    private handleStreamEvent(event: StreamEvent) {
+        this.updateActivity();
+
+        switch (event.type) {
+            case 'thinking':
+                this.ensureStreamContainer();
+                this.handleThinkingEvent(event.content);
+                break;
+            case 'tool_call':
+                this.ensureStreamContainer();
+                this.addToolCallNode(event.name, event.args);
+                break;
+            case 'tool_result':
+                this.updateToolResultNode(event.name, event.result, event.error);
+                break;
+            case 'text_delta':
+                this.ensureStreamContainer();
+                this.handleTextDelta(event.content);
+                break;
+            case 'done':
+                this.finalizeStream();
+                break;
+            case 'error':
+                this.finalizeStream();
+                break;
+        }
+
+        this.scrollToEnd();
+    }
+
+    private ensureStreamContainer() {
+        if (this.streamContainer) return;
+
+        const loadingDiv = document.getElementById('loading-indicator');
+        if (loadingDiv) loadingDiv.remove();
+
+        this.streamContainer = this.outputContainer.createDiv({ cls: 'shell-entry ai shell-stream-container' });
+        this.streamTimeline = this.streamContainer.createDiv({ cls: 'shell-think-timeline' });
+
+        const summary = this.streamTimeline.createDiv({ cls: 'shell-think-summary' });
+        summary.createSpan({ cls: 'think-toggle', text: '\u25BC' });
+        summary.createSpan({ cls: 'think-summary-text', text: '思考中...' });
+        summary.addEventListener('click', () => {
+            this.streamTimeline?.toggleClass('is-collapsed', !this.streamTimeline.hasClass('is-collapsed'));
+        });
+
+        this.streamContent = this.streamContainer.createDiv({ cls: 'shell-response-content' });
+        this.streamAccumulatedText = '';
+        this.streamNodeCount = 0;
+        this.currentThinkingNode = null;
+    }
+
+    private handleThinkingEvent(content: string) {
+        if (!this.streamTimeline) return;
+
+        if (!this.currentThinkingNode) {
+            this.currentThinkingNode = this.streamTimeline.createDiv({ cls: 'think-node is-thinking' });
+            const header = this.currentThinkingNode.createDiv({ cls: 'think-node-header' });
+            header.createSpan({ cls: 'think-node-icon', text: '\uD83D\uDCA1' });
+            header.createSpan({ cls: 'think-node-label' });
+            this.currentThinkingNode.createDiv({ cls: 'think-node-detail' });
+            header.addEventListener('click', () => {
+                this.currentThinkingNode?.toggleClass('is-expanded', !this.currentThinkingNode.hasClass('is-expanded'));
+            });
+            this.streamNodeCount++;
+        }
+
+        const detail = this.currentThinkingNode.querySelector('.think-node-detail') as HTMLElement;
+        const label = this.currentThinkingNode.querySelector('.think-node-label') as HTMLElement;
+        if (detail) detail.textContent = (detail.textContent || '') + content;
+        if (label) {
+            const fullText = detail?.textContent || '';
+            label.textContent = fullText.length > 30 ? fullText.substring(0, 30) + '...' : fullText;
+        }
+    }
+
+    private addToolCallNode(name: string, args: any) {
+        if (!this.streamTimeline) return;
+
+        if (this.currentThinkingNode) {
+            this.currentThinkingNode.removeClass('is-thinking');
+            this.currentThinkingNode = null;
+        }
+
+        const node = this.streamTimeline.createDiv({ cls: 'think-node is-tool' });
+        node.dataset.toolName = name;
+        const header = node.createDiv({ cls: 'think-node-header' });
+        header.createSpan({ cls: 'think-node-icon', text: '\uD83D\uDD27' });
+        header.createSpan({ cls: 'think-node-label', text: name });
+        const detail = node.createDiv({ cls: 'think-node-detail' });
+        detail.textContent = JSON.stringify(args, null, 2);
+        header.addEventListener('click', () => {
+            node.toggleClass('is-expanded', !node.hasClass('is-expanded'));
+        });
+        this.streamNodeCount++;
+    }
+
+    private updateToolResultNode(name: string, result: any, error?: string) {
+        if (!this.streamTimeline) return;
+
+        const nodes = this.streamTimeline.querySelectorAll('.think-node.is-tool');
+        let targetNode: HTMLElement | null = null;
+        for (let i = nodes.length - 1; i >= 0; i--) {
+            if ((nodes[i] as HTMLElement).dataset.toolName === name) {
+                targetNode = nodes[i] as HTMLElement;
+                break;
+            }
+        }
+        if (!targetNode) return;
+
+        const detail = targetNode.querySelector('.think-node-detail') as HTMLElement;
+        if (detail) {
+            const resultText = error ? `Error: ${error}` : JSON.stringify(result, null, 2);
+            detail.textContent += '\n--- Result ---\n' + resultText;
+        }
+    }
+
+    private handleTextDelta(content: string) {
+        this.streamAccumulatedText += content;
+
+        if (this.streamRenderTimer !== null) {
+            window.clearTimeout(this.streamRenderTimer);
+        }
+        this.streamRenderTimer = window.setTimeout(() => {
+            this.renderStreamContent();
+        }, 100);
+    }
+
+    private renderStreamContent() {
+        if (!this.streamContent) return;
+
+        this.streamContent.empty();
+        MarkdownRenderer.render(
+            this.app,
+            this.streamAccumulatedText,
+            this.streamContent,
+            '',
+            this as any
+        ).then(() => {
+            const cursor = document.createElement('span');
+            cursor.className = 'shell-stream-cursor';
+            this.streamContent?.appendChild(cursor);
+            this.scrollToEnd();
+        });
+    }
+
+    private finalizeStream() {
+        if (this.streamRenderTimer !== null) {
+            window.clearTimeout(this.streamRenderTimer);
+            this.streamRenderTimer = null;
+        }
+
+        if (this.currentThinkingNode) {
+            this.currentThinkingNode.removeClass('is-thinking');
+            this.currentThinkingNode = null;
+        }
+
+        if (this.streamContent && this.streamAccumulatedText) {
+            this.streamContent.empty();
+            MarkdownRenderer.render(
+                this.app,
+                this.streamAccumulatedText,
+                this.streamContent,
+                '',
+                this as any
+            ).then(() => {
+                if (this.streamContent) {
+                    this.postProcessAiContent(this.streamContent);
+                }
+                this.scrollToEnd();
+            });
+        }
+
+        if (this.streamTimeline && this.streamNodeCount > 0) {
+            const summaryText = this.streamTimeline.querySelector('.think-summary-text') as HTMLElement;
+            if (summaryText) summaryText.textContent = `思考了 ${this.streamNodeCount} 步`;
+            this.streamTimeline.addClass('is-collapsed');
+        } else if (this.streamTimeline && this.streamNodeCount === 0) {
+            this.streamTimeline.style.display = 'none';
+        }
+
+        if (this.streamContainer) {
+            this.addFeedbackBar(this.streamContainer, this.streamAccumulatedText);
+        }
+
+        this.streamContainer = null;
+        this.streamTimeline = null;
+        this.streamContent = null;
+        this.streamAccumulatedText = '';
+        this.streamNodeCount = 0;
+    }
+
+    private postProcessAiContent(container: HTMLElement) {
+        const codeBlocks = container.querySelectorAll('pre > code');
+        codeBlocks.forEach((codeBlock) => {
+            const pre = codeBlock.parentElement;
+            if (pre) {
+                const header = pre.createDiv({ cls: 'shell-code-block-header' });
+                const langClass = Array.from(codeBlock.classList).find(cls => cls.startsWith('language-'));
+                const lang = langClass ? langClass.replace('language-', '') : 'text';
+                header.createDiv({ cls: 'shell-code-block-filename', text: `untitled.${lang === 'text' ? 'txt' : lang}` });
+                const buttons = header.createDiv({ cls: 'shell-code-block-buttons' });
+                const btn = buttons.createEl('button', { cls: 'shell-apply-btn clickable-icon', title: 'Review Changes' });
+                btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="16" x2="12" y2="12"></line><line x1="10" y1="14" x2="10" y2="10"></line></svg>';
+                btn.addEventListener('click', async () => {
+                    const activeFile = this.app.workspace.getActiveFile();
+                    if (!activeFile) { new Notice('No active file to apply changes to.'); return; }
+                    const originalContent = await this.app.vault.read(activeFile);
+                    const newContent = codeBlock.textContent || '';
+                    new DiffModal(this.app, originalContent, newContent, async () => {
+                        await this.app.vault.modify(activeFile, newContent);
+                        new Notice('Changes applied.');
+                    }).open();
+                });
+                pre.insertBefore(header, codeBlock);
+            }
+        });
+
+        container.querySelectorAll('a.internal-link').forEach((link) => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const href = link.getAttribute('href') || link.getAttribute('data-href') || '';
+                if (href) this.app.workspace.openLinkText(href, '', false);
+            });
+        });
+    }
+
+    private addFeedbackBar(container: HTMLElement, content: string) {
+        const msgId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+        const feedbackBar = container.createDiv({ cls: 'shell-feedback-bar' });
+        const thumbsUpBtn = feedbackBar.createEl('button', { cls: 'shell-feedback-btn shell-thumbs-up', title: 'Useful - save to knowledge wiki' });
+        thumbsUpBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>';
+        const thumbsDownBtn = feedbackBar.createEl('button', { cls: 'shell-feedback-btn shell-thumbs-down', title: 'Not useful' });
+        thumbsDownBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
+        thumbsUpBtn.addEventListener('click', () => {
+            thumbsUpBtn.addClass('active');
+            thumbsDownBtn.removeClass('active');
+            this.chatController.processCommand(`/file-back ${msgId}`, [], '');
+        });
+        thumbsDownBtn.addEventListener('click', () => {
+            thumbsDownBtn.addClass('active');
+            thumbsUpBtn.removeClass('active');
+        });
+    }
+
     async onClose() {
         this.stopHeartbeat();
+        // Unsubscribe from provider changes
+        this.unsubscribeProvider?.();
+        this.unsubscribeProvider = null;
         // Prevent interval leaks from ChatController
         if (this.chatController) {
             this.chatController.cleanup();
@@ -754,16 +946,17 @@ export class ShellView extends ItemView {
 
     private async populateModelOptions(selectEl: HTMLSelectElement, forceRefresh: boolean = false) {
         const settings = (this.app as any).plugins.plugins['obsidian-cli']?.settings;
-        if (!settings) return;
+        if (!settings?.providers) return;
 
         const requestId = ++this.modelLoadRequestId;
-        const provider = settings.provider || 'gemini';
+        const config = settings.providers[settings.activeProvider];
+        if (!config) return;
 
         selectEl.empty();
         selectEl.disabled = true;
         const loadingOption = selectEl.createEl('option', {
             value: '',
-            text: `Loading ${provider} models...`
+            text: `Loading ${config.label} models...`
         });
         loadingOption.selected = true;
 
@@ -786,21 +979,7 @@ export class ShellView extends ItemView {
                 return;
             }
 
-            let currentModel = '';
-            switch (provider) {
-                case 'gemini':
-                    currentModel = settings.primaryModel;
-                    break;
-                case 'openai':
-                    currentModel = settings.openaiModel;
-                    break;
-                case 'deepseek':
-                    currentModel = settings.deepseekModel;
-                    break;
-                case 'qwen':
-                    currentModel = settings.qwenModel;
-                    break;
-            }
+            const currentModel = config.model || '';
 
             models.forEach(model => {
                 const option = selectEl.createEl('option', {
@@ -824,7 +1003,7 @@ export class ShellView extends ItemView {
         } catch (error: any) {
             if (requestId !== this.modelLoadRequestId) return;
             logger.warn(
-                `Failed to load model list for ${provider}: ${error?.message || 'Unknown error'}`,
+                `Failed to load model list: ${error?.message || 'Unknown error'}`,
                 'ShellView.populateModelOptions'
             );
             selectEl.empty();
@@ -840,79 +1019,27 @@ export class ShellView extends ItemView {
 
     private populateProviderOptions(selectEl: HTMLSelectElement) {
         const settings = (this.app as any).plugins.plugins['obsidian-cli']?.settings;
-        if (!settings) return;
+        if (!settings?.providers) return;
 
         selectEl.empty();
-        const provider = settings.provider || 'gemini';
+        const active = settings.activeProvider || 'gemini';
 
-        const providers: { value: string; label: string }[] = [
-            { value: 'gemini', label: 'Gemini' },
-            { value: 'openai', label: 'OpenAI Compatible' },
-            { value: 'deepseek', label: 'DeepSeek' },
-            { value: 'qwen', label: 'Qwen' }
-        ];
-
-        providers.forEach(p => {
+        for (const [id, config] of Object.entries(settings.providers) as [string, any][]) {
+            const configured = !!config.apiKey;
             const option = selectEl.createEl('option', {
-                value: p.value,
-                text: p.label
+                value: id,
+                text: configured ? config.label : `${config.label} ⚠️`
             });
-            if (p.value === provider) option.selected = true;
-        });
-    }
-
-    private async changeProvider(providerId: string) {
-        const plugin = (this.app as any).plugins.plugins['obsidian-cli'];
-        if (!plugin) return;
-
-        plugin.settings.provider = providerId;
-        await plugin.saveSettings();
-        this.modelService.updateSettings(plugin.settings);
-
-        // Refresh provider selector UI to reflect any normalization.
-        if (this.providerSelectEl) {
-            this.populateProviderOptions(this.providerSelectEl);
+            if (id === active) option.selected = true;
         }
     }
 
     private updatePlaceholder() {
         if (!this.inputEl) return;
         const settings = (this.app as any).plugins.plugins['obsidian-cli']?.settings;
-        const provider = settings?.provider || 'gemini';
-        const providerLabelMap: Record<string, string> = {
-            gemini: 'Gemini',
-            openai: 'OpenAI',
-            deepseek: 'DeepSeek',
-            qwen: 'Qwen',
-        };
-        const label = providerLabelMap[provider] || 'AI';
+        const config = settings?.providers?.[settings?.activeProvider];
+        const label = config?.label || 'AI';
         this.inputEl.setAttr('placeholder', `Ask ${label}... (/ for commands, @ for files)`);
-    }
-
-    private async changeModel(modelId: string) {
-        const plugin = (this.app as any).plugins.plugins['obsidian-cli'];
-        if (!plugin) return;
-
-        const settings = plugin.settings;
-        const provider = settings.provider || 'gemini';
-
-        switch (provider) {
-            case 'gemini':
-                settings.primaryModel = modelId;
-                break;
-            case 'openai':
-                settings.openaiModel = modelId;
-                break;
-            case 'deepseek':
-                settings.deepseekModel = modelId;
-                break;
-            case 'qwen':
-                settings.qwenModel = modelId;
-                break;
-        }
-
-        await plugin.saveSettings();
-        this.modelService.updateSettings(settings);
     }
 
     public async updateModelSelector(forceRefresh: boolean = false) {
