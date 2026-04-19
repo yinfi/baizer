@@ -144,6 +144,7 @@ class GeminiChatSession implements IChatSession {
         }
 
         let fullText = '';
+        const collectedFunctionCalls: { name: string; args: any }[] = [];
 
         for await (const chunk of streamResult.stream) {
             const candidate = chunk.candidates?.[0];
@@ -152,6 +153,9 @@ class GeminiChatSession implements IChatSession {
             for (const part of candidate.content.parts) {
                 if ((part as any).thought === true && (part as any).text) {
                     yield { type: 'thinking' as const, content: (part as any).text };
+                } else if ((part as any).functionCall) {
+                    const fc = (part as any).functionCall;
+                    collectedFunctionCalls.push({ name: fc.name, args: fc.args });
                 } else if (part.text) {
                     fullText += part.text;
                     yield { type: 'text_delta' as const, content: part.text };
@@ -159,12 +163,22 @@ class GeminiChatSession implements IChatSession {
             }
         }
 
-        const response = await streamResult.response;
-        const functionCalls = response.functionCalls();
-        if (functionCalls && functionCalls.length > 0) {
-            for (const fc of functionCalls) {
-                yield { type: 'tool_call' as const, name: fc.name, args: fc.args };
+        // 优先用 stream 中收集的 function calls，fallback 到 response.functionCalls()
+        let functionCalls = collectedFunctionCalls;
+        if (functionCalls.length === 0) {
+            try {
+                const response = await streamResult.response;
+                const responseFCs = response.functionCalls();
+                if (responseFCs && responseFCs.length > 0) {
+                    functionCalls = responseFCs.map(fc => ({ name: fc.name, args: fc.args }));
+                }
+            } catch {
+                // response 可能在流式消费后不可用
             }
+        }
+
+        for (const fc of functionCalls) {
+            yield { type: 'tool_call' as const, name: fc.name, args: fc.args };
         }
 
         yield { type: 'done' as const, text: fullText };
