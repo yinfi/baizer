@@ -103,7 +103,14 @@ export class ChatController {
                         return;
                     }
                 }
-                this.addMessage('ai', fullText);
+                // 流式模式下只记录到历史，不触发 appendMessage（UI 已通过 stream 事件渲染）
+                const msg: ChatMessage = {
+                    id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                    role: 'ai',
+                    content: fullText,
+                    timestamp: Date.now()
+                };
+                this.messages.push(msg);
             } else {
                 const response = await this.api.chat(query, context, selection);
                 this.addMessage('ai', response);
