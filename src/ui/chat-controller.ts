@@ -1,5 +1,6 @@
 import { App, MarkdownView } from 'obsidian';
 import { ModelService } from '../services/model-service';
+import { StreamEvent } from '../models/interfaces';
 import { logger } from '../utils/logger';
 
 export interface ChatMessage {
@@ -15,6 +16,7 @@ export interface ChatControllerOptions {
     api: ModelService;
     onMessageAdded?: (message: ChatMessage) => void;
     onStatusChanged?: (isResponding: boolean) => void;
+    onStreamEvent?: (event: StreamEvent) => void;
 }
 
 export class ChatController {
@@ -24,6 +26,7 @@ export class ChatController {
     // private isResponding: boolean = false; // Unused
     private onMessageAdded?: (message: ChatMessage) => void;
     private onStatusChanged?: (isResponding: boolean) => void;
+    private onStreamEvent?: (event: StreamEvent) => void;
 
     // 文件搜索缓存
     private fileSearchCache: { term: string; results: any[]; timestamp: number } | null = null;
@@ -35,6 +38,7 @@ export class ChatController {
         this.api = options.api;
         this.onMessageAdded = options.onMessageAdded;
         this.onStatusChanged = options.onStatusChanged;
+        this.onStreamEvent = options.onStreamEvent;
 
         // 设置定时器清理过期的文件搜索缓存
         this.fileSearchCacheCleanupTimer = window.setInterval(() => {
@@ -88,8 +92,22 @@ export class ChatController {
         this.setResponding(true);
 
         try {
-            const response = await this.api.chat(query, context, selection);
-            this.addMessage('ai', response);
+            if (this.onStreamEvent) {
+                let fullText = '';
+                for await (const event of this.api.chatStream(query, context, selection)) {
+                    this.onStreamEvent(event);
+                    if (event.type === 'done') {
+                        fullText = event.text;
+                    } else if (event.type === 'error') {
+                        this.addMessage('system', `Error: ${event.message}`);
+                        return;
+                    }
+                }
+                this.addMessage('ai', fullText);
+            } else {
+                const response = await this.api.chat(query, context, selection);
+                this.addMessage('ai', response);
+            }
         } catch (error: any) {
             this.handleError(error);
         } finally {
