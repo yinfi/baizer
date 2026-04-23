@@ -3708,6 +3708,15 @@ var GeminiProvider = class {
   genAI;
   model;
   config;
+  getCapabilities() {
+    return {
+      supportsThinking: true,
+      supportsModelListing: true,
+      supportsImageInput: true,
+      supportsToolCalling: true,
+      supportsCustomBaseUrl: false
+    };
+  }
   configure(config) {
     this.config = config;
     this.genAI = new GoogleGenerativeAI(config.apiKey);
@@ -3878,6 +3887,15 @@ var OpenAIProvider = class {
   id = "openai";
   name = "OpenAI Compatible";
   config;
+  getCapabilities() {
+    return {
+      supportsThinking: true,
+      supportsModelListing: true,
+      supportsImageInput: false,
+      supportsToolCalling: true,
+      supportsCustomBaseUrl: true
+    };
+  }
   configure(config) {
     this.config = config;
   }
@@ -4170,6 +4188,194 @@ var OpenAIChatSession = class {
   }
 };
 
+// src/runtime/chat-runtime.ts
+var DefaultChatRuntime = class {
+  constructor(deps) {
+    this.deps = deps;
+  }
+  getTools() {
+    return this.buildSkillModeTools();
+  }
+  async prepareTurn(request) {
+    let memoryContext = "";
+    if (this.deps.memoryManager) {
+      await this.deps.memoryManager.ready();
+      memoryContext = this.deps.memoryManager.buildContext();
+    }
+    let prompt = "";
+    if (memoryContext) {
+      prompt += `${memoryContext}
+
+`;
+    }
+    prompt += `[Current Time: ${(/* @__PURE__ */ new Date()).toLocaleString()} (${(/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { weekday: "long" })})]
+`;
+    prompt += `[Context: ${this.formatContextItems(request.contextItems)}]
+`;
+    if (request.selection) {
+      prompt += `[Selected Text: ${request.selection}]
+`;
+    }
+    prompt += `User Request: ${request.userMessage}`;
+    return {
+      prompt,
+      tools: this.getTools()
+    };
+  }
+  async query(turn) {
+    const chat = this.deps.memoryManager ? this.deps.memoryManager.getOrCreateSession(turn.tools) : this.deps.provider.startChat(turn.tools);
+    let result = await chat.sendMessage(turn.prompt);
+    let loopCount = 0;
+    const maxLoops = 10;
+    while (result.functionCalls && result.functionCalls.length > 0) {
+      loopCount++;
+      if (loopCount > maxLoops)
+        break;
+      const toolResults = await Promise.all(result.functionCalls.map(async (call) => {
+        if (call.name === "use_skill") {
+          return {
+            name: call.name,
+            response: await this.executeSkill(call.args)
+          };
+        }
+        return {
+          name: call.name,
+          response: await this.withTimeout(
+            this.deps.toolRegistry.execute(call.name, call.args),
+            3e4,
+            `Tool ${call.name} execution timed out`
+          )
+        };
+      }));
+      result = await chat.sendMessage(toolResults);
+    }
+    if (this.deps.memoryManager) {
+      const userRequest = this.extractUserRequest(turn.prompt);
+      await this.deps.memoryManager.recordMessage("user", userRequest);
+      await this.deps.memoryManager.recordMessage("model", result.text);
+    }
+    return result.text;
+  }
+  async *queryStream(turn) {
+    const chat = this.deps.memoryManager ? this.deps.memoryManager.getOrCreateSession(turn.tools) : this.deps.provider.startChat(turn.tools);
+    let loopCount = 0;
+    const maxLoops = 10;
+    let input = turn.prompt;
+    let fullResponseText = "";
+    while (loopCount <= maxLoops) {
+      const pendingCalls = [];
+      for await (const event of chat.sendMessageStream(input)) {
+        if (event.type === "tool_call") {
+          pendingCalls.push({ name: event.name, args: event.args });
+          yield event;
+        } else if (event.type === "text_delta") {
+          fullResponseText += event.content;
+          yield event;
+        } else if (event.type === "thinking") {
+          yield event;
+        }
+      }
+      if (pendingCalls.length === 0)
+        break;
+      loopCount++;
+      if (loopCount > maxLoops)
+        break;
+      const toolResults = [];
+      for (const call of pendingCalls) {
+        let toolResult;
+        if (call.name === "use_skill") {
+          toolResult = await this.executeSkill(call.args);
+        } else {
+          toolResult = await this.withTimeout(
+            this.deps.toolRegistry.execute(call.name, call.args),
+            3e4,
+            `Tool ${call.name} execution timed out`
+          );
+        }
+        yield { type: "tool_result", name: call.name, result: toolResult };
+        toolResults.push({ name: call.name, response: toolResult });
+      }
+      input = toolResults;
+      fullResponseText = "";
+    }
+    if (this.deps.memoryManager) {
+      const userRequest = this.extractUserRequest(turn.prompt);
+      await this.deps.memoryManager.recordMessage("user", userRequest);
+      await this.deps.memoryManager.recordMessage("model", fullResponseText);
+    }
+    yield { type: "done", text: fullResponseText };
+  }
+  formatContextItems(contextItems) {
+    if (!contextItems?.length)
+      return "";
+    return contextItems.map((item) => {
+      if (item.type === "image")
+        return `[Image: ${item.summary || "Attached Image"}]`;
+      return `[Context (${item.type}): ${item.data}]
+${item.content || ""}`;
+    }).join("\n\n");
+  }
+  buildSkillModeTools() {
+    const tools = [];
+    tools.push(...this.deps.toolRegistry.getAllDefinitions());
+    const skillSummary = this.deps.skillRegistry.getSkillSummaryText();
+    const useSkillDesc = skillSummary ? `Get detailed instructions for a specific workflow, then use the returned instructions with the existing tools.
+
+${skillSummary}` : "Get detailed instructions for a specific workflow.";
+    tools.push({
+      name: "use_skill",
+      description: useSkillDesc,
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Skill name" }
+        },
+        required: ["name"]
+      }
+    });
+    return tools;
+  }
+  async executeSkill(args) {
+    const skillName = args?.name;
+    if (!skillName)
+      return { error: "Missing skill name" };
+    const activated = this.deps.skillRegistry.activateSkill(skillName);
+    if (!activated)
+      return { error: `Skill "${skillName}" not found or disabled` };
+    return {
+      action_required: "Use the returned instructions immediately with the available tools to complete the user request.",
+      instructions: activated.instructions,
+      available_tools: activated.tools.map((tool) => tool.name)
+    };
+  }
+  async withTimeout(promise, timeoutMs, errorMessage) {
+    const controller = new AbortController();
+    const timeoutPromise = new Promise((_, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(errorMessage));
+      }, timeoutMs);
+      controller.signal.addEventListener("abort", () => {
+        clearTimeout(timeoutId);
+      });
+    });
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      controller.abort();
+    }
+  }
+  extractUserRequest(prompt) {
+    const marker = "User Request: ";
+    const index = prompt.lastIndexOf(marker);
+    return index >= 0 ? prompt.slice(index + marker.length) : prompt;
+  }
+};
+
+// src/runtime/runtime-factory.ts
+function createChatRuntime(args) {
+  return new DefaultChatRuntime(args);
+}
+
 // src/services/model-service.ts
 var ModelService = class {
   constructor(app, settings, toolRegistry, skillRegistry) {
@@ -4187,22 +4393,6 @@ var ModelService = class {
   providerChangedCallbacks = [];
   skillRegistry;
   toolRegistry;
-  async withTimeout(promise, timeoutMs, errorMessage) {
-    const controller = new AbortController();
-    const timeoutPromise = new Promise((_, reject) => {
-      const timeoutId = setTimeout(() => {
-        reject(new Error(errorMessage));
-      }, timeoutMs);
-      controller.signal.addEventListener("abort", () => {
-        clearTimeout(timeoutId);
-      });
-    });
-    try {
-      return await Promise.race([promise, timeoutPromise]);
-    } finally {
-      controller.abort();
-    }
-  }
   initializeProvider() {
     const config = this.getActiveProviderConfig();
     if (!config) {
@@ -4388,82 +4578,13 @@ var ModelService = class {
       return "Error: API Key missing.";
     }
     try {
-      let memoryContext = "";
-      if (this.memoryManager) {
-        await this.memoryManager.ready();
-        memoryContext = this.memoryManager.buildContext();
-      }
-      let fullPrompt = "";
-      if (memoryContext) {
-        fullPrompt += `${memoryContext}
-
-`;
-      }
-      fullPrompt += `[Current Time: ${(/* @__PURE__ */ new Date()).toLocaleString()} (${(/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { weekday: "long" })})]
-`;
-      let contextStr = "";
-      if (contextItems && contextItems.length > 0) {
-        contextStr = contextItems.map((item) => {
-          if (item.type === "image")
-            return `[Image: ${item.summary || "Attached Image"}]`;
-          return `[Context (${item.type}): ${item.data}]
-${item.content || ""}`;
-        }).join("\n\n");
-      }
-      fullPrompt += `[Context: ${contextStr}]
-`;
-      if (selection) {
-        fullPrompt += `[Selected Text: ${selection}]
-`;
-      }
-      fullPrompt += `User Request: ${userMessage}`;
-      const tools = this.buildSkillModeTools();
-      const chat = this.memoryManager ? this.memoryManager.getOrCreateSession(tools) : this.provider.startChat(tools);
-      let result = await chat.sendMessage(fullPrompt);
-      let loopCount = 0;
-      const MAX_LOOPS = 10;
-      while (result.functionCalls && result.functionCalls.length > 0) {
-        loopCount++;
-        if (loopCount > MAX_LOOPS) {
-          logger.warn(`Function call loop limit reached (${MAX_LOOPS})`, "ModelService.chat");
-          break;
-        }
-        logger.info(
-          `Processing function calls (Loop ${loopCount}): ${result.functionCalls.map((c) => c.name).join(", ")}`,
-          "ModelService.chat"
-        );
-        const toolResults = await Promise.all(result.functionCalls.map(async (call) => {
-          try {
-            let toolResult;
-            if (call.name === "use_skill") {
-              toolResult = await this.executeSkill(call.args);
-            } else {
-              toolResult = await this.withTimeout(
-                this.toolRegistry.execute(call.name, call.args),
-                3e4,
-                `Tool ${call.name} execution timed out`
-              );
-            }
-            return {
-              name: call.name,
-              response: toolResult
-            };
-          } catch (error) {
-            logger.error(`Tool execution failed: ${call.name}`, error, "ModelService.chat");
-            return {
-              name: call.name,
-              response: { error: error.message || "Unknown error" }
-            };
-          }
-        }));
-        result = await chat.sendMessage(toolResults);
-      }
-      const responseText = result.text;
-      if (this.memoryManager) {
-        await this.memoryManager.recordMessage("user", userMessage);
-        await this.memoryManager.recordMessage("model", responseText);
-      }
-      return responseText;
+      const runtime = this.createChatRuntime();
+      const preparedTurn = await runtime.prepareTurn({
+        userMessage,
+        contextItems,
+        selection
+      });
+      return await runtime.query(preparedTurn);
     } catch (e) {
       logger.error("Chat processing failed", e, "ModelService.chat");
       return `Error: ${e.message}`;
@@ -4477,88 +4598,15 @@ ${item.content || ""}`;
       return;
     }
     try {
-      let memoryContext = "";
-      if (this.memoryManager) {
-        await this.memoryManager.ready();
-        memoryContext = this.memoryManager.buildContext();
+      const runtime = this.createChatRuntime();
+      const preparedTurn = await runtime.prepareTurn({
+        userMessage,
+        contextItems,
+        selection
+      });
+      for await (const event of runtime.queryStream(preparedTurn)) {
+        yield event;
       }
-      let fullPrompt = "";
-      if (memoryContext)
-        fullPrompt += `${memoryContext}
-
-`;
-      fullPrompt += `[Current Time: ${(/* @__PURE__ */ new Date()).toLocaleString()} (${(/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { weekday: "long" })})]
-`;
-      let contextStr = "";
-      if (contextItems && contextItems.length > 0) {
-        contextStr = contextItems.map((item) => {
-          if (item.type === "image")
-            return `[Image: ${item.summary || "Attached Image"}]`;
-          return `[Context (${item.type}): ${item.data}]
-${item.content || ""}`;
-        }).join("\n\n");
-      }
-      fullPrompt += `[Context: ${contextStr}]
-`;
-      if (selection)
-        fullPrompt += `[Selected Text: ${selection}]
-`;
-      fullPrompt += `User Request: ${userMessage}`;
-      const tools = this.buildSkillModeTools();
-      const chat = this.memoryManager ? this.memoryManager.getOrCreateSession(tools) : this.provider.startChat(tools);
-      let loopCount = 0;
-      const MAX_LOOPS = 10;
-      let input = fullPrompt;
-      let fullResponseText = "";
-      while (loopCount <= MAX_LOOPS) {
-        const pendingCalls = [];
-        for await (const event of chat.sendMessageStream(input)) {
-          if (event.type === "tool_call") {
-            pendingCalls.push({ name: event.name, args: event.args });
-            yield event;
-          } else if (event.type === "text_delta") {
-            fullResponseText += event.content;
-            yield event;
-          } else if (event.type === "thinking") {
-            yield event;
-          }
-        }
-        if (pendingCalls.length === 0)
-          break;
-        loopCount++;
-        if (loopCount > MAX_LOOPS) {
-          logger.warn(`Stream function call loop limit reached (${MAX_LOOPS})`, "ModelService.chatStream");
-          break;
-        }
-        const toolResults = [];
-        for (const call of pendingCalls) {
-          try {
-            let toolResult;
-            if (call.name === "use_skill") {
-              toolResult = await this.executeSkill(call.args);
-            } else {
-              toolResult = await this.withTimeout(
-                this.toolRegistry.execute(call.name, call.args),
-                3e4,
-                `Tool ${call.name} execution timed out`
-              );
-            }
-            yield { type: "tool_result", name: call.name, result: toolResult };
-            toolResults.push({ name: call.name, response: toolResult });
-          } catch (error) {
-            logger.error(`Tool execution failed: ${call.name}`, error, "ModelService.chatStream");
-            yield { type: "tool_result", name: call.name, result: null, error: error.message };
-            toolResults.push({ name: call.name, response: { error: error.message || "Unknown error" } });
-          }
-        }
-        input = toolResults;
-        fullResponseText = "";
-      }
-      if (this.memoryManager) {
-        await this.memoryManager.recordMessage("user", userMessage);
-        await this.memoryManager.recordMessage("model", fullResponseText);
-      }
-      yield { type: "done", text: fullResponseText };
     } catch (e) {
       logger.error("Stream chat failed", e, "ModelService.chatStream");
       yield { type: "error", message: e.message };
@@ -4575,40 +4623,6 @@ ${item.content || ""}`;
       logger.error("Stateless generation failed", e, "ModelService.generate");
       throw e;
     }
-  }
-  buildSkillModeTools() {
-    const tools = [];
-    tools.push(...this.toolRegistry.getAllDefinitions());
-    const skillSummary = this.skillRegistry.getSkillSummaryText();
-    const useSkillDesc = skillSummary ? `Get detailed instructions for a specific workflow, then use the returned instructions with the existing tools.
-
-${skillSummary}` : "Get detailed instructions for a specific workflow.";
-    tools.push({
-      name: "use_skill",
-      description: useSkillDesc,
-      parameters: {
-        type: "object",
-        properties: {
-          name: { type: "string", description: "Skill name" }
-        },
-        required: ["name"]
-      }
-    });
-    return tools;
-  }
-  async executeSkill(args) {
-    const skillName = args?.name;
-    if (!skillName)
-      return { error: "Missing skill name" };
-    const activated = this.skillRegistry.activateSkill(skillName);
-    if (!activated)
-      return { error: `Skill "${skillName}" not found or disabled` };
-    const { instructions, tools } = activated;
-    return {
-      action_required: "Use the returned instructions immediately with the available tools to complete the user request.",
-      instructions,
-      available_tools: tools.map((t) => t.name)
-    };
   }
   async clearSession() {
     if (this.memoryManager) {
@@ -4630,10 +4644,13 @@ ${skillSummary}` : "Get detailed instructions for a specific workflow.";
     return null;
   }
   getAvailableTools() {
-    return this.buildSkillModeTools();
+    return this.createChatRuntime().getTools();
   }
   getSkillCommands() {
     return this.skillRegistry.listCommandEntries();
+  }
+  getProviderCapabilities() {
+    return this.provider.getCapabilities();
   }
   async executeSlashSkillCommand(command, input) {
     const skill = this.skillRegistry.resolveByCommand(command);
@@ -4648,6 +4665,20 @@ ${skillSummary}` : "Get detailed instructions for a specific workflow.";
     }, {
       app: this.app,
       settings: this.settings
+    });
+  }
+  async executeApprovedAction(action, args) {
+    return this.toolRegistry.execute(action, {
+      ...args,
+      approved: true
+    });
+  }
+  createChatRuntime() {
+    return createChatRuntime({
+      provider: this.provider,
+      memoryManager: this.memoryManager,
+      toolRegistry: this.toolRegistry,
+      skillRegistry: this.skillRegistry
     });
   }
   async shutdown() {
@@ -4733,7 +4764,7 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
         activeConfig.apiKey = value;
         await this.plugin.saveSettings();
       }));
-      if (activeConfig.type === "openai-compatible") {
+      if (this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl) {
         new import_obsidian4.Setting(containerEl).setName("Base URL").setDesc("API Base URL.").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(activeConfig.baseUrl).onChange(async (value) => {
           activeConfig.baseUrl = value;
           await this.plugin.saveSettings();
@@ -5051,11 +5082,7 @@ var ChatController = class {
     if (matchedSkillCommand && typeof this.api.executeSlashSkillCommand === "function") {
       try {
         const result = await this.api.executeSlashSkillCommand(cmd, argStr.trim());
-        if (result?.error) {
-          this.addMessage("system", `Error: ${result.error}`);
-        } else {
-          this.addMessage("system", this.formatSlashCommandResult(result));
-        }
+        this.handleStructuredResult(result);
       } catch (error) {
         this.handleError(error);
       }
@@ -5134,6 +5161,36 @@ ${toolsList}`);
 ${JSON.stringify(result, null, 2)}
 \`\`\``;
   }
+  handleStructuredResult(result) {
+    if (result?.approval_required) {
+      this.addApprovalMessage({
+        action: result.action,
+        target: result.target,
+        args: result.args || {},
+        message: result.message || "Approval required."
+      });
+      return;
+    }
+    if (result?.error) {
+      this.addMessage("system", `Error: ${result.error}`);
+      return;
+    }
+    this.addMessage("system", this.formatSlashCommandResult(result));
+  }
+  async approveApproval(request) {
+    this.setResponding(true);
+    try {
+      const result = await this.api.executeApprovedAction(request.action, request.args);
+      this.handleStructuredResult(result);
+    } catch (error) {
+      this.handleError(error);
+    } finally {
+      this.setResponding(false);
+    }
+  }
+  cancelApproval(request) {
+    this.addMessage("system", `Cancelled: ${request.target}`);
+  }
   async handleOpenFile(searchTerm) {
     const now = Date.now();
     if (this.fileSearchCache && this.fileSearchCache.term === searchTerm && now - this.fileSearchCache.timestamp < this.FILE_SEARCH_CACHE_TTL) {
@@ -5170,17 +5227,21 @@ ${list}`);
 ${list}`);
     }
   }
-  addMessage(role, content) {
+  addMessage(role, content, approval) {
     const msg = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
       role,
       content,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      approval
     };
     this.messages.push(msg);
     if (this.onMessageAdded) {
       this.onMessageAdded(msg);
     }
+  }
+  addApprovalMessage(request) {
+    this.addMessage("system", request.message, request);
   }
   setResponding(status) {
     if (this.onStatusChanged) {
@@ -5876,6 +5937,29 @@ var DiffModal = class extends import_obsidian8.Modal {
   }
 };
 
+// src/ui/approval-card.ts
+function renderApprovalCard(container, request, handlers) {
+  const card = container.createDiv({ cls: "shell-approval-card" });
+  card.createDiv({ cls: "shell-approval-title", text: "Approval Required" });
+  card.createDiv({ cls: "shell-approval-message", text: request.message });
+  const actions = card.createDiv({ cls: "shell-approval-actions" });
+  const approveButton = actions.createEl("button", {
+    cls: "shell-approval-btn shell-approval-confirm",
+    text: "Approve"
+  });
+  const cancelButton = actions.createEl("button", {
+    cls: "shell-approval-btn shell-approval-cancel",
+    text: "Cancel"
+  });
+  approveButton.addEventListener("click", () => {
+    void handlers.onApprove();
+  });
+  cancelButton.addEventListener("click", () => {
+    void handlers.onCancel();
+  });
+  return card;
+}
+
 // src/ui/command-suggestions.ts
 function buildCommandSuggestions(localCommands, skillCommands, query) {
   const merged = /* @__PURE__ */ new Map();
@@ -6255,7 +6339,17 @@ ${tool.name}: ${tool.description}
   }
   appendMessage(msg) {
     const entry = this.outputContainer.createDiv({ cls: `shell-entry ${msg.role}` });
-    if (msg.role === "ai") {
+    if (msg.approval) {
+      renderApprovalCard(entry, msg.approval, {
+        onApprove: async () => {
+          await this.chatController.approveApproval(msg.approval);
+        },
+        onCancel: () => {
+          this.chatController.cancelApproval(msg.approval);
+        }
+      });
+      this.scrollToEnd();
+    } else if (msg.role === "ai") {
       import_obsidian9.MarkdownRenderer.render(this.app, msg.content, entry, "", this).then(() => {
         this.postProcessAiContent(entry);
         requestAnimationFrame(() => {
@@ -6613,6 +6707,10 @@ ${tool.name}: ${tool.description}
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (item.type.indexOf("image") !== -1) {
+        if (!this.modelService.getProviderCapabilities().supportsImageInput) {
+          new import_obsidian9.Notice("The active provider does not support image context.");
+          return;
+        }
         e.preventDefault();
         const blob = item.getAsFile();
         if (blob) {
@@ -6647,6 +6745,10 @@ ${tool.name}: ${tool.description}
   }
   handleDrop(e) {
     e.preventDefault();
+    if (!this.modelService.getProviderCapabilities().supportsImageInput) {
+      new import_obsidian9.Notice("The active provider does not support image context.");
+      return;
+    }
     if (e.dataTransfer?.files) {
       for (let i = 0; i < e.dataTransfer.files.length; i++) {
         const file = e.dataTransfer.files[i];
@@ -8194,19 +8296,27 @@ var WikiIndexer = class {
 // src/knowledge/linter.ts
 var import_obsidian15 = require("obsidian");
 function checkMissingSummaries(doneFiles, existingFiles) {
-  return doneFiles.filter((f) => f.summaryPath && !existingFiles.has(f.summaryPath)).map((f) => ({
+  return doneFiles.map((f) => ({
+    ...f,
+    normalizedSummaryPath: f.summaryPath ?? f.summary_path ?? null
+  })).filter((f) => f.normalizedSummaryPath && !existingFiles.has(f.normalizedSummaryPath)).map((f) => ({
     type: "missing_summary",
     severity: "error",
+    recordId: f.id,
     filePath: f.path,
-    message: `Summary file missing for "${f.path}" (expected: ${f.summaryPath})`
+    message: `Summary file missing for "${f.path}" (expected: ${f.normalizedSummaryPath})`
   }));
 }
 function checkLowConfidenceExtractions(summaries) {
-  return summaries.filter((s) => s.reviewFlags.length > 0).map((s) => ({
+  return summaries.map((summary) => ({
+    ...summary,
+    normalizedReviewFlags: summary.reviewFlags ?? summary.review_flags ?? []
+  })).filter((s) => s.normalizedReviewFlags.length > 0).map((s) => ({
     type: "low_confidence",
     severity: "warning",
+    recordId: s.sourceId,
     filePath: s.path,
-    message: `Low confidence extraction in "${s.title}": ${s.reviewFlags.join(", ")}`
+    message: `Low confidence extraction in "${s.title}": ${s.normalizedReviewFlags.join(", ")}`
   }));
 }
 function checkOrphanConcepts(conceptMap) {

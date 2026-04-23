@@ -53,13 +53,14 @@ test('KNOWLEDGE_REGISTRY_STATUSES has all 7 statuses', () => {
   expect(KNOWLEDGE_REGISTRY_STATUSES).toContain('missing_source');
 });
 
-test('KNOWLEDGE_ARTIFACT_TYPES has all 5 types', () => {
-  expect(KNOWLEDGE_ARTIFACT_TYPES.length).toBe(5);
+test('KNOWLEDGE_ARTIFACT_TYPES has all 6 types', () => {
+  expect(KNOWLEDGE_ARTIFACT_TYPES.length).toBe(6);
   expect(KNOWLEDGE_ARTIFACT_TYPES).toContain('summary');
   expect(KNOWLEDGE_ARTIFACT_TYPES).toContain('topic_page');
   expect(KNOWLEDGE_ARTIFACT_TYPES).toContain('global_index');
   expect(KNOWLEDGE_ARTIFACT_TYPES).toContain('health_report');
   expect(KNOWLEDGE_ARTIFACT_TYPES).toContain('file_back');
+  expect(KNOWLEDGE_ARTIFACT_TYPES).toContain('ontology_schema');
 });
 
 test('normalizeTopicSlug handles standard cases', () => {

@@ -6,6 +6,7 @@ import { ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
 import { VIEW_TYPE_SHELL } from '../mcp/types';
 import { StreamEvent } from '../models/interfaces';
+import { renderApprovalCard } from './approval-card';
 import { buildCommandSuggestions, CommandSuggestion } from './command-suggestions';
 
 export { VIEW_TYPE_SHELL };
@@ -486,7 +487,17 @@ export class ShellView extends ItemView {
     appendMessage(msg: ChatMessage) {
         const entry = this.outputContainer.createDiv({ cls: `shell-entry ${msg.role}` });
 
-        if (msg.role === 'ai') {
+        if (msg.approval) {
+            renderApprovalCard(entry, msg.approval, {
+                onApprove: async () => {
+                    await this.chatController.approveApproval(msg.approval!);
+                },
+                onCancel: () => {
+                    this.chatController.cancelApproval(msg.approval!);
+                },
+            });
+            this.scrollToEnd();
+        } else if (msg.role === 'ai') {
             MarkdownRenderer.render(this.app, msg.content, entry, '', this as any).then(() => {
                 this.postProcessAiContent(entry);
 
@@ -877,6 +888,10 @@ export class ShellView extends ItemView {
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             if (item.type.indexOf('image') !== -1) {
+                if (!this.modelService.getProviderCapabilities().supportsImageInput) {
+                    new Notice('The active provider does not support image context.');
+                    return;
+                }
                 e.preventDefault();
                 const blob = item.getAsFile();
                 if (blob) {
@@ -915,6 +930,10 @@ export class ShellView extends ItemView {
 
     private handleDrop(e: DragEvent) {
         e.preventDefault();
+        if (!this.modelService.getProviderCapabilities().supportsImageInput) {
+            new Notice('The active provider does not support image context.');
+            return;
+        }
         // Handle files dropped
         if (e.dataTransfer?.files) {
             for (let i = 0; i < e.dataTransfer.files.length; i++) {

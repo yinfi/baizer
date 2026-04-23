@@ -1,5 +1,13 @@
 import { DEFAULT_SETTINGS } from '../src/mcp/types';
 
+(global as any).localStorage = {
+  getItem: () => null,
+  setItem: () => { },
+  removeItem: () => { },
+  key: () => null,
+  length: 0,
+};
+
 function expect(actual: any) {
   return {
     toEqual: (expected: any) => {
@@ -138,6 +146,90 @@ async function runTests() {
         settings: service.settings,
       },
     }]);
+  });
+
+  await test('executeApprovedAction replays the target tool with approved flag', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const calls: any[] = [];
+
+    service.toolRegistry = {
+      execute: async (name: string, args: any) => {
+        calls.push({ name, args });
+        return { success: true, message: 'approved execution' };
+      },
+    };
+
+    const result = await service.executeApprovedAction('create_note', {
+      filename: 'approved.md',
+      content: '# Approved',
+    });
+
+    expect(result).toEqual({ success: true, message: 'approved execution' });
+    expect(calls).toEqual([{
+      name: 'create_note',
+      args: {
+        filename: 'approved.md',
+        content: '# Approved',
+        approved: true,
+      },
+    }]);
+  });
+
+  await test('chat delegates prepared turn execution to ChatRuntime', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const calls: string[] = [];
+    const request = {
+      userMessage: 'hello',
+      contextItems: [{ type: 'file', data: 'note.md', content: 'content' }],
+      selection: 'selected text',
+    };
+
+    service.hasValidConfig = () => true;
+    service.getActiveProviderConfig = () => ({ label: 'Test Provider' });
+    service.createChatRuntime = () => ({
+      prepareTurn: async (input: any) => {
+        calls.push(`prepare:${JSON.stringify(input)}`);
+        return { prompt: 'prepared', tools: [] };
+      },
+      query: async (prepared: any) => {
+        calls.push(`query:${JSON.stringify(prepared)}`);
+        return 'runtime response';
+      },
+    });
+    service.memoryManager = null;
+
+    const result = await service.chat(
+      request.userMessage,
+      request.contextItems,
+      request.selection,
+    );
+
+    expect(result).toEqual('runtime response');
+    expect(calls).toEqual([
+      `prepare:${JSON.stringify(request)}`,
+      `query:${JSON.stringify({ prompt: 'prepared', tools: [] })}`,
+    ]);
+  });
+
+  await test('getProviderCapabilities proxies the active provider capability declaration', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.provider = {
+      getCapabilities: () => ({
+        supportsThinking: true,
+        supportsModelListing: true,
+        supportsImageInput: false,
+        supportsToolCalling: true,
+        supportsCustomBaseUrl: false,
+      }),
+    };
+
+    expect(service.getProviderCapabilities()).toEqual({
+      supportsThinking: true,
+      supportsModelListing: true,
+      supportsImageInput: false,
+      supportsToolCalling: true,
+      supportsCustomBaseUrl: false,
+    });
   });
 }
 

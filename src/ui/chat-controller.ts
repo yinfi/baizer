@@ -2,6 +2,7 @@ import { App, MarkdownView } from 'obsidian';
 import { ModelService } from '../services/model-service';
 import { StreamEvent } from '../models/interfaces';
 import { logger } from '../utils/logger';
+import { ApprovalRequest } from './approval-card';
 
 export interface ChatMessage {
     id: string;
@@ -9,6 +10,7 @@ export interface ChatMessage {
     content: string;
     timestamp: number;
     feedback?: 'up' | 'down' | null;
+    approval?: ApprovalRequest;
 }
 
 export interface ChatControllerOptions {
@@ -136,11 +138,7 @@ export class ChatController {
         if (matchedSkillCommand && typeof (this.api as any).executeSlashSkillCommand === 'function') {
             try {
                 const result = await (this.api as any).executeSlashSkillCommand(cmd, argStr.trim());
-                if (result?.error) {
-                    this.addMessage('system', `Error: ${result.error}`);
-                } else {
-                    this.addMessage('system', this.formatSlashCommandResult(result));
-                }
+                this.handleStructuredResult(result);
             } catch (error: any) {
                 this.handleError(error);
             }
@@ -213,6 +211,41 @@ export class ChatController {
         return `\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
     }
 
+    private handleStructuredResult(result: any) {
+        if (result?.approval_required) {
+            this.addApprovalMessage({
+                action: result.action,
+                target: result.target,
+                args: result.args || {},
+                message: result.message || 'Approval required.',
+            });
+            return;
+        }
+
+        if (result?.error) {
+            this.addMessage('system', `Error: ${result.error}`);
+            return;
+        }
+
+        this.addMessage('system', this.formatSlashCommandResult(result));
+    }
+
+    public async approveApproval(request: ApprovalRequest) {
+        this.setResponding(true);
+        try {
+            const result = await (this.api as any).executeApprovedAction(request.action, request.args);
+            this.handleStructuredResult(result);
+        } catch (error: any) {
+            this.handleError(error);
+        } finally {
+            this.setResponding(false);
+        }
+    }
+
+    public cancelApproval(request: ApprovalRequest) {
+        this.addMessage('system', `Cancelled: ${request.target}`);
+    }
+
     private async handleOpenFile(searchTerm: string) {
         // 检查缓存
         const now = Date.now();
@@ -258,17 +291,22 @@ export class ChatController {
         }
     }
 
-    private addMessage(role: 'user' | 'ai' | 'system', content: string) {
+    private addMessage(role: 'user' | 'ai' | 'system', content: string, approval?: ApprovalRequest) {
         const msg: ChatMessage = {
             id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
             role,
             content,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            approval,
         };
         this.messages.push(msg);
         if (this.onMessageAdded) {
             this.onMessageAdded(msg);
         }
+    }
+
+    private addApprovalMessage(request: ApprovalRequest) {
+        this.addMessage('system', request.message, request);
     }
 
     private setResponding(status: boolean) {

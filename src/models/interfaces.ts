@@ -1,4 +1,6 @@
 
+import { ProviderCapabilities } from '../runtime/provider-capabilities';
+
 export interface ModelConfig {
     apiKey: string;
     baseUrl?: string;
@@ -15,6 +17,14 @@ export interface ModelOption {
 export interface ChatMessage {
     role: 'user' | 'model' | 'system';
     content: string;
+}
+
+export interface ChatContextItem {
+    id?: string;
+    type: string;
+    data: string;
+    summary?: string;
+    content?: string;
 }
 
 export interface ToolDefinition {
@@ -58,6 +68,7 @@ export interface IModelProvider {
     name: string;
 
     configure(config: ModelConfig): void;
+    getCapabilities(): ProviderCapabilities;
     checkAvailability(): Promise<boolean>;
     listModels?(): Promise<ModelOption[]>;
 

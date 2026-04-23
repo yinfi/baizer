@@ -1,115 +1,112 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to coding agents working in this repository.
 
 ## Project Overview
 
-**Obsidian CLI** (also known as Gemini Shell) is an AI-powered Obsidian plugin that integrates Google Gemini AI into the note-taking workflow. It provides:
+**Obsidian CLI** is an AI-powered Obsidian plugin that combines:
 
-- **Gemini Shell**: A terminal-like interface for natural language interaction with your vault
-- **Guardian Mode**: An AI co-writer that provides inline suggestions via Ghost Text
-- **MCP-style Tools**: File operations, web search, webpage saving, and plugin orchestration
-- **Persistent Memory**: User profiling and session history stored locally
+- A shell-style chat interface inside Obsidian
+- Guardian inline writing assistance
+- A skill-and-tool orchestration layer
+- A local knowledge wiki compiler
+- Multi-provider model support
+- Approval-based execution for sensitive actions
 
-## Build Commands
+## Build And Test Commands
 
 ```bash
-# Development mode (watch for changes)
-npm run dev
-
-# Production build
-npm run build
-
-# Install dependencies
 npm install
+npm test
+npm run build
+npm run dev
 ```
 
-## Architecture
+`npm test` runs the maintained custom `tsx` test harness via `test/run-tests.ts`.
+
+## Current Architecture
 
 ### Entry Point
-- `main.ts` - Plugin entry, registers commands, views, and CodeMirror extensions
 
-### Core Modules
+- `main.ts`: bootstraps settings, registries, runtimes, views, editor extensions, and watchers
+
+### Runtime Layer
 
 | Module | Purpose |
 |--------|---------|
-| `src/gemini-api.ts` | Gemini API wrapper with retry logic, function calling, and memory integration |
-| `src/mcp/tools.ts` | Tool definitions and execution (read/write notes, web search, plugin control) |
-| `src/mcp/types.ts` | Settings interface (`GeminiSettings`) and default values |
-| `src/settings.ts` | Plugin settings UI tab |
+| `src/services/model-service.ts` | UI-facing model facade, provider switching, settings updates |
+| `src/runtime/chat-runtime.ts` | Prompt preparation, tool loop, and stream execution |
+| `src/runtime/runtime-factory.ts` | Runtime construction |
+| `src/runtime/provider-capabilities.ts` | Provider capability declaration |
+
+### Tool And Skill Layer
+
+| Module | Purpose |
+|--------|---------|
+| `src/skills/tool-registry.ts` | Register and execute atomic tools |
+| `src/skills/skill-registry.ts` | Register skills, route slash commands and intent, expose summaries |
+| `src/skills/skill-loader.ts` | Load user-defined `SKILL.md` files |
+| `src/skills/builtin/` | Built-in skills and atomic tool registrations |
+
+### Knowledge System
+
+| Module | Purpose |
+|--------|---------|
+| `src/knowledge/runtime.ts` | Knowledge lifecycle orchestration |
+| `src/knowledge/compiler.ts` | Note compilation into structured wiki summaries |
+| `src/knowledge/indexer.ts` | Index and base-file generation |
+| `src/knowledge/linter.ts` | Knowledge health checks |
 
 ### UI Components
 
 | Component | Purpose |
 |-----------|---------|
-| `src/ui/shell-view.ts` | Main terminal view (ItemView), command parsing, suggestion popups |
-| `src/ui/ghost-text.ts` | CodeMirror extension for inline AI suggestions (Tab to accept, Esc to dismiss) |
-| `src/ui/guardian-gutter.ts` | CodeMirror gutter extension showing Guardian state (thinking/suggestion/paused) |
-| `src/ui/selection-menu.ts` | Floating menu on text selection for AI actions |
-| `src/ui/guardian-modal.ts` | Modal for manual Guardian instructions |
+| `src/ui/shell-view.ts` | Main shell view, streaming UI, command suggestions |
+| `src/ui/chat-controller.ts` | Slash-command dispatch, approval handling |
+| `src/ui/approval-card.ts` | Approval request rendering |
+| `src/ui/ghost-text.ts` | Inline suggestion rendering |
+| `src/ui/guardian-gutter.ts` | Guardian editor gutter state |
+| `src/ui/selection-menu.ts` | Selection-triggered AI actions |
 
-### Memory System
-- `src/memory/memory-manager.ts` - User profile extraction, session summaries, chat history
-- `src/memory/types.ts` - UserProfile, SessionSummary, ChatMessage interfaces
-- Data stored in `.obsidian/gemini-memory/`
+## Key Patterns
 
-### Key Patterns
+1. **Skill-first orchestration**
+   - Atomic tools live in `ToolRegistry`
+   - Higher-level workflows live in `SkillRegistry`
+   - Slash command suggestions and routing should prefer the skill registry instead of hardcoded tables
 
-1. **Function Calling**: Tools are registered via `ToolManager.getToolsDefinitions()` and executed through Gemini's native function calling with multi-turn support (up to 10 loops)
+2. **Runtime boundary**
+   - `ModelService` should stay a facade
+   - Prompt assembly, function-call loops, and streaming execution belong in `ChatRuntime`
 
-2. **CodeMirror Extensions**: Guardian features use CM6 StateFields and StateEffects for reactive UI updates:
-   - `guardianModeField` - Global enabled/paused state
-   - `ghostTextField` - Decoration management for inline suggestions
-   - `setGuardianLineState` - Per-line thinking/suggestion state
+3. **Approval flow**
+   - Sensitive tools return structured `approval_required`
+   - The UI renders approval cards
+   - Approved actions replay through `ModelService.executeApprovedAction(...)`
 
-3. **Settings Architecture**: All settings defined in `src/mcp/types.ts` with `DEFAULT_SETTINGS`, UI in `src/settings.ts`
+4. **Capability-driven UI**
+   - Providers declare capabilities such as image input and custom base URL support
+   - Prefer capability checks over provider-name branching in UI code
 
-## Shell Commands
+## Notes For Development
 
-Built-in commands in Gemini Shell:
-- `/clear` - Clear session history
-- `/profile` - View user profile
-- `/tools` - List available MCP tools
-- `/open <file>` - Open file by name
-- `@` prefix - File autocomplete
-- `/` prefix - Command autocomplete
+- Build output goes to `main.js`
+- External dependencies such as `obsidian`, `electron`, and `@codemirror/*` stay external in esbuild
+- Mobile compatibility matters: avoid Node-only runtime dependencies in production plugin code
+- Destructive or privileged operations must respect:
+  - `allowFileCreation`
+  - `allowFileModification`
+  - `allowPluginControl`
+  - `confirmExecutions`
 
-## Hotkeys
+## Shell And Skill Routing
 
-- `Mod+J` - Open Gemini Shell
-- `Mod+Shift+G` - Guardian manual trigger
+When a user request clearly maps to a registered skill workflow, prefer routing through the skill system instead of hardcoding bespoke controller behavior.
 
-## Supported Tools
+Examples:
 
-Core vault operations: `read_note`, `create_note`, `update_note`, `append_to_note`, `delete_note`, `rename_note`, `list_notes`, `search_vault`, `open_file`
+- Web save and clipping -> `web-clipper`
+- Knowledge lookup -> `knowledge`
+- Plugin inspection and command use -> `plugin-ctrl`
 
-External: `save_webpage` (YouTube/Bilibili transcripts, WeChat articles), `web_search` (DuckDuckGo)
-
-Plugin control (when enabled): `list_plugins`, `get_plugin_commands`, `get_plugin_settings`
-
-## Notes for Development
-
-- Build output goes to `main.js` (single bundled file)
-- External dependencies: `obsidian`, `electron`, `@codemirror/*` packages are marked external in esbuild config
-- Mobile compatibility required: avoid Node.js-specific APIs like `child_process`
-- All destructive operations (delete/overwrite) should respect `confirmExecutions` setting
-
-## Skill routing
-
-When the user's request matches an available skill, ALWAYS invoke it using the Skill
-tool as your FIRST action. Do NOT answer directly, do NOT use other tools first.
-The skill has specialized workflows that produce better results than ad-hoc answers.
-
-Key routing rules:
-- Product ideas, "is this worth building", brainstorming → invoke office-hours
-- Bugs, errors, "why is this broken", 500 errors → invoke investigate
-- Ship, deploy, push, create PR → invoke ship
-- QA, test the site, find bugs → invoke qa
-- Code review, check my diff → invoke review
-- Update docs after shipping → invoke document-release
-- Weekly retro → invoke retro
-- Design system, brand → invoke design-consultation
-- Visual audit, design polish → invoke design-review
-- Architecture review → invoke plan-eng-review
-- Save progress, checkpoint, resume → invoke checkpoint
-- Code quality, health check → invoke health
+Keep local commands such as `/clear` and `/profile` local unless there is a strong reason to move them.
