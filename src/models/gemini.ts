@@ -13,6 +13,7 @@ import {
 } from './interfaces';
 import { mergeStreamThoughtSignatures } from './gemini-thought-signatures';
 import { logger } from '../utils/logger';
+import { ProviderCapabilities } from '../runtime/provider-capabilities';
 
 export class GeminiProvider implements IModelProvider {
     id = 'gemini';
@@ -21,6 +22,16 @@ export class GeminiProvider implements IModelProvider {
     private genAI: GoogleGenerativeAI;
     private model: GenerativeModel;
     private config: ModelConfig;
+
+    getCapabilities(): ProviderCapabilities {
+        return {
+            supportsThinking: true,
+            supportsModelListing: true,
+            supportsImageInput: true,
+            supportsToolCalling: true,
+            supportsCustomBaseUrl: false,
+        };
+    }
 
     configure(config: ModelConfig) {
         this.config = config;

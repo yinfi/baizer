@@ -139,6 +139,28 @@ async function runTests() {
     });
     expect(created.length).toBe(0);
   });
+
+  await test('create_note executes after approval when approved flag is provided', async () => {
+    created.length = 0;
+    const registry = new ToolRegistry(mockApp, {
+      ...DEFAULT_SETTINGS,
+      allowFileCreation: true,
+      confirmExecutions: true,
+    });
+    registerVaultTools(registry);
+
+    const result = await registry.execute('create_note', {
+      filename: 'approved-note',
+      content: '# Approved',
+      approved: true,
+    });
+
+    expect(result).toEqual({
+      status: 'success',
+      message: '✅ Note created: approved-note.md',
+    });
+    expect(created).toEqual(['approved-note.md']);
+  });
 }
 
 runTests().catch(console.error);

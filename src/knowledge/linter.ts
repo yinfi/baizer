@@ -15,6 +15,7 @@ export type LintIssueSeverity = 'error' | 'warning' | 'info';
 export interface LintIssue {
   type: LintIssueType;
   severity: LintIssueSeverity;
+  recordId?: string;
   filePath?: string;
   message: string;
 }
@@ -23,16 +24,26 @@ export interface LintIssue {
  * 检查：done 状态但 summary 文件不存在
  */
 export function checkMissingSummaries(
-  doneFiles: { path: string; summaryPath: string | null }[],
+  doneFiles: Array<{
+    id?: string;
+    path: string;
+    summaryPath?: string | null;
+    summary_path?: string | null;
+  }>,
   existingFiles: Set<string>
 ): LintIssue[] {
   return doneFiles
-    .filter(f => f.summaryPath && !existingFiles.has(f.summaryPath!))
+    .map(f => ({
+      ...f,
+      normalizedSummaryPath: f.summaryPath ?? f.summary_path ?? null,
+    }))
+    .filter(f => f.normalizedSummaryPath && !existingFiles.has(f.normalizedSummaryPath))
     .map(f => ({
       type: 'missing_summary' as const,
       severity: 'error' as const,
+      recordId: f.id,
       filePath: f.path,
-      message: `Summary file missing for "${f.path}" (expected: ${f.summaryPath})`
+      message: `Summary file missing for "${f.path}" (expected: ${f.normalizedSummaryPath})`
     }));
 }
 
@@ -40,15 +51,26 @@ export function checkMissingSummaries(
  * 检查：summary 中有 review_flags 的低置信度提取
  */
 export function checkLowConfidenceExtractions(
-  summaries: { path: string; title: string; reviewFlags: string[] }[]
+  summaries: Array<{
+    path?: string;
+    title: string;
+    reviewFlags?: string[];
+    review_flags?: string[];
+    sourceId?: string;
+  }>
 ): LintIssue[] {
   return summaries
-    .filter(s => s.reviewFlags.length > 0)
+    .map(summary => ({
+      ...summary,
+      normalizedReviewFlags: summary.reviewFlags ?? summary.review_flags ?? [],
+    }))
+    .filter(s => s.normalizedReviewFlags.length > 0)
     .map(s => ({
       type: 'low_confidence' as const,
       severity: 'warning' as const,
+      recordId: s.sourceId,
       filePath: s.path,
-      message: `Low confidence extraction in "${s.title}": ${s.reviewFlags.join(', ')}`
+      message: `Low confidence extraction in "${s.title}": ${s.normalizedReviewFlags.join(', ')}`
     }));
 }
 

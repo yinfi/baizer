@@ -835,6 +835,56 @@ textarea.shell-input::placeholder {
     color: var(--interactive-accent);
 }
 
+.shell-approval-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-1);
+    padding: var(--size-4-2);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    font-style: normal;
+}
+
+.shell-approval-title {
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-accent);
+}
+
+.shell-approval-message {
+    font-size: var(--font-ui-small);
+    line-height: var(--line-height-normal);
+    color: var(--text-normal);
+}
+
+.shell-approval-actions {
+    display: flex;
+    gap: var(--size-4-1);
+}
+
+.shell-approval-btn {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: var(--size-2-1) var(--size-4-2);
+    cursor: pointer;
+    font-size: var(--font-ui-small);
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.shell-approval-confirm {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.shell-approval-cancel {
+    background: var(--background-primary);
+    color: var(--text-muted);
+}
+
 .shell-thumbs-up.active {
     color: var(--color-green);
     border-color: var(--color-green);

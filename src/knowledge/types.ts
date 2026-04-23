@@ -8,6 +8,49 @@ export const KNOWLEDGE_ARTIFACT_TYPES = [
 
 export type KnowledgeArtifactType = typeof KNOWLEDGE_ARTIFACT_TYPES[number];
 
+export const KNOWLEDGE_REGISTRY_STATUSES = [
+  'pending',
+  'processing',
+  'done',
+  'stale',
+  'failed',
+  'partial',
+  'missing_source',
+] as const;
+
+export type KnowledgeRegistryStatus = typeof KNOWLEDGE_REGISTRY_STATUSES[number];
+
+export interface KnowledgeRegistryRecord {
+  id: string;
+  path: string;
+  status: KnowledgeRegistryStatus;
+  summary_path: string | null;
+  created_at: string;
+  updated_at: string;
+  error: string | null;
+}
+
+export interface KnowledgeRegistry {
+  records: Record<string, KnowledgeRegistryRecord>;
+}
+
+export const VALID_STATUS_TRANSITIONS: Record<KnowledgeRegistryStatus, KnowledgeRegistryStatus[]> = {
+  pending: ['processing', 'missing_source'],
+  processing: ['done', 'failed', 'partial', 'missing_source'],
+  done: ['stale', 'missing_source'],
+  stale: ['pending', 'missing_source'],
+  failed: ['pending', 'missing_source'],
+  partial: ['pending', 'missing_source'],
+  missing_source: ['pending'],
+};
+
+export function isValidTransition(
+  from: KnowledgeRegistryStatus,
+  to: KnowledgeRegistryStatus,
+): boolean {
+  return VALID_STATUS_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
 // ===== Topic Normalization =====
 
 export interface TopicRef {

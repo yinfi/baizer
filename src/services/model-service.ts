@@ -9,6 +9,8 @@ import { OpenAIProvider } from '../models/openai';
 import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry } from '../skills/types';
+import { createChatRuntime } from '../runtime/runtime-factory';
+import { ProviderCapabilities } from '../runtime/provider-capabilities';
 
 export class ModelService {
     private provider: IModelProvider;
@@ -29,30 +31,6 @@ export class ModelService {
         this.skillRegistry = skillRegistry;
         this.initializeProvider();
         this.setupErrorHandlers();
-    }
-
-    private async withTimeout<T>(
-        promise: Promise<T>,
-        timeoutMs: number,
-        errorMessage: string
-    ): Promise<T> {
-        const controller = new AbortController();
-
-        const timeoutPromise = new Promise<never>((_, reject) => {
-            const timeoutId = setTimeout(() => {
-                reject(new Error(errorMessage));
-            }, timeoutMs);
-
-            controller.signal.addEventListener('abort', () => {
-                clearTimeout(timeoutId);
-            });
-        });
-
-        try {
-            return await Promise.race([promise, timeoutPromise]);
-        } finally {
-            controller.abort();
-        }
     }
 
     private initializeProvider() {
@@ -268,90 +246,13 @@ export class ModelService {
         }
 
         try {
-            let memoryContext = '';
-            if (this.memoryManager) {
-                await this.memoryManager.ready();
-                memoryContext = this.memoryManager.buildContext();
-            }
-
-            let fullPrompt = '';
-            if (memoryContext) {
-                fullPrompt += `${memoryContext}\n\n`;
-            }
-            fullPrompt += `[Current Time: ${new Date().toLocaleString()} (${new Date().toLocaleDateString(undefined, { weekday: 'long' })})]\n`;
-
-            let contextStr = '';
-            if (contextItems && contextItems.length > 0) {
-                contextStr = contextItems.map(item => {
-                    if (item.type === 'image') return `[Image: ${item.summary || 'Attached Image'}]`;
-                    return `[Context (${item.type}): ${item.data}]\n${item.content || ''}`;
-                }).join('\n\n');
-            }
-
-            fullPrompt += `[Context: ${contextStr}]\n`;
-            if (selection) {
-                fullPrompt += `[Selected Text: ${selection}]\n`;
-            }
-            fullPrompt += `User Request: ${userMessage}`;
-
-            const tools = this.buildSkillModeTools();
-            const chat = this.memoryManager
-                ? this.memoryManager.getOrCreateSession(tools)
-                : this.provider.startChat(tools);
-
-            let result = await chat.sendMessage(fullPrompt);
-            let loopCount = 0;
-            const MAX_LOOPS = 10;
-
-            while (result.functionCalls && result.functionCalls.length > 0) {
-                loopCount++;
-                if (loopCount > MAX_LOOPS) {
-                    logger.warn(`Function call loop limit reached (${MAX_LOOPS})`, 'ModelService.chat');
-                    break;
-                }
-
-                logger.info(
-                    `Processing function calls (Loop ${loopCount}): ${result.functionCalls.map(c => c.name).join(', ')}`,
-                    'ModelService.chat'
-                );
-
-                const toolResults = await Promise.all(result.functionCalls.map(async (call) => {
-                    try {
-                        let toolResult: any;
-
-                        if (call.name === 'use_skill') {
-                            toolResult = await this.executeSkill(call.args);
-                        } else {
-                            toolResult = await this.withTimeout(
-                                this.toolRegistry.execute(call.name, call.args),
-                                30000,
-                                `Tool ${call.name} execution timed out`
-                            );
-                        }
-                        return {
-                            name: call.name,
-                            response: toolResult,
-                        };
-                    } catch (error: any) {
-                        logger.error(`Tool execution failed: ${call.name}`, error, 'ModelService.chat');
-                        return {
-                            name: call.name,
-                            response: { error: error.message || 'Unknown error' },
-                        };
-                    }
-                }));
-
-                result = await chat.sendMessage(toolResults);
-            }
-
-            const responseText = result.text;
-
-            if (this.memoryManager) {
-                await this.memoryManager.recordMessage('user', userMessage);
-                await this.memoryManager.recordMessage('model', responseText);
-            }
-
-            return responseText;
+            const runtime = this.createChatRuntime();
+            const preparedTurn = await runtime.prepareTurn({
+                userMessage,
+                contextItems,
+                selection,
+            });
+            return await runtime.query(preparedTurn);
         } catch (e: any) {
             logger.error('Chat processing failed', e, 'ModelService.chat');
             return `Error: ${e.message}`;
@@ -368,92 +269,15 @@ export class ModelService {
         }
 
         try {
-            let memoryContext = '';
-            if (this.memoryManager) {
-                await this.memoryManager.ready();
-                memoryContext = this.memoryManager.buildContext();
+            const runtime = this.createChatRuntime();
+            const preparedTurn = await runtime.prepareTurn({
+                userMessage,
+                contextItems,
+                selection,
+            });
+            for await (const event of runtime.queryStream(preparedTurn)) {
+                yield event;
             }
-
-            let fullPrompt = '';
-            if (memoryContext) fullPrompt += `${memoryContext}\n\n`;
-            fullPrompt += `[Current Time: ${new Date().toLocaleString()} (${new Date().toLocaleDateString(undefined, { weekday: 'long' })})]\n`;
-
-            let contextStr = '';
-            if (contextItems && contextItems.length > 0) {
-                contextStr = contextItems.map(item => {
-                    if (item.type === 'image') return `[Image: ${item.summary || 'Attached Image'}]`;
-                    return `[Context (${item.type}): ${item.data}]\n${item.content || ''}`;
-                }).join('\n\n');
-            }
-            fullPrompt += `[Context: ${contextStr}]\n`;
-            if (selection) fullPrompt += `[Selected Text: ${selection}]\n`;
-            fullPrompt += `User Request: ${userMessage}`;
-
-            const tools = this.buildSkillModeTools();
-            const chat = this.memoryManager
-                ? this.memoryManager.getOrCreateSession(tools)
-                : this.provider.startChat(tools);
-
-            let loopCount = 0;
-            const MAX_LOOPS = 10;
-            let input: string | { name: string; response: any }[] = fullPrompt;
-            let fullResponseText = '';
-
-            while (loopCount <= MAX_LOOPS) {
-                const pendingCalls: { name: string; args: any }[] = [];
-
-                for await (const event of chat.sendMessageStream(input)) {
-                    if (event.type === 'tool_call') {
-                        pendingCalls.push({ name: event.name, args: event.args });
-                        yield event;
-                    } else if (event.type === 'text_delta') {
-                        fullResponseText += event.content;
-                        yield event;
-                    } else if (event.type === 'thinking') {
-                        yield event;
-                    }
-                }
-
-                if (pendingCalls.length === 0) break;
-
-                loopCount++;
-                if (loopCount > MAX_LOOPS) {
-                    logger.warn(`Stream function call loop limit reached (${MAX_LOOPS})`, 'ModelService.chatStream');
-                    break;
-                }
-
-                const toolResults: { name: string; response: any }[] = [];
-                for (const call of pendingCalls) {
-                    try {
-                        let toolResult: any;
-                        if (call.name === 'use_skill') {
-                            toolResult = await this.executeSkill(call.args);
-                        } else {
-                            toolResult = await this.withTimeout(
-                                this.toolRegistry.execute(call.name, call.args),
-                                30000,
-                                `Tool ${call.name} execution timed out`
-                            );
-                        }
-                        yield { type: 'tool_result' as const, name: call.name, result: toolResult };
-                        toolResults.push({ name: call.name, response: toolResult });
-                    } catch (error: any) {
-                        logger.error(`Tool execution failed: ${call.name}`, error, 'ModelService.chatStream');
-                        yield { type: 'tool_result' as const, name: call.name, result: null, error: error.message };
-                        toolResults.push({ name: call.name, response: { error: error.message || 'Unknown error' } });
-                    }
-                }
-
-                input = toolResults;
-                fullResponseText = '';
-            }
-
-            if (this.memoryManager) {
-                await this.memoryManager.recordMessage('user', userMessage);
-                await this.memoryManager.recordMessage('model', fullResponseText);
-            }
-
-            yield { type: 'done' as const, text: fullResponseText };
         } catch (e: any) {
             logger.error('Stream chat failed', e, 'ModelService.chatStream');
             yield { type: 'error' as const, message: e.message };
@@ -472,46 +296,6 @@ export class ModelService {
             logger.error('Stateless generation failed', e, 'ModelService.generate');
             throw e;
         }
-    }
-
-    private buildSkillModeTools(): ToolDefinition[] {
-        const tools: ToolDefinition[] = [];
-        tools.push(...this.toolRegistry.getAllDefinitions());
-
-        const skillSummary = this.skillRegistry.getSkillSummaryText();
-        const useSkillDesc = skillSummary
-            ? `Get detailed instructions for a specific workflow, then use the returned instructions with the existing tools.\n\n${skillSummary}`
-            : 'Get detailed instructions for a specific workflow.';
-
-        tools.push({
-            name: 'use_skill',
-            description: useSkillDesc,
-            parameters: {
-                type: 'object',
-                properties: {
-                    name: { type: 'string', description: 'Skill name' },
-                },
-                required: ['name'],
-            },
-        });
-
-        return tools;
-    }
-
-    private async executeSkill(args: any): Promise<any> {
-        const skillName = args?.name;
-        if (!skillName) return { error: 'Missing skill name' };
-
-        const activated = this.skillRegistry.activateSkill(skillName);
-        if (!activated) return { error: `Skill "${skillName}" not found or disabled` };
-
-        const { instructions, tools } = activated;
-
-        return {
-            action_required: 'Use the returned instructions immediately with the available tools to complete the user request.',
-            instructions,
-            available_tools: tools.map(t => t.name),
-        };
     }
 
     async clearSession() {
@@ -538,11 +322,15 @@ export class ModelService {
     }
 
     getAvailableTools() {
-        return this.buildSkillModeTools();
+        return this.createChatRuntime().getTools();
     }
 
     getSkillCommands(): SkillCommandEntry[] {
         return this.skillRegistry.listCommandEntries();
+    }
+
+    getProviderCapabilities(): ProviderCapabilities {
+        return this.provider.getCapabilities();
     }
 
     async executeSlashSkillCommand(command: string, input: string): Promise<any> {
@@ -559,6 +347,22 @@ export class ModelService {
         }, {
             app: this.app,
             settings: this.settings,
+        });
+    }
+
+    async executeApprovedAction(action: string, args: Record<string, any>): Promise<any> {
+        return this.toolRegistry.execute(action, {
+            ...args,
+            approved: true,
+        });
+    }
+
+    createChatRuntime() {
+        return createChatRuntime({
+            provider: this.provider,
+            memoryManager: this.memoryManager,
+            toolRegistry: this.toolRegistry,
+            skillRegistry: this.skillRegistry,
         });
     }
 

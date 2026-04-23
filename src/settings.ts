@@ -114,8 +114,7 @@ export class SettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                     }));
 
-            // Gemini 不需要 Base URL
-            if (activeConfig.type === 'openai-compatible') {
+            if (this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl) {
                 new Setting(containerEl)
                     .setName('Base URL')
                     .setDesc('API Base URL.')

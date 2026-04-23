@@ -1,12 +1,23 @@
 import { IModelProvider, ModelConfig, IChatSession, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption, StreamEvent } from './interfaces';
 import { requestUrl, RequestUrlParam } from 'obsidian';
 import { logger } from '../utils/logger';
+import { ProviderCapabilities } from '../runtime/provider-capabilities';
 
 export class OpenAIProvider implements IModelProvider {
     id = 'openai';
     name = 'OpenAI Compatible';
 
     private config: ModelConfig;
+
+    getCapabilities(): ProviderCapabilities {
+        return {
+            supportsThinking: true,
+            supportsModelListing: true,
+            supportsImageInput: false,
+            supportsToolCalling: true,
+            supportsCustomBaseUrl: true,
+        };
+    }
 
     configure(config: ModelConfig) {
         this.config = config;
