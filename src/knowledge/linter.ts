@@ -1,39 +1,38 @@
 // src/knowledge/linter.ts
 
 import { App, TFile } from 'obsidian';
-import { KnowledgeRegistryManager } from './registry';
-import { KnowledgeRegistryRecord, WIKI_HEALTH_SUBFOLDER } from './types';
+import { WIKI_HEALTH_SUBFOLDER } from './types';
+import { getFilesByKnowledgeStatus } from './frontmatter';
 
 export type LintIssueType =
   | 'missing_summary'
   | 'low_confidence'
   | 'orphan_concept'
-  | 'duplicate_topic'
-  | 'stale_missing_source';
+  | 'duplicate_topic';
 
 export type LintIssueSeverity = 'error' | 'warning' | 'info';
 
 export interface LintIssue {
   type: LintIssueType;
   severity: LintIssueSeverity;
-  recordId?: string;
+  filePath?: string;
   message: string;
 }
 
 /**
- * 检查：registry 中 done 状态但无对应 summary 文件
+ * 检查：done 状态但 summary 文件不存在
  */
 export function checkMissingSummaries(
-  records: KnowledgeRegistryRecord[],
+  doneFiles: { path: string; summaryPath: string | null }[],
   existingFiles: Set<string>
 ): LintIssue[] {
-  return records
-    .filter(r => r.status === 'done' && r.summary_path && !existingFiles.has(r.summary_path!))
-    .map(r => ({
+  return doneFiles
+    .filter(f => f.summaryPath && !existingFiles.has(f.summaryPath!))
+    .map(f => ({
       type: 'missing_summary' as const,
       severity: 'error' as const,
-      recordId: r.id,
-      message: `Summary file missing for "${r.path}" (expected: ${r.summary_path})`
+      filePath: f.path,
+      message: `Summary file missing for "${f.path}" (expected: ${f.summaryPath})`
     }));
 }
 
@@ -41,14 +40,14 @@ export function checkMissingSummaries(
  * 检查：summary 中有 review_flags 的低置信度提取
  */
 export function checkLowConfidenceExtractions(
-  summaries: { sourceId: string; title: string; reviewFlags: string[] }[]
+  summaries: { path: string; title: string; reviewFlags: string[] }[]
 ): LintIssue[] {
   return summaries
     .filter(s => s.reviewFlags.length > 0)
     .map(s => ({
       type: 'low_confidence' as const,
       severity: 'warning' as const,
-      recordId: s.sourceId,
+      filePath: s.path,
       message: `Low confidence extraction in "${s.title}": ${s.reviewFlags.join(', ')}`
     }));
 }
@@ -64,7 +63,7 @@ export function checkOrphanConcepts(
     .map(([concept, sources]) => ({
       type: 'orphan_concept' as const,
       severity: 'info' as const,
-      recordId: sources[0],
+      filePath: sources[0],
       message: `Orphan concept "${concept}" only appears in one summary`
     }));
 }
@@ -90,7 +89,7 @@ export function buildHealthReportContent(issues: LintIssue[]): string {
   if (errors.length > 0) {
     md += '## Errors\n\n';
     for (const e of errors) {
-      md += `- **[${e.type}]** ${e.message}${e.recordId ? ` (${e.recordId})` : ''}\n`;
+      md += `- **[${e.type}]** ${e.message}\n`;
     }
     md += '\n';
   }
@@ -98,7 +97,7 @@ export function buildHealthReportContent(issues: LintIssue[]): string {
   if (warnings.length > 0) {
     md += '## Warnings\n\n';
     for (const w of warnings) {
-      md += `- **[${w.type}]** ${w.message}${w.recordId ? ` (${w.recordId})` : ''}\n`;
+      md += `- **[${w.type}]** ${w.message}\n`;
     }
     md += '\n';
   }
@@ -106,7 +105,7 @@ export function buildHealthReportContent(issues: LintIssue[]): string {
   if (infos.length > 0) {
     md += '## Info\n\n';
     for (const i of infos) {
-      md += `- **[${i.type}]** ${i.message}${i.recordId ? ` (${i.recordId})` : ''}\n`;
+      md += `- **[${i.type}]** ${i.message}\n`;
     }
     md += '\n';
   }
@@ -120,39 +119,45 @@ export function buildHealthReportContent(issues: LintIssue[]): string {
 export class KnowledgeLinter {
   constructor(
     private app: App,
-    private registry: KnowledgeRegistryManager,
     private wikiFolder: string
   ) {}
 
   async runLint(): Promise<LintIssue[]> {
     const allIssues: LintIssue[] = [];
+    const existingFiles = new Set(this.app.vault.getFiles().map(f => f.path));
 
-    const doneRecords = this.registry.getByStatus('done');
-    const existingFiles = new Set(
-      this.app.vault.getFiles().map(f => f.path)
-    );
-    allIssues.push(...checkMissingSummaries(doneRecords, existingFiles));
+    // 检查 done 状态文件的 summary 是否存在
+    const doneFiles = getFilesByKnowledgeStatus(this.app, 'done');
+    const doneInfo = doneFiles.map(f => {
+      const cache = this.app.metadataCache.getFileCache(f);
+      return {
+        path: f.path,
+        summaryPath: cache?.frontmatter?.knowledge_summary ?? null
+      };
+    });
+    allIssues.push(...checkMissingSummaries(doneInfo, existingFiles));
 
-    const summaries: { sourceId: string; title: string; reviewFlags: string[] }[] = [];
+    // 检查 summary 文件的 review_flags 和 concepts
+    const summaries: { path: string; title: string; reviewFlags: string[] }[] = [];
     const conceptMap: Record<string, string[]> = {};
 
-    for (const record of doneRecords) {
-      if (!record.summary_path) continue;
-      const file = this.app.vault.getAbstractFileByPath(record.summary_path);
-      if (!file || !(file instanceof TFile)) continue;
+    const wikiFiles = this.app.vault.getFiles().filter(
+      f => f.path.startsWith(this.wikiFolder + '/Articles/') && f.extension === 'md'
+    );
 
-      const cache = this.app.metadataCache.getFileCache(file as TFile);
+    for (const file of wikiFiles) {
+      const cache = this.app.metadataCache.getFileCache(file);
       const fm = cache?.frontmatter;
-      if (!fm) continue;
+      if (!fm || !fm.knowledge_generated) continue;
 
-      const title = fm.title || record.path;
+      const title = fm.title || file.basename;
       let reviewFlags: string[] = [];
       if (Array.isArray(fm.review_flags)) {
         reviewFlags = fm.review_flags;
       } else if (typeof fm.review_flags === 'string') {
         try { reviewFlags = JSON.parse(fm.review_flags); } catch {}
       }
-      summaries.push({ sourceId: record.id, title, reviewFlags });
+      summaries.push({ path: file.path, title, reviewFlags });
 
       let concepts: string[] = [];
       if (Array.isArray(fm.concepts)) {
@@ -162,24 +167,12 @@ export class KnowledgeLinter {
       }
       for (const c of concepts) {
         if (!conceptMap[c]) conceptMap[c] = [];
-        conceptMap[c].push(record.id);
+        conceptMap[c].push(file.path);
       }
     }
 
     allIssues.push(...checkLowConfidenceExtractions(summaries));
     allIssues.push(...checkOrphanConcepts(conceptMap));
-
-    const missingRecords = this.registry.getByStatus('missing_source');
-    for (const r of missingRecords) {
-      if (r.summary_path && existingFiles.has(r.summary_path)) {
-        allIssues.push({
-          type: 'stale_missing_source',
-          severity: 'warning',
-          recordId: r.id,
-          message: `Source deleted but summary still exists: ${r.summary_path}`
-        });
-      }
-    }
 
     return allIssues;
   }

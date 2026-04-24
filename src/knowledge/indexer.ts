@@ -2,7 +2,6 @@
 // 生成 Obsidian Bases 索引文件，替代手动 markdown 索引
 
 import { App, TFile, Notice } from 'obsidian';
-import { KnowledgeRegistryManager } from './registry';
 import { MetadataIndex } from './metadata-index';
 import {
   DEFAULT_WIKI_FOLDER,
@@ -55,7 +54,6 @@ views:
 export class WikiIndexer {
   constructor(
     private app: App,
-    registry: KnowledgeRegistryManager,
     private metadataIndex: MetadataIndex,
     private wikiFolder: string = DEFAULT_WIKI_FOLDER
   ) {}

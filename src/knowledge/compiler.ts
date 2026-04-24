@@ -1,20 +1,216 @@
 // src/knowledge/compiler.ts
 
 import { App, TFile } from 'obsidian';
-import { CompilerExtraction, TopicRef, normalizeTopicSlug } from './types';
-import { KnowledgeRegistryManager } from './registry';
+import { CompilerExtraction, TopicRef, normalizeTopicSlug, OntologySchema } from './types';
+import {
+  getSourceId,
+  ensureSourceId,
+  setKnowledgeStatus,
+  getFilesByKnowledgeStatus,
+  KnowledgeStatus,
+} from './frontmatter';
+import { computeSchemaHash } from './ontology';
+
+/**
+ * 去除 markdown frontmatter（--- 之间的部分），返回正文
+ */
+export function stripFrontmatter(content: string): string {
+  if (!content.startsWith('---')) return content;
+  const endIdx = content.indexOf('---', 3);
+  if (endIdx === -1) return content;
+  return content.substring(endIdx + 3).trimStart();
+}
+
+/**
+ * 计算文件正文的 content hash（排除 frontmatter）
+ * 复用 ontology.ts 的 computeSchemaHash（djb2 算法）
+ */
+export function computeContentHash(content: string): string {
+  const body = stripFrontmatter(content);
+  return computeSchemaHash(body);
+}
+
+/**
+ * 按 markdown heading 边界对长文档分块
+ * - content <= 30000 字符：不分块，返回 [content]
+ * - 否则按 ## / ### 标题切割，每块 <= maxChunkSize
+ * - 单个 section 超长时在段落边界（\n\n）二次分割
+ * - 相邻块有 overlap 字符重叠
+ * - 每块带 frontmatter + 前 200 字符作为上下文前缀
+ */
+export function chunkDocument(
+  content: string,
+  maxChunkSize: number = 25000,
+  overlap: number = 500
+): string[] {
+  // 短文章不分块
+  if (content.length <= 30000) return [content];
+
+  // 提取 frontmatter + 前 200 字符作为全局上下文前缀
+  const body = stripFrontmatter(content);
+  let contextPrefix = '';
+  if (content.startsWith('---')) {
+    const endIdx = content.indexOf('---', 3);
+    if (endIdx !== -1) {
+      contextPrefix = content.substring(0, endIdx + 3) + '\n';
+    }
+  }
+  contextPrefix += body.substring(0, 200) + '\n...\n\n';
+
+  // 按 heading 边界切割（## 或 ###）
+  const sections: string[] = [];
+  const headingRegex = /^#{2,3}\s+/m;
+  let remaining = body;
+
+  while (remaining.length > 0) {
+    // 在 maxChunkSize 范围内找最后一个 heading 边界
+    if (remaining.length <= maxChunkSize) {
+      sections.push(remaining);
+      break;
+    }
+
+    const searchArea = remaining.substring(0, maxChunkSize);
+    let splitIdx = -1;
+
+    // 从后往前找 heading 边界
+    const lines = searchArea.split('\n');
+    let charCount = 0;
+    for (let i = lines.length - 1; i > 0; i--) {
+      charCount += lines[i].length + 1;
+      if (headingRegex.test(lines[i])) {
+        splitIdx = searchArea.length - charCount;
+        break;
+      }
+    }
+
+    // 没找到 heading，在段落边界（\n\n）分割
+    if (splitIdx <= 0) {
+      const lastPara = searchArea.lastIndexOf('\n\n');
+      splitIdx = lastPara > 0 ? lastPara : maxChunkSize;
+    }
+
+    sections.push(remaining.substring(0, splitIdx));
+    // overlap：回退 overlap 字符，保证上下文连续
+    const overlapStart = Math.max(0, splitIdx - overlap);
+    remaining = remaining.substring(overlapStart);
+  }
+
+  // 每块加上下文前缀
+  const prefixLen = contextPrefix.length;
+  const effectiveMax = maxChunkSize - prefixLen;
+
+  return sections.map((section, i) => {
+    // 如果加了前缀后超长，截断 section（不应该常发生）
+    const trimmed = section.length > effectiveMax
+      ? section.substring(0, effectiveMax)
+      : section;
+    return contextPrefix + trimmed;
+  });
+}
+
+/**
+ * 合并多个 chunk 的提取结果（Reduce 阶段）
+ * 纯函数，不需要 AI 调用
+ */
+export function mergeExtractions(extractions: CompilerExtraction[]): CompilerExtraction {
+  // 空数组 guard
+  if (extractions.length === 0) {
+    return {
+      title: '', author: '', source_url: '', created_at: '',
+      topics: [], concepts: [], key_claims: [], review_flags: ['all_chunks_empty'],
+    };
+  }
+
+  // 单个直接返回
+  if (extractions.length === 1) return extractions[0];
+
+  // title/author/source_url/created_at: 取第一个非空
+  const first = (field: keyof CompilerExtraction) =>
+    (extractions.find(e => {
+      const v = e[field];
+      return typeof v === 'string' && v.length > 0;
+    })?.[field] as string) || '';
+
+  // topics: 按 slug 去重
+  const topicMap = new Map<string, TopicRef>();
+  for (const e of extractions) {
+    for (const t of e.topics) {
+      if (!topicMap.has(t.slug)) topicMap.set(t.slug, t);
+    }
+  }
+
+  // concepts: exact match 去重
+  const conceptSet = new Set<string>();
+  for (const e of extractions) {
+    for (const c of e.concepts) conceptSet.add(c);
+  }
+
+  // key_claims: exact match 去重，保持顺序
+  const claimSet = new Set<string>();
+  const claims: string[] = [];
+  for (const e of extractions) {
+    for (const c of e.key_claims) {
+      if (!claimSet.has(c)) { claimSet.add(c); claims.push(c); }
+    }
+  }
+
+  // entities: 按 name+type 去重，description 取最长
+  const entityMap = new Map<string, { name: string; type: string; description: string }>();
+  for (const e of extractions) {
+    for (const ent of (e.entities || [])) {
+      const key = `${ent.name}::${ent.type}`;
+      const existing = entityMap.get(key);
+      if (!existing || ent.description.length > existing.description.length) {
+        entityMap.set(key, ent);
+      }
+    }
+  }
+
+  // categorized_knowledge: 按 category 合并 items，去重
+  const catMap = new Map<string, Set<string>>();
+  for (const e of extractions) {
+    for (const ck of (e.categorized_knowledge || [])) {
+      if (!catMap.has(ck.category)) catMap.set(ck.category, new Set());
+      for (const item of ck.items) catMap.get(ck.category)!.add(item);
+    }
+  }
+  const categorized_knowledge = Array.from(catMap.entries()).map(([category, items]) => ({
+    category,
+    items: Array.from(items),
+  }));
+
+  // review_flags: 全部保留 + compiled_from_N_chunks
+  const flagSet = new Set<string>();
+  for (const e of extractions) {
+    for (const f of e.review_flags) flagSet.add(f);
+  }
+  flagSet.add(`compiled_from_${extractions.length}_chunks`);
+
+  return {
+    title: first('title'),
+    author: first('author'),
+    source_url: first('source_url'),
+    created_at: first('created_at'),
+    topics: Array.from(topicMap.values()),
+    concepts: Array.from(conceptSet),
+    key_claims: claims,
+    review_flags: Array.from(flagSet),
+    categorized_knowledge: categorized_knowledge.length > 0 ? categorized_knowledge : undefined,
+    entities: entityMap.size > 0 ? Array.from(entityMap.values()) : undefined,
+  };
+}
 
 /**
  * 构建编译器 prompt：让 AI 从原始笔记中提取结构化字段
  */
-export function buildCompilerPrompt(noteContent: string, notePath: string): string {
-  return `你是一个知识编译器。请从以下笔记中提取结构化信息。
+export function buildCompilerPrompt(noteContent: string, notePath: string, ontologySchema?: OntologySchema): string {
+  let prompt = `你是一个知识编译器。请从以下笔记中提取结构化信息。
 
 笔记路径: ${notePath}
 
 笔记内容:
 ---
-${noteContent.substring(0, 30000)}
+${noteContent}
 ---
 
 请提取以下字段，以 JSON 格式返回（不要添加任何其他文字）：
@@ -39,6 +235,38 @@ ${noteContent.substring(0, 30000)}
 - 如果无法确定某个字段，留空字符串或空数组
 - review_flags 用于标记你不确定的提取结果
 - 不要编造信息，只提取笔记中实际存在的内容`;
+
+  // Ontology schema 注入
+  if (ontologySchema) {
+    prompt += '\n\n## 本体模型提取要求\n\n请额外按以下知识类别对提取内容进行分类：\n\n';
+    for (const c of ontologySchema.categories) {
+      prompt += `- "${c.name}"：${c.description}\n`;
+    }
+
+    if (ontologySchema.entity_types.length > 0) {
+      prompt += '\n请额外识别以下类型的实体：\n\n';
+      for (const e of ontologySchema.entity_types) {
+        prompt += `- "${e.name}"：${e.description}\n`;
+      }
+    }
+
+    prompt += `
+在 JSON 输出中新增以下字段：
+
+"categorized_knowledge": [
+  {"category": "类别名", "items": ["该类别下的条目1", "条目2"]}
+],
+"entities": [
+  {"name": "实体名", "type": "实体类型", "description": "一句话描述"}
+]
+
+规则：
+- 每个 item 只归入最匹配的一个 category，不要重复归类
+- 如果文章内容不涉及某个 category，该 category 的 items 为空数组
+- 实体名使用文章中最常见的称呼形式`;
+  }
+
+  return prompt;
 }
 
 /**
@@ -57,6 +285,36 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
       label: t.label || t.slug || ''
     })).filter((t: TopicRef) => t.slug.length > 0);
 
+    const reviewFlags: string[] = Array.isArray(parsed.review_flags) ? parsed.review_flags : [];
+
+    // Ontology 字段解析（fail-visible：解析失败不影响基础字段）
+    let categorized_knowledge: CompilerExtraction['categorized_knowledge'];
+    let entities: CompilerExtraction['entities'];
+
+    try {
+      if (Array.isArray(parsed.categorized_knowledge)) {
+        categorized_knowledge = parsed.categorized_knowledge
+          .filter((ck: any) => typeof ck?.category === 'string' && Array.isArray(ck?.items))
+          .map((ck: any) => ({
+            category: ck.category,
+            items: ck.items.filter((i: any) => typeof i === 'string'),
+          }));
+      }
+      if (Array.isArray(parsed.entities)) {
+        entities = parsed.entities
+          .filter((e: any) => typeof e?.name === 'string' && typeof e?.type === 'string')
+          .map((e: any) => ({
+            name: e.name,
+            type: e.type,
+            description: typeof e.description === 'string' ? e.description : '',
+          }));
+      }
+    } catch {
+      // Ontology 字段解析失败，标记到 review_flags
+      reviewFlags.push('ontology_extraction_failed');
+      console.warn('[parseCompilerResponse] Ontology fields parse failed, base fields preserved');
+    }
+
     return {
       title: parsed.title || '',
       author: parsed.author || '',
@@ -65,7 +323,9 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
       topics,
       concepts: Array.isArray(parsed.concepts) ? parsed.concepts : [],
       key_claims: Array.isArray(parsed.key_claims) ? parsed.key_claims : [],
-      review_flags: Array.isArray(parsed.review_flags) ? parsed.review_flags : []
+      review_flags: reviewFlags,
+      categorized_knowledge,
+      entities,
     };
   } catch {
     return null;
@@ -78,7 +338,9 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
 export function buildSummaryMarkdown(
   sourceId: string,
   extraction: CompilerExtraction,
-  sourcePath: string | null
+  sourcePath: string | null,
+  schemaHash?: string,
+  contentHash?: string
 ): string {
   const now = new Date().toISOString();
 
@@ -90,6 +352,8 @@ export function buildSummaryMarkdown(
   if (extraction.author) fm += `author: "${extraction.author.replace(/"/g, '\\"')}"\n`;
   if (extraction.created_at) fm += `created_at: "${extraction.created_at}"\n`;
   fm += `compiled_at: "${now}"\n`;
+  if (schemaHash) fm += `schema_hash: "${schemaHash}"\n`;
+  if (contentHash) fm += `content_hash: "${contentHash}"\n`;
 
   if (extraction.topics.length > 0) {
     fm += 'topics:\n';
@@ -115,10 +379,27 @@ export function buildSummaryMarkdown(
     fm += 'review_flags: []\n';
   }
 
+  // Ontology 扩展字段写入 frontmatter
+  if (extraction.categorized_knowledge && extraction.categorized_knowledge.length > 0) {
+    fm += 'categorized_knowledge:\n';
+    for (const ck of extraction.categorized_knowledge) {
+      fm += `  - category: "${ck.category.replace(/"/g, '\\"')}"\n`;
+      fm += `    items: ${JSON.stringify(ck.items)}\n`;
+    }
+  }
+
+  if (extraction.entities && extraction.entities.length > 0) {
+    fm += 'entities:\n';
+    for (const e of extraction.entities) {
+      fm += `  - name: "${e.name.replace(/"/g, '\\"')}"\n`;
+      fm += `    type: "${e.type.replace(/"/g, '\\"')}"\n`;
+      fm += `    description: "${e.description.replace(/"/g, '\\"')}"\n`;
+    }
+  }
+
   fm += '---\n';
 
   let body = `# ${extraction.title}\n\n`;
-
   body += '## 摘要\n\n';
   if (extraction.key_claims.length > 0) {
     body += extraction.key_claims.slice(0, 2).map(c => `- ${c}`).join('\n') + '\n';
@@ -140,6 +421,25 @@ export function buildSummaryMarkdown(
     body += '（无）\n';
   }
 
+  // Ontology 扩展字段写入 body
+  if (extraction.categorized_knowledge && extraction.categorized_knowledge.length > 0) {
+    body += '\n## 知识分类\n\n';
+    for (const ck of extraction.categorized_knowledge) {
+      if (ck.items.length > 0) {
+        body += `### ${ck.category}\n\n`;
+        body += ck.items.map(i => `- ${i}`).join('\n') + '\n\n';
+      }
+    }
+  }
+
+  if (extraction.entities && extraction.entities.length > 0) {
+    body += '\n## 实体\n\n';
+    for (const e of extraction.entities) {
+      body += `- **${e.name}**（${e.type}）：${e.description}\n`;
+    }
+    body += '\n';
+  }
+
   body += '\n## 原始来源\n\n';
   if (sourcePath) {
     body += `[[${sourcePath}]]\n`;
@@ -151,48 +451,98 @@ export function buildSummaryMarkdown(
 }
 
 /**
- * 编译器主类：协调 registry、AI 调用、文件写入
+ * 编译器主类：协调 frontmatter 状态、AI 调用、文件写入
  */
 export class KnowledgeCompiler {
   constructor(
     private app: App,
-    private registry: KnowledgeRegistryManager,
     private generateFn: (prompt: string) => Promise<string>,
     private wikiFolder: string
   ) {}
 
   /**
    * 编译单篇笔记
-   * @returns summary 文件路径，或 null（失败时）
+   * 短文章（<= 30000 字符）走单次 AI 调用
+   * 长文章走 Map-Reduce：分块并行提取 + 纯函数合并
+   * @param schema 可选的 ontology schema，传入时注入到 prompt
+   * @param schemaHash 可选的 schema 内容 hash，写入 summary frontmatter
+   * @param concurrency Map 阶段并行度（默认 3）
    */
-  async compileNote(sourceId: string): Promise<string | null> {
-    const record = this.registry.getRecord(sourceId);
-    if (!record) throw new Error(`Record not found: ${sourceId}`);
-
-    const file = this.app.vault.getAbstractFileByPath(record.path);
-    if (!file || !(file instanceof TFile)) {
-      this.registry.transition(sourceId, 'missing_source');
-      await this.registry.save();
-      return null;
-    }
-
-    this.registry.transition(sourceId, 'processing');
-    await this.registry.save();
+  async compileNote(
+    file: TFile,
+    schema?: OntologySchema,
+    schemaHash?: string,
+    concurrency: number = 3
+  ): Promise<string | null> {
+    const sourceId = await ensureSourceId(this.app, file);
+    await setKnowledgeStatus(this.app, file, 'processing');
 
     try {
       const content = await this.app.vault.read(file);
-      const prompt = buildCompilerPrompt(content, record.path);
-      const response = await this.generateFn(prompt);
-      const extraction = parseCompilerResponse(response);
+      const contentHash = computeContentHash(content);
+      let extraction: CompilerExtraction | null;
+
+      if (content.length <= 30000) {
+        // 短文章：单次 AI 调用
+        const prompt = buildCompilerPrompt(content, file.path, schema);
+        const response = await this.generateFn(prompt);
+        extraction = parseCompilerResponse(response);
+      } else {
+        // 长文章：Map-Reduce
+        const chunks = chunkDocument(content);
+        const allResults: PromiseSettledResult<CompilerExtraction | null>[] = [];
+
+        // 批次并行
+        for (let i = 0; i < chunks.length; i += concurrency) {
+          const batch = chunks.slice(i, i + concurrency);
+          const batchResults = await Promise.allSettled(
+            batch.map(async (chunk, batchIdx) => {
+              const chunkIdx = i + batchIdx;
+              const chunkPrompt = buildCompilerPrompt(chunk, file.path, schema);
+              const prefix = `[注意：这是文档的第 ${chunkIdx + 1}/${chunks.length} 块，请只提取本块中的信息]\n\n`;
+              const response = await this.generateFn(prefix + chunkPrompt);
+              return parseCompilerResponse(response);
+            })
+          );
+          allResults.push(...batchResults);
+        }
+
+        // 收集成功的提取结果
+        const extractions: CompilerExtraction[] = [];
+        const failedChunks: number[] = [];
+        allResults.forEach((r, idx) => {
+          if (r.status === 'fulfilled' && r.value) {
+            extractions.push(r.value);
+          } else {
+            failedChunks.push(idx);
+          }
+        });
+
+        if (extractions.length === 0) {
+          await setKnowledgeStatus(this.app, file, 'failed', {
+            error: `All ${chunks.length} chunks failed extraction`
+          });
+          return null;
+        }
+
+        // 合并 + 标记失败的 chunk
+        extraction = mergeExtractions(extractions);
+        for (const idx of failedChunks) {
+          extraction.review_flags.push(`chunk_${idx}_extraction_failed`);
+        }
+      }
 
       if (!extraction) {
-        this.registry.transition(sourceId, 'failed', 'Failed to parse AI response');
-        await this.registry.save();
+        await setKnowledgeStatus(this.app, file, 'failed', {
+          error: 'Failed to parse AI response'
+        });
         return null;
       }
 
       const summaryPath = `${this.wikiFolder}/Articles/${sourceId}.md`;
-      const summaryContent = buildSummaryMarkdown(sourceId, extraction, record.path);
+      const summaryContent = buildSummaryMarkdown(
+        sourceId, extraction, file.path, schemaHash, contentHash
+      );
 
       const articlesDir = `${this.wikiFolder}/Articles`;
       if (!this.app.vault.getAbstractFileByPath(articlesDir)) {
@@ -203,8 +553,9 @@ export class KnowledgeCompiler {
       if (existingFile && existingFile instanceof TFile) {
         const existingContent = await this.app.vault.read(existingFile);
         if (!existingContent.includes('knowledge_generated: true')) {
-          this.registry.transition(sourceId, 'failed', 'Target file exists and is not a generated file');
-          await this.registry.save();
+          await setKnowledgeStatus(this.app, file, 'failed', {
+            error: 'Target file exists and is not a generated file'
+          });
           return null;
         }
         await this.app.vault.modify(existingFile, summaryContent);
@@ -212,37 +563,42 @@ export class KnowledgeCompiler {
         await this.app.vault.create(summaryPath, summaryContent);
       }
 
-      this.registry.setSummaryPath(sourceId, summaryPath);
-      this.registry.transition(sourceId, 'done');
-      await this.registry.save();
+      await setKnowledgeStatus(this.app, file, 'done', {
+        source_id: sourceId,
+        compiled_at: new Date().toISOString(),
+        summary: summaryPath,
+      });
       return summaryPath;
     } catch (e: any) {
       try {
-        this.registry.transition(sourceId, 'failed', e.message);
-      } catch { /* 状态可能已经不允许转换 */ }
-      await this.registry.save();
+        await setKnowledgeStatus(this.app, file, 'failed', { error: e.message });
+      } catch { /* frontmatter 写入也失败了，忽略 */ }
       return null;
     }
   }
 
   /**
-   * 批量编译所有 pending 和 stale 项
+   * 批量编译所有 pending 项
+   * @param schema 可选的 ontology schema，整个 batch 使用同一份
+   * @param schemaHash 可选的 schema 内容 hash
    */
-  async compileAllPending(maxBatch: number = 50, onProgress?: (current: number, total: number, noteId: string) => void): Promise<{ success: number; failed: number }> {
-    const staleRecords = this.registry.getByStatus('stale');
-    for (const r of staleRecords) {
-      this.registry.transition(r.id, 'pending');
-    }
-    await this.registry.save();
+  async compileAllPending(
+    maxBatch: number = 50,
+    onProgress?: (current: number, total: number, path: string) => void,
+    schema?: OntologySchema,
+    schemaHash?: string,
+    concurrency?: number
+  ): Promise<{ success: number; failed: number }> {
+    // stuck-file reset 已移到 runtime.ts onMetadataReady() 统一管理
 
-    const pendingRecords = this.registry.getByStatus('pending').slice(0, maxBatch);
+    const pendingFiles = getFilesByKnowledgeStatus(this.app, 'pending').slice(0, maxBatch);
     let success = 0;
     let failed = 0;
 
-    for (let i = 0; i < pendingRecords.length; i++) {
-      const record = pendingRecords[i];
-      onProgress?.(i + 1, pendingRecords.length, record.id);
-      const result = await this.compileNote(record.id);
+    for (let i = 0; i < pendingFiles.length; i++) {
+      const file = pendingFiles[i];
+      onProgress?.(i + 1, pendingFiles.length, file.path);
+      const result = await this.compileNote(file, schema, schemaHash, concurrency);
       if (result) { success++; } else { failed++; }
     }
 

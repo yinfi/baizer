@@ -1,5 +1,148 @@
 ---
 
+### [2026-04-19 20:51] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 完成 /plan-eng-review，审查 /emit 输出引擎设计文档。4 个架构 issue + Codex outside voice 12 个发现（7 个采纳）。范围从 7 文件减到 6 文件。2 个 TODO 加入 TODOS.md。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 锁定 /emit 实现前的架构细节，确保闭环真正闭合（MetadataIndex 字段完整、斜杠命令路由、ontology 污染防护、token 截断）
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- compiler.ts 改动是多余的（status:done 已跳过）
+- 斜杠命令是硬编码的，注册 skill 不会自动创建命令
+- synthesis frontmatter 缺少 MetadataIndex 需要的 title/compiled_at/concepts/key_claims 字段
+- synthesis 文件会污染 ontology discovery
+- 不做 token 截断在大 vault 上会爆 context window
+
+**4. 如何修复的？ (How was it fixed?)**
+- 去掉 compiler.ts 改动；chat-controller 加硬编码 /emit case；frontmatter 补全所有必要字段；synthesis 用 "synthesis-" 前缀过滤 ontology；加 80K 字符截断；写完文件后显式调用 metadataIndex.onFileChanged()
+
+---
+
+### [2026-04-19 18:50] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 通过 /office-hours 完成了"知识闭环 — /emit 输出引擎 + 社区发布路径"设计文档，经过 2 轮对抗性审查（7/10 → 8.5/10），6 个问题全部修复并批准
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 分析当前项目与"采集→整理→输出闭环 + 自我持续升级的第二大脑"目标的偏差。结论：采集和整理基本成型，最大缺口是"输出"层。/emit 命令是最小改动量闭合循环的方案，且输出反哺索引实现"知识代谢"= 自升级机制
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- Reviewer 发现输出文件路径断裂：原设计 _output/ 目录不在 MetadataIndex 扫描范围内
+- synthesis 文件缺少 knowledge_generated: true 字段，MetadataIndex 不会索引
+- queryForEmit 接口签名缺失，getByTopic 无相关度排序不适合 token 预算控制
+
+**4. 如何修复的？ (How was it fixed?)**
+- 输出改到 wikiFolder/Articles/（与编译产物同目录），MetadataIndex 自动索引
+- frontmatter 补充 knowledge_generated: true
+- queryForEmit 改用 MetadataIndex.search()（有评分），补充完整 EmitContext 类型签名
+
+---
+
+
+- 实现了 Obsidian Shell 的流式输出 + Think 时间线功能，涉及 7 个文件的改动：interfaces.ts（StreamEvent 类型）、gemini.ts/openai.ts（双 provider 流式）、model-service.ts（chatStream 编排）、chat-controller.ts（流式接入）、shell-view.ts（时间线 UI + debounced 渲染）、styles.css（时间线样式）
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 原来 AI 响应是一次性返回，用户需要等待完整响应。流式输出让文本逐字显示，thinking token 和 function call 步骤以可折叠时间线展示，大幅提升交互体验。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- AsyncGenerator 中不能在 Promise.all 回调里 yield，需要改为 for 循环顺序执行工具调用
+- OpenAI SSE 的 tool_calls 是增量分片的，需要 pendingToolCalls Map 按 index 拼接
+
+**4. 如何修复的？ (How was it fixed?)**
+- ModelService.chatStream 中工具执行改为 for...of 顺序循环，每个工具执行后直接 yield tool_result
+- OpenAI provider 中维护 pendingToolCalls Map，流结束后统一 yield 完整的 tool_call 事件
+
+---
+
+### [2026-04-18 02:00] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 手动重写 18 个插件的 SKILL.md 文件，基于 GitHub README 内容生成高质量操作指南
+- 改造信息获取链路：community-plugins.json → GitHub raw README → DuckDuckGo fallback
+- 修复 extractSyntaxHints（改用 adapter.read）和 searchPluginDocs（202 重试）
+
+**2. 为什么要这么做？ (Why was it done?)**
+- Gemini 生成质量不稳定，10/17 个 skill 为空或角色扮演
+- 信息源不足（main.js 读不到、web search 返回 202）导致 LLM 没有足够上下文
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- vault.getAbstractFileByPath 不索引 .obsidian 目录
+- DuckDuckGo 大部分请求返回 202（中间响应），需要重试
+- Agent 并行生成因权限问题失败，改为手动生成
+
+**4. 如何修复的？ (How was it fixed?)**
+- 用 adapter.read 替代 vault API 读取 .obsidian 下的文件
+- community-plugins.json 获取 repo 字段拼 GitHub raw README 地址（最可靠方案）
+- 手动用 Claude Opus 生成所有 skill，质量远超 Gemini 自动生成
+
+---
+
+### [2026-04-18 01:00] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 为 PluginSkillGenerator 添加分层信息扩展：main.js 语法提取 + DuckDuckGo web search
+- 修复 keywords 停用词问题（过滤 the/for/your 等无意义词）
+- 添加 body 空内容兜底模板
+- 更新 buildPrompt 加入语法标识符和网络搜索上下文段
+- 适配 plugin-watcher.ts（collectPluginInfo 变 async）
+- 更新测试 mock
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 17 个生成的 skill 中 10 个质量差（body 空或角色扮演），根因是 LLM 输入信息太少
+- keywords 全是英文停用词，无触发价值
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 插件安装目录无 README，只有 main.js（300KB-1.3MB）
+- main.js 打包后 registerMarkdownCodeBlockProcessor 等 API 名被压缩，需用字符串匹配替代
+
+**4. 如何修复的？ (How was it fixed?)**
+- extractSyntaxHints：读 main.js 前 50KB，正则提取被引号包裹的短标识符
+- searchPluginDocs：内联 DuckDuckGo HTML 搜索，提取前 3 条 snippet
+- STOP_WORDS 集合过滤无意义词，syntaxHints 加入 keywords
+
+---
+
+### [2026-04-18 00:00] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 重写 PluginSkillGenerator，从"LLM 生成全部"改为"代码生成 frontmatter + LLM 只生成 body"
+- 新增命令分类（AI 可用 vs 需要 UI 交互）、settings 精简（只取 key 名）、生成后校验
+- 修复循环引用崩溃（safeStringify）、prompt 泄漏、参数幻觉
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 原方案让 LLM 生成完整 SKILL.md，导致 tools 填错、YAML 重复 key、操作指南是命令翻译流水账、prompt 泄漏、编造参数
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- PluginInfo 类型变更（settings → settingsKeys）需要同步更新测试 mock
+- mockModelService 方法名从 chat 改为 generate
+
+**4. 如何修复的？ (How was it fixed?)**
+- frontmatter 由代码确定性生成，消除格式错误
+- SYSTEM_PROMPT 加 few-shot 好/差示例，明确工具签名和局限性
+- 命令按 UI_KEYWORDS 启发式分类，prompt 中分开展示
+- validateBody 检查编造参数和 prompt 泄漏
+
+---
+
+### [2026-04-17] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 创建了 `src/skills/builtin/plugin-ctrl/skill-generator.ts`，实现 `PluginSkillGenerator` 类
+- 创建了 `test/plugin-skill-generator.test.ts`，包含 4 个测试用例
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 为插件技能自动生成功能提供核心逻辑，支持收集插件信息、构建 prompt、调用 AI 生成 SKILL.md 并写入 vault
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 无
+
+**4. 如何修复的？ (How was it fixed?)**
+- 无
+
+---
+
 ### [2026-04-17 22:15] 修复 Ontology Schema 加载不生效
 
 **1. 刚刚做了什么？ (What was done?)**

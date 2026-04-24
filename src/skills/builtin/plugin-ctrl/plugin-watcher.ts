@@ -1,8 +1,12 @@
 // src/skills/builtin/plugin-ctrl/plugin-watcher.ts
-import { App, Notice, TFile } from 'obsidian';
+import { App, Notice } from 'obsidian';
 import { PluginSettings, PLUGIN_ID } from '../../../mcp/types';
-import { SkillRegistry } from '../../skill-registry';
+import {
+  pluginSkillFileExists,
+  readTextIfExists,
+} from '../../skill-files';
 import { SkillLoader } from '../../skill-loader';
+import { SkillRegistry } from '../../skill-registry';
 import { PluginSkillGenerator } from './skill-generator';
 
 const POLL_INTERVAL_MS = 10_000;
@@ -37,13 +41,8 @@ export class PluginWatcher {
     return { added, removed };
   }
 
-  hasSkillFile(pluginId: string): boolean {
-    const path = this.generator.skillFilePath(pluginId);
-    // getAbstractFileByPath 对 .obsidian 目录可能不可靠，双重检查
-    if (this.app.vault.getAbstractFileByPath(path)) return true;
-    // 回退：检查目录是否存在（目录存在说明之前生成过）
-    const dirPath = this.generator.skillDirPath(pluginId);
-    return !!this.app.vault.getAbstractFileByPath(dirPath);
+  async hasSkillFile(pluginId: string): Promise<boolean> {
+    return pluginSkillFileExists(this.app.vault.adapter, pluginId);
   }
 
   async start(): Promise<void> {
@@ -71,7 +70,13 @@ export class PluginWatcher {
     const pluginIds = this.getEnabledPluginIds();
     this.snapshot = new Set(pluginIds);
 
-    const toGenerate = pluginIds.filter(id => !this.hasSkillFile(id));
+    const toGenerate: string[] = [];
+    for (const id of pluginIds) {
+      if (!await this.hasSkillFile(id)) {
+        toGenerate.push(id);
+      }
+    }
+
     if (toGenerate.length === 0) {
       console.log('[PluginWatcher] All plugins have skills');
       return;
@@ -79,7 +84,7 @@ export class PluginWatcher {
 
     const candidates: string[] = [];
     for (const id of toGenerate) {
-      const info = this.generator.collectPluginInfo(id);
+      const info = await this.generator.collectPluginInfo(id);
       if (!this.generator.shouldSkipPlugin(info)) {
         candidates.push(id);
       }
@@ -88,7 +93,7 @@ export class PluginWatcher {
     if (candidates.length === 0) return;
 
     console.log(`[PluginWatcher] Generating skills for ${candidates.length} plugins`);
-    new Notice(`🔌 正在为 ${candidates.length} 个插件生成 Skill...`);
+    new Notice(`Generating skills for ${candidates.length} plugins...`);
 
     for (let i = 0; i < candidates.length; i++) {
       await this.generateAndRegister(candidates[i]);
@@ -97,7 +102,7 @@ export class PluginWatcher {
       }
     }
 
-    new Notice(`✅ 插件 Skill 生成完成（${candidates.length} 个）`);
+    new Notice(`Plugin skill generation finished (${candidates.length})`);
   }
 
   private async checkChanges(): Promise<void> {
@@ -107,12 +112,12 @@ export class PluginWatcher {
     const { added, removed } = this.diffPlugins(this.snapshot, currentIds);
 
     for (const id of added) {
-      if (this.hasSkillFile(id)) {
+      if (await this.hasSkillFile(id)) {
         await this.loadAndRegister(id);
       } else {
-        const info = this.generator.collectPluginInfo(id);
+        const info = await this.generator.collectPluginInfo(id);
         if (!this.generator.shouldSkipPlugin(info)) {
-          new Notice(`🔌 正在为 ${info.name} 生成 Skill...`);
+          new Notice(`Generating skill for ${info.name}...`);
           await this.generateAndRegister(id);
         }
       }
@@ -132,10 +137,15 @@ export class PluginWatcher {
     if (retries >= MAX_RETRIES) return;
 
     try {
-      const info = this.generator.collectPluginInfo(pluginId);
+      const info = await this.generator.collectPluginInfo(pluginId);
       const content = await this.generator.generateSkillMd(info);
       await this.generator.writeSkillFile(pluginId, content);
-      await this.loadAndRegister(pluginId);
+
+      const registered = await this.loadAndRegister(pluginId);
+      if (!registered) {
+        throw new Error(`Generated skill file could not be loaded: ${this.generator.skillFilePath(pluginId)}`);
+      }
+
       this.failedRetries.delete(pluginId);
       console.log(`[PluginWatcher] Generated skill for: ${pluginId}`);
     } catch (e: any) {
@@ -147,20 +157,20 @@ export class PluginWatcher {
     }
   }
 
-  private async loadAndRegister(pluginId: string): Promise<void> {
+  private async loadAndRegister(pluginId: string): Promise<boolean> {
     const filePath = this.generator.skillFilePath(pluginId);
-    const file = this.app.vault.getAbstractFileByPath(filePath);
-    if (!file || !(file instanceof TFile)) return;
+    const content = await readTextIfExists(this.app.vault.adapter, filePath);
+    if (content === null) return false;
 
-    const content = await this.app.vault.read(file);
     const loader = new SkillLoader(
       this.app,
       this.skillRegistry.getToolRegistry(),
     );
     const skill = loader.parseSkillMd(content);
-    if (skill) {
-      this.skillRegistry.registerUser(skill);
-    }
+    if (!skill) return false;
+
+    this.skillRegistry.registerUser(skill);
+    return true;
   }
 
   private delay(ms: number): Promise<void> {

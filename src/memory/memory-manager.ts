@@ -8,48 +8,56 @@ export class MemoryManager {
     private userProfile: UserProfile;
     private sessionSummaries: SessionSummary[] = [];
     public chatHistory: ChatMessage[] = [];
+    private currentSessionTranscript: ChatMessage[] = [];
     private currentSessionMessages: number = 0;
     private lastProfileUpdateTime: number = 0;
+    private initPromise: Promise<void>;
 
-    // 限制内存中保留的聊天历史数量，防止内存泄漏
-    private readonly MAX_MEMORY_CHAT_HISTORY = 100; // 只保留最近100条消息在内存中
+    private readonly MAX_MEMORY_CHAT_HISTORY = 100;
 
     private readonly MEMORY_DIR = MEMORY_DIR;
     private readonly PROFILE_FILE = 'user-profile.json';
     private readonly SUMMARY_FILE = 'session-summaries.json';
     private readonly HISTORY_FILE = 'chat-history.json';
-    private readonly PROFILE_UPDATE_INTERVAL = 5; // Update every 5 messages
-    private readonly PROFILE_UPDATE_MIN_TIME = 60 * 1000; // Minimum 1 minute between updates
+    private readonly PROFILE_UPDATE_INTERVAL = 5;
+    private readonly PROFILE_UPDATE_MIN_TIME = 60 * 1000;
 
     constructor(
         private app: App,
         private model: IModelProvider
     ) {
         this.userProfile = { ...DEFAULT_USER_PROFILE };
-        this.loadProfile();
-        this.loadSummaries();
-        this.loadChatHistory();
+        this.initPromise = this.initialize();
     }
 
-    // ==================== Session Management ====================
+    private async initialize() {
+        await this.loadProfile();
+        await this.loadSummaries();
+        await this.loadChatHistory();
+    }
+
+    async ready(): Promise<void> {
+        await this.initPromise;
+    }
 
     getOrCreateSession(tools?: ToolDefinition[]): IChatSession {
         if (!this.chatSession) {
             this.chatSession = this.model.startChat(tools);
             this.currentSessionMessages = 0;
+            this.currentSessionTranscript = [];
         }
         return this.chatSession;
     }
 
     async clearSession() {
-        if (this.chatSession && this.currentSessionMessages > 0) {
+        await this.ready();
+        if (this.currentSessionMessages > 0) {
             await this.endSession();
         }
         this.chatSession = null;
         this.currentSessionMessages = 0;
+        this.currentSessionTranscript = [];
     }
-
-    // ==================== Context Building ====================
 
     buildContext(): string {
         const profileContext = this.formatProfileForContext();
@@ -86,38 +94,34 @@ export class MemoryManager {
             return 'No previous sessions.';
         }
 
-        // 最近 3 次会话
         const recent = this.sessionSummaries.slice(-3);
         return recent.map((s, i) =>
             `Session ${i + 1}: ${s.summary}`
         ).join('\n');
     }
 
-    // ==================== Message Recording ====================
-
     async recordMessage(role: 'user' | 'model', content: string) {
+        await this.ready();
         this.currentSessionMessages++;
         this.userProfile.metadata.totalInteractions++;
 
-        // Record to history
-        this.chatHistory.push({
+        const message: ChatMessage = {
             role,
             content,
             timestamp: Date.now()
-        });
+        };
 
-        // 清理过旧的聊天记录，防止内存泄漏
+        this.chatHistory.push(message);
+        this.currentSessionTranscript.push(message);
+
         this.cleanupOldChatHistory();
 
         await this.saveChatHistory();
 
-        // 自动画像更新
         if (role === 'user') {
             const timeSinceLastUpdate = Date.now() - this.lastProfileUpdateTime;
             const shouldUpdateByTurns = this.currentSessionMessages % this.PROFILE_UPDATE_INTERVAL === 0;
             const shouldUpdateByTime = timeSinceLastUpdate >= this.PROFILE_UPDATE_MIN_TIME;
-
-            // More aggressive update for new users
             const isNewUser = this.userProfile.metadata.totalInteractions < 20;
 
             if (isNewUser && this.currentSessionMessages % 2 === 0) {
@@ -138,22 +142,17 @@ export class MemoryManager {
         }
     }
 
-    // 清理过旧的聊天历史，只保留最近的消息在内存中
     private cleanupOldChatHistory() {
         if (this.chatHistory.length > this.MAX_MEMORY_CHAT_HISTORY) {
-            // 只保留最近的消息
             const excessCount = this.chatHistory.length - this.MAX_MEMORY_CHAT_HISTORY;
-            // 保留最近的消息在数组末尾
             this.chatHistory = this.chatHistory.slice(-this.MAX_MEMORY_CHAT_HISTORY);
 
             console.log(`[MemoryManager] Cleaned up ${excessCount} old messages from memory. Keeping ${this.MAX_MEMORY_CHAT_HISTORY} most recent messages.`);
         }
     }
 
-    // ==================== Profile Management ====================
-
-    // 手动触发画像提取（从最近的对话中学习）
     async learnFromRecentMessages(recentMessages: string[]) {
+        await this.ready();
         try {
             const combinedMessage = recentMessages.join('\n');
             await this.updateProfileFromConversation(combinedMessage);
@@ -165,33 +164,64 @@ export class MemoryManager {
 
     private async updateProfileFromConversation(userMessage: string) {
         try {
-            const extractionPrompt = `分析以下用户消息，提取可能的用户信息。只返回 JSON 格式，不要其他内容：
+            const extractionPrompt = `Analyze the following user message and extract profile information as JSON only.
 
-用户消息: "${userMessage}"
+User message: "${userMessage}"
 
-提取以下信息（如果消息中包含）：
+Return:
 {
-  "profession": "职业（如果提到）",
-  "expertise": ["专业领域数组"],
-  "currentProjects": ["当前项目"],
-  "goals": ["目标"],
+  "profession": "profession if present",
+  "expertise": ["areas of expertise"],
+  "currentProjects": ["current projects"],
+  "goals": ["goals"],
   "preferences": {
-    "responseStyle": "concise/detailed（如果用户表达了偏好）"
+    "responseStyle": "concise or detailed if stated"
   }
 }
 
-如果没有提取到任何信息，返回 {}`;
+If nothing is present, return {}`;
 
             const result = await this.model.generateContent(extractionPrompt);
             const responseText = result.text.trim();
 
-            // 提取 JSON
-            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const extracted = JSON.parse(jsonMatch[0]);
-                this.mergeProfile(extracted);
-                await this.saveProfile();
-                return extracted; // 返回提取的信息
+            const braceStart = responseText.indexOf('{');
+            if (braceStart !== -1) {
+                let depth = 0;
+                let inStr = false;
+                let esc = false;
+                let end = -1;
+
+                for (let i = braceStart; i < responseText.length; i++) {
+                    const c = responseText[i];
+                    if (esc) {
+                        esc = false;
+                        continue;
+                    }
+                    if (c === '\\' && inStr) {
+                        esc = true;
+                        continue;
+                    }
+                    if (c === '"') {
+                        inStr = !inStr;
+                        continue;
+                    }
+                    if (inStr) continue;
+                    if (c === '{') depth++;
+                    else if (c === '}') {
+                        depth--;
+                        if (depth === 0) {
+                            end = i;
+                            break;
+                        }
+                    }
+                }
+
+                if (end !== -1) {
+                    const extracted = JSON.parse(responseText.substring(braceStart, end + 1));
+                    this.mergeProfile(extracted);
+                    await this.saveProfile();
+                    return extracted;
+                }
             }
             return null;
         } catch (e) {
@@ -203,12 +233,10 @@ export class MemoryManager {
     private mergeProfile(extracted: any) {
         if (!extracted || Object.keys(extracted).length === 0) return;
 
-        // 合并基本信息
         if (extracted.profession) {
             this.userProfile.profession = extracted.profession;
         }
 
-        // 合并专业领域（去重）
         if (extracted.expertise && Array.isArray(extracted.expertise)) {
             const newExpertise = extracted.expertise.filter(
                 (e: string) => !this.userProfile.expertise.includes(e)
@@ -216,7 +244,6 @@ export class MemoryManager {
             this.userProfile.expertise.push(...newExpertise);
         }
 
-        // 合并当前项目
         if (extracted.currentProjects && Array.isArray(extracted.currentProjects)) {
             const newProjects = extracted.currentProjects.filter(
                 (p: string) => !this.userProfile.context.currentProjects.includes(p)
@@ -224,7 +251,6 @@ export class MemoryManager {
             this.userProfile.context.currentProjects.push(...newProjects);
         }
 
-        // 合并目标
         if (extracted.goals && Array.isArray(extracted.goals)) {
             const newGoals = extracted.goals.filter(
                 (g: string) => !this.userProfile.context.goals.includes(g)
@@ -232,14 +258,10 @@ export class MemoryManager {
             this.userProfile.context.goals.push(...newGoals);
         }
 
-        // 更新偏好
-        if (extracted.preferences) {
-            if (extracted.preferences.responseStyle) {
-                this.userProfile.preferences.responseStyle = extracted.preferences.responseStyle;
-            }
+        if (extracted.preferences?.responseStyle) {
+            this.userProfile.preferences.responseStyle = extracted.preferences.responseStyle;
         }
 
-        // 更新元数据
         this.userProfile.metadata.updatedAt = Date.now();
         this.userProfile.metadata.lastProfileUpdate = Date.now();
     }
@@ -249,12 +271,11 @@ export class MemoryManager {
     }
 
     async updateProfile(updates: Partial<UserProfile>) {
+        await this.ready();
         this.userProfile = { ...this.userProfile, ...updates };
         this.userProfile.metadata.updatedAt = Date.now();
         await this.saveProfile();
     }
-
-    // ==================== Session Summary ====================
 
     private async endSession() {
         if (this.currentSessionMessages === 0) return;
@@ -263,7 +284,6 @@ export class MemoryManager {
             const summary = await this.generateSessionSummary();
             this.sessionSummaries.push(summary);
 
-            // 只保留最近 10 次
             if (this.sessionSummaries.length > 10) {
                 this.sessionSummaries = this.sessionSummaries.slice(-10);
             }
@@ -275,7 +295,15 @@ export class MemoryManager {
     }
 
     private async generateSessionSummary(): Promise<SessionSummary> {
-        const summaryPrompt = `总结这次对话的关键内容（50字以内，一句话）`;
+        const transcript = this.currentSessionTranscript
+            .map(message => `${message.role}: ${message.content}`)
+            .join('\n')
+            .slice(0, 4000);
+
+        const summaryPrompt = `Please summarize the key points from the following conversation in one sentence under 50 words.
+
+Conversation:
+${transcript}`;
 
         try {
             const result = await this.model.generateContent(summaryPrompt);
@@ -284,20 +312,19 @@ export class MemoryManager {
             return {
                 timestamp: Date.now(),
                 messageCount: this.currentSessionMessages,
-                summary: summary
+                summary
             };
-        } catch (e) {
+        } catch (_) {
             return {
                 timestamp: Date.now(),
                 messageCount: this.currentSessionMessages,
-                summary: `对话包含 ${this.currentSessionMessages} 条消息`
+                summary: `Conversation contained ${this.currentSessionMessages} messages.`
             };
         }
     }
 
-    // ==================== Persistence ====================
-
     async save() {
+        await this.ready();
         await this.saveProfile();
         await this.saveSummaries();
         await this.saveChatHistory();
@@ -396,6 +423,7 @@ export class MemoryManager {
     }
 
     async clearChatHistory() {
+        await this.ready();
         this.chatHistory = [];
         await this.saveChatHistory();
     }

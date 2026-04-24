@@ -1,8 +1,13 @@
 // src/knowledge/watcher.ts
+// 文件夹监听器：检测监听目录中的文件变更，通过 frontmatter 管理状态
 
 import { App, TFile, debounce } from 'obsidian';
-import { KnowledgeRegistryManager } from './registry';
 import { DEFAULT_WIKI_FOLDER } from './types';
+import {
+  getKnowledgeStatus,
+  setKnowledgeStatus,
+  ensureSourceId,
+} from './frontmatter';
 
 /**
  * 检查文件路径是否在监听文件夹列表中
@@ -28,71 +33,75 @@ export function shouldEnqueueFile(
 }
 
 /**
- * 文件夹监听器：监听指定文件夹，将新建/修改的笔记自动入队
+ * 文件夹监听器：监听指定文件夹，自动标记新建/修改的笔记
+ * 通过 onCompileNeeded 回调通知上层触发编译
  */
 export class KnowledgeWatcher {
   private debouncedHandlers: Map<string, () => void> = new Map();
+  private _onCompileNeeded: (() => void) | null = null;
+  /** 正在写 frontmatter 的文件路径，用于过滤自触发的 modify 事件 */
+  private writingPaths: Set<string> = new Set();
 
   constructor(
-    app: App,
-    private registry: KnowledgeRegistryManager,
+    private app: App,
     private watchedFolders: string[],
     private wikiFolder: string = DEFAULT_WIKI_FOLDER,
     private debounceMs: number = 60000
   ) {}
 
-  async onFileCreate(file: TFile): Promise<void> {
-    if (!shouldEnqueueFile(file.path, this.watchedFolders, this.wikiFolder)) return;
-    const existing = this.registry.findByPath(file.path);
-    if (existing) return;
-    this.registry.register(file.path);
-    await this.registry.save();
-    console.log(`[KnowledgeWatcher] Registered new file: ${file.path}`);
+  /** 设置自动编译回调 */
+  setOnCompileNeeded(cb: () => void): void {
+    this._onCompileNeeded = cb;
   }
 
+  /** 外部主动触发编译（如启动时检测到 pending 项） */
+  triggerCompile(): void {
+    this._onCompileNeeded?.();
+  }
+
+  /** 新文件创建：标记 pending + 生成 source_id */
+  async onFileCreate(file: TFile): Promise<void> {
+    if (!shouldEnqueueFile(file.path, this.watchedFolders, this.wikiFolder)) return;
+    if (this.writingPaths.has(file.path)) return;
+    const status = getKnowledgeStatus(this.app, file);
+    if (status) return; // 已有状态，跳过
+
+    this.writingPaths.add(file.path);
+    try {
+      await ensureSourceId(this.app, file);
+      await setKnowledgeStatus(this.app, file, 'pending');
+      console.log(`[KnowledgeWatcher] Registered new file: ${file.path}`);
+      this._onCompileNeeded?.();
+    } finally {
+      // 延迟清除，等 vault modify 事件传播完毕
+      setTimeout(() => this.writingPaths.delete(file.path), 500);
+    }
+  }
+
+  /** 文件修改：已完成的标记回 pending（debounce） */
   onFileModify(file: TFile): void {
     if (!shouldEnqueueFile(file.path, this.watchedFolders, this.wikiFolder)) return;
+    if (this.writingPaths.has(file.path)) return;
     const key = file.path;
     if (this.debouncedHandlers.has(key)) return;
 
     const handler = debounce(async () => {
-      const record = this.registry.findByPath(file.path);
-      if (record && record.status === 'done') {
-        this.registry.transition(record.id, 'stale');
-        await this.registry.save();
-        console.log(`[KnowledgeWatcher] Marked stale: ${file.path}`);
+      const status = getKnowledgeStatus(this.app, file);
+      if (status === 'done') {
+        this.writingPaths.add(file.path);
+        try {
+          await setKnowledgeStatus(this.app, file, 'pending');
+          console.log(`[KnowledgeWatcher] Marked pending (was done): ${file.path}`);
+          this._onCompileNeeded?.();
+        } finally {
+          setTimeout(() => this.writingPaths.delete(file.path), 500);
+        }
       }
       this.debouncedHandlers.delete(key);
     }, this.debounceMs, true);
 
     this.debouncedHandlers.set(key, handler);
     handler();
-  }
-
-  async onFileDelete(filePath: string): Promise<void> {
-    const record = this.registry.findByPath(filePath);
-    if (!record) return;
-    if (record.status !== 'missing_source') {
-      try {
-        this.registry.transition(record.id, 'missing_source');
-        await this.registry.save();
-        console.log(`[KnowledgeWatcher] Marked missing_source: ${filePath}`);
-      } catch {}
-    }
-  }
-
-  async onFileRename(oldPath: string, newPath: string): Promise<void> {
-    const record = this.registry.findByPath(oldPath);
-    if (!record) {
-      if (shouldEnqueueFile(newPath, this.watchedFolders, this.wikiFolder)) {
-        this.registry.register(newPath);
-        await this.registry.save();
-      }
-      return;
-    }
-    this.registry.updatePath(record.id, newPath);
-    await this.registry.save();
-    console.log(`[KnowledgeWatcher] Updated path: ${oldPath} -> ${newPath}`);
   }
 
   updateWatchedFolders(folders: string[]): void {

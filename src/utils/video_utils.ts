@@ -6,142 +6,216 @@ export interface VideoTranscript {
     platform: 'youtube' | 'bilibili';
     author?: string;
     url?: string;
+    description?: string;
+    transcriptSource?: 'platform-subtitle' | 'audio-transcription' | 'metadata';
+    needsTranscription?: boolean;
 }
 
-export async function getVideoTranscript(url: string): Promise<VideoTranscript | null> {
-    if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        return await getYoutubeTranscript(url);
-    } else if (url.includes('bilibili.com') || url.includes('b23.tv')) {
-        return await getBilibiliTranscript(url);
+interface VideoTranscriptDeps {
+    requestUrl: typeof requestUrl;
+    userAgent: string;
+}
+
+const defaultDeps: VideoTranscriptDeps = {
+    requestUrl: (options) => requestUrl(options),
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Mozilla/5.0',
+};
+
+function extractBalancedJson(source: string, marker: string): any | null {
+    const markerIndex = source.indexOf(marker);
+    if (markerIndex === -1) return null;
+
+    const braceStart = source.indexOf('{', markerIndex);
+    if (braceStart === -1) return null;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = braceStart; i < source.length; i++) {
+        const ch = source[i];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (ch === '\\' && inString) {
+            escaped = true;
+            continue;
+        }
+        if (ch === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (inString) continue;
+        if (ch === '{') depth++;
+        if (ch === '}') {
+            depth--;
+            if (depth === 0) {
+                try {
+                    return JSON.parse(source.slice(braceStart, i + 1));
+                } catch {
+                    return null;
+                }
+            }
+        }
     }
+
     return null;
 }
 
-async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null> {
+async function fetchText(
+    deps: VideoTranscriptDeps,
+    url: string,
+    headers?: Record<string, string>,
+): Promise<string> {
+    const response = await deps.requestUrl({
+        url,
+        headers,
+    });
+    return response.text;
+}
+
+function buildMetadataOnlyResult(params: {
+    title: string;
+    platform: 'youtube' | 'bilibili';
+    author: string;
+    url: string;
+    description: string;
+}): VideoTranscript {
+    return {
+        text: '',
+        title: params.title,
+        platform: params.platform,
+        author: params.author,
+        url: params.url,
+        description: params.description,
+        transcriptSource: 'metadata',
+        needsTranscription: true,
+    };
+}
+
+async function getYoutubeTranscript(url: string, deps: VideoTranscriptDeps): Promise<VideoTranscript | null> {
     try {
-        const userAgent = navigator.userAgent;
-        console.log(`Obsidian Shell: Using User-Agent: ${userAgent}`);
-
-        // 1. Fetch the video page using requestUrl (bypasses CORS)
-        const response = await requestUrl({
-            url: url,
-            headers: {
-                'User-Agent': userAgent
-            }
+        const html = await fetchText(deps, url, {
+            'User-Agent': deps.userAgent,
         });
-        const html = response.text;
 
-        // 2. Extract Title
-        let title = "YouTube Video";
+        let title = 'YouTube Video';
         const titleMatch = html.match(/<title>(.*?)<\/title>/);
-        if (titleMatch && titleMatch[1]) {
+        if (titleMatch?.[1]) {
             title = titleMatch[1].replace(' - YouTube', '');
         }
 
-        // Extract Author
-        let author = "YouTube";
-        const authorMatch = html.match(/<link itemprop="name" content="(.*?)">/) || html.match(/<meta name="author" content="(.*?)">/);
-        if (authorMatch && authorMatch[1]) {
+        let author = 'YouTube';
+        const authorMatch = html.match(/<link itemprop="name" content="(.*?)">/)
+            || html.match(/<meta name="author" content="(.*?)">/);
+        if (authorMatch?.[1]) {
             author = authorMatch[1];
         }
 
-        // 3. Extract Captions JSON
-        // Look for "captionTracks" inside the HTML (usually in ytInitialPlayerResponse)
+        const descriptionMatch = html.match(/<meta name="description" content="([^"]*)"/i);
+        const description = descriptionMatch?.[1]?.trim() || title;
+
         const captionsMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
         if (!captionsMatch) {
-            console.warn("Obsidian Shell: No captionTracks found in YouTube page.");
-            // Return partial result if title was found
-            return { text: "", title, platform: 'youtube', author, url };
+            return buildMetadataOnlyResult({
+                title,
+                platform: 'youtube',
+                author,
+                url,
+                description,
+            });
         }
 
         const captionTracks = JSON.parse(captionsMatch[1]);
-        if (!captionTracks || captionTracks.length === 0) {
-            console.warn("Obsidian Shell: Empty captionTracks.");
-            return { text: "", title, platform: 'youtube', author, url };
+        if (!Array.isArray(captionTracks) || captionTracks.length === 0) {
+            return buildMetadataOnlyResult({
+                title,
+                platform: 'youtube',
+                author,
+                url,
+                description,
+            });
         }
 
-        // Prefer English or Auto-generated English, or just the first one
-        // captionTracks structure: { baseUrl: string, name: { simpleText: string }, languageCode: string, ... }
         let selectedTrack = captionTracks.find((track: any) => track.languageCode === 'en');
         if (!selectedTrack) {
             selectedTrack = captionTracks[0];
         }
 
-        console.log(`Obsidian Shell: Selected caption track: ${selectedTrack.name?.simpleText} (${selectedTrack.languageCode})`);
-        console.log(`Obsidian Shell: Fetching transcript from: ${selectedTrack.baseUrl}`);
-
-        // 4. Fetch Transcript
-        let transcriptResponse;
+        let transcriptText = '';
         try {
-            transcriptResponse = await requestUrl({
+            const transcriptResponse = await deps.requestUrl({
                 url: selectedTrack.baseUrl,
                 headers: {
-                    'User-Agent': userAgent
-                }
+                    'User-Agent': deps.userAgent,
+                },
             });
-        } catch (e) {
-            console.warn("Obsidian Shell: Failed to fetch transcript with User-Agent, trying without...", e);
-            transcriptResponse = await requestUrl({ url: selectedTrack.baseUrl });
+            transcriptText = transcriptResponse.text;
+        } catch {
+            const transcriptResponse = await deps.requestUrl({ url: selectedTrack.baseUrl });
+            transcriptText = transcriptResponse.text;
         }
 
-        let transcriptXml = transcriptResponse.text;
-        console.log(`Obsidian Shell: Transcript Response Status: ${transcriptResponse.status}`);
-        console.log(`Obsidian Shell: Transcript Response Headers:`, transcriptResponse.headers);
-
-        if (!transcriptXml || transcriptXml.length === 0) {
-            console.warn("Obsidian Shell: Empty XML response. Trying fmt=json3...");
+        if (!transcriptText) {
             try {
-                const jsonUrl = selectedTrack.baseUrl + '&fmt=json3';
-                const jsonResponse = await requestUrl({
-                    url: jsonUrl,
-                    headers: { 'User-Agent': userAgent }
+                const jsonResponse = await deps.requestUrl({
+                    url: `${selectedTrack.baseUrl}&fmt=json3`,
+                    headers: {
+                        'User-Agent': deps.userAgent,
+                    },
                 });
-                const jsonText = jsonResponse.text;
-                if (jsonText && jsonText.length > 0) {
-                    console.log("Obsidian Shell: Found JSON transcript, parsing...");
-                    const jsonData = JSON.parse(jsonText);
-                    // Parse JSON3 format: { events: [ { tStartMs: 1000, dDurationMs: 2000, segs: [ { utf8: "text" } ] } ] }
-                    if (jsonData.events) {
-                        const lines = jsonData.events.map((e: any) => e.segs ? e.segs.map((s: any) => s.utf8).join('') : '').filter((t: string) => t);
-                        const text = lines.join(' ');
-                        return {
-                            text,
-                            title,
-                            platform: 'youtube',
-                            author,
-                            url
-                        };
-                    }
+                const jsonData = JSON.parse(jsonResponse.text);
+                const text = Array.isArray(jsonData.events)
+                    ? jsonData.events
+                        .map((event: any) => Array.isArray(event.segs)
+                            ? event.segs.map((seg: any) => seg.utf8).join('')
+                            : '')
+                        .filter(Boolean)
+                        .join(' ')
+                    : '';
+                if (text) {
+                    return {
+                        text,
+                        title,
+                        platform: 'youtube',
+                        author,
+                        url,
+                        description,
+                        transcriptSource: 'platform-subtitle',
+                        needsTranscription: false,
+                    };
                 }
-            } catch (e) {
-                console.error("Obsidian Shell: Failed to fetch/parse JSON3 transcript", e);
+            } catch {
+                // Fall through to XML parsing / metadata fallback.
             }
         }
 
-        console.log(`Obsidian Shell: Transcript XML length: ${transcriptXml.length}`);
-        if (transcriptXml.length < 100) {
-            console.log(`Obsidian Shell: Transcript XML preview: ${transcriptXml}`);
-        }
-
-        // 5. Parse XML to Text using DOMParser
         const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(transcriptXml, "text/xml");
-        const textNodes = xmlDoc.getElementsByTagName("text");
-
-        const lines = [];
+        const xmlDoc = parser.parseFromString(transcriptText, 'text/xml');
+        const textNodes = xmlDoc.getElementsByTagName('text');
+        const lines: string[] = [];
         for (let i = 0; i < textNodes.length; i++) {
             const textContent = textNodes[i].textContent;
             if (textContent) {
-                lines.push(textContent.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+                lines.push(
+                    textContent
+                        .replace(/&#39;/g, "'")
+                        .replace(/&quot;/g, '"')
+                        .replace(/&amp;/g, '&')
+                );
             }
         }
 
         const text = lines.join(' ');
-
         if (!text) {
-            console.warn("Obsidian Shell: Parsed transcript is empty. XML Preview: ", transcriptXml.substring(0, 200));
-            // Return title and platform even if text is empty
-            return { text: "", title, platform: 'youtube', author, url };
+            return buildMetadataOnlyResult({
+                title,
+                platform: 'youtube',
+                author,
+                url,
+                description,
+            });
         }
 
         return {
@@ -149,58 +223,56 @@ async function getYoutubeTranscript(url: string): Promise<VideoTranscript | null
             title,
             platform: 'youtube',
             author,
-            url
+            url,
+            description,
+            transcriptSource: 'platform-subtitle',
+            needsTranscription: false,
         };
-
     } catch (e: any) {
-        console.error("Failed to get YouTube transcript", e);
+        console.error('Failed to get YouTube transcript', e);
         new Notice(`YouTube Transcript Error: ${e.message}`);
-        // Return null if we can't even get the basic page info
         return null;
     }
 }
 
-async function getBilibiliTranscript(url: string): Promise<VideoTranscript | null> {
+async function getBilibiliTranscript(url: string, deps: VideoTranscriptDeps): Promise<VideoTranscript | null> {
     try {
-        // 1. Fetch page to get CID and Title
-        const response = await requestUrl({
-            url: url,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
+        const html = await fetchText(deps, url, {
+            'User-Agent': deps.userAgent,
         });
-        const html = response.text;
 
-        // Extract Title
-        let title = "Bilibili Video";
-        const titleMatch = html.match(/<title data-vue-meta="true">([^<]+)<\/title>/) || html.match(/<title>([^<]+)<\/title>/);
-        if (titleMatch && titleMatch[1]) {
+        let title = 'Bilibili Video';
+        const titleMatch = html.match(/<title data-vue-meta="true">([^<]+)<\/title>/)
+            || html.match(/<title>([^<]+)<\/title>/);
+        if (titleMatch?.[1]) {
             title = titleMatch[1].replace('_哔哩哔哩_bilibili', '');
         }
 
-        // Extract Author
-        let author = "Bilibili";
-        const authorMatch = html.match(/<meta name="author" content="(.*?)">/) || html.match(/<meta name="author" content="(.*?)" \/>/);
-        if (authorMatch && authorMatch[1]) {
+        let author = 'Bilibili';
+        const authorMatch = html.match(/<meta name="author" content="(.*?)">/)
+            || html.match(/<meta name="author" content="(.*?)" \/>/);
+        if (authorMatch?.[1]) {
             author = authorMatch[1];
         }
 
-        // Extract CID (can be in window.__INITIAL_STATE__ or similar)
-        // Regex for "cid":12345678
+        const descriptionMatch = html.match(/"desc":"([^"]+)"/)
+            || html.match(/<meta name="description" content="([^"]*)"/);
+        const description = descriptionMatch?.[1]
+            ? descriptionMatch[1].replace(/\\n/g, ' ').trim()
+            : title;
+
         const cidMatch = html.match(/"cid":(\d+)/);
         if (!cidMatch) {
-            console.error("Bilibili CID not found");
-            return null;
+          console.error('Bilibili CID not found');
+          return null;
         }
         const cid = cidMatch[1];
 
-        // Extract BVID from URL or HTML
         let bvid = '';
         const bvidMatch = url.match(/(BV\w+)/);
         if (bvidMatch) {
             bvid = bvidMatch[1];
         } else {
-            // Fallback: try to find bvid in HTML if not in URL (rare for b23.tv resolved, but possible)
             const htmlBvidMatch = html.match(/"bvid":"(BV\w+)"/);
             if (htmlBvidMatch) {
                 bvid = htmlBvidMatch[1];
@@ -208,66 +280,93 @@ async function getBilibiliTranscript(url: string): Promise<VideoTranscript | nul
         }
 
         if (!bvid) {
-            console.error("Bilibili BVID not found");
+            console.error('Bilibili BVID not found');
             return null;
         }
 
-        // 2. Fetch subtitle list
-        // API: https://api.bilibili.com/x/player/v2?cid={cid}&bvid={bvid}
-        const subtitleApiUrl = `https://api.bilibili.com/x/player/v2?cid=${cid}&bvid=${bvid}`;
-        const subtitleResponse = await requestUrl({
-            url: subtitleApiUrl,
+        const subtitleResponse = await deps.requestUrl({
+            url: `https://api.bilibili.com/x/player/v2?cid=${cid}&bvid=${bvid}`,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
+                'User-Agent': deps.userAgent,
+            },
         });
-
         const subtitleData = JSON.parse(subtitleResponse.text);
-        let text = "";
+        const subtitles = subtitleData?.data?.subtitle?.subtitles;
 
-        if (subtitleData.data && subtitleData.data.subtitle && subtitleData.data.subtitle.subtitles && subtitleData.data.subtitle.subtitles.length > 0) {
-            // Prefer user selected language or first available
-            const subtitles = subtitleData.data.subtitle.subtitles;
-            const selectedSubtitle = subtitles[0]; // Just take the first one for now
-            const subtitleUrl = `https:${selectedSubtitle.url}`;
-
-            console.log(`Obsidian Shell: Fetching Bilibili subtitle from ${subtitleUrl}`);
-            const transcriptResponse = await requestUrl({ url: subtitleUrl });
-            const transcriptJson = JSON.parse(transcriptResponse.text);
-
-            // Parse BCC format: { body: [ { from: 0, to: 1, content: "text" } ] }
-            if (transcriptJson.body) {
-                text = transcriptJson.body.map((item: any) => item.content).join(' ');
+        let text = '';
+        if (Array.isArray(subtitles) && subtitles.length > 0) {
+            const selectedSubtitle = subtitles.find((subtitle: any) => subtitle?.url) || subtitles[0];
+            if (selectedSubtitle?.url) {
+                const subtitleUrl = selectedSubtitle.url.startsWith('http')
+                    ? selectedSubtitle.url
+                    : `https:${selectedSubtitle.url}`;
+                const transcriptResponse = await deps.requestUrl({ url: subtitleUrl });
+                const transcriptJson = JSON.parse(transcriptResponse.text);
+                if (Array.isArray(transcriptJson.body)) {
+                    text = transcriptJson.body.map((item: any) => item.content).join(' ');
+                }
             }
-        } else {
-            console.warn("Obsidian Shell: No subtitles found for Bilibili video");
         }
 
-        // Preserve query parameters (like p=2) from the original URL if it was a long link
-        let queryParams = "";
+        let queryParams = '';
         if (url.includes('?')) {
             const urlObj = new URL(url);
-            // We only care about specific params like 'p'
             const p = urlObj.searchParams.get('p');
             if (p) {
                 queryParams = `?p=${p}`;
             }
         }
 
-        // Construct canonical URL with query params (no trailing slash)
         const canonicalUrl = `https://www.bilibili.com/video/${bvid}${queryParams}`;
+        if (!text) {
+            return {
+                text: '',
+                title,
+                platform: 'bilibili',
+                author,
+                url: canonicalUrl,
+                description,
+                transcriptSource: 'metadata',
+                needsTranscription: true,
+            };
+        }
 
         return {
             text,
             title,
             platform: 'bilibili',
             author,
-            url: canonicalUrl
+            url: canonicalUrl,
+            description,
+            transcriptSource: 'platform-subtitle',
+            needsTranscription: false,
         };
-
     } catch (e: any) {
-        console.error("Failed to get Bilibili transcript", e);
+        console.error('Failed to get Bilibili transcript', e);
         new Notice(`Bilibili Transcript Error: ${e.message}`);
         return null;
     }
+}
+
+export function createVideoTranscriptFetcher(partialDeps: Partial<VideoTranscriptDeps> = {}) {
+    const deps: VideoTranscriptDeps = {
+        ...defaultDeps,
+        ...partialDeps,
+    };
+
+    return async (url: string): Promise<VideoTranscript | null> => {
+        if (url.includes('youtube.com') || url.includes('youtu.be')) {
+            return await getYoutubeTranscript(url, deps);
+        }
+        if (url.includes('bilibili.com') || url.includes('b23.tv')) {
+            return await getBilibiliTranscript(url, deps);
+        }
+        return null;
+    };
+}
+
+export const getVideoTranscript = createVideoTranscriptFetcher();
+
+export function extractJsonAssignment(source: string, marker: string): any | null {
+    return extractBalancedJson(source, marker);
 }
