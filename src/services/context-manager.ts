@@ -1,6 +1,7 @@
 import { requestUrl } from 'obsidian';
 import { logger } from '../utils/logger';
 import { getVideoTranscript } from '../utils/video_utils';
+import { budgetContextItems } from './context-budget';
 
 export interface ContextItem {
     id: string;
@@ -13,6 +14,7 @@ export interface ContextItem {
 interface ContextManagerDeps {
     fetchWebContent: (url: string) => Promise<string>;
     fetchVideoTranscript: (url: string) => Promise<string>;
+    budgetContexts: (items: ContextItem[]) => ContextItem[];
 }
 
 export class ContextManager {
@@ -24,6 +26,7 @@ export class ContextManager {
         this.deps = {
             fetchWebContent: deps?.fetchWebContent ?? this.fetchWebContent.bind(this),
             fetchVideoTranscript: deps?.fetchVideoTranscript ?? this.fetchVideoTranscript.bind(this),
+            budgetContexts: deps?.budgetContexts ?? ((items) => budgetContextItems(items)),
         };
     }
 
@@ -64,7 +67,7 @@ export class ContextManager {
                 }
             }
         }
-        return this.activeContexts;
+        return this.deps.budgetContexts(this.activeContexts);
     }
 
     private async fetchWebContent(url: string): Promise<string> {

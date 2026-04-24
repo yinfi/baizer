@@ -8,6 +8,11 @@ import { VIEW_TYPE_SHELL } from '../mcp/types';
 import { StreamEvent } from '../models/interfaces';
 import { renderApprovalCard } from './approval-card';
 import { buildCommandSuggestions, CommandSuggestion } from './command-suggestions';
+import { ContextController } from './controllers/context-controller';
+import { detectSuggestionTrigger, InputController } from './controllers/input-controller';
+import { StreamController } from './controllers/stream-controller';
+import { ThinkingRenderer } from './renderers/thinking-renderer';
+import { ToolRenderer } from './renderers/tool-renderer';
 
 export { VIEW_TYPE_SHELL };
 
@@ -19,13 +24,11 @@ export class ShellView extends ItemView {
     private inputEl: HTMLTextAreaElement;
     private suggestionContainer: HTMLElement;
     private currentSelection: string = "";
-    // private editor: any = null; // Removed as it was unused in the new implementation
-
-    // Suggestion State
-    private isSuggesting = false;
-    private suggestionType: 'command' | 'file' | null = null;
-    private selectedIndex = 0;
-    private suggestions: any[] = [];
+    private inputController: InputController;
+    private contextController: ContextController;
+    private streamController: StreamController;
+    private thinkingRenderer: ThinkingRenderer | null = null;
+    private toolRenderer: ToolRenderer | null = null;
 
     // Heartbeat monitoring
     private heartbeatInterval: number | null = null;
@@ -43,8 +46,6 @@ export class ShellView extends ItemView {
     private streamContent: HTMLElement | null = null;
     private streamAccumulatedText: string = '';
     private streamRenderTimer: number | null = null;
-    private streamNodeCount: number = 0;
-    private currentThinkingNode: HTMLElement | null = null;
     private readonly localCommandSuggestions: CommandSuggestion[] = [
         { label: '/clear', desc: 'Clear session history' },
         { label: '/profile', desc: 'View user profile' },
@@ -66,7 +67,7 @@ export class ShellView extends ItemView {
     };
 
     private handleKeyDownBound = async (e: KeyboardEvent) => {
-        if (this.isSuggesting) {
+        if (this.inputController.getIsSuggesting()) {
             if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 this.navigateSuggestions(-1);
@@ -116,6 +117,34 @@ export class ShellView extends ItemView {
         super(leaf);
         this.modelService = modelService;
         this.contextManager = new ContextManager();
+        this.inputController = new InputController();
+        this.contextController = new ContextController({
+            app: this.app,
+            contextManager: this.contextManager,
+        });
+        this.streamController = new StreamController({
+            onThinking: (content) => {
+                this.ensureStreamContainer();
+                this.thinkingRenderer?.appendThinking(content);
+                this.streamNodeCount = this.getStreamNodeCount();
+            },
+            onToolCall: (name, args) => {
+                this.ensureStreamContainer();
+                this.thinkingRenderer?.finalizeCurrentThinking();
+                this.toolRenderer?.addToolCall(name, args);
+                this.streamNodeCount = this.getStreamNodeCount();
+            },
+            onToolResult: (name, result, error) => {
+                this.toolRenderer?.updateToolResult(name, result, error);
+            },
+            onTextDelta: (content) => {
+                this.ensureStreamContainer();
+                this.handleTextDelta(content);
+            },
+            onDone: () => this.finalizeStream(),
+            onError: () => this.finalizeStream(),
+            onScrollRequest: () => this.scrollToEnd(),
+        });
     }
 
     getViewType() {
@@ -320,32 +349,20 @@ export class ShellView extends ItemView {
     // ==================== Suggestion Logic ====================
 
     handleInput() {
-        const val = this.inputEl.value;
-        const cursor = this.inputEl.selectionStart;
-
-        // Check for triggers
-        // Simple logic: look at the last word or character
-        const textBeforeCursor = val.substring(0, cursor);
-        const lastWord = textBeforeCursor.split(/\s+/).pop() || '';
-
-        if (lastWord.startsWith('/')) {
-            this.showSuggestions('command', lastWord.substring(1));
-        } else if (lastWord.startsWith('@')) {
-            this.showSuggestions('file', lastWord.substring(1));
+        const trigger = detectSuggestionTrigger(this.inputEl.value, this.inputEl.selectionStart);
+        if (trigger) {
+            this.showSuggestions(trigger.type, trigger.query);
         } else {
             this.hideSuggestions();
         }
     }
 
     showSuggestions(type: 'command' | 'file', query: string) {
-        this.isSuggesting = true;
-        this.suggestionType = type;
         this.suggestionContainer.empty();
         this.suggestionContainer.style.display = 'block';
-        this.selectedIndex = 0;
-
+        let suggestions;
         if (type === 'command') {
-            this.suggestions = buildCommandSuggestions(
+            suggestions = buildCommandSuggestions(
                 this.localCommandSuggestions,
                 this.modelService.getSkillCommands().map(command => ({
                     command: command.command,
@@ -355,13 +372,15 @@ export class ShellView extends ItemView {
             );
         } else {
             const files = this.app.vault.getFiles();
-            this.suggestions = files
+            suggestions = files
                 .filter(f => f.path.toLowerCase().includes(query.toLowerCase()))
                 .slice(0, 10)
                 .map(f => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]` }));
         }
 
-        if (this.suggestions.length === 0) {
+        this.inputController.setSuggestions(type, suggestions);
+
+        if (this.inputController.getSuggestions().length === 0) {
             this.hideSuggestions();
             return;
         }
@@ -371,60 +390,49 @@ export class ShellView extends ItemView {
 
     renderSuggestions() {
         this.suggestionContainer.empty();
-        this.suggestions.forEach((item, index) => {
+        this.inputController.getSuggestions().forEach((item, index) => {
             const el = this.suggestionContainer.createDiv({
-                cls: `suggestion-item ${index === this.selectedIndex ? 'is-selected' : ''}`
+                cls: `suggestion-item ${index === this.inputController.getSelectedIndex() ? 'is-selected' : ''}`
             });
-            el.createSpan({ cls: 'suggestion-icon', text: this.suggestionType === 'command' ? '/' : '@' });
+            el.createSpan({ cls: 'suggestion-icon', text: this.inputController.getSuggestionType() === 'command' ? '/' : '@' });
             el.createSpan({ cls: 'suggestion-text', text: item.label });
             if (item.desc) {
                 el.createSpan({ cls: 'suggestion-desc', text: item.desc });
             }
 
             el.addEventListener('click', () => {
-                this.selectedIndex = index;
+                while (this.inputController.getSelectedIndex() !== index) {
+                    this.inputController.navigate(1);
+                }
                 this.selectSuggestion();
             });
         });
     }
 
     navigateSuggestions(dir: number) {
-        this.selectedIndex += dir;
-        if (this.selectedIndex < 0) this.selectedIndex = this.suggestions.length - 1;
-        if (this.selectedIndex >= this.suggestions.length) this.selectedIndex = 0;
+        this.inputController.navigate(dir);
         this.renderSuggestions();
 
         // Scroll into view
-        const selectedEl = this.suggestionContainer.children[this.selectedIndex] as HTMLElement;
+        const selectedEl = this.suggestionContainer.children[this.inputController.getSelectedIndex()] as HTMLElement;
         if (selectedEl) {
             selectedEl.scrollIntoView({ block: 'nearest' });
         }
     }
 
     selectSuggestion() {
-        const item = this.suggestions[this.selectedIndex];
-        if (!item) return;
+        const selection = this.inputController.selectSuggestion(this.inputEl.value, this.inputEl.selectionStart);
+        if (!selection) return;
 
-        const val = this.inputEl.value;
-        const cursor = this.inputEl.selectionStart;
-        const textBeforeCursor = val.substring(0, cursor);
-        const lastWord = textBeforeCursor.split(/\s+/).pop() || '';
-
-        const replacement = this.suggestionType === 'command' ? item.label : item.value;
-
-        // Replace the trigger word with the selection
-        const newTextBefore = textBeforeCursor.substring(0, textBeforeCursor.length - lastWord.length) + replacement + ' ';
-        const newText = newTextBefore + val.substring(cursor);
-
-        this.inputEl.value = newText;
-        this.inputEl.selectionStart = this.inputEl.selectionEnd = newTextBefore.length;
+        this.inputEl.value = selection.text;
+        this.inputEl.selectionStart = this.inputEl.selectionEnd = selection.cursor;
 
         this.hideSuggestions();
         this.inputEl.focus();
     }
 
     hideSuggestions() {
-        this.isSuggesting = false;
+        this.inputController.hide();
         this.suggestionContainer.style.display = 'none';
         this.suggestionContainer.empty();
     }
@@ -433,37 +441,8 @@ export class ShellView extends ItemView {
 
     async processCommand(query: string) {
         try {
-            // Context gathering
-            const activeFile = this.app.workspace.getActiveFile();
-
-            // Resolve context items
-            const contextItems = await this.contextManager.resolveContexts();
-
-            // Add active file as a ContextItem to unify context handling.
-            if (activeFile) {
-                contextItems.push({
-                    id: 'active-file',
-                    type: 'file',
-                    data: activeFile.path,
-                    content: await this.app.vault.read(activeFile)
-                });
-            }
-
-            // Try to get selection from the active editor
-            this.currentSelection = '';
-            const activeLeaf = this.app.workspace.getMostRecentLeaf();
-            if (activeLeaf && activeLeaf.view) {
-                const editor = (activeLeaf.view as any).editor;
-                if (editor) {
-                    // this.editor = editor; // Unused
-                    this.currentSelection = editor.getSelection();
-                    if (this.currentSelection) {
-                        // We don't need to log this explicitly as system message anymore,
-                        // or we can if we want to mimic exact previous behavior.
-                        // Let's keep it clean for now.
-                    }
-                }
-            }
+            const { contextItems, selection } = await this.contextController.collectCommandContext();
+            this.currentSelection = selection;
 
             this.updateActivity();
             await this.chatController.processCommand(query, contextItems, this.currentSelection);
@@ -550,32 +529,7 @@ export class ShellView extends ItemView {
 
     private handleStreamEvent(event: StreamEvent) {
         this.updateActivity();
-
-        switch (event.type) {
-            case 'thinking':
-                this.ensureStreamContainer();
-                this.handleThinkingEvent(event.content);
-                break;
-            case 'tool_call':
-                this.ensureStreamContainer();
-                this.addToolCallNode(event.name, event.args);
-                break;
-            case 'tool_result':
-                this.updateToolResultNode(event.name, event.result, event.error);
-                break;
-            case 'text_delta':
-                this.ensureStreamContainer();
-                this.handleTextDelta(event.content);
-                break;
-            case 'done':
-                this.finalizeStream();
-                break;
-            case 'error':
-                this.finalizeStream();
-                break;
-        }
-
-        this.scrollToEnd();
+        this.streamController.handleEvent(event);
     }
 
     private ensureStreamContainer() {
@@ -586,6 +540,8 @@ export class ShellView extends ItemView {
 
         this.streamContainer = this.outputContainer.createDiv({ cls: 'shell-entry ai shell-stream-container' });
         this.streamTimeline = this.streamContainer.createDiv({ cls: 'shell-think-timeline' });
+        this.thinkingRenderer = new ThinkingRenderer(this.streamTimeline);
+        this.toolRenderer = new ToolRenderer(this.streamTimeline);
 
         const summary = this.streamTimeline.createDiv({ cls: 'shell-think-summary' });
         summary.createSpan({ cls: 'think-toggle', text: '\u25BC' });
@@ -597,72 +553,10 @@ export class ShellView extends ItemView {
         this.streamContent = this.streamContainer.createDiv({ cls: 'shell-response-content' });
         this.streamAccumulatedText = '';
         this.streamNodeCount = 0;
-        this.currentThinkingNode = null;
     }
 
-    private handleThinkingEvent(content: string) {
-        if (!this.streamTimeline) return;
-
-        if (!this.currentThinkingNode) {
-            this.currentThinkingNode = this.streamTimeline.createDiv({ cls: 'think-node is-thinking' });
-            const header = this.currentThinkingNode.createDiv({ cls: 'think-node-header' });
-            header.createSpan({ cls: 'think-node-icon', text: '\uD83D\uDCA1' });
-            header.createSpan({ cls: 'think-node-label' });
-            this.currentThinkingNode.createDiv({ cls: 'think-node-detail' });
-            header.addEventListener('click', () => {
-                this.currentThinkingNode?.toggleClass('is-expanded', !this.currentThinkingNode.hasClass('is-expanded'));
-            });
-            this.streamNodeCount++;
-        }
-
-        const detail = this.currentThinkingNode.querySelector('.think-node-detail') as HTMLElement;
-        const label = this.currentThinkingNode.querySelector('.think-node-label') as HTMLElement;
-        if (detail) detail.textContent = (detail.textContent || '') + content;
-        if (label) {
-            const fullText = detail?.textContent || '';
-            label.textContent = fullText.length > 30 ? fullText.substring(0, 30) + '...' : fullText;
-        }
-    }
-
-    private addToolCallNode(name: string, args: any) {
-        if (!this.streamTimeline) return;
-
-        if (this.currentThinkingNode) {
-            this.currentThinkingNode.removeClass('is-thinking');
-            this.currentThinkingNode = null;
-        }
-
-        const node = this.streamTimeline.createDiv({ cls: 'think-node is-tool' });
-        node.dataset.toolName = name;
-        const header = node.createDiv({ cls: 'think-node-header' });
-        header.createSpan({ cls: 'think-node-icon', text: '\uD83D\uDD27' });
-        header.createSpan({ cls: 'think-node-label', text: name });
-        const detail = node.createDiv({ cls: 'think-node-detail' });
-        detail.textContent = JSON.stringify(args, null, 2);
-        header.addEventListener('click', () => {
-            node.toggleClass('is-expanded', !node.hasClass('is-expanded'));
-        });
-        this.streamNodeCount++;
-    }
-
-    private updateToolResultNode(name: string, result: any, error?: string) {
-        if (!this.streamTimeline) return;
-
-        const nodes = this.streamTimeline.querySelectorAll('.think-node.is-tool');
-        let targetNode: HTMLElement | null = null;
-        for (let i = nodes.length - 1; i >= 0; i--) {
-            if ((nodes[i] as HTMLElement).dataset.toolName === name) {
-                targetNode = nodes[i] as HTMLElement;
-                break;
-            }
-        }
-        if (!targetNode) return;
-
-        const detail = targetNode.querySelector('.think-node-detail') as HTMLElement;
-        if (detail) {
-            const resultText = error ? `Error: ${error}` : JSON.stringify(result, null, 2);
-            detail.textContent += '\n--- Result ---\n' + resultText;
-        }
+    private getStreamNodeCount() {
+        return (this.thinkingRenderer?.getNodeCount() || 0) + (this.toolRenderer?.getNodeCount() || 0);
     }
 
     private handleTextDelta(content: string) {
@@ -700,10 +594,7 @@ export class ShellView extends ItemView {
             this.streamRenderTimer = null;
         }
 
-        if (this.currentThinkingNode) {
-            this.currentThinkingNode.removeClass('is-thinking');
-            this.currentThinkingNode = null;
-        }
+        this.thinkingRenderer?.finalizeCurrentThinking();
 
         if (this.streamContent && this.streamAccumulatedText) {
             this.streamContent.empty();
@@ -738,6 +629,8 @@ export class ShellView extends ItemView {
         this.streamContent = null;
         this.streamAccumulatedText = '';
         this.streamNodeCount = 0;
+        this.thinkingRenderer = null;
+        this.toolRenderer = null;
     }
 
     private postProcessAiContent(container: HTMLElement) {
