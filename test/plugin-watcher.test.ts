@@ -36,10 +36,12 @@ const mockSkillRegistry = {
 
 const generatedPlugins: string[] = [];
 const mockGenerator = {
-  collectPluginInfo: (id: string) => ({
+  collectPluginInfo: async (id: string) => ({
     id, name: id, description: '', version: '1.0',
-    commands: [{ id: `${id}:cmd`, name: 'cmd' }],
-    settings: {},
+    commands: [{ id: `${id}:cmd`, name: 'cmd', aiUsable: true }],
+    settingsKeys: [],
+    syntaxHints: [],
+    webContext: '',
   }),
   shouldSkipPlugin: () => false,
   generateSkillMd: async () => `---\nname: test\ndescription: test\n---\n# Test`,

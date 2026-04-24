@@ -2104,7 +2104,7 @@ __export(main_exports, {
   default: () => ObsidianCliPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian18 = require("obsidian");
+var import_obsidian23 = require("obsidian");
 
 // src/services/model-service.ts
 var import_obsidian3 = require("obsidian");
@@ -2137,21 +2137,41 @@ var DEFAULT_USER_PROFILE = {
 var PLUGIN_ID = "obsidian-cli";
 var VIEW_TYPE_SHELL = `${PLUGIN_ID}-shell-view`;
 var MEMORY_DIR = `.obsidian/${PLUGIN_ID}-memory`;
+var DEFAULT_PROVIDERS = {
+  "gemini": {
+    type: "gemini",
+    label: "Google Gemini",
+    apiKey: "",
+    baseUrl: "",
+    model: "gemini-2.5-flash"
+  },
+  "openai": {
+    type: "openai-compatible",
+    label: "OpenAI",
+    apiKey: "",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o"
+  },
+  "deepseek": {
+    type: "openai-compatible",
+    label: "DeepSeek",
+    apiKey: "",
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-chat"
+  },
+  "qwen": {
+    type: "openai-compatible",
+    label: "Qwen",
+    apiKey: "",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model: "qwen-turbo"
+  }
+};
+var BUILTIN_PROVIDER_KEYS = Object.keys(DEFAULT_PROVIDERS);
 var DEFAULT_SETTINGS = {
   // Core
-  provider: "gemini",
-  apiKey: "",
-  primaryModel: "gemini-2.5-flash",
-  openaiApiKey: "",
-  openaiBaseUrl: "https://api.openai.com/v1",
-  openaiModel: "gpt-4o",
-  deepseekApiKey: "",
-  deepseekBaseUrl: "https://api.deepseek.com",
-  deepseekModel: "deepseek-chat",
-  qwenApiKey: "",
-  qwenBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  qwenModel: "qwen-turbo",
-  thinkingModel: "gemini-2.5-pro",
+  activeProvider: "gemini",
+  providers: { ...DEFAULT_PROVIDERS },
   contextWindow: 1e5,
   // Guardian
   enableGuardian: false,
@@ -2174,86 +2194,73 @@ var DEFAULT_SETTINGS = {
   // Prompt
   customizePrompt: false,
   systemPrompt: `You are a command-line interface inside Obsidian. Be concise. Output valid Markdown.
-    
-IMPORTANT: Before creating a generic note for tasks, reminders, calendars, or other specialized content, ALWAYS check if a specialized plugin is installed using 'list_plugins'.
-- If a relevant plugin is found (e.g., "obsidian-tasks-plugin", "obsidian-kanban", "reminder"), use 'get_plugin_commands' to find the appropriate command and execute it.
-- If you need to know how a plugin is configured (e.g. default folder), use 'get_plugin_settings'.
-- Only create a generic Markdown note if no suitable plugin is available or if the user explicitly asks for a note.
 
-You have access to the internet via the 'web_search' tool. Use it to find up-to-date information, news, or documentation when the user asks for information not present in their vault.
-
-\u4F60\u6709\u4E00\u4E2A\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u53EF\u7528\u3002\u5F53\u7528\u6237\u7684\u95EE\u9898\u53EF\u80FD\u4E0E\u4F60\u4E4B\u524D\u79EF\u7D2F\u7684\u77E5\u8BC6\u76F8\u5173\u65F6\uFF0C
-\u4F7F\u7528 query_knowledge \u5DE5\u5177\u67E5\u9605\u77E5\u8BC6\u5E93\u3002
-\u5982\u679C\u77E5\u8BC6\u5E93\u4E2D\u6CA1\u6709\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5E38\u56DE\u7B54\u5373\u53EF\uFF0C\u4E0D\u8981\u5F3A\u884C\u5F15\u7528\u3002
-\u77E5\u8BC6\u5E93\u68C0\u7D22\u4E0D\u8DB3\u65F6\uFF0C\u53EF\u4EE5\u7528 search_vault \u641C\u7D22\u6574\u4E2A vault \u8865\u5145\u3002
-
-\u5F15\u7528\u89C4\u5219\uFF1A\u5982\u679C\u4F60\u7684\u56DE\u7B54\u5F15\u7528\u4E86\u77E5\u8BC6\u5E93\u4E2D\u7684\u6587\u7AE0\uFF0C\u5FC5\u987B\u5728\u56DE\u7B54\u672B\u5C3E\u6DFB\u52A0"---"\u5206\u9694\u7EBF\uFF0C
-\u7136\u540E\u5217\u51FA\u5F15\u7528\u6765\u6E90\uFF0C\u683C\u5F0F\u4E3A\uFF1A
----
-\u{1F4DA} \u5F15\u7528\u6765\u6E90\uFF1A
-- [[\u6587\u7AE0\u8DEF\u5F84|\u6587\u7AE0\u6807\u9898]]
-\u6BCF\u7BC7\u5F15\u7528\u7684\u6587\u7AE0\u90FD\u8981\u5217\u51FA\u3002\u672A\u5F15\u7528\u77E5\u8BC6\u5E93\u65F6\u4E0D\u8981\u6DFB\u52A0\u6B64\u90E8\u5206\u3002
-
-\u5F53\u4F60\u7684\u56DE\u7B54\u7EFC\u5408\u4E86\u591A\u4E2A\u77E5\u8BC6\u6765\u6E90\u3001\u4EA7\u51FA\u4E86\u6709\u4EF7\u503C\u7684\u65B0\u6D1E\u5BDF\u6216\u5BF9\u6BD4\u5206\u6790\u65F6\uFF0C
-\u4F7F\u7528 file_back_knowledge \u5DE5\u5177\u5C06\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002
-\u4E0D\u8981\u5BF9\u7B80\u5355\u7684\u4E8B\u5B9E\u67E5\u8BE2\u505A\u56DE\u586B\uFF0C\u53EA\u56DE\u586B\u6709\u7EFC\u5408\u4EF7\u503C\u7684\u5185\u5BB9\u3002
-\u6CE8\u610F\uFF1A\u5982\u679C\u7528\u6237\u5BF9\u56DE\u7B54\u70B9\u8D5E\uFF0C\u65E0\u8BBA\u4F60\u7684\u5224\u65AD\u5982\u4F55\u90FD\u6267\u884C\u56DE\u586B\uFF1B
-\u5982\u679C\u7528\u6237\u70B9\u8E29\uFF0C\u5219\u4E0D\u56DE\u586B\u3002\u7528\u6237\u53CD\u9988\u4F18\u5148\u4E8E\u4F60\u7684\u5224\u65AD\u3002`,
+\u4F60\u662F\u7528\u6237\u7684\u4E2A\u4EBA AI \u52A9\u624B\uFF0C\u62E5\u6709\u7528\u6237\u7684\u7B14\u8BB0\u5E93\u548C\u77E5\u8BC6\u5E93\u3002
+\u56DE\u7B54\u5B9E\u8D28\u6027\u95EE\u9898\u524D\uFF0C\u5148\u67E5\u8BE2\u7528\u6237\u7684\u77E5\u8BC6\u5E93\u548C\u7B14\u8BB0\uFF0C\u57FA\u4E8E\u7528\u6237\u7684\u5B9E\u9645\u60C5\u51B5\u7ED9\u51FA\u4E2A\u6027\u5316\u56DE\u7B54\u3002
+\u4E0D\u8981\u51ED\u7A7A\u751F\u6210\u901A\u7528\u5185\u5BB9\u3002\u5982\u679C\u77E5\u8BC6\u5E93\u4E2D\u6CA1\u6709\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5E38\u56DE\u7B54\u5373\u53EF\u3002
+\u76F4\u63A5\u64CD\u4F5C\u7B14\u8BB0\uFF08\u8BFB\u5199\u641C\u7D22\uFF09\u65F6\u4F7F\u7528 vault \u5DE5\u5177\uFF0C\u5176\u4ED6\u80FD\u529B\u901A\u8FC7 use_skill \u8C03\u7528\u3002
+\u8C03\u7528 use_skill \u540E\u4F1A\u8FD4\u56DE instructions\uFF0C\u4F60\u5FC5\u987B\u6839\u636E instructions \u7ACB\u5373\u4F7F\u7528\u5DE5\u5177\u6267\u884C\u64CD\u4F5C\uFF0C\u4E0D\u8981\u53EA\u662F\u63CF\u8FF0\u6B65\u9AA4\u3002`,
   // WeChat
   wechatInboxPath: "Inbox.md",
   wechatStoragePath: "Clippings",
-  // MCP
-  mcpServers: {},
   // Knowledge Compiler
   knowledgeSourceFolders: [],
   knowledgeAutoCompile: false,
   knowledgeWikiFolder: "Knowledge Wiki",
-  knowledgeMaxCompileBatch: 50
+  knowledgeMaxCompileBatch: 50,
+  // Plugin Skill Generator
+  autoGeneratePluginSkills: true,
+  pluginSkillExcludeList: []
 };
 
 // src/memory/memory-manager.ts
 var MemoryManager = class {
-  // Minimum 1 minute between updates
   constructor(app, model) {
     this.app = app;
     this.model = model;
     this.userProfile = { ...DEFAULT_USER_PROFILE };
-    this.loadProfile();
-    this.loadSummaries();
-    this.loadChatHistory();
+    this.initPromise = this.initialize();
   }
   chatSession = null;
   userProfile;
   sessionSummaries = [];
   chatHistory = [];
+  currentSessionTranscript = [];
   currentSessionMessages = 0;
   lastProfileUpdateTime = 0;
-  // 限制内存中保留的聊天历史数量，防止内存泄漏
+  initPromise;
   MAX_MEMORY_CHAT_HISTORY = 100;
-  // 只保留最近100条消息在内存中
   MEMORY_DIR = MEMORY_DIR;
   PROFILE_FILE = "user-profile.json";
   SUMMARY_FILE = "session-summaries.json";
   HISTORY_FILE = "chat-history.json";
   PROFILE_UPDATE_INTERVAL = 5;
-  // Update every 5 messages
   PROFILE_UPDATE_MIN_TIME = 60 * 1e3;
-  // ==================== Session Management ====================
+  async initialize() {
+    await this.loadProfile();
+    await this.loadSummaries();
+    await this.loadChatHistory();
+  }
+  async ready() {
+    await this.initPromise;
+  }
   getOrCreateSession(tools) {
     if (!this.chatSession) {
       this.chatSession = this.model.startChat(tools);
       this.currentSessionMessages = 0;
+      this.currentSessionTranscript = [];
     }
     return this.chatSession;
   }
   async clearSession() {
-    if (this.chatSession && this.currentSessionMessages > 0) {
+    await this.ready();
+    if (this.currentSessionMessages > 0) {
       await this.endSession();
     }
     this.chatSession = null;
     this.currentSessionMessages = 0;
+    this.currentSessionTranscript = [];
   }
-  // ==================== Context Building ====================
   buildContext() {
     const profileContext = this.formatProfileForContext();
     const summaryContext = this.formatSummariesForContext();
@@ -2292,15 +2299,17 @@ ${summaryContext}`;
       (s, i) => `Session ${i + 1}: ${s.summary}`
     ).join("\n");
   }
-  // ==================== Message Recording ====================
   async recordMessage(role, content) {
+    await this.ready();
     this.currentSessionMessages++;
     this.userProfile.metadata.totalInteractions++;
-    this.chatHistory.push({
+    const message = {
       role,
       content,
       timestamp: Date.now()
-    });
+    };
+    this.chatHistory.push(message);
+    this.currentSessionTranscript.push(message);
     this.cleanupOldChatHistory();
     await this.saveChatHistory();
     if (role === "user") {
@@ -2325,7 +2334,6 @@ ${summaryContext}`;
       }
     }
   }
-  // 清理过旧的聊天历史，只保留最近的消息在内存中
   cleanupOldChatHistory() {
     if (this.chatHistory.length > this.MAX_MEMORY_CHAT_HISTORY) {
       const excessCount = this.chatHistory.length - this.MAX_MEMORY_CHAT_HISTORY;
@@ -2333,9 +2341,8 @@ ${summaryContext}`;
       console.log(`[MemoryManager] Cleaned up ${excessCount} old messages from memory. Keeping ${this.MAX_MEMORY_CHAT_HISTORY} most recent messages.`);
     }
   }
-  // ==================== Profile Management ====================
-  // 手动触发画像提取（从最近的对话中学习）
   async learnFromRecentMessages(recentMessages) {
+    await this.ready();
     try {
       const combinedMessage = recentMessages.join("\n");
       await this.updateProfileFromConversation(combinedMessage);
@@ -2346,30 +2353,62 @@ ${summaryContext}`;
   }
   async updateProfileFromConversation(userMessage) {
     try {
-      const extractionPrompt = `\u5206\u6790\u4EE5\u4E0B\u7528\u6237\u6D88\u606F\uFF0C\u63D0\u53D6\u53EF\u80FD\u7684\u7528\u6237\u4FE1\u606F\u3002\u53EA\u8FD4\u56DE JSON \u683C\u5F0F\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\uFF1A
+      const extractionPrompt = `Analyze the following user message and extract profile information as JSON only.
 
-\u7528\u6237\u6D88\u606F: "${userMessage}"
+User message: "${userMessage}"
 
-\u63D0\u53D6\u4EE5\u4E0B\u4FE1\u606F\uFF08\u5982\u679C\u6D88\u606F\u4E2D\u5305\u542B\uFF09\uFF1A
+Return:
 {
-  "profession": "\u804C\u4E1A\uFF08\u5982\u679C\u63D0\u5230\uFF09",
-  "expertise": ["\u4E13\u4E1A\u9886\u57DF\u6570\u7EC4"],
-  "currentProjects": ["\u5F53\u524D\u9879\u76EE"],
-  "goals": ["\u76EE\u6807"],
+  "profession": "profession if present",
+  "expertise": ["areas of expertise"],
+  "currentProjects": ["current projects"],
+  "goals": ["goals"],
   "preferences": {
-    "responseStyle": "concise/detailed\uFF08\u5982\u679C\u7528\u6237\u8868\u8FBE\u4E86\u504F\u597D\uFF09"
+    "responseStyle": "concise or detailed if stated"
   }
 }
 
-\u5982\u679C\u6CA1\u6709\u63D0\u53D6\u5230\u4EFB\u4F55\u4FE1\u606F\uFF0C\u8FD4\u56DE {}`;
+If nothing is present, return {}`;
       const result = await this.model.generateContent(extractionPrompt);
       const responseText = result.text.trim();
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const extracted = JSON.parse(jsonMatch[0]);
-        this.mergeProfile(extracted);
-        await this.saveProfile();
-        return extracted;
+      const braceStart = responseText.indexOf("{");
+      if (braceStart !== -1) {
+        let depth = 0;
+        let inStr = false;
+        let esc = false;
+        let end = -1;
+        for (let i = braceStart; i < responseText.length; i++) {
+          const c = responseText[i];
+          if (esc) {
+            esc = false;
+            continue;
+          }
+          if (c === "\\" && inStr) {
+            esc = true;
+            continue;
+          }
+          if (c === '"') {
+            inStr = !inStr;
+            continue;
+          }
+          if (inStr)
+            continue;
+          if (c === "{")
+            depth++;
+          else if (c === "}") {
+            depth--;
+            if (depth === 0) {
+              end = i;
+              break;
+            }
+          }
+        }
+        if (end !== -1) {
+          const extracted = JSON.parse(responseText.substring(braceStart, end + 1));
+          this.mergeProfile(extracted);
+          await this.saveProfile();
+          return extracted;
+        }
       }
       return null;
     } catch (e) {
@@ -2401,10 +2440,8 @@ ${summaryContext}`;
       );
       this.userProfile.context.goals.push(...newGoals);
     }
-    if (extracted.preferences) {
-      if (extracted.preferences.responseStyle) {
-        this.userProfile.preferences.responseStyle = extracted.preferences.responseStyle;
-      }
+    if (extracted.preferences?.responseStyle) {
+      this.userProfile.preferences.responseStyle = extracted.preferences.responseStyle;
     }
     this.userProfile.metadata.updatedAt = Date.now();
     this.userProfile.metadata.lastProfileUpdate = Date.now();
@@ -2413,11 +2450,11 @@ ${summaryContext}`;
     return { ...this.userProfile };
   }
   async updateProfile(updates) {
+    await this.ready();
     this.userProfile = { ...this.userProfile, ...updates };
     this.userProfile.metadata.updatedAt = Date.now();
     await this.saveProfile();
   }
-  // ==================== Session Summary ====================
   async endSession() {
     if (this.currentSessionMessages === 0)
       return;
@@ -2433,7 +2470,11 @@ ${summaryContext}`;
     }
   }
   async generateSessionSummary() {
-    const summaryPrompt = `\u603B\u7ED3\u8FD9\u6B21\u5BF9\u8BDD\u7684\u5173\u952E\u5185\u5BB9\uFF0850\u5B57\u4EE5\u5185\uFF0C\u4E00\u53E5\u8BDD\uFF09`;
+    const transcript = this.currentSessionTranscript.map((message) => `${message.role}: ${message.content}`).join("\n").slice(0, 4e3);
+    const summaryPrompt = `Please summarize the key points from the following conversation in one sentence under 50 words.
+
+Conversation:
+${transcript}`;
     try {
       const result = await this.model.generateContent(summaryPrompt);
       const summary = result.text.trim();
@@ -2442,16 +2483,16 @@ ${summaryContext}`;
         messageCount: this.currentSessionMessages,
         summary
       };
-    } catch (e) {
+    } catch (_) {
       return {
         timestamp: Date.now(),
         messageCount: this.currentSessionMessages,
-        summary: `\u5BF9\u8BDD\u5305\u542B ${this.currentSessionMessages} \u6761\u6D88\u606F`
+        summary: `Conversation contained ${this.currentSessionMessages} messages.`
       };
     }
   }
-  // ==================== Persistence ====================
   async save() {
+    await this.ready();
     await this.saveProfile();
     await this.saveSummaries();
     await this.saveChatHistory();
@@ -2539,6 +2580,7 @@ ${summaryContext}`;
     }
   }
   async clearChatHistory() {
+    await this.ready();
     this.chatHistory = [];
     await this.saveChatHistory();
   }
@@ -3633,6 +3675,33 @@ var GoogleGenerativeAI = class {
 
 // src/models/gemini.ts
 var import_obsidian = require("obsidian");
+
+// src/models/gemini-thought-signatures.ts
+function clonePart(part) {
+  return JSON.parse(JSON.stringify(part));
+}
+function mergeStreamThoughtSignatures(aggregatedParts, streamedParts) {
+  const mergedParts = aggregatedParts.map(clonePart);
+  const streamedFunctionCallParts = streamedParts.filter(
+    (part) => !!part.functionCall
+  );
+  let streamedCallIndex = 0;
+  for (const part of mergedParts) {
+    if (!part.functionCall)
+      continue;
+    const streamedPart = streamedFunctionCallParts[streamedCallIndex];
+    streamedCallIndex += 1;
+    if (!streamedPart?.thoughtSignature)
+      continue;
+    part.thoughtSignature = streamedPart.thoughtSignature;
+    if (streamedPart.thought !== void 0) {
+      part.thought = streamedPart.thought;
+    }
+  }
+  return mergedParts;
+}
+
+// src/models/gemini.ts
 var GeminiProvider = class {
   id = "gemini";
   name = "Google Gemini";
@@ -3709,6 +3778,18 @@ var GeminiChatSession = class {
   constructor(chat) {
     this.chat = chat;
   }
+  async patchHistoryWithThoughtSignatures(streamedParts) {
+    if (streamedParts.length === 0)
+      return;
+    const history = await this.chat.getHistory();
+    const lastMessage = history[history.length - 1];
+    if (!lastMessage?.parts?.length || lastMessage.role !== "model")
+      return;
+    lastMessage.parts = mergeStreamThoughtSignatures(
+      lastMessage.parts,
+      streamedParts
+    );
+  }
   async sendMessage(text) {
     let result;
     if (typeof text === "string") {
@@ -3731,6 +3812,54 @@ var GeminiChatSession = class {
         args: fc.args
       })) : void 0
     };
+  }
+  async *sendMessageStream(text) {
+    let streamResult;
+    if (typeof text === "string") {
+      streamResult = await this.chat.sendMessageStream(text);
+    } else {
+      const toolResponse = text.map((t) => ({
+        functionResponse: {
+          name: t.name,
+          response: t.response
+        }
+      }));
+      streamResult = await this.chat.sendMessageStream(toolResponse);
+    }
+    let fullText = "";
+    const streamedParts = [];
+    const collectedFunctionCalls = [];
+    for await (const chunk of streamResult.stream) {
+      const candidate = chunk.candidates?.[0];
+      if (!candidate?.content?.parts)
+        continue;
+      for (const part of candidate.content.parts) {
+        streamedParts.push(JSON.parse(JSON.stringify(part)));
+        if (part.thought === true && part.text) {
+          yield { type: "thinking", content: part.text };
+        } else if (part.functionCall) {
+          const fc = part.functionCall;
+          collectedFunctionCalls.push({ name: fc.name, args: fc.args });
+        } else if (part.text) {
+          fullText += part.text;
+          yield { type: "text_delta", content: part.text };
+        }
+      }
+    }
+    let functionCalls = collectedFunctionCalls;
+    try {
+      const response = await streamResult.response;
+      await this.patchHistoryWithThoughtSignatures(streamedParts);
+      const responseFCs = response.functionCalls();
+      if (responseFCs && responseFCs.length > 0) {
+        functionCalls = responseFCs.map((fc) => ({ name: fc.name, args: fc.args }));
+      }
+    } catch {
+    }
+    for (const fc of functionCalls) {
+      yield { type: "tool_call", name: fc.name, args: fc.args };
+    }
+    yield { type: "done", text: fullText };
   }
   async getHistory() {
     const history = await this.chat.getHistory();
@@ -3862,6 +3991,95 @@ var OpenAIProvider = class {
     }
     return result;
   }
+  async *chatCompletionStream(messages, tools) {
+    const url = `${this.config.baseUrl || "https://api.openai.com/v1"}/chat/completions`;
+    const body = {
+      model: this.config.modelName,
+      messages,
+      temperature: 0.7,
+      stream: true
+    };
+    if (tools && tools.length > 0) {
+      body.tools = tools.map((t) => ({
+        type: "function",
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters
+        }
+      }));
+    }
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.config.apiKey}`
+      },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) {
+      throw new Error(`OpenAI API Error: ${response.status}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+    const pendingToolCalls = /* @__PURE__ */ new Map();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done)
+        break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data: "))
+          continue;
+        const data = trimmed.slice(6);
+        if (data === "[DONE]")
+          continue;
+        try {
+          const parsed = JSON.parse(data);
+          const delta = parsed.choices?.[0]?.delta;
+          if (!delta)
+            continue;
+          if (delta.reasoning_content) {
+            yield { type: "thinking", content: delta.reasoning_content };
+          }
+          if (delta.content) {
+            fullText += delta.content;
+            yield { type: "text_delta", content: delta.content };
+          }
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const idx = tc.index ?? 0;
+              if (!pendingToolCalls.has(idx)) {
+                pendingToolCalls.set(idx, { name: "", arguments: "" });
+              }
+              const pending = pendingToolCalls.get(idx);
+              if (tc.function?.name)
+                pending.name += tc.function.name;
+              if (tc.function?.arguments)
+                pending.arguments += tc.function.arguments;
+            }
+          }
+        } catch {
+        }
+      }
+    }
+    for (const [, tc] of pendingToolCalls) {
+      if (tc.name) {
+        try {
+          const args = tc.arguments ? JSON.parse(tc.arguments) : {};
+          yield { type: "tool_call", name: tc.name, args };
+        } catch {
+          yield { type: "tool_call", name: tc.name, args: {} };
+        }
+      }
+    }
+    yield { type: "done", text: fullText };
+  }
 };
 var OpenAIChatSession = class {
   constructor(config, tools, provider) {
@@ -3896,6 +4114,48 @@ var OpenAIChatSession = class {
     this.history.push(rawMessage);
     return OpenAIProvider.toGenerationResult(rawMessage);
   }
+  async *sendMessageStream(text) {
+    if (typeof text === "string") {
+      this.history.push({ role: "user", content: text });
+    } else {
+      const lastMsg = this.history[this.history.length - 1];
+      if (lastMsg?.role === "assistant" && lastMsg.tool_calls) {
+        text.forEach((t) => {
+          const call = lastMsg.tool_calls.find((tc) => tc.function.name === t.name);
+          if (call) {
+            this.history.push({
+              role: "tool",
+              tool_call_id: call.id,
+              name: t.name,
+              content: JSON.stringify(t.response)
+            });
+          }
+        });
+      }
+    }
+    let fullText = "";
+    const toolCalls = [];
+    for await (const event of this.provider.chatCompletionStream(this.history, this.tools)) {
+      if (event.type === "text_delta") {
+        fullText += event.content;
+      } else if (event.type === "tool_call") {
+        toolCalls.push({
+          id: `call_${Date.now()}_${toolCalls.length}`,
+          type: "function",
+          function: { name: event.name, arguments: JSON.stringify(event.args) }
+        });
+      }
+      if (event.type !== "done") {
+        yield event;
+      }
+    }
+    const assistantMsg = { role: "assistant", content: fullText || null };
+    if (toolCalls.length > 0) {
+      assistantMsg.tool_calls = toolCalls;
+    }
+    this.history.push(assistantMsg);
+    yield { type: "done", text: fullText };
+  }
   async getHistory() {
     return this.history.filter((h) => h.role !== "system" && h.role !== "tool").map((h) => ({
       role: h.role,
@@ -3912,10 +4172,11 @@ var OpenAIChatSession = class {
 
 // src/services/model-service.ts
 var ModelService = class {
-  constructor(app, settings, toolManager) {
+  constructor(app, settings, toolRegistry, skillRegistry) {
     this.app = app;
     this.settings = settings;
-    this.toolManager = toolManager;
+    this.toolRegistry = toolRegistry;
+    this.skillRegistry = skillRegistry;
     this.initializeProvider();
     this.setupErrorHandlers();
   }
@@ -3923,7 +4184,9 @@ var ModelService = class {
   memoryManager = null;
   modelListCache = /* @__PURE__ */ new Map();
   modelListCacheTtlMs = 10 * 60 * 1e3;
-  // 创建超时工具函数，使用 AbortController 确保定时器被清理
+  providerChangedCallbacks = [];
+  skillRegistry;
+  toolRegistry;
   async withTimeout(promise, timeoutMs, errorMessage) {
     const controller = new AbortController();
     const timeoutPromise = new Promise((_, reject) => {
@@ -3941,76 +4204,73 @@ var ModelService = class {
     }
   }
   initializeProvider() {
-    const providerType = this.settings.provider;
-    switch (providerType) {
+    const config = this.getActiveProviderConfig();
+    if (!config) {
+      logger.error(`Unknown provider: ${this.settings.activeProvider}`, null, "ModelService");
+      this.provider = new GeminiProvider();
+      return;
+    }
+    switch (config.type) {
       case "gemini":
         this.provider = new GeminiProvider();
-        this.provider.configure({
-          apiKey: this.settings.apiKey,
-          modelName: this.settings.primaryModel,
-          systemPrompt: this.settings.systemPrompt,
-          contextWindow: this.settings.contextWindow
-        });
         break;
-      case "openai":
+      case "openai-compatible":
         this.provider = new OpenAIProvider();
-        this.provider.configure({
-          apiKey: this.settings.openaiApiKey,
-          baseUrl: this.settings.openaiBaseUrl,
-          modelName: this.settings.openaiModel,
-          systemPrompt: this.settings.systemPrompt
-        });
-        break;
-      case "deepseek":
-        this.provider = new OpenAIProvider();
-        this.provider.id = "deepseek";
-        this.provider.name = "DeepSeek";
-        this.provider.configure({
-          apiKey: this.settings.deepseekApiKey,
-          baseUrl: this.settings.deepseekBaseUrl,
-          modelName: this.settings.deepseekModel,
-          systemPrompt: this.settings.systemPrompt
-        });
-        break;
-      case "qwen":
-        this.provider = new OpenAIProvider();
-        this.provider.id = "qwen";
-        this.provider.name = "Qwen";
-        this.provider.configure({
-          apiKey: this.settings.qwenApiKey,
-          baseUrl: this.settings.qwenBaseUrl,
-          modelName: this.settings.qwenModel,
-          systemPrompt: this.settings.systemPrompt
-        });
         break;
       default:
-        logger.error(`Unknown provider: ${providerType}`, null, "ModelService");
+        logger.error(`Unknown provider type: ${config.type}`, null, "ModelService");
         this.provider = new GeminiProvider();
     }
+    this.provider.configure({
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+      modelName: config.model,
+      systemPrompt: this.settings.systemPrompt,
+      contextWindow: this.settings.contextWindow
+    });
     if (this.hasValidConfig()) {
       this.memoryManager = new MemoryManager(this.app, this.provider);
     }
   }
   hasValidConfig() {
-    switch (this.settings.provider) {
-      case "gemini":
-        return !!this.settings.apiKey;
-      case "openai":
-        return !!this.settings.openaiApiKey;
-      case "deepseek":
-        return !!this.settings.deepseekApiKey;
-      case "qwen":
-        return !!this.settings.qwenApiKey;
-      default:
-        return false;
-    }
+    const config = this.getActiveProviderConfig();
+    return !!config?.apiKey;
   }
-  reloadProvider() {
+  getActiveProviderConfig() {
+    return this.settings.providers[this.settings.activeProvider];
+  }
+  async switchProvider(providerId, saveFn) {
+    const config = this.settings.providers[providerId];
+    if (!config)
+      return;
+    this.settings.activeProvider = providerId;
+    if (saveFn)
+      await saveFn();
+    await this.flushMemorySession();
+    this.cleanup();
+    this.modelListCache.clear();
+    this.initializeProvider();
+    this.providerChangedCallbacks.forEach((cb) => cb());
+  }
+  async switchModel(modelId, saveFn) {
+    const config = this.getActiveProviderConfig();
+    if (!config)
+      return;
+    config.model = modelId;
+    if (saveFn)
+      await saveFn();
+    await this.flushMemorySession();
     this.cleanup();
     this.initializeProvider();
-    this.modelListCache.clear();
   }
-  updateSettings(settings) {
+  onProviderChanged(callback) {
+    this.providerChangedCallbacks.push(callback);
+    return () => {
+      this.providerChangedCallbacks = this.providerChangedCallbacks.filter((cb) => cb !== callback);
+    };
+  }
+  async updateSettings(settings) {
+    await this.flushMemorySession();
     this.settings = settings;
     this.cleanup();
     this.initializeProvider();
@@ -4027,17 +4287,27 @@ var ModelService = class {
     window.removeEventListener("unhandledrejection", this.unhandledRejectionHandler);
     this.memoryManager = null;
   }
+  async flushMemorySession() {
+    if (!this.memoryManager)
+      return;
+    await this.memoryManager.ready();
+    await this.memoryManager.clearSession();
+    await this.memoryManager.save();
+  }
   async checkAvailability() {
     return await this.provider.checkAvailability();
   }
   async getAvailableModels(forceRefresh = false) {
-    const providerType = this.settings.provider;
-    const cacheKey = this.buildModelListCacheKey(providerType);
+    const providerId = this.settings.activeProvider;
+    const config = this.getActiveProviderConfig();
+    if (!config)
+      return [];
+    const cacheKey = `${providerId}:${config.baseUrl}:${(config.apiKey || "").slice(0, 8)}`;
     const now = Date.now();
     if (!forceRefresh) {
       const cached = this.modelListCache.get(cacheKey);
       if (cached && now - cached.timestamp < this.modelListCacheTtlMs) {
-        return this.ensureCurrentModelInList(cached.models, providerType);
+        return this.ensureCurrentModelInList(cached.models);
       }
     }
     let models = [];
@@ -4046,65 +4316,43 @@ var ModelService = class {
         models = await this.provider.listModels();
       } catch (error) {
         logger.warn(
-          `Failed to fetch model list for provider ${providerType}: ${error?.message || "Unknown error"}`,
+          `Failed to fetch model list for provider ${providerId}: ${error?.message || "Unknown error"}`,
           "ModelService.getAvailableModels"
         );
       }
     }
     if (!models.length) {
-      models = this.getFallbackModels(providerType);
+      models = this.getFallbackModels(providerId);
     }
-    const normalized = this.ensureCurrentModelInList(this.normalizeModelOptions(models), providerType);
-    this.modelListCache.set(cacheKey, {
-      timestamp: now,
-      models: normalized
-    });
+    const normalized = this.ensureCurrentModelInList(this.normalizeModelOptions(models));
+    this.modelListCache.set(cacheKey, { timestamp: now, models: normalized });
     return normalized;
   }
-  buildModelListCacheKey(providerType) {
-    switch (providerType) {
-      case "gemini":
-        return `gemini:${this.settings.apiKey.slice(0, 8)}`;
-      case "openai":
-        return `openai:${this.settings.openaiBaseUrl}:${this.settings.openaiApiKey.slice(0, 8)}`;
-      case "deepseek":
-        return `deepseek:${this.settings.deepseekBaseUrl}:${this.settings.deepseekApiKey.slice(0, 8)}`;
-      case "qwen":
-        return `qwen:${this.settings.qwenBaseUrl}:${this.settings.qwenApiKey.slice(0, 8)}`;
-      default:
-        return providerType;
-    }
-  }
-  getFallbackModels(providerType) {
-    switch (providerType) {
-      case "gemini":
-        return [
-          { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-          { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-          { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-          { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro" }
-        ];
-      case "openai":
-        return [
-          { value: "gpt-4o", label: "GPT-4o" },
-          { value: "gpt-4o-mini", label: "GPT-4o Mini" },
-          { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
-          { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" }
-        ];
-      case "deepseek":
-        return [
-          { value: "deepseek-chat", label: "DeepSeek Chat" },
-          { value: "deepseek-coder", label: "DeepSeek Coder" }
-        ];
-      case "qwen":
-        return [
-          { value: "qwen-turbo", label: "Qwen Turbo" },
-          { value: "qwen-plus", label: "Qwen Plus" },
-          { value: "qwen-max", label: "Qwen Max" }
-        ];
-      default:
-        return [];
-    }
+  getFallbackModels(providerId) {
+    const fallbacks = {
+      gemini: [
+        { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+        { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+        { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+        { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro" }
+      ],
+      openai: [
+        { value: "gpt-4o", label: "GPT-4o" },
+        { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+        { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
+        { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" }
+      ],
+      deepseek: [
+        { value: "deepseek-chat", label: "DeepSeek Chat" },
+        { value: "deepseek-coder", label: "DeepSeek Coder" }
+      ],
+      qwen: [
+        { value: "qwen-turbo", label: "Qwen Turbo" },
+        { value: "qwen-plus", label: "Qwen Plus" },
+        { value: "qwen-max", label: "Qwen Max" }
+      ]
+    };
+    return fallbacks[providerId] || [];
   }
   normalizeModelOptions(options) {
     const deduped = /* @__PURE__ */ new Map();
@@ -4121,8 +4369,8 @@ var ModelService = class {
     });
     return Array.from(deduped.values());
   }
-  ensureCurrentModelInList(options, providerType) {
-    const currentModel = this.getCurrentModel(providerType);
+  ensureCurrentModelInList(options) {
+    const currentModel = this.getActiveProviderConfig()?.model || "";
     if (!currentModel)
       return options;
     const exists = options.some((option) => option.value === currentModel);
@@ -4130,24 +4378,11 @@ var ModelService = class {
       return options;
     return [{ value: currentModel, label: `${currentModel} (Current)` }, ...options];
   }
-  getCurrentModel(providerType) {
-    switch (providerType) {
-      case "gemini":
-        return this.settings.primaryModel || "";
-      case "openai":
-        return this.settings.openaiModel || "";
-      case "deepseek":
-        return this.settings.deepseekModel || "";
-      case "qwen":
-        return this.settings.qwenModel || "";
-      default:
-        return "";
-    }
-  }
   async chat(userMessage, contextItems, selection = "") {
     logger.info(`Processing chat message: ${userMessage.substring(0, 50)}...`, "ModelService.chat");
     if (!this.hasValidConfig()) {
-      const error = `${this.provider.name} API Key not configured!`;
+      const providerLabel = this.getActiveProviderConfig()?.label || "AI";
+      const error = `${providerLabel} API Key not configured!`;
       logger.error(error, new Error(error), "ModelService.chat");
       new import_obsidian3.Notice(error);
       return "Error: API Key missing.";
@@ -4155,6 +4390,7 @@ var ModelService = class {
     try {
       let memoryContext = "";
       if (this.memoryManager) {
+        await this.memoryManager.ready();
         memoryContext = this.memoryManager.buildContext();
       }
       let fullPrompt = "";
@@ -4181,7 +4417,7 @@ ${item.content || ""}`;
 `;
       }
       fullPrompt += `User Request: ${userMessage}`;
-      const tools = this.toolManager.getToolsDefinitions();
+      const tools = this.buildSkillModeTools();
       const chat = this.memoryManager ? this.memoryManager.getOrCreateSession(tools) : this.provider.startChat(tools);
       let result = await chat.sendMessage(fullPrompt);
       let loopCount = 0;
@@ -4192,15 +4428,22 @@ ${item.content || ""}`;
           logger.warn(`Function call loop limit reached (${MAX_LOOPS})`, "ModelService.chat");
           break;
         }
-        logger.info(`Processing function calls (Loop ${loopCount}): ${result.functionCalls.map((c) => c.name).join(", ")}`, "ModelService.chat");
+        logger.info(
+          `Processing function calls (Loop ${loopCount}): ${result.functionCalls.map((c) => c.name).join(", ")}`,
+          "ModelService.chat"
+        );
         const toolResults = await Promise.all(result.functionCalls.map(async (call) => {
           try {
-            const toolResult = await this.withTimeout(
-              this.toolManager.execute(call.name, call.args),
-              3e4,
-              // 30秒超时
-              `Tool ${call.name} execution timed out`
-            );
+            let toolResult;
+            if (call.name === "use_skill") {
+              toolResult = await this.executeSkill(call.args);
+            } else {
+              toolResult = await this.withTimeout(
+                this.toolRegistry.execute(call.name, call.args),
+                3e4,
+                `Tool ${call.name} execution timed out`
+              );
+            }
             return {
               name: call.name,
               response: toolResult
@@ -4226,13 +4469,104 @@ ${item.content || ""}`;
       return `Error: ${e.message}`;
     }
   }
-  /**
-   * 无状态单次生成：不走 MemoryManager，不走 function calling
-   * 用于 Knowledge Compiler 等需要独立 AI 调用的场景
-   */
+  async *chatStream(userMessage, contextItems, selection = "") {
+    logger.info(`Processing streaming chat: ${userMessage.substring(0, 50)}...`, "ModelService.chatStream");
+    if (!this.hasValidConfig()) {
+      const providerLabel = this.getActiveProviderConfig()?.label || "AI";
+      yield { type: "error", message: `${providerLabel} API Key not configured!` };
+      return;
+    }
+    try {
+      let memoryContext = "";
+      if (this.memoryManager) {
+        await this.memoryManager.ready();
+        memoryContext = this.memoryManager.buildContext();
+      }
+      let fullPrompt = "";
+      if (memoryContext)
+        fullPrompt += `${memoryContext}
+
+`;
+      fullPrompt += `[Current Time: ${(/* @__PURE__ */ new Date()).toLocaleString()} (${(/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { weekday: "long" })})]
+`;
+      let contextStr = "";
+      if (contextItems && contextItems.length > 0) {
+        contextStr = contextItems.map((item) => {
+          if (item.type === "image")
+            return `[Image: ${item.summary || "Attached Image"}]`;
+          return `[Context (${item.type}): ${item.data}]
+${item.content || ""}`;
+        }).join("\n\n");
+      }
+      fullPrompt += `[Context: ${contextStr}]
+`;
+      if (selection)
+        fullPrompt += `[Selected Text: ${selection}]
+`;
+      fullPrompt += `User Request: ${userMessage}`;
+      const tools = this.buildSkillModeTools();
+      const chat = this.memoryManager ? this.memoryManager.getOrCreateSession(tools) : this.provider.startChat(tools);
+      let loopCount = 0;
+      const MAX_LOOPS = 10;
+      let input = fullPrompt;
+      let fullResponseText = "";
+      while (loopCount <= MAX_LOOPS) {
+        const pendingCalls = [];
+        for await (const event of chat.sendMessageStream(input)) {
+          if (event.type === "tool_call") {
+            pendingCalls.push({ name: event.name, args: event.args });
+            yield event;
+          } else if (event.type === "text_delta") {
+            fullResponseText += event.content;
+            yield event;
+          } else if (event.type === "thinking") {
+            yield event;
+          }
+        }
+        if (pendingCalls.length === 0)
+          break;
+        loopCount++;
+        if (loopCount > MAX_LOOPS) {
+          logger.warn(`Stream function call loop limit reached (${MAX_LOOPS})`, "ModelService.chatStream");
+          break;
+        }
+        const toolResults = [];
+        for (const call of pendingCalls) {
+          try {
+            let toolResult;
+            if (call.name === "use_skill") {
+              toolResult = await this.executeSkill(call.args);
+            } else {
+              toolResult = await this.withTimeout(
+                this.toolRegistry.execute(call.name, call.args),
+                3e4,
+                `Tool ${call.name} execution timed out`
+              );
+            }
+            yield { type: "tool_result", name: call.name, result: toolResult };
+            toolResults.push({ name: call.name, response: toolResult });
+          } catch (error) {
+            logger.error(`Tool execution failed: ${call.name}`, error, "ModelService.chatStream");
+            yield { type: "tool_result", name: call.name, result: null, error: error.message };
+            toolResults.push({ name: call.name, response: { error: error.message || "Unknown error" } });
+          }
+        }
+        input = toolResults;
+        fullResponseText = "";
+      }
+      if (this.memoryManager) {
+        await this.memoryManager.recordMessage("user", userMessage);
+        await this.memoryManager.recordMessage("model", fullResponseText);
+      }
+      yield { type: "done", text: fullResponseText };
+    } catch (e) {
+      logger.error("Stream chat failed", e, "ModelService.chatStream");
+      yield { type: "error", message: e.message };
+    }
+  }
   async generate(prompt, systemPrompt) {
     if (!this.hasValidConfig()) {
-      throw new Error(`${this.provider.name} API Key not configured`);
+      throw new Error(`${this.getActiveProviderConfig()?.label || "AI"} API Key not configured`);
     }
     try {
       const result = await this.provider.generateContent(prompt, systemPrompt);
@@ -4242,7 +4576,40 @@ ${item.content || ""}`;
       throw e;
     }
   }
-  // ==================== Memory Management Methods ====================
+  buildSkillModeTools() {
+    const tools = [];
+    tools.push(...this.toolRegistry.getAllDefinitions());
+    const skillSummary = this.skillRegistry.getSkillSummaryText();
+    const useSkillDesc = skillSummary ? `Get detailed instructions for a specific workflow, then use the returned instructions with the existing tools.
+
+${skillSummary}` : "Get detailed instructions for a specific workflow.";
+    tools.push({
+      name: "use_skill",
+      description: useSkillDesc,
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Skill name" }
+        },
+        required: ["name"]
+      }
+    });
+    return tools;
+  }
+  async executeSkill(args) {
+    const skillName = args?.name;
+    if (!skillName)
+      return { error: "Missing skill name" };
+    const activated = this.skillRegistry.activateSkill(skillName);
+    if (!activated)
+      return { error: `Skill "${skillName}" not found or disabled` };
+    const { instructions, tools } = activated;
+    return {
+      action_required: "Use the returned instructions immediately with the available tools to complete the user request.",
+      instructions,
+      available_tools: tools.map((t) => t.name)
+    };
+  }
   async clearSession() {
     if (this.memoryManager) {
       await this.memoryManager.clearSession();
@@ -4263,1198 +4630,54 @@ ${item.content || ""}`;
     return null;
   }
   getAvailableTools() {
-    return this.toolManager.getToolsDefinitions();
+    return this.buildSkillModeTools();
+  }
+  getSkillCommands() {
+    return this.skillRegistry.listCommandEntries();
+  }
+  async executeSlashSkillCommand(command, input) {
+    const skill = this.skillRegistry.resolveByCommand(command);
+    if (!skill) {
+      return { success: false, error: `Unknown command: ${command}` };
+    }
+    return skill.execute({
+      command,
+      input,
+      query: input,
+      url: input
+    }, {
+      app: this.app,
+      settings: this.settings
+    });
   }
   async shutdown() {
     window.removeEventListener("unhandledrejection", this.unhandledRejectionHandler);
-    if (this.memoryManager) {
-      await this.memoryManager.save();
-    }
-    if (this.toolManager) {
-      await this.toolManager.cleanupMcpClients();
-    }
-  }
-};
-
-// src/mcp/tools.ts
-var import_obsidian5 = require("obsidian");
-var import_readability = __toESM(require_readability());
-
-// src/utils/video_utils.ts
-var import_obsidian4 = require("obsidian");
-async function getVideoTranscript(url) {
-  if (url.includes("youtube.com") || url.includes("youtu.be")) {
-    return await getYoutubeTranscript(url);
-  } else if (url.includes("bilibili.com") || url.includes("b23.tv")) {
-    return await getBilibiliTranscript(url);
-  }
-  return null;
-}
-async function getYoutubeTranscript(url) {
-  try {
-    const userAgent = navigator.userAgent;
-    console.log(`Obsidian Shell: Using User-Agent: ${userAgent}`);
-    const response = await (0, import_obsidian4.requestUrl)({
-      url,
-      headers: {
-        "User-Agent": userAgent
-      }
-    });
-    const html = response.text;
-    let title = "YouTube Video";
-    const titleMatch = html.match(/<title>(.*?)<\/title>/);
-    if (titleMatch && titleMatch[1]) {
-      title = titleMatch[1].replace(" - YouTube", "");
-    }
-    let author = "YouTube";
-    const authorMatch = html.match(/<link itemprop="name" content="(.*?)">/) || html.match(/<meta name="author" content="(.*?)">/);
-    if (authorMatch && authorMatch[1]) {
-      author = authorMatch[1];
-    }
-    const captionsMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
-    if (!captionsMatch) {
-      console.warn("Obsidian Shell: No captionTracks found in YouTube page.");
-      return { text: "", title, platform: "youtube", author, url };
-    }
-    const captionTracks = JSON.parse(captionsMatch[1]);
-    if (!captionTracks || captionTracks.length === 0) {
-      console.warn("Obsidian Shell: Empty captionTracks.");
-      return { text: "", title, platform: "youtube", author, url };
-    }
-    let selectedTrack = captionTracks.find((track) => track.languageCode === "en");
-    if (!selectedTrack) {
-      selectedTrack = captionTracks[0];
-    }
-    console.log(`Obsidian Shell: Selected caption track: ${selectedTrack.name?.simpleText} (${selectedTrack.languageCode})`);
-    console.log(`Obsidian Shell: Fetching transcript from: ${selectedTrack.baseUrl}`);
-    let transcriptResponse;
-    try {
-      transcriptResponse = await (0, import_obsidian4.requestUrl)({
-        url: selectedTrack.baseUrl,
-        headers: {
-          "User-Agent": userAgent
-        }
-      });
-    } catch (e) {
-      console.warn("Obsidian Shell: Failed to fetch transcript with User-Agent, trying without...", e);
-      transcriptResponse = await (0, import_obsidian4.requestUrl)({ url: selectedTrack.baseUrl });
-    }
-    let transcriptXml = transcriptResponse.text;
-    console.log(`Obsidian Shell: Transcript Response Status: ${transcriptResponse.status}`);
-    console.log(`Obsidian Shell: Transcript Response Headers:`, transcriptResponse.headers);
-    if (!transcriptXml || transcriptXml.length === 0) {
-      console.warn("Obsidian Shell: Empty XML response. Trying fmt=json3...");
-      try {
-        const jsonUrl = selectedTrack.baseUrl + "&fmt=json3";
-        const jsonResponse = await (0, import_obsidian4.requestUrl)({
-          url: jsonUrl,
-          headers: { "User-Agent": userAgent }
-        });
-        const jsonText = jsonResponse.text;
-        if (jsonText && jsonText.length > 0) {
-          console.log("Obsidian Shell: Found JSON transcript, parsing...");
-          const jsonData = JSON.parse(jsonText);
-          if (jsonData.events) {
-            const lines2 = jsonData.events.map((e) => e.segs ? e.segs.map((s) => s.utf8).join("") : "").filter((t) => t);
-            const text2 = lines2.join(" ");
-            return {
-              text: text2,
-              title,
-              platform: "youtube",
-              author,
-              url
-            };
-          }
-        }
-      } catch (e) {
-        console.error("Obsidian Shell: Failed to fetch/parse JSON3 transcript", e);
-      }
-    }
-    console.log(`Obsidian Shell: Transcript XML length: ${transcriptXml.length}`);
-    if (transcriptXml.length < 100) {
-      console.log(`Obsidian Shell: Transcript XML preview: ${transcriptXml}`);
-    }
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(transcriptXml, "text/xml");
-    const textNodes = xmlDoc.getElementsByTagName("text");
-    const lines = [];
-    for (let i = 0; i < textNodes.length; i++) {
-      const textContent = textNodes[i].textContent;
-      if (textContent) {
-        lines.push(textContent.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
-      }
-    }
-    const text = lines.join(" ");
-    if (!text) {
-      console.warn("Obsidian Shell: Parsed transcript is empty. XML Preview: ", transcriptXml.substring(0, 200));
-      return { text: "", title, platform: "youtube", author, url };
-    }
-    return {
-      text,
-      title,
-      platform: "youtube",
-      author,
-      url
-    };
-  } catch (e) {
-    console.error("Failed to get YouTube transcript", e);
-    new import_obsidian4.Notice(`YouTube Transcript Error: ${e.message}`);
-    return null;
-  }
-}
-async function getBilibiliTranscript(url) {
-  try {
-    const response = await (0, import_obsidian4.requestUrl)({
-      url,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      }
-    });
-    const html = response.text;
-    let title = "Bilibili Video";
-    const titleMatch = html.match(/<title data-vue-meta="true">([^<]+)<\/title>/) || html.match(/<title>([^<]+)<\/title>/);
-    if (titleMatch && titleMatch[1]) {
-      title = titleMatch[1].replace("_\u54D4\u54E9\u54D4\u54E9_bilibili", "");
-    }
-    let author = "Bilibili";
-    const authorMatch = html.match(/<meta name="author" content="(.*?)">/) || html.match(/<meta name="author" content="(.*?)" \/>/);
-    if (authorMatch && authorMatch[1]) {
-      author = authorMatch[1];
-    }
-    const cidMatch = html.match(/"cid":(\d+)/);
-    if (!cidMatch) {
-      console.error("Bilibili CID not found");
-      return null;
-    }
-    const cid = cidMatch[1];
-    let bvid = "";
-    const bvidMatch = url.match(/(BV\w+)/);
-    if (bvidMatch) {
-      bvid = bvidMatch[1];
-    } else {
-      const htmlBvidMatch = html.match(/"bvid":"(BV\w+)"/);
-      if (htmlBvidMatch) {
-        bvid = htmlBvidMatch[1];
-      }
-    }
-    if (!bvid) {
-      console.error("Bilibili BVID not found");
-      return null;
-    }
-    const subtitleApiUrl = `https://api.bilibili.com/x/player/v2?cid=${cid}&bvid=${bvid}`;
-    const subtitleResponse = await (0, import_obsidian4.requestUrl)({
-      url: subtitleApiUrl,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      }
-    });
-    const subtitleData = JSON.parse(subtitleResponse.text);
-    let text = "";
-    if (subtitleData.data && subtitleData.data.subtitle && subtitleData.data.subtitle.subtitles && subtitleData.data.subtitle.subtitles.length > 0) {
-      const subtitles = subtitleData.data.subtitle.subtitles;
-      const selectedSubtitle = subtitles[0];
-      const subtitleUrl = `https:${selectedSubtitle.url}`;
-      console.log(`Obsidian Shell: Fetching Bilibili subtitle from ${subtitleUrl}`);
-      const transcriptResponse = await (0, import_obsidian4.requestUrl)({ url: subtitleUrl });
-      const transcriptJson = JSON.parse(transcriptResponse.text);
-      if (transcriptJson.body) {
-        text = transcriptJson.body.map((item) => item.content).join(" ");
-      }
-    } else {
-      console.warn("Obsidian Shell: No subtitles found for Bilibili video");
-    }
-    let queryParams = "";
-    if (url.includes("?")) {
-      const urlObj = new URL(url);
-      const p = urlObj.searchParams.get("p");
-      if (p) {
-        queryParams = `?p=${p}`;
-      }
-    }
-    const canonicalUrl = `https://www.bilibili.com/video/${bvid}${queryParams}`;
-    return {
-      text,
-      title,
-      platform: "bilibili",
-      author,
-      url: canonicalUrl
-    };
-  } catch (e) {
-    console.error("Failed to get Bilibili transcript", e);
-    new import_obsidian4.Notice(`Bilibili Transcript Error: ${e.message}`);
-    return null;
-  }
-}
-
-// src/mcp/mcp-client.ts
-var StdioMcpClient = class {
-  // 1MB-ish safety cap
-  constructor(command, args) {
-    this.command = command;
-    this.args = args;
-  }
-  process;
-  requestId = 0;
-  pendingRequests = /* @__PURE__ */ new Map();
-  buffer = "";
-  requestTimeoutMs = 3e4;
-  maxBufferChars = 1e6;
-  async connect() {
-    try {
-      const cp = require("child_process");
-      this.process = cp.spawn(this.command, this.args, {
-        stdio: ["pipe", "pipe", "pipe"]
-      });
-      this.process.stdout.on("data", (data) => {
-        this.handleData(data);
-      });
-      this.process.stderr.on("data", (data) => {
-        logger.warn(`MCP Stderr [${this.command}]: ${data.toString()}`, "McpClient");
-      });
-      this.process.on("error", (err) => {
-        logger.error(`MCP Process Error [${this.command}]`, err, "McpClient");
-        this.rejectAllPending(err);
-      });
-      this.process.on("close", (code) => {
-        logger.info(`MCP Process exited with code ${code}`, "McpClient");
-        this.rejectAllPending(new Error(`MCP process closed with code ${code}`));
-      });
-      const initResult = await this.sendRequest("initialize", {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "obsidian-cli", version: "1.0.0" }
-      });
-      logger.info(`MCP Initialized: ${JSON.stringify(initResult)}`, "McpClient");
-      await this.sendNotification("notifications/initialized");
-    } catch (e) {
-      logger.error(`Failed to connect to MCP server: ${this.command}`, e, "McpClient");
-      try {
-        this.process?.kill();
-      } catch (_) {
-      }
-      throw e;
-    }
-  }
-  async listTools() {
-    const result = await this.sendRequest("tools/list", {});
-    return result.tools || [];
-  }
-  async callTool(name, args) {
-    const result = await this.sendRequest("tools/call", {
-      name,
-      arguments: args
-    });
-    return result.content;
-  }
-  handleData(data) {
-    this.buffer += data.toString();
-    if (this.buffer.length > this.maxBufferChars) {
-      logger.warn(`MCP buffer exceeded ${this.maxBufferChars} chars, resetting`, "McpClient");
-      this.buffer = "";
-    }
-    const lines = this.buffer.split("\n");
-    this.buffer = lines.pop() || "";
-    for (const line of lines) {
-      if (!line.trim())
-        continue;
-      try {
-        const message = JSON.parse(line);
-        if (message.id !== void 0) {
-          const pending = this.pendingRequests.get(message.id);
-          if (pending) {
-            if (message.error) {
-              pending.reject(message.error);
-            } else {
-              pending.resolve(message.result);
-            }
-            this.pendingRequests.delete(message.id);
-          }
-        } else {
-        }
-      } catch (e) {
-        logger.error("Failed to parse MCP message", e, "McpClient");
-      }
-    }
-  }
-  sendRequest(method, params = {}) {
-    return new Promise((resolve, reject) => {
-      const id = this.requestId++;
-      const timeoutId = setTimeout(() => {
-        if (this.pendingRequests.has(id)) {
-          this.pendingRequests.delete(id);
-          reject(new Error(`MCP request timed out: ${method}`));
-        }
-      }, this.requestTimeoutMs);
-      this.pendingRequests.set(id, {
-        resolve: (value) => {
-          clearTimeout(timeoutId);
-          resolve(value);
-        },
-        reject: (err) => {
-          clearTimeout(timeoutId);
-          reject(err);
-        }
-      });
-      const message = {
-        jsonrpc: "2.0",
-        id,
-        method,
-        params
-      };
-      try {
-        this.process.stdin.write(JSON.stringify(message) + "\n");
-      } catch (e) {
-        clearTimeout(timeoutId);
-        this.pendingRequests.delete(id);
-        reject(e);
-      }
-    });
-  }
-  async sendNotification(method, params = {}) {
-    const message = {
-      jsonrpc: "2.0",
-      method,
-      params
-    };
-    this.process.stdin.write(JSON.stringify(message) + "\n");
-  }
-  disconnect() {
-    if (this.process) {
-      this.process.kill();
-    }
-  }
-  rejectAllPending(err) {
-    for (const [id, pending] of this.pendingRequests) {
-      try {
-        pending.reject(err);
-      } catch (_) {
-      }
-      this.pendingRequests.delete(id);
-    }
-  }
-};
-
-// src/mcp/save-path.ts
-function resolveSavedNotePath(filename, preferredFolder, exists) {
-  const normalizedFilename = filename.replace(/\\/g, "/");
-  const normalizedFolder = (preferredFolder || "").trim().replace(/[\\/]+$/g, "");
-  const hasExplicitFolder = normalizedFilename.includes("/");
-  const basePath = normalizedFolder && !hasExplicitFolder ? `${normalizedFolder}/${normalizedFilename}` : normalizedFilename;
-  let finalPath = basePath;
-  let counter = 1;
-  while (exists(finalPath)) {
-    finalPath = basePath.replace(/\.md$/, ` (${counter}).md`);
-    counter++;
-  }
-  return finalPath;
-}
-
-// src/mcp/tools.ts
-var ToolManager = class {
-  app;
-  geminiApi;
-  allowPluginControl;
-  mcpClients = /* @__PURE__ */ new Map();
-  settings;
-  queryExecutor = null;
-  fileBackExecutor = null;
-  constructor(app, settings) {
-    this.app = app;
-    this.settings = settings;
-    this.geminiApi = null;
-    this.allowPluginControl = settings.allowPluginControl;
-    this.initializeMcpClients();
-  }
-  setKnowledgeExecutors(queryExecutor, fileBackExecutor) {
-    this.queryExecutor = queryExecutor;
-    this.fileBackExecutor = fileBackExecutor;
-  }
-  async initializeMcpClients() {
-    await this.cleanupMcpClients();
-    if (!this.settings.mcpServers)
-      return;
-    for (const [name, config] of Object.entries(this.settings.mcpServers)) {
-      try {
-        const client = new StdioMcpClient(config.command, config.args);
-        await client.connect();
-        this.mcpClients.set(name, client);
-      } catch (e) {
-        console.error(`Failed to initialize MCP server ${name}`, e);
-      }
-    }
-  }
-  // 添加清理 MCP 客户端的方法
-  async cleanupMcpClients() {
-    if (this.mcpClients && this.mcpClients.size > 0) {
-      console.log(`[ToolManager] Cleaning up ${this.mcpClients.size} MCP clients...`);
-      const cleanupPromises = Array.from(this.mcpClients.entries()).map(async ([name, client]) => {
-        try {
-          await client.disconnect();
-          console.log(`[ToolManager] Successfully disconnected MCP client: ${name}`);
-        } catch (e) {
-          console.error(`[ToolManager] Error disconnecting MCP client ${name}:`, e);
-        }
-      });
-      await Promise.allSettled(cleanupPromises);
-      this.mcpClients.clear();
-      console.log("[ToolManager] All MCP clients have been cleaned up.");
-    }
-  }
-  setGeminiApi(api) {
-    this.geminiApi = api;
-  }
-  async ensureParentFolder(path) {
-    const pathParts = path.split("/");
-    if (pathParts.length <= 1)
-      return;
-    const folderPath = pathParts.slice(0, -1).join("/");
-    if (!folderPath || this.app.vault.getAbstractFileByPath(folderPath))
-      return;
-    try {
-      await this.app.vault.createFolder(folderPath);
-    } catch (e) {
-      console.log("Folder creation note:", e);
-    }
-  }
-  updateSettings(settings) {
-    this.settings = settings;
-    this.allowPluginControl = settings.allowPluginControl;
-    this.initializeMcpClients();
-  }
-  getToolsDefinitions() {
-    const tools = [
-      {
-        name: "read_note",
-        description: "Read the content of a specific note in the vault.",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            path: { type: "string" /* STRING */, description: 'The path to the note (e.g., "Folder/Note.md")' }
-          },
-          required: ["path"]
-        }
-      },
-      {
-        name: "create_note",
-        description: "Create a new note with the specified content.",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            filename: { type: "string" /* STRING */, description: "The name/path of the new note" },
-            content: { type: "string" /* STRING */, description: "The content to write to the note" }
-          },
-          required: ["filename", "content"]
-        }
-      },
-      {
-        name: "update_note",
-        description: "Update the content of an existing note. Replaces the entire content.",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            path: { type: "string" /* STRING */, description: "The path to the note to update" },
-            content: { type: "string" /* STRING */, description: "The new content for the note" }
-          },
-          required: ["path", "content"]
-        }
-      },
-      {
-        name: "append_to_note",
-        description: "Append content to the end of an existing note.",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            path: { type: "string" /* STRING */, description: "The path to the note" },
-            content: { type: "string" /* STRING */, description: "The content to append" }
-          },
-          required: ["path", "content"]
-        }
-      },
-      {
-        name: "delete_note",
-        description: "Delete a note from the vault.",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            path: { type: "string" /* STRING */, description: "The path to the note to delete" }
-          },
-          required: ["path"]
-        }
-      },
-      {
-        name: "rename_note",
-        description: "Rename or move a note.",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            oldPath: { type: "string" /* STRING */, description: "The current path of the note" },
-            newPath: { type: "string" /* STRING */, description: "The new path/name for the note" }
-          },
-          required: ["oldPath", "newPath"]
-        }
-      },
-      {
-        name: "list_notes",
-        description: "List notes in a specific folder or the entire vault.",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            folder: { type: "string" /* STRING */, description: "The folder to list (optional, defaults to root)" },
-            limit: { type: "integer" /* INTEGER */, description: "Maximum number of notes to return (default 20)" }
-          }
-        }
-      },
-      {
-        name: "search_vault",
-        description: "Search for files in the vault by name.",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            query: { type: "string" /* STRING */, description: "The search query" }
-          },
-          required: ["query"]
-        }
-      },
-      {
-        name: "open_file",
-        description: "Open a file in the Obsidian workspace.",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            path: { type: "string" /* STRING */, description: "The path or name of the file to open" }
-          },
-          required: ["path"]
-        }
-      },
-      {
-        name: "save_webpage",
-        description: "Save a webpage or video transcript to a new note. Supports YouTube, Bilibili, and WeChat articles.",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            url: { type: "string" /* STRING */, description: "The URL of the webpage or video" },
-            filename: { type: "string" /* STRING */, description: "Optional filename for the note" }
-          },
-          required: ["url"]
-        }
-      },
-      {
-        name: "get_current_time",
-        description: "Get the current local time and date.",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {}
-        }
-      }
-    ];
-    if (this.allowPluginControl) {
-      tools.push(
-        {
-          name: "list_plugins",
-          description: "List all installed plugins and their status.",
-          parameters: { type: "object" /* OBJECT */, properties: {} }
-        },
-        {
-          name: "get_plugin_commands",
-          description: "Get available commands for a specific plugin.",
-          parameters: {
-            type: "object" /* OBJECT */,
-            properties: {
-              pluginId: { type: "string" /* STRING */, description: "The ID of the plugin" }
-            },
-            required: ["pluginId"]
-          }
-        },
-        {
-          name: "get_plugin_settings",
-          description: "Get settings for a specific plugin.",
-          parameters: {
-            type: "object" /* OBJECT */,
-            properties: {
-              pluginId: { type: "string" /* STRING */, description: "The ID of the plugin" }
-            },
-            required: ["pluginId"]
-          }
-        }
-      );
-    }
-    tools.push(
-      {
-        name: "query_knowledge",
-        description: "\u4ECE\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u4E2D\u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\u3002\u5148\u8BFB\u53D6\u5168\u5C40\u7D22\u5F15\u4E86\u89E3\u6709\u54EA\u4E9B\u6587\u7AE0\u548C\u4E3B\u9898\uFF0C\u518D\u6839\u636E\u9700\u8981\u8BFB\u53D6\u5177\u4F53\u7684 summary \u5168\u6587\u3002\u5F53\u7528\u6237\u7684\u95EE\u9898\u53EF\u80FD\u4E0E\u5DF2\u79EF\u7D2F\u7684\u77E5\u8BC6\u76F8\u5173\u65F6\u4F7F\u7528\u6B64\u5DE5\u5177\u3002",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            query: { type: "string" /* STRING */, description: "\u68C0\u7D22\u5173\u952E\u8BCD\u6216\u95EE\u9898" },
-            max_results: { type: "integer" /* INTEGER */, description: "\u6700\u591A\u8FD4\u56DE\u51E0\u7BC7 summary\uFF0C\u9ED8\u8BA4 3" }
-          },
-          required: ["query"]
-        }
-      },
-      {
-        name: "file_back_knowledge",
-        description: "\u5C06\u5F53\u524D\u5BF9\u8BDD\u4E2D\u4EA7\u51FA\u7684\u9AD8\u8D28\u91CF\u77E5\u8BC6\u56DE\u7B54\u5B58\u56DE\u77E5\u8BC6\u5E93 Wiki\uFF0C\u8BA9\u77E5\u8BC6\u5E93\u968F\u4F7F\u7528\u4E0D\u65AD\u589E\u957F\u3002\u53EA\u5BF9\u7EFC\u5408\u4E86\u591A\u4E2A\u77E5\u8BC6\u6765\u6E90\u3001\u4EA7\u51FA\u6709\u4EF7\u503C\u65B0\u6D1E\u5BDF\u7684\u56DE\u7B54\u4F7F\u7528\u3002",
-        parameters: {
-          type: "object" /* OBJECT */,
-          properties: {
-            title: { type: "string" /* STRING */, description: "\u56DE\u586B\u6587\u7AE0\u7684\u6807\u9898" },
-            content: { type: "string" /* STRING */, description: "\u8981\u5F52\u6863\u7684\u5185\u5BB9\uFF08Markdown \u683C\u5F0F\uFF09" },
-            topics: {
-              type: "array" /* ARRAY */,
-              items: { type: "string" /* STRING */ },
-              description: '\u6587\u7AE0\u7684\u4E3B\u9898\u6807\u7B7E\uFF0C\u5982 ["LLM", "RAG", "\u77E5\u8BC6\u7BA1\u7406"]'
-            },
-            source_queries: {
-              type: "array" /* ARRAY */,
-              items: { type: "string" /* STRING */ },
-              description: "\u89E6\u53D1\u8FD9\u6B21\u56DE\u7B54\u7684\u95EE\u9898\u5217\u8868"
-            },
-            related_sources: {
-              type: "array" /* ARRAY */,
-              items: { type: "string" /* STRING */ },
-              description: "\u5F15\u7528\u7684 knowledge_source_id \u5217\u8868"
-            },
-            source_url: { type: "string" /* STRING */, description: "\u5185\u5BB9\u7684\u539F\u59CB\u6765\u6E90 URL\uFF08\u5982\u6709\uFF09" }
-          },
-          required: ["title", "content", "source_queries"]
-        }
-      }
-    );
-    tools.push({
-      name: "web_search",
-      description: "Search the web for information. Use this to find up-to-date info, news, or documentation. IMPORTANT: When providing links in the output, YOU MUST use standard Markdown link syntax: [Title](URL). Do not use bare URLs.",
-      parameters: {
-        type: "object" /* OBJECT */,
-        properties: {
-          query: { type: "string" /* STRING */, description: "The search query" },
-          time_range: {
-            type: "string" /* STRING */,
-            description: "Time range for search results. Options: d (day), w (week), m (month), y (year). Default is no filter.",
-            enum: ["d", "w", "m", "y"]
-          }
-        },
-        required: ["query"]
-      }
-    });
-    for (const [serverName, client] of this.mcpClients) {
-      try {
-      } catch (e) {
-        console.error(`Failed to list tools for ${serverName}`, e);
-      }
-    }
-    return tools;
-  }
-  // New method to get tools async
-  async getToolsDefinitionsAsync() {
-    const tools = this.getToolsDefinitions();
-    for (const [serverName, client] of this.mcpClients) {
-      try {
-        const mcpTools = await client.listTools();
-        for (const tool of mcpTools) {
-          tools.push({
-            name: `${serverName}_${tool.name}`,
-            description: tool.description || `Tool from ${serverName}`,
-            parameters: tool.inputSchema
-          });
-        }
-      } catch (e) {
-        console.error(`Failed to list tools for ${serverName}`, e);
-      }
-    }
-    return tools;
-  }
-  async execute(name, args) {
-    for (const [serverName, client] of this.mcpClients) {
-      if (name.startsWith(`${serverName}_`)) {
-        const toolName = name.substring(serverName.length + 1);
-        return await client.callTool(toolName, args);
-      }
-    }
-    try {
-      switch (name) {
-        case "read_note":
-          const file = this.app.metadataCache.getFirstLinkpathDest(args.path, "");
-          if (!file)
-            return { error: "File not found" };
-          const content = await this.app.vault.read(file);
-          return { path: file.path, content: content.substring(0, 5e3) };
-        case "create_note":
-          let path = args.filename;
-          if (!path.endsWith(".md"))
-            path += ".md";
-          const existingFile = this.app.vault.getAbstractFileByPath(path);
-          if (existingFile) {
-            return {
-              status: "error",
-              message: `File already exists: ${path}. Use update_note to modify existing files.`
-            };
-          }
-          const pathParts = path.split("/");
-          if (pathParts.length > 1) {
-            const folderPath2 = pathParts.slice(0, -1).join("/");
-            const folder = this.app.vault.getAbstractFileByPath(folderPath2);
-            if (!folder) {
-              try {
-                await this.app.vault.createFolder(folderPath2);
-              } catch (e) {
-                console.log("Folder creation note:", e);
-              }
-            }
-          }
-          await this.app.vault.create(path, args.content || "");
-          return { status: "success", message: `\u2705 Note created: ${path}` };
-        case "update_note":
-          const updateFile = this.app.vault.getAbstractFileByPath(args.path);
-          if (!updateFile || !(updateFile instanceof import_obsidian5.TFile)) {
-            return { success: false, error: "File not found" };
-          }
-          await this.app.vault.modify(updateFile, args.content);
-          return { success: true, message: `\u2705 Updated: ${args.path}` };
-        case "append_to_note":
-          const appendFile = this.app.vault.getAbstractFileByPath(args.path);
-          if (!appendFile || !(appendFile instanceof import_obsidian5.TFile)) {
-            return { success: false, error: "File not found" };
-          }
-          const existingContent = await this.app.vault.read(appendFile);
-          await this.app.vault.modify(appendFile, existingContent + "\n" + args.content);
-          return { success: true, message: `\u2705 Appended to: ${args.path}` };
-        case "delete_note":
-          const deleteFile = this.app.vault.getAbstractFileByPath(args.path);
-          if (!deleteFile) {
-            return { success: false, error: "File not found" };
-          }
-          await this.app.vault.trash(deleteFile, true);
-          return { success: true, message: `\u2705 Deleted: ${args.path}` };
-        case "rename_note":
-          const renameFile = this.app.vault.getAbstractFileByPath(args.oldPath);
-          if (!renameFile) {
-            return { success: false, error: "File not found" };
-          }
-          await this.app.vault.rename(renameFile, args.newPath);
-          return { success: true, message: `\u2705 Renamed: ${args.oldPath} -> ${args.newPath}` };
-        case "list_notes":
-          const folderPath = args.folder || "/";
-          const limit = args.limit || 20;
-          let files = this.app.vault.getMarkdownFiles();
-          if (folderPath !== "/") {
-            files = files.filter((f) => f.path.startsWith(folderPath));
-          }
-          const fileList = files.slice(0, limit).map((f) => ({
-            path: f.path,
-            name: f.basename,
-            size: f.stat.size,
-            modified: new Date(f.stat.mtime).toISOString()
-          }));
-          return { success: true, files: fileList, total: files.length };
-        case "search_vault":
-          const matches = this.app.vault.getFiles().filter((f) => f.basename.toLowerCase().includes(args.query.toLowerCase())).map((f) => f.path).slice(0, 5);
-          return { matches };
-        case "open_file":
-          const allFiles = this.app.vault.getFiles();
-          let targetFile = allFiles.find((f) => f.path === args.path);
-          if (!targetFile) {
-            targetFile = allFiles.find((f) => f.basename === args.path || f.basename === args.path.replace(".md", ""));
-          }
-          if (!targetFile) {
-            const fuzzyMatches = allFiles.filter((f) => f.path.toLowerCase().includes(args.path.toLowerCase()));
-            if (fuzzyMatches.length === 1) {
-              targetFile = fuzzyMatches[0];
-            } else if (fuzzyMatches.length > 1) {
-              return {
-                success: false,
-                error: `Found ${fuzzyMatches.length} matches`,
-                matches: fuzzyMatches.map((f) => f.path)
-              };
-            }
-          }
-          if (!targetFile) {
-            return { success: false, error: "File not found" };
-          }
-          const leaf = this.app.workspace.getLeaf(false);
-          await leaf.openFile(targetFile);
-          return { success: true, path: targetFile.path, message: `\u2705 Opened: ${targetFile.path}` };
-        case "save_webpage":
-          const extractTags = (text) => {
-            const tags = [];
-            const words = text.split(/\s+/);
-            for (const word of words) {
-              if (word.startsWith("#") && word.length > 1) {
-                tags.push(word.substring(1));
-              }
-            }
-            return tags;
-          };
-          const url = args.url;
-          console.log(`Obsidian Shell: Saving webpage ${url}`);
-          try {
-            const videoTranscript = await getVideoTranscript(url);
-            if (videoTranscript) {
-              console.log(`Obsidian Shell: Found video info for ${videoTranscript.platform}`);
-              const finalUrl = videoTranscript.url || url;
-              let content2 = "";
-              if (videoTranscript.text && videoTranscript.text.length > 0) {
-                if (!this.geminiApi) {
-                  return { success: false, error: "Gemini API not initialized for summarization." };
-                }
-                new import_obsidian5.Notice(`\u{1F3A5} Summarizing ${videoTranscript.platform} video...`);
-                const prompt = `Please summarize the following video transcript. 
-Title: ${videoTranscript.title}
-Transcript:
-${videoTranscript.text.substring(0, 3e4)}... (truncated if too long)
-
-Task:
-1. Provide a concise summary of the video content.
-2. List key takeaways or bullet points.
-3. Format the output in Markdown.`;
-                try {
-                  const summary = await this.geminiApi.chat(prompt, "VideoSummarization", "You are a helpful assistant that summarizes videos.");
-                  const created2 = (/* @__PURE__ */ new Date()).toISOString();
-                  const titleTags = extractTags(videoTranscript.title);
-                  const tagString = titleTags.length > 0 ? `, ${titleTags.join(", ")}` : "";
-                  const yamlFrontmatter2 = `---
-created: ${created2}
-tags: video, ${videoTranscript.platform}${tagString}
-source: ${finalUrl}
-author: ${videoTranscript.author || videoTranscript.platform}
----
-
-`;
-                  content2 = `${yamlFrontmatter2}# ${videoTranscript.title}
-
-${summary}
-
-## Transcript Excerpt
-
-${videoTranscript.text.substring(0, 1e3)}...`;
-                } catch (e) {
-                  console.error("Obsidian Shell: Summarization failed", e);
-                  const created2 = (/* @__PURE__ */ new Date()).toISOString();
-                  const titleTags = extractTags(videoTranscript.title);
-                  const tagString = titleTags.length > 0 ? `, ${titleTags.join(", ")}` : "";
-                  const yamlFrontmatter2 = `---
-created: ${created2}
-tags: video, ${videoTranscript.platform}${tagString}
-source: ${finalUrl}
-author: ${videoTranscript.author || videoTranscript.platform}
----
-
-`;
-                  const encodedUrl = encodeURIComponent(finalUrl);
-                  content2 = `${yamlFrontmatter2}# ${videoTranscript.title}
-
-[${videoTranscript.title}](${finalUrl})
-
-[\u25B6\uFE0F Play with Media Extended](obsidian://mx-open?url=${encodedUrl})`;
-                }
-              } else {
-                console.log("Obsidian Shell: No transcript text available, saving video embed.");
-                new import_obsidian5.Notice(`\u{1F4BE} Saving video link...`);
-                const created2 = (/* @__PURE__ */ new Date()).toISOString();
-                const titleTags = extractTags(videoTranscript.title);
-                const tagString = titleTags.length > 0 ? `, ${titleTags.join(", ")}` : "";
-                const yamlFrontmatter2 = `---
-created: ${created2}
-tags: video, ${videoTranscript.platform}${tagString}
-source: ${finalUrl}
-author: ${videoTranscript.author || videoTranscript.platform}
----
-
-`;
-                const encodedUrl = encodeURIComponent(finalUrl);
-                content2 = `${yamlFrontmatter2}# ${videoTranscript.title}
-
-[${videoTranscript.title}](${finalUrl})
-
-[\u25B6\uFE0F Play with Media Extended](obsidian://mx-open?url=${encodedUrl})`;
-              }
-              let filename2 = args.filename || videoTranscript.title;
-              filename2 = filename2.replace(/[\\:*?"<>|#^\[\]]/g, "-").replace(/\s+/g, " ").trim();
-              if (!filename2.endsWith(".md"))
-                filename2 += ".md";
-              const finalPath2 = resolveSavedNotePath(
-                filename2,
-                this.settings.wechatStoragePath,
-                (path2) => !!this.app.vault.getAbstractFileByPath(path2)
-              );
-              await this.ensureParentFolder(finalPath2);
-              await this.app.vault.create(finalPath2, content2);
-              return { success: true, path: finalPath2, message: `\u2705 Video Note Saved: ${finalPath2}` };
-            }
-            const response = await (0, import_obsidian5.requestUrl)({
-              url,
-              headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
-              }
-            });
-            let html = response.text;
-            console.log(`Obsidian Shell: Fetched ${html.length} bytes`);
-            let title = "Untitled Webpage";
-            const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-            if (titleMatch && titleMatch[1].trim()) {
-              title = titleMatch[1].trim();
-            } else {
-              const ogTitleMatch = html.match(/<meta[^>]*property="og:title"[^>]*content="([^"]*)"[^>]*>/i);
-              if (ogTitleMatch && ogTitleMatch[1].trim()) {
-                title = ogTitleMatch[1].trim();
-              } else {
-                const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-                if (h1Match && h1Match[1].trim()) {
-                  title = h1Match[1].replace(/<[^>]+>/g, "").trim();
-                }
-              }
-            }
-            let author = "";
-            if (url.includes("mp.weixin.qq.com")) {
-              const varMatch = html.match(/var\s+nickname\s*=\s*["']([^"']+)["']/);
-              if (varMatch && varMatch[1]) {
-                author = varMatch[1].trim();
-              }
-              if (!author) {
-                const profileMatch = html.match(/class="profile_nickname"[^>]*>([^<]+)</);
-                if (profileMatch && profileMatch[1]) {
-                  author = profileMatch[1].trim();
-                }
-              }
-              if (!author) {
-                const jsNameMatch = html.match(/class="js_name"[^>]*>([^<]+)</);
-                if (jsNameMatch && jsNameMatch[1]) {
-                  author = jsNameMatch[1].trim();
-                }
-              }
-            }
-            if (!author) {
-              const authorMatch = html.match(/<meta name="author" content="([^"]*)"/i) || html.match(/<meta property="article:author" content="([^"]*)"/i) || html.match(/<meta property="og:site_name" content="([^"]*)"/i);
-              if (authorMatch && authorMatch[1]) {
-                author = authorMatch[1].trim();
-              }
-            }
-            console.log(`Obsidian Shell: Extracted title "${title}", author "${author}"`);
-            const webpageTags = extractTags(title);
-            title = title.replace(/[\\/:*?"<>|#^\[\]]/g, "-").replace(/\s+/g, " ").trim();
-            if (!title || title.replace(/-/g, "").trim().length === 0) {
-              const now2 = /* @__PURE__ */ new Date();
-              title = `Clipping ${now2.toISOString().split("T")[0]} ${now2.getHours()}-${now2.getMinutes()}-${now2.getSeconds()}`;
-            }
-            if (url.includes("mp.weixin.qq.com")) {
-              html = html.replace(/data-src=/g, "src=");
-            }
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, "text/html");
-            let markdown = "";
-            let extractionMethod = "none";
-            if (url.includes("mp.weixin.qq.com")) {
-              const jsContent = doc.querySelector("#js_content");
-              if (jsContent) {
-                console.log("Obsidian Shell: Found #js_content for WeChat article");
-                try {
-                  const scripts = jsContent.querySelectorAll("script, style");
-                  scripts.forEach((s) => s.remove());
-                  markdown = (0, import_obsidian5.htmlToMarkdown)(jsContent.innerHTML);
-                  extractionMethod = "wechat-js_content";
-                } catch (e) {
-                  console.error("Obsidian Shell: htmlToMarkdown failed on #js_content", e);
-                }
-              }
-            }
-            if (!markdown) {
-              const clutterSelectors = [
-                "nav",
-                "footer",
-                "aside",
-                "script",
-                "style",
-                "noscript",
-                ".sidebar",
-                ".navbar",
-                ".nav",
-                ".menu",
-                "#sidebar",
-                "#nav",
-                "#menu",
-                ".ads",
-                ".advertisement",
-                ".ad-container"
-              ];
-              clutterSelectors.forEach((selector) => {
-                try {
-                  const elements = doc.querySelectorAll(selector);
-                  elements.forEach((el) => el.remove());
-                } catch (e) {
-                }
-              });
-              const reader = new import_readability.Readability(doc);
-              const article = reader.parse();
-              if (article && article.content) {
-                console.log(`Obsidian Shell: Readability extracted content length: ${article.content.length}`);
-                try {
-                  markdown = (0, import_obsidian5.htmlToMarkdown)(article.content);
-                  extractionMethod = "readability";
-                } catch (e) {
-                  console.error("Obsidian Shell: htmlToMarkdown failed on extracted content", e);
-                  markdown = "Error: Conversion failed.";
-                }
-              } else {
-                console.warn("Obsidian Shell: Readability failed to extract content, falling back to full HTML");
-                try {
-                  markdown = (0, import_obsidian5.htmlToMarkdown)(html);
-                  extractionMethod = "fallback-full";
-                } catch (e) {
-                  console.error("Obsidian Shell: htmlToMarkdown failed on full HTML", e);
-                  markdown = "Error: Conversion failed.";
-                }
-              }
-            }
-            console.log(`Obsidian Shell: Extraction method used: ${extractionMethod}`);
-            if (!markdown || markdown.startsWith("Error:")) {
-              if (!markdown)
-                markdown = "Error: Empty markdown result.";
-            }
-            let filename = args.filename || title;
-            if (!filename.endsWith(".md"))
-              filename += ".md";
-            const finalPath = resolveSavedNotePath(
-              filename,
-              this.settings.wechatStoragePath,
-              (path2) => !!this.app.vault.getAbstractFileByPath(path2)
-            );
-            const created = (/* @__PURE__ */ new Date()).toISOString();
-            const webpageTagString = webpageTags.length > 0 ? `, ${webpageTags.join(", ")}` : "";
-            const yamlFrontmatter = `---
-created: ${created}
-source: ${url}
-author: ${author}
-tags: clipping${webpageTagString}
----
-
-                        `;
-            const finalContent = `${yamlFrontmatter}# ${title}
-
-${markdown}`;
-            await this.ensureParentFolder(finalPath);
-            await this.app.vault.create(finalPath, finalContent);
-            return { success: true, path: finalPath, message: `\u2705 Webpage Saved: ${finalPath}` };
-          } catch (e) {
-            console.error("Obsidian Shell: Error saving webpage", e);
-            return { success: false, error: e.message };
-          }
-        case "list_plugins":
-          if (!this.allowPluginControl)
-            return { error: "Permission denied" };
-          const manifests = this.app.plugins.manifests;
-          const enabledPlugins = this.app.plugins.enabledPlugins;
-          const pluginList = Object.values(manifests).map((m) => ({
-            id: m.id,
-            name: m.name,
-            version: m.version,
-            enabled: enabledPlugins.has(m.id),
-            description: m.description
-          }));
-          return { plugins: pluginList, total: pluginList.length };
-        case "get_plugin_commands":
-          if (!this.allowPluginControl)
-            return { error: "Permission denied" };
-          const pluginId = args.pluginId;
-          const pluginCommands = this.app.commands.listCommands().filter((c) => c.id.startsWith(pluginId + ":")).map((c) => ({ id: c.id, name: c.name }));
-          return {
-            pluginId,
-            commands: pluginCommands,
-            count: pluginCommands.length
-          };
-        case "get_plugin_settings":
-          if (!this.allowPluginControl)
-            return { error: "Permission denied" };
-          const plugin = this.app.plugins.getPlugin(args.pluginId);
-          if (!plugin)
-            return { error: "Plugin not found or not enabled" };
-          const settings = plugin.settings || plugin.data || {};
-          return {
-            pluginId: args.pluginId,
-            settings
-          };
-        case "get_current_time":
-          const now = /* @__PURE__ */ new Date();
-          return {
-            iso: now.toISOString(),
-            local: now.toLocaleString(),
-            weekday: now.toLocaleDateString(void 0, { weekday: "long" })
-          };
-        case "query_knowledge":
-          if (!this.queryExecutor) {
-            return { error: "Knowledge system not initialized" };
-          }
-          return await this.queryExecutor.execute(args);
-        case "file_back_knowledge":
-          if (!this.fileBackExecutor) {
-            return { error: "Knowledge system not initialized" };
-          }
-          return await this.fileBackExecutor.execute(args);
-        case "web_search":
-          let searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;
-          if (args.time_range) {
-            searchUrl += `&df=${args.time_range}`;
-          }
-          try {
-            const response = await (0, import_obsidian5.requestUrl)({ url: searchUrl });
-            const html = response.text;
-            const results = [];
-            let match;
-            let count = 0;
-            const resultBlockRegex = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
-            while ((match = resultBlockRegex.exec(html)) !== null && count < 5) {
-              results.push({
-                title: match[2].replace(/<[^>]+>/g, "").trim(),
-                link: match[1],
-                snippet: match[3].replace(/<[^>]+>/g, "").trim()
-              });
-              count++;
-            }
-            if (results.length === 0) {
-              return { results: [], message: "No results found or parsing failed." };
-            }
-            return { results };
-          } catch (error) {
-            return { error: `Search failed: ${error.message}` };
-          }
-        default:
-          return { error: "Unknown tool" };
-      }
-    } catch (e) {
-      console.error(`Tool execution error [${name}]:`, e);
-      return { error: e.message };
-    }
+    await this.flushMemorySession();
   }
 };
 
 // src/settings.ts
-var import_obsidian6 = require("obsidian");
-var SettingTab = class extends import_obsidian6.PluginSettingTab {
+var import_obsidian4 = require("obsidian");
+var SettingTab = class extends import_obsidian4.PluginSettingTab {
   plugin;
   renderToken = 0;
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
-  getCurrentModelByProvider() {
-    switch (this.plugin.settings.provider) {
-      case "gemini":
-        return this.plugin.settings.primaryModel;
-      case "openai":
-        return this.plugin.settings.openaiModel;
-      case "deepseek":
-        return this.plugin.settings.deepseekModel;
-      case "qwen":
-        return this.plugin.settings.qwenModel;
-      default:
-        return "";
-    }
+  /** 获取当前激活 provider 的配置 */
+  getActiveConfig() {
+    const s = this.plugin.settings;
+    return s.providers[s.activeProvider];
   }
-  async loadDynamicModelOptions(dropdown, provider, token, forceRefresh = false) {
+  /** 动态加载 model 列表到下拉框 */
+  async loadDynamicModelOptions(dropdown, token, forceRefresh = false) {
+    const config = this.getActiveConfig();
+    const currentModel = config?.model || "";
     dropdown.selectEl.empty();
-    dropdown.addOption("__loading__", `Loading ${provider} models...`);
+    dropdown.addOption("__loading__", `Loading models...`);
     dropdown.setValue("__loading__");
     dropdown.setDisabled(true);
-    const currentModel = this.getCurrentModelByProvider();
     try {
       const models = await this.plugin.modelService.getAvailableModels(forceRefresh);
       if (token !== this.renderToken)
@@ -5492,271 +4715,246 @@ var SettingTab = class extends import_obsidian6.PluginSettingTab {
     const desc = containerEl.createEl("p", { cls: "setting-item-description" });
     desc.setText("Powered by multiple AI providers. Acting as your Vault OS.");
     containerEl.createEl("h3", { text: "\u{1F511} API Configuration", cls: "ocli-settings-header" });
-    new import_obsidian6.Setting(containerEl).setName("AI Provider").setDesc("Select the AI provider to use.").addDropdown((drop) => drop.addOption("gemini", "Google Gemini").addOption("openai", "OpenAI Compatible").addOption("deepseek", "DeepSeek").addOption("qwen", "Qwen (Tongyi Qianwen)").setValue(this.plugin.settings.provider).onChange(async (value) => {
-      this.plugin.settings.provider = value;
-      await this.plugin.saveSettings();
-      this.plugin.modelService.reloadProvider();
-      this.display();
-    }));
-    if (this.plugin.settings.provider === "gemini") {
-      new import_obsidian6.Setting(containerEl).setName("Gemini API Key").setDesc("Enter your Google Gemini API key.").addText((text) => text.setPlaceholder("AIzaSy...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
-        this.plugin.settings.apiKey = value;
+    const settings = this.plugin.settings;
+    const activeConfig = this.getActiveConfig();
+    new import_obsidian4.Setting(containerEl).setName("AI Provider").setDesc("Select the AI provider to use.").addDropdown((drop) => {
+      for (const [id, config] of Object.entries(settings.providers)) {
+        const configured = !!config.apiKey;
+        drop.addOption(id, configured ? config.label : `${config.label} \u26A0\uFE0F`);
+      }
+      drop.setValue(settings.activeProvider);
+      drop.onChange(async (value) => {
+        await this.plugin.modelService.switchProvider(value, () => this.plugin.saveSettings());
+        this.display();
+      });
+    });
+    if (activeConfig) {
+      new import_obsidian4.Setting(containerEl).setName("API Key").setDesc(`Enter your ${activeConfig.label} API key.`).addText((text) => text.setPlaceholder("sk-...").setValue(activeConfig.apiKey).onChange(async (value) => {
+        activeConfig.apiKey = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian6.Setting(containerEl).setName("Model").setDesc("Choose the Gemini model (loaded dynamically from API).").addDropdown((drop) => {
-        drop.addOption(this.plugin.settings.primaryModel, `${this.plugin.settings.primaryModel} (Current)`);
-        drop.setValue(this.plugin.settings.primaryModel);
-        void this.loadDynamicModelOptions(drop, "gemini", token);
+      if (activeConfig.type === "openai-compatible") {
+        new import_obsidian4.Setting(containerEl).setName("Base URL").setDesc("API Base URL.").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(activeConfig.baseUrl).onChange(async (value) => {
+          activeConfig.baseUrl = value;
+          await this.plugin.saveSettings();
+        }));
+      }
+      new import_obsidian4.Setting(containerEl).setName("Model").setDesc("Choose the model (loaded dynamically from API).").addDropdown((drop) => {
+        drop.addOption(activeConfig.model, `${activeConfig.model} (Current)`);
+        drop.setValue(activeConfig.model);
+        void this.loadDynamicModelOptions(drop, token);
         drop.onChange(async (value) => {
           if (value === "__loading__" || value === "__failed__")
             return;
-          this.plugin.settings.primaryModel = value;
-          await this.plugin.saveSettings();
+          await this.plugin.modelService.switchModel(value, () => this.plugin.saveSettings());
         });
       });
     }
-    if (this.plugin.settings.provider === "openai") {
-      new import_obsidian6.Setting(containerEl).setName("OpenAI API Key").setDesc("Enter your OpenAI API key.").addText((text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.openaiApiKey).onChange(async (value) => {
-        this.plugin.settings.openaiApiKey = value;
+    const providerActions = new import_obsidian4.Setting(containerEl);
+    providerActions.addButton((btn) => btn.setButtonText("+ Add Provider").onClick(() => {
+      new AddProviderModal(this.app, async (label, baseUrl) => {
+        const key = "custom-" + Date.now();
+        settings.providers[key] = {
+          type: "openai-compatible",
+          label,
+          apiKey: "",
+          baseUrl,
+          model: ""
+        };
+        settings.activeProvider = key;
         await this.plugin.saveSettings();
-      }));
-      new import_obsidian6.Setting(containerEl).setName("Base URL").setDesc("API Base URL (optional).").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(this.plugin.settings.openaiBaseUrl).onChange(async (value) => {
-        this.plugin.settings.openaiBaseUrl = value;
+        this.display();
+      }).open();
+    }));
+    const isBuiltin = BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider);
+    if (!isBuiltin && activeConfig) {
+      providerActions.addButton((btn) => btn.setButtonText(`Delete "${activeConfig.label}"`).setWarning().onClick(async () => {
+        delete settings.providers[settings.activeProvider];
+        settings.activeProvider = "gemini";
         await this.plugin.saveSettings();
-      }));
-      new import_obsidian6.Setting(containerEl).setName("Model Name").setDesc("Enter the model ID (e.g., gpt-4o, gpt-3.5-turbo).").addText((text) => text.setPlaceholder("gpt-4o").setValue(this.plugin.settings.openaiModel).onChange(async (value) => {
-        this.plugin.settings.openaiModel = value;
-        await this.plugin.saveSettings();
-      }));
-    }
-    if (this.plugin.settings.provider === "deepseek") {
-      new import_obsidian6.Setting(containerEl).setName("DeepSeek API Key").setDesc("Enter your DeepSeek API key.").addText((text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.deepseekApiKey).onChange(async (value) => {
-        this.plugin.settings.deepseekApiKey = value;
-        await this.plugin.saveSettings();
-      }));
-      new import_obsidian6.Setting(containerEl).setName("Base URL").setDesc("DeepSeek API Base URL.").addText((text) => text.setPlaceholder("https://api.deepseek.com").setValue(this.plugin.settings.deepseekBaseUrl).onChange(async (value) => {
-        this.plugin.settings.deepseekBaseUrl = value;
-        await this.plugin.saveSettings();
-      }));
-      new import_obsidian6.Setting(containerEl).setName("Model Name").setDesc("e.g., deepseek-chat, deepseek-coder").addText((text) => text.setPlaceholder("deepseek-chat").setValue(this.plugin.settings.deepseekModel).onChange(async (value) => {
-        this.plugin.settings.deepseekModel = value;
-        await this.plugin.saveSettings();
+        this.display();
+        new import_obsidian4.Notice("Provider deleted");
       }));
     }
-    if (this.plugin.settings.provider === "qwen") {
-      new import_obsidian6.Setting(containerEl).setName("Qwen API Key").setDesc("Enter your DashScope API key.").addText((text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.qwenApiKey).onChange(async (value) => {
-        this.plugin.settings.qwenApiKey = value;
-        await this.plugin.saveSettings();
-      }));
-      new import_obsidian6.Setting(containerEl).setName("Base URL").setDesc("DashScope Compatible API URL.").addText((text) => text.setPlaceholder("https://dashscope.aliyuncs.com/compatible-mode/v1").setValue(this.plugin.settings.qwenBaseUrl).onChange(async (value) => {
-        this.plugin.settings.qwenBaseUrl = value;
-        await this.plugin.saveSettings();
-      }));
-      new import_obsidian6.Setting(containerEl).setName("Model Name").setDesc("e.g., qwen-turbo, qwen-plus").addText((text) => text.setPlaceholder("qwen-turbo").setValue(this.plugin.settings.qwenModel).onChange(async (value) => {
-        this.plugin.settings.qwenModel = value;
-        await this.plugin.saveSettings();
-      }));
-    }
-    new import_obsidian6.Setting(containerEl).addButton((btn) => btn.setButtonText("Test Connection").onClick(async () => {
+    new import_obsidian4.Setting(containerEl).addButton((btn) => btn.setButtonText("Test Connection").onClick(async () => {
       try {
-        new import_obsidian6.Notice(`Testing connection to ${this.plugin.settings.provider}...`);
-        this.plugin.modelService.reloadProvider();
+        const label = activeConfig?.label || "AI";
+        new import_obsidian4.Notice(`Testing connection to ${label}...`);
+        await this.plugin.modelService.updateSettings(this.plugin.settings);
         const success = await this.plugin.modelService.checkAvailability();
         if (success) {
-          new import_obsidian6.Notice("\u2705 Connection successful!");
+          new import_obsidian4.Notice("\u2705 Connection successful!");
         } else {
-          new import_obsidian6.Notice("\u274C Connection failed. Check API key and settings.");
+          new import_obsidian4.Notice("\u274C Connection failed. Check API key and settings.");
         }
       } catch (error) {
-        new import_obsidian6.Notice(`\u274C Connection failed: ${error.message}`);
+        new import_obsidian4.Notice(`\u274C Connection failed: ${error.message}`);
       }
     }));
-    new import_obsidian6.Setting(containerEl).setName("Context Window Limit").setDesc("Limit token usage. Higher values allow reading larger files but cost more.").addSlider((slider) => slider.setLimits(1e4, 1e6, 1e4).setValue(this.plugin.settings.contextWindow).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Context Window Limit").setDesc("Limit token usage. Higher values allow reading larger files but cost more.").addSlider((slider) => slider.setLimits(1e4, 1e6, 1e4).setValue(this.plugin.settings.contextWindow).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.contextWindow = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "\u{1F6E1}\uFE0F Guardian Behavior", cls: "ocli-settings-header" });
-    new import_obsidian6.Setting(containerEl).setName("Enable Guardian").setDesc("Allow AI to passively analyze text and offer suggestions.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableGuardian).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Enable Guardian").setDesc("Allow AI to passively analyze text and offer suggestions.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableGuardian).onChange(async (value) => {
       this.plugin.settings.enableGuardian = value;
       await this.plugin.saveSettings();
       this.display();
     }));
     if (this.plugin.settings.enableGuardian) {
-      new import_obsidian6.Setting(containerEl).setName("Auto Mode").setDesc("Automatically analyze text after 5 seconds of inactivity.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.guardianAutoMode).onChange(async (value) => {
+      new import_obsidian4.Setting(containerEl).setName("Auto Mode").setDesc("Automatically analyze text after 5 seconds of inactivity.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.guardianAutoMode).onChange(async (value) => {
         this.plugin.settings.guardianAutoMode = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian6.Setting(containerEl).setName("Manual Mode Hotkey").setDesc("Configure the hotkey to manually trigger Guardian (Default: Mod+Shift+G).").addButton((btn) => btn.setButtonText("Configure Hotkey").onClick(() => {
+      new import_obsidian4.Setting(containerEl).setName("Manual Mode Hotkey").setDesc("Configure the hotkey to manually trigger Guardian (Default: Mod+Shift+G).").addButton((btn) => btn.setButtonText("Configure Hotkey").onClick(() => {
         this.app.setting.openTabById("hotkeys");
         this.app.setting.activeTab.setQuery("Guardian: Manual Trigger");
       }));
-      new import_obsidian6.Setting(containerEl).setName("Guardian Sensitivity").setDesc("Low (Manual) <-> High (Copilot Style)").addSlider((slider) => slider.setLimits(0, 100, 25).setValue(this.plugin.settings.guardianSensitivity).setDynamicTooltip().onChange(async (value) => {
+      new import_obsidian4.Setting(containerEl).setName("Guardian Sensitivity").setDesc("Low (Manual) <-> High (Copilot Style)").addSlider((slider) => slider.setLimits(0, 100, 25).setValue(this.plugin.settings.guardianSensitivity).setDynamicTooltip().onChange(async (value) => {
         this.plugin.settings.guardianSensitivity = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian6.Setting(containerEl).setName("UI Style").setDesc("How suggestions appear in the editor.").addDropdown((drop) => drop.addOption("ghost", "Ghost Text (Inline)").addOption("gutter", "Gutter Dot (Subtle)").addOption("hybrid", "Hybrid (Both)").setValue(this.plugin.settings.guardianUIStyle).onChange(async (value) => {
+      new import_obsidian4.Setting(containerEl).setName("UI Style").setDesc("How suggestions appear in the editor.").addDropdown((drop) => drop.addOption("ghost", "Ghost Text (Inline)").addOption("gutter", "Gutter Dot (Subtle)").addOption("hybrid", "Hybrid (Both)").setValue(this.plugin.settings.guardianUIStyle).onChange(async (value) => {
         this.plugin.settings.guardianUIStyle = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian6.Setting(containerEl).setName("Privacy Mode").setDesc("Anonymize data before sending (Replace names/emails). Reduces accuracy.").addToggle((toggle) => toggle.setValue(this.plugin.settings.privacyMode).onChange(async (value) => {
+      new import_obsidian4.Setting(containerEl).setName("Privacy Mode").setDesc("Anonymize data before sending (Replace names/emails). Reduces accuracy.").addToggle((toggle) => toggle.setValue(this.plugin.settings.privacyMode).onChange(async (value) => {
         this.plugin.settings.privacyMode = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian6.Setting(containerEl).setName("Ignored Folders").setDesc('Path patterns to ignore (one per line). e.g. "Private/"').setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Private/\nSecrets/\nTemplates/").setValue(this.plugin.settings.ignoredFolders).onChange(async (value) => {
+      new import_obsidian4.Setting(containerEl).setName("Ignored Folders").setDesc('Path patterns to ignore (one per line). e.g. "Private/"').setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Private/\nSecrets/\nTemplates/").setValue(this.plugin.settings.ignoredFolders).onChange(async (value) => {
         this.plugin.settings.ignoredFolders = value;
         await this.plugin.saveSettings();
       }));
     }
     containerEl.createEl("h3", { text: "\u26A1 Permissions & Capabilities", cls: "ocli-settings-header" });
-    new import_obsidian6.Setting(containerEl).setName("Allow File Creation").setDesc("Let AI create new notes (`/new`).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileCreation).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Allow File Creation").setDesc("Let AI create new notes (`/new`).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileCreation).onChange(async (value) => {
       this.plugin.settings.allowFileCreation = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian6.Setting(containerEl).setName("Allow File Modification").setDesc("Let AI modify notes other than the one you are editing (e.g. Append to Daily Note).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileModification).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Allow File Modification").setDesc("Let AI modify notes other than the one you are editing (e.g. Append to Daily Note).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileModification).onChange(async (value) => {
       this.plugin.settings.allowFileModification = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian6.Setting(containerEl).setName("Allow Plugin Control").setDesc("WARNING: Let AI execute commands from OTHER plugins (Dataview, Kanban, etc).").setClass("gemini-danger-setting").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowPluginControl).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Allow Plugin Control").setDesc("WARNING: Let AI execute commands from OTHER plugins (Dataview, Kanban, etc).").setClass("gemini-danger-setting").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowPluginControl).onChange(async (value) => {
       if (value)
-        new import_obsidian6.Notice("\u26A0\uFE0F Permission Granted: AI can now control your plugins.");
+        new import_obsidian4.Notice("\u26A0\uFE0F Permission Granted: AI can now control your plugins.");
       this.plugin.settings.allowPluginControl = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian6.Setting(containerEl).setName("Confirm Executions").setDesc("Human-in-the-loop: Always ask for confirmation before writing files or running commands.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmExecutions).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Confirm Executions").setDesc("Human-in-the-loop: Always ask for confirmation before writing files or running commands.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmExecutions).onChange(async (value) => {
       this.plugin.settings.confirmExecutions = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "\u{1F5A5}\uFE0F Terminal Appearance", cls: "ocli-settings-header" });
-    new import_obsidian6.Setting(containerEl).setName("Theme Style").addDropdown((drop) => drop.addOption("hacker-green", "Hacker Green").addOption("cyberpunk", "Cyberpunk Neon").addOption("obsidian-native", "Obsidian Native").setValue(this.plugin.settings.terminalTheme).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Theme Style").addDropdown((drop) => drop.addOption("hacker-green", "Hacker Green").addOption("cyberpunk", "Cyberpunk Neon").addOption("obsidian-native", "Obsidian Native").setValue(this.plugin.settings.terminalTheme).onChange(async (value) => {
       this.plugin.settings.terminalTheme = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian6.Setting(containerEl).setName("Font Size").addSlider((slider) => slider.setLimits(12, 24, 1).setValue(this.plugin.settings.terminalFontSize).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Font Size").addSlider((slider) => slider.setLimits(12, 24, 1).setValue(this.plugin.settings.terminalFontSize).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.terminalFontSize = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian6.Setting(containerEl).setName("Background Opacity").addSlider((slider) => slider.setLimits(0.5, 1, 0.05).setValue(this.plugin.settings.terminalOpacity).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Background Opacity").addSlider((slider) => slider.setLimits(0.5, 1, 0.05).setValue(this.plugin.settings.terminalOpacity).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.terminalOpacity = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "\u{1F9E0} System Persona", cls: "ocli-settings-header" });
-    new import_obsidian6.Setting(containerEl).setName("Customize System Prompt").setDesc("Override the default AI personality.").addToggle((toggle) => toggle.setValue(this.plugin.settings.customizePrompt).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Customize System Prompt").setDesc("Override the default AI personality.").addToggle((toggle) => toggle.setValue(this.plugin.settings.customizePrompt).onChange(async (value) => {
       this.plugin.settings.customizePrompt = value;
       await this.plugin.saveSettings();
       this.display();
     }));
     if (this.plugin.settings.customizePrompt) {
-      new import_obsidian6.Setting(containerEl).setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("You are a helpful assistant...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
+      new import_obsidian4.Setting(containerEl).setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("You are a helpful assistant...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
         this.plugin.settings.systemPrompt = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian6.Setting(containerEl).addButton((btn) => btn.setButtonText("Restore Default Prompt").onClick(async () => {
+      new import_obsidian4.Setting(containerEl).addButton((btn) => btn.setButtonText("Restore Default Prompt").onClick(async () => {
         this.plugin.settings.systemPrompt = DEFAULT_SETTINGS.systemPrompt;
         await this.plugin.saveSettings();
         this.display();
       }));
     }
     containerEl.createEl("h3", { text: "\u{1F4E8} WeChat Inbox", cls: "ocli-settings-header" });
-    new import_obsidian6.Setting(containerEl).setName("WeChat Inbox Path").setDesc('The file to monitor for new WeChat links (e.g., "Inbox.md").').addText((text) => text.setPlaceholder("Inbox.md").setValue(this.plugin.settings.wechatInboxPath).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("WeChat Inbox Path").setDesc('The file to monitor for new WeChat links (e.g., "Inbox.md").').addText((text) => text.setPlaceholder("Inbox.md").setValue(this.plugin.settings.wechatInboxPath).onChange(async (value) => {
       this.plugin.settings.wechatInboxPath = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian6.Setting(containerEl).setName("WeChat Storage Path").setDesc('The folder to store saved articles (e.g., "Clippings").').addText((text) => text.setPlaceholder("Clippings").setValue(this.plugin.settings.wechatStoragePath).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("WeChat Storage Path").setDesc('The folder to store saved articles (e.g., "Clippings").').addText((text) => text.setPlaceholder("Clippings").setValue(this.plugin.settings.wechatStoragePath).onChange(async (value) => {
       this.plugin.settings.wechatStoragePath = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "\u{1F4DA} Knowledge Compiler", cls: "ocli-settings-header" });
     const knowledgeDesc = containerEl.createEl("p", { cls: "setting-item-description" });
     knowledgeDesc.setText("Compile notes from watched folders into a structured knowledge wiki.");
-    new import_obsidian6.Setting(containerEl).setName("Auto Compile").setDesc("Automatically compile notes when they are created or modified in watched folders.").addToggle((toggle) => toggle.setValue(this.plugin.settings.knowledgeAutoCompile).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Auto Compile").setDesc("Automatically compile notes when they are created or modified in watched folders.").addToggle((toggle) => toggle.setValue(this.plugin.settings.knowledgeAutoCompile).onChange(async (value) => {
       this.plugin.settings.knowledgeAutoCompile = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian6.Setting(containerEl).setName("Wiki Output Folder").setDesc("The folder where compiled wiki pages are stored.").addText((text) => text.setPlaceholder("Knowledge Wiki").setValue(this.plugin.settings.knowledgeWikiFolder).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Wiki Output Folder").setDesc("The folder where compiled wiki pages are stored.").addText((text) => text.setPlaceholder("Knowledge Wiki").setValue(this.plugin.settings.knowledgeWikiFolder).onChange(async (value) => {
       this.plugin.settings.knowledgeWikiFolder = value || "Knowledge Wiki";
       await this.plugin.saveSettings();
     }));
-    new import_obsidian6.Setting(containerEl).setName("Max Compile Batch").setDesc("Maximum number of notes to compile in a single batch.").addSlider((slider) => slider.setLimits(1, 200, 1).setValue(this.plugin.settings.knowledgeMaxCompileBatch).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Max Compile Batch").setDesc("Maximum number of notes to compile in a single batch.").addSlider((slider) => slider.setLimits(1, 200, 1).setValue(this.plugin.settings.knowledgeMaxCompileBatch).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.knowledgeMaxCompileBatch = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian6.Setting(containerEl).setName("Source Folders").setDesc("Folders to watch for notes to compile (one per line).").setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Clippings\nReading Notes").setValue((this.plugin.settings.knowledgeSourceFolders || []).join("\n")).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("Source Folders").setDesc("Folders to watch for notes to compile (one per line).").setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Clippings\nReading Notes").setValue((this.plugin.settings.knowledgeSourceFolders || []).join("\n")).onChange(async (value) => {
       this.plugin.settings.knowledgeSourceFolders = value.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "\u{1F50C} MCP Servers", cls: "ocli-settings-header" });
-    const mcpDesc = containerEl.createEl("p", { cls: "setting-item-description" });
-    mcpDesc.setText("Connect to external tools via Model Context Protocol (MCP).");
-    const servers = this.plugin.settings.mcpServers || {};
-    for (const [name, config] of Object.entries(servers)) {
-      new import_obsidian6.Setting(containerEl).setName(name).setDesc(`${config.command} ${config.args.join(" ")}`).addButton((btn) => btn.setButtonText("Edit").setIcon("pencil").onClick(() => {
-        this.removeMcpServer(name);
-        this.addMcpServerModal(name, config);
-      })).addButton((btn) => btn.setButtonText("Remove").setIcon("trash").setWarning().onClick(async () => {
-        await this.removeMcpServer(name);
-      }));
-    }
-    new import_obsidian6.Setting(containerEl).addButton((btn) => btn.setButtonText("Add MCP Server").setCta().onClick(() => {
-      this.addMcpServerModal();
+    containerEl.createEl("h3", { text: "\u{1F50C} Plugin Skill Generator", cls: "ocli-settings-header" });
+    new import_obsidian4.Setting(containerEl).setName("Auto-generate plugin skills").setDesc("Automatically generate AI skills for installed plugins on startup.").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoGeneratePluginSkills).onChange(async (value) => {
+      this.plugin.settings.autoGeneratePluginSkills = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian4.Setting(containerEl).setName("Excluded plugins").setDesc("Plugin IDs to exclude from skill generation (comma-separated).").addText((text) => text.setPlaceholder("plugin-id-1, plugin-id-2").setValue(this.plugin.settings.pluginSkillExcludeList.join(", ")).onChange(async (value) => {
+      this.plugin.settings.pluginSkillExcludeList = value.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+      await this.plugin.saveSettings();
     }));
   }
-  async removeMcpServer(name) {
-    const settings = this.plugin.settings;
-    if (settings.mcpServers && settings.mcpServers[name]) {
-      delete settings.mcpServers[name];
-      await this.plugin.saveSettings();
-      this.display();
-    }
+};
+var AddProviderModal = class extends import_obsidian4.Modal {
+  onSubmit;
+  constructor(app, onSubmit) {
+    super(app);
+    this.onSubmit = onSubmit;
   }
-  addMcpServerModal(existingName, existingConfig) {
-    class McpModal extends import_obsidian6.Modal {
-      name;
-      command;
-      args;
-      onSubmit;
-      constructor(app, onSubmit, name = "", command = "", args = "") {
-        super(app);
-        this.onSubmit = onSubmit;
-        this.name = name;
-        this.command = command;
-        this.args = args;
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "Add OpenAI Compatible Provider" });
+    let labelValue = "";
+    let baseUrlValue = "";
+    new import_obsidian4.Setting(contentEl).setName("Provider Name").setDesc("Display name (e.g., SiliconFlow, Groq, Ollama)").addText((text) => text.setPlaceholder("My Provider").onChange((v) => {
+      labelValue = v;
+    }));
+    new import_obsidian4.Setting(contentEl).setName("Base URL").setDesc("API endpoint URL").addText((text) => text.setPlaceholder("https://api.example.com/v1").onChange((v) => {
+      baseUrlValue = v;
+    }));
+    new import_obsidian4.Setting(contentEl).addButton((btn) => btn.setButtonText("Add").setCta().onClick(() => {
+      if (!labelValue.trim()) {
+        new import_obsidian4.Notice("Please enter a provider name");
+        return;
       }
-      onOpen() {
-        const { contentEl } = this;
-        contentEl.createEl("h2", { text: existingName ? "Edit MCP Server" : "Add MCP Server" });
-        new import_obsidian6.Setting(contentEl).setName("Server Name").setDesc('Unique identifier (e.g., "weather")').addText((text) => text.setValue(this.name).onChange((value) => this.name = value));
-        new import_obsidian6.Setting(contentEl).setName("Command").setDesc('Executable (e.g., "node", "python", "uv")').addText((text) => text.setValue(this.command).onChange((value) => this.command = value));
-        new import_obsidian6.Setting(contentEl).setName("Arguments").setDesc('Space-separated arguments (e.g., "path/to/server.js")').addText((text) => text.setValue(this.args).onChange((value) => this.args = value));
-        new import_obsidian6.Setting(contentEl).addButton((btn) => btn.setButtonText("Save").setCta().onClick(() => {
-          if (this.name && this.command) {
-            const argsList = this.args.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((a) => a.replace(/^"|"$/g, "")) || [];
-            this.onSubmit(this.name, this.command, argsList);
-            this.close();
-          } else {
-            new import_obsidian6.Notice("Name and Command are required.");
-          }
-        }));
+      if (!baseUrlValue.trim()) {
+        new import_obsidian4.Notice("Please enter a base URL");
+        return;
       }
-      onClose() {
-        const { contentEl } = this;
-        contentEl.empty();
-      }
-    }
-    new McpModal(this.app, async (name, command, args) => {
-      if (!this.plugin.settings.mcpServers)
-        this.plugin.settings.mcpServers = {};
-      this.plugin.settings.mcpServers[name] = { command, args };
-      await this.plugin.saveSettings();
-      this.display();
-    }, existingName || "", existingConfig?.command || "", existingConfig?.args.join(" ") || "").open();
+      this.onSubmit(labelValue.trim(), baseUrlValue.trim());
+      this.close();
+    }));
+  }
+  onClose() {
+    this.contentEl.empty();
   }
 };
 
 // src/ui/shell-view.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/ui/chat-controller.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 var ChatController = class {
   app;
   api;
@@ -5764,6 +4962,7 @@ var ChatController = class {
   // private isResponding: boolean = false; // Unused
   onMessageAdded;
   onStatusChanged;
+  onStreamEvent;
   // 文件搜索缓存
   fileSearchCache = null;
   FILE_SEARCH_CACHE_TTL = 5e3;
@@ -5774,6 +4973,7 @@ var ChatController = class {
     this.api = options.api;
     this.onMessageAdded = options.onMessageAdded;
     this.onStatusChanged = options.onStatusChanged;
+    this.onStreamEvent = options.onStreamEvent;
     this.fileSearchCacheCleanupTimer = window.setInterval(() => {
       this.cleanupExpiredFileSearchCache();
     }, 6e4);
@@ -5814,8 +5014,28 @@ var ChatController = class {
     this.addMessage("user", query);
     this.setResponding(true);
     try {
-      const response = await this.api.chat(query, context, selection);
-      this.addMessage("ai", response);
+      if (this.onStreamEvent) {
+        let fullText = "";
+        for await (const event of this.api.chatStream(query, context, selection)) {
+          this.onStreamEvent(event);
+          if (event.type === "done") {
+            fullText = event.text;
+          } else if (event.type === "error") {
+            this.addMessage("system", `Error: ${event.message}`);
+            return;
+          }
+        }
+        const msg = {
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+          role: "ai",
+          content: fullText,
+          timestamp: Date.now()
+        };
+        this.messages.push(msg);
+      } else {
+        const response = await this.api.chat(query, context, selection);
+        this.addMessage("ai", response);
+      }
     } catch (error) {
       this.handleError(error);
     } finally {
@@ -5826,6 +5046,21 @@ var ChatController = class {
     const [cmd, ...args] = query.split(" ");
     const argStr = args.join(" ");
     this.addMessage("user", query);
+    const skillCommands = typeof this.api.getSkillCommands === "function" ? this.api.getSkillCommands() : [];
+    const matchedSkillCommand = skillCommands.find((entry) => entry.command === cmd);
+    if (matchedSkillCommand && typeof this.api.executeSlashSkillCommand === "function") {
+      try {
+        const result = await this.api.executeSlashSkillCommand(cmd, argStr.trim());
+        if (result?.error) {
+          this.addMessage("system", `Error: ${result.error}`);
+        } else {
+          this.addMessage("system", this.formatSlashCommandResult(result));
+        }
+      } catch (error) {
+        this.handleError(error);
+      }
+      return;
+    }
     switch (cmd) {
       case "/clear":
         this.clearHistory();
@@ -5889,6 +5124,15 @@ ${toolsList}`);
       default:
         this.addMessage("system", `Unknown command: ${cmd}`);
     }
+  }
+  formatSlashCommandResult(result) {
+    if (typeof result === "string")
+      return result;
+    if (result?.message && typeof result.message === "string")
+      return result.message;
+    return `\`\`\`json
+${JSON.stringify(result, null, 2)}
+\`\`\``;
   }
   async handleOpenFile(searchTerm) {
     const now = Date.now();
@@ -6053,7 +5297,7 @@ ${targetMsg.content}`;
       this.addMessage("system", "\u7528\u6CD5: \u5148\u5728\u7F16\u8F91\u5668\u4E2D\u9009\u4E2D\u6587\u672C\uFF0C\u7136\u540E `/edit <\u6307\u4EE4>`\n\u4F8B: `/edit \u7FFB\u8BD1\u6210\u82F1\u6587`");
       return;
     }
-    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
     const editor = activeView?.editor;
     const selection = editor?.getSelection();
     if (!selection) {
@@ -6152,13 +5396,315 @@ ${selection}`;
 };
 
 // src/services/context-manager.ts
-var import_obsidian8 = require("obsidian");
+var import_obsidian7 = require("obsidian");
+
+// src/utils/video_utils.ts
+var import_obsidian6 = require("obsidian");
+var defaultDeps = {
+  requestUrl: (options) => (0, import_obsidian6.requestUrl)(options),
+  userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "Mozilla/5.0"
+};
+function extractBalancedJson(source, marker) {
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex === -1)
+    return null;
+  const braceStart = source.indexOf("{", markerIndex);
+  if (braceStart === -1)
+    return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = braceStart; i < source.length; i++) {
+    const ch = source[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\" && inString) {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString)
+      continue;
+    if (ch === "{")
+      depth++;
+    if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        try {
+          return JSON.parse(source.slice(braceStart, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+async function fetchText(deps, url, headers) {
+  const response = await deps.requestUrl({
+    url,
+    headers
+  });
+  return response.text;
+}
+function buildMetadataOnlyResult(params) {
+  return {
+    text: "",
+    title: params.title,
+    platform: params.platform,
+    author: params.author,
+    url: params.url,
+    description: params.description,
+    transcriptSource: "metadata",
+    needsTranscription: true
+  };
+}
+async function getYoutubeTranscript(url, deps) {
+  try {
+    const html = await fetchText(deps, url, {
+      "User-Agent": deps.userAgent
+    });
+    let title = "YouTube Video";
+    const titleMatch = html.match(/<title>(.*?)<\/title>/);
+    if (titleMatch?.[1]) {
+      title = titleMatch[1].replace(" - YouTube", "");
+    }
+    let author = "YouTube";
+    const authorMatch = html.match(/<link itemprop="name" content="(.*?)">/) || html.match(/<meta name="author" content="(.*?)">/);
+    if (authorMatch?.[1]) {
+      author = authorMatch[1];
+    }
+    const descriptionMatch = html.match(/<meta name="description" content="([^"]*)"/i);
+    const description = descriptionMatch?.[1]?.trim() || title;
+    const captionsMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
+    if (!captionsMatch) {
+      return buildMetadataOnlyResult({
+        title,
+        platform: "youtube",
+        author,
+        url,
+        description
+      });
+    }
+    const captionTracks = JSON.parse(captionsMatch[1]);
+    if (!Array.isArray(captionTracks) || captionTracks.length === 0) {
+      return buildMetadataOnlyResult({
+        title,
+        platform: "youtube",
+        author,
+        url,
+        description
+      });
+    }
+    let selectedTrack = captionTracks.find((track) => track.languageCode === "en");
+    if (!selectedTrack) {
+      selectedTrack = captionTracks[0];
+    }
+    let transcriptText = "";
+    try {
+      const transcriptResponse = await deps.requestUrl({
+        url: selectedTrack.baseUrl,
+        headers: {
+          "User-Agent": deps.userAgent
+        }
+      });
+      transcriptText = transcriptResponse.text;
+    } catch {
+      const transcriptResponse = await deps.requestUrl({ url: selectedTrack.baseUrl });
+      transcriptText = transcriptResponse.text;
+    }
+    if (!transcriptText) {
+      try {
+        const jsonResponse = await deps.requestUrl({
+          url: `${selectedTrack.baseUrl}&fmt=json3`,
+          headers: {
+            "User-Agent": deps.userAgent
+          }
+        });
+        const jsonData = JSON.parse(jsonResponse.text);
+        const text2 = Array.isArray(jsonData.events) ? jsonData.events.map((event) => Array.isArray(event.segs) ? event.segs.map((seg) => seg.utf8).join("") : "").filter(Boolean).join(" ") : "";
+        if (text2) {
+          return {
+            text: text2,
+            title,
+            platform: "youtube",
+            author,
+            url,
+            description,
+            transcriptSource: "platform-subtitle",
+            needsTranscription: false
+          };
+        }
+      } catch {
+      }
+    }
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(transcriptText, "text/xml");
+    const textNodes = xmlDoc.getElementsByTagName("text");
+    const lines = [];
+    for (let i = 0; i < textNodes.length; i++) {
+      const textContent = textNodes[i].textContent;
+      if (textContent) {
+        lines.push(
+          textContent.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&")
+        );
+      }
+    }
+    const text = lines.join(" ");
+    if (!text) {
+      return buildMetadataOnlyResult({
+        title,
+        platform: "youtube",
+        author,
+        url,
+        description
+      });
+    }
+    return {
+      text,
+      title,
+      platform: "youtube",
+      author,
+      url,
+      description,
+      transcriptSource: "platform-subtitle",
+      needsTranscription: false
+    };
+  } catch (e) {
+    console.error("Failed to get YouTube transcript", e);
+    new import_obsidian6.Notice(`YouTube Transcript Error: ${e.message}`);
+    return null;
+  }
+}
+async function getBilibiliTranscript(url, deps) {
+  try {
+    const html = await fetchText(deps, url, {
+      "User-Agent": deps.userAgent
+    });
+    let title = "Bilibili Video";
+    const titleMatch = html.match(/<title data-vue-meta="true">([^<]+)<\/title>/) || html.match(/<title>([^<]+)<\/title>/);
+    if (titleMatch?.[1]) {
+      title = titleMatch[1].replace("_\u54D4\u54E9\u54D4\u54E9_bilibili", "");
+    }
+    let author = "Bilibili";
+    const authorMatch = html.match(/<meta name="author" content="(.*?)">/) || html.match(/<meta name="author" content="(.*?)" \/>/);
+    if (authorMatch?.[1]) {
+      author = authorMatch[1];
+    }
+    const descriptionMatch = html.match(/"desc":"([^"]+)"/) || html.match(/<meta name="description" content="([^"]*)"/);
+    const description = descriptionMatch?.[1] ? descriptionMatch[1].replace(/\\n/g, " ").trim() : title;
+    const cidMatch = html.match(/"cid":(\d+)/);
+    if (!cidMatch) {
+      console.error("Bilibili CID not found");
+      return null;
+    }
+    const cid = cidMatch[1];
+    let bvid = "";
+    const bvidMatch = url.match(/(BV\w+)/);
+    if (bvidMatch) {
+      bvid = bvidMatch[1];
+    } else {
+      const htmlBvidMatch = html.match(/"bvid":"(BV\w+)"/);
+      if (htmlBvidMatch) {
+        bvid = htmlBvidMatch[1];
+      }
+    }
+    if (!bvid) {
+      console.error("Bilibili BVID not found");
+      return null;
+    }
+    const subtitleResponse = await deps.requestUrl({
+      url: `https://api.bilibili.com/x/player/v2?cid=${cid}&bvid=${bvid}`,
+      headers: {
+        "User-Agent": deps.userAgent
+      }
+    });
+    const subtitleData = JSON.parse(subtitleResponse.text);
+    const subtitles = subtitleData?.data?.subtitle?.subtitles;
+    let text = "";
+    if (Array.isArray(subtitles) && subtitles.length > 0) {
+      const selectedSubtitle = subtitles.find((subtitle) => subtitle?.url) || subtitles[0];
+      if (selectedSubtitle?.url) {
+        const subtitleUrl = selectedSubtitle.url.startsWith("http") ? selectedSubtitle.url : `https:${selectedSubtitle.url}`;
+        const transcriptResponse = await deps.requestUrl({ url: subtitleUrl });
+        const transcriptJson = JSON.parse(transcriptResponse.text);
+        if (Array.isArray(transcriptJson.body)) {
+          text = transcriptJson.body.map((item) => item.content).join(" ");
+        }
+      }
+    }
+    let queryParams = "";
+    if (url.includes("?")) {
+      const urlObj = new URL(url);
+      const p = urlObj.searchParams.get("p");
+      if (p) {
+        queryParams = `?p=${p}`;
+      }
+    }
+    const canonicalUrl = `https://www.bilibili.com/video/${bvid}${queryParams}`;
+    if (!text) {
+      return {
+        text: "",
+        title,
+        platform: "bilibili",
+        author,
+        url: canonicalUrl,
+        description,
+        transcriptSource: "metadata",
+        needsTranscription: true
+      };
+    }
+    return {
+      text,
+      title,
+      platform: "bilibili",
+      author,
+      url: canonicalUrl,
+      description,
+      transcriptSource: "platform-subtitle",
+      needsTranscription: false
+    };
+  } catch (e) {
+    console.error("Failed to get Bilibili transcript", e);
+    new import_obsidian6.Notice(`Bilibili Transcript Error: ${e.message}`);
+    return null;
+  }
+}
+function createVideoTranscriptFetcher(partialDeps = {}) {
+  const deps = {
+    ...defaultDeps,
+    ...partialDeps
+  };
+  return async (url) => {
+    if (url.includes("youtube.com") || url.includes("youtu.be")) {
+      return await getYoutubeTranscript(url, deps);
+    }
+    if (url.includes("bilibili.com") || url.includes("b23.tv")) {
+      return await getBilibiliTranscript(url, deps);
+    }
+    return null;
+  };
+}
+var getVideoTranscript = createVideoTranscriptFetcher();
+function extractJsonAssignment(source, marker) {
+  return extractBalancedJson(source, marker);
+}
+
+// src/services/context-manager.ts
 var ContextManager = class {
   activeContexts = [];
-  // 限制活动上下文的数量，防止内存泄漏
   MAX_ACTIVE_CONTEXTS = 50;
-  // 最多保留50个活动上下文
-  constructor() {
+  deps;
+  constructor(deps) {
+    this.deps = {
+      fetchWebContent: deps?.fetchWebContent ?? this.fetchWebContent.bind(this),
+      fetchVideoTranscript: deps?.fetchVideoTranscript ?? this.fetchVideoTranscript.bind(this)
+    };
   }
   addContext(item) {
     if (!this.activeContexts.find((c) => c.id === item.id)) {
@@ -6178,7 +5724,6 @@ var ContextManager = class {
   clearContexts() {
     this.activeContexts = [];
   }
-  // 清理资源
   cleanup() {
     this.clearContexts();
   }
@@ -6186,9 +5731,9 @@ var ContextManager = class {
     for (const ctx of this.activeContexts) {
       if (!ctx.content) {
         if (ctx.type === "url") {
-          ctx.content = await this.fetchWebContent(ctx.data);
+          ctx.content = await this.deps.fetchWebContent(ctx.data);
         } else if (ctx.type === "youtube") {
-          ctx.content = await this.fetchYouTubeTranscript(ctx.data);
+          ctx.content = await this.deps.fetchVideoTranscript(ctx.data);
         }
       }
     }
@@ -6196,48 +5741,31 @@ var ContextManager = class {
   }
   async fetchWebContent(url) {
     try {
-      const res = await (0, import_obsidian8.requestUrl)({ url });
-      const html = res.text;
-      return this.stripHtml(html);
+      const res = await (0, import_obsidian7.requestUrl)({ url });
+      if (res.status !== 200) {
+        return `[Error fetching content from ${url}: HTTP ${res.status}]`;
+      }
+      return this.stripHtml(res.text);
     } catch (e) {
       logger.error(`Failed to fetch web content: ${url}`, e);
       return `[Error fetching content from ${url}]`;
     }
   }
   stripHtml(html) {
-    return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   }
-  async fetchYouTubeTranscript(url) {
+  async fetchVideoTranscript(url) {
     try {
-      const res = await (0, import_obsidian8.requestUrl)({
-        url,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-      });
-      const html = res.text;
-      const captionsMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
-      if (!captionsMatch) {
-        return "[No captions found for this video]";
+      const transcript = await getVideoTranscript(url);
+      if (!transcript) {
+        return `[Error fetching transcript for ${url}]`;
       }
-      const captionTracks = JSON.parse(captionsMatch[1]);
-      let selectedTrack = captionTracks.find((track) => track.languageCode === "en");
-      if (!selectedTrack)
-        selectedTrack = captionTracks[0];
-      if (!selectedTrack)
-        return "[No suitable caption track found]";
-      const transcriptUrl = selectedTrack.baseUrl + "&fmt=xml";
-      const xmlRes = await (0, import_obsidian8.requestUrl)({
-        url: transcriptUrl,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-      });
-      const xml = xmlRes.text;
-      const text = xml.replace(/<text[^>]*>/g, "\n").replace(/<\/text>/g, "").replace(/&amp;#39;/g, "'").replace(/&amp;quot;/g, '"');
-      return `YouTube Transcript for ${url}:
+      if (!transcript.text) {
+        return `[No transcript available for ${url}]`;
+      }
+      return `${transcript.title}
 
-${text}`;
+${transcript.text.substring(0, 4e3)}`;
     } catch (e) {
       logger.error(`Failed to fetch YouTube transcript: ${url}`, e);
       return `[Error fetching transcript for ${url}]`;
@@ -6246,8 +5774,8 @@ ${text}`;
 };
 
 // src/ui/diff-modal.ts
-var import_obsidian9 = require("obsidian");
-var DiffModal = class extends import_obsidian9.Modal {
+var import_obsidian8 = require("obsidian");
+var DiffModal = class extends import_obsidian8.Modal {
   constructor(app, original, modified, onApply) {
     super(app);
     this.original = original;
@@ -6265,8 +5793,8 @@ var DiffModal = class extends import_obsidian9.Modal {
     buttonContainer.style.justifyContent = "flex-end";
     buttonContainer.style.gap = "10px";
     buttonContainer.style.marginTop = "20px";
-    new import_obsidian9.ButtonComponent(buttonContainer).setButtonText("Cancel").onClick(() => this.close());
-    new import_obsidian9.ButtonComponent(buttonContainer).setButtonText("Apply Changes").setCta().onClick(() => {
+    new import_obsidian8.ButtonComponent(buttonContainer).setButtonText("Cancel").onClick(() => this.close());
+    new import_obsidian8.ButtonComponent(buttonContainer).setButtonText("Apply Changes").setCta().onClick(() => {
       this.onApply();
       this.close();
     });
@@ -6348,8 +5876,23 @@ var DiffModal = class extends import_obsidian9.Modal {
   }
 };
 
+// src/ui/command-suggestions.ts
+function buildCommandSuggestions(localCommands, skillCommands, query) {
+  const merged = /* @__PURE__ */ new Map();
+  for (const command of localCommands) {
+    merged.set(command.label, command);
+  }
+  for (const skillCommand of skillCommands) {
+    merged.set(skillCommand.command, {
+      label: skillCommand.command,
+      desc: skillCommand.description
+    });
+  }
+  return Array.from(merged.values()).filter((command) => command.label.toLowerCase().includes(query.toLowerCase())).sort((a, b) => a.label.localeCompare(b.label));
+}
+
 // src/ui/shell-view.ts
-var ShellView = class extends import_obsidian10.ItemView {
+var ShellView = class extends import_obsidian9.ItemView {
   modelService;
   chatController;
   contextManager;
@@ -6372,6 +5915,28 @@ var ShellView = class extends import_obsidian10.ItemView {
   modelSelectEl = null;
   providerSelectEl = null;
   modelLoadRequestId = 0;
+  unsubscribeProvider = null;
+  // Streaming state
+  streamContainer = null;
+  streamTimeline = null;
+  streamContent = null;
+  streamAccumulatedText = "";
+  streamRenderTimer = null;
+  streamNodeCount = 0;
+  currentThinkingNode = null;
+  localCommandSuggestions = [
+    { label: "/clear", desc: "Clear session history" },
+    { label: "/profile", desc: "View user profile" },
+    { label: "/forget", desc: "Forget user memory (name/profession/all...)" },
+    { label: "/new", desc: "Create new note" },
+    { label: "/edit", desc: "AI edit selected text" },
+    { label: "/open", desc: "Open file" },
+    { label: "/tools", desc: "List available MCP tools" },
+    { label: "/help", desc: "Show all commands" },
+    { label: "/wiki:compile", desc: "Compile notes to knowledge wiki" },
+    { label: "/wiki:index", desc: "Open knowledge wiki index" },
+    { label: "/wiki:lint", desc: "Run knowledge health check" }
+  ];
   // Event Handlers
   handleInputBound = () => {
     this.adjustHeight();
@@ -6437,7 +6002,8 @@ var ShellView = class extends import_obsidian10.ItemView {
       app: this.app,
       api: this.modelService,
       onMessageAdded: (msg) => this.appendMessage(msg),
-      onStatusChanged: (status) => this.handleStatusChange(status)
+      onStatusChanged: (status) => this.handleStatusChange(status),
+      onStreamEvent: (event) => this.handleStreamEvent(event)
     });
     const container = contentEl.createDiv({ cls: "ocli-shell-view" });
     const header = container.createDiv({ cls: "shell-header" });
@@ -6470,9 +6036,9 @@ ${tool.name}: ${tool.description}
 `;
           }
         });
-        new import_obsidian10.Notice(toolsList, 8e3);
+        new import_obsidian9.Notice(toolsList, 8e3);
       } else {
-        new import_obsidian10.Notice("No tools available or tools not loaded yet.");
+        new import_obsidian9.Notice("No tools available or tools not loaded yet.");
       }
     });
     const settingsBtn = headerButtons.createEl("button", {
@@ -6515,12 +6081,19 @@ ${tool.name}: ${tool.description}
     this.populateProviderOptions(this.providerSelectEl);
     this.providerSelectEl.addEventListener("change", async (e) => {
       const target = e.target;
-      await this.changeProvider(target.value);
-      new import_obsidian10.Notice(`Switched provider to ${target.options[target.selectedIndex].text}`);
-      if (this.modelSelectEl) {
-        await this.populateModelOptions(this.modelSelectEl, true);
+      const id = target.value;
+      const plugin = this.app.plugins.plugins["obsidian-cli"];
+      const config = plugin?.settings?.providers?.[id];
+      if (!config?.apiKey) {
+        new import_obsidian9.Notice(`${config?.label || id} \u672A\u914D\u7F6E API Key\uFF0C\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E`);
+        this.app.setting.open();
+        this.app.setting.openTabById("obsidian-cli");
+        if (this.providerSelectEl)
+          this.populateProviderOptions(this.providerSelectEl);
+        return;
       }
-      this.updatePlaceholder();
+      await this.modelService.switchProvider(id, () => plugin.saveSettings());
+      new import_obsidian9.Notice(`\u5DF2\u5207\u6362\u5230 ${config.label}`);
     });
     this.modelSelectEl = modelSelectContainer.createEl("select", {
       cls: "shell-model-select shell-main-model-select",
@@ -6529,8 +6102,11 @@ ${tool.name}: ${tool.description}
     void this.populateModelOptions(this.modelSelectEl);
     this.modelSelectEl.addEventListener("change", async (e) => {
       const target = e.target;
-      await this.changeModel(target.value);
-      new import_obsidian10.Notice(`Switched to ${target.options[target.selectedIndex].text}`);
+      if (!target.value)
+        return;
+      const plugin = this.app.plugins.plugins["obsidian-cli"];
+      await this.modelService.switchModel(target.value, () => plugin.saveSettings());
+      new import_obsidian9.Notice(`Switched to ${target.options[target.selectedIndex].text}`);
     });
     inputControls.createDiv({ cls: "shell-action-buttons" });
     this.inputEl.addEventListener("input", this.handleInputBound);
@@ -6538,6 +6114,13 @@ ${tool.name}: ${tool.description}
     container.addEventListener("click", this.handleContainerClickBound);
     this.inputEl.addEventListener("paste", this.handlePasteBound);
     this.inputEl.addEventListener("drop", this.handleDropBound);
+    this.unsubscribeProvider = this.modelService.onProviderChanged(() => {
+      if (this.providerSelectEl)
+        this.populateProviderOptions(this.providerSelectEl);
+      if (this.modelSelectEl)
+        void this.populateModelOptions(this.modelSelectEl, true);
+      this.updatePlaceholder();
+    });
     this.startHeartbeat();
   }
   adjustHeight() {
@@ -6565,21 +6148,14 @@ ${tool.name}: ${tool.description}
     this.suggestionContainer.style.display = "block";
     this.selectedIndex = 0;
     if (type === "command") {
-      const commands = [
-        { label: "/clear", desc: "Clear session history" },
-        { label: "/profile", desc: "View user profile" },
-        { label: "/forget", desc: "Forget user memory (name/profession/all...)" },
-        { label: "/new", desc: "Create new note" },
-        { label: "/edit", desc: "AI edit selected text" },
-        { label: "/open", desc: "Open file" },
-        { label: "/save", desc: "Save webpage/video to vault" },
-        { label: "/tools", desc: "List available MCP tools" },
-        { label: "/help", desc: "Show all commands" },
-        { label: "/wiki:compile", desc: "Compile notes to knowledge wiki" },
-        { label: "/wiki:index", desc: "Open knowledge wiki index" },
-        { label: "/wiki:lint", desc: "Run knowledge health check" }
-      ];
-      this.suggestions = commands.filter((c) => c.label.toLowerCase().includes(query.toLowerCase()));
+      this.suggestions = buildCommandSuggestions(
+        this.localCommandSuggestions,
+        this.modelService.getSkillCommands().map((command) => ({
+          command: command.command,
+          description: command.description
+        })),
+        query
+      );
     } else {
       const files = this.app.vault.getFiles();
       this.suggestions = files.filter((f) => f.path.toLowerCase().includes(query.toLowerCase())).slice(0, 10).map((f) => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]` }));
@@ -6653,6 +6229,7 @@ ${tool.name}: ${tool.description}
           content: await this.app.vault.read(activeFile)
         });
       }
+      this.currentSelection = "";
       const activeLeaf = this.app.workspace.getMostRecentLeaf();
       if (activeLeaf && activeLeaf.view) {
         const editor = activeLeaf.view.editor;
@@ -6679,79 +6256,12 @@ ${tool.name}: ${tool.description}
   appendMessage(msg) {
     const entry = this.outputContainer.createDiv({ cls: `shell-entry ${msg.role}` });
     if (msg.role === "ai") {
-      import_obsidian10.MarkdownRenderer.render(this.app, msg.content, entry, "", this).then(() => {
-        const codeBlocks = entry.querySelectorAll("pre > code");
-        codeBlocks.forEach((codeBlock) => {
-          const pre = codeBlock.parentElement;
-          if (pre) {
-            const header = pre.createDiv({ cls: "shell-code-block-header" });
-            const langClass = Array.from(codeBlock.classList).find((cls) => cls.startsWith("language-"));
-            const lang = langClass ? langClass.replace("language-", "") : "text";
-            const filename = `untitled.${lang === "text" ? "txt" : lang}`;
-            header.createDiv({
-              cls: "shell-code-block-filename",
-              text: filename
-            });
-            const buttons = header.createDiv({ cls: "shell-code-block-buttons" });
-            const btn = buttons.createEl("button", {
-              cls: "shell-apply-btn clickable-icon",
-              title: "Review Changes"
-            });
-            btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="16" x2="12" y2="12"></line><line x1="10" y1="14" x2="10" y2="10"></line></svg>';
-            btn.addEventListener("click", async () => {
-              const activeFile = this.app.workspace.getActiveFile();
-              if (!activeFile) {
-                new import_obsidian10.Notice("No active file to apply changes to.");
-                return;
-              }
-              const originalContent = await this.app.vault.read(activeFile);
-              const newContent = codeBlock.textContent || "";
-              new DiffModal(this.app, originalContent, newContent, async () => {
-                await this.app.vault.modify(activeFile, newContent);
-                new import_obsidian10.Notice("Changes applied.");
-              }).open();
-            });
-            pre.insertBefore(header, codeBlock);
-          }
-        });
-        entry.querySelectorAll("a.internal-link").forEach((link) => {
-          link.addEventListener("click", (e) => {
-            e.preventDefault();
-            const href = link.getAttribute("href") || link.getAttribute("data-href") || "";
-            if (href) {
-              this.app.workspace.openLinkText(href, "", false);
-            }
-          });
-        });
+      import_obsidian9.MarkdownRenderer.render(this.app, msg.content, entry, "", this).then(() => {
+        this.postProcessAiContent(entry);
         requestAnimationFrame(() => {
           this.scrollToEnd();
         });
-        const feedbackBar = entry.createDiv({ cls: "shell-feedback-bar" });
-        const thumbsUpBtn = feedbackBar.createEl("button", {
-          cls: "shell-feedback-btn shell-thumbs-up",
-          title: "Useful - save to knowledge wiki"
-        });
-        thumbsUpBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>';
-        const thumbsDownBtn = feedbackBar.createEl("button", {
-          cls: "shell-feedback-btn shell-thumbs-down",
-          title: "Not useful"
-        });
-        thumbsDownBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
-        thumbsUpBtn.addEventListener("click", () => {
-          msg.feedback = "up";
-          thumbsUpBtn.addClass("active");
-          thumbsDownBtn.removeClass("active");
-          this.chatController.processCommand(
-            `/file-back ${msg.id}`,
-            [],
-            ""
-          );
-        });
-        thumbsDownBtn.addEventListener("click", () => {
-          msg.feedback = "down";
-          thumbsDownBtn.addClass("active");
-          thumbsUpBtn.removeClass("active");
-        });
+        this.addFeedbackBar(entry, msg.content);
       }).catch((error) => {
         logger.error("Markdown rendering failed", error, "ShellView");
         entry.setText("Error rendering message");
@@ -6788,8 +6298,238 @@ ${tool.name}: ${tool.description}
         loadingDiv.remove();
     }
   }
+  handleStreamEvent(event) {
+    this.updateActivity();
+    switch (event.type) {
+      case "thinking":
+        this.ensureStreamContainer();
+        this.handleThinkingEvent(event.content);
+        break;
+      case "tool_call":
+        this.ensureStreamContainer();
+        this.addToolCallNode(event.name, event.args);
+        break;
+      case "tool_result":
+        this.updateToolResultNode(event.name, event.result, event.error);
+        break;
+      case "text_delta":
+        this.ensureStreamContainer();
+        this.handleTextDelta(event.content);
+        break;
+      case "done":
+        this.finalizeStream();
+        break;
+      case "error":
+        this.finalizeStream();
+        break;
+    }
+    this.scrollToEnd();
+  }
+  ensureStreamContainer() {
+    if (this.streamContainer)
+      return;
+    const loadingDiv = document.getElementById("loading-indicator");
+    if (loadingDiv)
+      loadingDiv.remove();
+    this.streamContainer = this.outputContainer.createDiv({ cls: "shell-entry ai shell-stream-container" });
+    this.streamTimeline = this.streamContainer.createDiv({ cls: "shell-think-timeline" });
+    const summary = this.streamTimeline.createDiv({ cls: "shell-think-summary" });
+    summary.createSpan({ cls: "think-toggle", text: "\u25BC" });
+    summary.createSpan({ cls: "think-summary-text", text: "\u601D\u8003\u4E2D..." });
+    summary.addEventListener("click", () => {
+      this.streamTimeline?.toggleClass("is-collapsed", !this.streamTimeline.hasClass("is-collapsed"));
+    });
+    this.streamContent = this.streamContainer.createDiv({ cls: "shell-response-content" });
+    this.streamAccumulatedText = "";
+    this.streamNodeCount = 0;
+    this.currentThinkingNode = null;
+  }
+  handleThinkingEvent(content) {
+    if (!this.streamTimeline)
+      return;
+    if (!this.currentThinkingNode) {
+      this.currentThinkingNode = this.streamTimeline.createDiv({ cls: "think-node is-thinking" });
+      const header = this.currentThinkingNode.createDiv({ cls: "think-node-header" });
+      header.createSpan({ cls: "think-node-icon", text: "\u{1F4A1}" });
+      header.createSpan({ cls: "think-node-label" });
+      this.currentThinkingNode.createDiv({ cls: "think-node-detail" });
+      header.addEventListener("click", () => {
+        this.currentThinkingNode?.toggleClass("is-expanded", !this.currentThinkingNode.hasClass("is-expanded"));
+      });
+      this.streamNodeCount++;
+    }
+    const detail = this.currentThinkingNode.querySelector(".think-node-detail");
+    const label = this.currentThinkingNode.querySelector(".think-node-label");
+    if (detail)
+      detail.textContent = (detail.textContent || "") + content;
+    if (label) {
+      const fullText = detail?.textContent || "";
+      label.textContent = fullText.length > 30 ? fullText.substring(0, 30) + "..." : fullText;
+    }
+  }
+  addToolCallNode(name, args) {
+    if (!this.streamTimeline)
+      return;
+    if (this.currentThinkingNode) {
+      this.currentThinkingNode.removeClass("is-thinking");
+      this.currentThinkingNode = null;
+    }
+    const node = this.streamTimeline.createDiv({ cls: "think-node is-tool" });
+    node.dataset.toolName = name;
+    const header = node.createDiv({ cls: "think-node-header" });
+    header.createSpan({ cls: "think-node-icon", text: "\u{1F527}" });
+    header.createSpan({ cls: "think-node-label", text: name });
+    const detail = node.createDiv({ cls: "think-node-detail" });
+    detail.textContent = JSON.stringify(args, null, 2);
+    header.addEventListener("click", () => {
+      node.toggleClass("is-expanded", !node.hasClass("is-expanded"));
+    });
+    this.streamNodeCount++;
+  }
+  updateToolResultNode(name, result, error) {
+    if (!this.streamTimeline)
+      return;
+    const nodes = this.streamTimeline.querySelectorAll(".think-node.is-tool");
+    let targetNode = null;
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      if (nodes[i].dataset.toolName === name) {
+        targetNode = nodes[i];
+        break;
+      }
+    }
+    if (!targetNode)
+      return;
+    const detail = targetNode.querySelector(".think-node-detail");
+    if (detail) {
+      const resultText = error ? `Error: ${error}` : JSON.stringify(result, null, 2);
+      detail.textContent += "\n--- Result ---\n" + resultText;
+    }
+  }
+  handleTextDelta(content) {
+    this.streamAccumulatedText += content;
+    if (this.streamRenderTimer !== null) {
+      window.clearTimeout(this.streamRenderTimer);
+    }
+    this.streamRenderTimer = window.setTimeout(() => {
+      this.renderStreamContent();
+    }, 100);
+  }
+  renderStreamContent() {
+    if (!this.streamContent)
+      return;
+    this.streamContent.empty();
+    import_obsidian9.MarkdownRenderer.render(
+      this.app,
+      this.streamAccumulatedText,
+      this.streamContent,
+      "",
+      this
+    ).then(() => {
+      const cursor = document.createElement("span");
+      cursor.className = "shell-stream-cursor";
+      this.streamContent?.appendChild(cursor);
+      this.scrollToEnd();
+    });
+  }
+  finalizeStream() {
+    if (this.streamRenderTimer !== null) {
+      window.clearTimeout(this.streamRenderTimer);
+      this.streamRenderTimer = null;
+    }
+    if (this.currentThinkingNode) {
+      this.currentThinkingNode.removeClass("is-thinking");
+      this.currentThinkingNode = null;
+    }
+    if (this.streamContent && this.streamAccumulatedText) {
+      this.streamContent.empty();
+      import_obsidian9.MarkdownRenderer.render(
+        this.app,
+        this.streamAccumulatedText,
+        this.streamContent,
+        "",
+        this
+      ).then(() => {
+        if (this.streamContent) {
+          this.postProcessAiContent(this.streamContent);
+        }
+        this.scrollToEnd();
+      });
+    }
+    if (this.streamTimeline && this.streamNodeCount > 0) {
+      const summaryText = this.streamTimeline.querySelector(".think-summary-text");
+      if (summaryText)
+        summaryText.textContent = `\u601D\u8003\u4E86 ${this.streamNodeCount} \u6B65`;
+      this.streamTimeline.addClass("is-collapsed");
+    } else if (this.streamTimeline && this.streamNodeCount === 0) {
+      this.streamTimeline.style.display = "none";
+    }
+    if (this.streamContainer) {
+      this.addFeedbackBar(this.streamContainer, this.streamAccumulatedText);
+    }
+    this.streamContainer = null;
+    this.streamTimeline = null;
+    this.streamContent = null;
+    this.streamAccumulatedText = "";
+    this.streamNodeCount = 0;
+  }
+  postProcessAiContent(container) {
+    const codeBlocks = container.querySelectorAll("pre > code");
+    codeBlocks.forEach((codeBlock) => {
+      const pre = codeBlock.parentElement;
+      if (pre) {
+        const header = pre.createDiv({ cls: "shell-code-block-header" });
+        const langClass = Array.from(codeBlock.classList).find((cls) => cls.startsWith("language-"));
+        const lang = langClass ? langClass.replace("language-", "") : "text";
+        header.createDiv({ cls: "shell-code-block-filename", text: `untitled.${lang === "text" ? "txt" : lang}` });
+        const buttons = header.createDiv({ cls: "shell-code-block-buttons" });
+        const btn = buttons.createEl("button", { cls: "shell-apply-btn clickable-icon", title: "Review Changes" });
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="16" x2="12" y2="12"></line><line x1="10" y1="14" x2="10" y2="10"></line></svg>';
+        btn.addEventListener("click", async () => {
+          const activeFile = this.app.workspace.getActiveFile();
+          if (!activeFile) {
+            new import_obsidian9.Notice("No active file to apply changes to.");
+            return;
+          }
+          const originalContent = await this.app.vault.read(activeFile);
+          const newContent = codeBlock.textContent || "";
+          new DiffModal(this.app, originalContent, newContent, async () => {
+            await this.app.vault.modify(activeFile, newContent);
+            new import_obsidian9.Notice("Changes applied.");
+          }).open();
+        });
+        pre.insertBefore(header, codeBlock);
+      }
+    });
+    container.querySelectorAll("a.internal-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        const href = link.getAttribute("href") || link.getAttribute("data-href") || "";
+        if (href)
+          this.app.workspace.openLinkText(href, "", false);
+      });
+    });
+  }
+  addFeedbackBar(container, content) {
+    const msgId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    const feedbackBar = container.createDiv({ cls: "shell-feedback-bar" });
+    const thumbsUpBtn = feedbackBar.createEl("button", { cls: "shell-feedback-btn shell-thumbs-up", title: "Useful - save to knowledge wiki" });
+    thumbsUpBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>';
+    const thumbsDownBtn = feedbackBar.createEl("button", { cls: "shell-feedback-btn shell-thumbs-down", title: "Not useful" });
+    thumbsDownBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
+    thumbsUpBtn.addEventListener("click", () => {
+      thumbsUpBtn.addClass("active");
+      thumbsDownBtn.removeClass("active");
+      this.chatController.processCommand(`/file-back ${msgId}`, [], "");
+    });
+    thumbsDownBtn.addEventListener("click", () => {
+      thumbsDownBtn.addClass("active");
+      thumbsUpBtn.removeClass("active");
+    });
+  }
   async onClose() {
     this.stopHeartbeat();
+    this.unsubscribeProvider?.();
+    this.unsubscribeProvider = null;
     if (this.chatController) {
       this.chatController.cleanup();
     }
@@ -6892,15 +6632,14 @@ ${tool.name}: ${tool.description}
       } else if (item.type === "text/plain") {
         item.getAsString((text) => {
           if (this.isValidUrl(text)) {
-            if (text.includes("youtube.com") || text.includes("youtu.be")) {
-              this.contextManager.addContext({
-                id: Date.now().toString(),
-                type: "youtube",
-                data: text,
-                summary: text
-              });
-              this.renderContextChips(this.outputContainer.parentElement?.querySelector(".shell-context-chips"));
-            }
+            const type = text.includes("youtube.com") || text.includes("youtu.be") ? "youtube" : "url";
+            this.contextManager.addContext({
+              id: Date.now().toString(),
+              type,
+              data: text,
+              summary: text
+            });
+            this.renderContextChips(this.outputContainer.parentElement?.querySelector(".shell-context-chips"));
           }
         });
       }
@@ -6938,15 +6677,17 @@ ${tool.name}: ${tool.description}
   }
   async populateModelOptions(selectEl, forceRefresh = false) {
     const settings = this.app.plugins.plugins["obsidian-cli"]?.settings;
-    if (!settings)
+    if (!settings?.providers)
       return;
     const requestId = ++this.modelLoadRequestId;
-    const provider = settings.provider || "gemini";
+    const config = settings.providers[settings.activeProvider];
+    if (!config)
+      return;
     selectEl.empty();
     selectEl.disabled = true;
     const loadingOption = selectEl.createEl("option", {
       value: "",
-      text: `Loading ${provider} models...`
+      text: `Loading ${config.label} models...`
     });
     loadingOption.selected = true;
     try {
@@ -6964,21 +6705,7 @@ ${tool.name}: ${tool.description}
         selectEl.disabled = true;
         return;
       }
-      let currentModel = "";
-      switch (provider) {
-        case "gemini":
-          currentModel = settings.primaryModel;
-          break;
-        case "openai":
-          currentModel = settings.openaiModel;
-          break;
-        case "deepseek":
-          currentModel = settings.deepseekModel;
-          break;
-        case "qwen":
-          currentModel = settings.qwenModel;
-          break;
-      }
+      const currentModel = config.model || "";
       models.forEach((model) => {
         const option = selectEl.createEl("option", {
           value: model.value,
@@ -7000,7 +6727,7 @@ ${tool.name}: ${tool.description}
       if (requestId !== this.modelLoadRequestId)
         return;
       logger.warn(
-        `Failed to load model list for ${provider}: ${error?.message || "Unknown error"}`,
+        `Failed to load model list: ${error?.message || "Unknown error"}`,
         "ShellView.populateModelOptions"
       );
       selectEl.empty();
@@ -7015,72 +6742,27 @@ ${tool.name}: ${tool.description}
   }
   populateProviderOptions(selectEl) {
     const settings = this.app.plugins.plugins["obsidian-cli"]?.settings;
-    if (!settings)
+    if (!settings?.providers)
       return;
     selectEl.empty();
-    const provider = settings.provider || "gemini";
-    const providers = [
-      { value: "gemini", label: "Gemini" },
-      { value: "openai", label: "OpenAI Compatible" },
-      { value: "deepseek", label: "DeepSeek" },
-      { value: "qwen", label: "Qwen" }
-    ];
-    providers.forEach((p) => {
+    const active = settings.activeProvider || "gemini";
+    for (const [id, config] of Object.entries(settings.providers)) {
+      const configured = !!config.apiKey;
       const option = selectEl.createEl("option", {
-        value: p.value,
-        text: p.label
+        value: id,
+        text: configured ? config.label : `${config.label} \u26A0\uFE0F`
       });
-      if (p.value === provider)
+      if (id === active)
         option.selected = true;
-    });
-  }
-  async changeProvider(providerId) {
-    const plugin = this.app.plugins.plugins["obsidian-cli"];
-    if (!plugin)
-      return;
-    plugin.settings.provider = providerId;
-    await plugin.saveSettings();
-    this.modelService.updateSettings(plugin.settings);
-    if (this.providerSelectEl) {
-      this.populateProviderOptions(this.providerSelectEl);
     }
   }
   updatePlaceholder() {
     if (!this.inputEl)
       return;
     const settings = this.app.plugins.plugins["obsidian-cli"]?.settings;
-    const provider = settings?.provider || "gemini";
-    const providerLabelMap = {
-      gemini: "Gemini",
-      openai: "OpenAI",
-      deepseek: "DeepSeek",
-      qwen: "Qwen"
-    };
-    const label = providerLabelMap[provider] || "AI";
+    const config = settings?.providers?.[settings?.activeProvider];
+    const label = config?.label || "AI";
     this.inputEl.setAttr("placeholder", `Ask ${label}... (/ for commands, @ for files)`);
-  }
-  async changeModel(modelId) {
-    const plugin = this.app.plugins.plugins["obsidian-cli"];
-    if (!plugin)
-      return;
-    const settings = plugin.settings;
-    const provider = settings.provider || "gemini";
-    switch (provider) {
-      case "gemini":
-        settings.primaryModel = modelId;
-        break;
-      case "openai":
-        settings.openaiModel = modelId;
-        break;
-      case "deepseek":
-        settings.deepseekModel = modelId;
-        break;
-      case "qwen":
-        settings.qwenModel = modelId;
-        break;
-    }
-    await plugin.saveSettings();
-    this.modelService.updateSettings(settings);
   }
   async updateModelSelector(forceRefresh = false) {
     if (this.providerSelectEl) {
@@ -7098,7 +6780,7 @@ ${tool.name}: ${tool.description}
       content: "Chat cleared.",
       timestamp: Date.now()
     });
-    new import_obsidian10.Notice("Chat cleared");
+    new import_obsidian9.Notice("Chat cleared");
   }
 };
 
@@ -7344,8 +7026,8 @@ function showGhostText(view, text, line, ch, replaceRange) {
 }
 
 // src/ui/guardian-modal.ts
-var import_obsidian11 = require("obsidian");
-var GuardianModal = class extends import_obsidian11.Modal {
+var import_obsidian10 = require("obsidian");
+var GuardianModal = class extends import_obsidian10.Modal {
   result;
   onSubmit;
   constructor(app, onSubmit) {
@@ -7355,20 +7037,20 @@ var GuardianModal = class extends import_obsidian11.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h2", { text: "Guardian Manual Trigger" });
-    new import_obsidian11.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
+    new import_obsidian10.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
       this.result = value;
     }).inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         this.submit();
       }
     }));
-    new import_obsidian11.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
+    new import_obsidian10.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
       this.submit();
     }));
   }
   submit() {
     if (!this.result) {
-      new import_obsidian11.Notice("Please enter an instruction.");
+      new import_obsidian10.Notice("Please enter an instruction.");
       return;
     }
     this.close();
@@ -7381,7 +7063,7 @@ var GuardianModal = class extends import_obsidian11.Modal {
 };
 
 // src/ui/selection-menu.ts
-var import_obsidian12 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 var import_view3 = require("@codemirror/view");
 var import_state5 = require("@codemirror/state");
 var pluginContextMap = /* @__PURE__ */ new WeakMap();
@@ -7468,7 +7150,7 @@ var selectionMenuField = import_state5.StateField.define({
               messages.forEach((msg) => {
                 const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
                 if (msg.role === "ai") {
-                  import_obsidian12.MarkdownRenderer.render(context.app, msg.content, msgEl, "", new import_obsidian12.Component());
+                  import_obsidian11.MarkdownRenderer.render(context.app, msg.content, msgEl, "", new import_obsidian11.Component());
                 } else {
                   msgEl.setText(msg.content);
                 }
@@ -7516,7 +7198,7 @@ ${selectionText}`;
           copyBtn.onclick = () => {
             const selectionText = view.state.doc.sliceString(state.from, state.to);
             navigator.clipboard.writeText(selectionText);
-            new import_obsidian12.Notice("Selection copied");
+            new import_obsidian11.Notice("Selection copied");
           };
           const replaceBtn = actions.createEl("button", { text: "Replace with Last Response" });
           replaceBtn.onclick = () => {
@@ -7528,7 +7210,7 @@ ${selectionText}`;
                 effects: setSelectionMenuState.of({ type: "hidden" })
               });
             } else {
-              new import_obsidian12.Notice("No AI response to replace with.");
+              new import_obsidian11.Notice("No AI response to replace with.");
             }
           };
           dom.appendChild(container);
@@ -7554,161 +7236,500 @@ function selectionMenuExtension(app, modelService) {
 // src/knowledge/runtime.ts
 var import_obsidian17 = require("obsidian");
 
+// src/knowledge/compiler.ts
+var import_obsidian13 = require("obsidian");
+
 // src/knowledge/types.ts
-var VALID_STATUS_TRANSITIONS = {
-  pending: ["processing", "missing_source"],
-  processing: ["done", "failed", "partial", "missing_source"],
-  done: ["stale", "missing_source"],
-  stale: ["pending", "missing_source"],
-  failed: ["pending", "missing_source"],
-  partial: ["pending", "missing_source"],
-  missing_source: ["pending"]
-};
-function isValidTransition(from, to) {
-  return VALID_STATUS_TRANSITIONS[from]?.includes(to) ?? false;
-}
 function normalizeTopicSlug(raw) {
   return raw.trim().toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
 }
-var KNOWLEDGE_REGISTRY_PATH = ".obsidian/obsidian-cli/knowledge-registry.json";
+var LEGACY_REGISTRY_PATH = ".obsidian/obsidian-cli/knowledge-registry.json";
 var DEFAULT_WIKI_FOLDER = "Knowledge Wiki";
 var WIKI_ARTICLES_SUBFOLDER = "Articles";
 var WIKI_TOPICS_SUBFOLDER = "Topics";
 var WIKI_HEALTH_SUBFOLDER = "Health";
 var WIKI_INDEX_FILENAME = "index.md";
 var WIKI_INDEX_BASE_FILENAME = "index.base";
+var ONTOLOGY_SCHEMA_FILENAME = "_ontology.md";
 
-// src/knowledge/registry.ts
-var KnowledgeRegistryManager = class {
-  constructor(adapter) {
-    this.adapter = adapter;
+// src/knowledge/frontmatter.ts
+var import_obsidian12 = require("obsidian");
+function generateSourceId() {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let suffix = "";
+  for (let i = 0; i < 12; i++) {
+    suffix += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  registry = { schema_version: 1, records: {} };
-  pathIndex = /* @__PURE__ */ new Map();
-  static generateId() {
-    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-    let suffix = "";
-    for (let i = 0; i < 12; i++) {
-      suffix += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return `ksrc_${suffix}`;
+  return `ksrc_${suffix}`;
+}
+function getKnowledgeStatus(app, file) {
+  const cache = app.metadataCache.getFileCache(file);
+  const status = cache?.frontmatter?.knowledge_status;
+  if (!status)
+    return null;
+  if (["pending", "processing", "done", "failed"].includes(status)) {
+    return status;
   }
-  async load() {
-    try {
-      if (await this.adapter.exists(KNOWLEDGE_REGISTRY_PATH)) {
-        const raw = await this.adapter.read(KNOWLEDGE_REGISTRY_PATH);
-        this.registry = JSON.parse(raw);
-      } else {
-        this.registry = { schema_version: 1, records: {} };
+  return null;
+}
+function getSourceId(app, file) {
+  const cache = app.metadataCache.getFileCache(file);
+  return cache?.frontmatter?.knowledge_source_id ?? null;
+}
+async function setKnowledgeStatus(app, file, status, extra) {
+  try {
+    await app.fileManager.processFrontMatter(file, (fm) => {
+      fm.knowledge_status = status;
+      if (extra?.source_id)
+        fm.knowledge_source_id = extra.source_id;
+      if (extra?.compiled_at)
+        fm.knowledge_compiled_at = extra.compiled_at;
+      if (extra?.summary)
+        fm.knowledge_summary = extra.summary;
+      if (extra?.error) {
+        fm.knowledge_error = extra.error;
+      } else if (status === "done" || status === "pending") {
+        delete fm.knowledge_error;
       }
-    } catch {
-      this.registry = { schema_version: 1, records: {} };
+    });
+  } catch (e) {
+    console.warn(`[KnowledgeFrontmatter] processFrontMatter failed for ${file.path}, fixing YAML...`, e);
+    await fixAndSetFrontmatter(app, file, status, extra);
+  }
+}
+async function fixAndSetFrontmatter(app, file, status, extra) {
+  let content = await app.vault.read(file);
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (fmMatch) {
+    const fixedFm = fmMatch[1].replace(
+      /^(\s*\w[\w\s]*?):\s*(.+:.+)$/gm,
+      (_, key, val) => `${key}: "${val.replace(/"/g, '\\"')}"`
+    );
+    content = content.replace(fmMatch[1], fixedFm);
+  }
+  const fields = [`knowledge_status: ${status}`];
+  if (extra?.source_id)
+    fields.push(`knowledge_source_id: "${extra.source_id}"`);
+  if (extra?.compiled_at)
+    fields.push(`knowledge_compiled_at: "${extra.compiled_at}"`);
+  if (extra?.summary)
+    fields.push(`knowledge_summary: "${extra.summary}"`);
+  if (extra?.error)
+    fields.push(`knowledge_error: "${extra.error.replace(/"/g, '\\"')}"`);
+  if (fmMatch) {
+    const insertPoint = content.indexOf("\n---", 4);
+    content = content.slice(0, insertPoint) + "\n" + fields.join("\n") + content.slice(insertPoint);
+  } else {
+    content = "---\n" + fields.join("\n") + "\n---\n" + content;
+  }
+  await app.vault.modify(file, content);
+}
+async function ensureSourceId(app, file) {
+  const existing = getSourceId(app, file);
+  if (existing)
+    return existing;
+  const newId = generateSourceId();
+  try {
+    await app.fileManager.processFrontMatter(file, (fm) => {
+      fm.knowledge_source_id = newId;
+    });
+  } catch {
+    await fixAndSetFrontmatter(app, file, "pending", { source_id: newId });
+  }
+  return newId;
+}
+function getFilesByKnowledgeStatus(app, status, folders) {
+  const results = [];
+  const files = app.vault.getMarkdownFiles();
+  for (const file of files) {
+    if (folders && folders.length > 0) {
+      const inFolder = folders.some((f) => {
+        const normalized = f.endsWith("/") ? f : f + "/";
+        return file.path.startsWith(normalized);
+      });
+      if (!inFolder)
+        continue;
     }
-    this.rebuildPathIndex();
-  }
-  async save() {
-    const dir = KNOWLEDGE_REGISTRY_PATH.split("/").slice(0, -1).join("/");
-    try {
-      await this.adapter.mkdir(dir);
-    } catch {
-    }
-    await this.adapter.write(KNOWLEDGE_REGISTRY_PATH, JSON.stringify(this.registry, null, 2));
-  }
-  rebuildPathIndex() {
-    this.pathIndex.clear();
-    for (const [id, record] of Object.entries(this.registry.records)) {
-      this.pathIndex.set(record.path, id);
+    const cache = app.metadataCache.getFileCache(file);
+    if (cache?.frontmatter?.knowledge_status === status) {
+      results.push(file);
     }
   }
-  register(path) {
-    const existing = this.findByPath(path);
-    if (existing)
-      return existing;
-    const id = KnowledgeRegistryManager.generateId();
-    if (this.registry.records[id]) {
-      throw new Error(`Registry ID collision: ${id}`);
+  return results;
+}
+function getUnregisteredFiles(app, watchedFolders, wikiFolder) {
+  if (watchedFolders.length === 0)
+    return [];
+  const results = [];
+  const files = app.vault.getMarkdownFiles();
+  for (const file of files) {
+    if (file.path.startsWith(wikiFolder + "/"))
+      continue;
+    const inWatched = watchedFolders.some((f) => {
+      const normalized = f.endsWith("/") ? f : f + "/";
+      return file.path.startsWith(normalized);
+    });
+    if (!inWatched)
+      continue;
+    const cache = app.metadataCache.getFileCache(file);
+    if (!cache?.frontmatter?.knowledge_status) {
+      results.push(file);
     }
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    const record = {
-      id,
-      path,
-      status: "pending",
-      created_at: now,
-      updated_at: now,
-      summary_path: null,
-      error: null
-    };
-    this.registry.records[id] = record;
-    this.pathIndex.set(path, id);
-    return record;
   }
-  transition(id, to, error) {
-    const record = this.registry.records[id];
-    if (!record)
-      throw new Error(`Record not found: ${id}`);
-    if (!isValidTransition(record.status, to)) {
-      throw new Error(`Invalid transition: ${record.status} -> ${to} for ${id}`);
+  return results;
+}
+function getSummaryFrontmatter(app, summaryPath) {
+  const file = app.vault.getAbstractFileByPath(summaryPath);
+  if (!file || !(file instanceof import_obsidian12.TFile))
+    return null;
+  const cache = app.metadataCache.getFileCache(file);
+  if (!cache?.frontmatter)
+    return null;
+  return {
+    schema_hash: cache.frontmatter.schema_hash || void 0,
+    content_hash: cache.frontmatter.content_hash || void 0,
+    compiled_at: cache.frontmatter.compiled_at || void 0
+  };
+}
+
+// src/knowledge/ontology.ts
+function extractFrontmatter(rawContent) {
+  if (!rawContent.startsWith("---"))
+    return null;
+  const endIdx = rawContent.indexOf("\n---", 3);
+  if (endIdx === -1)
+    return null;
+  const yamlBlock = rawContent.substring(4, endIdx);
+  try {
+    return parseSimpleYaml(yamlBlock);
+  } catch {
+    return null;
+  }
+}
+function parseSimpleYaml(yaml) {
+  const result = {};
+  const lines = yaml.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim() || line.trim().startsWith("#")) {
+      i++;
+      continue;
     }
-    record.status = to;
-    record.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-    record.error = error ?? null;
+    const kvMatch = line.match(/^(\w[\w_]*)\s*:\s*(.*)$/);
+    if (!kvMatch) {
+      i++;
+      continue;
+    }
+    const key = kvMatch[1];
+    const inlineVal = kvMatch[2].trim();
+    if (!inlineVal && i + 1 < lines.length && lines[i + 1].match(/^\s+-/)) {
+      const arr = [];
+      i++;
+      while (i < lines.length) {
+        const arrLine = lines[i];
+        const itemMatch = arrLine.match(/^\s+-\s+(\w[\w_]*)\s*:\s*"?(.*?)"?\s*$/);
+        if (itemMatch) {
+          const obj = {};
+          obj[itemMatch[1]] = itemMatch[2];
+          i++;
+          while (i < lines.length) {
+            const propLine = lines[i];
+            const propMatch = propLine.match(/^\s{4,}(\w[\w_]*)\s*:\s*"?(.*?)"?\s*$/);
+            if (propMatch && !propLine.match(/^\s+-/)) {
+              obj[propMatch[1]] = propMatch[2];
+              i++;
+            } else {
+              break;
+            }
+          }
+          arr.push(obj);
+        } else if (arrLine.match(/^\s+-\s+"?(.*?)"?\s*$/)) {
+          arr.push(arrLine.match(/^\s+-\s+"?(.*?)"?\s*$/)[1]);
+          i++;
+        } else {
+          break;
+        }
+      }
+      result[key] = arr;
+    } else {
+      let val = inlineVal.replace(/^"(.*)"$/, "$1");
+      if (val === "true")
+        val = true;
+      else if (val === "false")
+        val = false;
+      else if (/^\d+$/.test(val))
+        val = parseInt(val, 10);
+      result[key] = val;
+      i++;
+    }
   }
-  setSummaryPath(id, summaryPath) {
-    const record = this.registry.records[id];
-    if (!record)
-      throw new Error(`Record not found: ${id}`);
-    record.summary_path = summaryPath;
-    record.updated_at = (/* @__PURE__ */ new Date()).toISOString();
+  return result;
+}
+function parseOntologySchema(frontmatter) {
+  if (!frontmatter)
+    return null;
+  if (frontmatter.knowledge_artifact_type !== "ontology_schema")
+    return null;
+  const version = typeof frontmatter.version === "number" ? frontmatter.version : 1;
+  const categories = parseCategories(frontmatter.categories);
+  const entityTypes = parseEntityTypes(frontmatter.entity_types);
+  if (categories.length === 0 && entityTypes.length === 0)
+    return null;
+  return { version, categories, entity_types: entityTypes };
+}
+function parseCategories(raw) {
+  if (!Array.isArray(raw))
+    return [];
+  return raw.filter((c) => typeof c?.name === "string" && c.name.trim()).map((c) => ({
+    name: c.name.trim(),
+    description: typeof c.description === "string" ? c.description.trim() : ""
+  }));
+}
+function parseEntityTypes(raw) {
+  if (!Array.isArray(raw))
+    return [];
+  return raw.filter((e) => typeof e?.name === "string" && e.name.trim()).map((e) => ({
+    name: e.name.trim(),
+    description: typeof e.description === "string" ? e.description.trim() : ""
+  }));
+}
+function computeSchemaHash(rawContent) {
+  let hash = 5381;
+  for (let i = 0; i < rawContent.length; i++) {
+    hash = (hash << 5) + hash + rawContent.charCodeAt(i) >>> 0;
   }
-  getRecord(id) {
-    return this.registry.records[id] ?? null;
+  return hash.toString(16).padStart(8, "0");
+}
+function buildDiscoveryPrompt(stats) {
+  let prompt = `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u672C\u4F53\u5206\u6790\u5E08\u3002\u4EE5\u4E0B\u662F\u4ECE ${stats.totalCount} \u7BC7\u6587\u7AE0\u4E2D\u63D0\u53D6\u7684\u805A\u5408\u7EDF\u8BA1\uFF1A
+
+`;
+  prompt += "## \u9AD8\u9891\u4E3B\u9898\uFF08\u51FA\u73B0 3 \u6B21\u4EE5\u4E0A\uFF09\n";
+  for (const t of stats.topTopics) {
+    prompt += `- "${t.topic}"\uFF08${t.count} \u7BC7\uFF09
+`;
   }
-  findByPath(path) {
-    const id = this.pathIndex.get(path);
-    if (!id)
+  prompt += "\n## \u9AD8\u9891\u6982\u5FF5\uFF08\u51FA\u73B0 2 \u6B21\u4EE5\u4E0A\uFF09\n";
+  for (const c of stats.topConcepts) {
+    prompt += `- "${c.concept}"\uFF08${c.count} \u7BC7\uFF09
+`;
+  }
+  prompt += "\n## \u6838\u5FC3\u89C2\u70B9\u6837\u672C\uFF08\u6700\u8FD1 20 \u6761\uFF09\n";
+  for (const claim of stats.recentClaims.slice(0, 20)) {
+    prompt += `- ${claim}
+`;
+  }
+  prompt += `
+\u8BF7\u5206\u6790\u4EE5\u4E0A\u6570\u636E\uFF0C\u751F\u6210\u4E00\u4E2A\u77E5\u8BC6\u672C\u4F53 schema\uFF0C\u5305\u542B\uFF1A
+
+1. categories\uFF08\u77E5\u8BC6\u7C7B\u522B\uFF0C5-8 \u4E2A\uFF09\uFF1A\u6BCF\u4E2A\u7C7B\u522B\u6709 name \u548C description
+2. entity_types\uFF08\u5B9E\u4F53\u7C7B\u578B\uFF0C3-5 \u4E2A\uFF09\uFF1A\u6BCF\u4E2A\u7C7B\u578B\u6709 name \u548C description
+
+\u8981\u6C42\uFF1A
+- \u7C7B\u522B\u5E94\u8BE5\u80FD\u8986\u76D6\u4E0A\u8FF0\u4E3B\u9898\u548C\u89C2\u70B9\u7684 80% \u4EE5\u4E0A
+- \u7C7B\u522B\u4E4B\u95F4\u4E0D\u91CD\u53E0\uFF0C\u6BCF\u4E2A\u77E5\u8BC6\u6761\u76EE\u5E94\u8BE5\u53EA\u5C5E\u4E8E\u4E00\u4E2A\u7C7B\u522B
+- \u7528\u4E2D\u6587\u547D\u540D\uFF0Cdescription \u7528\u4E00\u53E5\u8BDD\u8BF4\u660E\u5224\u5B9A\u6807\u51C6
+
+\u4EE5 JSON \u683C\u5F0F\u8FD4\u56DE\uFF1A
+{"categories": [{"name": "...", "description": "..."}], "entity_types": [{"name": "...", "description": "..."}]}`;
+  return prompt;
+}
+function parseDiscoveryResponse(response) {
+  try {
+    const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
+    const parsed = JSON.parse(jsonStr);
+    const categories = parseCategories(parsed.categories);
+    const entityTypes = parseEntityTypes(parsed.entity_types);
+    if (categories.length === 0 && entityTypes.length === 0)
       return null;
-    return this.registry.records[id] ?? null;
+    return { version: 1, categories, entity_types: entityTypes };
+  } catch {
+    return null;
   }
-  getAllRecords() {
-    return { ...this.registry.records };
-  }
-  getByStatus(status) {
-    return Object.values(this.registry.records).filter((r) => r.status === status);
-  }
-  updatePath(id, newPath) {
-    const record = this.registry.records[id];
-    if (!record)
-      throw new Error(`Record not found: ${id}`);
-    this.pathIndex.delete(record.path);
-    record.path = newPath;
-    record.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-    this.pathIndex.set(newPath, id);
-  }
-  /** 插件重启时，processing 状态重置为 pending */
-  resetProcessingOnStartup() {
-    for (const record of Object.values(this.registry.records)) {
-      if (record.status === "processing") {
-        record.status = "pending";
-        record.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-      }
+}
+function buildOntologyFile(schema) {
+  let fm = "---\n";
+  fm += "knowledge_generated: true\n";
+  fm += "knowledge_artifact_type: ontology_schema\n";
+  fm += `version: ${schema.version}
+`;
+  if (schema.categories.length > 0) {
+    fm += "categories:\n";
+    for (const c of schema.categories) {
+      fm += `  - name: "${c.name.replace(/"/g, '\\"')}"
+`;
+      fm += `    description: "${c.description.replace(/"/g, '\\"')}"
+`;
     }
   }
-  /** 获取所有已完成编译且有 summary 的记录 */
-  getCompletedRecords() {
-    return Object.values(this.registry.records).filter((r) => r.status === "done" && r.summary_path);
+  if (schema.entity_types.length > 0) {
+    fm += "entity_types:\n";
+    for (const e of schema.entity_types) {
+      fm += `  - name: "${e.name.replace(/"/g, '\\"')}"
+`;
+      fm += `    description: "${e.description.replace(/"/g, '\\"')}"
+`;
+    }
   }
-};
+  fm += "---\n";
+  fm += "# Knowledge Ontology Schema\n\n";
+  fm += "\u6B64\u6587\u4EF6\u5B9A\u4E49\u77E5\u8BC6\u63D0\u53D6\u7684\u672C\u4F53\u6A21\u578B\u3002\u7F16\u8F91\u4E0A\u65B9 frontmatter \u4E2D\u7684 categories \u548C entity_types \u6765\u5B9A\u5236\u63D0\u53D6\u89C4\u5219\u3002\n";
+  fm += "\u7F16\u8BD1\u5668\u4F1A\u81EA\u52A8\u8BFB\u53D6\u6B64 schema \u5E76\u6309\u5B9A\u4E49\u7684\u7C7B\u522B\u63D0\u53D6\u77E5\u8BC6\u3002\n";
+  return fm;
+}
 
 // src/knowledge/compiler.ts
-var import_obsidian13 = require("obsidian");
-function buildCompilerPrompt(noteContent, notePath) {
-  return `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u7F16\u8BD1\u5668\u3002\u8BF7\u4ECE\u4EE5\u4E0B\u7B14\u8BB0\u4E2D\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002
+function stripFrontmatter(content) {
+  if (!content.startsWith("---"))
+    return content;
+  const endIdx = content.indexOf("---", 3);
+  if (endIdx === -1)
+    return content;
+  return content.substring(endIdx + 3).trimStart();
+}
+function computeContentHash(content) {
+  const body = stripFrontmatter(content);
+  return computeSchemaHash(body);
+}
+function chunkDocument(content, maxChunkSize = 25e3, overlap = 500) {
+  if (content.length <= 3e4)
+    return [content];
+  const body = stripFrontmatter(content);
+  let contextPrefix = "";
+  if (content.startsWith("---")) {
+    const endIdx = content.indexOf("---", 3);
+    if (endIdx !== -1) {
+      contextPrefix = content.substring(0, endIdx + 3) + "\n";
+    }
+  }
+  contextPrefix += body.substring(0, 200) + "\n...\n\n";
+  const sections = [];
+  const headingRegex = /^#{2,3}\s+/m;
+  let remaining = body;
+  while (remaining.length > 0) {
+    if (remaining.length <= maxChunkSize) {
+      sections.push(remaining);
+      break;
+    }
+    const searchArea = remaining.substring(0, maxChunkSize);
+    let splitIdx = -1;
+    const lines = searchArea.split("\n");
+    let charCount = 0;
+    for (let i = lines.length - 1; i > 0; i--) {
+      charCount += lines[i].length + 1;
+      if (headingRegex.test(lines[i])) {
+        splitIdx = searchArea.length - charCount;
+        break;
+      }
+    }
+    if (splitIdx <= 0) {
+      const lastPara = searchArea.lastIndexOf("\n\n");
+      splitIdx = lastPara > 0 ? lastPara : maxChunkSize;
+    }
+    sections.push(remaining.substring(0, splitIdx));
+    const overlapStart = Math.max(0, splitIdx - overlap);
+    remaining = remaining.substring(overlapStart);
+  }
+  const prefixLen = contextPrefix.length;
+  const effectiveMax = maxChunkSize - prefixLen;
+  return sections.map((section, i) => {
+    const trimmed = section.length > effectiveMax ? section.substring(0, effectiveMax) : section;
+    return contextPrefix + trimmed;
+  });
+}
+function mergeExtractions(extractions) {
+  if (extractions.length === 0) {
+    return {
+      title: "",
+      author: "",
+      source_url: "",
+      created_at: "",
+      topics: [],
+      concepts: [],
+      key_claims: [],
+      review_flags: ["all_chunks_empty"]
+    };
+  }
+  if (extractions.length === 1)
+    return extractions[0];
+  const first = (field) => extractions.find((e) => {
+    const v = e[field];
+    return typeof v === "string" && v.length > 0;
+  })?.[field] || "";
+  const topicMap = /* @__PURE__ */ new Map();
+  for (const e of extractions) {
+    for (const t of e.topics) {
+      if (!topicMap.has(t.slug))
+        topicMap.set(t.slug, t);
+    }
+  }
+  const conceptSet = /* @__PURE__ */ new Set();
+  for (const e of extractions) {
+    for (const c of e.concepts)
+      conceptSet.add(c);
+  }
+  const claimSet = /* @__PURE__ */ new Set();
+  const claims = [];
+  for (const e of extractions) {
+    for (const c of e.key_claims) {
+      if (!claimSet.has(c)) {
+        claimSet.add(c);
+        claims.push(c);
+      }
+    }
+  }
+  const entityMap = /* @__PURE__ */ new Map();
+  for (const e of extractions) {
+    for (const ent of e.entities || []) {
+      const key = `${ent.name}::${ent.type}`;
+      const existing = entityMap.get(key);
+      if (!existing || ent.description.length > existing.description.length) {
+        entityMap.set(key, ent);
+      }
+    }
+  }
+  const catMap = /* @__PURE__ */ new Map();
+  for (const e of extractions) {
+    for (const ck of e.categorized_knowledge || []) {
+      if (!catMap.has(ck.category))
+        catMap.set(ck.category, /* @__PURE__ */ new Set());
+      for (const item of ck.items)
+        catMap.get(ck.category).add(item);
+    }
+  }
+  const categorized_knowledge = Array.from(catMap.entries()).map(([category, items]) => ({
+    category,
+    items: Array.from(items)
+  }));
+  const flagSet = /* @__PURE__ */ new Set();
+  for (const e of extractions) {
+    for (const f of e.review_flags)
+      flagSet.add(f);
+  }
+  flagSet.add(`compiled_from_${extractions.length}_chunks`);
+  return {
+    title: first("title"),
+    author: first("author"),
+    source_url: first("source_url"),
+    created_at: first("created_at"),
+    topics: Array.from(topicMap.values()),
+    concepts: Array.from(conceptSet),
+    key_claims: claims,
+    review_flags: Array.from(flagSet),
+    categorized_knowledge: categorized_knowledge.length > 0 ? categorized_knowledge : void 0,
+    entities: entityMap.size > 0 ? Array.from(entityMap.values()) : void 0
+  };
+}
+function buildCompilerPrompt(noteContent, notePath, ontologySchema) {
+  let prompt = `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u7F16\u8BD1\u5668\u3002\u8BF7\u4ECE\u4EE5\u4E0B\u7B14\u8BB0\u4E2D\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002
 
 \u7B14\u8BB0\u8DEF\u5F84: ${notePath}
 
 \u7B14\u8BB0\u5185\u5BB9:
 ---
-${noteContent.substring(0, 3e4)}
+${noteContent}
 ---
 
 \u8BF7\u63D0\u53D6\u4EE5\u4E0B\u5B57\u6BB5\uFF0C\u4EE5 JSON \u683C\u5F0F\u8FD4\u56DE\uFF08\u4E0D\u8981\u6DFB\u52A0\u4EFB\u4F55\u5176\u4ED6\u6587\u5B57\uFF09\uFF1A
@@ -7733,6 +7754,35 @@ ${noteContent.substring(0, 3e4)}
 - \u5982\u679C\u65E0\u6CD5\u786E\u5B9A\u67D0\u4E2A\u5B57\u6BB5\uFF0C\u7559\u7A7A\u5B57\u7B26\u4E32\u6216\u7A7A\u6570\u7EC4
 - review_flags \u7528\u4E8E\u6807\u8BB0\u4F60\u4E0D\u786E\u5B9A\u7684\u63D0\u53D6\u7ED3\u679C
 - \u4E0D\u8981\u7F16\u9020\u4FE1\u606F\uFF0C\u53EA\u63D0\u53D6\u7B14\u8BB0\u4E2D\u5B9E\u9645\u5B58\u5728\u7684\u5185\u5BB9`;
+  if (ontologySchema) {
+    prompt += "\n\n## \u672C\u4F53\u6A21\u578B\u63D0\u53D6\u8981\u6C42\n\n\u8BF7\u989D\u5916\u6309\u4EE5\u4E0B\u77E5\u8BC6\u7C7B\u522B\u5BF9\u63D0\u53D6\u5185\u5BB9\u8FDB\u884C\u5206\u7C7B\uFF1A\n\n";
+    for (const c of ontologySchema.categories) {
+      prompt += `- "${c.name}"\uFF1A${c.description}
+`;
+    }
+    if (ontologySchema.entity_types.length > 0) {
+      prompt += "\n\u8BF7\u989D\u5916\u8BC6\u522B\u4EE5\u4E0B\u7C7B\u578B\u7684\u5B9E\u4F53\uFF1A\n\n";
+      for (const e of ontologySchema.entity_types) {
+        prompt += `- "${e.name}"\uFF1A${e.description}
+`;
+      }
+    }
+    prompt += `
+\u5728 JSON \u8F93\u51FA\u4E2D\u65B0\u589E\u4EE5\u4E0B\u5B57\u6BB5\uFF1A
+
+"categorized_knowledge": [
+  {"category": "\u7C7B\u522B\u540D", "items": ["\u8BE5\u7C7B\u522B\u4E0B\u7684\u6761\u76EE1", "\u6761\u76EE2"]}
+],
+"entities": [
+  {"name": "\u5B9E\u4F53\u540D", "type": "\u5B9E\u4F53\u7C7B\u578B", "description": "\u4E00\u53E5\u8BDD\u63CF\u8FF0"}
+]
+
+\u89C4\u5219\uFF1A
+- \u6BCF\u4E2A item \u53EA\u5F52\u5165\u6700\u5339\u914D\u7684\u4E00\u4E2A category\uFF0C\u4E0D\u8981\u91CD\u590D\u5F52\u7C7B
+- \u5982\u679C\u6587\u7AE0\u5185\u5BB9\u4E0D\u6D89\u53CA\u67D0\u4E2A category\uFF0C\u8BE5 category \u7684 items \u4E3A\u7A7A\u6570\u7EC4
+- \u5B9E\u4F53\u540D\u4F7F\u7528\u6587\u7AE0\u4E2D\u6700\u5E38\u89C1\u7684\u79F0\u547C\u5F62\u5F0F`;
+  }
+  return prompt;
 }
 function parseCompilerResponse(response) {
   try {
@@ -7745,6 +7795,27 @@ function parseCompilerResponse(response) {
       slug: normalizeTopicSlug(t.slug || t.label || ""),
       label: t.label || t.slug || ""
     })).filter((t) => t.slug.length > 0);
+    const reviewFlags = Array.isArray(parsed.review_flags) ? parsed.review_flags : [];
+    let categorized_knowledge;
+    let entities;
+    try {
+      if (Array.isArray(parsed.categorized_knowledge)) {
+        categorized_knowledge = parsed.categorized_knowledge.filter((ck) => typeof ck?.category === "string" && Array.isArray(ck?.items)).map((ck) => ({
+          category: ck.category,
+          items: ck.items.filter((i) => typeof i === "string")
+        }));
+      }
+      if (Array.isArray(parsed.entities)) {
+        entities = parsed.entities.filter((e) => typeof e?.name === "string" && typeof e?.type === "string").map((e) => ({
+          name: e.name,
+          type: e.type,
+          description: typeof e.description === "string" ? e.description : ""
+        }));
+      }
+    } catch {
+      reviewFlags.push("ontology_extraction_failed");
+      console.warn("[parseCompilerResponse] Ontology fields parse failed, base fields preserved");
+    }
     return {
       title: parsed.title || "",
       author: parsed.author || "",
@@ -7753,13 +7824,15 @@ function parseCompilerResponse(response) {
       topics,
       concepts: Array.isArray(parsed.concepts) ? parsed.concepts : [],
       key_claims: Array.isArray(parsed.key_claims) ? parsed.key_claims : [],
-      review_flags: Array.isArray(parsed.review_flags) ? parsed.review_flags : []
+      review_flags: reviewFlags,
+      categorized_knowledge,
+      entities
     };
   } catch {
     return null;
   }
 }
-function buildSummaryMarkdown(sourceId, extraction, sourcePath) {
+function buildSummaryMarkdown(sourceId, extraction, sourcePath, schemaHash, contentHash) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   let fm = "---\n";
   fm += "knowledge_generated: true\n";
@@ -7777,6 +7850,12 @@ function buildSummaryMarkdown(sourceId, extraction, sourcePath) {
     fm += `created_at: "${extraction.created_at}"
 `;
   fm += `compiled_at: "${now}"
+`;
+  if (schemaHash)
+    fm += `schema_hash: "${schemaHash}"
+`;
+  if (contentHash)
+    fm += `content_hash: "${contentHash}"
 `;
   if (extraction.topics.length > 0) {
     fm += "topics:\n";
@@ -7802,6 +7881,26 @@ function buildSummaryMarkdown(sourceId, extraction, sourcePath) {
   } else {
     fm += "review_flags: []\n";
   }
+  if (extraction.categorized_knowledge && extraction.categorized_knowledge.length > 0) {
+    fm += "categorized_knowledge:\n";
+    for (const ck of extraction.categorized_knowledge) {
+      fm += `  - category: "${ck.category.replace(/"/g, '\\"')}"
+`;
+      fm += `    items: ${JSON.stringify(ck.items)}
+`;
+    }
+  }
+  if (extraction.entities && extraction.entities.length > 0) {
+    fm += "entities:\n";
+    for (const e of extraction.entities) {
+      fm += `  - name: "${e.name.replace(/"/g, '\\"')}"
+`;
+      fm += `    type: "${e.type.replace(/"/g, '\\"')}"
+`;
+      fm += `    description: "${e.description.replace(/"/g, '\\"')}"
+`;
+    }
+  }
   fm += "---\n";
   let body = `# ${extraction.title}
 
@@ -7824,6 +7923,25 @@ function buildSummaryMarkdown(sourceId, extraction, sourcePath) {
   } else {
     body += "\uFF08\u65E0\uFF09\n";
   }
+  if (extraction.categorized_knowledge && extraction.categorized_knowledge.length > 0) {
+    body += "\n## \u77E5\u8BC6\u5206\u7C7B\n\n";
+    for (const ck of extraction.categorized_knowledge) {
+      if (ck.items.length > 0) {
+        body += `### ${ck.category}
+
+`;
+        body += ck.items.map((i) => `- ${i}`).join("\n") + "\n\n";
+      }
+    }
+  }
+  if (extraction.entities && extraction.entities.length > 0) {
+    body += "\n## \u5B9E\u4F53\n\n";
+    for (const e of extraction.entities) {
+      body += `- **${e.name}**\uFF08${e.type}\uFF09\uFF1A${e.description}
+`;
+    }
+    body += "\n";
+  }
   body += "\n## \u539F\u59CB\u6765\u6E90\n\n";
   if (sourcePath) {
     body += `[[${sourcePath}]]
@@ -7834,40 +7952,82 @@ function buildSummaryMarkdown(sourceId, extraction, sourcePath) {
   return fm + body;
 }
 var KnowledgeCompiler = class {
-  constructor(app, registry, generateFn, wikiFolder) {
+  constructor(app, generateFn, wikiFolder) {
     this.app = app;
-    this.registry = registry;
     this.generateFn = generateFn;
     this.wikiFolder = wikiFolder;
   }
   /**
    * 编译单篇笔记
-   * @returns summary 文件路径，或 null（失败时）
+   * 短文章（<= 30000 字符）走单次 AI 调用
+   * 长文章走 Map-Reduce：分块并行提取 + 纯函数合并
+   * @param schema 可选的 ontology schema，传入时注入到 prompt
+   * @param schemaHash 可选的 schema 内容 hash，写入 summary frontmatter
+   * @param concurrency Map 阶段并行度（默认 3）
    */
-  async compileNote(sourceId) {
-    const record = this.registry.getRecord(sourceId);
-    if (!record)
-      throw new Error(`Record not found: ${sourceId}`);
-    const file = this.app.vault.getAbstractFileByPath(record.path);
-    if (!file || !(file instanceof import_obsidian13.TFile)) {
-      this.registry.transition(sourceId, "missing_source");
-      await this.registry.save();
-      return null;
-    }
-    this.registry.transition(sourceId, "processing");
-    await this.registry.save();
+  async compileNote(file, schema, schemaHash, concurrency = 3) {
+    const sourceId = await ensureSourceId(this.app, file);
+    await setKnowledgeStatus(this.app, file, "processing");
     try {
       const content = await this.app.vault.read(file);
-      const prompt = buildCompilerPrompt(content, record.path);
-      const response = await this.generateFn(prompt);
-      const extraction = parseCompilerResponse(response);
+      const contentHash = computeContentHash(content);
+      let extraction;
+      if (content.length <= 3e4) {
+        const prompt = buildCompilerPrompt(content, file.path, schema);
+        const response = await this.generateFn(prompt);
+        extraction = parseCompilerResponse(response);
+      } else {
+        const chunks = chunkDocument(content);
+        const allResults = [];
+        for (let i = 0; i < chunks.length; i += concurrency) {
+          const batch = chunks.slice(i, i + concurrency);
+          const batchResults = await Promise.allSettled(
+            batch.map(async (chunk, batchIdx) => {
+              const chunkIdx = i + batchIdx;
+              const chunkPrompt = buildCompilerPrompt(chunk, file.path, schema);
+              const prefix = `[\u6CE8\u610F\uFF1A\u8FD9\u662F\u6587\u6863\u7684\u7B2C ${chunkIdx + 1}/${chunks.length} \u5757\uFF0C\u8BF7\u53EA\u63D0\u53D6\u672C\u5757\u4E2D\u7684\u4FE1\u606F]
+
+`;
+              const response = await this.generateFn(prefix + chunkPrompt);
+              return parseCompilerResponse(response);
+            })
+          );
+          allResults.push(...batchResults);
+        }
+        const extractions = [];
+        const failedChunks = [];
+        allResults.forEach((r, idx) => {
+          if (r.status === "fulfilled" && r.value) {
+            extractions.push(r.value);
+          } else {
+            failedChunks.push(idx);
+          }
+        });
+        if (extractions.length === 0) {
+          await setKnowledgeStatus(this.app, file, "failed", {
+            error: `All ${chunks.length} chunks failed extraction`
+          });
+          return null;
+        }
+        extraction = mergeExtractions(extractions);
+        for (const idx of failedChunks) {
+          extraction.review_flags.push(`chunk_${idx}_extraction_failed`);
+        }
+      }
       if (!extraction) {
-        this.registry.transition(sourceId, "failed", "Failed to parse AI response");
-        await this.registry.save();
+        await setKnowledgeStatus(this.app, file, "failed", {
+          error: "Failed to parse AI response"
+        });
         return null;
       }
       const summaryPath = `${this.wikiFolder}/Articles/${sourceId}.md`;
-      const summaryContent = buildSummaryMarkdown(sourceId, extraction, record.path);
+      const summaryContent = buildSummaryMarkdown(
+        sourceId,
+        extraction,
+        file.path,
+        schemaHash,
+        contentHash
+      );
       const articlesDir = `${this.wikiFolder}/Articles`;
       if (!this.app.vault.getAbstractFileByPath(articlesDir)) {
         await this.app.vault.createFolder(articlesDir);
@@ -7876,43 +8036,42 @@ var KnowledgeCompiler = class {
       if (existingFile && existingFile instanceof import_obsidian13.TFile) {
         const existingContent = await this.app.vault.read(existingFile);
         if (!existingContent.includes("knowledge_generated: true")) {
-          this.registry.transition(sourceId, "failed", "Target file exists and is not a generated file");
-          await this.registry.save();
+          await setKnowledgeStatus(this.app, file, "failed", {
+            error: "Target file exists and is not a generated file"
+          });
           return null;
         }
         await this.app.vault.modify(existingFile, summaryContent);
       } else {
         await this.app.vault.create(summaryPath, summaryContent);
       }
-      this.registry.setSummaryPath(sourceId, summaryPath);
-      this.registry.transition(sourceId, "done");
-      await this.registry.save();
+      await setKnowledgeStatus(this.app, file, "done", {
+        source_id: sourceId,
+        compiled_at: (/* @__PURE__ */ new Date()).toISOString(),
+        summary: summaryPath
+      });
       return summaryPath;
     } catch (e) {
       try {
-        this.registry.transition(sourceId, "failed", e.message);
+        await setKnowledgeStatus(this.app, file, "failed", { error: e.message });
       } catch {
       }
-      await this.registry.save();
       return null;
     }
   }
   /**
-   * 批量编译所有 pending 和 stale 项
+   * 批量编译所有 pending 项
+   * @param schema 可选的 ontology schema，整个 batch 使用同一份
+   * @param schemaHash 可选的 schema 内容 hash
    */
-  async compileAllPending(maxBatch = 50, onProgress) {
-    const staleRecords = this.registry.getByStatus("stale");
-    for (const r of staleRecords) {
-      this.registry.transition(r.id, "pending");
-    }
-    await this.registry.save();
-    const pendingRecords = this.registry.getByStatus("pending").slice(0, maxBatch);
+  async compileAllPending(maxBatch = 50, onProgress, schema, schemaHash, concurrency) {
+    const pendingFiles = getFilesByKnowledgeStatus(this.app, "pending").slice(0, maxBatch);
     let success = 0;
     let failed = 0;
-    for (let i = 0; i < pendingRecords.length; i++) {
-      const record = pendingRecords[i];
-      onProgress?.(i + 1, pendingRecords.length, record.id);
-      const result = await this.compileNote(record.id);
+    for (let i = 0; i < pendingFiles.length; i++) {
+      const file = pendingFiles[i];
+      onProgress?.(i + 1, pendingFiles.length, file.path);
+      const result = await this.compileNote(file, schema, schemaHash, concurrency);
       if (result) {
         success++;
       } else {
@@ -7960,7 +8119,7 @@ views:
 `;
 }
 var WikiIndexer = class {
-  constructor(app, registry, metadataIndex, wikiFolder = DEFAULT_WIKI_FOLDER) {
+  constructor(app, metadataIndex, wikiFolder = DEFAULT_WIKI_FOLDER) {
     this.app = app;
     this.metadataIndex = metadataIndex;
     this.wikiFolder = wikiFolder;
@@ -8034,19 +8193,19 @@ var WikiIndexer = class {
 
 // src/knowledge/linter.ts
 var import_obsidian15 = require("obsidian");
-function checkMissingSummaries(records, existingFiles) {
-  return records.filter((r) => r.status === "done" && r.summary_path && !existingFiles.has(r.summary_path)).map((r) => ({
+function checkMissingSummaries(doneFiles, existingFiles) {
+  return doneFiles.filter((f) => f.summaryPath && !existingFiles.has(f.summaryPath)).map((f) => ({
     type: "missing_summary",
     severity: "error",
-    recordId: r.id,
-    message: `Summary file missing for "${r.path}" (expected: ${r.summary_path})`
+    filePath: f.path,
+    message: `Summary file missing for "${f.path}" (expected: ${f.summaryPath})`
   }));
 }
 function checkLowConfidenceExtractions(summaries) {
   return summaries.filter((s) => s.reviewFlags.length > 0).map((s) => ({
     type: "low_confidence",
     severity: "warning",
-    recordId: s.sourceId,
+    filePath: s.path,
     message: `Low confidence extraction in "${s.title}": ${s.reviewFlags.join(", ")}`
   }));
 }
@@ -8054,7 +8213,7 @@ function checkOrphanConcepts(conceptMap) {
   return Object.entries(conceptMap).filter(([_, sources]) => sources.length === 1).map(([concept, sources]) => ({
     type: "orphan_concept",
     severity: "info",
-    recordId: sources[0],
+    filePath: sources[0],
     message: `Orphan concept "${concept}" only appears in one summary`
   }));
 }
@@ -8081,7 +8240,7 @@ generated_at: "${now}"
   if (errors.length > 0) {
     md += "## Errors\n\n";
     for (const e of errors) {
-      md += `- **[${e.type}]** ${e.message}${e.recordId ? ` (${e.recordId})` : ""}
+      md += `- **[${e.type}]** ${e.message}
 `;
     }
     md += "\n";
@@ -8089,7 +8248,7 @@ generated_at: "${now}"
   if (warnings.length > 0) {
     md += "## Warnings\n\n";
     for (const w of warnings) {
-      md += `- **[${w.type}]** ${w.message}${w.recordId ? ` (${w.recordId})` : ""}
+      md += `- **[${w.type}]** ${w.message}
 `;
     }
     md += "\n";
@@ -8097,7 +8256,7 @@ generated_at: "${now}"
   if (infos.length > 0) {
     md += "## Info\n\n";
     for (const i of infos) {
-      md += `- **[${i.type}]** ${i.message}${i.recordId ? ` (${i.recordId})` : ""}
+      md += `- **[${i.type}]** ${i.message}
 `;
     }
     md += "\n";
@@ -8105,31 +8264,33 @@ generated_at: "${now}"
   return md;
 }
 var KnowledgeLinter = class {
-  constructor(app, registry, wikiFolder) {
+  constructor(app, wikiFolder) {
     this.app = app;
-    this.registry = registry;
     this.wikiFolder = wikiFolder;
   }
   async runLint() {
     const allIssues = [];
-    const doneRecords = this.registry.getByStatus("done");
-    const existingFiles = new Set(
-      this.app.vault.getFiles().map((f) => f.path)
-    );
-    allIssues.push(...checkMissingSummaries(doneRecords, existingFiles));
+    const existingFiles = new Set(this.app.vault.getFiles().map((f) => f.path));
+    const doneFiles = getFilesByKnowledgeStatus(this.app, "done");
+    const doneInfo = doneFiles.map((f) => {
+      const cache = this.app.metadataCache.getFileCache(f);
+      return {
+        path: f.path,
+        summaryPath: cache?.frontmatter?.knowledge_summary ?? null
+      };
+    });
+    allIssues.push(...checkMissingSummaries(doneInfo, existingFiles));
     const summaries = [];
     const conceptMap = {};
-    for (const record of doneRecords) {
-      if (!record.summary_path)
-        continue;
-      const file = this.app.vault.getAbstractFileByPath(record.summary_path);
-      if (!file || !(file instanceof import_obsidian15.TFile))
-        continue;
+    const wikiFiles = this.app.vault.getFiles().filter(
+      (f) => f.path.startsWith(this.wikiFolder + "/Articles/") && f.extension === "md"
+    );
+    for (const file of wikiFiles) {
       const cache = this.app.metadataCache.getFileCache(file);
       const fm = cache?.frontmatter;
-      if (!fm)
+      if (!fm || !fm.knowledge_generated)
         continue;
-      const title = fm.title || record.path;
+      const title = fm.title || file.basename;
       let reviewFlags = [];
       if (Array.isArray(fm.review_flags)) {
         reviewFlags = fm.review_flags;
@@ -8139,7 +8300,7 @@ var KnowledgeLinter = class {
         } catch {
         }
       }
-      summaries.push({ sourceId: record.id, title, reviewFlags });
+      summaries.push({ path: file.path, title, reviewFlags });
       let concepts = [];
       if (Array.isArray(fm.concepts)) {
         concepts = fm.concepts;
@@ -8152,22 +8313,11 @@ var KnowledgeLinter = class {
       for (const c of concepts) {
         if (!conceptMap[c])
           conceptMap[c] = [];
-        conceptMap[c].push(record.id);
+        conceptMap[c].push(file.path);
       }
     }
     allIssues.push(...checkLowConfidenceExtractions(summaries));
     allIssues.push(...checkOrphanConcepts(conceptMap));
-    const missingRecords = this.registry.getByStatus("missing_source");
-    for (const r of missingRecords) {
-      if (r.summary_path && existingFiles.has(r.summary_path)) {
-        allIssues.push({
-          type: "stale_missing_source",
-          severity: "warning",
-          recordId: r.id,
-          message: `Source deleted but summary still exists: ${r.summary_path}`
-        });
-      }
-    }
     return allIssues;
   }
   async generateReport() {
@@ -8207,66 +8357,68 @@ function shouldEnqueueFile(filePath, watchedFolders, wikiFolder = DEFAULT_WIKI_F
   return isInWatchedFolder(filePath, watchedFolders);
 }
 var KnowledgeWatcher = class {
-  constructor(app, registry, watchedFolders, wikiFolder = DEFAULT_WIKI_FOLDER, debounceMs = 6e4) {
-    this.registry = registry;
+  constructor(app, watchedFolders, wikiFolder = DEFAULT_WIKI_FOLDER, debounceMs = 6e4) {
+    this.app = app;
     this.watchedFolders = watchedFolders;
     this.wikiFolder = wikiFolder;
     this.debounceMs = debounceMs;
   }
   debouncedHandlers = /* @__PURE__ */ new Map();
+  _onCompileNeeded = null;
+  /** 正在写 frontmatter 的文件路径，用于过滤自触发的 modify 事件 */
+  writingPaths = /* @__PURE__ */ new Set();
+  /** 设置自动编译回调 */
+  setOnCompileNeeded(cb) {
+    this._onCompileNeeded = cb;
+  }
+  /** 外部主动触发编译（如启动时检测到 pending 项） */
+  triggerCompile() {
+    this._onCompileNeeded?.();
+  }
+  /** 新文件创建：标记 pending + 生成 source_id */
   async onFileCreate(file) {
     if (!shouldEnqueueFile(file.path, this.watchedFolders, this.wikiFolder))
       return;
-    const existing = this.registry.findByPath(file.path);
-    if (existing)
+    if (this.writingPaths.has(file.path))
       return;
-    this.registry.register(file.path);
-    await this.registry.save();
-    console.log(`[KnowledgeWatcher] Registered new file: ${file.path}`);
+    const status = getKnowledgeStatus(this.app, file);
+    if (status)
+      return;
+    this.writingPaths.add(file.path);
+    try {
+      await ensureSourceId(this.app, file);
+      await setKnowledgeStatus(this.app, file, "pending");
+      console.log(`[KnowledgeWatcher] Registered new file: ${file.path}`);
+      this._onCompileNeeded?.();
+    } finally {
+      setTimeout(() => this.writingPaths.delete(file.path), 500);
+    }
   }
+  /** 文件修改：已完成的标记回 pending（debounce） */
   onFileModify(file) {
     if (!shouldEnqueueFile(file.path, this.watchedFolders, this.wikiFolder))
+      return;
+    if (this.writingPaths.has(file.path))
       return;
     const key = file.path;
     if (this.debouncedHandlers.has(key))
       return;
     const handler = (0, import_obsidian16.debounce)(async () => {
-      const record = this.registry.findByPath(file.path);
-      if (record && record.status === "done") {
-        this.registry.transition(record.id, "stale");
-        await this.registry.save();
-        console.log(`[KnowledgeWatcher] Marked stale: ${file.path}`);
+      const status = getKnowledgeStatus(this.app, file);
+      if (status === "done") {
+        this.writingPaths.add(file.path);
+        try {
+          await setKnowledgeStatus(this.app, file, "pending");
+          console.log(`[KnowledgeWatcher] Marked pending (was done): ${file.path}`);
+          this._onCompileNeeded?.();
+        } finally {
+          setTimeout(() => this.writingPaths.delete(file.path), 500);
+        }
       }
       this.debouncedHandlers.delete(key);
     }, this.debounceMs, true);
     this.debouncedHandlers.set(key, handler);
     handler();
-  }
-  async onFileDelete(filePath) {
-    const record = this.registry.findByPath(filePath);
-    if (!record)
-      return;
-    if (record.status !== "missing_source") {
-      try {
-        this.registry.transition(record.id, "missing_source");
-        await this.registry.save();
-        console.log(`[KnowledgeWatcher] Marked missing_source: ${filePath}`);
-      } catch {
-      }
-    }
-  }
-  async onFileRename(oldPath, newPath) {
-    const record = this.registry.findByPath(oldPath);
-    if (!record) {
-      if (shouldEnqueueFile(newPath, this.watchedFolders, this.wikiFolder)) {
-        this.registry.register(newPath);
-        await this.registry.save();
-      }
-      return;
-    }
-    this.registry.updatePath(record.id, newPath);
-    await this.registry.save();
-    console.log(`[KnowledgeWatcher] Updated path: ${oldPath} -> ${newPath}`);
   }
   updateWatchedFolders(folders) {
     this.watchedFolders = folders;
@@ -8592,31 +8744,52 @@ var MetadataIndex = class {
 
 // src/knowledge/runtime.ts
 var KnowledgeRuntime = class {
-  constructor(app, settings, modelService, toolManager) {
+  constructor(app, settings, modelService) {
     this.app = app;
     this.settings = settings;
     const wikiFolder = settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
-    this.registry = new KnowledgeRegistryManager(app.vault.adapter);
+    this.modelService = modelService;
     this.compiler = new KnowledgeCompiler(
       app,
-      this.registry,
       (prompt) => modelService.generate(prompt, "\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u7F16\u8BD1\u5668\uFF0C\u8BF7\u4E25\u683C\u6309\u7167\u8981\u6C42\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002"),
       wikiFolder
     );
     this.metadataIndex = new MetadataIndex(app, wikiFolder);
-    this.indexer = new WikiIndexer(app, this.registry, this.metadataIndex, wikiFolder);
-    this.linter = new KnowledgeLinter(app, this.registry, wikiFolder);
+    this.indexer = new WikiIndexer(app, this.metadataIndex, wikiFolder);
+    this.linter = new KnowledgeLinter(app, wikiFolder);
     this.watcher = new KnowledgeWatcher(
       app,
-      this.registry,
       settings.knowledgeSourceFolders || [],
       wikiFolder
     );
+    const debouncedAutoCompile = (0, import_obsidian17.debounce)(async () => {
+      if (!this.settings.knowledgeAutoCompile)
+        return;
+      if (this.autoCompiling)
+        return;
+      this.autoCompiling = true;
+      try {
+        const maxBatch = this.settings.knowledgeMaxCompileBatch || 50;
+        const ontology = await this.loadOntologySchema();
+        console.log(`[KnowledgeRuntime] Auto-compiling pending notes...${ontology ? " (with ontology schema)" : ""}`);
+        const result = await this.compiler.compileAllPending(maxBatch, void 0, ontology?.schema, ontology?.hash);
+        if (result.success > 0) {
+          await this.indexer.rebuildIndex();
+          new import_obsidian17.Notice(`Auto-compiled: ${result.success} notes`);
+        }
+        if (result.failed > 0) {
+          console.warn(`[KnowledgeRuntime] Auto-compile: ${result.failed} failed`);
+        }
+      } catch (e) {
+        console.error(`[KnowledgeRuntime] Auto-compile error:`, e);
+      } finally {
+        this.autoCompiling = false;
+      }
+    }, 5e3, true);
+    this.watcher.setOnCompileNeeded(debouncedAutoCompile);
     this.queryExecutor = new QueryKnowledgeExecutor(this.metadataIndex);
     this.fileBackExecutor = new FileBackExecutor(app, this.indexer, wikiFolder);
-    toolManager.setKnowledgeExecutors(this.queryExecutor, this.fileBackExecutor);
   }
-  registry;
   compiler;
   indexer;
   linter;
@@ -8624,23 +8797,145 @@ var KnowledgeRuntime = class {
   queryExecutor;
   fileBackExecutor;
   metadataIndex;
+  modelService;
+  /** 暴露给 SkillRegistry 注册 knowledge 工具 */
+  getQueryExecutor() {
+    return this.queryExecutor;
+  }
+  getFileBackExecutor() {
+    return this.fileBackExecutor;
+  }
+  autoCompiling = false;
   async initialize() {
-    await this.registry.load();
-    this.registry.resetProcessingOnStartup();
-    await this.registry.save();
     if (this.app.metadataCache.initialized) {
       this.metadataIndex.rebuild();
+      await this.onMetadataReady();
     } else {
-      const ref = this.app.metadataCache.on("resolved", () => {
+      const ref = this.app.metadataCache.on("resolved", async () => {
         this.metadataIndex.rebuild();
         this.app.metadataCache.offref(ref);
         console.log(`[KnowledgeRuntime] MetadataCache resolved, ${this.metadataIndex.size} articles indexed`);
+        await this.onMetadataReady();
       });
     }
+    await this.migrateFromRegistry();
     await this.indexer.migrateLegacyIndex();
     this.indexer.checkBasesPlugin();
     await this.indexer.ensureBaseFile();
-    console.log(`[KnowledgeRuntime] Initialized, ${this.metadataIndex.size} articles indexed`);
+    console.log(`[KnowledgeRuntime] Initialized`);
+  }
+  /** metadataCache 就绪后：扫描未注册文件 + 重置 processing + 触发自动编译 */
+  async onMetadataReady() {
+    const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
+    const sourceFolders = this.settings.knowledgeSourceFolders || [];
+    const stuckFiles = getFilesByKnowledgeStatus(this.app, "processing");
+    for (const f of stuckFiles) {
+      await setKnowledgeStatus(this.app, f, "pending");
+    }
+    if (stuckFiles.length > 0) {
+      console.log(`[KnowledgeRuntime] Reset ${stuckFiles.length} stuck processing files`);
+    }
+    const staleCount = await this.detectStaleFiles(wikiFolder);
+    if (staleCount > 0) {
+      console.log(`[KnowledgeRuntime] Detected ${staleCount} stale files for recompilation`);
+    }
+    await this.discoverOntology();
+    const unregistered = getUnregisteredFiles(this.app, sourceFolders, wikiFolder);
+    for (const file of unregistered) {
+      await ensureSourceId(this.app, file);
+      await setKnowledgeStatus(this.app, file, "pending");
+    }
+    if (unregistered.length > 0) {
+      console.log(`[KnowledgeRuntime] Startup scan: registered ${unregistered.length} new files`);
+    }
+    const existingPending = getFilesByKnowledgeStatus(this.app, "pending").length;
+    const totalPending = Math.max(existingPending, unregistered.length + stuckFiles.length);
+    if (this.settings.knowledgeAutoCompile && totalPending > 0) {
+      console.log(`[KnowledgeRuntime] ${totalPending} pending notes, scheduling auto-compile...`);
+      setTimeout(() => this.watcher.triggerCompile(), 1e4);
+    }
+  }
+  /**
+   * 检测过期文件：schema 变更或内容变更时标记为 pending
+   * 快速路径：先比较 ontology hash，没变则只检查 mtime 近期变化的文件
+   */
+  async detectStaleFiles(wikiFolder) {
+    const doneFiles = getFilesByKnowledgeStatus(this.app, "done");
+    if (doneFiles.length === 0)
+      return 0;
+    const schemaFile = this.app.vault.getAbstractFileByPath(
+      `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`
+    );
+    let currentSchemaHash;
+    if (schemaFile && schemaFile instanceof import_obsidian17.TFile) {
+      const schemaContent = await this.app.vault.read(schemaFile);
+      currentSchemaHash = computeSchemaHash(schemaContent);
+    }
+    let staleCount = 0;
+    for (const file of doneFiles) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      const summaryPath = cache?.frontmatter?.knowledge_summary;
+      if (!summaryPath)
+        continue;
+      const summaryFm = getSummaryFrontmatter(this.app, summaryPath);
+      if (!summaryFm)
+        continue;
+      let isStale = false;
+      if (currentSchemaHash && summaryFm.schema_hash !== currentSchemaHash) {
+        isStale = true;
+      }
+      if (!isStale && summaryFm.content_hash) {
+        try {
+          const content = await this.app.vault.read(file);
+          const currentHash = computeContentHash(content);
+          if (currentHash !== summaryFm.content_hash) {
+            isStale = true;
+          }
+        } catch {
+        }
+      }
+      if (isStale) {
+        await setKnowledgeStatus(this.app, file, "pending");
+        staleCount++;
+      }
+    }
+    return staleCount;
+  }
+  /** 一次性迁移：旧 registry JSON → frontmatter */
+  async migrateFromRegistry() {
+    const adapter = this.app.vault.adapter;
+    try {
+      if (!await adapter.exists(LEGACY_REGISTRY_PATH))
+        return;
+      const raw = await adapter.read(LEGACY_REGISTRY_PATH);
+      const registry = JSON.parse(raw);
+      const records = registry.records || {};
+      let migrated = 0;
+      for (const record of Object.values(records)) {
+        if (record.status !== "done" && record.status !== "failed")
+          continue;
+        const file = this.app.vault.getAbstractFileByPath(record.path);
+        if (!file || !(file instanceof import_obsidian17.TFile))
+          continue;
+        const existing = getKnowledgeStatus(this.app, file);
+        if (existing)
+          continue;
+        await setKnowledgeStatus(this.app, file, record.status, {
+          source_id: record.id,
+          compiled_at: record.updated_at,
+          summary: record.summary_path,
+          error: record.error
+        });
+        migrated++;
+      }
+      await adapter.remove(LEGACY_REGISTRY_PATH);
+      if (migrated > 0) {
+        console.log(`[KnowledgeRuntime] Migrated ${migrated} records from registry to frontmatter`);
+        new import_obsidian17.Notice(`Knowledge Wiki: migrated ${migrated} records to frontmatter`);
+      }
+    } catch (e) {
+      console.error(`[KnowledgeRuntime] Registry migration error:`, e);
+    }
   }
   registerCommands(plugin) {
     plugin.addCommand({
@@ -8653,25 +8948,20 @@ var KnowledgeRuntime = class {
           return;
         }
         new import_obsidian17.Notice(`Compiling: ${file.path}...`);
-        let record = this.registry.findByPath(file.path);
-        if (!record) {
-          record = this.registry.register(file.path);
-          await this.registry.save();
-        } else if (record.status === "done") {
-          this.registry.transition(record.id, "stale");
-          this.registry.transition(record.id, "pending");
-          await this.registry.save();
-        } else if (record.status === "stale") {
-          this.registry.transition(record.id, "pending");
-          await this.registry.save();
+        const status = getKnowledgeStatus(this.app, file);
+        if (status === "done" || status === "failed") {
+          await setKnowledgeStatus(this.app, file, "pending");
+        } else if (!status) {
+          await ensureSourceId(this.app, file);
+          await setKnowledgeStatus(this.app, file, "pending");
         }
-        const result = await this.compiler.compileNote(record.id);
+        const ontology = await this.loadOntologySchema();
+        const result = await this.compiler.compileNote(file, ontology?.schema, ontology?.hash);
         if (result) {
           await this.indexer.rebuildIndex();
           new import_obsidian17.Notice(`Compiled: ${result}`);
         } else {
-          const updated = this.registry.getRecord(record.id);
-          new import_obsidian17.Notice(`Compilation failed: ${updated?.error || "Unknown error"}`);
+          new import_obsidian17.Notice(`Compilation failed`);
         }
       }
     });
@@ -8681,7 +8971,8 @@ var KnowledgeRuntime = class {
       callback: async () => {
         new import_obsidian17.Notice("Compiling all pending notes...");
         const maxBatch = this.settings.knowledgeMaxCompileBatch || 50;
-        const result = await this.compiler.compileAllPending(maxBatch);
+        const ontology = await this.loadOntologySchema();
+        const result = await this.compiler.compileAllPending(maxBatch, void 0, ontology?.schema, ontology?.hash);
         if (result.success > 0) {
           await this.indexer.rebuildIndex();
         }
@@ -8696,8 +8987,7 @@ var KnowledgeRuntime = class {
         const basePath = `${wikiFolder}/${WIKI_INDEX_BASE_FILENAME}`;
         const file = this.app.vault.getAbstractFileByPath(basePath);
         if (file && file instanceof import_obsidian17.TFile) {
-          const leaf = this.app.workspace.getLeaf(false);
-          await leaf.openFile(file);
+          await this.app.workspace.getLeaf(false).openFile(file);
         } else {
           new import_obsidian17.Notice("Knowledge index not found. Compile some notes first.");
         }
@@ -8712,8 +9002,7 @@ var KnowledgeRuntime = class {
         new import_obsidian17.Notice(`Health report generated: ${reportPath}`);
         const file = this.app.vault.getAbstractFileByPath(reportPath);
         if (file && file instanceof import_obsidian17.TFile) {
-          const leaf = this.app.workspace.getLeaf(false);
-          await leaf.openFile(file);
+          await this.app.workspace.getLeaf(false).openFile(file);
         }
       }
     });
@@ -8722,33 +9011,14 @@ var KnowledgeRuntime = class {
     plugin.registerEvent(
       this.app.vault.on("create", (file) => {
         if (file instanceof import_obsidian17.TFile && file.extension === "md") {
-          if (this.settings.knowledgeAutoCompile) {
-            this.watcher.onFileCreate(file);
-          }
+          this.watcher.onFileCreate(file);
         }
       })
     );
     plugin.registerEvent(
       this.app.vault.on("modify", (file) => {
         if (file instanceof import_obsidian17.TFile && file.extension === "md") {
-          if (this.settings.knowledgeAutoCompile) {
-            this.watcher.onFileModify(file);
-          }
-        }
-      })
-    );
-    plugin.registerEvent(
-      this.app.vault.on("delete", (file) => {
-        if (file instanceof import_obsidian17.TFile) {
-          this.watcher.onFileDelete(file.path);
-          this.metadataIndex.onFileDeleted(file.path);
-        }
-      })
-    );
-    plugin.registerEvent(
-      this.app.vault.on("rename", (file, oldPath) => {
-        if (file instanceof import_obsidian17.TFile && file.extension === "md") {
-          this.watcher.onFileRename(oldPath, file.path);
+          this.watcher.onFileModify(file);
         }
       })
     );
@@ -8757,8 +9027,15 @@ var KnowledgeRuntime = class {
         this.metadataIndex.onFileChanged(file);
       })
     );
+    plugin.registerEvent(
+      this.app.vault.on("delete", (file) => {
+        if (file instanceof import_obsidian17.TFile) {
+          this.metadataIndex.onFileDeleted(file.path);
+        }
+      })
+    );
   }
-  /** Guardian 知识上下文：从内存索引搜索，通过 metadataCache 读取详情 */
+  /** Guardian 知识上下文 */
   async getGuardianKnowledgeContext(editorContext) {
     const keywords = editorContext.split(/[\s,，。！？、；：""''（）\[\]{}]+/).filter((w) => w.length >= 2).slice(0, 10).join(" ");
     if (!keywords)
@@ -8786,25 +9063,131 @@ var KnowledgeRuntime = class {
   updateSettings(settings) {
     this.watcher.updateWatchedFolders(settings.knowledgeSourceFolders || []);
   }
+  /**
+   * 加载 ontology schema（每次 batch 开始时调用一次）
+   * 按 Amendment 1：不缓存，不监听，每次读取
+   * @returns { schema, hash } 或 null（schema 不存在时）
+   */
+  async loadOntologySchema() {
+    const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
+    const schemaPath = `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`;
+    const file = this.app.vault.getAbstractFileByPath(schemaPath);
+    if (!file || !(file instanceof import_obsidian17.TFile))
+      return null;
+    try {
+      const rawContent = await this.app.vault.read(file);
+      const frontmatter = extractFrontmatter(rawContent);
+      const schema = parseOntologySchema(frontmatter);
+      if (!schema) {
+        console.warn("[KnowledgeRuntime] Ontology file exists but schema parse failed");
+        return null;
+      }
+      const hash = computeSchemaHash(rawContent);
+      return { schema, hash };
+    } catch (e) {
+      console.error("[KnowledgeRuntime] Failed to load ontology schema:", e);
+      return null;
+    }
+  }
+  /**
+   * 自动发现 ontology schema
+   * 从已编译的 Articles 聚合 topics/concepts/claims，让 AI 生成 schema
+   * @param minArticles 最少需要多少篇已编译文章才触发（默认 10）
+   * @returns schema 文件路径，或 null（文章不足/AI 失败时）
+   */
+  async discoverOntology(minArticles = 10) {
+    const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
+    const schemaPath = `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`;
+    if (this.app.vault.getAbstractFileByPath(schemaPath)) {
+      console.log("[KnowledgeRuntime] Ontology schema already exists, skipping discovery");
+      return schemaPath;
+    }
+    const articlesDir = `${wikiFolder}/Articles`;
+    const articlesFolder = this.app.vault.getAbstractFileByPath(articlesDir);
+    if (!articlesFolder)
+      return null;
+    const articles = [];
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (f.path.startsWith(articlesDir + "/"))
+        articles.push(f);
+    }
+    if (articles.length < minArticles) {
+      console.log(`[KnowledgeRuntime] Only ${articles.length} articles, need ${minArticles} for ontology discovery`);
+      return null;
+    }
+    const topicCounts = /* @__PURE__ */ new Map();
+    const conceptCounts = /* @__PURE__ */ new Map();
+    const recentClaims = [];
+    for (const file of articles) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      const fm = cache?.frontmatter;
+      if (!fm)
+        continue;
+      if (Array.isArray(fm.topics)) {
+        for (const t of fm.topics) {
+          const label = typeof t === "string" ? t : t?.label;
+          if (label)
+            topicCounts.set(label, (topicCounts.get(label) || 0) + 1);
+        }
+      }
+      if (Array.isArray(fm.concepts)) {
+        for (const c of fm.concepts) {
+          if (typeof c === "string")
+            conceptCounts.set(c, (conceptCounts.get(c) || 0) + 1);
+        }
+      }
+      if (Array.isArray(fm.key_claims)) {
+        for (const claim of fm.key_claims.slice(0, 3)) {
+          if (typeof claim === "string")
+            recentClaims.push(claim);
+        }
+      }
+    }
+    const topTopics = Array.from(topicCounts.entries()).filter(([, count]) => count >= 3).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([topic, count]) => ({ topic, count }));
+    const topConcepts = Array.from(conceptCounts.entries()).filter(([, count]) => count >= 2).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([concept, count]) => ({ concept, count }));
+    if (topTopics.length === 0 && topConcepts.length === 0) {
+      console.log("[KnowledgeRuntime] No high-frequency topics/concepts found, skipping discovery");
+      return null;
+    }
+    try {
+      const prompt = buildDiscoveryPrompt({
+        totalCount: articles.length,
+        topTopics,
+        topConcepts,
+        recentClaims: recentClaims.slice(-20)
+      });
+      const response = await this.modelService.generate(prompt);
+      const schema = parseDiscoveryResponse(response);
+      if (!schema) {
+        console.error("[KnowledgeRuntime] Failed to parse ontology discovery response");
+        return null;
+      }
+      const content = buildOntologyFile(schema);
+      await this.app.vault.create(schemaPath, content);
+      console.log(`[KnowledgeRuntime] Ontology schema created at ${schemaPath}`);
+      return schemaPath;
+    } catch (e) {
+      console.error("[KnowledgeRuntime] Ontology discovery failed:", e.message);
+      return null;
+    }
+  }
   async compileByPath(path) {
     const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
     const abstractFile = this.app.vault.getAbstractFileByPath(path);
     if (!abstractFile)
       throw new Error(`\u8DEF\u5F84\u4E0D\u5B58\u5728: ${path}`);
+    const ontology = await this.loadOntologySchema();
     let registered = 0;
     if (abstractFile instanceof import_obsidian17.TFile) {
-      let record = this.registry.findByPath(path);
-      if (!record) {
-        record = this.registry.register(path);
+      const status = getKnowledgeStatus(this.app, abstractFile);
+      if (!status) {
+        await ensureSourceId(this.app, abstractFile);
+        await setKnowledgeStatus(this.app, abstractFile, "pending");
         registered = 1;
-      } else if (record.status === "done") {
-        this.registry.transition(record.id, "stale");
-        this.registry.transition(record.id, "pending");
-      } else if (record.status === "stale") {
-        this.registry.transition(record.id, "pending");
+      } else if (status === "done" || status === "failed") {
+        await setKnowledgeStatus(this.app, abstractFile, "pending");
       }
-      await this.registry.save();
-      const result2 = await this.compiler.compileNote(record.id);
+      const result2 = await this.compiler.compileNote(abstractFile, ontology?.schema, ontology?.hash);
       if (result2) {
         await this.indexer.rebuildIndex();
         return { registered, success: 1, failed: 0 };
@@ -8815,14 +9198,15 @@ var KnowledgeRuntime = class {
       (f) => f.path.startsWith(path + "/") && f.extension === "md" && !f.path.startsWith(wikiFolder + "/")
     );
     for (const file of files) {
-      if (!this.registry.findByPath(file.path)) {
-        this.registry.register(file.path);
+      const status = getKnowledgeStatus(this.app, file);
+      if (!status) {
+        await ensureSourceId(this.app, file);
+        await setKnowledgeStatus(this.app, file, "pending");
         registered++;
       }
     }
-    await this.registry.save();
     const maxBatch = this.settings.knowledgeMaxCompileBatch || 50;
-    const result = await this.compiler.compileAllPending(maxBatch);
+    const result = await this.compiler.compileAllPending(maxBatch, void 0, ontology?.schema, ontology?.hash);
     if (result.success > 0) {
       await this.indexer.rebuildIndex();
     }
@@ -8833,33 +9217,2416 @@ var KnowledgeRuntime = class {
   }
 };
 
+// src/skills/tool-registry.ts
+var ToolRegistry = class {
+  tools = /* @__PURE__ */ new Map();
+  ctx;
+  constructor(app, settings) {
+    this.ctx = { app, settings };
+  }
+  /** 更新上下文（settings 变更时调用） */
+  updateContext(settings) {
+    this.ctx = { app: this.ctx.app, settings };
+  }
+  /** 获取当前 settings */
+  getSettings() {
+    return this.ctx.settings;
+  }
+  register(tool) {
+    if (this.tools.has(tool.name)) {
+      console.warn(`[ToolRegistry] Tool "${tool.name}" already registered, overwriting.`);
+    }
+    this.tools.set(tool.name, tool);
+  }
+  get(name) {
+    return this.tools.get(name);
+  }
+  /** 将 Tool 转为 function calling 用的 ToolDefinition */
+  getDefinition(name) {
+    const tool = this.tools.get(name);
+    if (!tool)
+      return void 0;
+    return {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters
+    };
+  }
+  /** 批量获取 ToolDefinition */
+  getDefinitions(names) {
+    return names.map((n) => this.getDefinition(n)).filter((d) => d !== void 0);
+  }
+  /** 获取所有工具的 ToolDefinition */
+  getAllDefinitions() {
+    return Array.from(this.tools.values()).map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters
+    }));
+  }
+  /** 执行工具 */
+  async execute(name, args) {
+    const tool = this.tools.get(name);
+    if (!tool) {
+      return { error: `Unknown tool: ${name}` };
+    }
+    try {
+      return await tool.execute(args, this.ctx);
+    } catch (e) {
+      console.error(`[ToolRegistry] Tool "${name}" execution error:`, e);
+      return { error: e.message };
+    }
+  }
+  /** 列出所有已注册工具 */
+  listAll() {
+    return Array.from(this.tools.values());
+  }
+  /** 已注册工具数量 */
+  get size() {
+    return this.tools.size;
+  }
+};
+
+// src/skills/skill-files.ts
+var SKILL_FILE_NAME = "SKILL.md";
+var USER_SKILLS_DIR = ".obsidian/obsidian-cli/skills";
+function joinPath(...segments) {
+  return segments.filter(Boolean).join("/").replace(/\/{2,}/g, "/");
+}
+function basename(path) {
+  const parts = path.split("/");
+  return parts[parts.length - 1] || "";
+}
+function skillFilePath(dirPath) {
+  return joinPath(dirPath, SKILL_FILE_NAME);
+}
+function pluginSkillDirPath(pluginId, skillsDir = USER_SKILLS_DIR) {
+  return joinPath(skillsDir, `plugin-${pluginId}`);
+}
+function pluginSkillFilePath(pluginId, skillsDir = USER_SKILLS_DIR) {
+  return skillFilePath(pluginSkillDirPath(pluginId, skillsDir));
+}
+async function pluginSkillFileExists(adapter, pluginId, skillsDir = USER_SKILLS_DIR) {
+  return adapter.exists(pluginSkillFilePath(pluginId, skillsDir));
+}
+async function readTextIfExists(adapter, path) {
+  if (!await adapter.exists(path))
+    return null;
+  return adapter.read(path);
+}
+async function listSkillFilePaths(adapter, dirPath = USER_SKILLS_DIR) {
+  if (!await adapter.exists(dirPath))
+    return [];
+  const listed = await adapter.list(dirPath);
+  const paths = /* @__PURE__ */ new Set();
+  for (const filePath of listed.files) {
+    if (basename(filePath) === SKILL_FILE_NAME) {
+      paths.add(filePath);
+    }
+  }
+  for (const folderPath of listed.folders) {
+    const filePath = skillFilePath(folderPath);
+    if (await adapter.exists(filePath)) {
+      paths.add(filePath);
+    }
+  }
+  return [...paths].sort();
+}
+async function ensureDirectory(adapter, dirPath) {
+  let currentPath = "";
+  for (const segment of dirPath.split("/").filter(Boolean)) {
+    currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+    if (!await adapter.exists(currentPath)) {
+      await adapter.mkdir(currentPath);
+    }
+  }
+}
+
+// src/skills/skill-loader.ts
+var UserSkill = class {
+  name;
+  description;
+  triggers;
+  enabled;
+  instructions;
+  toolNames;
+  toolRegistry;
+  constructor(frontmatter, instructions, toolRegistry) {
+    this.name = frontmatter.name;
+    this.description = frontmatter.description;
+    this.triggers = frontmatter.triggers;
+    this.enabled = frontmatter.enabled ?? true;
+    this.instructions = instructions;
+    this.toolNames = frontmatter.tools ?? [];
+    this.toolRegistry = toolRegistry;
+  }
+  getInstructions() {
+    return this.instructions;
+  }
+  getTools() {
+    return this.toolRegistry.getDefinitions(this.toolNames);
+  }
+  async execute(args, ctx) {
+    return {
+      instructions: this.instructions,
+      tools: this.toolNames,
+      message: `Skill "${this.name}" activated. Follow the instructions above.`
+    };
+  }
+};
+var SkillLoader = class {
+  constructor(app, toolRegistry) {
+    this.app = app;
+    this.toolRegistry = toolRegistry;
+  }
+  async loadFromDirectory(dirPath) {
+    const skills = [];
+    const filePaths = await listSkillFilePaths(this.app.vault.adapter, dirPath);
+    if (filePaths.length === 0) {
+      console.log(`[SkillLoader] Skills directory not found: ${dirPath}`);
+      return skills;
+    }
+    for (const filePath of filePaths) {
+      const skill = await this.loadSkillFile(filePath);
+      if (skill)
+        skills.push(skill);
+    }
+    console.log(`[SkillLoader] Loaded ${skills.length} user skills from ${dirPath}`);
+    return skills;
+  }
+  async loadSkillFile(filePath) {
+    try {
+      const content = await this.app.vault.adapter.read(filePath);
+      return this.parseSkillMd(content);
+    } catch (e) {
+      console.error(`[SkillLoader] Failed to load ${filePath}:`, e);
+      return null;
+    }
+  }
+  parseSkillMd(content) {
+    const { frontmatter, body } = this.extractFrontmatter(content);
+    if (!frontmatter)
+      return null;
+    if (!frontmatter.name || !frontmatter.description) {
+      console.warn("[SkillLoader] SKILL.md missing required fields: name, description");
+      return null;
+    }
+    if (!/^[a-z0-9-]+$/.test(frontmatter.name) || frontmatter.name.length > 64) {
+      console.warn(`[SkillLoader] Invalid skill name: "${frontmatter.name}"`);
+      return null;
+    }
+    return new UserSkill(frontmatter, body.trim(), this.toolRegistry);
+  }
+  extractFrontmatter(content) {
+    const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+    if (!match) {
+      return { frontmatter: null, body: content };
+    }
+    try {
+      const yaml = this.parseSimpleYaml(match[1]);
+      const frontmatter = {
+        name: yaml.name ?? "",
+        description: yaml.description ?? "",
+        enabled: yaml.enabled,
+        tools: yaml.tools,
+        triggers: yaml.triggers
+      };
+      return { frontmatter, body: match[2] };
+    } catch (e) {
+      console.error("[SkillLoader] YAML parse error:", e);
+      return { frontmatter: null, body: content };
+    }
+  }
+  parseSimpleYaml(yaml) {
+    const result = {};
+    let currentKey = "";
+    let currentObj = null;
+    for (const line of yaml.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#"))
+        continue;
+      if (line.startsWith("  ") && currentKey && currentObj !== null) {
+        const subMatch = trimmed.match(/^(\w+):\s*(.*)$/);
+        if (subMatch) {
+          currentObj[subMatch[1]] = this.parseYamlValue(subMatch[2]);
+          result[currentKey] = currentObj;
+          continue;
+        }
+      }
+      const topMatch = trimmed.match(/^(\w+):\s*(.*)$/);
+      if (topMatch) {
+        const key = topMatch[1];
+        const rawValue = topMatch[2];
+        if (rawValue === "" || rawValue === void 0) {
+          currentKey = key;
+          currentObj = {};
+        } else {
+          result[key] = this.parseYamlValue(rawValue);
+          currentKey = "";
+          currentObj = null;
+        }
+      }
+    }
+    return result;
+  }
+  parseYamlValue(raw) {
+    if (!raw)
+      return "";
+    if (raw === "true")
+      return true;
+    if (raw === "false")
+      return false;
+    if (raw.startsWith("[") && raw.endsWith("]")) {
+      const inner = raw.slice(1, -1);
+      if (!inner.trim())
+        return [];
+      return inner.split(",").map((s) => {
+        const v = s.trim();
+        if (v.startsWith('"') && v.endsWith('"') || v.startsWith("'") && v.endsWith("'")) {
+          return v.slice(1, -1);
+        }
+        return v;
+      });
+    }
+    if (raw.startsWith('"') && raw.endsWith('"') || raw.startsWith("'") && raw.endsWith("'")) {
+      return raw.slice(1, -1);
+    }
+    if (/^\d+$/.test(raw))
+      return parseInt(raw, 10);
+    return raw;
+  }
+};
+
+// src/skills/skill-registry.ts
+var BuiltinSkill = class {
+  name;
+  description;
+  triggers;
+  enabled;
+  instructions;
+  toolNames;
+  toolRegistry;
+  executor;
+  constructor(fm, instructions, toolRegistry, executor3, enabledFn) {
+    this.name = fm.name;
+    this.description = fm.description;
+    this.triggers = fm.triggers;
+    this.enabled = enabledFn ?? (fm.enabled ?? true);
+    this.instructions = instructions;
+    this.toolNames = fm.tools ?? [];
+    this.toolRegistry = toolRegistry;
+    this.executor = executor3;
+  }
+  getInstructions() {
+    return this.instructions;
+  }
+  getTools() {
+    return this.toolRegistry.getDefinitions(this.toolNames);
+  }
+  async execute(args, ctx) {
+    return this.executor.execute(args, ctx);
+  }
+};
+var SkillRegistry = class {
+  constructor(toolRegistry) {
+    this.toolRegistry = toolRegistry;
+  }
+  skills = /* @__PURE__ */ new Map();
+  /** 斜杠命令 → skill name 的快速索引 */
+  commandIndex = /* @__PURE__ */ new Map();
+  registerBuiltin(skill) {
+    this.skills.set(skill.name, skill);
+    this.indexTriggers(skill);
+    console.log(`[SkillRegistry] Registered builtin skill: ${skill.name}`);
+  }
+  /**
+   * 从 SKILL.md 字符串 + executor 注册内置 Skill
+   * SKILL.md 在编译时通过 esbuild text loader 导入
+   */
+  registerBuiltinFromMd(skillMd, executor3, enabledFn) {
+    const { frontmatter, body } = this.parseFrontmatter(skillMd);
+    if (!frontmatter || !frontmatter.name) {
+      console.error("[SkillRegistry] Invalid SKILL.md: missing name");
+      return;
+    }
+    const skill = new BuiltinSkill(frontmatter, body.trim(), this.toolRegistry, executor3, enabledFn);
+    this.registerBuiltin(skill);
+  }
+  /** 解析 YAML frontmatter（简易解析，复用 SkillLoader 的逻辑） */
+  parseFrontmatter(content) {
+    const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+    if (!match)
+      return { frontmatter: null, body: content };
+    try {
+      const yaml = this.parseSimpleYaml(match[1]);
+      return {
+        frontmatter: {
+          name: yaml.name ?? "",
+          description: yaml.description ?? "",
+          triggers: yaml.triggers,
+          tools: yaml.tools,
+          enabled: yaml.enabled
+        },
+        body: match[2]
+      };
+    } catch (e) {
+      console.error("[SkillRegistry] YAML parse error:", e);
+      return { frontmatter: null, body: content };
+    }
+  }
+  /** 简易 YAML 解析 */
+  parseSimpleYaml(yaml) {
+    const result = {};
+    let currentKey = "";
+    let currentObj = null;
+    for (const line of yaml.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#"))
+        continue;
+      if (line.startsWith("  ") && currentKey && currentObj !== null) {
+        const subMatch = trimmed.match(/^(\w+):\s*(.*)$/);
+        if (subMatch) {
+          currentObj[subMatch[1]] = this.parseYamlValue(subMatch[2]);
+          result[currentKey] = currentObj;
+          continue;
+        }
+      }
+      const topMatch = trimmed.match(/^(\w+):\s*(.*)$/);
+      if (topMatch) {
+        const key = topMatch[1];
+        const rawValue = topMatch[2];
+        if (rawValue === "" || rawValue === void 0) {
+          currentKey = key;
+          currentObj = {};
+        } else {
+          result[key] = this.parseYamlValue(rawValue);
+          currentKey = "";
+          currentObj = null;
+        }
+      }
+    }
+    return result;
+  }
+  parseYamlValue(raw) {
+    if (!raw)
+      return "";
+    if (raw === "true")
+      return true;
+    if (raw === "false")
+      return false;
+    if (raw.startsWith("[") && raw.endsWith("]")) {
+      const inner = raw.slice(1, -1);
+      if (!inner.trim())
+        return [];
+      return inner.split(",").map((s) => {
+        const v = s.trim();
+        if (v.startsWith('"') && v.endsWith('"') || v.startsWith("'") && v.endsWith("'"))
+          return v.slice(1, -1);
+        return v;
+      });
+    }
+    if (raw.startsWith('"') && raw.endsWith('"') || raw.startsWith("'") && raw.endsWith("'"))
+      return raw.slice(1, -1);
+    if (/^\d+$/.test(raw))
+      return parseInt(raw, 10);
+    return raw;
+  }
+  /** 注册用户 Skill（由 SkillLoader 调用） */
+  registerUser(skill) {
+    if (this.skills.has(skill.name)) {
+      console.warn(
+        `[SkillRegistry] Skill "${skill.name}" already exists, user skill skipped.`
+      );
+      return;
+    }
+    this.skills.set(skill.name, skill);
+    this.indexTriggers(skill);
+    console.log(`[SkillRegistry] Registered user skill: ${skill.name}`);
+  }
+  /** 注销 skill（插件禁用时调用） */
+  unregisterSkill(name) {
+    const skill = this.skills.get(name);
+    if (!skill)
+      return;
+    if (skill.triggers?.commands) {
+      for (const cmd of skill.triggers.commands) {
+        this.commandIndex.delete(cmd);
+      }
+    }
+    this.skills.delete(name);
+    console.log(`[SkillRegistry] Unregistered skill: ${name}`);
+  }
+  /** 暴露 toolRegistry 供 PluginWatcher 使用 */
+  getToolRegistry() {
+    return this.toolRegistry;
+  }
+  /** 从 vault 目录加载用户自定义 Skill */
+  async loadUserSkills(skillsDir, app) {
+    const loader = new SkillLoader(app, this.toolRegistry);
+    const skills = await loader.loadFromDirectory(skillsDir);
+    for (const skill of skills) {
+      this.registerUser(skill);
+    }
+    if (skills.length > 0) {
+      console.log(`[SkillRegistry] Loaded ${skills.length} user skills from ${skillsDir}`);
+    }
+  }
+  // ==================== Level 1: 发现 ====================
+  /** 生成所有 Skill 的摘要列表 */
+  getSkillSummaries() {
+    const summaries = [];
+    for (const skill of this.skills.values()) {
+      if (!this.isEnabled(skill))
+        continue;
+      summaries.push({
+        name: skill.name,
+        description: skill.description,
+        commands: skill.triggers?.commands
+      });
+    }
+    return summaries;
+  }
+  listCommandEntries() {
+    const entries = [];
+    for (const skill of this.skills.values()) {
+      if (!this.isEnabled(skill) || !skill.triggers?.commands?.length)
+        continue;
+      for (const command of skill.triggers.commands) {
+        entries.push({
+          command,
+          skillName: skill.name,
+          description: skill.description
+        });
+      }
+    }
+    return entries.sort((a, b) => a.command.localeCompare(b.command));
+  }
+  /** 生成注入 system prompt 的摘要文本（只列清单，不做行为引导） */
+  getSkillSummaryText() {
+    const summaries = this.getSkillSummaries();
+    if (summaries.length === 0)
+      return "";
+    const lines = summaries.map((s) => {
+      const cmdHint = s.commands?.length ? ` (${s.commands.join(", ")})` : "";
+      return `- ${s.name}: ${s.description}${cmdHint}`;
+    });
+    return `\u53EF\u7528 Skill\uFF08\u8C03\u7528 use_skill \u83B7\u53D6\u8BE5\u573A\u666F\u7684\u8BE6\u7EC6\u5DE5\u4F5C\u6307\u5F15\uFF09\uFF1A
+${lines.join("\n")}`;
+  }
+  // ==================== 路由 ====================
+  /** 斜杠命令路由 */
+  resolveByCommand(command) {
+    const skillName = this.commandIndex.get(command);
+    if (!skillName)
+      return null;
+    const skill = this.skills.get(skillName);
+    return skill && this.isEnabled(skill) ? skill : null;
+  }
+  /** AI 意图路由（Phase 3 实现，先返回 null） */
+  resolveByIntent(message) {
+    const normalized = message.trim().toLowerCase();
+    if (!normalized)
+      return null;
+    let bestMatch = null;
+    let bestScore = 0;
+    for (const skill of this.skills.values()) {
+      if (!this.isEnabled(skill) || !skill.triggers?.keywords?.length)
+        continue;
+      let score = 0;
+      for (const keyword of skill.triggers.keywords) {
+        const normalizedKeyword = keyword.trim().toLowerCase();
+        if (!normalizedKeyword)
+          continue;
+        if (normalized.includes(normalizedKeyword)) {
+          score += 1;
+        }
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = skill;
+      }
+    }
+    return bestScore > 0 ? bestMatch : null;
+  }
+  // ==================== Level 2: 激活 ====================
+  /** 激活 Skill，返回完整的 instructions + tools */
+  activateSkill(name) {
+    const skill = this.skills.get(name);
+    if (!skill || !this.isEnabled(skill)) {
+      console.warn(`[SkillRegistry] Skill "${name}" not found or disabled.`);
+      return null;
+    }
+    return {
+      skill,
+      tools: skill.getTools(),
+      instructions: skill.getInstructions()
+    };
+  }
+  /** 列出所有 Skill */
+  listSkills() {
+    return this.getSkillSummaries();
+  }
+  // ==================== 内部方法 ====================
+  /** 索引 Skill 的触发条件 */
+  indexTriggers(skill) {
+    if (skill.triggers?.commands) {
+      for (const cmd of skill.triggers.commands) {
+        this.commandIndex.set(cmd, skill.name);
+      }
+    }
+  }
+  /** 检查 Skill 是否启用 */
+  isEnabled(skill) {
+    if (skill.enabled === void 0)
+      return true;
+    if (typeof skill.enabled === "function") {
+      return skill.enabled(this.toolRegistry.getSettings());
+    }
+    return skill.enabled;
+  }
+};
+
+// src/skills/builtin/vault-ops.ts
+var import_obsidian18 = require("obsidian");
+var readNote = {
+  name: "read_note",
+  description: "Read the content of a specific note in the vault.",
+  parameters: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: 'The path to the note (e.g., "Folder/Note.md")' }
+    },
+    required: ["path"]
+  },
+  async execute(args, ctx) {
+    const file = ctx.app.metadataCache.getFirstLinkpathDest(args.path, "");
+    if (!file)
+      return { error: "File not found" };
+    const content = await ctx.app.vault.read(file);
+    return { path: file.path, content: content.substring(0, 5e3) };
+  }
+};
+var createNote = {
+  name: "create_note",
+  description: "Create a new note with the specified content.",
+  parameters: {
+    type: "object",
+    properties: {
+      filename: { type: "string", description: "The name/path of the new note" },
+      content: { type: "string", description: "The content to write to the note" }
+    },
+    required: ["filename", "content"]
+  },
+  async execute(args, ctx) {
+    let path = args.filename || args.path || args.name;
+    if (!path)
+      return { status: "error", message: "Missing filename parameter" };
+    if (!path.endsWith(".md"))
+      path += ".md";
+    if (!ctx.settings.allowFileCreation) {
+      return { success: false, error: "File creation is disabled" };
+    }
+    const existing = ctx.app.vault.getAbstractFileByPath(path);
+    if (existing) {
+      return { status: "error", message: `File already exists: ${path}. Use update_note to modify existing files.` };
+    }
+    if (ctx.settings.confirmExecutions && !args.approved) {
+      return buildApprovalResponse("create_note", path, {
+        filename: path,
+        content: args.content || ""
+      }, "create note");
+    }
+    await ensureParentFolder(ctx.app, path);
+    await ctx.app.vault.create(path, args.content || "");
+    return { status: "success", message: `\u2705 Note created: ${path}` };
+  }
+};
+var updateNote = {
+  name: "update_note",
+  description: "Update the content of an existing note. Replaces the entire content.",
+  parameters: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "The path to the note to update" },
+      content: { type: "string", description: "The new content for the note" }
+    },
+    required: ["path", "content"]
+  },
+  async execute(args, ctx) {
+    if (!ctx.settings.allowFileModification) {
+      return { success: false, error: "File modification is disabled" };
+    }
+    const file = ctx.app.vault.getAbstractFileByPath(args.path);
+    if (!file || !(file instanceof import_obsidian18.TFile))
+      return { success: false, error: "File not found" };
+    if (ctx.settings.confirmExecutions && !args.approved) {
+      return buildApprovalResponse("update_note", args.path, {
+        path: args.path,
+        content: args.content
+      }, "update note");
+    }
+    await ctx.app.vault.modify(file, args.content);
+    return { success: true, message: `\u2705 Updated: ${args.path}` };
+  }
+};
+var appendToNote = {
+  name: "append_to_note",
+  description: "Append content to the end of an existing note.",
+  parameters: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "The path to the note" },
+      content: { type: "string", description: "The content to append" }
+    },
+    required: ["path", "content"]
+  },
+  async execute(args, ctx) {
+    if (!ctx.settings.allowFileModification) {
+      return { success: false, error: "File modification is disabled" };
+    }
+    const file = ctx.app.vault.getAbstractFileByPath(args.path);
+    if (!file || !(file instanceof import_obsidian18.TFile))
+      return { success: false, error: "File not found" };
+    if (ctx.settings.confirmExecutions && !args.approved) {
+      return buildApprovalResponse("append_to_note", args.path, {
+        path: args.path,
+        content: args.content
+      }, "append to note");
+    }
+    const existing = await ctx.app.vault.read(file);
+    await ctx.app.vault.modify(file, existing + "\n" + args.content);
+    return { success: true, message: `\u2705 Appended to: ${args.path}` };
+  }
+};
+var deleteNote = {
+  name: "delete_note",
+  description: "Delete a note from the vault.",
+  parameters: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "The path to the note to delete" }
+    },
+    required: ["path"]
+  },
+  async execute(args, ctx) {
+    if (!ctx.settings.allowFileModification) {
+      return { success: false, error: "File modification is disabled" };
+    }
+    const file = ctx.app.vault.getAbstractFileByPath(args.path);
+    if (!file)
+      return { success: false, error: "File not found" };
+    if (ctx.settings.confirmExecutions && !args.approved) {
+      return buildApprovalResponse("delete_note", args.path, {
+        path: args.path
+      }, "delete note");
+    }
+    await ctx.app.vault.trash(file, true);
+    return { success: true, message: `\u2705 Deleted: ${args.path}` };
+  }
+};
+var renameNote = {
+  name: "rename_note",
+  description: "Rename or move a note.",
+  parameters: {
+    type: "object",
+    properties: {
+      oldPath: { type: "string", description: "The current path of the note" },
+      newPath: { type: "string", description: "The new path/name for the note" }
+    },
+    required: ["oldPath", "newPath"]
+  },
+  async execute(args, ctx) {
+    if (!ctx.settings.allowFileModification) {
+      return { success: false, error: "File modification is disabled" };
+    }
+    const file = ctx.app.vault.getAbstractFileByPath(args.oldPath);
+    if (!file)
+      return { success: false, error: "File not found" };
+    if (ctx.settings.confirmExecutions && !args.approved) {
+      return buildApprovalResponse("rename_note", args.oldPath, {
+        oldPath: args.oldPath,
+        newPath: args.newPath
+      }, "rename note");
+    }
+    await ctx.app.vault.rename(file, args.newPath);
+    return { success: true, message: `\u2705 Renamed: ${args.oldPath} -> ${args.newPath}` };
+  }
+};
+var listNotes = {
+  name: "list_notes",
+  description: "List notes in a specific folder or the entire vault.",
+  parameters: {
+    type: "object",
+    properties: {
+      folder: { type: "string", description: "The folder to list (optional, defaults to root)" },
+      limit: { type: "integer", description: "Maximum number of notes to return (default 20)" }
+    }
+  },
+  async execute(args, ctx) {
+    const folderPath = args.folder || "/";
+    const limit = args.limit || 20;
+    let files = ctx.app.vault.getMarkdownFiles();
+    if (folderPath !== "/") {
+      files = files.filter((f) => f.path.startsWith(folderPath));
+    }
+    const fileList = files.slice(0, limit).map((f) => ({
+      path: f.path,
+      name: f.basename,
+      size: f.stat.size,
+      modified: new Date(f.stat.mtime).toISOString()
+    }));
+    return { success: true, files: fileList, total: files.length };
+  }
+};
+var searchVault = {
+  name: "search_vault",
+  description: "Search for files in the vault by name.",
+  parameters: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "The search query" }
+    },
+    required: ["query"]
+  },
+  async execute(args, ctx) {
+    const matches = ctx.app.vault.getFiles().filter((f) => f.basename.toLowerCase().includes(args.query.toLowerCase())).map((f) => f.path).slice(0, 5);
+    return { matches };
+  }
+};
+var openFile = {
+  name: "open_file",
+  description: "Open a file in the Obsidian workspace.",
+  parameters: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "The path or name of the file to open" }
+    },
+    required: ["path"]
+  },
+  async execute(args, ctx) {
+    const allFiles = ctx.app.vault.getFiles();
+    let target = allFiles.find((f) => f.path === args.path);
+    if (!target) {
+      target = allFiles.find(
+        (f) => f.basename === args.path || f.basename === args.path.replace(".md", "")
+      );
+    }
+    if (!target) {
+      const fuzzy = allFiles.filter(
+        (f) => f.path.toLowerCase().includes(args.path.toLowerCase())
+      );
+      if (fuzzy.length === 1) {
+        target = fuzzy[0];
+      } else if (fuzzy.length > 1) {
+        return { success: false, error: `Found ${fuzzy.length} matches`, matches: fuzzy.map((f) => f.path) };
+      }
+    }
+    if (!target)
+      return { success: false, error: "File not found" };
+    const leaf = ctx.app.workspace.getLeaf(false);
+    await leaf.openFile(target);
+    return { success: true, path: target.path, message: `\u2705 Opened: ${target.path}` };
+  }
+};
+async function ensureParentFolder(app, path) {
+  const parts = path.split("/");
+  if (parts.length <= 1)
+    return;
+  const folderPath = parts.slice(0, -1).join("/");
+  if (!folderPath || app.vault.getAbstractFileByPath(folderPath))
+    return;
+  try {
+    await app.vault.createFolder(folderPath);
+  } catch (e) {
+  }
+}
+function buildApprovalResponse(action, target, args, description) {
+  return {
+    approval_required: true,
+    action,
+    target,
+    args,
+    message: `Approval required to ${description}: ${target}`
+  };
+}
+var ALL_VAULT_TOOLS = [
+  readNote,
+  createNote,
+  updateNote,
+  appendToNote,
+  deleteNote,
+  renameNote,
+  listNotes,
+  searchVault,
+  openFile
+];
+function registerVaultTools(registry) {
+  for (const tool of ALL_VAULT_TOOLS) {
+    registry.register(tool);
+  }
+  console.log(`[vault-ops] Registered ${ALL_VAULT_TOOLS.length} vault tools.`);
+}
+
+// src/skills/builtin/web-search/executor.ts
+var import_obsidian19 = require("obsidian");
+var defaultDeps2 = {
+  requestUrl: (options) => (0, import_obsidian19.requestUrl)(options),
+  wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+};
+function createWebSearchTool(deps = defaultDeps2) {
+  return {
+    name: "web_search",
+    description: "Search the web for information using DuckDuckGo.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "The search query" },
+        time_range: {
+          type: "string",
+          description: "Time range: d (day), w (week), m (month), y (year)",
+          enum: ["d", "w", "m", "y"]
+        }
+      },
+      required: ["query"]
+    },
+    async execute(args, _ctx) {
+      let searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;
+      if (args.time_range)
+        searchUrl += `&df=${args.time_range}`;
+      try {
+        let html = "";
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const response = await deps.requestUrl({ url: searchUrl });
+          const candidate = response.text || "";
+          if (response.status === 200 && candidate.length > 40) {
+            html = candidate;
+            break;
+          }
+          if (attempt < 2) {
+            await deps.wait(200);
+          }
+        }
+        if (!html) {
+          return { results: [], message: "No results found or parsing failed." };
+        }
+        const results = [];
+        let match;
+        let count = 0;
+        const regex = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
+        while ((match = regex.exec(html)) !== null && count < 5) {
+          results.push({
+            title: match[2].replace(/<[^>]+>/g, "").trim(),
+            link: match[1],
+            snippet: match[3].replace(/<[^>]+>/g, "").trim()
+          });
+          count++;
+        }
+        return results.length === 0 ? { results: [], message: "No results found or parsing failed." } : { results };
+      } catch (error) {
+        return { error: `Search failed: ${error.message}` };
+      }
+    }
+  };
+}
+var webSearchTool = createWebSearchTool();
+var executor = {
+  async execute(args, ctx) {
+    return webSearchTool.execute(args, ctx);
+  }
+};
+function registerTools(registry) {
+  registry.register(webSearchTool);
+}
+
+// src/skills/builtin/web-clipper/executor.ts
+var obsidian = __toESM(require("obsidian"));
+var import_readability = __toESM(require_readability());
+
+// src/mcp/save-path.ts
+function resolveSavedNotePath(filename, preferredFolder, exists) {
+  const normalizedFilename = filename.replace(/\\/g, "/");
+  const normalizedFolder = (preferredFolder || "").trim().replace(/[\\/]+$/g, "");
+  const hasExplicitFolder = normalizedFilename.includes("/");
+  const basePath = normalizedFolder && !hasExplicitFolder ? `${normalizedFolder}/${normalizedFilename}` : normalizedFilename;
+  let finalPath = basePath;
+  let counter = 1;
+  while (exists(finalPath)) {
+    finalPath = basePath.replace(/\.md$/, ` (${counter}).md`);
+    counter++;
+  }
+  return finalPath;
+}
+
+// src/services/video-transcription.ts
+var import_obsidian20 = require("obsidian");
+var defaultDeps3 = {
+  requestUrl: (options) => (0, import_obsidian20.requestUrl)(options),
+  fetchImpl: (input, init) => fetch(input, init),
+  createGeminiModel: (provider) => {
+    const genAI = new GoogleGenerativeAI(provider.apiKey);
+    return genAI.getGenerativeModel({ model: provider.model });
+  }
+};
+function toBase64(buffer) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(new Uint8Array(buffer)).toString("base64");
+  }
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+function joinUrl(baseUrl, path) {
+  return `${baseUrl.replace(/\/+$/, "")}${path}`;
+}
+function getTranscriptionEndpoint(provider) {
+  return joinUrl(provider.baseUrl || "https://api.openai.com/v1", "/audio/transcriptions");
+}
+function pickBilibiliAudioUrl(html) {
+  const playInfo = extractJsonAssignment(html, "window.__playinfo__=") || extractJsonAssignment(html, "__playinfo__=");
+  const audioTracks = playInfo?.data?.dash?.audio;
+  if (!Array.isArray(audioTracks) || audioTracks.length === 0)
+    return null;
+  const selected = audioTracks.find((track) => track?.baseUrl || track?.base_url) || audioTracks[0];
+  return selected?.baseUrl || selected?.base_url || selected?.backupUrl?.[0] || selected?.backup_url?.[0] || null;
+}
+function pickYouTubeAudioUrl(html) {
+  const playerResponse = extractJsonAssignment(html, "var ytInitialPlayerResponse = ") || extractJsonAssignment(html, "ytInitialPlayerResponse = ") || extractJsonAssignment(html, "ytInitialPlayerResponse=");
+  const formats = playerResponse?.streamingData?.adaptiveFormats;
+  if (!Array.isArray(formats))
+    return null;
+  const selected = formats.find((format) => typeof format?.mimeType === "string" && format.mimeType.startsWith("audio/"));
+  return selected?.url || null;
+}
+async function resolveAudio(params) {
+  const pageResponse = await params.deps.requestUrl({
+    url: params.url,
+    headers: {
+      "User-Agent": "Mozilla/5.0"
+    }
+  });
+  if (pageResponse.status !== 200) {
+    throw new Error(`Failed to fetch video page: HTTP ${pageResponse.status}`);
+  }
+  const html = pageResponse.text;
+  const audioUrl = params.platform === "bilibili" ? pickBilibiliAudioUrl(html) : pickYouTubeAudioUrl(html);
+  if (!audioUrl) {
+    throw new Error(`Unable to resolve audio stream URL for ${params.platform} video`);
+  }
+  const audioResponse = await params.deps.requestUrl({
+    url: audioUrl,
+    headers: {
+      "User-Agent": "Mozilla/5.0"
+    }
+  });
+  if (audioResponse.status !== 200) {
+    throw new Error(`Failed to download audio stream: HTTP ${audioResponse.status}`);
+  }
+  return {
+    audioUrl,
+    audioBuffer: audioResponse.arrayBuffer
+  };
+}
+async function transcribeWithOpenAICompatible(params) {
+  const endpoint = getTranscriptionEndpoint(params.provider);
+  const formData = new FormData();
+  const blob = new Blob([params.audioBuffer], { type: "audio/mp4" });
+  formData.append("file", blob, "video-audio.m4a");
+  formData.append("model", "whisper-1");
+  const response = await params.deps.fetchImpl(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.provider.apiKey}`
+    },
+    body: formData
+  });
+  if (!response.ok) {
+    const details = typeof response.text === "function" ? await response.text() : "";
+    throw new Error(`Audio transcription failed: HTTP ${response.status}${details ? ` - ${details}` : ""}`);
+  }
+  const data = typeof response.json === "function" ? await response.json() : {};
+  const text = typeof data?.text === "string" ? data.text.trim() : "";
+  if (!text) {
+    throw new Error("Audio transcription returned empty text");
+  }
+  return text;
+}
+async function transcribeWithGemini(params) {
+  const model = params.deps.createGeminiModel(params.provider);
+  const base64Audio = toBase64(params.audioBuffer);
+  const result = await model.generateContent([
+    "Transcribe the speech in this audio. Return only the transcript text.",
+    {
+      inlineData: {
+        data: base64Audio,
+        mimeType: "audio/mp4"
+      }
+    }
+  ]);
+  const text = result.response.text().trim();
+  if (!text) {
+    throw new Error("Gemini transcription returned empty text");
+  }
+  return text;
+}
+function createVideoTranscriptionService(partialDeps = {}) {
+  const deps = {
+    ...defaultDeps3,
+    ...partialDeps
+  };
+  return {
+    async transcribeFromVideoUrl(params) {
+      const { audioUrl, audioBuffer } = await resolveAudio({
+        url: params.url,
+        platform: params.platform,
+        deps
+      });
+      const text = params.provider.type === "gemini" ? await transcribeWithGemini({
+        provider: params.provider,
+        audioBuffer,
+        deps
+      }) : await transcribeWithOpenAICompatible({
+        provider: params.provider,
+        audioBuffer,
+        deps
+      });
+      return {
+        text,
+        audioUrl
+      };
+    }
+  };
+}
+
+// src/skills/builtin/web-clipper/executor.ts
+var transcriptionService = createVideoTranscriptionService();
+var defaultDeps4 = {
+  getVideoTranscript: (url) => getVideoTranscript(url),
+  requestUrl: (options) => obsidian.requestUrl(options),
+  htmlToMarkdown: (html) => obsidian.htmlToMarkdown(html),
+  notice: (message) => {
+    new obsidian.Notice(message);
+  },
+  transcribeVideoAudio: (params) => transcriptionService.transcribeFromVideoUrl(params)
+};
+function extractTags(text) {
+  const tags = [];
+  for (const word of text.split(/\s+/)) {
+    if (word.startsWith("#") && word.length > 1)
+      tags.push(word.substring(1));
+  }
+  return tags;
+}
+function sanitizeTitle(title) {
+  let clean = title.replace(/[\\/:*?"<>|#^\[\]]/g, "-").replace(/\s+/g, " ").trim();
+  if (!clean || clean.replace(/-/g, "").trim().length === 0) {
+    const now = /* @__PURE__ */ new Date();
+    clean = `Clipping ${now.toISOString().split("T")[0]} ${now.getHours()}-${now.getMinutes()}-${now.getSeconds()}`;
+  }
+  return clean;
+}
+function buildFrontmatter(opts) {
+  const created = (/* @__PURE__ */ new Date()).toISOString();
+  return `---
+created: ${created}
+source: ${opts.source}
+author: ${opts.author || ""}
+tags: ${opts.tags.join(", ")}
+---
+
+`;
+}
+async function ensureFolder(app, path) {
+  const parts = path.split("/");
+  if (parts.length <= 1)
+    return;
+  const folder = parts.slice(0, -1).join("/");
+  if (!folder || app.vault.getAbstractFileByPath(folder))
+    return;
+  try {
+    await app.vault.createFolder(folder);
+  } catch (_) {
+  }
+}
+function buildVideoLinkContent(title, finalUrl, author, tags) {
+  const encoded = encodeURIComponent(finalUrl);
+  return buildFrontmatter({ source: finalUrl, author, tags }) + `# ${title}
+
+[${title}](${finalUrl})
+
+[Play with Media Extended](obsidian://mx-open?url=${encoded})`;
+}
+function splitIntoSummarySentences(text) {
+  return text.split(/[.!?。！？]+\s*/).map((sentence) => sentence.trim()).filter(Boolean).slice(0, 3);
+}
+function buildTranscriptFallbackSummary(text) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized)
+    return "Transcript captured, but no concise summary could be generated.";
+  const sentences = splitIntoSummarySentences(normalized);
+  if (sentences.length > 0) {
+    return sentences.map((sentence) => `- ${sentence}`).join("\n");
+  }
+  return `- ${normalized.substring(0, 240)}${normalized.length > 240 ? "..." : ""}`;
+}
+function buildMetadataFallbackSummary(title, description) {
+  const detail = (description || title || "").replace(/\s+/g, " ").trim();
+  if (!detail)
+    return "- Summary unavailable.";
+  if (detail === title || detail.length < 80) {
+    return `- ${detail}`;
+  }
+  const sentences = splitIntoSummarySentences(detail);
+  if (sentences.length > 0) {
+    return sentences.map((sentence) => `- ${sentence}`).join("\n");
+  }
+  return `- ${detail.substring(0, 240)}${detail.length > 240 ? "..." : ""}`;
+}
+function buildVideoSummaryContent(opts) {
+  const encoded = encodeURIComponent(opts.finalUrl);
+  return buildFrontmatter({ source: opts.finalUrl, author: opts.author, tags: opts.tags }) + `# ${opts.title}
+
+[${opts.title}](${opts.finalUrl})
+
+[Play with Media Extended](obsidian://mx-open?url=${encoded})
+
+## Summary
+
+${opts.summary}
+
+## ${opts.excerptHeading || "Transcript Excerpt"}
+
+${opts.excerptText.substring(0, 1e3)}...`;
+}
+async function summarizeTranscript(modelService, transcript) {
+  if (!modelService || typeof modelService.generate !== "function")
+    return null;
+  const prompt = `Please summarize the following video transcript.
+Title: ${transcript.title}
+Transcript:
+${transcript.text.substring(0, 3e4)}...
+
+Task:
+1. Provide a concise summary.
+2. List key takeaways.
+3. Format in Markdown.`;
+  try {
+    const summary = await modelService.generate(
+      prompt,
+      "You are a helpful assistant that summarizes videos."
+    );
+    const clean = typeof summary === "string" ? summary.trim() : "";
+    if (!clean || clean.startsWith("Error:"))
+      return null;
+    return clean;
+  } catch (_) {
+    return null;
+  }
+}
+async function summarizeVideoMetadata(modelService, video) {
+  if (!modelService || typeof modelService.generate !== "function")
+    return null;
+  const prompt = `Please summarize the following video using its title and description.
+Title: ${video.title}
+Description:
+${video.description || video.title}
+
+Task:
+1. Provide a concise summary.
+2. List key takeaways when possible.
+3. Format in Markdown.`;
+  try {
+    const summary = await modelService.generate(
+      prompt,
+      "You are a helpful assistant that summarizes videos from metadata when no transcript is available."
+    );
+    const clean = typeof summary === "string" ? summary.trim() : "";
+    if (!clean || clean.startsWith("Error:"))
+      return null;
+    return clean;
+  } catch (_) {
+    return null;
+  }
+}
+async function saveVideo(url, args, ctx, modelService, deps) {
+  const transcript = await deps.getVideoTranscript(url);
+  if (!transcript)
+    return null;
+  const finalUrl = transcript.url || url;
+  const activeProvider = ctx.settings.providers[ctx.settings.activeProvider];
+  const titleTags = extractTags(transcript.title);
+  const baseTags = ["video", transcript.platform, ...titleTags];
+  let content = "";
+  if (transcript.text && transcript.text.length > 0 && modelService) {
+    deps.notice(`Summarizing ${transcript.platform} video...`);
+    const summary = await summarizeTranscript(modelService, transcript);
+    content = buildVideoSummaryContent({
+      title: transcript.title,
+      finalUrl,
+      author: transcript.author || transcript.platform,
+      tags: baseTags,
+      summary: summary || buildTranscriptFallbackSummary(transcript.text),
+      excerptText: transcript.text,
+      excerptHeading: "Transcript Excerpt"
+    });
+  } else if (transcript.needsTranscription && activeProvider?.type === "openai-compatible") {
+    deps.notice(`Transcribing ${transcript.platform} audio...`);
+    try {
+      const transcription = await deps.transcribeVideoAudio({
+        url: finalUrl,
+        platform: transcript.platform,
+        provider: activeProvider
+      });
+      const summary = await summarizeTranscript(modelService, {
+        title: transcript.title,
+        text: transcription.text
+      });
+      content = buildVideoSummaryContent({
+        title: transcript.title,
+        finalUrl,
+        author: transcript.author || transcript.platform,
+        tags: baseTags,
+        summary: summary || buildTranscriptFallbackSummary(transcription.text),
+        excerptText: transcription.text,
+        excerptHeading: "Transcript Excerpt"
+      });
+    } catch (_) {
+      content = buildVideoSummaryContent({
+        title: transcript.title,
+        finalUrl,
+        author: transcript.author || transcript.platform,
+        tags: baseTags,
+        summary: buildMetadataFallbackSummary(transcript.title, transcript.description),
+        excerptText: transcript.description || transcript.title,
+        excerptHeading: "Video Description"
+      });
+    }
+  } else if (modelService && (transcript.description || transcript.title)) {
+    deps.notice(`Summarizing ${transcript.platform} video from metadata...`);
+    const summary = await summarizeVideoMetadata(modelService, {
+      title: transcript.title,
+      description: transcript.description
+    });
+    content = buildVideoSummaryContent({
+      title: transcript.title,
+      finalUrl,
+      author: transcript.author || transcript.platform,
+      tags: baseTags,
+      summary: summary || buildMetadataFallbackSummary(transcript.title, transcript.description),
+      excerptText: transcript.description || transcript.title,
+      excerptHeading: "Video Description"
+    });
+  } else {
+    deps.notice("Saving video link...");
+    content = buildVideoLinkContent(
+      transcript.title,
+      finalUrl,
+      transcript.author || transcript.platform,
+      baseTags
+    );
+  }
+  let filename = sanitizeTitle(args.filename || transcript.title);
+  if (!filename.endsWith(".md"))
+    filename += ".md";
+  const finalPath = resolveSavedNotePath(
+    filename,
+    ctx.settings.wechatStoragePath,
+    (p) => !!ctx.app.vault.getAbstractFileByPath(p)
+  );
+  await ensureFolder(ctx.app, finalPath);
+  await ctx.app.vault.create(finalPath, content);
+  return { success: true, path: finalPath, message: `Video Note Saved: ${finalPath}` };
+}
+async function saveWebpage(url, args, ctx, deps) {
+  const response = await deps.requestUrl({
+    url,
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    }
+  });
+  if (response.status !== 200) {
+    throw new Error(`Failed to fetch webpage: HTTP ${response.status}`);
+  }
+  let html = response.text;
+  let title = "Untitled Webpage";
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (titleMatch?.[1]?.trim())
+    title = titleMatch[1].trim();
+  else {
+    const ogMatch = html.match(/<meta[^>]*property="og:title"[^>]*content="([^"]*)"[^>]*>/i);
+    if (ogMatch?.[1]?.trim())
+      title = ogMatch[1].trim();
+    else {
+      const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+      if (h1Match?.[1]?.trim())
+        title = h1Match[1].replace(/<[^>]+>/g, "").trim();
+    }
+  }
+  let author = "";
+  if (url.includes("mp.weixin.qq.com")) {
+    const varMatch = html.match(/var\s+nickname\s*=\s*["']([^"']+)["']/);
+    if (varMatch?.[1])
+      author = varMatch[1].trim();
+    if (!author) {
+      const nicknameMatch = html.match(/class="profile_nickname"[^>]*>([^<]+)</);
+      if (nicknameMatch?.[1])
+        author = nicknameMatch[1].trim();
+    }
+    if (!author) {
+      const nameMatch = html.match(/class="js_name"[^>]*>([^<]+)</);
+      if (nameMatch?.[1])
+        author = nameMatch[1].trim();
+    }
+  }
+  if (!author) {
+    const metaAuthor = html.match(/<meta name="author" content="([^"]*)"/i) || html.match(/<meta property="article:author" content="([^"]*)"/i) || html.match(/<meta property="og:site_name" content="([^"]*)"/i);
+    if (metaAuthor?.[1])
+      author = metaAuthor[1].trim();
+  }
+  const webpageTags = extractTags(title);
+  title = sanitizeTitle(title);
+  if (url.includes("mp.weixin.qq.com"))
+    html = html.replace(/data-src=/g, "src=");
+  let markdown = "";
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  if (url.includes("mp.weixin.qq.com")) {
+    const jsContent = doc.querySelector("#js_content");
+    if (jsContent) {
+      jsContent.querySelectorAll("script, style").forEach((node) => node.remove());
+      try {
+        markdown = deps.htmlToMarkdown(jsContent.innerHTML);
+      } catch (_) {
+        markdown = "";
+      }
+    }
+  }
+  if (!markdown) {
+    ["nav", "footer", "aside", "script", "style", "noscript", ".sidebar", ".navbar", ".ads", ".ad-container"].forEach((sel) => {
+      try {
+        doc.querySelectorAll(sel).forEach((node) => node.remove());
+      } catch (_) {
+      }
+    });
+    const reader = new import_readability.Readability(doc);
+    const article = reader.parse();
+    if (article?.content) {
+      try {
+        markdown = deps.htmlToMarkdown(article.content);
+      } catch (_) {
+        markdown = "";
+      }
+    } else {
+      try {
+        markdown = deps.htmlToMarkdown(html);
+      } catch (_) {
+        markdown = "";
+      }
+    }
+  }
+  if (!markdown) {
+    throw new Error("Failed to convert webpage content to Markdown");
+  }
+  let filename = args.filename || title;
+  if (!filename.endsWith(".md"))
+    filename += ".md";
+  const finalPath = resolveSavedNotePath(
+    filename,
+    ctx.settings.wechatStoragePath,
+    (p) => !!ctx.app.vault.getAbstractFileByPath(p)
+  );
+  const content = buildFrontmatter({ source: url, author, tags: ["clipping", ...webpageTags] }) + `# ${title}
+
+${markdown}`;
+  await ensureFolder(ctx.app, finalPath);
+  await ctx.app.vault.create(finalPath, content);
+  return { success: true, path: finalPath, message: `Webpage Saved: ${finalPath}` };
+}
+function createSaveWebpageTool(modelService, deps = defaultDeps4) {
+  return {
+    name: "save_webpage",
+    description: "Save a webpage or video transcript to a new note.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "The URL of the webpage or video" },
+        filename: { type: "string", description: "Optional filename for the note" }
+      },
+      required: ["url"]
+    },
+    async execute(args, ctx) {
+      try {
+        const videoResult = await saveVideo(args.url, args, ctx, modelService, deps);
+        if (videoResult)
+          return videoResult;
+        return await saveWebpage(args.url, args, ctx, deps);
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+  };
+}
+function createExecutor(modelService) {
+  const tool = createSaveWebpageTool(modelService);
+  return {
+    async execute(args, ctx) {
+      return tool.execute(args, ctx);
+    }
+  };
+}
+function registerTools2(registry, modelService) {
+  registry.register(createSaveWebpageTool(modelService));
+}
+
+// src/skills/builtin/knowledge/executor.ts
+function createKnowledgeTools(queryExecutor, fileBackExecutor) {
+  const queryKnowledge = {
+    name: "query_knowledge",
+    description: "\u4ECE\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u4E2D\u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\u3002",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "\u68C0\u7D22\u5173\u952E\u8BCD\u6216\u95EE\u9898" },
+        max_results: { type: "integer", description: "\u6700\u591A\u8FD4\u56DE\u51E0\u7BC7\uFF0C\u9ED8\u8BA4 3" }
+      },
+      required: ["query"]
+    },
+    async execute(args) {
+      if (!queryExecutor)
+        return { error: "Knowledge system not initialized" };
+      return await queryExecutor.execute(args);
+    }
+  };
+  const fileBackKnowledge = {
+    name: "file_back_knowledge",
+    description: "\u5C06\u9AD8\u8D28\u91CF\u77E5\u8BC6\u56DE\u7B54\u5B58\u56DE\u77E5\u8BC6\u5E93 Wiki\u3002",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "\u56DE\u586B\u6587\u7AE0\u7684\u6807\u9898" },
+        content: { type: "string", description: "\u8981\u5F52\u6863\u7684\u5185\u5BB9\uFF08Markdown\uFF09" },
+        topics: { type: "array", items: { type: "string" }, description: "\u4E3B\u9898\u6807\u7B7E" },
+        source_queries: { type: "array", items: { type: "string" }, description: "\u89E6\u53D1\u95EE\u9898\u5217\u8868" }
+      },
+      required: ["title", "content", "source_queries"]
+    },
+    async execute(args) {
+      if (!fileBackExecutor)
+        return { error: "Knowledge system not initialized" };
+      return await fileBackExecutor.execute(args);
+    }
+  };
+  return [queryKnowledge, fileBackKnowledge];
+}
+function createExecutor2(registry) {
+  return {
+    async execute(args, ctx) {
+      const query = args?.query || args?.name || "";
+      if (!query)
+        return { error: "Missing query parameter" };
+      return registry.execute("query_knowledge", { query, max_results: args?.max_results || 3 });
+    }
+  };
+}
+function registerTools3(registry, queryExecutor, fileBackExecutor) {
+  for (const tool of createKnowledgeTools(queryExecutor, fileBackExecutor)) {
+    registry.register(tool);
+  }
+}
+
+// src/skills/builtin/plugin-ctrl/executor.ts
+var listPlugins = {
+  name: "list_plugins",
+  description: "List all installed plugins and their status, including whether they have an AI skill.",
+  parameters: { type: "object", properties: {} },
+  async execute(args, ctx) {
+    if (!ctx.settings.allowPluginControl)
+      return { error: "Permission denied" };
+    const manifests = ctx.app.plugins.manifests;
+    const enabled = ctx.app.plugins.enabledPlugins;
+    const list = await Promise.all(Object.values(manifests).map(async (m) => ({
+      id: m.id,
+      name: m.name,
+      version: m.version,
+      enabled: enabled.has(m.id),
+      description: m.description,
+      hasSkill: await ctx.app.vault.adapter.exists(pluginSkillFilePath(m.id))
+    })));
+    return { plugins: list, total: list.length };
+  }
+};
+var getPluginCommands = {
+  name: "get_plugin_commands",
+  description: "Get available commands for a specific plugin.",
+  parameters: {
+    type: "object",
+    properties: {
+      pluginId: { type: "string", description: "The ID of the plugin" }
+    },
+    required: ["pluginId"]
+  },
+  async execute(args, ctx) {
+    if (!ctx.settings.allowPluginControl)
+      return { error: "Permission denied" };
+    const cmds = ctx.app.commands.listCommands().filter((c) => c.id.startsWith(args.pluginId + ":")).map((c) => ({ id: c.id, name: c.name }));
+    return { pluginId: args.pluginId, commands: cmds, count: cmds.length };
+  }
+};
+var getPluginSettings = {
+  name: "get_plugin_settings",
+  description: "Get settings for a specific plugin.",
+  parameters: {
+    type: "object",
+    properties: {
+      pluginId: { type: "string", description: "The ID of the plugin" }
+    },
+    required: ["pluginId"]
+  },
+  async execute(args, ctx) {
+    if (!ctx.settings.allowPluginControl)
+      return { error: "Permission denied" };
+    const plugin = ctx.app.plugins.getPlugin(args.pluginId);
+    if (!plugin)
+      return { error: "Plugin not found or not enabled" };
+    return { pluginId: args.pluginId, settings: plugin.settings || plugin.data || {} };
+  }
+};
+var executePluginCommand = {
+  name: "execute_plugin_command",
+  description: "Execute a plugin command by its ID. Use get_plugin_commands first to find the command ID.",
+  parameters: {
+    type: "object",
+    properties: {
+      commandId: { type: "string", description: 'The full command ID (e.g., "obsidian-tasks-plugin:add-task")' }
+    },
+    required: ["commandId"]
+  },
+  async execute(args, ctx) {
+    if (!ctx.settings.allowPluginControl)
+      return { error: "Permission denied" };
+    if (ctx.settings.confirmExecutions && !args.approved) {
+      return {
+        approval_required: true,
+        action: "execute_plugin_command",
+        target: args.commandId,
+        args: {
+          commandId: args.commandId
+        },
+        message: `Approval required to execute plugin command: ${args.commandId}`
+      };
+    }
+    const success = ctx.app.commands.executeCommandById(args.commandId);
+    return success ? { success: true, message: `\u2705 Executed: ${args.commandId}` } : { success: false, error: `Command not found: ${args.commandId}` };
+  }
+};
+var executor2 = {
+  async execute(args, ctx) {
+    return { message: "Plugin control: use args.action (list/commands/settings/execute) with pluginId." };
+  }
+};
+function registerTools4(registry) {
+  registry.register(listPlugins);
+  registry.register(getPluginCommands);
+  registry.register(getPluginSettings);
+  registry.register(executePluginCommand);
+}
+
+// src/skills/builtin/web-search/SKILL.md
+var SKILL_default = '---\nname: web-search\ndescription: \u641C\u7D22\u4E92\u8054\u7F51\u83B7\u53D6\u6700\u65B0\u4FE1\u606F\u3001\u65B0\u95FB\u6216\u6587\u6863\u3002\u5F53\u7528\u6237\u8BE2\u95EE vault \u4E2D\u6CA1\u6709\u7684\u5B9E\u65F6\u4FE1\u606F\u65F6\u4F7F\u7528\u3002\ntriggers:\n  keywords: ["\u641C\u7D22", "\u641C\u4E00\u4E0B", "search", "google", "\u6700\u65B0", "\u65B0\u95FB"]\ntools: ["web_search"]\n---\n\n# Web Search\n\n\u4F7F\u7528 DuckDuckGo \u641C\u7D22\u4E92\u8054\u7F51\u3002\n\n## \u4F7F\u7528\u65B9\u5F0F\n\n\u63D0\u4F9B\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u53EF\u9009\u65F6\u95F4\u8303\u56F4\u8FC7\u6EE4\u3002\n\n## \u53C2\u6570\n\n- `query`\uFF08\u5FC5\u586B\uFF09\uFF1A\u641C\u7D22\u5173\u952E\u8BCD\n- `time_range`\uFF08\u53EF\u9009\uFF09\uFF1A\u65F6\u95F4\u8303\u56F4 \u2014 d(\u5929), w(\u5468), m(\u6708), y(\u5E74)\n\n## \u8F93\u51FA\u683C\u5F0F\n\n\u8FD4\u56DE\u6700\u591A 5 \u6761\u641C\u7D22\u7ED3\u679C\uFF0C\u6BCF\u6761\u5305\u542B title\u3001link\u3001snippet\u3002\n\u56DE\u7B54\u65F6\u4F7F\u7528 Markdown \u94FE\u63A5\u683C\u5F0F\uFF1A`[Title](URL)`\u3002\n';
+
+// src/skills/builtin/web-clipper/SKILL.md
+var SKILL_default2 = '---\nname: web-clipper\ndescription: \u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault\u3002\u652F\u6301 YouTube\u3001Bilibili\u3001\u5FAE\u4FE1\u516C\u4F17\u53F7\u548C\u666E\u901A\u7F51\u9875\u3002\ntriggers:\n  commands: ["/save"]\n  keywords: ["\u4FDD\u5B58", "\u526A\u85CF", "save", "clip", "\u7F51\u9875", "webpage"]\ntools: ["save_webpage"]\n---\n\n# Web Clipper\n\n\u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault \u7684\u5B8C\u6574\u6D41\u7A0B\u3002\n\n## \u652F\u6301\u7684\u5185\u5BB9\u7C7B\u578B\n\n- **YouTube \u89C6\u9891**\uFF1A\u63D0\u53D6\u8F6C\u5F55\u6587\u672C\uFF0CAI \u751F\u6210\u6458\u8981\n- **Bilibili \u89C6\u9891**\uFF1A\u63D0\u53D6\u5B57\u5E55\uFF0CAI \u751F\u6210\u6458\u8981\n- **\u5FAE\u4FE1\u516C\u4F17\u53F7\u6587\u7AE0**\uFF1A\u7279\u6B8A DOM \u5904\u7406\uFF0C\u63D0\u53D6\u6B63\u6587\n- **\u666E\u901A\u7F51\u9875**\uFF1AReadability \u63D0\u53D6\u6B63\u6587\uFF0C\u8F6C\u4E3A Markdown\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n1. \u68C0\u6D4B URL \u7C7B\u578B\uFF08\u89C6\u9891 / \u7F51\u9875\uFF09\n2. \u89C6\u9891\u8DEF\u5F84\uFF1A\u63D0\u53D6\u8F6C\u5F55 \u2192 AI \u6458\u8981 \u2192 \u751F\u6210\u7B14\u8BB0\n3. \u7F51\u9875\u8DEF\u5F84\uFF1AHTTP \u8BF7\u6C42 \u2192 HTML \u89E3\u6790 \u2192 Readability \u63D0\u53D6 \u2192 Markdown \u8F6C\u6362\n4. \u751F\u6210 YAML frontmatter\uFF08created, source, author, tags\uFF09\n5. \u4FDD\u5B58\u5230\u914D\u7F6E\u7684\u5B58\u50A8\u76EE\u5F55\n\n## \u8F93\u51FA\u683C\u5F0F\n\n```markdown\n---\ncreated: 2026-04-17T12:00:00.000Z\nsource: https://example.com/article\nauthor: Author Name\ntags: clipping\n---\n\n# Article Title\n\n[\u6B63\u6587\u5185\u5BB9]\n```\n';
+
+// src/skills/builtin/knowledge/SKILL.md
+var SKILL_default3 = '---\nname: knowledge\ndescription: \u4ECE\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\uFF0C\u6216\u5C06\u9AD8\u8D28\u91CF\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\u5F53\u7528\u6237\u7684\u95EE\u9898\u53EF\u80FD\u4E0E\u5DF2\u79EF\u7D2F\u7684\u77E5\u8BC6\u76F8\u5173\u65F6\u4F7F\u7528\u3002\ntriggers:\n  commands: ["/wiki:query"]\n  keywords: ["\u77E5\u8BC6\u5E93", "\u77E5\u8BC6", "knowledge", "wiki"]\ntools: ["query_knowledge", "file_back_knowledge"]\n---\n\n# Knowledge Wiki\n\n\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u7684\u68C0\u7D22\u548C\u5F52\u6863\u3002\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n1. \u4F7F\u7528 `query_knowledge` \u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\n2. \u5982\u679C\u77E5\u8BC6\u5E93\u4E2D\u6CA1\u6709\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5E38\u56DE\u7B54\u5373\u53EF\uFF0C\u4E0D\u8981\u5F3A\u884C\u5F15\u7528\n3. \u77E5\u8BC6\u5E93\u68C0\u7D22\u4E0D\u8DB3\u65F6\uFF0C\u53EF\u4EE5\u7528 `search_vault` \u641C\u7D22\u6574\u4E2A vault \u8865\u5145\n\n## \u5F15\u7528\u89C4\u5219\n\n\u5982\u679C\u56DE\u7B54\u5F15\u7528\u4E86\u77E5\u8BC6\u5E93\u4E2D\u7684\u6587\u7AE0\uFF0C\u5FC5\u987B\u5728\u56DE\u7B54\u672B\u5C3E\u6DFB\u52A0\u5F15\u7528\u6765\u6E90\uFF1A\n\n```\n---\n\u{1F4DA} \u5F15\u7528\u6765\u6E90\uFF1A\n- [[\u6587\u7AE0\u8DEF\u5F84|\u6587\u7AE0\u6807\u9898]]\n```\n\n## \u56DE\u586B\u89C4\u5219\n\n\u5F53\u56DE\u7B54\u7EFC\u5408\u4E86\u591A\u4E2A\u77E5\u8BC6\u6765\u6E90\u3001\u4EA7\u51FA\u6709\u4EF7\u503C\u7684\u65B0\u6D1E\u5BDF\u6216\u5BF9\u6BD4\u5206\u6790\u65F6\uFF0C\n\u4F7F\u7528 `file_back_knowledge` \u5DE5\u5177\u5C06\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\n\n- \u4E0D\u8981\u5BF9\u7B80\u5355\u7684\u4E8B\u5B9E\u67E5\u8BE2\u505A\u56DE\u586B\uFF0C\u53EA\u56DE\u586B\u6709\u7EFC\u5408\u4EF7\u503C\u7684\u5185\u5BB9\n- \u7528\u6237\u70B9\u8D5E\uFF08\u{1F44D}\uFF09\u65F6\u65E0\u8BBA\u5224\u65AD\u5982\u4F55\u90FD\u6267\u884C\u56DE\u586B\n- \u7528\u6237\u70B9\u8E29\uFF08\u{1F44E}\uFF09\u65F6\u4E0D\u56DE\u586B\n';
+
+// src/skills/builtin/plugin-ctrl/SKILL.md
+var SKILL_default4 = '---\nname: plugin-ctrl\ndescription: \u53D1\u73B0\u548C\u4F7F\u7528 Obsidian \u63D2\u4EF6\u3002\u9700\u8981\u63D2\u4EF6\u80FD\u529B\u65F6\u5148\u901A\u8FC7\u6B64 skill \u67E5\u627E\u5408\u9002\u63D2\u4EF6\u3002\ntriggers:\n  keywords: ["\u63D2\u4EF6", "plugin", "plugins"]\ntools: ["list_plugins", "get_plugin_commands", "get_plugin_settings", "execute_plugin_command"]\n---\n\n# Plugin Control \u2014 \u63D2\u4EF6\u7F16\u6392\u5668\n\n\u67E5\u8BE2\u548C\u63A7\u5236 Obsidian \u63D2\u4EF6\u3002\u81EA\u52A8\u4E3A\u5DF2\u5B89\u88C5\u63D2\u4EF6\u751F\u6210\u4F7F\u7528 Skill\u3002\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n\u5F53\u7528\u6237\u7684\u9700\u6C42\u53EF\u80FD\u7531\u67D0\u4E2A\u63D2\u4EF6\u5B8C\u6210\u65F6\uFF1A\n\n1. \u67E5\u770B skill \u6458\u8981\u5217\u8868\uFF0C\u662F\u5426\u5DF2\u6709\u5339\u914D\u7684 `plugin-*` skill\n2. \u5982\u679C\u6709 \u2192 \u76F4\u63A5\u8C03\u7528\u8BE5\u63D2\u4EF6 skill\uFF08\u5982 `use_skill("plugin-obsidian-tasks")`\uFF09\n3. \u5982\u679C\u6CA1\u6709 \u2192 \u4F7F\u7528 `list_plugins` \u67E5\u770B\u5DF2\u5B89\u88C5\u63D2\u4EF6\n4. \u627E\u5230\u5019\u9009\u63D2\u4EF6\u540E\uFF0C\u7528 `get_plugin_commands` \u4E86\u89E3\u5176\u80FD\u529B\n5. \u6839\u636E\u547D\u4EE4\u548C\u8BBE\u7F6E\u4FE1\u606F\uFF0C\u76F4\u63A5\u64CD\u4F5C\u5B8C\u6210\u4EFB\u52A1\n\n## \u53EF\u7528\u5DE5\u5177\n\n- `list_plugins` \u2014 \u5217\u51FA\u6240\u6709\u5DF2\u5B89\u88C5\u63D2\u4EF6\u53CA\u5176\u542F\u7528\u72B6\u6001\u548C skill \u72B6\u6001\n- `get_plugin_commands` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u53EF\u7528\u547D\u4EE4\n- `get_plugin_settings` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u8BBE\u7F6E\n- `execute_plugin_command` \u2014 \u6267\u884C\u6307\u5B9A\u63D2\u4EF6\u547D\u4EE4\n\n## \u539F\u5219\n\n- \u4F18\u5148\u4F7F\u7528\u5DF2\u6709 skill \u7684\u63D2\u4EF6\uFF08instructions \u66F4\u5B8C\u6574\uFF09\n- \u6CA1\u6709 skill \u7684\u63D2\u4EF6\uFF0C\u9000\u56DE\u5230\u547D\u4EE4\u7EA7\u64CD\u4F5C\n- \u53EA\u6709\u5728\u6CA1\u6709\u5408\u9002\u63D2\u4EF6\u65F6\uFF0C\u624D\u7528\u7EAF vault \u64CD\u4F5C\u521B\u5EFA\u666E\u901A Markdown\n';
+
+// src/skills/builtin/plugin-ctrl/plugin-watcher.ts
+var import_obsidian21 = require("obsidian");
+var POLL_INTERVAL_MS = 1e4;
+var GENERATE_DELAY_MS = 1e3;
+var MAX_RETRIES = 3;
+var PluginWatcher = class {
+  constructor(app, skillRegistry, generator, settings) {
+    this.app = app;
+    this.skillRegistry = skillRegistry;
+    this.generator = generator;
+    this.settings = settings;
+  }
+  snapshot = /* @__PURE__ */ new Set();
+  intervalId = null;
+  failedRetries = /* @__PURE__ */ new Map();
+  getEnabledPluginIds() {
+    const enabled = this.app.plugins.enabledPlugins;
+    return [...enabled].filter(
+      (id) => id !== PLUGIN_ID && !this.settings.pluginSkillExcludeList.includes(id)
+    );
+  }
+  diffPlugins(oldSet, newSet) {
+    const added = [...newSet].filter((id) => !oldSet.has(id));
+    const removed = [...oldSet].filter((id) => !newSet.has(id));
+    return { added, removed };
+  }
+  async hasSkillFile(pluginId) {
+    return pluginSkillFileExists(this.app.vault.adapter, pluginId);
+  }
+  async start() {
+    if (!this.settings.autoGeneratePluginSkills) {
+      console.log("[PluginWatcher] Disabled by settings");
+      return;
+    }
+    console.log("[PluginWatcher] Starting...");
+    await this.initialScan();
+    this.intervalId = window.setInterval(
+      () => this.checkChanges(),
+      POLL_INTERVAL_MS
+    );
+  }
+  stop() {
+    if (this.intervalId !== null) {
+      window.clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    console.log("[PluginWatcher] Stopped");
+  }
+  async initialScan() {
+    const pluginIds = this.getEnabledPluginIds();
+    this.snapshot = new Set(pluginIds);
+    const toGenerate = [];
+    for (const id of pluginIds) {
+      if (!await this.hasSkillFile(id)) {
+        toGenerate.push(id);
+      }
+    }
+    if (toGenerate.length === 0) {
+      console.log("[PluginWatcher] All plugins have skills");
+      return;
+    }
+    const candidates = [];
+    for (const id of toGenerate) {
+      const info = await this.generator.collectPluginInfo(id);
+      if (!this.generator.shouldSkipPlugin(info)) {
+        candidates.push(id);
+      }
+    }
+    if (candidates.length === 0)
+      return;
+    console.log(`[PluginWatcher] Generating skills for ${candidates.length} plugins`);
+    new import_obsidian21.Notice(`Generating skills for ${candidates.length} plugins...`);
+    for (let i = 0; i < candidates.length; i++) {
+      await this.generateAndRegister(candidates[i]);
+      if (i < candidates.length - 1) {
+        await this.delay(GENERATE_DELAY_MS);
+      }
+    }
+    new import_obsidian21.Notice(`Plugin skill generation finished (${candidates.length})`);
+  }
+  async checkChanges() {
+    if (!this.settings.autoGeneratePluginSkills)
+      return;
+    const currentIds = new Set(this.getEnabledPluginIds());
+    const { added, removed } = this.diffPlugins(this.snapshot, currentIds);
+    for (const id of added) {
+      if (await this.hasSkillFile(id)) {
+        await this.loadAndRegister(id);
+      } else {
+        const info = await this.generator.collectPluginInfo(id);
+        if (!this.generator.shouldSkipPlugin(info)) {
+          new import_obsidian21.Notice(`Generating skill for ${info.name}...`);
+          await this.generateAndRegister(id);
+        }
+      }
+    }
+    for (const id of removed) {
+      const skillName = `plugin-${id}`;
+      this.skillRegistry.unregisterSkill(skillName);
+      console.log(`[PluginWatcher] Unregistered skill: ${skillName}`);
+    }
+    this.snapshot = currentIds;
+  }
+  async generateAndRegister(pluginId) {
+    const retries = this.failedRetries.get(pluginId) || 0;
+    if (retries >= MAX_RETRIES)
+      return;
+    try {
+      const info = await this.generator.collectPluginInfo(pluginId);
+      const content = await this.generator.generateSkillMd(info);
+      await this.generator.writeSkillFile(pluginId, content);
+      const registered = await this.loadAndRegister(pluginId);
+      if (!registered) {
+        throw new Error(`Generated skill file could not be loaded: ${this.generator.skillFilePath(pluginId)}`);
+      }
+      this.failedRetries.delete(pluginId);
+      console.log(`[PluginWatcher] Generated skill for: ${pluginId}`);
+    } catch (e) {
+      this.failedRetries.set(pluginId, retries + 1);
+      console.error(
+        `[PluginWatcher] Failed to generate skill for ${pluginId} (attempt ${retries + 1}/${MAX_RETRIES}):`,
+        e.message
+      );
+    }
+  }
+  async loadAndRegister(pluginId) {
+    const filePath = this.generator.skillFilePath(pluginId);
+    const content = await readTextIfExists(this.app.vault.adapter, filePath);
+    if (content === null)
+      return false;
+    const loader = new SkillLoader(
+      this.app,
+      this.skillRegistry.getToolRegistry()
+    );
+    const skill = loader.parseSkillMd(content);
+    if (!skill)
+      return false;
+    this.skillRegistry.registerUser(skill);
+    return true;
+  }
+  delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+};
+
+// src/skills/builtin/plugin-ctrl/skill-generator.ts
+var import_obsidian22 = require("obsidian");
+var UI_KEYWORDS = [
+  "open",
+  "show",
+  "toggle",
+  "view",
+  "modal",
+  "picker",
+  "select",
+  "insert",
+  "jump",
+  "focus",
+  "reveal"
+];
+var STOP_WORDS = /* @__PURE__ */ new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "but",
+  "in",
+  "on",
+  "at",
+  "to",
+  "for",
+  "of",
+  "with",
+  "by",
+  "from",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "your",
+  "you",
+  "this",
+  "that",
+  "it",
+  "its",
+  "yet",
+  "another",
+  "into",
+  "not",
+  "can",
+  "has",
+  "have",
+  "had",
+  "will",
+  "would",
+  "could",
+  "should",
+  "may",
+  "might",
+  "all",
+  "any",
+  "each",
+  "every",
+  "more",
+  "most",
+  "other",
+  "plugin",
+  "obsidian",
+  "based",
+  "using",
+  "allows",
+  "allowing",
+  "use"
+]);
+var SYSTEM_PROMPT = `\u4F60\u662F Obsidian \u63D2\u4EF6\u4E13\u5BB6\u3002\u6839\u636E\u63D2\u4EF6\u4FE1\u606F\u751F\u6210\u64CD\u4F5C\u6307\u5357\u3002
+
+## \u4F60\u7684\u4EFB\u52A1
+\u8F93\u51FA Markdown body \u5185\u5BB9\uFF0C\u683C\u5F0F\u8981\u6C42\uFF1A
+1. \u7B2C\u4E00\u884C\u5FC5\u987B\u662F\uFF1A<!-- DESC: \u4E00\u53E5\u8BDD\u4E2D\u6587\u63CF\u8FF0\uFF0C\u4E0D\u8D85\u8FC7100\u5B57 -->
+   - \u8FD9\u53E5\u63CF\u8FF0\u8981\u6982\u62EC\u63D2\u4EF6\u7684\u6838\u5FC3\u529F\u80FD\u548C AI \u80FD\u5E2E\u7528\u6237\u505A\u4EC0\u4E48\uFF0C\u57FA\u4E8E\u547D\u4EE4\u5217\u8868\u603B\u7ED3\uFF0C\u4E0D\u8981\u76F4\u8BD1\u82F1\u6587\u63CF\u8FF0
+2. \u7136\u540E\u662F # \u6807\u9898\u5F00\u59CB\u7684\u6B63\u6587\u5185\u5BB9
+\u4E0D\u8981\u8F93\u51FA frontmatter\uFF08--- \u5757\uFF09\u3002
+\u8FD9\u4EFD\u6307\u5357\u544A\u8BC9 AI \u52A9\u624B\u5982\u4F55\u7528 vault \u5DE5\u5177\u914D\u5408\u8BE5\u63D2\u4EF6\u5B8C\u6210\u7528\u6237\u4EFB\u52A1\u3002
+
+## \u7EA6\u675F
+- \u4E0D\u8981\u8F93\u51FA frontmatter\u3001\u7EA6\u675F\u8BF4\u660E\u3001\u6216\u4EFB\u4F55\u4E0E\u64CD\u4F5C\u6307\u5357\u65E0\u5173\u7684\u5185\u5BB9
+- \u64CD\u4F5C\u6307\u5357\u4E2D\u53EA\u4F7F\u7528\u4E0B\u65B9\u5217\u51FA\u7684\u5DE5\u5177\u53CA\u5176\u771F\u5B9E\u53C2\u6570\u7B7E\u540D\uFF0C\u7981\u6B62\u7F16\u9020\u53C2\u6570
+- execute_plugin_command(commandId: string) \u53EA\u63A5\u53D7\u4E00\u4E2A\u53C2\u6570 commandId
+- execute_plugin_command \u7684\u5C40\u9650\uFF1A\u5B83\u53EA\u662F\u89E6\u53D1\u547D\u4EE4\uFF0C\u65E0\u6CD5\u6307\u5B9A\u76EE\u6807\u6587\u4EF6\u6216\u4F20\u9012\u989D\u5916\u53C2\u6570\uFF1B\u5F88\u591A\u547D\u4EE4\u9700\u8981\u7528\u6237\u5728\u7F16\u8F91\u5668\u4E2D\u6253\u5F00\u76EE\u6807\u6587\u4EF6\u540E\u624D\u80FD\u751F\u6548
+- \u91CD\u70B9\u5199"AI \u600E\u4E48\u7528 vault \u5DE5\u5177\u8BFB\u5199\u6587\u4EF6\u6765\u914D\u5408\u63D2\u4EF6"\uFF0C\u800C\u4E0D\u662F\u7B80\u5355\u7FFB\u8BD1\u547D\u4EE4\u5217\u8868
+- \u5982\u679C\u63D2\u4EF6\u901A\u8FC7\u7279\u5B9A Markdown \u683C\u5F0F\u5B58\u50A8\u6570\u636E\uFF0C\u52A1\u5FC5\u7ED9\u51FA\u683C\u5F0F\u793A\u4F8B
+
+## \u597D\u7684\u793A\u4F8B
+
+\u8F93\u5165\uFF1A\u63D2\u4EF6 obsidian-tasks-plugin\uFF0C\u547D\u4EE4 toggle-done / edit-task
+\u8F93\u51FA\uFF1A
+
+<!-- DESC: \u7BA1\u7406 vault \u4E2D\u7684\u5F85\u529E\u4EFB\u52A1\uFF0C\u652F\u6301\u622A\u6B62\u65E5\u671F\u3001\u91CD\u590D\u4EFB\u52A1\u548C\u5B8C\u6210\u72B6\u6001\u8FFD\u8E2A -->
+
+# Tasks
+
+## \u6570\u636E\u683C\u5F0F
+\u4EFB\u52A1\u4EE5 Markdown checkbox \u5B58\u50A8\uFF0C\u652F\u6301 emoji \u6807\u8BB0\uFF1A
+\`- [ ] \u4E70\u725B\u5976 \u{1F4C5} 2024-12-31\`
+\`- [x] \u5199\u5468\u62A5 \u2705 2024-06-01\`
+
+## \u64CD\u4F5C\u6307\u5357
+1. \u67E5\u770B\u4EFB\u52A1\uFF1Aread_note(path) \u8BFB\u53D6\u7B14\u8BB0\uFF0C\u8BC6\u522B \`- [ ]\` \u548C \`- [x]\` \u884C
+2. \u6DFB\u52A0\u4EFB\u52A1\uFF1Aappend_to_note(path, "- [ ] \u65B0\u4EFB\u52A1\u63CF\u8FF0 \u{1F4C5} YYYY-MM-DD")
+3. \u6279\u91CF\u67E5\u627E\u4EFB\u52A1\uFF1Asearch_vault("TODO") \u6216 list_notes(folder) \u904D\u5386\u76EE\u5F55
+4. \u6807\u8BB0\u5B8C\u6210\uFF08\u9700\u8981 UI\uFF09\uFF1A\u5148\u7528 open_file(path) \u6253\u5F00\u7B14\u8BB0\uFF0C\u518D execute_plugin_command("obsidian-tasks-plugin:toggle-done")
+
+## \u5DEE\u7684\u793A\u4F8B\uFF08\u4E0D\u8981\u8FD9\u6837\u5199\uFF09
+- \u53EA\u5217\u51FA execute_plugin_command \u8C03\u7528\uFF0C\u6CA1\u6709 vault \u5DE5\u5177\u914D\u5408
+- \u7ED9 execute_plugin_command \u7F16\u9020 path/content/task_identifier \u7B49\u4E0D\u5B58\u5728\u7684\u53C2\u6570
+- \u628A\u7CFB\u7EDF\u7EA6\u675F\u539F\u6837\u8F93\u51FA\u5230\u64CD\u4F5C\u6307\u5357\u4E2D`;
+var PluginSkillGenerator = class {
+  constructor(app, modelService, settings) {
+    this.app = app;
+    this.modelService = modelService;
+    this.settings = settings;
+  }
+  // ---------- 信息收集 ----------
+  async collectPluginInfo(pluginId) {
+    const manifestData = await this.readManifest(pluginId);
+    const fallbackManifest = this.app.plugins.manifests[pluginId];
+    const name = manifestData.name || fallbackManifest?.name || pluginId;
+    const description = manifestData.description || fallbackManifest?.description || "";
+    const rawCommands = this.app.commands.listCommands().filter((c) => c.id.startsWith(pluginId + ":")).map((c) => ({ id: c.id, name: c.name }));
+    const commands = rawCommands.map((c) => this.classifyCommand(c));
+    const plugin = this.app.plugins.getPlugin(pluginId);
+    const rawSettings = plugin?.settings || plugin?.data || {};
+    const settingsKeys = this.extractSettingsKeys(rawSettings);
+    const syntaxHints = await this.extractSyntaxHints(pluginId);
+    const webContext = await this.fetchPluginContext(pluginId, name);
+    console.log(`[SkillGenerator] ${pluginId} syntaxHints:`, syntaxHints);
+    console.log(`[SkillGenerator] ${pluginId} webContext length:`, webContext.length);
+    return {
+      id: pluginId,
+      name,
+      description,
+      version: manifestData.version || fallbackManifest?.version || "",
+      commands,
+      settingsKeys,
+      syntaxHints,
+      webContext
+    };
+  }
+  /** 从 main.js 提取代码块语法标识符 */
+  async extractSyntaxHints(pluginId) {
+    try {
+      const path = `.obsidian/plugins/${pluginId}/main.js`;
+      let content;
+      try {
+        content = await this.app.vault.adapter.read(path);
+      } catch {
+        console.log(`[SkillGenerator] extractSyntaxHints ${pluginId}: file not found`);
+        return [];
+      }
+      console.log(`[SkillGenerator] extractSyntaxHints ${pluginId}: file read, ${content.length} chars`);
+      const chunk = content.slice(0, 5e4);
+      const hints = /* @__PURE__ */ new Set();
+      const regex = /["']([a-z][a-z0-9-]{2,29})["']/g;
+      let match;
+      while ((match = regex.exec(chunk)) !== null) {
+        const val = match[1];
+        if (val.includes(pluginId) || val.length < 3)
+          continue;
+        if ([
+          "function",
+          "object",
+          "string",
+          "number",
+          "boolean",
+          "undefined",
+          "default",
+          "module",
+          "exports",
+          "require",
+          "prototype",
+          "constructor",
+          "class"
+        ].includes(val))
+          continue;
+        hints.add(val);
+      }
+      const pluginShort = pluginId.replace(/^obsidian-?/, "").toLowerCase();
+      return [...hints].filter((h) => h.includes("-") || h.includes(pluginShort) || [
+        "dataview",
+        "dataviewjs",
+        "tasks",
+        "task",
+        "kanban",
+        "button",
+        "button-maker",
+        "admonition",
+        "callout",
+        "templater",
+        "excalidraw"
+      ].includes(h)).slice(0, 10);
+    } catch {
+      return [];
+    }
+  }
+  /** 分层获取插件文档上下文 */
+  async fetchPluginContext(pluginId, pluginName) {
+    const repo = await this.getPluginRepo(pluginId);
+    if (repo) {
+      const rawUrl = `https://raw.githubusercontent.com/${repo}/HEAD/README.md`;
+      const content = await this.fetchRawText(rawUrl);
+      if (content) {
+        console.log(`[SkillGenerator] ${pluginId}: got ${content.length} chars from GitHub README (${repo})`);
+        return content;
+      }
+    }
+    return this.searchPluginDocs(pluginName);
+  }
+  /** 社区插件索引缓存 */
+  communityPluginsCache = null;
+  /** 从 community-plugins.json 获取插件的 GitHub repo */
+  async getPluginRepo(pluginId) {
+    try {
+      if (this.communityPluginsCache) {
+        return this.communityPluginsCache[pluginId] || "";
+      }
+      const url = "https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json";
+      const response = await (0, import_obsidian22.requestUrl)({ url });
+      if (response.status !== 200)
+        return "";
+      const plugins = JSON.parse(response.text);
+      this.communityPluginsCache = {};
+      for (const p of plugins) {
+        this.communityPluginsCache[p.id] = p.repo;
+      }
+      console.log(`[SkillGenerator] Loaded community-plugins.json: ${plugins.length} plugins`);
+      return this.communityPluginsCache[pluginId] || "";
+    } catch (e) {
+      console.warn(`[SkillGenerator] Failed to load community-plugins.json:`, e.message);
+      return "";
+    }
+  }
+  /** 从 manifest.json 读取基本信息 */
+  async readManifest(pluginId) {
+    try {
+      const path = `.obsidian/plugins/${pluginId}/manifest.json`;
+      const raw = await this.app.vault.adapter.read(path);
+      const json = JSON.parse(raw);
+      return {
+        name: json.name || "",
+        description: json.description || "",
+        version: json.version || ""
+      };
+    } catch {
+      return { name: "", description: "", version: "" };
+    }
+  }
+  /** 抓取纯文本内容（用于 GitHub raw README） */
+  async fetchRawText(url) {
+    try {
+      const response = await (0, import_obsidian22.requestUrl)({ url });
+      if (response.status !== 200)
+        return "";
+      return response.text;
+    } catch {
+      return "";
+    }
+  }
+  /** 通过 DuckDuckGo 搜索插件文档摘要（fallback） */
+  async searchPluginDocs(pluginName) {
+    try {
+      const query = `obsidian ${pluginName} plugin usage markdown syntax`;
+      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      let html = "";
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const response = await (0, import_obsidian22.requestUrl)({ url });
+        console.log(`[SkillGenerator] web search for "${pluginName}": attempt=${attempt + 1}, status=${response.status}, html=${response.text.length} chars`);
+        if (response.status === 200 && response.text.length > 2e4) {
+          html = response.text;
+          break;
+        }
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 2e3));
+        }
+      }
+      if (!html)
+        return "";
+      const snippets = [];
+      const regex = /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
+      let match;
+      while ((match = regex.exec(html)) !== null && snippets.length < 3) {
+        const text = match[1].replace(/<[^>]+>/g, "").trim();
+        if (text.length > 20)
+          snippets.push(text);
+      }
+      return snippets.join("\n");
+    } catch {
+      return "";
+    }
+  }
+  /** 启发式判断命令是否需要 UI 交互 */
+  classifyCommand(cmd) {
+    const nameLower = cmd.name.toLowerCase();
+    const needsUI = UI_KEYWORDS.some((k) => nameLower.includes(k));
+    return {
+      id: cmd.id,
+      name: cmd.name,
+      aiUsable: !needsUI,
+      reason: needsUI ? "\u9700\u8981 UI \u4EA4\u4E92" : void 0
+    };
+  }
+  /** 只提取 settings 顶层 key 名，不 dump 值 */
+  extractSettingsKeys(settings) {
+    try {
+      return Object.keys(settings).slice(0, 15);
+    } catch {
+      return [];
+    }
+  }
+  shouldSkipPlugin(info) {
+    return info.commands.length === 0 && info.settingsKeys.length === 0;
+  }
+  // ---------- Frontmatter（代码生成，不交给 LLM） ----------
+  buildFrontmatter(info, llmDesc) {
+    const name = `plugin-${info.id}`;
+    const desc = (llmDesc || info.description || info.name).slice(0, 150);
+    const keywords = this.extractKeywords(info);
+    const tools = this.inferTools(info);
+    return [
+      "---",
+      `name: ${name}`,
+      `description: ${desc}`,
+      "triggers:",
+      `  keywords: ${JSON.stringify(keywords)}`,
+      `tools: ${JSON.stringify(tools)}`,
+      "---"
+    ].join("\n");
+  }
+  /** 从插件名称和描述中提取关键词 */
+  extractKeywords(info) {
+    const kw = /* @__PURE__ */ new Set();
+    const shortName = info.name.replace(/^obsidian[\s-]*/i, "").trim();
+    if (shortName)
+      kw.add(shortName);
+    const descWords = (info.description || "").replace(/[.,;:!?()[\]{}'"]/g, " ").split(/\s+/).filter((w) => w.length > 2 && w.length < 20).filter((w) => !STOP_WORDS.has(w.toLowerCase())).slice(0, 5);
+    for (const w of descWords)
+      kw.add(w.toLowerCase());
+    for (const h of info.syntaxHints.slice(0, 3))
+      kw.add(h);
+    return [...kw].slice(0, 8);
+  }
+  /** 根据插件命令推断需要的工具 */
+  inferTools(info) {
+    const tools = /* @__PURE__ */ new Set();
+    if (info.commands.length > 0) {
+      tools.add("execute_plugin_command");
+    }
+    tools.add("read_note");
+    tools.add("append_to_note");
+    tools.add("search_vault");
+    return [...tools];
+  }
+  // ---------- Prompt（只让 LLM 生成 body） ----------
+  buildPrompt(info) {
+    const aiCmds = info.commands.filter((c) => c.aiUsable);
+    const uiCmds = info.commands.filter((c) => !c.aiUsable);
+    const aiCmdList = aiCmds.length > 0 ? aiCmds.map((c) => `- ${c.id} \u2014 ${c.name}`).join("\n") : "\uFF08\u65E0\uFF09";
+    const uiCmdList = uiCmds.length > 0 ? uiCmds.map((c) => `- ${c.id} \u2014 ${c.name}\uFF08${c.reason}\uFF09`).join("\n") : "\uFF08\u65E0\uFF09";
+    const settingsList = info.settingsKeys.length > 0 ? info.settingsKeys.join(", ") : "\uFF08\u65E0\u53EF\u8BFB\u8BBE\u7F6E\uFF09";
+    const syntaxSection = info.syntaxHints.length > 0 ? `
+## \u63D2\u4EF6\u4F7F\u7528\u7684 Markdown \u8BED\u6CD5\u6807\u8BC6\u7B26
+${info.syntaxHints.map((h) => `- \`${h}\``).join("\n")}
+\u8FD9\u4E9B\u6807\u8BC6\u7B26\u901A\u5E38\u7528\u4E8E\u4EE3\u7801\u5757\uFF08\u5982 \`\`\`${info.syntaxHints[0]}\`\`\`\uFF09\u6216 frontmatter \u5B57\u6BB5\u3002` : "";
+    const webSection = info.webContext ? `
+## \u7F51\u7EDC\u641C\u7D22\u8865\u5145\u4FE1\u606F
+${info.webContext}` : "";
+    return `\u8BF7\u4E3A\u4EE5\u4E0B\u63D2\u4EF6\u751F\u6210\u64CD\u4F5C\u6307\u5357\uFF08\u4ECE # \u6807\u9898\u5F00\u59CB\uFF0C\u4E0D\u8981\u8F93\u51FA frontmatter\uFF09\uFF1A
+
+## \u63D2\u4EF6\u4FE1\u606F
+- \u540D\u79F0: ${info.name}
+- \u63CF\u8FF0: ${info.description}
+
+## AI \u53EF\u76F4\u63A5\u8C03\u7528\u7684\u547D\u4EE4
+${aiCmdList}
+
+## \u9700\u8981 UI \u4EA4\u4E92\u7684\u547D\u4EE4\uFF08\u9700\u5148 open_file \u6253\u5F00\u76EE\u6807\u7B14\u8BB0\uFF09
+${uiCmdList}
+
+## \u914D\u7F6E\u9879\uFF08\u4EC5 key \u540D\uFF09
+${settingsList}
+${syntaxSection}
+${webSection}
+
+## \u53EF\u7528\u7684 vault \u5DE5\u5177\u7B7E\u540D
+- read_note(path: string) \u2014 \u8BFB\u53D6\u7B14\u8BB0
+- create_note(path: string, content: string) \u2014 \u521B\u5EFA\u7B14\u8BB0
+- update_note(path: string, content: string) \u2014 \u8986\u76D6\u66F4\u65B0\u7B14\u8BB0
+- append_to_note(path: string, content: string) \u2014 \u8FFD\u52A0\u5185\u5BB9
+- search_vault(query: string) \u2014 \u641C\u7D22\u6587\u4EF6
+- list_notes(folder?: string) \u2014 \u5217\u51FA\u7B14\u8BB0
+- open_file(path: string) \u2014 \u6253\u5F00\u6587\u4EF6\uFF08\u914D\u5408\u9700\u8981 UI \u7684\u547D\u4EE4\uFF09
+- execute_plugin_command(commandId: string) \u2014 \u6267\u884C\u547D\u4EE4\uFF08\u53EA\u63A5\u53D7 commandId\uFF09
+
+\u8BF7\u751F\u6210\u64CD\u4F5C\u6307\u5357\uFF0C\u91CD\u70B9\u5199 AI \u5982\u4F55\u7528 vault \u5DE5\u5177\u914D\u5408\u63D2\u4EF6\u5B8C\u6210\u4EFB\u52A1\u3002`;
+  }
+  // ---------- 生成 + 拼装 + 校验 ----------
+  async generateSkillMd(info) {
+    const prompt = this.buildPrompt(info);
+    const response = await this.modelService.generate(prompt, SYSTEM_PROMPT);
+    let body = response.trim();
+    const codeBlockMatch = body.match(
+      /```(?:yaml|markdown|md)?\s*\n([\s\S]*?)```/
+    );
+    if (codeBlockMatch)
+      body = codeBlockMatch[1].trim();
+    if (body.startsWith("---")) {
+      const endIdx = body.indexOf("---", 3);
+      if (endIdx > 0) {
+        body = body.slice(endIdx + 3).trim();
+      }
+    }
+    let llmDesc = "";
+    const descMatch = body.match(/^<!--\s*DESC:\s*(.+?)\s*-->/);
+    if (descMatch) {
+      llmDesc = descMatch[1].slice(0, 150);
+      body = body.slice(descMatch[0].length).trim();
+    }
+    if (!body.startsWith("#")) {
+      body = `# ${info.name}
+
+${body}`;
+    }
+    const bodyWithoutTitle = body.replace(/^#[^\n]*\n*/, "").trim();
+    if (bodyWithoutTitle.length < 50) {
+      const firstCmd = info.commands[0]?.id || `${info.id}:command`;
+      body = `# ${info.name}
+
+## \u64CD\u4F5C\u6307\u5357
+1. \u6267\u884C\u63D2\u4EF6\u547D\u4EE4\uFF1Aexecute_plugin_command("${firstCmd}")
+2. \u641C\u7D22\u76F8\u5173\u7B14\u8BB0\uFF1Asearch_vault("${info.name}")
+3. \u8BFB\u53D6\u7B14\u8BB0\u5185\u5BB9\uFF1Aread_note(path) \u83B7\u53D6\u6587\u4EF6\u5185\u5BB9\u540E\u5206\u6790`;
+      console.warn(`[SkillGenerator] Body too short for ${info.id}, using fallback template`);
+    }
+    const warnings = this.validateBody(body);
+    if (warnings.length > 0) {
+      console.warn(
+        `[SkillGenerator] Validation warnings for ${info.id}:`,
+        warnings.join("; ")
+      );
+    }
+    const frontmatter = this.buildFrontmatter(info, llmDesc);
+    return `${frontmatter}
+
+${body}`;
+  }
+  /** 校验生成的 body 内容 */
+  validateBody(body) {
+    const warnings = [];
+    const fakeParams = ["path=", "content=", "task_identifier=", "target_folder="];
+    for (const p of fakeParams) {
+      if (body.includes(p)) {
+        warnings.push(`\u53EF\u80FD\u5305\u542B\u7F16\u9020\u53C2\u6570: ${p}`);
+      }
+    }
+    const leakPatterns = ["\u5173\u952E\u539F\u5219", "\u4E0D\u8981\u8F93\u51FA", "\u7981\u6B62\u7F16\u9020", "\u4E25\u683C\u6309\u4EE5\u4E0B"];
+    for (const p of leakPatterns) {
+      if (body.includes(p)) {
+        warnings.push(`\u53EF\u80FD\u6CC4\u6F0F\u7CFB\u7EDF\u63D0\u793A: "${p}"`);
+      }
+    }
+    return warnings;
+  }
+  // ---------- 文件操作 ----------
+  async writeSkillFile(pluginId, content) {
+    const resolvedDirPath = pluginSkillDirPath(pluginId, USER_SKILLS_DIR);
+    const resolvedFilePath = pluginSkillFilePath(pluginId, USER_SKILLS_DIR);
+    const adapter = this.app.vault.adapter;
+    await ensureDirectory(adapter, resolvedDirPath);
+    if (await adapter.exists(resolvedFilePath))
+      return resolvedFilePath;
+    await adapter.write(resolvedFilePath, content);
+    return resolvedFilePath;
+  }
+  skillDirPath(pluginId) {
+    return pluginSkillDirPath(pluginId, USER_SKILLS_DIR);
+  }
+  skillFilePath(pluginId) {
+    return pluginSkillFilePath(pluginId, USER_SKILLS_DIR);
+  }
+};
+
+// src/services/inbox-autosave.ts
+function extractRawUrlMatches(content) {
+  const regex = /(\[\[.*?\]\])|(\[.*?\]\(.*?\))|(https?:\/\/[^\s\)]+)/g;
+  const matches = [];
+  for (const match of content.matchAll(regex)) {
+    if (!match[1] && !match[2] && match[3] && match.index !== void 0) {
+      matches.push({
+        url: match[3],
+        index: match.index,
+        length: match[0].length
+      });
+    }
+  }
+  return matches;
+}
+function buildSavedLink(path) {
+  return `[[${path}|Saved: ${path.split("/").pop()?.replace(".md", "")}]]`;
+}
+function replaceMatchesWithLinks(content, replacements) {
+  const currentMatches = extractRawUrlMatches(content);
+  const pendingMatches = [...currentMatches];
+  const edits = [];
+  for (const replacement of replacements) {
+    const matchIndex = pendingMatches.findIndex((match2) => match2.url === replacement.url);
+    if (matchIndex === -1)
+      continue;
+    const match = pendingMatches[matchIndex];
+    pendingMatches.splice(matchIndex, 1);
+    edits.push({
+      index: match.index,
+      length: match.length,
+      text: buildSavedLink(replacement.path)
+    });
+  }
+  if (edits.length === 0) {
+    return { content, modified: false };
+  }
+  edits.sort((a, b) => b.index - a.index);
+  let nextContent = content;
+  for (const edit of edits) {
+    nextContent = nextContent.slice(0, edit.index) + edit.text + nextContent.slice(edit.index + edit.length);
+  }
+  return { content: nextContent, modified: true };
+}
+var InboxAutosaveCoordinator = class {
+  constructor(options) {
+    this.options = options;
+  }
+  fileQueues = /* @__PURE__ */ new Map();
+  async handleFileModify(file) {
+    if (file.path !== this.options.getInboxPath())
+      return;
+    const previous = this.fileQueues.get(file.path) || Promise.resolve();
+    const next = previous.catch(() => void 0).then(() => this.processFile(file)).finally(() => {
+      if (this.fileQueues.get(file.path) === next) {
+        this.fileQueues.delete(file.path);
+      }
+    });
+    this.fileQueues.set(file.path, next);
+    await next;
+  }
+  async processFile(file) {
+    const initialContent = await this.options.app.vault.read(file);
+    const matches = extractRawUrlMatches(initialContent);
+    if (matches.length === 0)
+      return;
+    const replacements = [];
+    for (const match of matches) {
+      this.options.notify?.(`Auto-saving: ${match.url}`);
+      const result = await this.options.saveUrl(match.url);
+      if (result.success && result.path) {
+        replacements.push({ url: match.url, path: result.path });
+      } else if (result.error) {
+        this.options.notify?.(`Failed to save ${match.url}: ${result.error}`);
+      }
+    }
+    if (replacements.length === 0)
+      return;
+    const latestContent = await this.options.app.vault.read(file);
+    const rewritten = replaceMatchesWithLinks(latestContent, replacements);
+    if (!rewritten.modified)
+      return;
+    await this.options.app.vault.modify(file, rewritten.content);
+  }
+};
+
 // main.ts
-var ObsidianCliPlugin = class extends import_obsidian18.Plugin {
+var ObsidianCliPlugin = class extends import_obsidian23.Plugin {
   settings;
   modelService;
-  toolManager;
   knowledgeRuntime = null;
+  toolRegistry;
+  skillRegistry;
+  editorExtensionsRegistered = false;
+  pluginWatcher = null;
+  inboxAutosave = null;
   // Debounce with trailing edge (default/false) for inactivity trigger
-  onEditorChangeDebounced = (0, import_obsidian18.debounce)(this.runGuardianCheck.bind(this), 3e3);
+  onEditorChangeDebounced = (0, import_obsidian23.debounce)(this.runGuardianCheck.bind(this), 3e3);
   async onload() {
     await this.loadSettings();
-    new import_obsidian18.Notice("Obsidian Shell: Plugin Loaded (v2)");
-    this.toolManager = new ToolManager(this.app, this.settings);
-    this.modelService = new ModelService(this.app, this.settings, this.toolManager);
-    this.toolManager.setGeminiApi(this.modelService);
+    new import_obsidian23.Notice("Obsidian Shell: Plugin Loaded (v2)");
+    this.toolRegistry = new ToolRegistry(this.app, this.settings);
+    this.skillRegistry = new SkillRegistry(this.toolRegistry);
+    this.modelService = new ModelService(this.app, this.settings, this.toolRegistry, this.skillRegistry);
+    this.inboxAutosave = new InboxAutosaveCoordinator({
+      app: this.app,
+      getInboxPath: () => this.settings.wechatInboxPath,
+      saveUrl: async (url) => this.toolRegistry.execute("save_webpage", { url }),
+      notify: (message) => new import_obsidian23.Notice(message)
+    });
+    registerVaultTools(this.toolRegistry);
+    registerTools(this.toolRegistry);
+    registerTools2(this.toolRegistry, this.modelService);
+    registerTools4(this.toolRegistry);
+    this.skillRegistry.registerBuiltinFromMd(SKILL_default, executor);
+    this.skillRegistry.registerBuiltinFromMd(SKILL_default2, createExecutor(this.modelService));
+    this.skillRegistry.registerBuiltinFromMd(
+      SKILL_default4,
+      executor2,
+      (settings) => settings.allowPluginControl
+    );
+    console.log(`[ObsidianCli] SkillRegistry initialized: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
     this.knowledgeRuntime = new KnowledgeRuntime(
       this.app,
       this.settings,
-      this.modelService,
-      this.toolManager
+      this.modelService
     );
     await this.knowledgeRuntime.initialize();
     this.knowledgeRuntime.registerCommands(this);
     this.knowledgeRuntime.registerEvents(this);
-    this.registerView(
-      VIEW_TYPE_SHELL,
-      (leaf) => new ShellView(leaf, this.modelService)
+    registerTools3(
+      this.toolRegistry,
+      this.knowledgeRuntime.getQueryExecutor(),
+      this.knowledgeRuntime.getFileBackExecutor()
     );
+    this.skillRegistry.registerBuiltinFromMd(SKILL_default3, createExecutor2(this.toolRegistry));
+    console.log(`[ObsidianCli] Final: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
+    await this.skillRegistry.loadUserSkills(".obsidian/obsidian-cli/skills", this.app);
+    console.log(`[ObsidianCli] Skill system ready: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
+    this.app.workspace.detachLeavesOfType(VIEW_TYPE_SHELL);
+    try {
+      this.registerView(
+        VIEW_TYPE_SHELL,
+        (leaf) => new ShellView(leaf, this.modelService)
+      );
+    } catch (e) {
+      console.log("[ObsidianCli] View type already registered, skipping.");
+    }
     this.addRibbonIcon("terminal", "Open Obsidian Shell", (evt) => {
       this.activateView();
     });
@@ -8876,26 +11643,43 @@ var ObsidianCliPlugin = class extends import_obsidian18.Plugin {
       hotkeys: [{ modifiers: ["Mod", "Shift"], key: "g" }]
     });
     this.addSettingTab(new SettingTab(this.app, this));
-    this.registerEditorExtension([
-      guardianGutterExtension(),
-      ghostTextExtension(),
-      selectionMenuExtension(this.app, this.modelService)
-    ]);
+    if (!this.editorExtensionsRegistered) {
+      this.registerEditorExtension([
+        guardianGutterExtension(),
+        ghostTextExtension(),
+        selectionMenuExtension(this.app, this.modelService)
+      ]);
+      this.editorExtensionsRegistered = true;
+    }
     this.registerEvent(
       this.app.workspace.on("editor-change", this.onEditorChangeDebounced)
     );
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (file instanceof import_obsidian18.TFile && file.extension === "md") {
-          this.onFileModify(file);
+        if (file instanceof import_obsidian23.TFile && file.extension === "md") {
+          void this.inboxAutosave?.handleFileModify(file);
         }
       })
     );
+    const skillGenerator = new PluginSkillGenerator(
+      this.app,
+      this.modelService,
+      this.settings
+    );
+    this.pluginWatcher = new PluginWatcher(
+      this.app,
+      this.skillRegistry,
+      skillGenerator,
+      this.settings
+    );
+    this.pluginWatcher.start();
   }
   onunload() {
+    this.app.workspace.detachLeavesOfType(VIEW_TYPE_SHELL);
     if (this.knowledgeRuntime) {
       this.knowledgeRuntime.cleanup();
     }
+    this.pluginWatcher?.stop();
     this.modelService.shutdown();
   }
   async activateView() {
@@ -8910,9 +11694,9 @@ var ObsidianCliPlugin = class extends import_obsidian18.Plugin {
     }
   }
   activateGuardianModal() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian18.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian23.MarkdownView);
     if (!view) {
-      new import_obsidian18.Notice("Please open a Markdown file first.");
+      new import_obsidian23.Notice("Please open a Markdown file first.");
       return;
     }
     new GuardianModal(this.app, (instruction) => {
@@ -8920,12 +11704,55 @@ var ObsidianCliPlugin = class extends import_obsidian18.Plugin {
     }).open();
   }
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const raw = await this.loadData() || {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
+    if (!raw.providers && raw.provider) {
+      const old = raw;
+      this.settings.activeProvider = old.provider || "gemini";
+      this.settings.providers = {
+        "gemini": {
+          type: "gemini",
+          label: "Google Gemini",
+          apiKey: old.apiKey || "",
+          baseUrl: "",
+          model: old.primaryModel || "gemini-2.5-flash"
+        },
+        "openai": {
+          type: "openai-compatible",
+          label: "OpenAI",
+          apiKey: old.openaiApiKey || "",
+          baseUrl: old.openaiBaseUrl || "https://api.openai.com/v1",
+          model: old.openaiModel || "gpt-4o"
+        },
+        "deepseek": {
+          type: "openai-compatible",
+          label: "DeepSeek",
+          apiKey: old.deepseekApiKey || "",
+          baseUrl: old.deepseekBaseUrl || "https://api.deepseek.com",
+          model: old.deepseekModel || "deepseek-chat"
+        },
+        "qwen": {
+          type: "openai-compatible",
+          label: "Qwen",
+          apiKey: old.qwenApiKey || "",
+          baseUrl: old.qwenBaseUrl || "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          model: old.qwenModel || "qwen-turbo"
+        }
+      };
+      await this.saveData(this.settings);
+    }
+    if (this.settings.providers) {
+      for (const [id, defaultConfig] of Object.entries(DEFAULT_PROVIDERS)) {
+        if (!this.settings.providers[id]) {
+          this.settings.providers[id] = { ...defaultConfig };
+        }
+      }
+    }
   }
   async saveSettings() {
     await this.saveData(this.settings);
-    this.toolManager.updateSettings(this.settings);
-    this.modelService.updateSettings(this.settings);
+    await this.modelService.updateSettings(this.settings);
+    this.toolRegistry.updateContext(this.settings);
     if (this.knowledgeRuntime) {
       this.knowledgeRuntime.updateSettings(this.settings);
     }
@@ -8951,15 +11778,15 @@ var ObsidianCliPlugin = class extends import_obsidian18.Plugin {
       return;
     rawUrlMatches.sort((a, b) => b.index - a.index);
     for (const m of rawUrlMatches) {
-      new import_obsidian18.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
-      const result = await this.toolManager.execute("save_webpage", { url: m.url });
+      new import_obsidian23.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
+      const result = await this.toolRegistry.execute("save_webpage", { url: m.url });
       if (result.success) {
         const finalPath = result.path;
         const linkText = `[[${finalPath}|Saved: ${finalPath.split("/").pop()?.replace(".md", "")}]]`;
         newContent = newContent.substring(0, m.index) + linkText + newContent.substring(m.index + m.length);
         modified = true;
       } else {
-        new import_obsidian18.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
+        new import_obsidian23.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
       }
     }
     if (modified) {
@@ -9018,12 +11845,52 @@ Instructions:
 5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
       }
       const response = await this.modelService.chat(prompt, [], systemPromptOverride);
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
+      let data;
+      const braceStart = response.indexOf("{");
+      if (braceStart === -1) {
         updateGuardianState(view, lineNumber, "idle" /* Idle */);
         return;
       }
-      const data = JSON.parse(jsonMatch[0]);
+      let depth = 0;
+      let inString = false;
+      let escape = false;
+      let jsonEnd = -1;
+      for (let i = braceStart; i < response.length; i++) {
+        const ch = response[i];
+        if (escape) {
+          escape = false;
+          continue;
+        }
+        if (ch === "\\" && inString) {
+          escape = true;
+          continue;
+        }
+        if (ch === '"') {
+          inString = !inString;
+          continue;
+        }
+        if (inString)
+          continue;
+        if (ch === "{")
+          depth++;
+        else if (ch === "}") {
+          depth--;
+          if (depth === 0) {
+            jsonEnd = i;
+            break;
+          }
+        }
+      }
+      if (jsonEnd === -1) {
+        updateGuardianState(view, lineNumber, "idle" /* Idle */);
+        return;
+      }
+      try {
+        data = JSON.parse(response.substring(braceStart, jsonEnd + 1));
+      } catch {
+        updateGuardianState(view, lineNumber, "idle" /* Idle */);
+        return;
+      }
       if (data.suggestion && typeof data.suggestion === "string") {
         const currentLineCount = view.state.doc.lines;
         if (lineNumber > currentLineCount) {

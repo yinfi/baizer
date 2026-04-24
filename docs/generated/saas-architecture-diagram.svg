@@ -1,0 +1,187 @@
+<svg width="1600" height="1050" viewBox="0 0 1600 1050" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1600" y2="1050" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7F1E7"/>
+      <stop offset="0.52" stop-color="#E8F2F4"/>
+      <stop offset="1" stop-color="#F7FAFC"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="80" y1="190" x2="1520" y2="950" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFDF9"/>
+      <stop offset="1" stop-color="#FAFCFD"/>
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="1800" height="1300" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#193749" flood-opacity="0.12"/>
+    </filter>
+    <filter id="softShadow" x="0" y="0" width="1800" height="1300" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#193749" flood-opacity="0.08"/>
+    </filter>
+    <pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse">
+      <path d="M56 0H0V56" stroke="#C9D5DA" stroke-opacity="0.55" stroke-width="1"/>
+    </pattern>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="10" refY="7" orient="auto">
+      <path d="M0 0L14 7L0 14V0Z" fill="#2A7087"/>
+    </marker>
+    <marker id="arrowLight" markerWidth="14" markerHeight="14" refX="10" refY="7" orient="auto">
+      <path d="M0 0L14 7L0 14V0Z" fill="#90A5AF"/>
+    </marker>
+    <style>
+      .title { font: 700 58px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #14364B; }
+      .subtitle { font: 400 24px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #4D6774; }
+      .section { font: 700 24px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #16384C; }
+      .chip { font: 700 18px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #FFFFFF; }
+      .cardTitle { font: 700 24px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #14364B; }
+      .cardBody { font: 400 18px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #5B707C; }
+      .tiny { font: 700 16px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #6A7E88; }
+      .foot { font: 500 17px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #EAF2F5; }
+      .badgeTitle { font: 700 16px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #DCEBF2; }
+      .badgeText { font: 600 17px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #FFFFFF; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1050" fill="url(#bg)"/>
+  <rect width="1600" height="1050" fill="url(#grid)" opacity="0.2"/>
+
+  <g opacity="0.4">
+    <path d="M1080 112C1014 112 985 152 930 152C875 152 848 125 790 125C732 125 700 165 638 165" stroke="#C0CED3" stroke-width="3" stroke-linecap="round"/>
+    <path d="M1260 155C1182 155 1152 198 1085 198C1018 198 989 166 926 166C863 166 834 208 768 208" stroke="#C0CED3" stroke-width="3" stroke-linecap="round"/>
+    <path d="M210 800C320 800 342 852 454 852C566 852 583 802 694 802C805 802 835 850 940 850" stroke="#CFDADF" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="80" y="36" width="1440" height="130" rx="34" fill="#FFFCF7"/>
+    <rect x="80" y="190" width="1440" height="760" rx="36" fill="url(#panel)"/>
+  </g>
+
+  <rect x="80" y="36" width="1440" height="130" rx="34" stroke="#D8E3E7" stroke-width="2"/>
+  <rect x="80" y="190" width="1440" height="760" rx="36" stroke="#D8E3E7" stroke-width="2"/>
+
+  <text x="118" y="108" class="title">典型 SaaS 架构图</text>
+  <text x="118" y="145" class="subtitle">一个通用的多租户 SaaS，通常由统一入口、业务服务层、数据平台层和第三方集成共同组成</text>
+
+  <g transform="translate(1160 62)">
+    <rect width="290" height="78" rx="24" fill="#14364B"/>
+    <text x="22" y="28" class="badgeTitle">核心思路</text>
+    <text x="22" y="56" class="badgeText">多租户 + API 优先 + 事件驱动 + 可观测</text>
+  </g>
+
+  <g transform="translate(120 240)">
+    <text x="0" y="0" class="section">客户端</text>
+    <text x="0" y="28" class="tiny">所有流量先进入统一边缘入口</text>
+  </g>
+  <g transform="translate(470 240)">
+    <text x="0" y="0" class="section">SaaS 平台</text>
+    <text x="0" y="28" class="tiny">统一身份、租户上下文、业务域与共享基础设施</text>
+  </g>
+  <g transform="translate(1230 240)">
+    <text x="0" y="0" class="section">外部集成</text>
+    <text x="0" y="28" class="tiny">按职责与内部服务解耦</text>
+  </g>
+
+  <g filter="url(#softShadow)">
+    <rect x="120" y="285" width="270" height="520" rx="28" fill="#FEFEFD"/>
+    <rect x="450" y="285" width="700" height="520" rx="28" fill="#FEFEFD"/>
+    <rect x="1210" y="285" width="270" height="520" rx="28" fill="#FEFEFD"/>
+  </g>
+  <rect x="120" y="285" width="270" height="520" rx="28" stroke="#D9E4E7" stroke-width="2"/>
+  <rect x="450" y="285" width="700" height="520" rx="28" stroke="#D9E4E7" stroke-width="2"/>
+  <rect x="1210" y="285" width="270" height="520" rx="28" stroke="#D9E4E7" stroke-width="2"/>
+
+  <g transform="translate(148 320)">
+    <rect width="214" height="78" rx="22" fill="#E3F0F4"/>
+    <rect y="98" width="214" height="78" rx="22" fill="#E4F4EE"/>
+    <rect y="196" width="214" height="78" rx="22" fill="#FBE8D3"/>
+    <rect y="294" width="214" height="78" rx="22" fill="#EAEFF7"/>
+    <text x="22" y="34" class="cardTitle">Web / SPA</text>
+    <text x="22" y="59" class="cardBody">浏览器、营销站、控制台</text>
+    <text x="22" y="132" class="cardTitle">Mobile App</text>
+    <text x="22" y="157" class="cardBody">iOS / Android / 小程序</text>
+    <text x="22" y="230" class="cardTitle">Admin / Support</text>
+    <text x="22" y="255" class="cardBody">运营、客服、财务后台</text>
+    <text x="22" y="328" class="cardTitle">Public API / SDK</text>
+    <text x="22" y="353" class="cardBody">伙伴接入、自动化脚本</text>
+  </g>
+
+  <g transform="translate(488 320)">
+    <rect width="624" height="116" rx="24" fill="#F2F7F8"/>
+    <rect x="18" y="18" width="182" height="78" rx="20" fill="#D8E9EF"/>
+    <rect x="221" y="18" width="182" height="78" rx="20" fill="#D8EEE8"/>
+    <rect x="424" y="18" width="182" height="78" rx="20" fill="#FBE8D3"/>
+    <text x="18" y="-10" class="tiny">边缘与访问层</text>
+    <text x="40" y="53" class="cardTitle">DNS / CDN / WAF</text>
+    <text x="40" y="79" class="cardBody">加速、缓存、边界防护</text>
+    <text x="245" y="53" class="cardTitle">API Gateway / BFF</text>
+    <text x="245" y="79" class="cardBody">统一入口、限流、路由</text>
+    <text x="450" y="53" class="cardTitle">Identity / RBAC</text>
+    <text x="450" y="79" class="cardBody">登录、租户上下文、权限</text>
+  </g>
+
+  <g transform="translate(488 474)">
+    <rect width="624" height="182" rx="24" fill="#F8FBFC"/>
+    <text x="18" y="-10" class="tiny">业务服务层</text>
+    <rect x="18" y="18" width="282" height="64" rx="20" fill="#E3F0F4"/>
+    <rect x="324" y="18" width="282" height="64" rx="20" fill="#E4F4EE"/>
+    <rect x="18" y="98" width="282" height="64" rx="20" fill="#FBE8D3"/>
+    <rect x="324" y="98" width="282" height="64" rx="20" fill="#F6E2D9"/>
+    <text x="38" y="54" class="cardTitle">Tenant / Org Service</text>
+    <text x="38" y="136" class="cardTitle">Billing / Subscription</text>
+    <text x="346" y="54" class="cardTitle">Core Product Services</text>
+    <text x="346" y="136" class="cardTitle">Notification / Workflow</text>
+    <text x="38" y="76" class="cardBody">组织、套餐、配置、隔离策略</text>
+    <text x="346" y="76" class="cardBody">你的核心业务域: CRM / 项目 / 文档 / 协作</text>
+    <text x="38" y="158" class="cardBody">订阅、账单、额度、试用与续费</text>
+    <text x="346" y="158" class="cardBody">邮件、消息、审批、异步流程</text>
+  </g>
+
+  <g transform="translate(488 690)">
+    <rect width="624" height="92" rx="24" fill="#F2F7F8"/>
+    <text x="18" y="-10" class="tiny">数据与异步层</text>
+    <rect x="18" y="16" width="108" height="56" rx="18" fill="#D8E9EF"/>
+    <rect x="140" y="16" width="108" height="56" rx="18" fill="#D8EEE8"/>
+    <rect x="262" y="16" width="108" height="56" rx="18" fill="#FBE8D3"/>
+    <rect x="384" y="16" width="108" height="56" rx="18" fill="#EAEFF7"/>
+    <rect x="506" y="16" width="100" height="56" rx="18" fill="#F6E2D9"/>
+    <text x="34" y="50" class="tiny">Event Bus / Jobs</text>
+    <text x="170" y="50" class="tiny">Cache</text>
+    <text x="284" y="50" class="tiny">Primary DB</text>
+    <text x="410" y="50" class="tiny">Object Storage</text>
+    <text x="525" y="50" class="tiny">Search / BI</text>
+  </g>
+
+  <g transform="translate(1238 320)">
+    <rect width="214" height="68" rx="20" fill="#E3F0F4"/>
+    <rect y="86" width="214" height="68" rx="20" fill="#E4F4EE"/>
+    <rect y="172" width="214" height="68" rx="20" fill="#FBE8D3"/>
+    <rect y="258" width="214" height="68" rx="20" fill="#EAEFF7"/>
+    <rect y="344" width="214" height="68" rx="20" fill="#F6E2D9"/>
+    <text x="22" y="30" class="cardTitle">IdP / SSO</text>
+    <text x="22" y="52" class="cardBody">企业身份源</text>
+    <text x="22" y="116" class="cardTitle">Payment Gateway</text>
+    <text x="22" y="138" class="cardBody">支付与对账</text>
+    <text x="22" y="202" class="cardTitle">Email / SMS / Push</text>
+    <text x="22" y="224" class="cardBody">通知触达</text>
+    <text x="22" y="288" class="cardTitle">3rd-party Apps</text>
+    <text x="22" y="310" class="cardBody">Webhook / Marketplace</text>
+    <text x="22" y="374" class="cardTitle">Warehouse / BI</text>
+    <text x="22" y="396" class="cardBody">离线分析与报表</text>
+  </g>
+
+  <path d="M390 485H470" stroke="#2A7087" stroke-width="6" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M800 436V474" stroke="#2A7087" stroke-width="6" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M800 656V690" stroke="#2A7087" stroke-width="6" stroke-linecap="round" marker-end="url(#arrow)"/>
+
+  <path d="M1112 374H1210" stroke="#90A5AF" stroke-width="4" stroke-linecap="round" marker-end="url(#arrowLight)"/>
+  <path d="M1112 526H1210" stroke="#90A5AF" stroke-width="4" stroke-linecap="round" marker-end="url(#arrowLight)"/>
+  <path d="M1112 606H1210" stroke="#90A5AF" stroke-width="4" stroke-linecap="round" marker-end="url(#arrowLight)"/>
+  <path d="M1112 734H1210" stroke="#90A5AF" stroke-width="4" stroke-linecap="round" marker-end="url(#arrowLight)"/>
+
+  <g transform="translate(500 822)">
+    <rect width="602" height="76" rx="24" fill="#14364B"/>
+    <text x="22" y="30" class="badgeTitle">租户隔离建议</text>
+    <text x="22" y="57" class="foot">小规模可从行级隔离开始，增长后演进到独立 schema、独立库甚至独立实例。</text>
+  </g>
+
+  <g transform="translate(120 872)">
+    <rect width="1360" height="56" rx="24" fill="#173A4F"/>
+    <text x="24" y="36" class="foot">横切能力: Observability / Audit Log / Feature Flags / Secrets &amp; KMS / Backup &amp; DR / CI-CD / Cost Control</text>
+  </g>
+</svg>

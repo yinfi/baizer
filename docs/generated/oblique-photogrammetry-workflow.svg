@@ -1,0 +1,179 @@
+<svg width="1400" height="1900" viewBox="0 0 1400 1900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1400" y2="1900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5EFE4"/>
+      <stop offset="0.55" stop-color="#E9F3F4"/>
+      <stop offset="1" stop-color="#F7FAFC"/>
+    </linearGradient>
+    <linearGradient id="line" x1="700" y1="320" x2="700" y2="1710" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2B6F86"/>
+      <stop offset="1" stop-color="#D78631"/>
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="1600" height="2100" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="14" stdDeviation="20" flood-color="#1D3B4A" flood-opacity="0.10"/>
+    </filter>
+    <filter id="softShadow" x="0" y="0" width="1600" height="2100" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#1D3B4A" flood-opacity="0.08"/>
+    </filter>
+    <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+      <path d="M60 0H0V60" stroke="#C9D6DA" stroke-opacity="0.55" stroke-width="1"/>
+    </pattern>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="7" refY="7" orient="auto">
+      <path d="M2 2L12 7L2 12V2Z" fill="#2B6F86"/>
+    </marker>
+    <style>
+      .title { font: 700 56px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #14364B; }
+      .subtitle { font: 400 24px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #4B6674; }
+      .chip { font: 700 20px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #14364B; }
+      .bubbleNo { font: 700 30px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #FFFFFF; text-anchor: middle; dominant-baseline: middle; }
+      .cardTitle { font: 700 28px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #133547; }
+      .cardBody { font: 400 21px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #496572; }
+      .tag { font: 700 18px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #FFFFFF; }
+      .metaLabel { font: 700 18px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #6A7D86; }
+      .metaText { font: 600 18px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #18455E; }
+      .footer { font: 500 18px "Microsoft YaHei", "PingFang SC", "Source Han Sans SC", sans-serif; fill: #5C7381; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="1900" fill="url(#bg)"/>
+  <rect width="1400" height="1900" fill="url(#grid)" opacity="0.25"/>
+
+  <g opacity="0.45">
+    <path d="M1110 110C1020 110 980 170 920 170C860 170 830 130 760 130C690 130 660 190 580 190" stroke="#B8C9CF" stroke-width="3" stroke-linecap="round"/>
+    <path d="M1260 180C1185 180 1160 230 1090 230C1020 230 995 200 935 200C875 200 845 260 775 260" stroke="#B8C9CF" stroke-width="3" stroke-linecap="round"/>
+    <path d="M300 1450C395 1450 430 1508 505 1508C580 1508 622 1462 690 1462C758 1462 790 1518 880 1518" stroke="#C9D6DA" stroke-width="3" stroke-linecap="round"/>
+    <path d="M210 1530C295 1530 330 1580 405 1580C480 1580 520 1540 592 1540C664 1540 700 1600 786 1600" stroke="#C9D6DA" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="60" width="1260" height="215" rx="36" fill="#FFFCF7"/>
+    <rect x="70" y="60" width="1260" height="215" rx="36" stroke="#D7E3E7" stroke-width="2"/>
+  </g>
+
+  <text x="110" y="138" class="title">倾斜摄影建模流程</text>
+  <text x="110" y="185" class="subtitle">从航线设计、外业采集到三维实景模型交付的标准链路</text>
+
+  <g transform="translate(110 215)">
+    <rect width="128" height="42" rx="21" fill="#DCEAF0"/>
+    <text x="64" y="28" class="chip" text-anchor="middle">外业准备</text>
+    <rect x="142" width="128" height="42" rx="21" fill="#D5F0EA"/>
+    <text x="206" y="28" class="chip" text-anchor="middle">数据采集</text>
+    <rect x="284" width="128" height="42" rx="21" fill="#FFE6C8"/>
+    <text x="348" y="28" class="chip" text-anchor="middle">摄影测量</text>
+    <rect x="426" width="128" height="42" rx="21" fill="#F7E0D5"/>
+    <text x="490" y="28" class="chip" text-anchor="middle">三维重建</text>
+    <rect x="568" width="128" height="42" rx="21" fill="#E5E8F3"/>
+    <text x="632" y="28" class="chip" text-anchor="middle">成果交付</text>
+  </g>
+
+  <g transform="translate(930 110)">
+    <rect x="0" y="0" width="300" height="108" rx="24" fill="#14364B"/>
+    <text x="28" y="36" class="metaLabel" fill="#B9D2DC">核心输入</text>
+    <text x="28" y="66" class="metaText" fill="#FFFFFF">倾斜影像 + POS/IMU + 像控点</text>
+    <text x="28" y="92" class="metaText" fill="#DDEAF0">关键目标: 精度、完整性、可发布格式</text>
+  </g>
+
+  <path d="M700 320V1710" stroke="url(#line)" stroke-width="10" stroke-linecap="round" marker-end="url(#arrow)"/>
+
+  <g transform="translate(100 320)" filter="url(#softShadow)">
+    <rect width="500" height="132" rx="28" fill="#FFFCF7"/>
+    <rect width="500" height="132" rx="28" stroke="#D8E3E6" stroke-width="2"/>
+    <rect x="22" y="22" width="94" height="34" rx="17" fill="#2B6F86"/>
+    <text x="69" y="45" class="tag" text-anchor="middle">准备</text>
+    <text x="142" y="47" class="cardTitle">1. 航线规划与控制测量</text>
+    <text x="32" y="84" class="cardBody">确定测区范围、GSD、航向/旁向重叠度，并布设像控点、检查点。</text>
+    <text x="32" y="112" class="cardBody">产出: 航线方案、控制点成果、飞行参数。</text>
+  </g>
+  <circle cx="700" cy="386" r="34" fill="#2B6F86"/>
+  <text x="700" y="388" class="bubbleNo">1</text>
+
+  <g transform="translate(800 500)" filter="url(#softShadow)">
+    <rect width="500" height="132" rx="28" fill="#FFFCF7"/>
+    <rect width="500" height="132" rx="28" stroke="#D8E3E6" stroke-width="2"/>
+    <rect x="22" y="22" width="94" height="34" rx="17" fill="#1D8E77"/>
+    <text x="69" y="45" class="tag" text-anchor="middle">采集</text>
+    <text x="142" y="47" class="cardTitle">2. 倾斜影像外业采集</text>
+    <text x="32" y="84" class="cardBody">利用五镜头或多视角无人机航摄，同步记录时间、位置与姿态信息。</text>
+    <text x="32" y="112" class="cardBody">产出: 原始影像、POS/IMU 数据、飞行日志。</text>
+  </g>
+  <circle cx="700" cy="566" r="34" fill="#1D8E77"/>
+  <text x="700" y="568" class="bubbleNo">2</text>
+
+  <g transform="translate(100 680)" filter="url(#softShadow)">
+    <rect width="500" height="132" rx="28" fill="#FFFCF7"/>
+    <rect width="500" height="132" rx="28" stroke="#D8E3E6" stroke-width="2"/>
+    <rect x="22" y="22" width="94" height="34" rx="17" fill="#D78631"/>
+    <text x="69" y="45" class="tag" text-anchor="middle">质检</text>
+    <text x="142" y="47" class="cardTitle">3. 数据整理与质量检查</text>
+    <text x="32" y="84" class="cardBody">剔除模糊、漏拍、曝光异常数据，统一坐标系并核对姿态与时间戳。</text>
+    <text x="32" y="112" class="cardBody">产出: 可用影像集、整理后的外参与控制数据。</text>
+  </g>
+  <circle cx="700" cy="746" r="34" fill="#D78631"/>
+  <text x="700" y="748" class="bubbleNo">3</text>
+
+  <g transform="translate(800 860)" filter="url(#softShadow)">
+    <rect width="500" height="132" rx="28" fill="#FFFCF7"/>
+    <rect width="500" height="132" rx="28" stroke="#D8E3E6" stroke-width="2"/>
+    <rect x="22" y="22" width="94" height="34" rx="17" fill="#C75E43"/>
+    <text x="69" y="45" class="tag" text-anchor="middle">空三</text>
+    <text x="142" y="47" class="cardTitle">4. 空三加密与联合平差</text>
+    <text x="32" y="84" class="cardBody">进行特征匹配、像点联测与平差，解算相机外方位元素和稀疏点云。</text>
+    <text x="32" y="112" class="cardBody">产出: 稀疏点云、连接点、定向成果。</text>
+  </g>
+  <circle cx="700" cy="926" r="34" fill="#C75E43"/>
+  <text x="700" y="928" class="bubbleNo">4</text>
+
+  <g transform="translate(100 1040)" filter="url(#softShadow)">
+    <rect width="500" height="132" rx="28" fill="#FFFCF7"/>
+    <rect width="500" height="132" rx="28" stroke="#D8E3E6" stroke-width="2"/>
+    <rect x="22" y="22" width="94" height="34" rx="17" fill="#4D8AA9"/>
+    <text x="69" y="45" class="tag" text-anchor="middle">点云</text>
+    <text x="142" y="47" class="cardTitle">5. 稠密点云重建</text>
+    <text x="32" y="84" class="cardBody">基于多视影像进行密集匹配，恢复建筑、地面与附属设施的几何细节。</text>
+    <text x="32" y="112" class="cardBody">产出: 高密度点云、点云分类基础数据。</text>
+  </g>
+  <circle cx="700" cy="1106" r="34" fill="#4D8AA9"/>
+  <text x="700" y="1108" class="bubbleNo">5</text>
+
+  <g transform="translate(800 1220)" filter="url(#softShadow)">
+    <rect width="500" height="132" rx="28" fill="#FFFCF7"/>
+    <rect width="500" height="132" rx="28" stroke="#D8E3E6" stroke-width="2"/>
+    <rect x="22" y="22" width="94" height="34" rx="17" fill="#7B8F3E"/>
+    <text x="69" y="45" class="tag" text-anchor="middle">网格</text>
+    <text x="142" y="47" class="cardTitle">6. 网格建模与白模修补</text>
+    <text x="32" y="84" class="cardBody">对点云去噪、滤波、构建 TIN/三角网，并修补孔洞、尖刺与破面。</text>
+    <text x="32" y="112" class="cardBody">产出: 白模、可贴图网格、结构化几何体。</text>
+  </g>
+  <circle cx="700" cy="1286" r="34" fill="#7B8F3E"/>
+  <text x="700" y="1288" class="bubbleNo">6</text>
+
+  <g transform="translate(100 1400)" filter="url(#softShadow)">
+    <rect width="500" height="132" rx="28" fill="#FFFCF7"/>
+    <rect width="500" height="132" rx="28" stroke="#D8E3E6" stroke-width="2"/>
+    <rect x="22" y="22" width="94" height="34" rx="17" fill="#8B5DAB"/>
+    <text x="69" y="45" class="tag" text-anchor="middle">贴图</text>
+    <text x="142" y="47" class="cardTitle">7. 纹理映射与轻量化优化</text>
+    <text x="32" y="84" class="cardBody">自动选片贴图、色差均衡、烘焙纹理，并按平台需求做 LOD 和压缩。</text>
+    <text x="32" y="112" class="cardBody">产出: 贴图模型、LOD 数据、轻量化成果。</text>
+  </g>
+  <circle cx="700" cy="1466" r="34" fill="#8B5DAB"/>
+  <text x="700" y="1468" class="bubbleNo">7</text>
+
+  <g transform="translate(800 1580)" filter="url(#softShadow)">
+    <rect width="500" height="132" rx="28" fill="#FFFCF7"/>
+    <rect width="500" height="132" rx="28" stroke="#D8E3E6" stroke-width="2"/>
+    <rect x="22" y="22" width="94" height="34" rx="17" fill="#CD7248"/>
+    <text x="69" y="45" class="tag" text-anchor="middle">发布</text>
+    <text x="142" y="47" class="cardTitle">8. 精度检查与成果交付</text>
+    <text x="32" y="84" class="cardBody">检查平面/高程精度、纹理完整性和接缝效果，按应用场景输出标准格式。</text>
+    <text x="32" y="112" class="cardBody">产出: OSGB、3D Tiles、OBJ/FBX、发布包。</text>
+  </g>
+  <circle cx="700" cy="1646" r="34" fill="#CD7248"/>
+  <text x="700" y="1648" class="bubbleNo">8</text>
+
+  <g transform="translate(70 1760)">
+    <rect width="1260" height="86" rx="28" fill="#14364B"/>
+    <text x="36" y="36" class="metaLabel" fill="#BCD4DE">建模关注点</text>
+    <text x="36" y="63" class="footer" fill="#FFFFFF">重叠度与坐标统一决定解算稳定性；点云质量决定几何精度；贴图优化影响最终浏览性能和视觉效果。</text>
+  </g>
+</svg>

@@ -34,7 +34,21 @@
       "Bash(gh search:*)",
       "WebFetch(domain:retypeapp.github.io)",
       "Bash(npx tsc:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(npx tsx --require ./test/setup-mock.js -e \":*)",
+      "Bash(node test/_json-extract.js)",
+      "Bash(~/.claude/skills/gstack/bin/gstack-learnings-log '{\"\"skill\"\":\"\"investigate\"\",\"\"type\"\":\"\"pattern\"\",\"\"key\"\":\"\"greedy-json-regex-bug\"\",\"\"insight\"\":\"\"Greedy regex /\\\\\\\\{[\\\\\\\\s\\\\\\\\S]*\\\\\\\\}/ for JSON extraction from AI responses will match from first { to LAST } in the string, breaking when AI adds explanation text containing braces after the JSON. Fix: use balanced brace counter with string/escape tracking to extract first complete JSON object.\"\",\"\"confidence\"\":9,\"\"source\"\":\"\"observed\"\",\"\"files\"\":[\"\"main.ts\"\",\"\"src/memory/memory-manager.ts\"\"]}')",
+      "mcp__plugin_oh-my-claudecode_t__lsp_diagnostics",
+      "WebFetch(domain:forum.obsidian.md)",
+      "WebFetch(domain:deepwiki.com)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json\")",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(json.dumps\\(p,indent=2\\)\\) for p in data if p[''''id'''']==''''obsidian-tasks-plugin'''']\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/obsidian-tasks-group/obsidian-tasks/HEAD/README.md\")",
+      "Bash(ls -d \"d:/code/obsidian/.obsidian/obsidian-cli/skills\"/plugin-*/)",
+      "WebFetch(domain:linkly.ai)",
+      "WebFetch(domain:www.dsebastien.net)",
+      "WebFetch(domain:www.mindstudio.ai)",
+      "Bash(~/.claude/skills/gstack/bin/gstack-learnings-log '{\"\"skill\"\":\"\"office-hours\"\",\"\"type\"\":\"\"architecture\"\",\"\"key\"\":\"\"knowledge-metabolism-pattern\"\",\"\"insight\"\":\"\"Output \\(emit\\) and compilation are the same operation at different abstraction levels. Synthesis files should go to wikiFolder/Articles/ with knowledge_type:synthesis and knowledge_generated:true, and compiler should skip them. This closes the knowledge metabolism loop without needing a separate self-reflection module.\"\",\"\"confidence\"\":9,\"\"source\"\":\"\"cross-model\"\",\"\"files\"\":[\"\"src/knowledge/compiler.ts\"\",\"\"src/knowledge/query.ts\"\",\"\"src/knowledge/metadata-index.ts\"\"]}')"
     ],
     "deny": [],
     "ask": []

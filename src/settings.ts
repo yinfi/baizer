@@ -162,7 +162,6 @@ export class SettingTab extends PluginSettingTab {
                     };
                     settings.activeProvider = key;
                     await this.plugin.saveSettings();
-                    this.plugin.modelService.updateSettings(settings);
                     this.display();
                 }).open();
             }));
@@ -177,7 +176,6 @@ export class SettingTab extends PluginSettingTab {
                     delete settings.providers[settings.activeProvider];
                     settings.activeProvider = 'gemini';
                     await this.plugin.saveSettings();
-                    this.plugin.modelService.updateSettings(settings);
                     this.display();
                     new Notice('Provider deleted');
                 }));
@@ -190,7 +188,7 @@ export class SettingTab extends PluginSettingTab {
                     try {
                         const label = activeConfig?.label || 'AI';
                         new Notice(`Testing connection to ${label}...`);
-                        this.plugin.modelService.updateSettings(this.plugin.settings);
+                        await this.plugin.modelService.updateSettings(this.plugin.settings);
                         const success = await this.plugin.modelService.checkAvailability();
                         if (success) {
                             new Notice('✅ Connection successful!');

@@ -1,6 +1,17 @@
-import { GoogleGenerativeAI, GenerativeModel, ChatSession } from '@google/generative-ai';
+import { ChatSession, GenerativeModel, GoogleGenerativeAI } from '@google/generative-ai';
 import { requestUrl } from 'obsidian';
-import { IModelProvider, ModelConfig, IChatSession, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption, StreamEvent } from './interfaces';
+import {
+  ChatMessage,
+  GenerationResult,
+  IChatSession,
+  IModelProvider,
+  ModelConfig,
+  ModelOption,
+  StreamEvent,
+  ToolDefinition,
+  ToolResult,
+} from './interfaces';
+import { mergeStreamThoughtSignatures } from './gemini-thought-signatures';
 import { logger } from '../utils/logger';
 
 export class GeminiProvider implements IModelProvider {
@@ -74,7 +85,6 @@ export class GeminiProvider implements IModelProvider {
     }
 
     async generateContent(prompt: string, systemPrompt?: string): Promise<GenerationResult> {
-        // 如果指定了 systemPrompt，临时创建独立 model 实例，避免污染全局状态
         const model = systemPrompt
             ? this.genAI.getGenerativeModel({
                 model: this.config.modelName,
@@ -102,12 +112,24 @@ export class GeminiProvider implements IModelProvider {
 class GeminiChatSession implements IChatSession {
     constructor(private chat: ChatSession) { }
 
+    private async patchHistoryWithThoughtSignatures(streamedParts: any[]): Promise<void> {
+        if (streamedParts.length === 0) return;
+
+        const history = await this.chat.getHistory();
+        const lastMessage = history[history.length - 1];
+        if (!lastMessage?.parts?.length || lastMessage.role !== 'model') return;
+
+        lastMessage.parts = mergeStreamThoughtSignatures(
+            lastMessage.parts as any[],
+            streamedParts as any[],
+        ) as any[];
+    }
+
     async sendMessage(text: string | ToolResult[]): Promise<GenerationResult> {
         let result;
         if (typeof text === 'string') {
             result = await this.chat.sendMessage(text);
         } else {
-            // Convert ToolResult to Gemini format
             const toolResponse = text.map(t => ({
                 functionResponse: {
                     name: t.name,
@@ -144,6 +166,7 @@ class GeminiChatSession implements IChatSession {
         }
 
         let fullText = '';
+        const streamedParts: any[] = [];
         const collectedFunctionCalls: { name: string; args: any }[] = [];
 
         for await (const chunk of streamResult.stream) {
@@ -151,6 +174,8 @@ class GeminiChatSession implements IChatSession {
             if (!candidate?.content?.parts) continue;
 
             for (const part of candidate.content.parts) {
+                streamedParts.push(JSON.parse(JSON.stringify(part)));
+
                 if ((part as any).thought === true && (part as any).text) {
                     yield { type: 'thinking' as const, content: (part as any).text };
                 } else if ((part as any).functionCall) {
@@ -163,18 +188,16 @@ class GeminiChatSession implements IChatSession {
             }
         }
 
-        // 优先用 stream 中收集的 function calls，fallback 到 response.functionCalls()
         let functionCalls = collectedFunctionCalls;
-        if (functionCalls.length === 0) {
-            try {
-                const response = await streamResult.response;
-                const responseFCs = response.functionCalls();
-                if (responseFCs && responseFCs.length > 0) {
-                    functionCalls = responseFCs.map(fc => ({ name: fc.name, args: fc.args }));
-                }
-            } catch {
-                // response 可能在流式消费后不可用
+        try {
+            const response = await streamResult.response;
+            await this.patchHistoryWithThoughtSignatures(streamedParts);
+            const responseFCs = response.functionCalls();
+            if (responseFCs && responseFCs.length > 0) {
+                functionCalls = responseFCs.map(fc => ({ name: fc.name, args: fc.args }));
             }
+        } catch {
+            // Keep streamed function calls if the aggregated response is unavailable.
         }
 
         for (const fc of functionCalls) {
@@ -194,8 +217,5 @@ class GeminiChatSession implements IChatSession {
 
     async clearHistory(): Promise<void> {
         // Gemini ChatSession doesn't support clearing history directly without creating a new session.
-        // The consumer of this interface should create a new session if they want to clear history.
-        // Or we can hack it by accessing private history if needed, but better to just restart.
-        // For now, we'll do nothing and rely on the manager to create a new session.
     }
 }
