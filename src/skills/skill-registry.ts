@@ -5,6 +5,7 @@ import { PluginSettings } from '../mcp/types';
 import {
   Skill,
   SkillSummary,
+  SkillCommandEntry,
   SkillTriggers,
   ActivatedSkill,
   ISkillRegistry,
@@ -246,6 +247,24 @@ export class SkillRegistry implements ISkillRegistry {
     return summaries;
   }
 
+  listCommandEntries(): SkillCommandEntry[] {
+    const entries: SkillCommandEntry[] = [];
+
+    for (const skill of this.skills.values()) {
+      if (!this.isEnabled(skill) || !skill.triggers?.commands?.length) continue;
+
+      for (const command of skill.triggers.commands) {
+        entries.push({
+          command,
+          skillName: skill.name,
+          description: skill.description,
+        });
+      }
+    }
+
+    return entries.sort((a, b) => a.command.localeCompare(b.command));
+  }
+
   /** 生成注入 system prompt 的摘要文本（只列清单，不做行为引导） */
   getSkillSummaryText(): string {
     const summaries = this.getSkillSummaries();
@@ -271,8 +290,31 @@ export class SkillRegistry implements ISkillRegistry {
 
   /** AI 意图路由（Phase 3 实现，先返回 null） */
   resolveByIntent(message: string): Skill | null {
-    // Phase 3: 基于 keywords 做简单匹配
-    return null;
+    const normalized = message.trim().toLowerCase();
+    if (!normalized) return null;
+
+    let bestMatch: Skill | null = null;
+    let bestScore = 0;
+
+    for (const skill of this.skills.values()) {
+      if (!this.isEnabled(skill) || !skill.triggers?.keywords?.length) continue;
+
+      let score = 0;
+      for (const keyword of skill.triggers.keywords) {
+        const normalizedKeyword = keyword.trim().toLowerCase();
+        if (!normalizedKeyword) continue;
+        if (normalized.includes(normalizedKeyword)) {
+          score += 1;
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = skill;
+      }
+    }
+
+    return bestScore > 0 ? bestMatch : null;
   }
 
   // ==================== Level 2: 激活 ====================

@@ -128,6 +128,25 @@ export class ChatController {
 
         this.addMessage('user', query);
 
+        const skillCommands = typeof (this.api as any).getSkillCommands === 'function'
+            ? (this.api as any).getSkillCommands()
+            : [];
+        const matchedSkillCommand = skillCommands.find((entry: any) => entry.command === cmd);
+
+        if (matchedSkillCommand && typeof (this.api as any).executeSlashSkillCommand === 'function') {
+            try {
+                const result = await (this.api as any).executeSlashSkillCommand(cmd, argStr.trim());
+                if (result?.error) {
+                    this.addMessage('system', `Error: ${result.error}`);
+                } else {
+                    this.addMessage('system', this.formatSlashCommandResult(result));
+                }
+            } catch (error: any) {
+                this.handleError(error);
+            }
+            return;
+        }
+
         switch (cmd) {
             case '/clear':
                 this.clearHistory();
@@ -186,6 +205,12 @@ export class ChatController {
             default:
                 this.addMessage('system', `Unknown command: ${cmd}`);
         }
+    }
+
+    private formatSlashCommandResult(result: any): string {
+        if (typeof result === 'string') return result;
+        if (result?.message && typeof result.message === 'string') return result.message;
+        return `\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
     }
 
     private async handleOpenFile(searchTerm: string) {

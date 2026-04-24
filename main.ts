@@ -12,10 +12,10 @@ import { KnowledgeRuntime } from './src/knowledge/runtime';
 import { ToolRegistry } from './src/skills/tool-registry';
 import { SkillRegistry } from './src/skills/skill-registry';
 import { registerVaultTools } from './src/skills/builtin/vault-ops';
-import { registerTools as registerWebSearchTools } from './src/skills/builtin/web-search/executor';
-import { registerTools as registerWebClipperTools } from './src/skills/builtin/web-clipper/executor';
-import { registerTools as registerKnowledgeTools } from './src/skills/builtin/knowledge/executor';
-import { registerTools as registerPluginCtrlTools } from './src/skills/builtin/plugin-ctrl/executor';
+import { executor as webSearchSkillExecutor, registerTools as registerWebSearchTools } from './src/skills/builtin/web-search/executor';
+import { createExecutor as createWebClipperSkillExecutor, registerTools as registerWebClipperTools } from './src/skills/builtin/web-clipper/executor';
+import { createExecutor as createKnowledgeSkillExecutor, registerTools as registerKnowledgeTools } from './src/skills/builtin/knowledge/executor';
+import { executor as pluginCtrlSkillExecutor, registerTools as registerPluginCtrlTools } from './src/skills/builtin/plugin-ctrl/executor';
 // SKILL.md 通过 esbuild text loader 导入
 import webSearchSkillMd from './src/skills/builtin/web-search/SKILL.md';
 import webClipperSkillMd from './src/skills/builtin/web-clipper/SKILL.md';
@@ -23,6 +23,7 @@ import knowledgeSkillMd from './src/skills/builtin/knowledge/SKILL.md';
 import pluginCtrlSkillMd from './src/skills/builtin/plugin-ctrl/SKILL.md';
 import { PluginWatcher } from './src/skills/builtin/plugin-ctrl/plugin-watcher';
 import { PluginSkillGenerator } from './src/skills/builtin/plugin-ctrl/skill-generator';
+import { InboxAutosaveCoordinator } from './src/services/inbox-autosave';
 
 export default class ObsidianCliPlugin extends Plugin {
     settings: PluginSettings;
@@ -32,6 +33,7 @@ export default class ObsidianCliPlugin extends Plugin {
     skillRegistry: SkillRegistry;
     private editorExtensionsRegistered = false;
     private pluginWatcher: PluginWatcher | null = null;
+    private inboxAutosave: InboxAutosaveCoordinator | null = null;
 
 
     // Debounce with trailing edge (default/false) for inactivity trigger
@@ -45,6 +47,12 @@ export default class ObsidianCliPlugin extends Plugin {
         this.toolRegistry = new ToolRegistry(this.app, this.settings);
         this.skillRegistry = new SkillRegistry(this.toolRegistry);
         this.modelService = new ModelService(this.app, this.settings, this.toolRegistry, this.skillRegistry);
+        this.inboxAutosave = new InboxAutosaveCoordinator({
+            app: this.app,
+            getInboxPath: () => this.settings.wechatInboxPath,
+            saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+            notify: (message: string) => new Notice(message),
+        });
 
         // 注册原子工具
         registerVaultTools(this.toolRegistry);
@@ -53,10 +61,9 @@ export default class ObsidianCliPlugin extends Plugin {
         registerPluginCtrlTools(this.toolRegistry);
 
         // 注册 Skill（从 SKILL.md，executor 为 noop — instructions 注入模式）
-        const noopExecutor = { execute: async () => ({}) };
-        this.skillRegistry.registerBuiltinFromMd(webSearchSkillMd, noopExecutor);
-        this.skillRegistry.registerBuiltinFromMd(webClipperSkillMd, noopExecutor);
-        this.skillRegistry.registerBuiltinFromMd(pluginCtrlSkillMd, noopExecutor,
+        this.skillRegistry.registerBuiltinFromMd(webSearchSkillMd, webSearchSkillExecutor);
+        this.skillRegistry.registerBuiltinFromMd(webClipperSkillMd, createWebClipperSkillExecutor(this.modelService));
+        this.skillRegistry.registerBuiltinFromMd(pluginCtrlSkillMd, pluginCtrlSkillExecutor,
             (settings) => settings.allowPluginControl,
         );
 
@@ -78,7 +85,7 @@ export default class ObsidianCliPlugin extends Plugin {
             this.knowledgeRuntime.getQueryExecutor(),
             this.knowledgeRuntime.getFileBackExecutor(),
         );
-        this.skillRegistry.registerBuiltinFromMd(knowledgeSkillMd, noopExecutor);
+        this.skillRegistry.registerBuiltinFromMd(knowledgeSkillMd, createKnowledgeSkillExecutor(this.toolRegistry));
 
         console.log(`[ObsidianCli] Final: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
 
@@ -139,7 +146,7 @@ export default class ObsidianCliPlugin extends Plugin {
         this.registerEvent(
             this.app.vault.on('modify', (file) => {
                 if (file instanceof TFile && file.extension === 'md') {
-                    this.onFileModify(file);
+                    void this.inboxAutosave?.handleFileModify(file);
                 }
             })
         );
@@ -242,7 +249,7 @@ export default class ObsidianCliPlugin extends Plugin {
 
     async saveSettings() {
         await this.saveData(this.settings);
-        this.modelService.updateSettings(this.settings);
+        await this.modelService.updateSettings(this.settings);
         this.toolRegistry.updateContext(this.settings);
         if (this.knowledgeRuntime) {
             this.knowledgeRuntime.updateSettings(this.settings);

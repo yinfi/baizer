@@ -6,6 +6,7 @@ import { ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
 import { VIEW_TYPE_SHELL } from '../mcp/types';
 import { StreamEvent } from '../models/interfaces';
+import { buildCommandSuggestions, CommandSuggestion } from './command-suggestions';
 
 export { VIEW_TYPE_SHELL };
 
@@ -43,6 +44,19 @@ export class ShellView extends ItemView {
     private streamRenderTimer: number | null = null;
     private streamNodeCount: number = 0;
     private currentThinkingNode: HTMLElement | null = null;
+    private readonly localCommandSuggestions: CommandSuggestion[] = [
+        { label: '/clear', desc: 'Clear session history' },
+        { label: '/profile', desc: 'View user profile' },
+        { label: '/forget', desc: 'Forget user memory (name/profession/all...)' },
+        { label: '/new', desc: 'Create new note' },
+        { label: '/edit', desc: 'AI edit selected text' },
+        { label: '/open', desc: 'Open file' },
+        { label: '/tools', desc: 'List available MCP tools' },
+        { label: '/help', desc: 'Show all commands' },
+        { label: '/wiki:compile', desc: 'Compile notes to knowledge wiki' },
+        { label: '/wiki:index', desc: 'Open knowledge wiki index' },
+        { label: '/wiki:lint', desc: 'Run knowledge health check' }
+    ];
 
     // Event Handlers
     private handleInputBound = () => {
@@ -330,21 +344,14 @@ export class ShellView extends ItemView {
         this.selectedIndex = 0;
 
         if (type === 'command') {
-            const commands = [
-                { label: '/clear', desc: 'Clear session history' },
-                { label: '/profile', desc: 'View user profile' },
-                { label: '/forget', desc: 'Forget user memory (name/profession/all...)' },
-                { label: '/new', desc: 'Create new note' },
-                { label: '/edit', desc: 'AI edit selected text' },
-                { label: '/open', desc: 'Open file' },
-                { label: '/save', desc: 'Save webpage/video to vault' },
-                { label: '/tools', desc: 'List available MCP tools' },
-                { label: '/help', desc: 'Show all commands' },
-                { label: '/wiki:compile', desc: 'Compile notes to knowledge wiki' },
-                { label: '/wiki:index', desc: 'Open knowledge wiki index' },
-                { label: '/wiki:lint', desc: 'Run knowledge health check' }
-            ];
-            this.suggestions = commands.filter(c => c.label.toLowerCase().includes(query.toLowerCase()));
+            this.suggestions = buildCommandSuggestions(
+                this.localCommandSuggestions,
+                this.modelService.getSkillCommands().map(command => ({
+                    command: command.command,
+                    description: command.description,
+                })),
+                query,
+            );
         } else {
             const files = this.app.vault.getFiles();
             this.suggestions = files
@@ -442,6 +449,7 @@ export class ShellView extends ItemView {
             }
 
             // Try to get selection from the active editor
+            this.currentSelection = '';
             const activeLeaf = this.app.workspace.getMostRecentLeaf();
             if (activeLeaf && activeLeaf.view) {
                 const editor = (activeLeaf.view as any).editor;
@@ -889,22 +897,16 @@ export class ShellView extends ItemView {
                 // Check if it's a URL
                 item.getAsString((text) => {
                     if (this.isValidUrl(text)) {
-                        // Don't prevent default, let it paste into input, 
-                        // but also maybe suggest adding as context?
-                        // Smart Composer detects URLs and converts them.
-                        // Let's just detect YouTube or Web URLs and add them as context if they are standalone?
-                        // Or maybe just let user type it.
-                        // For now, let's only handle explicit image paste.
-                        // If it's a YouTube URL, maybe we can auto-add it?
-                        if (text.includes('youtube.com') || text.includes('youtu.be')) {
-                            this.contextManager.addContext({
-                                id: Date.now().toString(),
-                                type: 'youtube',
-                                data: text,
-                                summary: text
-                            });
-                            this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
-                        }
+                        const type = (text.includes('youtube.com') || text.includes('youtu.be'))
+                            ? 'youtube'
+                            : 'url';
+                        this.contextManager.addContext({
+                            id: Date.now().toString(),
+                            type,
+                            data: text,
+                            summary: text
+                        });
+                        this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
                     }
                 });
             }
