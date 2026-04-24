@@ -6242,7 +6242,7 @@ var ToolRenderer = class {
     this.nodeCount++;
   }
   updateToolResult(name, result, error) {
-    const nodes = this.timeline.querySelectorAll(".think-node").filter((node) => node.hasClass?.("is-tool"));
+    const nodes = Array.from(this.timeline.querySelectorAll(".think-node")).filter((node) => node.hasClass?.("is-tool"));
     let targetNode = null;
     for (let i = nodes.length - 1; i >= 0; i--) {
       if (nodes[i].dataset.toolName === name) {
