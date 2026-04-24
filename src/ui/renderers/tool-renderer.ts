@@ -18,8 +18,7 @@ export class ToolRenderer {
   }
 
   updateToolResult(name: string, result: any, error?: string) {
-    const nodes = this.timeline
-      .querySelectorAll('.think-node')
+    const nodes = Array.from(this.timeline.querySelectorAll('.think-node'))
       .filter((node: any) => node.hasClass?.('is-tool'));
     let targetNode: HTMLElement | null = null;
     for (let i = nodes.length - 1; i >= 0; i--) {
