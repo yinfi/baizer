@@ -2214,6 +2214,56 @@ var DEFAULT_SETTINGS = {
   pluginSkillExcludeList: []
 };
 
+// src/services/context-budget.ts
+var DEFAULT_CONTEXT_BUDGET = {
+  maxItems: 8,
+  maxChars: 6e3,
+  perItemChars: 1200
+};
+var TYPE_PRIORITY = {
+  file: 4,
+  text: 3,
+  url: 2,
+  youtube: 2,
+  image: 1
+};
+function budgetTextBlock(text, maxChars) {
+  if (!text || text.length <= maxChars)
+    return text;
+  if (maxChars <= 3)
+    return ".".repeat(maxChars);
+  return `${text.slice(0, maxChars - 3)}...`;
+}
+function budgetContextItems(items, options = {}) {
+  const budget = { ...DEFAULT_CONTEXT_BUDGET, ...options };
+  let usedChars = 0;
+  const normalized = items.map((item, index) => ({
+    item: {
+      ...item,
+      content: item.content ? budgetTextBlock(item.content, budget.perItemChars) : item.content,
+      summary: item.summary ? budgetTextBlock(item.summary, Math.min(160, budget.perItemChars)) : item.summary
+    },
+    priority: TYPE_PRIORITY[item.type] ?? 0,
+    index
+  }));
+  normalized.sort((a, b) => {
+    if (b.priority !== a.priority)
+      return b.priority - a.priority;
+    return a.index - b.index;
+  });
+  const selected = [];
+  for (const entry of normalized) {
+    if (selected.length >= budget.maxItems)
+      break;
+    const estimatedChars = (entry.item.content || entry.item.data || "").length;
+    if (selected.length > 0 && usedChars + estimatedChars > budget.maxChars)
+      continue;
+    selected.push(entry.item);
+    usedChars += estimatedChars;
+  }
+  return selected;
+}
+
 // src/memory/memory-manager.ts
 var MemoryManager = class {
   constructor(app, model) {
@@ -2263,8 +2313,8 @@ var MemoryManager = class {
     this.currentSessionTranscript = [];
   }
   buildContext() {
-    const profileContext = this.formatProfileForContext();
-    const summaryContext = this.formatSummariesForContext();
+    const profileContext = budgetTextBlock(this.formatProfileForContext(), 2e3);
+    const summaryContext = budgetTextBlock(this.formatSummariesForContext(), 2e3);
     return `[User Profile]
 ${profileContext}
 
@@ -5765,7 +5815,8 @@ var ContextManager = class {
   constructor(deps) {
     this.deps = {
       fetchWebContent: deps?.fetchWebContent ?? this.fetchWebContent.bind(this),
-      fetchVideoTranscript: deps?.fetchVideoTranscript ?? this.fetchVideoTranscript.bind(this)
+      fetchVideoTranscript: deps?.fetchVideoTranscript ?? this.fetchVideoTranscript.bind(this),
+      budgetContexts: deps?.budgetContexts ?? ((items) => budgetContextItems(items))
     };
   }
   addContext(item) {
@@ -5799,7 +5850,7 @@ var ContextManager = class {
         }
       }
     }
-    return this.activeContexts;
+    return this.deps.budgetContexts(this.activeContexts);
   }
   async fetchWebContent(url) {
     try {
@@ -5976,6 +6027,244 @@ function buildCommandSuggestions(localCommands, skillCommands, query) {
   return Array.from(merged.values()).filter((command) => command.label.toLowerCase().includes(query.toLowerCase())).sort((a, b) => a.label.localeCompare(b.label));
 }
 
+// src/ui/controllers/context-controller.ts
+var ContextController = class {
+  constructor(deps) {
+    this.deps = deps;
+  }
+  async collectCommandContext() {
+    const contextItems = await this.deps.contextManager.resolveContexts();
+    const activeFile = this.deps.app.workspace.getActiveFile();
+    if (activeFile) {
+      contextItems.push({
+        id: "active-file",
+        type: "file",
+        data: activeFile.path,
+        content: await this.deps.app.vault.read(activeFile)
+      });
+    }
+    let selection = "";
+    const activeLeaf = this.deps.app.workspace.getMostRecentLeaf();
+    if (activeLeaf?.view) {
+      const editor = activeLeaf.view.editor;
+      if (editor) {
+        selection = editor.getSelection();
+      }
+    }
+    return { contextItems, selection };
+  }
+  renderContextChips(container, onRemove) {
+    if (!container)
+      return;
+    container.empty();
+    const contexts = this.deps.contextManager.getContexts();
+    contexts.forEach((ctx) => {
+      const chip = container.createDiv({ cls: "context-chip" });
+      chip.createSpan({ cls: "chip-icon", text: this.getIconForType(ctx.type) });
+      chip.createSpan({ cls: "chip-label", text: ctx.summary || ctx.data });
+      const removeBtn = chip.createSpan({ cls: "chip-remove", text: "\u8133" });
+      removeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onRemove(ctx.id);
+      });
+    });
+  }
+  getIconForType(type) {
+    switch (type) {
+      case "image":
+        return "\u{1F5BC}\uFE0F";
+      case "url":
+        return "\u{1F310}";
+      case "youtube":
+        return "\u25B6\uFE0F";
+      case "file":
+        return "\u{1F4C4}";
+      default:
+        return "\u{1F4CC}";
+    }
+  }
+};
+
+// src/ui/controllers/input-controller.ts
+function detectSuggestionTrigger(value, cursor) {
+  const textBeforeCursor = value.substring(0, cursor);
+  const lastWord = textBeforeCursor.split(/\s+/).pop() || "";
+  if (lastWord.startsWith("/")) {
+    return { type: "command", query: lastWord.substring(1) };
+  }
+  if (lastWord.startsWith("@")) {
+    return { type: "file", query: lastWord.substring(1) };
+  }
+  return null;
+}
+var InputController = class {
+  isSuggesting = false;
+  suggestionType = null;
+  selectedIndex = 0;
+  suggestions = [];
+  setSuggestions(type, suggestions) {
+    this.isSuggesting = suggestions.length > 0;
+    this.suggestionType = type;
+    this.selectedIndex = 0;
+    this.suggestions = suggestions;
+  }
+  hide() {
+    this.isSuggesting = false;
+    this.suggestionType = null;
+    this.selectedIndex = 0;
+    this.suggestions = [];
+  }
+  navigate(dir) {
+    if (this.suggestions.length === 0)
+      return this.selectedIndex;
+    this.selectedIndex += dir;
+    if (this.selectedIndex < 0)
+      this.selectedIndex = this.suggestions.length - 1;
+    if (this.selectedIndex >= this.suggestions.length)
+      this.selectedIndex = 0;
+    return this.selectedIndex;
+  }
+  selectSuggestion(value, cursor) {
+    const item = this.suggestions[this.selectedIndex];
+    if (!item || !this.suggestionType)
+      return null;
+    const textBeforeCursor = value.substring(0, cursor);
+    const lastWord = textBeforeCursor.split(/\s+/).pop() || "";
+    const replacement = this.suggestionType === "command" ? item.label : item.value || item.label;
+    const newTextBefore = textBeforeCursor.substring(0, textBeforeCursor.length - lastWord.length) + replacement + " ";
+    const newText = newTextBefore + value.substring(cursor);
+    this.hide();
+    return {
+      text: newText,
+      cursor: newTextBefore.length
+    };
+  }
+  getSuggestions() {
+    return this.suggestions;
+  }
+  getSelectedIndex() {
+    return this.selectedIndex;
+  }
+  getSuggestionType() {
+    return this.suggestionType;
+  }
+  getIsSuggesting() {
+    return this.isSuggesting;
+  }
+};
+
+// src/ui/controllers/stream-controller.ts
+var StreamController = class {
+  constructor(deps) {
+    this.deps = deps;
+  }
+  handleEvent(event) {
+    switch (event.type) {
+      case "thinking":
+        this.deps.onThinking(event.content);
+        break;
+      case "tool_call":
+        this.deps.onToolCall(event.name, event.args);
+        break;
+      case "tool_result":
+        this.deps.onToolResult(event.name, event.result, event.error);
+        break;
+      case "text_delta":
+        this.deps.onTextDelta(event.content);
+        break;
+      case "done":
+        this.deps.onDone();
+        break;
+      case "error":
+        this.deps.onError(event.message);
+        break;
+    }
+    this.deps.onScrollRequest?.();
+  }
+};
+
+// src/ui/renderers/thinking-renderer.ts
+var ThinkingRenderer = class {
+  constructor(timeline) {
+    this.timeline = timeline;
+  }
+  currentThinkingNode = null;
+  nodeCount = 0;
+  appendThinking(content) {
+    if (!this.currentThinkingNode) {
+      this.currentThinkingNode = this.timeline.createDiv({ cls: "think-node is-thinking" });
+      const header = this.currentThinkingNode.createDiv({ cls: "think-node-header" });
+      header.createSpan({ cls: "think-node-icon", text: "\u{1F4A1}" });
+      header.createSpan({ cls: "think-node-label" });
+      this.currentThinkingNode.createDiv({ cls: "think-node-detail" });
+      header.addEventListener("click", () => {
+        this.currentThinkingNode?.toggleClass("is-expanded", !this.currentThinkingNode.hasClass("is-expanded"));
+      });
+      this.nodeCount++;
+    }
+    const detail = this.currentThinkingNode.querySelector(".think-node-detail");
+    const label = this.currentThinkingNode.querySelector(".think-node-label");
+    if (detail)
+      detail.textContent = (detail.textContent || "") + content;
+    if (label) {
+      const fullText = detail?.textContent || "";
+      label.textContent = fullText.length > 30 ? `${fullText.substring(0, 30)}...` : fullText;
+    }
+  }
+  finalizeCurrentThinking() {
+    if (!this.currentThinkingNode)
+      return;
+    this.currentThinkingNode.removeClass("is-thinking");
+    this.currentThinkingNode = null;
+  }
+  getNodeCount() {
+    return this.nodeCount;
+  }
+};
+
+// src/ui/renderers/tool-renderer.ts
+var ToolRenderer = class {
+  constructor(timeline) {
+    this.timeline = timeline;
+  }
+  nodeCount = 0;
+  addToolCall(name, args) {
+    const node = this.timeline.createDiv({ cls: "think-node is-tool" });
+    node.dataset.toolName = name;
+    const header = node.createDiv({ cls: "think-node-header" });
+    header.createSpan({ cls: "think-node-icon", text: "\u{1F527}" });
+    header.createSpan({ cls: "think-node-label", text: name });
+    const detail = node.createDiv({ cls: "think-node-detail" });
+    detail.textContent = JSON.stringify(args, null, 2);
+    header.addEventListener("click", () => {
+      node.toggleClass("is-expanded", !node.hasClass("is-expanded"));
+    });
+    this.nodeCount++;
+  }
+  updateToolResult(name, result, error) {
+    const nodes = this.timeline.querySelectorAll(".think-node").filter((node) => node.hasClass?.("is-tool"));
+    let targetNode = null;
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      if (nodes[i].dataset.toolName === name) {
+        targetNode = nodes[i];
+        break;
+      }
+    }
+    if (!targetNode)
+      return;
+    const detail = targetNode.querySelector(".think-node-detail");
+    if (detail) {
+      const resultText = error ? `Error: ${error}` : JSON.stringify(result, null, 2);
+      detail.textContent += `
+--- Result ---
+${resultText}`;
+    }
+  }
+  getNodeCount() {
+    return this.nodeCount;
+  }
+};
+
 // src/ui/shell-view.ts
 var ShellView = class extends import_obsidian9.ItemView {
   modelService;
@@ -5985,12 +6274,11 @@ var ShellView = class extends import_obsidian9.ItemView {
   inputEl;
   suggestionContainer;
   currentSelection = "";
-  // private editor: any = null; // Removed as it was unused in the new implementation
-  // Suggestion State
-  isSuggesting = false;
-  suggestionType = null;
-  selectedIndex = 0;
-  suggestions = [];
+  inputController;
+  contextController;
+  streamController;
+  thinkingRenderer = null;
+  toolRenderer = null;
   // Heartbeat monitoring
   heartbeatInterval = null;
   lastActivityTime = Date.now();
@@ -6007,8 +6295,6 @@ var ShellView = class extends import_obsidian9.ItemView {
   streamContent = null;
   streamAccumulatedText = "";
   streamRenderTimer = null;
-  streamNodeCount = 0;
-  currentThinkingNode = null;
   localCommandSuggestions = [
     { label: "/clear", desc: "Clear session history" },
     { label: "/profile", desc: "View user profile" },
@@ -6028,7 +6314,7 @@ var ShellView = class extends import_obsidian9.ItemView {
     this.handleInput();
   };
   handleKeyDownBound = async (e) => {
-    if (this.isSuggesting) {
+    if (this.inputController.getIsSuggesting()) {
       if (e.key === "ArrowUp") {
         e.preventDefault();
         this.navigateSuggestions(-1);
@@ -6070,6 +6356,34 @@ var ShellView = class extends import_obsidian9.ItemView {
     super(leaf);
     this.modelService = modelService;
     this.contextManager = new ContextManager();
+    this.inputController = new InputController();
+    this.contextController = new ContextController({
+      app: this.app,
+      contextManager: this.contextManager
+    });
+    this.streamController = new StreamController({
+      onThinking: (content) => {
+        this.ensureStreamContainer();
+        this.thinkingRenderer?.appendThinking(content);
+        this.streamNodeCount = this.getStreamNodeCount();
+      },
+      onToolCall: (name, args) => {
+        this.ensureStreamContainer();
+        this.thinkingRenderer?.finalizeCurrentThinking();
+        this.toolRenderer?.addToolCall(name, args);
+        this.streamNodeCount = this.getStreamNodeCount();
+      },
+      onToolResult: (name, result, error) => {
+        this.toolRenderer?.updateToolResult(name, result, error);
+      },
+      onTextDelta: (content) => {
+        this.ensureStreamContainer();
+        this.handleTextDelta(content);
+      },
+      onDone: () => this.finalizeStream(),
+      onError: () => this.finalizeStream(),
+      onScrollRequest: () => this.scrollToEnd()
+    });
   }
   getViewType() {
     return VIEW_TYPE_SHELL;
@@ -6214,26 +6528,19 @@ ${tool.name}: ${tool.description}
   }
   // ==================== Suggestion Logic ====================
   handleInput() {
-    const val = this.inputEl.value;
-    const cursor = this.inputEl.selectionStart;
-    const textBeforeCursor = val.substring(0, cursor);
-    const lastWord = textBeforeCursor.split(/\s+/).pop() || "";
-    if (lastWord.startsWith("/")) {
-      this.showSuggestions("command", lastWord.substring(1));
-    } else if (lastWord.startsWith("@")) {
-      this.showSuggestions("file", lastWord.substring(1));
+    const trigger = detectSuggestionTrigger(this.inputEl.value, this.inputEl.selectionStart);
+    if (trigger) {
+      this.showSuggestions(trigger.type, trigger.query);
     } else {
       this.hideSuggestions();
     }
   }
   showSuggestions(type, query) {
-    this.isSuggesting = true;
-    this.suggestionType = type;
     this.suggestionContainer.empty();
     this.suggestionContainer.style.display = "block";
-    this.selectedIndex = 0;
+    let suggestions;
     if (type === "command") {
-      this.suggestions = buildCommandSuggestions(
+      suggestions = buildCommandSuggestions(
         this.localCommandSuggestions,
         this.modelService.getSkillCommands().map((command) => ({
           command: command.command,
@@ -6243,9 +6550,10 @@ ${tool.name}: ${tool.description}
       );
     } else {
       const files = this.app.vault.getFiles();
-      this.suggestions = files.filter((f) => f.path.toLowerCase().includes(query.toLowerCase())).slice(0, 10).map((f) => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]` }));
+      suggestions = files.filter((f) => f.path.toLowerCase().includes(query.toLowerCase())).slice(0, 10).map((f) => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]` }));
     }
-    if (this.suggestions.length === 0) {
+    this.inputController.setSuggestions(type, suggestions);
+    if (this.inputController.getSuggestions().length === 0) {
       this.hideSuggestions();
       return;
     }
@@ -6253,77 +6561,50 @@ ${tool.name}: ${tool.description}
   }
   renderSuggestions() {
     this.suggestionContainer.empty();
-    this.suggestions.forEach((item, index) => {
+    this.inputController.getSuggestions().forEach((item, index) => {
       const el = this.suggestionContainer.createDiv({
-        cls: `suggestion-item ${index === this.selectedIndex ? "is-selected" : ""}`
+        cls: `suggestion-item ${index === this.inputController.getSelectedIndex() ? "is-selected" : ""}`
       });
-      el.createSpan({ cls: "suggestion-icon", text: this.suggestionType === "command" ? "/" : "@" });
+      el.createSpan({ cls: "suggestion-icon", text: this.inputController.getSuggestionType() === "command" ? "/" : "@" });
       el.createSpan({ cls: "suggestion-text", text: item.label });
       if (item.desc) {
         el.createSpan({ cls: "suggestion-desc", text: item.desc });
       }
       el.addEventListener("click", () => {
-        this.selectedIndex = index;
+        while (this.inputController.getSelectedIndex() !== index) {
+          this.inputController.navigate(1);
+        }
         this.selectSuggestion();
       });
     });
   }
   navigateSuggestions(dir) {
-    this.selectedIndex += dir;
-    if (this.selectedIndex < 0)
-      this.selectedIndex = this.suggestions.length - 1;
-    if (this.selectedIndex >= this.suggestions.length)
-      this.selectedIndex = 0;
+    this.inputController.navigate(dir);
     this.renderSuggestions();
-    const selectedEl = this.suggestionContainer.children[this.selectedIndex];
+    const selectedEl = this.suggestionContainer.children[this.inputController.getSelectedIndex()];
     if (selectedEl) {
       selectedEl.scrollIntoView({ block: "nearest" });
     }
   }
   selectSuggestion() {
-    const item = this.suggestions[this.selectedIndex];
-    if (!item)
+    const selection = this.inputController.selectSuggestion(this.inputEl.value, this.inputEl.selectionStart);
+    if (!selection)
       return;
-    const val = this.inputEl.value;
-    const cursor = this.inputEl.selectionStart;
-    const textBeforeCursor = val.substring(0, cursor);
-    const lastWord = textBeforeCursor.split(/\s+/).pop() || "";
-    const replacement = this.suggestionType === "command" ? item.label : item.value;
-    const newTextBefore = textBeforeCursor.substring(0, textBeforeCursor.length - lastWord.length) + replacement + " ";
-    const newText = newTextBefore + val.substring(cursor);
-    this.inputEl.value = newText;
-    this.inputEl.selectionStart = this.inputEl.selectionEnd = newTextBefore.length;
+    this.inputEl.value = selection.text;
+    this.inputEl.selectionStart = this.inputEl.selectionEnd = selection.cursor;
     this.hideSuggestions();
     this.inputEl.focus();
   }
   hideSuggestions() {
-    this.isSuggesting = false;
+    this.inputController.hide();
     this.suggestionContainer.style.display = "none";
     this.suggestionContainer.empty();
   }
   // ==================== Chat Logic ====================
   async processCommand(query) {
     try {
-      const activeFile = this.app.workspace.getActiveFile();
-      const contextItems = await this.contextManager.resolveContexts();
-      if (activeFile) {
-        contextItems.push({
-          id: "active-file",
-          type: "file",
-          data: activeFile.path,
-          content: await this.app.vault.read(activeFile)
-        });
-      }
-      this.currentSelection = "";
-      const activeLeaf = this.app.workspace.getMostRecentLeaf();
-      if (activeLeaf && activeLeaf.view) {
-        const editor = activeLeaf.view.editor;
-        if (editor) {
-          this.currentSelection = editor.getSelection();
-          if (this.currentSelection) {
-          }
-        }
-      }
+      const { contextItems, selection } = await this.contextController.collectCommandContext();
+      this.currentSelection = selection;
       this.updateActivity();
       await this.chatController.processCommand(query, contextItems, this.currentSelection);
       this.contextManager.clearContexts();
@@ -6395,30 +6676,7 @@ ${tool.name}: ${tool.description}
   }
   handleStreamEvent(event) {
     this.updateActivity();
-    switch (event.type) {
-      case "thinking":
-        this.ensureStreamContainer();
-        this.handleThinkingEvent(event.content);
-        break;
-      case "tool_call":
-        this.ensureStreamContainer();
-        this.addToolCallNode(event.name, event.args);
-        break;
-      case "tool_result":
-        this.updateToolResultNode(event.name, event.result, event.error);
-        break;
-      case "text_delta":
-        this.ensureStreamContainer();
-        this.handleTextDelta(event.content);
-        break;
-      case "done":
-        this.finalizeStream();
-        break;
-      case "error":
-        this.finalizeStream();
-        break;
-    }
-    this.scrollToEnd();
+    this.streamController.handleEvent(event);
   }
   ensureStreamContainer() {
     if (this.streamContainer)
@@ -6428,6 +6686,8 @@ ${tool.name}: ${tool.description}
       loadingDiv.remove();
     this.streamContainer = this.outputContainer.createDiv({ cls: "shell-entry ai shell-stream-container" });
     this.streamTimeline = this.streamContainer.createDiv({ cls: "shell-think-timeline" });
+    this.thinkingRenderer = new ThinkingRenderer(this.streamTimeline);
+    this.toolRenderer = new ToolRenderer(this.streamTimeline);
     const summary = this.streamTimeline.createDiv({ cls: "shell-think-summary" });
     summary.createSpan({ cls: "think-toggle", text: "\u25BC" });
     summary.createSpan({ cls: "think-summary-text", text: "\u601D\u8003\u4E2D..." });
@@ -6437,68 +6697,9 @@ ${tool.name}: ${tool.description}
     this.streamContent = this.streamContainer.createDiv({ cls: "shell-response-content" });
     this.streamAccumulatedText = "";
     this.streamNodeCount = 0;
-    this.currentThinkingNode = null;
   }
-  handleThinkingEvent(content) {
-    if (!this.streamTimeline)
-      return;
-    if (!this.currentThinkingNode) {
-      this.currentThinkingNode = this.streamTimeline.createDiv({ cls: "think-node is-thinking" });
-      const header = this.currentThinkingNode.createDiv({ cls: "think-node-header" });
-      header.createSpan({ cls: "think-node-icon", text: "\u{1F4A1}" });
-      header.createSpan({ cls: "think-node-label" });
-      this.currentThinkingNode.createDiv({ cls: "think-node-detail" });
-      header.addEventListener("click", () => {
-        this.currentThinkingNode?.toggleClass("is-expanded", !this.currentThinkingNode.hasClass("is-expanded"));
-      });
-      this.streamNodeCount++;
-    }
-    const detail = this.currentThinkingNode.querySelector(".think-node-detail");
-    const label = this.currentThinkingNode.querySelector(".think-node-label");
-    if (detail)
-      detail.textContent = (detail.textContent || "") + content;
-    if (label) {
-      const fullText = detail?.textContent || "";
-      label.textContent = fullText.length > 30 ? fullText.substring(0, 30) + "..." : fullText;
-    }
-  }
-  addToolCallNode(name, args) {
-    if (!this.streamTimeline)
-      return;
-    if (this.currentThinkingNode) {
-      this.currentThinkingNode.removeClass("is-thinking");
-      this.currentThinkingNode = null;
-    }
-    const node = this.streamTimeline.createDiv({ cls: "think-node is-tool" });
-    node.dataset.toolName = name;
-    const header = node.createDiv({ cls: "think-node-header" });
-    header.createSpan({ cls: "think-node-icon", text: "\u{1F527}" });
-    header.createSpan({ cls: "think-node-label", text: name });
-    const detail = node.createDiv({ cls: "think-node-detail" });
-    detail.textContent = JSON.stringify(args, null, 2);
-    header.addEventListener("click", () => {
-      node.toggleClass("is-expanded", !node.hasClass("is-expanded"));
-    });
-    this.streamNodeCount++;
-  }
-  updateToolResultNode(name, result, error) {
-    if (!this.streamTimeline)
-      return;
-    const nodes = this.streamTimeline.querySelectorAll(".think-node.is-tool");
-    let targetNode = null;
-    for (let i = nodes.length - 1; i >= 0; i--) {
-      if (nodes[i].dataset.toolName === name) {
-        targetNode = nodes[i];
-        break;
-      }
-    }
-    if (!targetNode)
-      return;
-    const detail = targetNode.querySelector(".think-node-detail");
-    if (detail) {
-      const resultText = error ? `Error: ${error}` : JSON.stringify(result, null, 2);
-      detail.textContent += "\n--- Result ---\n" + resultText;
-    }
+  getStreamNodeCount() {
+    return (this.thinkingRenderer?.getNodeCount() || 0) + (this.toolRenderer?.getNodeCount() || 0);
   }
   handleTextDelta(content) {
     this.streamAccumulatedText += content;
@@ -6531,10 +6732,7 @@ ${tool.name}: ${tool.description}
       window.clearTimeout(this.streamRenderTimer);
       this.streamRenderTimer = null;
     }
-    if (this.currentThinkingNode) {
-      this.currentThinkingNode.removeClass("is-thinking");
-      this.currentThinkingNode = null;
-    }
+    this.thinkingRenderer?.finalizeCurrentThinking();
     if (this.streamContent && this.streamAccumulatedText) {
       this.streamContent.empty();
       import_obsidian9.MarkdownRenderer.render(
@@ -6566,6 +6764,8 @@ ${tool.name}: ${tool.description}
     this.streamContent = null;
     this.streamAccumulatedText = "";
     this.streamNodeCount = 0;
+    this.thinkingRenderer = null;
+    this.toolRenderer = null;
   }
   postProcessAiContent(container) {
     const codeBlocks = container.querySelectorAll("pre > code");

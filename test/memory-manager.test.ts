@@ -142,6 +142,33 @@ async function runTests() {
     expect(savedSummaries[0].summary).toContain('inbox autosave flow');
     expect(promptLog[promptLog.length - 1]).toContain('I am fixing the inbox autosave flow');
   });
+
+  await test('buildContext applies a budget to long profile and summary blocks', async () => {
+    const promptLog: string[] = [];
+    const { app } = createApp();
+    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    await memory.ready();
+
+    (memory as any).userProfile = {
+      name: 'User',
+      profession: 'Engineer',
+      expertise: ['x'.repeat(1500)],
+      preferences: { responseStyle: 'balanced' },
+      workflows: [],
+      context: { currentProjects: ['p'.repeat(1500)], goals: ['g'.repeat(1500)], challenges: [] },
+      metadata: { totalInteractions: 1, updatedAt: Date.now(), lastProfileUpdate: Date.now() },
+    };
+    (memory as any).sessionSummaries = [
+      { timestamp: Date.now(), messageCount: 5, summary: 's'.repeat(3000) },
+      { timestamp: Date.now(), messageCount: 6, summary: 't'.repeat(3000) },
+    ];
+
+    const context = memory.buildContext();
+
+    expect(context.length <= 4500).toBe(true);
+    expect(context).toContain('[User Profile]');
+    expect(context).toContain('[Recent Context]');
+  });
 }
 
 runTests().catch((e) => {

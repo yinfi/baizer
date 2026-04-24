@@ -84,4 +84,18 @@ test('resolveContexts returns an explicit error marker for failed url fetches', 
   expect(resolved[0].content).toContain('[Error fetching content');
 });
 
+test('resolveContexts applies the configured budgeter before returning contexts', async () => {
+  const cm = new (ContextManager as any)({
+    fetchWebContent: async (_url: string) => 'content',
+    fetchVideoTranscript: async (_url: string) => '',
+    budgetContexts: (items: any[]) => items.slice(0, 1),
+  });
+  cm.addContext({ id: 'a', type: 'text', data: 'a', content: 'A' });
+  cm.addContext({ id: 'b', type: 'text', data: 'b', content: 'B' });
+
+  const resolved = await cm.resolveContexts();
+  expect(resolved.length).toBe(1);
+  expect(resolved[0].id).toBe('a');
+});
+
 console.log('All ContextManager tests passed!');

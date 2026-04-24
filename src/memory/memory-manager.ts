@@ -2,6 +2,7 @@ import { App } from 'obsidian';
 import { IModelProvider, IChatSession, ToolDefinition } from '../models/interfaces';
 import { UserProfile, SessionSummary, ChatMessage, DEFAULT_USER_PROFILE } from './types';
 import { MEMORY_DIR } from '../mcp/types';
+import { budgetTextBlock } from '../services/context-budget';
 
 export class MemoryManager {
     private chatSession: IChatSession | null = null;
@@ -60,8 +61,8 @@ export class MemoryManager {
     }
 
     buildContext(): string {
-        const profileContext = this.formatProfileForContext();
-        const summaryContext = this.formatSummariesForContext();
+        const profileContext = budgetTextBlock(this.formatProfileForContext(), 2000);
+        const summaryContext = budgetTextBlock(this.formatSummariesForContext(), 2000);
 
         return `[User Profile]\n${profileContext}\n\n[Recent Context]\n${summaryContext}`;
     }
