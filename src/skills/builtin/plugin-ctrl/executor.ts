@@ -3,6 +3,7 @@
 import { Tool, ToolContext } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
+import { pluginSkillFilePath } from '../../skill-files';
 
 const listPlugins: Tool = {
   name: 'list_plugins',
@@ -12,14 +13,11 @@ const listPlugins: Tool = {
     if (!ctx.settings.allowPluginControl) return { error: 'Permission denied' };
     const manifests = (ctx.app as any).plugins.manifests;
     const enabled = (ctx.app as any).plugins.enabledPlugins;
-    const SKILL_DIR = '.obsidian/obsidian-cli/skills';
-    const list = Object.values(manifests).map((m: any) => ({
+    const list = await Promise.all(Object.values(manifests).map(async (m: any) => ({
       id: m.id, name: m.name, version: m.version,
       enabled: enabled.has(m.id), description: m.description,
-      hasSkill: !!ctx.app.vault.getAbstractFileByPath(
-        `${SKILL_DIR}/plugin-${m.id}/SKILL.md`
-      ),
-    }));
+      hasSkill: await ctx.app.vault.adapter.exists(pluginSkillFilePath(m.id)),
+    })));
     return { plugins: list, total: list.length };
   },
 };
@@ -73,14 +71,18 @@ const executePluginCommand: Tool = {
   },
   async execute(args, ctx) {
     if (!ctx.settings.allowPluginControl) return { error: 'Permission denied' };
-    if (!ctx.settings.confirmExecutions) {
-      // 直接执行
-      const success = (ctx.app as any).commands.executeCommandById(args.commandId);
-      return success
-        ? { success: true, message: `✅ Executed: ${args.commandId}` }
-        : { success: false, error: `Command not found: ${args.commandId}` };
+    if (ctx.settings.confirmExecutions && !args.approved) {
+      return {
+        approval_required: true,
+        action: 'execute_plugin_command',
+        target: args.commandId,
+        args: {
+          commandId: args.commandId,
+        },
+        message: `Approval required to execute plugin command: ${args.commandId}`,
+      };
     }
-    // confirmExecutions 开启时也执行（确认逻辑在 UI 层处理）
+
     const success = (ctx.app as any).commands.executeCommandById(args.commandId);
     return success
       ? { success: true, message: `✅ Executed: ${args.commandId}` }
