@@ -7,6 +7,8 @@ import { ToolRegistry } from '../tool-registry';
 
 // ==================== 工具定义 ====================
 
+const MAX_FILE_READ_CHARS = 20000;
+
 const readNote: Tool = {
   name: 'read_note',
   description: 'Read the content of a specific note in the vault.',
@@ -257,6 +259,145 @@ const openFile: Tool = {
 
 // ==================== 辅助函数 ====================
 
+const readFile: Tool = {
+  name: 'read_file',
+  description: 'Read the exact content of a text file in the vault, including .md, .canvas, .base, and .json files.',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Exact vault path to the file, e.g. "Boards/map.canvas"' },
+    },
+    required: ['path'],
+  },
+  async execute(args, ctx) {
+    const pathResult = normalizeVaultPath(args.path);
+    if (pathResult.error) return { success: false, error: pathResult.error };
+
+    const file = ctx.app.vault.getAbstractFileByPath(pathResult.path);
+    if (!isReadableVaultFile(file)) {
+      return { success: false, error: 'File not found' };
+    }
+
+    const content = await ctx.app.vault.read(file);
+    const truncated = content.length > MAX_FILE_READ_CHARS;
+    return {
+      success: true,
+      path: file.path,
+      content: truncated ? content.slice(0, MAX_FILE_READ_CHARS) : content,
+      truncated,
+    };
+  },
+};
+
+const createFile: Tool = {
+  name: 'create_file',
+  description: 'Create a new text file in the vault without changing its extension. Supports .md, .canvas, .base, and .json files.',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Exact vault path for the new file, e.g. "Bases/tasks.base"' },
+      content: { type: 'string', description: 'The complete file content to write' },
+    },
+    required: ['path', 'content'],
+  },
+  async execute(args, ctx) {
+    const pathResult = normalizeVaultPath(args.path);
+    if (pathResult.error) return { success: false, error: pathResult.error };
+    if (isObsidianConfigPath(pathResult.path)) {
+      return { success: false, error: 'Writing .obsidian files is not allowed' };
+    }
+    if (!ctx.settings.allowFileCreation) {
+      return { success: false, error: 'File creation is disabled' };
+    }
+    if (ctx.app.vault.getAbstractFileByPath(pathResult.path)) {
+      return { success: false, error: `File already exists: ${pathResult.path}` };
+    }
+    if (ctx.settings.confirmExecutions && !args.approved) {
+      return buildApprovalResponse('create_file', pathResult.path, {
+        path: pathResult.path,
+        content: args.content || '',
+      }, 'create file');
+    }
+
+    await ensureParentFolder(ctx.app, pathResult.path);
+    await ctx.app.vault.create(pathResult.path, args.content || '');
+    return {
+      success: true,
+      path: pathResult.path,
+      message: `File created: ${pathResult.path}`,
+    };
+  },
+};
+
+const updateFile: Tool = {
+  name: 'update_file',
+  description: 'Replace the exact content of an existing text file in the vault. Supports .md, .canvas, .base, and .json files.',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Exact vault path to the file to update' },
+      content: { type: 'string', description: 'The complete replacement file content' },
+    },
+    required: ['path', 'content'],
+  },
+  async execute(args, ctx) {
+    const pathResult = normalizeVaultPath(args.path);
+    if (pathResult.error) return { success: false, error: pathResult.error };
+    if (isObsidianConfigPath(pathResult.path)) {
+      return { success: false, error: 'Writing .obsidian files is not allowed' };
+    }
+    if (!ctx.settings.allowFileModification) {
+      return { success: false, error: 'File modification is disabled' };
+    }
+
+    const file = ctx.app.vault.getAbstractFileByPath(pathResult.path);
+    if (!isReadableVaultFile(file)) {
+      return { success: false, error: 'File not found' };
+    }
+    if (ctx.settings.confirmExecutions && !args.approved) {
+      return buildApprovalResponse('update_file', pathResult.path, {
+        path: pathResult.path,
+        content: args.content,
+      }, 'update file');
+    }
+
+    await ctx.app.vault.modify(file, args.content);
+    return {
+      success: true,
+      path: pathResult.path,
+      message: `File updated: ${pathResult.path}`,
+    };
+  },
+};
+
+function normalizeVaultPath(rawPath: any): { path: string; error?: string } {
+  if (typeof rawPath !== 'string' || !rawPath.trim()) {
+    return { path: '', error: 'Missing path parameter' };
+  }
+
+  const path = rawPath.trim().replace(/\\/g, '/');
+  const parts = path.split('/');
+
+  if (
+    path.startsWith('/') ||
+    /^[A-Za-z]:/.test(path) ||
+    parts.some(part => part === '..') ||
+    parts.some(part => part.trim() === '')
+  ) {
+    return { path, error: 'Unsafe vault path' };
+  }
+
+  return { path };
+}
+
+function isObsidianConfigPath(path: string): boolean {
+  return path === '.obsidian' || path.startsWith('.obsidian/');
+}
+
+function isReadableVaultFile(file: any): file is TFile {
+  return !!file && typeof file.path === 'string';
+}
+
 async function ensureParentFolder(app: App, path: string): Promise<void> {
   const parts = path.split('/');
   if (parts.length <= 1) return;
@@ -290,12 +431,14 @@ function buildApprovalResponse(
 const ALL_VAULT_TOOLS: Tool[] = [
   readNote, createNote, updateNote, appendToNote,
   deleteNote, renameNote, listNotes, searchVault, openFile,
+  readFile, createFile, updateFile,
 ];
 
 /** 高频核心工具（始终注册到 function calling） */
 export const CORE_VAULT_TOOL_NAMES = [
   'read_note', 'create_note', 'update_note', 'append_to_note',
   'list_notes', 'search_vault', 'open_file',
+  'read_file', 'create_file', 'update_file',
 ];
 
 /** 危险操作工具（通过 vault-danger skill 按需激活） */
