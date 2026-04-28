@@ -16,11 +16,16 @@ import { executor as webSearchSkillExecutor, registerTools as registerWebSearchT
 import { createExecutor as createWebClipperSkillExecutor, registerTools as registerWebClipperTools } from './src/skills/builtin/web-clipper/executor';
 import { createExecutor as createKnowledgeSkillExecutor, registerTools as registerKnowledgeTools } from './src/skills/builtin/knowledge/executor';
 import { executor as pluginCtrlSkillExecutor, registerTools as registerPluginCtrlTools } from './src/skills/builtin/plugin-ctrl/executor';
+import { executor as jsonCanvasSkillExecutor, registerTools as registerJsonCanvasTools } from './src/skills/builtin/json-canvas/executor';
+import { executor as obsidianBasesSkillExecutor, registerTools as registerObsidianBasesTools } from './src/skills/builtin/obsidian-bases/executor';
 // SKILL.md 通过 esbuild text loader 导入
 import webSearchSkillMd from './src/skills/builtin/web-search/SKILL.md';
 import webClipperSkillMd from './src/skills/builtin/web-clipper/SKILL.md';
 import knowledgeSkillMd from './src/skills/builtin/knowledge/SKILL.md';
 import pluginCtrlSkillMd from './src/skills/builtin/plugin-ctrl/SKILL.md';
+import obsidianMarkdownSkillMd from './src/skills/builtin/obsidian-markdown/SKILL.md';
+import jsonCanvasSkillMd from './src/skills/builtin/json-canvas/SKILL.md';
+import obsidianBasesSkillMd from './src/skills/builtin/obsidian-bases/SKILL.md';
 import { PluginWatcher } from './src/skills/builtin/plugin-ctrl/plugin-watcher';
 import { PluginSkillGenerator } from './src/skills/builtin/plugin-ctrl/skill-generator';
 import { InboxAutosaveCoordinator } from './src/services/inbox-autosave';
@@ -59,10 +64,15 @@ export default class ObsidianCliPlugin extends Plugin {
         registerWebSearchTools(this.toolRegistry);
         registerWebClipperTools(this.toolRegistry, this.modelService);
         registerPluginCtrlTools(this.toolRegistry);
+        registerJsonCanvasTools(this.toolRegistry);
+        registerObsidianBasesTools(this.toolRegistry);
 
         // 注册 Skill（从 SKILL.md，executor 为 noop — instructions 注入模式）
         this.skillRegistry.registerBuiltinFromMd(webSearchSkillMd, webSearchSkillExecutor);
         this.skillRegistry.registerBuiltinFromMd(webClipperSkillMd, createWebClipperSkillExecutor(this.modelService));
+        this.skillRegistry.registerBuiltinFromMd(obsidianMarkdownSkillMd, { execute: async () => ({ ok: true }) });
+        this.skillRegistry.registerBuiltinFromMd(jsonCanvasSkillMd, jsonCanvasSkillExecutor);
+        this.skillRegistry.registerBuiltinFromMd(obsidianBasesSkillMd, obsidianBasesSkillExecutor);
         this.skillRegistry.registerBuiltinFromMd(pluginCtrlSkillMd, pluginCtrlSkillExecutor,
             (settings) => settings.allowPluginControl,
         );

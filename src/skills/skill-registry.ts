@@ -111,7 +111,7 @@ export class SkillRegistry implements ISkillRegistry {
 
   /** 解析 YAML frontmatter（简易解析，复用 SkillLoader 的逻辑） */
   private parseFrontmatter(content: string): { frontmatter: SkillFrontmatter | null; body: string } {
-    const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
     if (!match) return { frontmatter: null, body: content };
 
     try {
