@@ -18,6 +18,7 @@ class UserSkill implements Skill {
   description: string;
   triggers?: SkillTriggers;
   enabled?: boolean;
+  executionMode: 'instructions' = 'instructions';
 
   private instructions: string;
   private toolNames: string[];

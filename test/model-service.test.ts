@@ -148,6 +148,56 @@ async function runTests() {
     }]);
   });
 
+  await test('executeSlashSkillCommand runs instruction-only skills through ChatRuntime', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const runtimeCalls: any[] = [];
+
+    service.app = { id: 'app' };
+    service.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    service.skillRegistry = {
+      resolveByCommand: (command: string) => command === '/tasks'
+        ? {
+            name: 'plugin-obsidian-tasks',
+            executionMode: 'instructions',
+            execute: async () => {
+              throw new Error('instruction-only skills should not execute directly');
+            },
+          }
+        : null,
+    };
+    service.createChatRuntime = () => ({
+      prepareTurn: async (request: any) => {
+        runtimeCalls.push({ type: 'prepareTurn', request });
+        return { prompt: 'prepared prompt', tools: [] };
+      },
+      query: async (turn: any) => {
+        runtimeCalls.push({ type: 'query', turn });
+        return 'task result';
+      },
+    });
+
+    const result = await service.executeSlashSkillCommand('/tasks', 'today');
+
+    expect(result).toEqual({ success: true, message: 'task result' });
+    expect(runtimeCalls).toEqual([
+      {
+        type: 'prepareTurn',
+        request: {
+          userMessage: 'today',
+          contextItems: [],
+          forcedSkillName: 'plugin-obsidian-tasks',
+        },
+      },
+      {
+        type: 'query',
+        turn: {
+          prompt: 'prepared prompt',
+          tools: [],
+        },
+      },
+    ]);
+  });
+
   await test('executeApprovedAction replays the target tool with approved flag', async () => {
     const service: any = Object.create(ModelService.prototype);
     const calls: any[] = [];

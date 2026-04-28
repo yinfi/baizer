@@ -77,6 +77,7 @@ export interface Skill {
 
   // === 触发条件 ===
   triggers?: SkillTriggers;
+  executionMode?: 'direct' | 'instructions';
 
   // === 生命周期 ===
   /** 是否启用，支持静态值或动态函数 */

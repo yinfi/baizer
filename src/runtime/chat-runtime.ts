@@ -16,6 +16,11 @@ interface ChatRuntimeDeps {
   skillRegistry: SkillRegistry;
 }
 
+interface ActiveSkillScope {
+  activeSkillName?: string;
+  allowedToolNames: Set<string> | null;
+}
+
 export class DefaultChatRuntime implements ChatRuntime {
   constructor(private deps: ChatRuntimeDeps) { }
 
@@ -30,12 +35,18 @@ export class DefaultChatRuntime implements ChatRuntime {
       memoryContext = this.deps.memoryManager.buildContext();
     }
 
+    const activeSkill = this.resolveRequestedSkill(request);
+
     let prompt = '';
     if (memoryContext) {
       prompt += `${memoryContext}\n\n`;
     }
     prompt += `[Current Time: ${new Date().toLocaleString()} (${new Date().toLocaleDateString(undefined, { weekday: 'long' })})]\n`;
     prompt += `[Context: ${this.formatContextItems(request.contextItems)}]\n`;
+    if (activeSkill) {
+      prompt += `[Active Skill: ${activeSkill.skill.name}]\n`;
+      prompt += `[Skill Instructions]\n${activeSkill.instructions}\n`;
+    }
     if (request.selection) {
       prompt += `[Selected Text: ${request.selection}]\n`;
     }
@@ -43,7 +54,9 @@ export class DefaultChatRuntime implements ChatRuntime {
 
     return {
       prompt,
-      tools: this.getTools(),
+      tools: this.buildSkillModeTools(activeSkill),
+      activeSkillName: activeSkill?.skill.name,
+      allowedToolNames: activeSkill?.tools.map(tool => tool.name),
     };
   }
 
@@ -55,28 +68,19 @@ export class DefaultChatRuntime implements ChatRuntime {
     let result = await chat.sendMessage(turn.prompt);
     let loopCount = 0;
     const maxLoops = 10;
+    const skillScope = this.createSkillScope(turn);
 
     while (result.functionCalls && result.functionCalls.length > 0) {
       loopCount++;
       if (loopCount > maxLoops) break;
 
-      const toolResults = await Promise.all(result.functionCalls.map(async (call) => {
-        if (call.name === 'use_skill') {
-          return {
-            name: call.name,
-            response: await this.executeSkill(call.args),
-          };
-        }
-
-        return {
+      const toolResults = [];
+      for (const call of result.functionCalls) {
+        toolResults.push({
           name: call.name,
-          response: await this.withTimeout(
-            this.deps.toolRegistry.execute(call.name, call.args),
-            30000,
-            `Tool ${call.name} execution timed out`,
-          ),
-        };
-      }));
+          response: await this.executeToolCall(call.name, call.args, skillScope),
+        });
+      }
 
       result = await chat.sendMessage(toolResults);
     }
@@ -99,6 +103,7 @@ export class DefaultChatRuntime implements ChatRuntime {
     const maxLoops = 10;
     let input: string | { name: string; response: any }[] = turn.prompt;
     let fullResponseText = '';
+    const skillScope = this.createSkillScope(turn);
 
     while (loopCount <= maxLoops) {
       const pendingCalls: { name: string; args: any }[] = [];
@@ -122,16 +127,7 @@ export class DefaultChatRuntime implements ChatRuntime {
 
       const toolResults: { name: string; response: any }[] = [];
       for (const call of pendingCalls) {
-        let toolResult: any;
-        if (call.name === 'use_skill') {
-          toolResult = await this.executeSkill(call.args);
-        } else {
-          toolResult = await this.withTimeout(
-            this.deps.toolRegistry.execute(call.name, call.args),
-            30000,
-            `Tool ${call.name} execution timed out`,
-          );
-        }
+        const toolResult = await this.executeToolCall(call.name, call.args, skillScope);
 
         yield { type: 'tool_result' as const, name: call.name, result: toolResult };
         toolResults.push({ name: call.name, response: toolResult });
@@ -158,9 +154,10 @@ export class DefaultChatRuntime implements ChatRuntime {
     }).join('\n\n');
   }
 
-  private buildSkillModeTools(): ToolDefinition[] {
-    const tools: ToolDefinition[] = [];
-    tools.push(...this.deps.toolRegistry.getAllDefinitions());
+  private buildSkillModeTools(activeSkill?: { tools: ToolDefinition[] } | null): ToolDefinition[] {
+    const tools = activeSkill?.tools?.length
+      ? [...activeSkill.tools]
+      : [...this.deps.toolRegistry.getAllDefinitions()];
 
     const skillSummary = this.deps.skillRegistry.getSkillSummaryText();
     const useSkillDesc = skillSummary
@@ -182,17 +179,72 @@ export class DefaultChatRuntime implements ChatRuntime {
     return tools;
   }
 
-  private async executeSkill(args: any): Promise<any> {
+  private resolveRequestedSkill(request: ChatTurnRequest) {
+    const skillName = request.forcedSkillName
+      ?? this.deps.skillRegistry.resolveByIntent?.(request.userMessage)?.name;
+    return skillName ? this.deps.skillRegistry.activateSkill(skillName) : null;
+  }
+
+  private createSkillScope(turn: PreparedChatTurn): ActiveSkillScope {
+    if (!turn.activeSkillName) {
+      return { allowedToolNames: null };
+    }
+    return {
+      activeSkillName: turn.activeSkillName,
+      allowedToolNames: new Set(turn.allowedToolNames ?? []),
+    };
+  }
+
+  private async executeToolCall(
+    name: string,
+    args: any,
+    skillScope: ActiveSkillScope,
+  ): Promise<any> {
+    if (name === 'use_skill') {
+      const activation = this.activateSkillRequest(args);
+      if (activation.activeSkillName) {
+        skillScope.activeSkillName = activation.activeSkillName;
+        skillScope.allowedToolNames = new Set(activation.allowedToolNames ?? []);
+      }
+      return activation.toolResult;
+    }
+
+    if (skillScope.allowedToolNames && !skillScope.allowedToolNames.has(name)) {
+      return {
+        error: `Tool "${name}" is not available for active skill "${skillScope.activeSkillName}"`,
+      };
+    }
+
+    return this.withTimeout(
+      this.deps.toolRegistry.execute(name, args),
+      30000,
+      `Tool ${name} execution timed out`,
+    );
+  }
+
+  private activateSkillRequest(args: any): {
+    activeSkillName?: string;
+    allowedToolNames?: string[];
+    toolResult: any;
+  } {
     const skillName = args?.name;
-    if (!skillName) return { error: 'Missing skill name' };
+    if (!skillName) {
+      return { toolResult: { error: 'Missing skill name' } };
+    }
 
     const activated = this.deps.skillRegistry.activateSkill(skillName);
-    if (!activated) return { error: `Skill "${skillName}" not found or disabled` };
+    if (!activated) {
+      return { toolResult: { error: `Skill "${skillName}" not found or disabled` } };
+    }
 
     return {
-      action_required: 'Use the returned instructions immediately with the available tools to complete the user request.',
-      instructions: activated.instructions,
-      available_tools: activated.tools.map(tool => tool.name),
+      activeSkillName: activated.skill?.name ?? skillName,
+      allowedToolNames: activated.tools.map(tool => tool.name),
+      toolResult: {
+        action_required: 'Use the returned instructions immediately with the available tools to complete the user request.',
+        instructions: activated.instructions,
+        available_tools: activated.tools.map(tool => tool.name),
+      },
     };
   }
 
