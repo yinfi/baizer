@@ -187,9 +187,6 @@ export class ChatController {
             case '/edit':
                 await this.handleEdit(argStr);
                 break;
-            case '/save':
-                await this.handleSave(argStr);
-                break;
             case '/help':
                 this.showHelp();
                 break;
@@ -466,6 +463,41 @@ export class ChatController {
     }
 
     private showHelp() {
+        const localCommands = [
+            { command: '/clear', description: 'Clear session history' },
+            { command: '/profile', description: 'View user profile' },
+            { command: '/file-back <message-id>', description: 'Archive a previous AI answer to the knowledge wiki' },
+            { command: '/forget [field]', description: 'Forget user memory (name/profession/expertise/preferences/workflows/projects/goals/all)' },
+            { command: '/new <title>', description: 'Create a new note' },
+            { command: '/edit <instruction>', description: 'AI edit the selected text' },
+            { command: '/open <file>', description: 'Open a file' },
+            { command: '/tools', description: 'List available MCP tools' },
+            { command: '/wiki:compile [path]', description: 'Compile notes into the knowledge wiki' },
+            { command: '/wiki:index', description: 'Open the knowledge wiki index' },
+            { command: '/wiki:lint', description: 'Run the knowledge wiki health check' },
+            { command: '/help', description: 'Show this help message' },
+        ];
+        const skillCommands = typeof (this.api as any).getSkillCommands === 'function'
+            ? (this.api as any).getSkillCommands()
+            : [];
+
+        let help = `## Shell Commands\n\n`;
+        help += localCommands
+            .map((entry) => `- \`${entry.command}\` — ${entry.description}`)
+            .join('\n');
+
+        if (skillCommands.length > 0) {
+            help += `\n\n## Skill Commands\n\n`;
+            help += skillCommands
+                .map((entry: any) => `- \`${entry.command}\` — ${entry.description}`)
+                .join('\n');
+        }
+
+        help += `\n\nType \`/\` to browse commands and \`@\` to mention files.`;
+        this.addMessage('system', help);
+    }
+
+    private showLegacyHelp() {
         const help = `## Shell Commands
 
 | 命令 | 说明 |
