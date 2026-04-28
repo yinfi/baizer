@@ -26,7 +26,21 @@ function expect(actual: any) {
       if (typeof actual !== 'string' || !actual.includes(expected))
         throw new Error(`Expected string to contain "${expected}"`);
     },
+    toInclude: (expected: any) => {
+      if (!Array.isArray(actual) || !actual.includes(expected))
+        throw new Error(`Expected ${JSON.stringify(actual)} to include ${JSON.stringify(expected)}`);
+    },
+    notToInclude: (expected: any) => {
+      if (Array.isArray(actual) && actual.includes(expected))
+        throw new Error(`Expected ${JSON.stringify(actual)} not to include ${JSON.stringify(expected)}`);
+    },
   };
+}
+
+function parseKeywords(skillMd: string): string[] {
+  const match = skillMd.match(/keywords:\s*(\[[^\n]+\])/);
+  if (!match) throw new Error('Could not find keywords frontmatter');
+  return JSON.parse(match[1]);
 }
 
 const mockApp = {
@@ -115,6 +129,45 @@ async function runTests() {
   await test('shouldSkipPlugin false for plugins with commands', async () => {
     const info = await generator.collectPluginInfo('obsidian-tasks-plugin');
     expect(generator.shouldSkipPlugin(info)).toBe(false);
+  });
+
+  await test('generateSkillMd adds command phrases to routing keywords', async () => {
+    const skillMd = await generator.generateSkillMd({
+      id: 'obsidian-tasks-plugin',
+      name: 'Tasks',
+      description: 'Task management for Obsidian',
+      version: '7.14.0',
+      commands: [
+        { id: 'obsidian-tasks-plugin:edit-task', name: 'Tasks: Edit task', aiUsable: true },
+        { id: 'obsidian-tasks-plugin:toggle-done', name: 'Tasks: Toggle done', aiUsable: true },
+      ],
+      settingsKeys: ['globalFilter', 'defaultFolder'],
+      syntaxHints: [],
+      webContext: '',
+    });
+
+    const keywords = parseKeywords(skillMd);
+    expect(keywords).toInclude('edit task');
+    expect(keywords).toInclude('toggle done');
+  });
+
+  await test('generateSkillMd keeps plugin keywords free of fake slash commands', async () => {
+    const skillMd = await generator.generateSkillMd({
+      id: 'obsidian-tasks-plugin',
+      name: 'Tasks',
+      description: 'Task management for Obsidian',
+      version: '7.14.0',
+      commands: [
+        { id: 'obsidian-tasks-plugin:edit-task', name: 'Tasks: Edit task', aiUsable: true },
+      ],
+      settingsKeys: [],
+      syntaxHints: [],
+      webContext: '',
+    });
+
+    const keywords = parseKeywords(skillMd);
+    expect(keywords).notToInclude('/tasks');
+    expect(keywords).notToInclude('/edit-task');
   });
 }
 

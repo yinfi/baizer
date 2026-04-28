@@ -49,6 +49,7 @@ export class ShellView extends ItemView {
     private readonly localCommandSuggestions: CommandSuggestion[] = [
         { label: '/clear', desc: 'Clear session history' },
         { label: '/profile', desc: 'View user profile' },
+        { label: '/file-back', desc: 'Archive a previous AI answer to the knowledge wiki' },
         { label: '/forget', desc: 'Forget user memory (name/profession/all...)' },
         { label: '/new', desc: 'Create new note' },
         { label: '/edit', desc: 'AI edit selected text' },

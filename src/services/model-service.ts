@@ -339,6 +339,17 @@ export class ModelService {
             return { success: false, error: `Unknown command: ${command}` };
         }
 
+        if (skill.executionMode === 'instructions') {
+            const runtime = this.createChatRuntime();
+            const preparedTurn = await runtime.prepareTurn({
+                userMessage: input,
+                contextItems: [],
+                forcedSkillName: skill.name,
+            });
+            const message = await runtime.query(preparedTurn);
+            return { success: true, message };
+        }
+
         return skill.execute({
             command,
             input,

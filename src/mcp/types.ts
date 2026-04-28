@@ -146,8 +146,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 回答实质性问题前，先查询用户的知识库和笔记，基于用户的实际情况给出个性化回答。
 不要凭空生成通用内容。如果知识库中没有相关内容，正常回答即可。
 直接操作笔记（读写搜索）时优先使用 vault 工具。
-当用户请求明显匹配某个 workflow skill 时，先调用 use_skill 获取该场景的 instructions。
-调用 use_skill 后，请立即按照返回的 instructions 使用相应工具完成任务，不要只描述步骤。`,
+当用户请求明显匹配某个 workflow skill 时，优先激活对应 skill，并遵守该 skill 暴露的工具范围。
+如果当前 skill 不匹配任务，再调用 use_skill 切换到更合适的 workflow，并立即使用返回的 instructions 与工具完成任务。`,
 
     // WeChat
     wechatInboxPath: 'Inbox.md',
