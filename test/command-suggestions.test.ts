@@ -1,5 +1,10 @@
 function expect(actual: any) {
   return {
+    toBe: (expected: any) => {
+      if (actual !== expected) {
+        throw new Error(`Expected ${expected} but got ${actual}`);
+      }
+    },
     toEqual: (expected: any) => {
       const actualStr = JSON.stringify(actual);
       const expectedStr = JSON.stringify(expected);
@@ -42,6 +47,22 @@ async function runTests() {
       { label: '/save', desc: 'Save webpage to vault' },
       { label: '/wiki:query', desc: 'Query knowledge wiki' },
     ]);
+  });
+
+  await test('ShellView keeps only genuinely local slash commands in its hardcoded suggestions', async () => {
+    const { ShellView } = await import('../src/ui/shell-view');
+
+    const view = new ShellView({} as any, {
+      getSkillCommands: () => [],
+    } as any);
+
+    const labels = ((view as any).localCommandSuggestions as Array<{ label: string }>)
+      .map(command => command.label)
+      .sort();
+
+    expect(labels.includes('/save')).toBe(false);
+    expect(labels.includes('/file-back')).toBe(true);
+    expect(labels.includes('/help')).toBe(true);
   });
 }
 

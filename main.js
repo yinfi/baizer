@@ -2199,8 +2199,8 @@ var DEFAULT_SETTINGS = {
 \u56DE\u7B54\u5B9E\u8D28\u6027\u95EE\u9898\u524D\uFF0C\u5148\u67E5\u8BE2\u7528\u6237\u7684\u77E5\u8BC6\u5E93\u548C\u7B14\u8BB0\uFF0C\u57FA\u4E8E\u7528\u6237\u7684\u5B9E\u9645\u60C5\u51B5\u7ED9\u51FA\u4E2A\u6027\u5316\u56DE\u7B54\u3002
 \u4E0D\u8981\u51ED\u7A7A\u751F\u6210\u901A\u7528\u5185\u5BB9\u3002\u5982\u679C\u77E5\u8BC6\u5E93\u4E2D\u6CA1\u6709\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5E38\u56DE\u7B54\u5373\u53EF\u3002
 \u76F4\u63A5\u64CD\u4F5C\u7B14\u8BB0\uFF08\u8BFB\u5199\u641C\u7D22\uFF09\u65F6\u4F18\u5148\u4F7F\u7528 vault \u5DE5\u5177\u3002
-\u5F53\u7528\u6237\u8BF7\u6C42\u660E\u663E\u5339\u914D\u67D0\u4E2A workflow skill \u65F6\uFF0C\u5148\u8C03\u7528 use_skill \u83B7\u53D6\u8BE5\u573A\u666F\u7684 instructions\u3002
-\u8C03\u7528 use_skill \u540E\uFF0C\u8BF7\u7ACB\u5373\u6309\u7167\u8FD4\u56DE\u7684 instructions \u4F7F\u7528\u76F8\u5E94\u5DE5\u5177\u5B8C\u6210\u4EFB\u52A1\uFF0C\u4E0D\u8981\u53EA\u63CF\u8FF0\u6B65\u9AA4\u3002`,
+\u5F53\u7528\u6237\u8BF7\u6C42\u660E\u663E\u5339\u914D\u67D0\u4E2A workflow skill \u65F6\uFF0C\u4F18\u5148\u6FC0\u6D3B\u5BF9\u5E94 skill\uFF0C\u5E76\u9075\u5B88\u8BE5 skill \u66B4\u9732\u7684\u5DE5\u5177\u8303\u56F4\u3002
+\u5982\u679C\u5F53\u524D skill \u4E0D\u5339\u914D\u4EFB\u52A1\uFF0C\u518D\u8C03\u7528 use_skill \u5207\u6362\u5230\u66F4\u5408\u9002\u7684 workflow\uFF0C\u5E76\u7ACB\u5373\u4F7F\u7528\u8FD4\u56DE\u7684 instructions \u4E0E\u5DE5\u5177\u5B8C\u6210\u4EFB\u52A1\u3002`,
   // WeChat
   wechatInboxPath: "Inbox.md",
   wechatStoragePath: "Clippings",
@@ -4253,6 +4253,7 @@ var DefaultChatRuntime = class {
       await this.deps.memoryManager.ready();
       memoryContext = this.deps.memoryManager.buildContext();
     }
+    const activeSkill = this.resolveRequestedSkill(request);
     let prompt = "";
     if (memoryContext) {
       prompt += `${memoryContext}
@@ -4263,6 +4264,13 @@ var DefaultChatRuntime = class {
 `;
     prompt += `[Context: ${this.formatContextItems(request.contextItems)}]
 `;
+    if (activeSkill) {
+      prompt += `[Active Skill: ${activeSkill.skill.name}]
+`;
+      prompt += `[Skill Instructions]
+${activeSkill.instructions}
+`;
+    }
     if (request.selection) {
       prompt += `[Selected Text: ${request.selection}]
 `;
@@ -4270,7 +4278,9 @@ var DefaultChatRuntime = class {
     prompt += `User Request: ${request.userMessage}`;
     return {
       prompt,
-      tools: this.getTools()
+      tools: this.buildSkillModeTools(activeSkill),
+      activeSkillName: activeSkill?.skill.name,
+      allowedToolNames: activeSkill?.tools.map((tool) => tool.name)
     };
   }
   async query(turn) {
@@ -4278,26 +4288,18 @@ var DefaultChatRuntime = class {
     let result = await chat.sendMessage(turn.prompt);
     let loopCount = 0;
     const maxLoops = 10;
+    const skillScope = this.createSkillScope(turn);
     while (result.functionCalls && result.functionCalls.length > 0) {
       loopCount++;
       if (loopCount > maxLoops)
         break;
-      const toolResults = await Promise.all(result.functionCalls.map(async (call) => {
-        if (call.name === "use_skill") {
-          return {
-            name: call.name,
-            response: await this.executeSkill(call.args)
-          };
-        }
-        return {
+      const toolResults = [];
+      for (const call of result.functionCalls) {
+        toolResults.push({
           name: call.name,
-          response: await this.withTimeout(
-            this.deps.toolRegistry.execute(call.name, call.args),
-            3e4,
-            `Tool ${call.name} execution timed out`
-          )
-        };
-      }));
+          response: await this.executeToolCall(call.name, call.args, skillScope)
+        });
+      }
       result = await chat.sendMessage(toolResults);
     }
     if (this.deps.memoryManager) {
@@ -4313,6 +4315,7 @@ var DefaultChatRuntime = class {
     const maxLoops = 10;
     let input = turn.prompt;
     let fullResponseText = "";
+    const skillScope = this.createSkillScope(turn);
     while (loopCount <= maxLoops) {
       const pendingCalls = [];
       for await (const event of chat.sendMessageStream(input)) {
@@ -4333,16 +4336,7 @@ var DefaultChatRuntime = class {
         break;
       const toolResults = [];
       for (const call of pendingCalls) {
-        let toolResult;
-        if (call.name === "use_skill") {
-          toolResult = await this.executeSkill(call.args);
-        } else {
-          toolResult = await this.withTimeout(
-            this.deps.toolRegistry.execute(call.name, call.args),
-            3e4,
-            `Tool ${call.name} execution timed out`
-          );
-        }
+        const toolResult = await this.executeToolCall(call.name, call.args, skillScope);
         yield { type: "tool_result", name: call.name, result: toolResult };
         toolResults.push({ name: call.name, response: toolResult });
       }
@@ -4366,9 +4360,8 @@ var DefaultChatRuntime = class {
 ${item.content || ""}`;
     }).join("\n\n");
   }
-  buildSkillModeTools() {
-    const tools = [];
-    tools.push(...this.deps.toolRegistry.getAllDefinitions());
+  buildSkillModeTools(activeSkill) {
+    const tools = activeSkill?.tools?.length ? [...activeSkill.tools] : [...this.deps.toolRegistry.getAllDefinitions()];
     const skillSummary = this.deps.skillRegistry.getSkillSummaryText();
     const useSkillDesc = skillSummary ? `Get detailed instructions for a specific workflow, then use the returned instructions with the existing tools.
 
@@ -4386,17 +4379,56 @@ ${skillSummary}` : "Get detailed instructions for a specific workflow.";
     });
     return tools;
   }
-  async executeSkill(args) {
-    const skillName = args?.name;
-    if (!skillName)
-      return { error: "Missing skill name" };
-    const activated = this.deps.skillRegistry.activateSkill(skillName);
-    if (!activated)
-      return { error: `Skill "${skillName}" not found or disabled` };
+  resolveRequestedSkill(request) {
+    const skillName = request.forcedSkillName ?? this.deps.skillRegistry.resolveByIntent?.(request.userMessage)?.name;
+    return skillName ? this.deps.skillRegistry.activateSkill(skillName) : null;
+  }
+  createSkillScope(turn) {
+    if (!turn.activeSkillName) {
+      return { allowedToolNames: null };
+    }
     return {
-      action_required: "Use the returned instructions immediately with the available tools to complete the user request.",
-      instructions: activated.instructions,
-      available_tools: activated.tools.map((tool) => tool.name)
+      activeSkillName: turn.activeSkillName,
+      allowedToolNames: new Set(turn.allowedToolNames ?? [])
+    };
+  }
+  async executeToolCall(name, args, skillScope) {
+    if (name === "use_skill") {
+      const activation = this.activateSkillRequest(args);
+      if (activation.activeSkillName) {
+        skillScope.activeSkillName = activation.activeSkillName;
+        skillScope.allowedToolNames = new Set(activation.allowedToolNames ?? []);
+      }
+      return activation.toolResult;
+    }
+    if (skillScope.allowedToolNames && !skillScope.allowedToolNames.has(name)) {
+      return {
+        error: `Tool "${name}" is not available for active skill "${skillScope.activeSkillName}"`
+      };
+    }
+    return this.withTimeout(
+      this.deps.toolRegistry.execute(name, args),
+      3e4,
+      `Tool ${name} execution timed out`
+    );
+  }
+  activateSkillRequest(args) {
+    const skillName = args?.name;
+    if (!skillName) {
+      return { toolResult: { error: "Missing skill name" } };
+    }
+    const activated = this.deps.skillRegistry.activateSkill(skillName);
+    if (!activated) {
+      return { toolResult: { error: `Skill "${skillName}" not found or disabled` } };
+    }
+    return {
+      activeSkillName: activated.skill?.name ?? skillName,
+      allowedToolNames: activated.tools.map((tool) => tool.name),
+      toolResult: {
+        action_required: "Use the returned instructions immediately with the available tools to complete the user request.",
+        instructions: activated.instructions,
+        available_tools: activated.tools.map((tool) => tool.name)
+      }
     };
   }
   async withTimeout(promise, timeoutMs, errorMessage) {
@@ -4707,6 +4739,16 @@ var ModelService = class {
     const skill = this.skillRegistry.resolveByCommand(command);
     if (!skill) {
       return { success: false, error: `Unknown command: ${command}` };
+    }
+    if (skill.executionMode === "instructions") {
+      const runtime = this.createChatRuntime();
+      const preparedTurn = await runtime.prepareTurn({
+        userMessage: input,
+        contextItems: [],
+        forcedSkillName: skill.name
+      });
+      const message = await runtime.query(preparedTurn);
+      return { success: true, message };
     }
     return skill.execute({
       command,
@@ -5186,9 +5228,6 @@ ${toolsList}`);
       case "/edit":
         await this.handleEdit(argStr);
         break;
-      case "/save":
-        await this.handleSave(argStr);
-        break;
       case "/help":
         this.showHelp();
         break;
@@ -5449,6 +5488,39 @@ ${selection}`;
     }
   }
   showHelp() {
+    const localCommands = [
+      { command: "/clear", description: "Clear session history" },
+      { command: "/profile", description: "View user profile" },
+      { command: "/file-back <message-id>", description: "Archive a previous AI answer to the knowledge wiki" },
+      { command: "/forget [field]", description: "Forget user memory (name/profession/expertise/preferences/workflows/projects/goals/all)" },
+      { command: "/new <title>", description: "Create a new note" },
+      { command: "/edit <instruction>", description: "AI edit the selected text" },
+      { command: "/open <file>", description: "Open a file" },
+      { command: "/tools", description: "List available MCP tools" },
+      { command: "/wiki:compile [path]", description: "Compile notes into the knowledge wiki" },
+      { command: "/wiki:index", description: "Open the knowledge wiki index" },
+      { command: "/wiki:lint", description: "Run the knowledge wiki health check" },
+      { command: "/help", description: "Show this help message" }
+    ];
+    const skillCommands = typeof this.api.getSkillCommands === "function" ? this.api.getSkillCommands() : [];
+    let help = `## Shell Commands
+
+`;
+    help += localCommands.map((entry) => `- \`${entry.command}\` \u2014 ${entry.description}`).join("\n");
+    if (skillCommands.length > 0) {
+      help += `
+
+## Skill Commands
+
+`;
+      help += skillCommands.map((entry) => `- \`${entry.command}\` \u2014 ${entry.description}`).join("\n");
+    }
+    help += `
+
+Type \`/\` to browse commands and \`@\` to mention files.`;
+    this.addMessage("system", help);
+  }
+  showLegacyHelp() {
     const help = `## Shell Commands
 
 | \u547D\u4EE4 | \u8BF4\u660E |
@@ -6298,6 +6370,7 @@ var ShellView = class extends import_obsidian9.ItemView {
   localCommandSuggestions = [
     { label: "/clear", desc: "Clear session history" },
     { label: "/profile", desc: "View user profile" },
+    { label: "/file-back", desc: "Archive a previous AI answer to the knowledge wiki" },
     { label: "/forget", desc: "Forget user memory (name/profession/all...)" },
     { label: "/new", desc: "Create new note" },
     { label: "/edit", desc: "AI edit selected text" },
@@ -9659,6 +9732,7 @@ var UserSkill = class {
   description;
   triggers;
   enabled;
+  executionMode = "instructions";
   instructions;
   toolNames;
   toolRegistry;
@@ -11643,6 +11717,8 @@ var PluginSkillGenerator = class {
     const shortName = info.name.replace(/^obsidian[\s-]*/i, "").trim();
     if (shortName)
       kw.add(shortName);
+    for (const phrase of this.extractCommandKeywords(info.commands))
+      kw.add(phrase);
     const descWords = (info.description || "").replace(/[.,;:!?()[\]{}'"]/g, " ").split(/\s+/).filter((w) => w.length > 2 && w.length < 20).filter((w) => !STOP_WORDS.has(w.toLowerCase())).slice(0, 5);
     for (const w of descWords)
       kw.add(w.toLowerCase());
@@ -11651,6 +11727,25 @@ var PluginSkillGenerator = class {
     return [...kw].slice(0, 8);
   }
   /** 根据插件命令推断需要的工具 */
+  extractCommandKeywords(commands) {
+    const phrases = [];
+    for (const command of commands) {
+      if (!command.aiUsable)
+        continue;
+      const rawName = command.name.includes(":") ? command.name.split(":").slice(1).join(":") : command.name;
+      const normalized = rawName.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").replace(/\s+/g, " ").trim();
+      if (!normalized || normalized.startsWith("/"))
+        continue;
+      if (normalized.length < 4 || normalized.length > 40)
+        continue;
+      if (!normalized.includes(" "))
+        continue;
+      phrases.push(normalized);
+      if (phrases.length >= 3)
+        break;
+    }
+    return phrases;
+  }
   inferTools(info) {
     const tools = /* @__PURE__ */ new Set();
     if (info.commands.length > 0) {

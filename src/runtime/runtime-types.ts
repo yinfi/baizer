@@ -4,11 +4,14 @@ export interface ChatTurnRequest {
   userMessage: string;
   contextItems: ChatContextItem[];
   selection?: string;
+  forcedSkillName?: string;
 }
 
 export interface PreparedChatTurn {
   prompt: string;
   tools: ToolDefinition[];
+  activeSkillName?: string;
+  allowedToolNames?: string[];
 }
 
 export interface ChatRuntime {

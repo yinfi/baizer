@@ -341,6 +341,7 @@ export class PluginSkillGenerator {
     // 插件名（去掉 obsidian- 前缀）
     const shortName = info.name.replace(/^obsidian[\s-]*/i, '').trim();
     if (shortName) kw.add(shortName);
+    for (const phrase of this.extractCommandKeywords(info.commands)) kw.add(phrase);
     // 从描述中提取有意义的词（过滤停用词）
     const descWords = (info.description || '')
       .replace(/[.,;:!?()[\]{}'"]/g, ' ')
@@ -355,6 +356,32 @@ export class PluginSkillGenerator {
   }
 
   /** 根据插件命令推断需要的工具 */
+  private extractCommandKeywords(commands: CommandInfo[]): string[] {
+    const phrases: string[] = [];
+
+    for (const command of commands) {
+      if (!command.aiUsable) continue;
+
+      const rawName = command.name.includes(':')
+        ? command.name.split(':').slice(1).join(':')
+        : command.name;
+      const normalized = rawName
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (!normalized || normalized.startsWith('/')) continue;
+      if (normalized.length < 4 || normalized.length > 40) continue;
+      if (!normalized.includes(' ')) continue;
+
+      phrases.push(normalized);
+      if (phrases.length >= 3) break;
+    }
+
+    return phrases;
+  }
+
   private inferTools(info: PluginInfo): string[] {
     const tools = new Set<string>();
     if (info.commands.length > 0) {
