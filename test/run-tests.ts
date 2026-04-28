@@ -3,6 +3,7 @@ import { execSync } from 'child_process';
 const tests = [
   'test/mcp-integration.test.ts',
   'test/skill-registry.test.ts',
+  'test/obsidian-markdown-skill.test.ts',
   'test/skill-routing.test.ts',
   'test/model-service.test.ts',
   'test/chat-runtime.test.ts',
@@ -15,6 +16,9 @@ const tests = [
   'test/tool-renderer.test.ts',
   'test/approval-flow.test.ts',
   'test/vault-permissions.test.ts',
+  'test/file-tools.test.ts',
+  'test/json-canvas.test.ts',
+  'test/obsidian-bases.test.ts',
   'test/plugin-tools.test.ts',
   'test/provider-capabilities.test.ts',
   'test/context-budget.test.ts',
