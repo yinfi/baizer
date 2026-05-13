@@ -19,6 +19,19 @@ export interface SettingsSectionStatus {
     tone: SettingsBadgeTone;
 }
 
+export type ConnectionTestState = 'idle' | 'testing' | 'success' | 'error';
+
+export interface ConnectionTestStatus {
+    state: ConnectionTestState;
+    message: string;
+}
+
+export interface ProviderDeletionState {
+    canDelete: boolean;
+    helperText: string;
+    label: string;
+}
+
 interface SettingsSectionMeta {
     id: SettingsSectionId;
     title: string;
@@ -122,6 +135,49 @@ export function getSettingsSectionStatuses(
     return statuses;
 }
 
+export function getProviderDeletionState(settings: PluginSettings): ProviderDeletionState {
+    const activeConfig = settings.providers[settings.activeProvider];
+    if (!activeConfig) {
+        return {
+            canDelete: false,
+            helperText: 'No active provider selected.',
+            label: 'Delete Provider',
+        };
+    }
+
+    if (BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider)) {
+        return {
+            canDelete: false,
+            helperText: 'Built-in providers cannot be deleted.',
+            label: 'Delete Provider',
+        };
+    }
+
+    return {
+        canDelete: true,
+        helperText: 'Remove the selected custom provider from this workspace.',
+        label: 'Delete Provider',
+    };
+}
+
+export function getConnectionTestStatusPresentation(
+    status: ConnectionTestStatus
+): SettingsSectionStatus | undefined {
+    if (!status.message.trim() || status.state === 'idle') {
+        return undefined;
+    }
+
+    if (status.state === 'testing') {
+        return { tone: 'accent', label: status.message };
+    }
+
+    if (status.state === 'success') {
+        return { tone: 'success', label: status.message };
+    }
+
+    return { tone: 'danger', label: status.message };
+}
+
 function getSectionMeta(id: SettingsSectionId): SettingsSectionMeta {
     const section = SETTINGS_SECTIONS.find(candidate => candidate.id === id);
     if (!section) {
@@ -136,6 +192,7 @@ export class SettingTab extends PluginSettingTab {
     private activeSectionId: SettingsSectionId = 'connection';
     private searchQuery = '';
     private revealApiKey = false;
+    private connectionTestStatus: ConnectionTestStatus = { state: 'idle', message: '' };
 
     constructor(app: App, plugin: IPlugin) {
         super(app, plugin);
@@ -160,6 +217,10 @@ export class SettingTab extends PluginSettingTab {
 
     private async persistSettings(): Promise<void> {
         await this.plugin.saveSettings();
+    }
+
+    private resetConnectionTestStatus(): void {
+        this.connectionTestStatus = { state: 'idle', message: '' };
     }
 
     private async loadDynamicModelOptions(
@@ -298,7 +359,9 @@ export class SettingTab extends PluginSettingTab {
 
     private renderSidebar(containerEl: HTMLElement, visibleSections: SettingsSectionId[]): void {
         const nav = containerEl.createDiv({ cls: 'ocli-settings-nav' });
-        nav.createDiv({ cls: 'ocli-settings-nav-title', text: 'Sections' });
+        const navHeader = nav.createDiv({ cls: 'ocli-settings-nav-header' });
+        navHeader.createDiv({ cls: 'ocli-settings-nav-title', text: 'Sections' });
+        navHeader.createDiv({ cls: 'ocli-settings-nav-kicker', text: 'Jump between groups' });
 
         if (!visibleSections.length) {
             nav.createDiv({ cls: 'ocli-settings-empty-nav', text: 'No matching sections.' });
@@ -315,13 +378,13 @@ export class SettingTab extends PluginSettingTab {
                 attr: { type: 'button' },
             }) as HTMLButtonElement;
 
-            const copy = button.createDiv({ cls: 'ocli-settings-nav-copy' });
+            const row = button.createDiv({ cls: 'ocli-settings-nav-row' });
+            const copy = row.createDiv({ cls: 'ocli-settings-nav-copy' });
             copy.createDiv({ cls: 'ocli-settings-nav-label', text: meta.title });
-            copy.createDiv({ cls: 'ocli-settings-nav-description', text: meta.description });
 
             const status = statuses[sectionId];
             if (status) {
-                button.createSpan({ cls: `ocli-settings-badge is-${status.tone}`, text: status.label });
+                row.createSpan({ cls: `ocli-settings-badge is-${status.tone}`, text: status.label });
             }
 
             button.addEventListener('click', () => {
@@ -418,6 +481,7 @@ export class SettingTab extends PluginSettingTab {
                 });
                 drop.setValue(settings.activeProvider);
                 drop.onChange(async (value: string) => {
+                    this.resetConnectionTestStatus();
                     await this.plugin.modelService.switchProvider(value, () => this.persistSettings());
                     this.revealApiKey = false;
                     this.activeSectionId = 'connection';
@@ -440,6 +504,7 @@ export class SettingTab extends PluginSettingTab {
                 .onClick(async () => {
                     activeConfig.apiKey = '';
                     this.revealApiKey = false;
+                    this.resetConnectionTestStatus();
                     await this.persistSettings();
                     this.display();
                 }));
@@ -453,6 +518,7 @@ export class SettingTab extends PluginSettingTab {
                     .setValue(activeConfig.baseUrl)
                     .onChange(async (value: string) => {
                         activeConfig.baseUrl = value;
+                        this.resetConnectionTestStatus();
                         await this.persistSettings();
                     }));
         }
@@ -472,6 +538,7 @@ export class SettingTab extends PluginSettingTab {
 
                 drop.onChange(async (value: string) => {
                     if (value === '__loading__' || value === '__failed__' || value === '__empty__') return;
+                    this.resetConnectionTestStatus();
                     await this.plugin.modelService.switchModel(value, () => this.persistSettings());
                     this.display();
                 });
@@ -489,6 +556,7 @@ export class SettingTab extends PluginSettingTab {
                     model: '',
                 };
                 settings.activeProvider = key;
+                this.resetConnectionTestStatus();
                 await this.persistSettings();
                 this.revealApiKey = false;
                 this.activeSectionId = 'connection';
@@ -496,37 +564,59 @@ export class SettingTab extends PluginSettingTab {
             }).open();
         }, 'accent');
 
-        this.createActionButton(actions, 'Test Connection', async () => {
+        const deletion = getProviderDeletionState(settings);
+        this.createActionButton(actions, deletion.label, async () => {
+            if (!deletion.canDelete) return;
+            delete settings.providers[settings.activeProvider];
+            settings.activeProvider = 'gemini';
+            this.revealApiKey = false;
+            this.resetConnectionTestStatus();
+            await this.persistSettings();
+            new Notice('Provider deleted');
+            this.display();
+        }, 'danger', !deletion.canDelete);
+
+        this.createActionButton(actions, this.connectionTestStatus.state === 'testing' ? 'Testing...' : 'Test Connection', async () => {
             const label = activeConfig.label || 'AI provider';
             if (!activeConfig.apiKey.trim()) {
-                new Notice(`No API key configured for ${label}.`);
+                this.connectionTestStatus = {
+                    state: 'error',
+                    message: `No API key configured for ${label}.`,
+                };
+                this.display();
                 return;
             }
 
             try {
-                new Notice(`Testing connection to ${label}...`);
+                this.connectionTestStatus = {
+                    state: 'testing',
+                    message: `Testing connection to ${label}...`,
+                };
+                this.display();
                 await this.plugin.modelService.updateSettings(this.plugin.settings);
                 const success = await this.plugin.modelService.checkAvailability();
-                new Notice(success
-                    ? 'Connection successful.'
-                    : 'Connection failed. Check API key and settings.');
+                this.connectionTestStatus = success
+                    ? { state: 'success', message: `Connection successful for ${label}.` }
+                    : { state: 'error', message: 'Connection failed. Check API key, base URL, and model.' };
             } catch (error: any) {
-                new Notice(`Connection failed: ${error.message}`);
+                this.connectionTestStatus = {
+                    state: 'error',
+                    message: `Connection failed: ${error.message}`,
+                };
             }
 
             this.display();
-        }, 'primary');
+        }, 'primary', this.connectionTestStatus.state === 'testing');
 
-        const isBuiltin = BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider);
-        if (!isBuiltin) {
-            this.createActionButton(actions, `Delete "${activeConfig.label}"`, async () => {
-                delete settings.providers[settings.activeProvider];
-                settings.activeProvider = 'gemini';
-                this.revealApiKey = false;
-                await this.persistSettings();
-                new Notice('Provider deleted');
-                this.display();
-            }, 'danger');
+        const connectionStatus = getConnectionTestStatusPresentation(this.connectionTestStatus);
+        if (!deletion.canDelete) {
+            containerEl.createDiv({ cls: 'ocli-settings-inline-hint', text: deletion.helperText });
+        }
+        if (connectionStatus) {
+            containerEl.createDiv({
+                cls: `ocli-settings-inline-note is-${connectionStatus.tone}`,
+                text: connectionStatus.label,
+            });
         }
     }
 
@@ -535,6 +625,7 @@ export class SettingTab extends PluginSettingTab {
         text.setValue(config.apiKey);
         text.onChange(async (value: string) => {
             config.apiKey = value;
+            this.resetConnectionTestStatus();
             await this.persistSettings();
         });
 
@@ -862,14 +953,17 @@ export class SettingTab extends PluginSettingTab {
         containerEl: HTMLElement,
         label: string,
         onClick: () => void | Promise<void>,
-        variant: 'default' | 'primary' | 'danger' | 'accent' = 'default'
+        variant: 'default' | 'primary' | 'danger' | 'accent' = 'default',
+        disabled: boolean = false
     ): HTMLButtonElement {
         const button = containerEl.createEl('button', {
             text: label,
             cls: `ocli-settings-action is-${variant}`,
             attr: { type: 'button' },
         }) as HTMLButtonElement;
+        button.disabled = disabled;
         button.addEventListener('click', () => {
+            if (button.disabled) return;
             void onClick();
         });
         return button;

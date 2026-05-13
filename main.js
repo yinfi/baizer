@@ -5056,6 +5056,40 @@ function getSettingsSectionStatuses(settings) {
   }
   return statuses;
 }
+function getProviderDeletionState(settings) {
+  const activeConfig = settings.providers[settings.activeProvider];
+  if (!activeConfig) {
+    return {
+      canDelete: false,
+      helperText: "No active provider selected.",
+      label: "Delete Provider"
+    };
+  }
+  if (BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider)) {
+    return {
+      canDelete: false,
+      helperText: "Built-in providers cannot be deleted.",
+      label: "Delete Provider"
+    };
+  }
+  return {
+    canDelete: true,
+    helperText: "Remove the selected custom provider from this workspace.",
+    label: "Delete Provider"
+  };
+}
+function getConnectionTestStatusPresentation(status) {
+  if (!status.message.trim() || status.state === "idle") {
+    return void 0;
+  }
+  if (status.state === "testing") {
+    return { tone: "accent", label: status.message };
+  }
+  if (status.state === "success") {
+    return { tone: "success", label: status.message };
+  }
+  return { tone: "danger", label: status.message };
+}
 function getSectionMeta(id) {
   const section = SETTINGS_SECTIONS.find((candidate) => candidate.id === id);
   if (!section) {
@@ -5069,6 +5103,7 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
   activeSectionId = "connection";
   searchQuery = "";
   revealApiKey = false;
+  connectionTestStatus = { state: "idle", message: "" };
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -5089,6 +5124,9 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
   }
   async persistSettings() {
     await this.plugin.saveSettings();
+  }
+  resetConnectionTestStatus() {
+    this.connectionTestStatus = { state: "idle", message: "" };
   }
   async loadDynamicModelOptions(dropdown, token, forceRefresh = false) {
     const config = this.getActiveConfig();
@@ -5192,7 +5230,9 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
   }
   renderSidebar(containerEl, visibleSections) {
     const nav = containerEl.createDiv({ cls: "ocli-settings-nav" });
-    nav.createDiv({ cls: "ocli-settings-nav-title", text: "Sections" });
+    const navHeader = nav.createDiv({ cls: "ocli-settings-nav-header" });
+    navHeader.createDiv({ cls: "ocli-settings-nav-title", text: "Sections" });
+    navHeader.createDiv({ cls: "ocli-settings-nav-kicker", text: "Jump between groups" });
     if (!visibleSections.length) {
       nav.createDiv({ cls: "ocli-settings-empty-nav", text: "No matching sections." });
       return;
@@ -5205,12 +5245,12 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
         cls: `ocli-settings-nav-item${sectionId === this.activeSectionId ? " is-active" : ""}`,
         attr: { type: "button" }
       });
-      const copy = button.createDiv({ cls: "ocli-settings-nav-copy" });
+      const row = button.createDiv({ cls: "ocli-settings-nav-row" });
+      const copy = row.createDiv({ cls: "ocli-settings-nav-copy" });
       copy.createDiv({ cls: "ocli-settings-nav-label", text: meta.title });
-      copy.createDiv({ cls: "ocli-settings-nav-description", text: meta.description });
       const status = statuses[sectionId];
       if (status) {
-        button.createSpan({ cls: `ocli-settings-badge is-${status.tone}`, text: status.label });
+        row.createSpan({ cls: `ocli-settings-badge is-${status.tone}`, text: status.label });
       }
       button.addEventListener("click", () => {
         this.activeSectionId = sectionId;
@@ -5292,6 +5332,7 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
       });
       drop.setValue(settings.activeProvider);
       drop.onChange(async (value) => {
+        this.resetConnectionTestStatus();
         await this.plugin.modelService.switchProvider(value, () => this.persistSettings());
         this.revealApiKey = false;
         this.activeSectionId = "connection";
@@ -5304,12 +5345,14 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
     })).addButton((btn) => btn.setButtonText("Clear").onClick(async () => {
       activeConfig.apiKey = "";
       this.revealApiKey = false;
+      this.resetConnectionTestStatus();
       await this.persistSettings();
       this.display();
     }));
     if (this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl) {
       new import_obsidian4.Setting(containerEl).setName("Base URL").setDesc("Override the API endpoint for compatible providers.").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(activeConfig.baseUrl).onChange(async (value) => {
         activeConfig.baseUrl = value;
+        this.resetConnectionTestStatus();
         await this.persistSettings();
       }));
     }
@@ -5324,6 +5367,7 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
       drop.onChange(async (value) => {
         if (value === "__loading__" || value === "__failed__" || value === "__empty__")
           return;
+        this.resetConnectionTestStatus();
         await this.plugin.modelService.switchModel(value, () => this.persistSettings());
         this.display();
       });
@@ -5340,38 +5384,61 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
           model: ""
         };
         settings.activeProvider = key;
+        this.resetConnectionTestStatus();
         await this.persistSettings();
         this.revealApiKey = false;
         this.activeSectionId = "connection";
         this.display();
       }).open();
     }, "accent");
-    this.createActionButton(actions, "Test Connection", async () => {
+    const deletion = getProviderDeletionState(settings);
+    this.createActionButton(actions, deletion.label, async () => {
+      if (!deletion.canDelete)
+        return;
+      delete settings.providers[settings.activeProvider];
+      settings.activeProvider = "gemini";
+      this.revealApiKey = false;
+      this.resetConnectionTestStatus();
+      await this.persistSettings();
+      new import_obsidian4.Notice("Provider deleted");
+      this.display();
+    }, "danger", !deletion.canDelete);
+    this.createActionButton(actions, this.connectionTestStatus.state === "testing" ? "Testing..." : "Test Connection", async () => {
       const label = activeConfig.label || "AI provider";
       if (!activeConfig.apiKey.trim()) {
-        new import_obsidian4.Notice(`No API key configured for ${label}.`);
+        this.connectionTestStatus = {
+          state: "error",
+          message: `No API key configured for ${label}.`
+        };
+        this.display();
         return;
       }
       try {
-        new import_obsidian4.Notice(`Testing connection to ${label}...`);
+        this.connectionTestStatus = {
+          state: "testing",
+          message: `Testing connection to ${label}...`
+        };
+        this.display();
         await this.plugin.modelService.updateSettings(this.plugin.settings);
         const success = await this.plugin.modelService.checkAvailability();
-        new import_obsidian4.Notice(success ? "Connection successful." : "Connection failed. Check API key and settings.");
+        this.connectionTestStatus = success ? { state: "success", message: `Connection successful for ${label}.` } : { state: "error", message: "Connection failed. Check API key, base URL, and model." };
       } catch (error) {
-        new import_obsidian4.Notice(`Connection failed: ${error.message}`);
+        this.connectionTestStatus = {
+          state: "error",
+          message: `Connection failed: ${error.message}`
+        };
       }
       this.display();
-    }, "primary");
-    const isBuiltin = BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider);
-    if (!isBuiltin) {
-      this.createActionButton(actions, `Delete "${activeConfig.label}"`, async () => {
-        delete settings.providers[settings.activeProvider];
-        settings.activeProvider = "gemini";
-        this.revealApiKey = false;
-        await this.persistSettings();
-        new import_obsidian4.Notice("Provider deleted");
-        this.display();
-      }, "danger");
+    }, "primary", this.connectionTestStatus.state === "testing");
+    const connectionStatus = getConnectionTestStatusPresentation(this.connectionTestStatus);
+    if (!deletion.canDelete) {
+      containerEl.createDiv({ cls: "ocli-settings-inline-hint", text: deletion.helperText });
+    }
+    if (connectionStatus) {
+      containerEl.createDiv({
+        cls: `ocli-settings-inline-note is-${connectionStatus.tone}`,
+        text: connectionStatus.label
+      });
     }
   }
   configureSecretInput(text, config) {
@@ -5379,6 +5446,7 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
     text.setValue(config.apiKey);
     text.onChange(async (value) => {
       config.apiKey = value;
+      this.resetConnectionTestStatus();
       await this.persistSettings();
     });
     if (text.inputEl) {
@@ -5520,13 +5588,16 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
       await this.persistSettings();
     }));
   }
-  createActionButton(containerEl, label, onClick, variant = "default") {
+  createActionButton(containerEl, label, onClick, variant = "default", disabled = false) {
     const button = containerEl.createEl("button", {
       text: label,
       cls: `ocli-settings-action is-${variant}`,
       attr: { type: "button" }
     });
+    button.disabled = disabled;
     button.addEventListener("click", () => {
+      if (button.disabled)
+        return;
       void onClick();
     });
     return button;
