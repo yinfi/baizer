@@ -12,6 +12,11 @@ function expect(actual: any) {
         throw new Error(`Expected ${expectedStr} but got ${actualStr}`);
       }
     },
+    toContain: (expected: string) => {
+      if (typeof actual !== 'string' || !actual.includes(expected)) {
+        throw new Error(`Expected "${actual}" to contain "${expected}"`);
+      }
+    },
   };
 }
 
@@ -97,6 +102,34 @@ async function runTests() {
     expect((prepared as any).allowedToolNames).toEqual(['save_webpage']);
     expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['save_webpage', 'use_skill']);
     expect(prepared.prompt.includes('Use save_webpage to save the requested page.')).toBe(true);
+  });
+
+  await test('prepareTurn adds a file-operation contract for write requests', async () => {
+    const runtime = createChatRuntime({
+      provider: {} as any,
+      memoryManager: null,
+      toolRegistry: {
+        getAllDefinitions: () => [
+          { name: 'create_file', description: 'Create file', parameters: {} },
+          { name: 'update_file', description: 'Update file', parameters: {} },
+        ],
+        execute: async () => ({}),
+      } as any,
+      skillRegistry: {
+        resolveByIntent: () => null,
+        getSkillSummaryText: () => '',
+        activateSkill: () => null,
+      } as any,
+    });
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: '帮我创建一个canvas文件，总结当前文章',
+      contextItems: [],
+    });
+
+    expect(prepared.prompt.includes('[File Operation Contract]')).toBe(true);
+    expect(prepared.prompt.includes('must call an appropriate vault write tool')).toBe(true);
+    expect(prepared.prompt.includes('Do not provide copy-paste instructions')).toBe(true);
   });
 
   await test('query resolves use_skill and tool calls through the runtime loop', async () => {
@@ -200,6 +233,136 @@ async function runTests() {
     expect(toolResponses[1].response.error).toBe(
       'Tool "search_vault" is not available for active skill "web-search"'
     );
+  });
+
+  await test('query stops before the model can claim success when a tool requires approval', async () => {
+    const chatInputs: any[] = [];
+    const executedCalls: any[] = [];
+    const runtime = createChatRuntime({
+      provider: {
+        startChat: () => ({
+          sendMessage: async (input: any) => {
+            chatInputs.push(input);
+            if (typeof input === 'string') {
+              return {
+                text: '',
+                functionCalls: [
+                  {
+                    name: 'create_file',
+                    args: {
+                      path: 'Assets/Canvas/summary.canvas',
+                      content: '{"nodes":[],"edges":[]}',
+                    },
+                  },
+                ],
+              };
+            }
+            return { text: 'I created the canvas file.' };
+          },
+        }),
+      } as any,
+      memoryManager: null,
+      toolRegistry: {
+        getAllDefinitions: () => [
+          { name: 'create_file', description: 'Create file', parameters: {} },
+        ],
+        execute: async (name: string, args: any) => {
+          executedCalls.push({ name, args });
+          return {
+            approval_required: true,
+            action: 'create_file',
+            target: args.path,
+            args,
+            message: `Approval required to create file: ${args.path}`,
+          };
+        },
+      } as any,
+      skillRegistry: {
+        resolveByIntent: () => null,
+        getSkillSummaryText: () => '',
+        activateSkill: () => null,
+      } as any,
+    });
+
+    const result = await runtime.query({
+      prompt: 'prepared prompt',
+      tools: [{ name: 'create_file', description: 'Create file', parameters: {} }],
+    });
+
+    expect(result).toBe('Approval required to create file: Assets/Canvas/summary.canvas');
+    expect(chatInputs.length).toBe(1);
+    expect(executedCalls).toEqual([{
+      name: 'create_file',
+      args: {
+        path: 'Assets/Canvas/summary.canvas',
+        content: '{"nodes":[],"edges":[]}',
+      },
+    }]);
+  });
+
+  await test('query returns a workspace warning when the write tool fails and the model still claims success', async () => {
+    const chatInputs: any[] = [];
+    const executedCalls: any[] = [];
+    const runtime = createChatRuntime({
+      provider: {
+        startChat: () => ({
+          sendMessage: async (input: any) => {
+            chatInputs.push(input);
+            if (typeof input === 'string') {
+              return {
+                text: '',
+                functionCalls: [
+                  {
+                    name: 'create_file',
+                    args: {
+                      path: '../summary.canvas',
+                      content: '{"nodes":[],"edges":[]}',
+                    },
+                  },
+                ],
+              };
+            }
+            return { text: 'I created the canvas file.' };
+          },
+        }),
+      } as any,
+      memoryManager: null,
+      toolRegistry: {
+        getAllDefinitions: () => [
+          { name: 'create_file', description: 'Create file', parameters: {} },
+        ],
+        execute: async (name: string, args: any) => {
+          executedCalls.push({ name, args });
+          return {
+            success: false,
+            error: 'Unsafe vault path',
+          };
+        },
+      } as any,
+      skillRegistry: {
+        resolveByIntent: () => null,
+        getSkillSummaryText: () => '',
+        activateSkill: () => null,
+      } as any,
+    });
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: 'Create a canvas file',
+      contextItems: [],
+    });
+
+    const result = await runtime.query(prepared);
+
+    expect(result).toContain('No file was created or modified');
+    expect(result).toContain('Unsafe vault path');
+    expect(chatInputs.length).toBe(2);
+    expect(executedCalls).toEqual([{
+      name: 'create_file',
+      args: {
+        path: '../summary.canvas',
+        content: '{"nodes":[],"edges":[]}',
+      },
+    }]);
   });
 }
 

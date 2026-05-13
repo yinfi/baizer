@@ -1,9 +1,10 @@
-export type SuggestionType = 'command' | 'file';
+export type SuggestionType = 'command' | 'file' | 'skill';
 
 export interface SuggestionItem {
   label: string;
   desc?: string;
   value?: string;
+  source?: 'local' | 'skill' | 'file';
 }
 
 export interface SuggestionTrigger {
@@ -21,6 +22,10 @@ export function detectSuggestionTrigger(value: string, cursor: number): Suggesti
 
   if (lastWord.startsWith('@')) {
     return { type: 'file', query: lastWord.substring(1) };
+  }
+
+  if (lastWord.startsWith('$')) {
+    return { type: 'skill', query: lastWord.substring(1) };
   }
 
   return null;

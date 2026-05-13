@@ -1,17 +1,17 @@
-import { App, MarkdownView } from 'obsidian';
+﻿import { App, MarkdownView } from 'obsidian';
 import { ModelService } from '../services/model-service';
 import { StreamEvent } from '../models/interfaces';
 import { logger } from '../utils/logger';
+import {
+    buildFileWriteFailureMessage,
+    getFileWriteError,
+    getFileWriteResultPath,
+    isFileWriteRequest,
+    isFileWriteToolName,
+    isSuccessfulWriteToolResult,
+} from '../utils/file-operation-contract';
 import { ApprovalRequest } from './approval-card';
-
-export interface ChatMessage {
-    id: string;
-    role: 'user' | 'ai' | 'system';
-    content: string;
-    timestamp: number;
-    feedback?: 'up' | 'down' | null;
-    approval?: ApprovalRequest;
-}
+import { ChatMessage } from './types';
 
 export interface ChatControllerOptions {
     app: App;
@@ -29,10 +29,11 @@ export class ChatController {
     private onMessageAdded?: (message: ChatMessage) => void;
     private onStatusChanged?: (isResponding: boolean) => void;
     private onStreamEvent?: (event: StreamEvent) => void;
+    private activeStreamController: AbortController | null = null;
 
-    // 文件搜索缓存
+    // 鏂囦欢鎼滅储缂撳瓨
     private fileSearchCache: { term: string; results: any[]; timestamp: number } | null = null;
-    private readonly FILE_SEARCH_CACHE_TTL = 5000; // 5秒缓存
+    private readonly FILE_SEARCH_CACHE_TTL = 5000; // 5绉掔紦瀛?
     private fileSearchCacheCleanupTimer: number | null = null;
 
     constructor(options: ChatControllerOptions) {
@@ -42,10 +43,10 @@ export class ChatController {
         this.onStatusChanged = options.onStatusChanged;
         this.onStreamEvent = options.onStreamEvent;
 
-        // 设置定时器清理过期的文件搜索缓存
+        // 璁剧疆瀹氭椂鍣ㄦ竻鐞嗚繃鏈熺殑鏂囦欢鎼滅储缂撳瓨
         this.fileSearchCacheCleanupTimer = window.setInterval(() => {
             this.cleanupExpiredFileSearchCache();
-        }, 60000); // 每60秒检查一次
+        }, 60000); // 姣?0绉掓鏌ヤ竴娆?
     }
 
     public getMessages(): ChatMessage[] {
@@ -58,7 +59,7 @@ export class ChatController {
         this.addMessage('system', 'Session cleared.');
     }
 
-    // 清理过期的文件搜索缓存
+    // 娓呯悊杩囨湡鐨勬枃浠舵悳绱㈢紦瀛?
     private cleanupExpiredFileSearchCache() {
         if (this.fileSearchCache) {
             const now = Date.now();
@@ -69,19 +70,22 @@ export class ChatController {
         }
     }
 
-    // 清理资源（在组件卸载时调用）
+    // 娓呯悊璧勬簮锛堝湪缁勪欢鍗歌浇鏃惰皟鐢級
     public cleanup() {
-        // 清理文件搜索缓存定时器
+        this.activeStreamController?.abort();
+        this.activeStreamController = null;
+        // 娓呯悊鏂囦欢鎼滅储缂撳瓨瀹氭椂鍣?
         if (this.fileSearchCacheCleanupTimer !== null) {
             window.clearInterval(this.fileSearchCacheCleanupTimer);
             this.fileSearchCacheCleanupTimer = null;
         }
-        // 清空缓存
+        // 娓呯┖缂撳瓨
         this.fileSearchCache = null;
     }
 
-    public async processCommand(query: string, context: any[] = [], selection: string = '') {
+    public async processCommand(query: string, context: any[] | string = [], selection: string = '') {
         if (!query.trim()) return;
+        const normalizedContext = this.normalizeContextItems(context);
 
         // 1. Handle Commands
         if (query.startsWith('/')) {
@@ -92,34 +96,117 @@ export class ChatController {
         // 2. Normal Chat
         this.addMessage('user', query);
         this.setResponding(true);
+        const streamController = new AbortController();
+        this.activeStreamController = streamController;
+        let fullText = '';
+        let sawDone = false;
 
         try {
             if (this.onStreamEvent) {
-                let fullText = '';
-                for await (const event of this.api.chatStream(query, context, selection)) {
-                    this.onStreamEvent(event);
+                const isWriteRequest = this.isFileWriteRequest(query);
+                let approvalRequest: ApprovalRequest | null = null;
+                let attemptedFileWrite = false;
+                let successfulFileWrite = false;
+                let lastWriteError = '';
+                const writeToolArgs = new Map<string, any[]>();
+                const bufferedTextEvents: StreamEvent[] = [];
+                for await (const event of this.api.chatStream(query, normalizedContext, selection, streamController.signal)) {
+                    if (event.type === 'tool_call' && this.isFileWriteTool(event.name)) {
+                        attemptedFileWrite = true;
+                        const calls = writeToolArgs.get(event.name) || [];
+                        calls.push(event.args || {});
+                        writeToolArgs.set(event.name, calls);
+                    }
+
+                    if (event.type === 'tool_result') {
+                        const args = this.shiftToolArgs(writeToolArgs, event.name);
+                        if (this.isFileWriteTool(event.name)) {
+                            attemptedFileWrite = true;
+                            if (this.isSuccessfulToolResult(event.result)) {
+                                successfulFileWrite = true;
+                            } else {
+                                const error = this.getWriteToolError(event.result);
+                                if (error) lastWriteError = error;
+                            }
+                        }
+                        const nextApproval = this.toApprovalRequest(event.result);
+                        if (nextApproval) {
+                            approvalRequest = nextApproval;
+                            this.addApprovalMessage(nextApproval);
+                        } else if (this.isFileWriteTool(event.name)) {
+                            await this.openFileFromToolResult(event.name, event.result, args);
+                            if (successfulFileWrite && bufferedTextEvents.length > 0) {
+                                for (const bufferedEvent of bufferedTextEvents) {
+                                    this.onStreamEvent(bufferedEvent);
+                                }
+                                bufferedTextEvents.length = 0;
+                            }
+                        }
+                    }
+
+                    if (event.type === 'text_delta') {
+                        if (approvalRequest || (isWriteRequest && !successfulFileWrite)) {
+                            bufferedTextEvents.push(event);
+                        } else {
+                            this.onStreamEvent(event);
+                        }
+                    } else if (event.type === 'done') {
+                        if (approvalRequest || (isWriteRequest && !successfulFileWrite)) {
+                            this.onStreamEvent({ ...event, text: '' });
+                        } else {
+                            this.onStreamEvent(event);
+                        }
+                    } else if (event.type === 'tool_call' || event.type === 'tool_result') {
+                        this.onStreamEvent(event);
+                    } else if (event.type === 'error') {
+                        this.onStreamEvent(event);
+                    }
+
                     if (event.type === 'done') {
-                        fullText = event.text;
+                        sawDone = true;
+                        fullText = approvalRequest ? '' : event.text;
                     } else if (event.type === 'error') {
                         this.addMessage('system', `Error: ${event.message}`);
                         return;
+                    } else if (event.type === 'text_delta') {
+                        fullText += event.content;
                     }
                 }
-                // 流式模式下只记录到历史，不触发 appendMessage（UI 已通过 stream 事件渲染）
-                const msg: ChatMessage = {
-                    id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                    role: 'ai',
-                    content: fullText,
-                    timestamp: Date.now()
-                };
-                this.messages.push(msg);
+                // 娴佸紡妯″紡涓嬪彧璁板綍鍒板巻鍙诧紝涓嶈Е鍙?appendMessage锛圲I 宸查€氳繃 stream 浜嬩欢娓叉煋锛?
+                if (!approvalRequest) {
+                    if (isWriteRequest && !successfulFileWrite) {
+                        this.addMessage(
+                            'system',
+                            this.getFileWriteFailureMessage(attemptedFileWrite, lastWriteError)
+                        );
+                    } else {
+                        if (sawDone || fullText) {
+                            const msg: ChatMessage = {
+                                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                                role: 'ai',
+                                content: fullText,
+                                timestamp: Date.now(),
+                                metadata: sawDone ? undefined : { interrupted: true }
+                            };
+                            this.messages.push(msg);
+                        }
+                    }
+                }
             } else {
-                const response = await this.api.chat(query, context, selection);
+                const response = await this.api.chat(query, normalizedContext, selection);
                 this.addMessage('ai', response);
             }
         } catch (error: any) {
+            if (this.isAbortError(error)) {
+                this.onStreamEvent?.({ type: 'done', text: fullText, interrupted: true });
+                this.addMessage('system', 'Response stopped.');
+                return;
+            }
             this.handleError(error);
         } finally {
+            if (this.activeStreamController === streamController) {
+                this.activeStreamController = null;
+            }
             this.setResponding(false);
         }
     }
@@ -166,7 +253,7 @@ export class ChatController {
                 this.addMessage('system', `## Available Tools\n\n${toolsList}`);
                 break;
             case '/file-back':
-                // 后台执行，不阻塞主流程
+                // 鍚庡彴鎵ц锛屼笉闃诲涓绘祦绋?
                 this.runFileBackInBackground(argStr.trim());
                 break;
             case '/wiki:compile':
@@ -208,14 +295,20 @@ export class ChatController {
         return `\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
     }
 
-    private handleStructuredResult(result: any) {
-        if (result?.approval_required) {
-            this.addApprovalMessage({
-                action: result.action,
-                target: result.target,
-                args: result.args || {},
-                message: result.message || 'Approval required.',
-            });
+    private toApprovalRequest(result: any): ApprovalRequest | null {
+        if (!result?.approval_required) return null;
+        return {
+            action: result.action,
+            target: result.target,
+            args: result.args || {},
+            message: result.message || 'Approval required.',
+        };
+    }
+
+    private handleStructuredResult(result: any, action?: string, args: Record<string, any> = {}) {
+        const approvalRequest = this.toApprovalRequest(result);
+        if (approvalRequest) {
+            this.addApprovalMessage(approvalRequest);
             return;
         }
 
@@ -224,6 +317,7 @@ export class ChatController {
             return;
         }
 
+        void this.openFileFromToolResult(action || '', result, args);
         this.addMessage('system', this.formatSlashCommandResult(result));
     }
 
@@ -231,7 +325,7 @@ export class ChatController {
         this.setResponding(true);
         try {
             const result = await (this.api as any).executeApprovedAction(request.action, request.args);
-            this.handleStructuredResult(result);
+            this.handleStructuredResult(result, request.action, request.args);
         } catch (error: any) {
             this.handleError(error);
         } finally {
@@ -243,13 +337,22 @@ export class ChatController {
         this.addMessage('system', `Cancelled: ${request.target}`);
     }
 
+    public cancelActiveStream(): boolean {
+        if (!this.activeStreamController || this.activeStreamController.signal.aborted) {
+            return false;
+        }
+
+        this.activeStreamController.abort();
+        return true;
+    }
+
     private async handleOpenFile(searchTerm: string) {
-        // 检查缓存
+        // 妫€鏌ョ紦瀛?
         const now = Date.now();
         if (this.fileSearchCache &&
             this.fileSearchCache.term === searchTerm &&
             now - this.fileSearchCache.timestamp < this.FILE_SEARCH_CACHE_TTL) {
-            // 使用缓存结果
+            // 浣跨敤缂撳瓨缁撴灉
             const matches = this.fileSearchCache.results;
             if (matches.length === 0) {
                 this.addMessage('system', `No files found matching "${searchTerm}"`);
@@ -263,14 +366,14 @@ export class ChatController {
             return;
         }
 
-        // 执行搜索
+        // 鎵ц鎼滅储
         const files = this.app.vault.getFiles();
         const matches = files.filter(f =>
             f.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
             f.basename.toLowerCase().includes(searchTerm.toLowerCase())
         );
 
-        // 缓存结果
+        // 缂撳瓨缁撴灉
         this.fileSearchCache = {
             term: searchTerm,
             results: matches,
@@ -285,6 +388,52 @@ export class ChatController {
         } else {
             const list = matches.slice(0, 10).map(f => `- [[${f.path}]]`).join('\n');
             this.addMessage('system', `Found multiple files:\n${list}`);
+        }
+    }
+
+    private isFileWriteRequest(message: string): boolean {
+        return isFileWriteRequest(message);
+    }
+
+    private isFileWriteTool(name: string): boolean {
+        return isFileWriteToolName(name);
+    }
+
+    private shiftToolArgs(toolArgs: Map<string, any[]>, name: string): any {
+        const calls = toolArgs.get(name);
+        if (!calls || calls.length === 0) return {};
+        const args = calls.shift() || {};
+        if (calls.length === 0) toolArgs.delete(name);
+        return args;
+    }
+
+    private isSuccessfulToolResult(result: any): boolean {
+        return isSuccessfulWriteToolResult(result);
+    }
+
+    private getResultPath(action: string, result: any, args: Record<string, any>): string {
+        return getFileWriteResultPath(action, result, args);
+    }
+
+    private getWriteToolError(result: any): string {
+        return getFileWriteError(result);
+    }
+
+    private getFileWriteFailureMessage(attemptedWrite: boolean, lastError?: string): string {
+        return buildFileWriteFailureMessage(attemptedWrite, lastError);
+    }
+
+    private async openFileFromToolResult(action: string, result: any, args: Record<string, any> = {}) {
+        if (!this.isSuccessfulToolResult(result)) return;
+        const path = this.getResultPath(action, result, args);
+        if (!path) return;
+
+        try {
+            const file = this.app.vault?.getAbstractFileByPath?.(path);
+            if (!file) return;
+            await this.app.workspace?.getLeaf?.(false)?.openFile?.(file);
+        } catch (error) {
+            logger.warn(`Unable to open file after write: ${path}`, 'ChatController.openFileFromToolResult', error);
         }
     }
 
@@ -320,43 +469,66 @@ export class ChatController {
         this.addMessage('system', `Error: ${msg}`);
     }
 
+    private isAbortError(error: any): boolean {
+        return error?.name === 'AbortError';
+    }
+
+    private normalizeContextItems(context: any[] | string): any[] {
+        if (Array.isArray(context)) {
+            return context;
+        }
+
+        const text = typeof context === 'string' ? context.trim() : '';
+        if (!text) {
+            return [];
+        }
+
+        return [{
+            id: 'legacy-selection-context',
+            type: 'selection',
+            data: 'Editor selection',
+            summary: 'Editor selection',
+            content: text,
+        }];
+    }
+
     /**
-     * 后台执行 file-back，不阻塞 UI
-     * 手动模式（👍按钮）和自动模式共用
+     * 鍚庡彴鎵ц file-back锛屼笉闃诲 UI
+     * 鎵嬪姩妯″紡锛堭煈嶆寜閽級鍜岃嚜鍔ㄦā寮忓叡鐢?
      */
     private runFileBackInBackground(msgId: string) {
         const targetMsg = this.messages.find(m => m.id === msgId && m.role === 'ai');
         if (!targetMsg) return;
 
-        const fileBackPrompt = `用户对以下回答点赞，请将其归档到知识库。使用 file_back_knowledge 工具，提取标题和核心内容，并提取相关的 topics 主题标签。\n\n回答内容：\n${targetMsg.content}`;
+        const fileBackPrompt = `鐢ㄦ埛瀵逛互涓嬪洖绛旂偣璧烇紝璇峰皢鍏跺綊妗ｅ埌鐭ヨ瘑搴撱€備娇鐢?file_back_knowledge 宸ュ叿锛屾彁鍙栨爣棰樺拰鏍稿績鍐呭锛屽苟鎻愬彇鐩稿叧鐨?topics 涓婚鏍囩銆俓n\n鍥炵瓟鍐呭锛歕n${targetMsg.content}`;
         this.api.chat(fileBackPrompt, [], '').then(() => {
-            this.addMessage('system', '已归档到知识库。');
+            this.addMessage('system', 'Archived to the knowledge wiki.');
         }).catch((error: any) => {
             logger.error('File-back failed', error, 'ChatController');
         });
     }
 
     /**
-     * 自动 file-back 已移除：改为 AI 在 query_knowledge 流程中自主判断是否调用 file_back_knowledge
-     * 手动模式保留：用户点赞（👍）时通过 /file-back 命令触发
+     * 鑷姩 file-back 宸茬Щ闄わ細鏀逛负 AI 鍦?query_knowledge 娴佺▼涓嚜涓诲垽鏂槸鍚﹁皟鐢?file_back_knowledge
+     * 鎵嬪姩妯″紡淇濈暀锛氱敤鎴风偣璧烇紙馃憤锛夋椂閫氳繃 /file-back 鍛戒护瑙﹀彂
      */
 
     /**
-     * /wiki:compile [path] — 编译笔记到知识 wiki
-     * 无参数：编译当前笔记 + 所有 pending
-     * 文件路径：编译指定文件
-     * 目录路径：扫描目录下所有 .md 注册并编译
+     * /wiki:compile [path] 鈥?缂栬瘧绗旇鍒扮煡璇?wiki
+     * 鏃犲弬鏁帮細缂栬瘧褰撳墠绗旇 + 鎵€鏈?pending
+     * 鏂囦欢璺緞锛氱紪璇戞寚瀹氭枃浠?
+     * 鐩綍璺緞锛氭壂鎻忕洰褰曚笅鎵€鏈?.md 娉ㄥ唽骞剁紪璇?
      */
     private async handleForget(field: string) {
         const f = field.trim().toLowerCase();
         if (!f) {
-            this.addMessage('system', '用法: `/forget <field>` 或 `/forget all`\n\n可遗忘字段: name, profession, expertise, preferences, workflows, projects, goals, all');
+            this.addMessage('system', '鐢ㄦ硶: `/forget <field>` 鎴?`/forget all`\n\n鍙仐蹇樺瓧娈? name, profession, expertise, preferences, workflows, projects, goals, all');
             return;
         }
 
         const profile = this.api.getUserProfile();
         if (!profile) {
-            this.addMessage('system', '暂无用户记忆数据。');
+            this.addMessage('system', 'No user memory data available.');
             return;
         }
 
@@ -367,36 +539,36 @@ export class ChatController {
                 workflows: [],
                 context: { currentProjects: [], goals: [], challenges: [] }
             });
-            this.addMessage('system', '已清除所有用户记忆。');
+            this.addMessage('system', 'Cleared all remembered user data.');
         } else if (f === 'name') {
             await this.api.updateProfile({ name: '' });
-            this.addMessage('system', '已遗忘: name');
+            this.addMessage('system', '宸查仐蹇? name');
         } else if (f === 'profession') {
             await this.api.updateProfile({ profession: '' });
-            this.addMessage('system', '已遗忘: profession');
+            this.addMessage('system', '宸查仐蹇? profession');
         } else if (f === 'expertise') {
             await this.api.updateProfile({ expertise: [] });
-            this.addMessage('system', '已遗忘: expertise');
+            this.addMessage('system', '宸查仐蹇? expertise');
         } else if (f === 'preferences') {
             await this.api.updateProfile({ preferences: { language: 'zh-CN', responseStyle: 'balanced', topics: [] } });
-            this.addMessage('system', '已遗忘: preferences');
+            this.addMessage('system', '宸查仐蹇? preferences');
         } else if (f === 'workflows') {
             await this.api.updateProfile({ workflows: [] });
-            this.addMessage('system', '已遗忘: workflows');
+            this.addMessage('system', '宸查仐蹇? workflows');
         } else if (f === 'projects') {
             await this.api.updateProfile({ context: { ...profile.context, currentProjects: [] } });
-            this.addMessage('system', '已遗忘: projects');
+            this.addMessage('system', '宸查仐蹇? projects');
         } else if (f === 'goals') {
             await this.api.updateProfile({ context: { ...profile.context, goals: [] } });
-            this.addMessage('system', '已遗忘: goals');
+            this.addMessage('system', '宸查仐蹇? goals');
         } else {
-            this.addMessage('system', `未知字段: ${f}\n可遗忘字段: name, profession, expertise, preferences, workflows, projects, goals, all`);
+            this.addMessage('system', `鏈煡瀛楁: ${f}\n鍙仐蹇樺瓧娈? name, profession, expertise, preferences, workflows, projects, goals, all`);
         }
     }
 
     private async handleNewNote(argStr: string) {
         if (!argStr.trim()) {
-            this.addMessage('system', '用法: `/new <title>` 或 `/new <title> <content>`');
+            this.addMessage('system', '鐢ㄦ硶: `/new <title>` 鎴?`/new <title> <content>`');
             return;
         }
         const firstNewline = argStr.indexOf('\n');
@@ -407,21 +579,21 @@ export class ChatController {
         try {
             const existing = this.app.vault.getAbstractFileByPath(path);
             if (existing) {
-                this.addMessage('system', `文件已存在: ${path}`);
+                this.addMessage('system', `鏂囦欢宸插瓨鍦? ${path}`);
                 return;
             }
             const file = await this.app.vault.create(path, content);
             const leaf = this.app.workspace.getLeaf(false);
             await leaf.openFile(file);
-            this.addMessage('system', `已创建并打开: [[${path}]]`);
+            this.addMessage('system', `宸插垱寤哄苟鎵撳紑: [[${path}]]`);
         } catch (e: any) {
-            this.addMessage('system', `创建失败: ${e.message}`);
+            this.addMessage('system', `鍒涘缓澶辫触: ${e.message}`);
         }
     }
 
     private async handleEdit(instruction: string) {
         if (!instruction.trim()) {
-            this.addMessage('system', '用法: 先在编辑器中选中文本，然后 `/edit <指令>`\n例: `/edit 翻译成英文`');
+            this.addMessage('system', 'Usage: select some text first, then run `/edit <instruction>`.\nExample: `/edit translate to English`');
             return;
         }
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -429,17 +601,17 @@ export class ChatController {
         const selection = editor?.getSelection();
 
         if (!selection) {
-            this.addMessage('system', '请先在编辑器中选中要编辑的文本。');
+            this.addMessage('system', 'Please select the text you want to edit first.');
             return;
         }
 
         this.setResponding(true);
         try {
-            const prompt = `请根据以下指令修改文本，只返回修改后的文本，不要解释。\n\n指令: ${instruction}\n\n原文:\n${selection}`;
+            const prompt = `璇锋牴鎹互涓嬫寚浠や慨鏀规枃鏈紝鍙繑鍥炰慨鏀瑰悗鐨勬枃鏈紝涓嶈瑙ｉ噴銆俓n\n鎸囦护: ${instruction}\n\n鍘熸枃:\n${selection}`;
             const result = await this.api.chat(prompt, [], selection);
             this.addMessage('ai', result);
         } catch (e: any) {
-            this.addMessage('system', `编辑失败: ${e.message}`);
+            this.addMessage('system', `缂栬緫澶辫触: ${e.message}`);
         } finally {
             this.setResponding(false);
         }
@@ -447,16 +619,16 @@ export class ChatController {
 
     private async handleSave(url: string) {
         if (!url.trim()) {
-            this.addMessage('system', '用法: `/save <url>`\n支持: 网页、YouTube、Bilibili、微信公众号');
+            this.addMessage('system', '鐢ㄦ硶: `/save <url>`\n鏀寔: 缃戦〉銆乊ouTube銆丅ilibili銆佸井淇″叕浼楀彿');
             return;
         }
         this.setResponding(true);
         try {
-            const prompt = `请使用 save_webpage 工具保存这个链接: ${url.trim()}`;
+            const prompt = `璇蜂娇鐢?save_webpage 宸ュ叿淇濆瓨杩欎釜閾炬帴: ${url.trim()}`;
             const result = await this.api.chat(prompt, [], '');
             this.addMessage('ai', result);
         } catch (e: any) {
-            this.addMessage('system', `保存失败: ${e.message}`);
+            this.addMessage('system', `淇濆瓨澶辫触: ${e.message}`);
         } finally {
             this.setResponding(false);
         }
@@ -483,13 +655,13 @@ export class ChatController {
 
         let help = `## Shell Commands\n\n`;
         help += localCommands
-            .map((entry) => `- \`${entry.command}\` — ${entry.description}`)
+            .map((entry) => `- \`${entry.command}\` 鈥?${entry.description}`)
             .join('\n');
 
         if (skillCommands.length > 0) {
             help += `\n\n## Skill Commands\n\n`;
             help += skillCommands
-                .map((entry: any) => `- \`${entry.command}\` — ${entry.description}`)
+                .map((entry: any) => `- \`${entry.command}\` 鈥?${entry.description}`)
                 .join('\n');
         }
 
@@ -500,22 +672,22 @@ export class ChatController {
     private showLegacyHelp() {
         const help = `## Shell Commands
 
-| 命令 | 说明 |
+| Command | Description |
 |------|------|
-| \`/clear\` | 清除会话历史 |
-| \`/profile\` | 查看用户画像 |
-| \`/forget [field]\` | 遗忘用户记忆 (name/profession/expertise/preferences/workflows/projects/goals/all) |
-| \`/new <title>\` | 创建新笔记 |
-| \`/edit <指令>\` | AI 编辑选中文本 |
-| \`/open <file>\` | 打开文件 |
-| \`/save <url>\` | 保存网页/视频到 vault |
-| \`/tools\` | 列出可用工具 |
-| \`/wiki:compile [path]\` | 编译笔记到知识 wiki |
-| \`/wiki:index\` | 打开知识索引 |
-| \`/wiki:lint\` | 知识库健康检查 |
-| \`/help\` | 显示本帮助 |
+| \`/clear\` | Clear session history |
+| \`/profile\` | View the user profile |
+| \`/forget [field]\` | Forget saved user memory |
+| \`/new <title>\` | Create a new note |
+| \`/edit <instruction>\` | AI edit the selected text |
+| \`/open <file>\` | Open a file |
+| \`/save <url>\` | Save a webpage or video into the vault |
+| \`/tools\` | List available tools |
+| \`/wiki:compile [path]\` | Compile notes into the knowledge wiki |
+| \`/wiki:index\` | Open the knowledge wiki index |
+| \`/wiki:lint\` | Run the knowledge wiki health check |
+| \`/help\` | Show this help |
 
-**提示**: 输入 \`/\` 查看命令自动补全，输入 \`@\` 引用文件。`;
+**Tip**: Type \`/\` for command suggestions and \`@\` to mention files.`;
         this.addMessage('system', help);
     }
 
@@ -525,38 +697,39 @@ export class ChatController {
         const runtime = plugin?.knowledgeRuntime;
 
         if (!runtime) {
-            this.addMessage('system', 'Knowledge 系统未初始化。');
+            this.addMessage('system', 'Knowledge system is not initialized.');
             return;
         }
 
         this.setResponding(true);
         try {
             if (!path) {
-                // 无参数：编译当前笔记 + 所有 pending
+                // 鏃犲弬鏁帮細缂栬瘧褰撳墠绗旇 + 鎵€鏈?pending
                 const activeFile = this.app.workspace.getActiveFile();
                 if (activeFile) {
-                    this.addMessage('system', `编译: ${activeFile.path}...`);
+                    this.addMessage('system', `缂栬瘧: ${activeFile.path}...`);
                     const r = await runtime.compileByPath(activeFile.path);
-                    this.addMessage('system', `完成: 注册 ${r.registered}，成功 ${r.success}，失败 ${r.failed}`);
+                    this.addMessage('system', `瀹屾垚: 娉ㄥ唽 ${r.registered}锛屾垚鍔?${r.success}锛屽け璐?${r.failed}`);
                 }
-                // 再编译所有 pending，带进度回调避免 heartbeat 误报
+                // 鍐嶇紪璇戞墍鏈?pending锛屽甫杩涘害鍥炶皟閬垮厤 heartbeat 璇姤
                 const maxBatch = runtime.settings.knowledgeMaxCompileBatch || 50;
                 const result = await runtime.compiler.compileAllPending(maxBatch, (current: number, total: number, noteId: string) => {
-                    this.addMessage('system', `[${current}/${total}] 编译: ${noteId}`);
+                    this.addMessage('system', `[${current}/${total}] 缂栬瘧: ${noteId}`);
                 });
                 if (result.success > 0) {
                     await runtime.indexer.rebuildIndex();
                 }
-                this.addMessage('system', `批量编译完成: ${result.success} 成功, ${result.failed} 失败`);
+                this.addMessage('system', `鎵归噺缂栬瘧瀹屾垚: ${result.success} 鎴愬姛, ${result.failed} 澶辫触`);
             } else {
-                this.addMessage('system', `编译: ${path}...`);
+                this.addMessage('system', `缂栬瘧: ${path}...`);
                 const r = await runtime.compileByPath(path);
-                this.addMessage('system', `完成: 注册 ${r.registered}，成功 ${r.success}，失败 ${r.failed}`);
+                this.addMessage('system', `瀹屾垚: 娉ㄥ唽 ${r.registered}锛屾垚鍔?${r.success}锛屽け璐?${r.failed}`);
             }
         } catch (e: any) {
-            this.addMessage('system', `编译失败: ${e.message}`);
+            this.addMessage('system', `缂栬瘧澶辫触: ${e.message}`);
         } finally {
             this.setResponding(false);
         }
     }
 }
+

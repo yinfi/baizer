@@ -77,6 +77,29 @@ class FakeElement {
   }
 }
 
+function createWorkspaceApp() {
+  const opened: string[] = [];
+  const files = new Map<string, any>();
+  return {
+    app: {
+      vault: {
+        getAbstractFileByPath: (path: string) => {
+          if (!files.has(path)) files.set(path, { path, basename: path.split('/').pop() });
+          return files.get(path);
+        },
+      },
+      workspace: {
+        getLeaf: () => ({
+          openFile: async (file: any) => {
+            opened.push(file.path);
+          },
+        }),
+      },
+    } as any,
+    opened,
+  };
+}
+
 async function runTests() {
   console.log('=== Approval Flow Tests ===');
   const { ChatController } = await import('../src/ui/chat-controller');
@@ -84,13 +107,14 @@ async function runTests() {
 
   await test('slash command approval result becomes an approval message and can be approved', async () => {
     const messages: any[] = [];
+    const { app, opened } = createWorkspaceApp();
     const apiCalls = {
       executeSlashSkillCommand: [] as any[],
       executeApprovedAction: [] as any[],
     };
 
     const controller = new ChatController({
-      app: {} as any,
+      app,
       api: {
         getSkillCommands: () => [
           { command: '/save', skillName: 'web-clipper', description: 'Save webpage to vault' },
@@ -107,7 +131,11 @@ async function runTests() {
         },
         executeApprovedAction: async (action: string, args: any) => {
           apiCalls.executeApprovedAction.push({ action, args });
-          return { success: true, message: 'Approved and executed' };
+          return {
+            success: true,
+            path: 'Clippings/example.md',
+            message: 'Approved and executed',
+          };
         },
         chat: async () => 'unused',
         chatStream: async function* () { },
@@ -138,6 +166,69 @@ async function runTests() {
       args: { filename: 'Clippings/example.md', content: '# Saved' },
     }]);
     expect(messages[messages.length - 1].content).toBe('Approved and executed');
+    expect(opened).toEqual(['Clippings/example.md']);
+
+    controller.cleanup();
+  });
+
+  await test('streaming tool approval result becomes an approval message instead of a success claim', async () => {
+    const messages: any[] = [];
+    const streamEvents: any[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        chatStream: async function* () {
+          yield {
+            type: 'tool_call',
+            name: 'create_file',
+            args: {
+              path: 'Assets/Canvas/summary.canvas',
+              content: '{"nodes":[],"edges":[]}',
+            },
+          };
+          yield {
+            type: 'tool_result',
+            name: 'create_file',
+            result: {
+              approval_required: true,
+              action: 'create_file',
+              target: 'Assets/Canvas/summary.canvas',
+              args: {
+                path: 'Assets/Canvas/summary.canvas',
+                content: '{"nodes":[],"edges":[]}',
+              },
+              message: 'Approval required to create file: Assets/Canvas/summary.canvas',
+            },
+          };
+          yield { type: 'text_delta', content: 'I created the canvas file.' };
+          yield { type: 'done', text: 'I created the canvas file.' };
+        },
+        chat: async () => 'unused',
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onMessageAdded: (message) => messages.push(message),
+      onStreamEvent: (event) => streamEvents.push(event),
+    });
+
+    await controller.processCommand('Create a canvas file');
+
+    expect(messages.map(message => message.role)).toEqual(['user', 'system']);
+    expect(messages[messages.length - 1].approval).toEqual({
+      action: 'create_file',
+      target: 'Assets/Canvas/summary.canvas',
+      args: {
+        path: 'Assets/Canvas/summary.canvas',
+        content: '{"nodes":[],"edges":[]}',
+      },
+      message: 'Approval required to create file: Assets/Canvas/summary.canvas',
+    });
+    expect(streamEvents.map(event => event.type)).toEqual(['tool_call', 'tool_result', 'done']);
+    expect(streamEvents[streamEvents.length - 1].text).toBe('');
 
     controller.cleanup();
   });

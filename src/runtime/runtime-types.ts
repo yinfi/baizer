@@ -12,11 +12,12 @@ export interface PreparedChatTurn {
   tools: ToolDefinition[];
   activeSkillName?: string;
   allowedToolNames?: string[];
+  requiresFileWrite?: boolean;
 }
 
 export interface ChatRuntime {
   getTools(): ToolDefinition[];
   prepareTurn(request: ChatTurnRequest): Promise<PreparedChatTurn>;
   query(turn: PreparedChatTurn): Promise<string>;
-  queryStream(turn: PreparedChatTurn): AsyncGenerator<StreamEvent, void, unknown>;
+  queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown>;
 }

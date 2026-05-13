@@ -1,20 +1,36 @@
-import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice } from 'obsidian';
+import { ItemView, WorkspaceLeaf, Notice } from 'obsidian';
 import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
-import { ChatController, ChatMessage } from './chat-controller';
+import { ChatController } from './chat-controller';
 import { ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
-import { VIEW_TYPE_SHELL } from '../mcp/types';
+import { IPlugin, VIEW_TYPE_SHELL } from '../mcp/types';
 import { StreamEvent } from '../models/interfaces';
-import { renderApprovalCard } from './approval-card';
 import { buildCommandSuggestions, CommandSuggestion } from './command-suggestions';
 import { ContextController } from './controllers/context-controller';
-import { detectSuggestionTrigger, InputController } from './controllers/input-controller';
+import { detectSuggestionTrigger, InputController, SuggestionType } from './controllers/input-controller';
 import { StreamController } from './controllers/stream-controller';
+import { CommandDropdown } from './components/command-dropdown';
+import { ContextChips } from './components/context-chips';
+import { InputToolbar } from './components/input-toolbar';
+import { HistoryMenu } from './components/history-menu';
 import { ThinkingRenderer } from './renderers/thinking-renderer';
 import { ToolRenderer } from './renderers/tool-renderer';
+import { MessageRenderer } from './renderers/message-renderer';
+import { ConversationSnapshot, ChatMessage } from './types';
+import { TabBar } from './tabs/tab-bar';
+import { TabManager } from './tabs/tab-manager';
+import { TabData, TabId } from './tabs/types';
+import { ConversationController } from './history/conversation-controller';
+import { ConversationStore } from './history/conversation-store';
 
 export { VIEW_TYPE_SHELL };
+
+interface ShellTabSession {
+    chatController: ChatController;
+    contextManager: ContextManager;
+    contextController: ContextController;
+}
 
 export class ShellView extends ItemView {
     private modelService: ModelService;
@@ -25,10 +41,20 @@ export class ShellView extends ItemView {
     private suggestionContainer: HTMLElement;
     private currentSelection: string = "";
     private inputController: InputController;
+    private commandDropdown: CommandDropdown | null = null;
+    private inputToolbar: InputToolbar | null = null;
     private contextController: ContextController;
     private streamController: StreamController;
     private thinkingRenderer: ThinkingRenderer | null = null;
     private toolRenderer: ToolRenderer | null = null;
+    private messageRenderer: MessageRenderer | null = null;
+    private tabManager: TabManager;
+    private tabBar: TabBar | null = null;
+    private tabBarContainerEl: HTMLElement | null = null;
+    private tabSessions = new Map<TabId, ShellTabSession>();
+    private conversationController: ConversationController;
+    private historyMenu: HistoryMenu | null = null;
+    private historyMenuContainerEl: HTMLElement | null = null;
 
     // Heartbeat monitoring
     private heartbeatInterval: number | null = null;
@@ -46,6 +72,7 @@ export class ShellView extends ItemView {
     private streamContent: HTMLElement | null = null;
     private streamAccumulatedText: string = '';
     private streamRenderTimer: number | null = null;
+    private streamNodeCount = 0;
     private readonly localCommandSuggestions: CommandSuggestion[] = [
         { label: '/clear', desc: 'Clear session history' },
         { label: '/profile', desc: 'View user profile' },
@@ -68,20 +95,7 @@ export class ShellView extends ItemView {
     };
 
     private handleKeyDownBound = async (e: KeyboardEvent) => {
-        if (this.inputController.getIsSuggesting()) {
-            if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                this.navigateSuggestions(-1);
-            } else if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                this.navigateSuggestions(1);
-            } else if (e.key === 'Enter') {
-                e.preventDefault();
-                this.selectSuggestion();
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                this.hideSuggestions();
-            }
+        if (this.inputController.getIsSuggesting() && this.commandDropdown?.handleKeyDown(e)) {
             return;
         }
 
@@ -106,17 +120,30 @@ export class ShellView extends ItemView {
             target.closest('.shell-suggestions') ||
             target.closest('.shell-context-chips') ||
             target.closest('.shell-model-select-container') ||
-            target.closest('.shell-action-buttons')
+            target.closest('.shell-action-buttons') ||
+            target.closest('.ocli-history-menu') ||
+            target.closest('.shell-history-btn')
         ) return;
+        this.hideHistoryMenu();
         this.inputEl.focus();
     };
 
     private handlePasteBound = (e: ClipboardEvent) => this.handlePaste(e);
     private handleDropBound = (e: DragEvent) => this.handleDrop(e);
 
-    constructor(leaf: WorkspaceLeaf, modelService: ModelService) {
+    constructor(leaf: WorkspaceLeaf, modelService: ModelService, private plugin?: IPlugin) {
         super(leaf);
         this.modelService = modelService;
+        this.tabManager = new TabManager({
+            onChanged: () => this.updateTabBar(),
+        });
+        const conversationStore = new ConversationStore(this.app);
+        this.conversationController = new ConversationController({
+            store: conversationStore,
+            getProviderId: () => this.getActiveProviderId(),
+            getModelId: () => this.getActiveModelId(),
+            getCurrentNotePath: () => this.getCurrentNotePath(),
+        });
         this.contextManager = new ContextManager();
         this.inputController = new InputController();
         this.contextController = new ContextController({
@@ -164,15 +191,6 @@ export class ShellView extends ItemView {
         const { contentEl } = this;
         contentEl.empty();
 
-        // Initialize ChatController
-        this.chatController = new ChatController({
-            app: this.app,
-            api: this.modelService,
-            onMessageAdded: (msg) => this.appendMessage(msg),
-            onStatusChanged: (status) => this.handleStatusChange(status),
-            onStreamEvent: (event) => this.handleStreamEvent(event)
-        });
-
         // Create a wrapper container to ensure proper flexbox layout
         const container = contentEl.createDiv({ cls: 'ocli-shell-view' });
 
@@ -180,8 +198,27 @@ export class ShellView extends ItemView {
         const header = container.createDiv({ cls: 'shell-header' });
         const headerTitle = header.createDiv({ cls: 'shell-header-title' });
         headerTitle.createEl('h1', { text: 'Obsidian Shell', cls: 'shell-title' });
+        this.tabBarContainerEl = headerTitle.createDiv({ cls: 'shell-tab-bar-container' });
 
         const headerButtons = header.createDiv({ cls: 'shell-header-buttons' });
+        this.historyMenuContainerEl = header.createDiv({ cls: 'ocli-history-menu' });
+        this.historyMenu = new HistoryMenu(this.historyMenuContainerEl, {
+            onOpen: (id) => this.openConversationFromHistory(id),
+            onDelete: (id) => this.deleteConversationFromHistory(id),
+            onTogglePin: (id) => this.toggleConversationPin(id),
+            onClose: () => this.hideHistoryMenu(),
+        });
+        this.historyMenu.hide();
+
+        const historyBtn = headerButtons.createEl('button', {
+            cls: 'clickable-icon shell-history-btn',
+            attr: { 'aria-label': 'Conversation history' }
+        });
+        historyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v5l3 3"></path><path d="M3.05 11a9 9 0 1 1 .5 4"></path><path d="M3 4v7h7"></path></svg>';
+        historyBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            void this.toggleHistoryMenu();
+        });
 
         // Clear button
         const clearBtn = headerButtons.createEl('button', {
@@ -231,13 +268,28 @@ export class ShellView extends ItemView {
         // 2. Output Area (Scrollable)
         this.outputContainer = container.createDiv({ cls: 'shell-output-area' });
 
-        // Welcome Message (Simulated)
-        this.appendMessage({
-            id: 'init',
-            role: 'system',
-            content: 'Kernel initialized.',
-            timestamp: Date.now()
+        this.tabBar = new TabBar(this.tabBarContainerEl, {
+            onTabClick: (id) => {
+                void this.switchTab(id);
+            },
+            onTabClose: (id) => {
+                void this.closeTab(id);
+            },
+            onNewTab: () => {
+                void this.createAndShowTab();
+            },
         });
+
+        if (this.tabManager.getAllTabs().length === 0) {
+            this.tabManager.createTab();
+        }
+        const activeTab = this.tabManager.getActiveTab();
+        if (activeTab) {
+            this.activateTabSession(activeTab.id);
+            this.applyTabMetadata(activeTab);
+        }
+        this.updateTabBar();
+        this.renderActiveTabMessages();
 
         // 3. Input Area (Fixed at bottom)
         const inputContainer = container.createDiv({ cls: 'shell-input-container' });
@@ -248,6 +300,11 @@ export class ShellView extends ItemView {
 
         // Suggestion Popup
         this.suggestionContainer = inputContainer.createDiv({ cls: 'shell-suggestions' });
+        this.commandDropdown = new CommandDropdown(this.suggestionContainer, {
+            onNavigate: (dir) => this.navigateSuggestions(dir),
+            onSelect: (_item, index) => this.selectSuggestionAt(index),
+            onCancel: () => this.hideSuggestions(),
+        });
 
         // Input wrapper (contains the textarea)
         const inputWrapper = inputContainer.createDiv({ cls: 'shell-input-wrapper' });
@@ -266,60 +323,24 @@ export class ShellView extends ItemView {
 
         // 4. Input Controls (below the textarea)
         const inputControls = inputContainer.createDiv({ cls: 'shell-input-controls' });
-
-        // Left side: Provider selector + Model selector
-        const modelSelectContainer = inputControls.createDiv({ cls: 'shell-model-select-container' });
-
-        // Provider selector
-        this.providerSelectEl = modelSelectContainer.createEl('select', {
-            cls: 'shell-model-select shell-provider-select',
-            attr: { title: 'Select AI Provider' }
+        this.inputToolbar = new InputToolbar(inputControls, {
+            onProviderChange: (id) => this.handleProviderChange(id),
+            onUnavailableProvider: (id) => this.handleUnavailableProvider(id),
+            onModelChange: (id) => this.handleModelChange(id),
+            onSend: async () => {
+                const query = this.inputEl.value.trim();
+                if (!query) return;
+                this.inputEl.value = '';
+                this.adjustHeight();
+                await this.processCommand(query);
+            },
+            onStop: () => this.stopActiveResponse(),
         });
-        this.populateProviderOptions(this.providerSelectEl);
-        this.providerSelectEl.addEventListener('change', async (e) => {
-            const target = e.target as HTMLSelectElement;
-            const id = target.value;
-            const plugin = (this.app as any).plugins.plugins['obsidian-cli'];
-            const config = plugin?.settings?.providers?.[id];
-            if (!config?.apiKey) {
-                new Notice(`${config?.label || id} 未配置 API Key，请先在设置中配置`);
-                // @ts-ignore
-                this.app.setting.open();
-                // @ts-ignore
-                this.app.setting.openTabById('obsidian-cli');
-                // 恢复选择
-                if (this.providerSelectEl) this.populateProviderOptions(this.providerSelectEl);
-                return;
-            }
-            await this.modelService.switchProvider(id, () => plugin.saveSettings());
-            new Notice(`已切换到 ${config.label}`);
-        });
-
-        // Model selector
-        this.modelSelectEl = modelSelectContainer.createEl('select', {
-            cls: 'shell-model-select shell-main-model-select',
-            attr: { title: 'Select AI Model' }
-        });
-
-        // Populate model options based on current provider
-        void this.populateModelOptions(this.modelSelectEl);
-
-        // Update model when selection changes
-        this.modelSelectEl.addEventListener('change', async (e) => {
-            const target = e.target as HTMLSelectElement;
-            if (!target.value) return;
-            const plugin = (this.app as any).plugins.plugins['obsidian-cli'];
-            await this.modelService.switchModel(target.value, () => plugin.saveSettings());
-            new Notice(`Switched to ${target.options[target.selectedIndex].text}`);
-        });
-
-        // Right side: Action buttons
-        inputControls.createDiv({ cls: 'shell-action-buttons' });
-
-        // TODO: Add image upload button
-        // TODO: Add submit button
-        // TODO: Add vault search button
-
+        this.providerSelectEl = this.inputToolbar.getProviderSelectEl();
+        this.modelSelectEl = this.inputToolbar.getModelSelectEl();
+        this.refreshInputToolbarProviders();
+        void this.refreshInputToolbarModels();
+        this.updateInputToolbarCapabilities();
         // Event Listeners
         this.inputEl.addEventListener('input', this.handleInputBound);
         this.inputEl.addEventListener('keydown', this.handleKeyDownBound);
@@ -333,8 +354,9 @@ export class ShellView extends ItemView {
 
         // Register provider change listener for cross-UI sync
         this.unsubscribeProvider = this.modelService.onProviderChanged(() => {
-            if (this.providerSelectEl) this.populateProviderOptions(this.providerSelectEl);
-            if (this.modelSelectEl) void this.populateModelOptions(this.modelSelectEl, true);
+            this.refreshInputToolbarProviders();
+            void this.refreshInputToolbarModels(true);
+            this.updateInputToolbarCapabilities();
             this.updatePlaceholder();
         });
 
@@ -358,25 +380,42 @@ export class ShellView extends ItemView {
         }
     }
 
-    showSuggestions(type: 'command' | 'file', query: string) {
+    showSuggestions(type: SuggestionType, query: string) {
         this.suggestionContainer.empty();
         this.suggestionContainer.style.display = 'block';
         let suggestions;
         if (type === 'command') {
+            const skillCommands = this.modelService.getSkillCommands().map(command => ({
+                command: command.command,
+                description: command.description,
+            }));
+            const skillCommandLabels = new Set(skillCommands.map(command => command.command));
             suggestions = buildCommandSuggestions(
                 this.localCommandSuggestions,
-                this.modelService.getSkillCommands().map(command => ({
-                    command: command.command,
-                    description: command.description,
-                })),
+                skillCommands,
                 query,
-            );
+            ).map(item => ({
+                ...item,
+                source: skillCommandLabels.has(item.label) ? 'skill' as const : 'local' as const,
+            }));
+        } else if (type === 'skill') {
+            suggestions = this.modelService.getSkillCommands()
+                .filter(command =>
+                    command.skillName.toLowerCase().includes(query.toLowerCase()) ||
+                    command.command.toLowerCase().includes(query.toLowerCase()))
+                .slice(0, 10)
+                .map(command => ({
+                    label: `$${command.skillName}`,
+                    desc: command.description,
+                    value: command.command,
+                    source: 'skill' as const,
+                }));
         } else {
             const files = this.app.vault.getFiles();
             suggestions = files
                 .filter(f => f.path.toLowerCase().includes(query.toLowerCase()))
                 .slice(0, 10)
-                .map(f => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]` }));
+                .map(f => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]`, source: 'file' as const }));
         }
 
         this.inputController.setSuggestions(type, suggestions);
@@ -390,23 +429,13 @@ export class ShellView extends ItemView {
     }
 
     renderSuggestions() {
-        this.suggestionContainer.empty();
-        this.inputController.getSuggestions().forEach((item, index) => {
-            const el = this.suggestionContainer.createDiv({
-                cls: `suggestion-item ${index === this.inputController.getSelectedIndex() ? 'is-selected' : ''}`
-            });
-            el.createSpan({ cls: 'suggestion-icon', text: this.inputController.getSuggestionType() === 'command' ? '/' : '@' });
-            el.createSpan({ cls: 'suggestion-text', text: item.label });
-            if (item.desc) {
-                el.createSpan({ cls: 'suggestion-desc', text: item.desc });
-            }
+        const type = this.inputController.getSuggestionType();
+        if (!type) return;
 
-            el.addEventListener('click', () => {
-                while (this.inputController.getSelectedIndex() !== index) {
-                    this.inputController.navigate(1);
-                }
-                this.selectSuggestion();
-            });
+        this.commandDropdown?.update({
+            type,
+            items: this.inputController.getSuggestions(),
+            selectedIndex: this.inputController.getSelectedIndex(),
         });
     }
 
@@ -432,16 +461,23 @@ export class ShellView extends ItemView {
         this.inputEl.focus();
     }
 
+    private selectSuggestionAt(index: number) {
+        while (this.inputController.getSelectedIndex() !== index) {
+            this.inputController.navigate(1);
+        }
+        this.selectSuggestion();
+    }
+
     hideSuggestions() {
         this.inputController.hide();
-        this.suggestionContainer.style.display = 'none';
-        this.suggestionContainer.empty();
+        this.commandDropdown?.hide();
     }
 
     // ==================== Chat Logic ====================
 
     async processCommand(query: string) {
         try {
+            this.ensureActiveTabSession();
             const { contextItems, selection } = await this.contextController.collectCommandContext();
             this.currentSelection = selection;
 
@@ -465,39 +501,7 @@ export class ShellView extends ItemView {
     }
 
     appendMessage(msg: ChatMessage) {
-        const entry = this.outputContainer.createDiv({ cls: `shell-entry ${msg.role}` });
-
-        if (msg.approval) {
-            renderApprovalCard(entry, msg.approval, {
-                onApprove: async () => {
-                    await this.chatController.approveApproval(msg.approval!);
-                },
-                onCancel: () => {
-                    this.chatController.cancelApproval(msg.approval!);
-                },
-            });
-            this.scrollToEnd();
-        } else if (msg.role === 'ai') {
-            MarkdownRenderer.render(this.app, msg.content, entry, '', this as any).then(() => {
-                this.postProcessAiContent(entry);
-
-                requestAnimationFrame(() => {
-                    this.scrollToEnd();
-                });
-
-                this.addFeedbackBar(entry, msg.content);
-            }).catch(error => {
-                logger.error('Markdown rendering failed', error, 'ShellView');
-                entry.setText('Error rendering message');
-            });
-        } else if (msg.role === 'user') {
-            entry.setText(msg.content);
-            this.scrollToEnd();
-        } else {
-            entry.setText(`[System] ${msg.content}`);
-            this.scrollToEnd();
-        }
-
+        void this.getMessageRenderer().renderMessage(this.outputContainer, msg);
         this.updateActivity();
     }
 
@@ -510,6 +514,7 @@ export class ShellView extends ItemView {
 
     handleStatusChange(isResponding: boolean) {
         this.isResponding = isResponding;
+        this.updateInputToolbarCapabilities();
         if (isResponding) {
             // Show loading indicator
             const loadingId = 'loading-indicator';
@@ -542,11 +547,15 @@ export class ShellView extends ItemView {
         this.streamContainer = this.outputContainer.createDiv({ cls: 'shell-entry ai shell-stream-container' });
         this.streamTimeline = this.streamContainer.createDiv({ cls: 'shell-think-timeline' });
         this.thinkingRenderer = new ThinkingRenderer(this.streamTimeline);
-        this.toolRenderer = new ToolRenderer(this.streamTimeline);
+        this.toolRenderer = new ToolRenderer(this.streamTimeline, {
+            onToolUpdate: (run) => {
+                this.tabManager.getActiveTab()?.state.upsertTool(run);
+            },
+        });
 
         const summary = this.streamTimeline.createDiv({ cls: 'shell-think-summary' });
         summary.createSpan({ cls: 'think-toggle', text: '\u25BC' });
-        summary.createSpan({ cls: 'think-summary-text', text: '思考中...' });
+        summary.createSpan({ cls: 'think-summary-text', text: 'Thinking in progress...' });
         summary.addEventListener('click', () => {
             this.streamTimeline?.toggleClass('is-collapsed', !this.streamTimeline.hasClass('is-collapsed'));
         });
@@ -575,12 +584,10 @@ export class ShellView extends ItemView {
         if (!this.streamContent) return;
 
         this.streamContent.empty();
-        MarkdownRenderer.render(
-            this.app,
-            this.streamAccumulatedText,
+        this.getMessageRenderer().renderAiContent(
             this.streamContent,
-            '',
-            this as any
+            this.streamAccumulatedText,
+            { postProcess: false },
         ).then(() => {
             const cursor = document.createElement('span');
             cursor.className = 'shell-stream-cursor';
@@ -599,30 +606,29 @@ export class ShellView extends ItemView {
 
         if (this.streamContent && this.streamAccumulatedText) {
             this.streamContent.empty();
-            MarkdownRenderer.render(
-                this.app,
-                this.streamAccumulatedText,
+            this.getMessageRenderer().renderAiContent(
                 this.streamContent,
-                '',
-                this as any
+                this.streamAccumulatedText,
             ).then(() => {
-                if (this.streamContent) {
-                    this.postProcessAiContent(this.streamContent);
-                }
                 this.scrollToEnd();
             });
         }
 
         if (this.streamTimeline && this.streamNodeCount > 0) {
             const summaryText = this.streamTimeline.querySelector('.think-summary-text') as HTMLElement;
-            if (summaryText) summaryText.textContent = `思考了 ${this.streamNodeCount} 步`;
+            if (summaryText) summaryText.textContent = `Thought through ${this.streamNodeCount} steps`;
             this.streamTimeline.addClass('is-collapsed');
         } else if (this.streamTimeline && this.streamNodeCount === 0) {
             this.streamTimeline.style.display = 'none';
         }
 
         if (this.streamContainer) {
-            this.addFeedbackBar(this.streamContainer, this.streamAccumulatedText);
+            this.getMessageRenderer().addActionToolbar(this.streamContainer, {
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                role: 'ai',
+                content: this.streamAccumulatedText,
+                timestamp: Date.now(),
+            });
         }
 
         this.streamContainer = null;
@@ -632,70 +638,69 @@ export class ShellView extends ItemView {
         this.streamNodeCount = 0;
         this.thinkingRenderer = null;
         this.toolRenderer = null;
+        void this.persistActiveTab();
     }
 
-    private postProcessAiContent(container: HTMLElement) {
-        const codeBlocks = container.querySelectorAll('pre > code');
-        codeBlocks.forEach((codeBlock) => {
-            const pre = codeBlock.parentElement;
-            if (pre) {
-                const header = pre.createDiv({ cls: 'shell-code-block-header' });
-                const langClass = Array.from(codeBlock.classList).find(cls => cls.startsWith('language-'));
-                const lang = langClass ? langClass.replace('language-', '') : 'text';
-                header.createDiv({ cls: 'shell-code-block-filename', text: `untitled.${lang === 'text' ? 'txt' : lang}` });
-                const buttons = header.createDiv({ cls: 'shell-code-block-buttons' });
-                const btn = buttons.createEl('button', { cls: 'shell-apply-btn clickable-icon', title: 'Review Changes' });
-                btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="16" x2="12" y2="12"></line><line x1="10" y1="14" x2="10" y2="10"></line></svg>';
-                btn.addEventListener('click', async () => {
-                    const activeFile = this.app.workspace.getActiveFile();
-                    if (!activeFile) { new Notice('No active file to apply changes to.'); return; }
-                    const originalContent = await this.app.vault.read(activeFile);
-                    const newContent = codeBlock.textContent || '';
-                    new DiffModal(this.app, originalContent, newContent, async () => {
-                        await this.app.vault.modify(activeFile, newContent);
-                        new Notice('Changes applied.');
-                    }).open();
-                });
-                pre.insertBefore(header, codeBlock);
-            }
-        });
-
-        container.querySelectorAll('a.internal-link').forEach((link) => {
-            link.addEventListener('click', (e) => {
-                e.preventDefault();
-                const href = link.getAttribute('href') || link.getAttribute('data-href') || '';
-                if (href) this.app.workspace.openLinkText(href, '', false);
+    private getMessageRenderer(): MessageRenderer {
+        if (!this.messageRenderer) {
+            this.messageRenderer = new MessageRenderer({
+                app: this.app,
+                component: this,
+                onApprove: async (message) => {
+                    if (message.approval) {
+                        await this.chatController.approveApproval(message.approval);
+                    }
+                },
+                onCancel: (message) => {
+                    if (message.approval) {
+                        this.chatController.cancelApproval(message.approval);
+                    }
+                },
+                onFeedbackUp: (message) => {
+                    void this.chatController.processCommand(`/file-back ${message.id}`, [], '');
+                },
+                onReviewCodeBlock: (content) => this.reviewCodeBlock(content),
+                onInternalLinkClick: (href) => {
+                    void this.app.workspace.openLinkText(href, '', false);
+                },
+                onScrollRequest: () => this.scrollToEnd(),
+                onRenderError: (error) => {
+                    logger.error('Markdown rendering failed', error, 'ShellView');
+                },
             });
-        });
+        }
+
+        return this.messageRenderer;
     }
 
-    private addFeedbackBar(container: HTMLElement, content: string) {
-        const msgId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-        const feedbackBar = container.createDiv({ cls: 'shell-feedback-bar' });
-        const thumbsUpBtn = feedbackBar.createEl('button', { cls: 'shell-feedback-btn shell-thumbs-up', title: 'Useful - save to knowledge wiki' });
-        thumbsUpBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>';
-        const thumbsDownBtn = feedbackBar.createEl('button', { cls: 'shell-feedback-btn shell-thumbs-down', title: 'Not useful' });
-        thumbsDownBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
-        thumbsUpBtn.addEventListener('click', () => {
-            thumbsUpBtn.addClass('active');
-            thumbsDownBtn.removeClass('active');
-            this.chatController.processCommand(`/file-back ${msgId}`, [], '');
-        });
-        thumbsDownBtn.addEventListener('click', () => {
-            thumbsDownBtn.addClass('active');
-            thumbsUpBtn.removeClass('active');
-        });
+    private async reviewCodeBlock(newContent: string) {
+        const activeFile = this.app.workspace.getActiveFile();
+        if (!activeFile) {
+            new Notice('No active file to apply changes to.');
+            return;
+        }
+
+        const originalContent = await this.app.vault.read(activeFile);
+        new DiffModal(this.app, originalContent, newContent, async () => {
+            await this.app.vault.modify(activeFile, newContent);
+            new Notice('Changes applied.');
+        }).open();
     }
 
     async onClose() {
+        await this.persistAllTabs();
         this.stopHeartbeat();
+        this.hideHistoryMenu();
+        this.tabBar?.destroy();
+        this.tabBar = null;
         // Unsubscribe from provider changes
         this.unsubscribeProvider?.();
         this.unsubscribeProvider = null;
         // Prevent interval leaks from ChatController
-        if (this.chatController) {
-            this.chatController.cleanup();
+        for (const session of this.tabSessions.values()) {
+            session.chatController.cleanup();
         }
+        this.tabSessions.clear();
         if (this.inputEl) {
             this.inputEl.removeEventListener('input', this.handleInputBound);
             this.inputEl.removeEventListener('keydown', this.handleKeyDownBound);
@@ -728,7 +733,7 @@ export class ShellView extends ItemView {
         const timeSinceLastActivity = now - this.lastActivityTime;
 
         if (this.isResponding && timeSinceLastActivity > 120000) {
-            const warning = '⚠️ 检测到长时间无响应，系统可能出现问题';
+            const warning = 'Long-running response detected. The provider may be stalled.';
             logger.warn(warning, 'ObsidianShellView.heartbeat');
             this.appendMessage({
                 id: 'warn',
@@ -747,32 +752,15 @@ export class ShellView extends ItemView {
     // ==================== Context Handling ====================
 
     private renderContextChips(container: HTMLElement) {
-        if (!container) return;
-        container.empty();
-
-        const contexts = this.contextManager.getContexts();
-        contexts.forEach(ctx => {
-            const chip = container.createDiv({ cls: 'context-chip' });
-            chip.createSpan({ cls: 'chip-icon', text: this.getIconForType(ctx.type) });
-            chip.createSpan({ cls: 'chip-label', text: ctx.summary || ctx.data });
-            const removeBtn = chip.createSpan({ cls: 'chip-remove', text: '×' });
-
-            removeBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.contextManager.removeContext(ctx.id);
+        new ContextChips(container, {
+            onRemove: (id) => {
+                this.contextManager.removeContext(id);
                 this.renderContextChips(container);
-            });
-        });
-    }
-
-    private getIconForType(type: string): string {
-        switch (type) {
-            case 'image': return '🖼️';
-            case 'url': return '🌐';
-            case 'youtube': return '▶️';
-            case 'file': return '📄';
-            default: return '📎';
-        }
+            },
+            onOpenFile: (path) => {
+                void this.app.workspace.openLinkText(path, '', false);
+            },
+        }).update(this.contextManager.getContexts());
     }
 
     private async handlePaste(e: ClipboardEvent) {
@@ -859,8 +847,114 @@ export class ShellView extends ItemView {
         }
     }
 
+    private refreshInputToolbarProviders() {
+        const settings = this.getPluginInstance()?.settings;
+        if (!settings?.providers || !this.inputToolbar) return;
+
+        this.inputToolbar.updateProviders(
+            Object.entries(settings.providers).map(([id, config]) => ({
+                id,
+                label: config.label,
+                configured: !!config.apiKey,
+            })),
+            settings.activeProvider || 'gemini',
+        );
+    }
+
+    private async refreshInputToolbarModels(forceRefresh: boolean = false) {
+        const settings = this.getPluginInstance()?.settings;
+        if (!settings?.providers || !this.inputToolbar) return;
+
+        const config = settings.providers[settings.activeProvider];
+        if (!config) return;
+
+        const requestId = ++this.modelLoadRequestId;
+        this.inputToolbar.updateModels({
+            loading: true,
+            providerLabel: config.label,
+            models: [],
+            activeModelId: '',
+        });
+
+        try {
+            const models = await this.modelService.getAvailableModels(forceRefresh);
+            if (requestId !== this.modelLoadRequestId) return;
+
+            this.inputToolbar.updateModels({
+                loading: false,
+                providerLabel: config.label,
+                models,
+                activeModelId: config.model || '',
+            });
+        } catch (error: any) {
+            if (requestId !== this.modelLoadRequestId) return;
+            logger.warn(
+                `Failed to load model list: ${error?.message || 'Unknown error'}`,
+                'ShellView.refreshInputToolbarModels'
+            );
+            this.inputToolbar.updateModels({
+                loading: false,
+                providerLabel: config.label,
+                models: [],
+                activeModelId: '',
+            });
+        }
+    }
+
+    private updateInputToolbarCapabilities() {
+        this.inputToolbar?.updateCapabilities({
+            supportsImageInput: this.modelService.getProviderCapabilities().supportsImageInput,
+            supportsCancellation: this.tabManager.getActiveTab()?.isStreaming ?? this.isResponding,
+        });
+    }
+
+    private async handleProviderChange(id: string) {
+        const plugin = this.getPluginInstance();
+        const config = plugin?.settings?.providers?.[id];
+        if (!config?.apiKey) {
+            this.handleUnavailableProvider(id);
+            return;
+        }
+
+        await this.modelService.switchProvider(id, plugin ? () => plugin.saveSettings() : undefined);
+        const activeTab = this.tabManager.getActiveTab();
+        if (activeTab) {
+            this.tabManager.updateTab(activeTab.id, {
+                providerId: id,
+                modelId: plugin?.settings?.providers?.[id]?.model || '',
+                currentNote: this.getCurrentNotePath(),
+            });
+        }
+        new Notice(`Switched to ${config.label}`);
+    }
+
+    private handleUnavailableProvider(id: string) {
+        const plugin = this.getPluginInstance();
+        const config = plugin?.settings?.providers?.[id];
+        new Notice(`${config?.label || id} API Key is not configured. Please configure it in settings.`);
+        // @ts-ignore - app setting tab activation
+        this.app.setting.open();
+        // @ts-ignore - activate plugin settings tab
+        this.app.setting.openTabById('obsidian-cli');
+        this.refreshInputToolbarProviders();
+    }
+
+    private async handleModelChange(modelId: string) {
+        const plugin = this.getPluginInstance();
+        await this.modelService.switchModel(modelId, plugin ? () => plugin.saveSettings() : undefined);
+        const activeTab = this.tabManager.getActiveTab();
+        if (activeTab) {
+            this.tabManager.updateTab(activeTab.id, {
+                providerId: this.getActiveProviderId(),
+                modelId,
+                currentNote: this.getCurrentNotePath(),
+            });
+        }
+        new Notice(`Switched to ${modelId}`);
+    }
+
     private async populateModelOptions(selectEl: HTMLSelectElement, forceRefresh: boolean = false) {
-        const settings = (this.app as any).plugins.plugins['obsidian-cli']?.settings;
+        const settings = this.getPluginInstance()?.settings;
         if (!settings?.providers) return;
 
         const requestId = ++this.modelLoadRequestId;
@@ -878,7 +972,7 @@ export class ShellView extends ItemView {
         try {
             const models = await this.modelService.getAvailableModels(forceRefresh);
 
-            // 用户在请求期间切换了 provider，丢弃旧请求结果
+            // 鐢ㄦ埛鍦ㄨ姹傛湡闂村垏鎹簡 provider锛屼涪寮冩棫璇锋眰缁撴灉
             if (requestId !== this.modelLoadRequestId) return;
 
             selectEl.empty();
@@ -933,7 +1027,7 @@ export class ShellView extends ItemView {
     }
 
     private populateProviderOptions(selectEl: HTMLSelectElement) {
-        const settings = (this.app as any).plugins.plugins['obsidian-cli']?.settings;
+        const settings = this.getPluginInstance()?.settings;
         if (!settings?.providers) return;
 
         selectEl.empty();
@@ -943,7 +1037,7 @@ export class ShellView extends ItemView {
             const configured = !!config.apiKey;
             const option = selectEl.createEl('option', {
                 value: id,
-                text: configured ? config.label : `${config.label} ⚠️`
+                text: configured ? config.label : `${config.label} !`
             });
             if (id === active) option.selected = true;
         }
@@ -951,23 +1045,33 @@ export class ShellView extends ItemView {
 
     private updatePlaceholder() {
         if (!this.inputEl) return;
-        const settings = (this.app as any).plugins.plugins['obsidian-cli']?.settings;
+        const settings = this.getPluginInstance()?.settings;
         const config = settings?.providers?.[settings?.activeProvider];
         const label = config?.label || 'AI';
         this.inputEl.setAttr('placeholder', `Ask ${label}... (/ for commands, @ for files)`);
     }
 
     public async updateModelSelector(forceRefresh: boolean = false) {
-        if (this.providerSelectEl) {
-            this.populateProviderOptions(this.providerSelectEl);
-        }
-        if (this.modelSelectEl) {
-            await this.populateModelOptions(this.modelSelectEl, forceRefresh);
-        }
+        this.refreshInputToolbarProviders();
+        await this.refreshInputToolbarModels(forceRefresh);
     }
 
     private clearChat() {
         this.outputContainer.empty();
+        const activeTab = this.tabManager.getActiveTab();
+        activeTab?.state.clearMessages();
+        if (activeTab) {
+            this.tabManager.updateTab(activeTab.id, {
+                title: `Chat ${activeTab.index}`,
+                createdAt: undefined,
+                updatedAt: undefined,
+                pinnedAt: undefined,
+                providerId: this.getActiveProviderId(),
+                modelId: this.getActiveModelId(),
+                currentNote: this.getCurrentNotePath(),
+            });
+            void this.conversationController.deleteConversation(activeTab.id);
+        }
         // Re-add welcome message
         this.appendMessage({
             id: 'init',
@@ -976,5 +1080,349 @@ export class ShellView extends ItemView {
             timestamp: Date.now()
         });
         new Notice('Chat cleared');
+    }
+
+    private async createAndShowTab() {
+        await this.persistActiveTab();
+        const tab = this.tabManager.createTab();
+        this.activateTabSession(tab.id);
+        this.applyTabMetadata(tab);
+        this.resetStreamState();
+        this.renderActiveTabMessages();
+        this.hideHistoryMenu();
+        this.inputEl?.focus();
+    }
+
+    private async switchTab(id: TabId) {
+        if (this.tabManager.getActiveTab()?.id === id) {
+            this.hideHistoryMenu();
+            return;
+        }
+
+        await this.persistActiveTab();
+        if (!this.tabManager.switchTab(id)) return;
+
+        const activeTab = this.tabManager.getActiveTab();
+        this.activateTabSession(id);
+        if (activeTab) {
+            await this.syncProviderStateForTab(activeTab);
+        }
+        this.resetStreamState();
+        this.renderActiveTabMessages();
+        this.hideHistoryMenu();
+        this.inputEl?.focus();
+    }
+
+    private async closeTab(id: TabId) {
+        const tabToClose = this.tabManager.getAllTabs().find(item => item.id === id) ?? null;
+        await this.persistTab(tabToClose);
+        const wasActive = this.tabManager.getActiveTab()?.id === id;
+        if (!this.tabManager.closeTab(id)) return;
+
+        const session = this.tabSessions.get(id);
+        session?.chatController.cleanup();
+        this.tabSessions.delete(id);
+        this.hideHistoryMenu();
+
+        if (wasActive) {
+            const activeTab = this.tabManager.getActiveTab();
+            if (activeTab) {
+                this.activateTabSession(activeTab.id);
+                await this.syncProviderStateForTab(activeTab);
+                this.resetStreamState();
+                this.renderActiveTabMessages();
+            }
+        }
+    }
+
+    private getPluginInstance(): IPlugin | undefined {
+        return this.plugin ?? (this.app as any).plugins.plugins['obsidian-cli'];
+    }
+
+    private ensureActiveTabSession(): ShellTabSession {
+        let activeTab = this.tabManager.getActiveTab();
+        if (!activeTab) {
+            activeTab = this.tabManager.createTab();
+            this.applyTabMetadata(activeTab);
+        }
+
+        return this.activateTabSession(activeTab.id);
+    }
+
+    private activateTabSession(id: TabId): ShellTabSession {
+        const session = this.getOrCreateTabSession(id);
+        this.chatController = session.chatController;
+        this.contextManager = session.contextManager;
+        this.contextController = session.contextController;
+        return session;
+    }
+
+    private getOrCreateTabSession(id: TabId): ShellTabSession {
+        const existing = this.tabSessions.get(id);
+        if (existing) return existing;
+
+        const contextManager = new ContextManager();
+        const contextController = new ContextController({
+            app: this.app,
+            contextManager,
+        });
+        const chatController = new ChatController({
+            app: this.app,
+            api: this.modelService,
+            onMessageAdded: (msg) => this.handleTabMessageAdded(id, msg),
+            onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
+            onStreamEvent: (event) => this.handleTabStreamEvent(id, event),
+        });
+
+        const session = { chatController, contextManager, contextController };
+        this.tabSessions.set(id, session);
+        return session;
+    }
+
+    private handleTabMessageAdded(tabId: TabId, msg: ChatMessage) {
+        const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
+        if (tab) {
+            tab.state.addMessage(msg);
+        }
+
+        if (this.tabManager.getActiveTab()?.id === tabId) {
+            this.appendMessage(msg);
+        } else {
+            this.tabManager.markAttention(tabId, true);
+        }
+    }
+
+    private handleTabStatusChanged(tabId: TabId, isResponding: boolean) {
+        this.tabManager.markStreaming(tabId, isResponding);
+        if (this.tabManager.getActiveTab()?.id === tabId) {
+            this.handleStatusChange(isResponding);
+        }
+    }
+
+    private handleTabStreamEvent(tabId: TabId, event: StreamEvent) {
+        if (event.type === 'done') {
+            const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
+            if (tab && event.text) {
+                tab.state.addMessage({
+                    id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                    role: 'ai',
+                    content: event.text,
+                    timestamp: Date.now(),
+                    metadata: event.interrupted ? { interrupted: true } : undefined,
+                });
+            }
+        }
+
+        if (this.tabManager.getActiveTab()?.id === tabId) {
+            this.handleStreamEvent(event);
+        } else {
+            this.tabManager.markAttention(tabId, true);
+        }
+    }
+
+    private updateTabBar() {
+        this.tabBar?.update(this.tabManager.toTabBarItems());
+    }
+
+    private async toggleHistoryMenu() {
+        if (!this.historyMenu || !this.historyMenuContainerEl) return;
+
+        if (this.historyMenuContainerEl.style.display === 'block') {
+            this.hideHistoryMenu();
+            return;
+        }
+
+        await this.refreshHistoryMenu();
+    }
+
+    private hideHistoryMenu() {
+        this.historyMenu?.hide();
+    }
+
+    private async openConversationFromHistory(id: string) {
+        const existing = this.tabManager.getAllTabs().find(tab => tab.id === id);
+        if (existing) {
+            await this.switchTab(existing.id);
+            return;
+        }
+
+        const history = await this.conversationController.listHistory();
+        const snapshot = history.find(item => item.id === id);
+        if (!snapshot) {
+            new Notice('Saved conversation not found.');
+            this.hideHistoryMenu();
+            return;
+        }
+
+        await this.persistActiveTab();
+        const restoredTab = this.conversationController.restoreConversation(snapshot, this.tabManager);
+        this.activateTabSession(restoredTab.id);
+        await this.syncProviderStateForTab(restoredTab);
+        this.resetStreamState();
+        this.renderActiveTabMessages();
+        this.hideHistoryMenu();
+        this.inputEl?.focus();
+    }
+
+    private async deleteConversationFromHistory(id: string) {
+        await this.conversationController.deleteConversation(id);
+
+        await this.refreshHistoryMenu();
+        new Notice('Conversation deleted.');
+    }
+
+    private async persistAllTabs() {
+        for (const tab of this.tabManager.getAllTabs()) {
+            await this.persistTab(tab);
+        }
+    }
+
+    private async persistActiveTab() {
+        await this.persistTab(this.tabManager.getActiveTab());
+    }
+
+    private async persistTab(tab: TabData | null) {
+        const snapshot = await this.conversationController.saveActiveTab(tab);
+        if (!snapshot) return;
+
+        this.tabManager.updateTab(snapshot.id, {
+            title: snapshot.title,
+            providerId: snapshot.providerId,
+            modelId: snapshot.modelId,
+            currentNote: snapshot.currentNote,
+            createdAt: snapshot.createdAt,
+            updatedAt: snapshot.updatedAt,
+            pinnedAt: snapshot.pinnedAt,
+        });
+    }
+
+    private applyTabMetadata(tab: TabData) {
+        this.tabManager.updateTab(tab.id, {
+            providerId: tab.providerId || this.getActiveProviderId(),
+            modelId: tab.modelId || this.getActiveModelId(),
+            currentNote: tab.currentNote || this.getCurrentNotePath(),
+            createdAt: tab.createdAt,
+            updatedAt: tab.updatedAt,
+            pinnedAt: tab.pinnedAt,
+        });
+    }
+
+    private async syncProviderStateForTab(tab: TabData) {
+        const plugin = this.getPluginInstance();
+        const settings = plugin?.settings;
+        const providerId = tab.providerId;
+        const modelId = tab.modelId;
+
+        if (providerId && settings?.providers?.[providerId]?.apiKey && providerId !== settings.activeProvider) {
+            await this.modelService.switchProvider(providerId, plugin ? () => plugin.saveSettings() : undefined);
+        }
+
+        if (modelId && modelId !== this.getActiveModelId()) {
+            await this.modelService.switchModel(modelId, plugin ? () => plugin.saveSettings() : undefined);
+        }
+
+        this.refreshInputToolbarProviders();
+        await this.refreshInputToolbarModels(true);
+        this.handleStatusChange(tab.isStreaming);
+        this.updatePlaceholder();
+    }
+
+    private toHistoryMenuItem(snapshot: ConversationSnapshot) {
+        return {
+            id: snapshot.id,
+            title: snapshot.title,
+            updatedAt: snapshot.updatedAt,
+            providerId: snapshot.providerId,
+            modelId: snapshot.modelId,
+            currentNote: snapshot.currentNote,
+            pinnedAt: snapshot.pinnedAt,
+            isActive: snapshot.id === this.tabManager.getActiveTab()?.id,
+        };
+    }
+
+    private async refreshHistoryMenu() {
+        const history = await this.conversationController.listHistory();
+        this.historyMenu?.update(history.map(snapshot => this.toHistoryMenuItem(snapshot)));
+    }
+
+    private async toggleConversationPin(id: string) {
+        const history = await this.conversationController.listHistory();
+        const snapshot = history.find(item => item.id === id);
+        if (!snapshot) {
+            new Notice('Saved conversation not found.');
+            await this.refreshHistoryMenu();
+            return;
+        }
+
+        const nextPinned = !snapshot.pinnedAt;
+        const updated = await this.conversationController.togglePinned(id, nextPinned);
+        if (!updated) {
+            new Notice('Unable to update conversation pin.');
+            await this.refreshHistoryMenu();
+            return;
+        }
+
+        this.tabManager.updateTab(id, {
+            pinnedAt: updated.pinnedAt,
+        });
+        await this.refreshHistoryMenu();
+        new Notice(updated.pinnedAt ? 'Conversation pinned.' : 'Conversation unpinned.');
+    }
+
+    private stopActiveResponse() {
+        if (!this.chatController?.cancelActiveStream()) {
+            return;
+        }
+
+        this.updateInputToolbarCapabilities();
+    }
+
+    private getActiveProviderId(): string {
+        return this.getPluginInstance()?.settings?.activeProvider || 'gemini';
+    }
+
+    private getActiveModelId(): string {
+        const settings = this.getPluginInstance()?.settings;
+        return settings?.providers?.[settings.activeProvider]?.model || '';
+    }
+
+    private getCurrentNotePath(): string | undefined {
+        return this.app.workspace.getActiveFile()?.path;
+    }
+
+    private renderActiveTabMessages() {
+        if (!this.outputContainer) return;
+
+        this.outputContainer.empty();
+        const activeTab = this.tabManager.getActiveTab();
+        const messages = activeTab?.state.getMessages() ?? [];
+
+        if (messages.length === 0) {
+            this.appendMessage({
+                id: 'init',
+                role: 'system',
+                content: 'Kernel initialized.',
+                timestamp: Date.now(),
+            });
+            return;
+        }
+
+        for (const message of messages) {
+            this.appendMessage(message);
+        }
+    }
+
+    private resetStreamState() {
+        if (this.streamRenderTimer !== null) {
+            window.clearTimeout(this.streamRenderTimer);
+            this.streamRenderTimer = null;
+        }
+        this.streamContainer = null;
+        this.streamTimeline = null;
+        this.streamContent = null;
+        this.streamAccumulatedText = '';
+        this.streamNodeCount = 0;
+        this.thinkingRenderer = null;
+        this.toolRenderer = null;
     }
 }

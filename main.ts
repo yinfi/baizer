@@ -7,6 +7,7 @@ import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
 import { ghostTextExtension, showGhostText } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
+import { requestGuardianResponse } from './src/ui/guardian-request';
 import { selectionMenuExtension } from './src/ui/selection-menu';
 import { KnowledgeRuntime } from './src/knowledge/runtime';
 import { ToolRegistry } from './src/skills/tool-registry';
@@ -109,7 +110,7 @@ export default class ObsidianCliPlugin extends Plugin {
         try {
             this.registerView(
                 VIEW_TYPE_SHELL,
-                (leaf) => new ShellView(leaf, this.modelService)
+                (leaf) => new ShellView(leaf, this.modelService, this)
             );
         } catch (e) {
             // hot reload 时 view type 可能已注册，忽略
@@ -378,7 +379,7 @@ Instructions:
 5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
             }
 
-            const response = await this.modelService.chat(prompt, [], systemPromptOverride);
+            const response = await requestGuardianResponse(this.modelService, prompt, systemPromptOverride);
 
             // 提取第一个完整 JSON 对象（平衡括号计数，避免贪婪 regex 抓到多余内容）
             let data: any;

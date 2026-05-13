@@ -1,5 +1,6 @@
 import { App } from 'obsidian';
 import { ContextManager, ContextItem } from '../../services/context-manager';
+import { ContextChips } from '../components/context-chips';
 
 interface ContextControllerDeps {
   app: App;
@@ -35,29 +36,19 @@ export class ContextController {
   }
 
   renderContextChips(container: HTMLElement, onRemove: (id: string) => void) {
-    if (!container) return;
-    container.empty();
-
-    const contexts = this.deps.contextManager.getContexts();
-    contexts.forEach(ctx => {
-      const chip = container.createDiv({ cls: 'context-chip' });
-      chip.createSpan({ cls: 'chip-icon', text: this.getIconForType(ctx.type) });
-      chip.createSpan({ cls: 'chip-label', text: ctx.summary || ctx.data });
-      const removeBtn = chip.createSpan({ cls: 'chip-remove', text: '脳' });
-      removeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        onRemove(ctx.id);
-      });
-    });
+    new ContextChips(container, {
+      onRemove,
+      onOpenFile: (path) => this.deps.app.workspace.openLinkText(path, '', false),
+    }).update(this.deps.contextManager.getContexts());
   }
 
   getIconForType(type: string): string {
     switch (type) {
-      case 'image': return '🖼️';
-      case 'url': return '🌐';
-      case 'youtube': return '▶️';
-      case 'file': return '📄';
-      default: return '📌';
+      case 'image': return 'image';
+      case 'url': return 'link';
+      case 'youtube': return 'youtube';
+      case 'file': return 'file-text';
+      default: return 'sticky-note';
     }
   }
 }
