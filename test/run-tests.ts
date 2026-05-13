@@ -21,6 +21,7 @@ const tests = [
   'test/obsidian-bases.test.ts',
   'test/plugin-tools.test.ts',
   'test/provider-capabilities.test.ts',
+  'test/settings-state.test.ts',
   'test/context-budget.test.ts',
   'test/context-manager.test.ts',
   'test/memory-manager.test.ts',
