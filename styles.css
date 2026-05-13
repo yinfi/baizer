@@ -1028,3 +1028,349 @@ textarea.shell-input::placeholder {
     0%, 100% { opacity: 1; }
     50% { opacity: 0; }
 }
+
+/* ==========================================================================
+   Obsidian Shell - Settings
+   ========================================================================== */
+
+.ocli-settings-page {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-bottom: 24px;
+}
+
+.ocli-settings-hero {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.ocli-settings-title {
+    margin: 0;
+    font-size: var(--font-ui-large);
+    font-weight: var(--font-semibold);
+}
+
+.ocli-settings-subtitle {
+    margin: 0;
+    color: var(--text-muted);
+    max-width: 72ch;
+}
+
+.ocli-settings-search-row {
+    display: flex;
+    align-items: center;
+}
+
+.ocli-settings-search {
+    width: min(420px, 100%);
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    box-shadow: none;
+}
+
+.ocli-settings-search:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 40%, transparent);
+}
+
+.ocli-settings-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.ocli-settings-summary-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    background: var(--background-secondary);
+}
+
+.ocli-settings-summary-label {
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    text-transform: uppercase;
+}
+
+.ocli-settings-summary-value {
+    color: var(--text-normal);
+    font-size: var(--font-ui-medium);
+    font-weight: var(--font-semibold);
+    word-break: break-word;
+}
+
+.ocli-settings-summary-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 20px;
+}
+
+.ocli-settings-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.ocli-settings-sidebar {
+    min-width: 0;
+}
+
+.ocli-settings-nav {
+    position: sticky;
+    top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    background: var(--background-primary-alt);
+}
+
+.ocli-settings-nav-title {
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    text-transform: uppercase;
+}
+
+.ocli-settings-nav-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ocli-settings-nav-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 10px;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    text-align: left;
+    cursor: pointer;
+}
+
+.ocli-settings-nav-item:hover {
+    background: var(--background-modifier-hover);
+}
+
+.ocli-settings-nav-item.is-active {
+    background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-secondary));
+    border-color: color-mix(in srgb, var(--interactive-accent) 40%, var(--background-modifier-border));
+}
+
+.ocli-settings-nav-copy {
+    min-width: 0;
+}
+
+.ocli-settings-nav-label {
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-medium);
+}
+
+.ocli-settings-nav-description {
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    line-height: 1.35;
+}
+
+.ocli-settings-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.ocli-settings-section-card {
+    padding: 16px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    background: var(--background-primary);
+}
+
+.ocli-settings-section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.ocli-settings-section-copy {
+    min-width: 0;
+}
+
+.ocli-settings-section-title {
+    margin: 0;
+    font-size: var(--font-ui-large);
+}
+
+.ocli-settings-section-description {
+    margin: 6px 0 0;
+    color: var(--text-muted);
+}
+
+.ocli-settings-section-content {
+    min-width: 0;
+}
+
+.ocli-settings-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    font-weight: var(--font-medium);
+    white-space: nowrap;
+}
+
+.ocli-settings-badge.is-warning {
+    color: #8b5e00;
+    background: color-mix(in srgb, var(--color-yellow) 18%, transparent);
+}
+
+.ocli-settings-badge.is-danger {
+    color: var(--text-error);
+    background: color-mix(in srgb, var(--text-error) 12%, transparent);
+}
+
+.ocli-settings-badge.is-muted {
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--background-modifier-border) 65%, transparent);
+}
+
+.ocli-settings-badge.is-accent {
+    color: var(--text-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+
+.ocli-settings-badge.is-success {
+    color: var(--color-green);
+    background: color-mix(in srgb, var(--color-green) 12%, transparent);
+}
+
+.ocli-settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-top: 8px;
+}
+
+.ocli-settings-action {
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    cursor: pointer;
+}
+
+.ocli-settings-action:hover {
+    background: var(--background-modifier-hover);
+}
+
+.ocli-settings-action.is-primary {
+    border-color: color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border));
+    background: color-mix(in srgb, var(--interactive-accent) 11%, var(--background-secondary));
+    color: var(--text-accent);
+}
+
+.ocli-settings-action.is-accent {
+    border-style: dashed;
+}
+
+.ocli-settings-action.is-danger {
+    border-color: color-mix(in srgb, var(--text-error) 30%, var(--background-modifier-border));
+    color: var(--text-error);
+}
+
+.ocli-settings-inline-note {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: var(--font-ui-small);
+}
+
+.ocli-settings-inline-note.is-warning {
+    color: #8b5e00;
+    background: color-mix(in srgb, var(--color-yellow) 16%, transparent);
+}
+
+.ocli-settings-inline-note.is-success {
+    color: var(--color-green);
+    background: color-mix(in srgb, var(--color-green) 10%, transparent);
+}
+
+.ocli-settings-empty-state,
+.ocli-settings-empty-nav {
+    padding: 20px;
+    border: 1px dashed var(--background-modifier-border);
+    border-radius: 12px;
+    color: var(--text-muted);
+    background: var(--background-secondary);
+}
+
+.ocli-settings-empty-state h3 {
+    margin: 0 0 6px;
+    color: var(--text-normal);
+}
+
+.ocli-settings-empty-state p {
+    margin: 0;
+}
+
+.ocli-full-width-textarea textarea {
+    width: 100%;
+    min-height: 120px;
+    resize: vertical;
+}
+
+.gemini-danger-setting {
+    border-left: 3px solid color-mix(in srgb, var(--text-error) 75%, transparent);
+    padding-left: 10px;
+}
+
+@media (max-width: 900px) {
+    .ocli-settings-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .ocli-settings-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .ocli-settings-nav {
+        position: static;
+    }
+
+    .ocli-settings-nav-list {
+        flex-direction: row;
+        overflow-x: auto;
+        padding-bottom: 2px;
+    }
+
+    .ocli-settings-nav-item {
+        flex: 0 0 220px;
+    }
+}
