@@ -18,4 +18,13 @@ export class ItemView {}
 export class WorkspaceLeaf {}
 export class MarkdownView {}
 export class Vault {}
+export const MarkdownRenderer = {
+  render: async (_app: any, markdown: string, el: any) => {
+    if (el && typeof el.setText === 'function') {
+      el.setText(markdown);
+    } else if (el) {
+      el.textContent = markdown;
+    }
+  },
+};
 export async function requestUrl(_options: any): Promise<any> { return { text: '' }; }

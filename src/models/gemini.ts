@@ -162,7 +162,8 @@ class GeminiChatSession implements IChatSession {
         };
     }
 
-    async *sendMessageStream(text: string | ToolResult[]): AsyncGenerator<StreamEvent, void, unknown> {
+    async *sendMessageStream(text: string | ToolResult[], signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
+        this.throwIfAborted(signal);
         let streamResult;
         if (typeof text === 'string') {
             streamResult = await this.chat.sendMessageStream(text);
@@ -181,6 +182,10 @@ class GeminiChatSession implements IChatSession {
         const collectedFunctionCalls: { name: string; args: any }[] = [];
 
         for await (const chunk of streamResult.stream) {
+            if (signal?.aborted) {
+                await (streamResult.stream as AsyncGenerator<any, void, unknown>).return?.(undefined);
+                this.throwIfAborted(signal);
+            }
             const candidate = chunk.candidates?.[0];
             if (!candidate?.content?.parts) continue;
 
@@ -201,6 +206,7 @@ class GeminiChatSession implements IChatSession {
 
         let functionCalls = collectedFunctionCalls;
         try {
+            this.throwIfAborted(signal);
             const response = await streamResult.response;
             await this.patchHistoryWithThoughtSignatures(streamedParts);
             const responseFCs = response.functionCalls();
@@ -216,6 +222,14 @@ class GeminiChatSession implements IChatSession {
         }
 
         yield { type: 'done' as const, text: fullText };
+    }
+
+    private throwIfAborted(signal?: AbortSignal): void {
+        if (signal?.aborted) {
+            const error = new Error('Stream aborted');
+            error.name = 'AbortError';
+            throw error;
+        }
     }
 
     async getHistory(): Promise<ChatMessage[]> {

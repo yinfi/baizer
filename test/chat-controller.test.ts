@@ -48,6 +48,29 @@ async function test(name: string, fn: () => Promise<void>) {
   }
 }
 
+function createWorkspaceApp() {
+  const opened: string[] = [];
+  const files = new Map<string, any>();
+  return {
+    app: {
+      vault: {
+        getAbstractFileByPath: (path: string) => {
+          if (!files.has(path)) files.set(path, { path, basename: path.split('/').pop() });
+          return files.get(path);
+        },
+      },
+      workspace: {
+        getLeaf: () => ({
+          openFile: async (file: any) => {
+            opened.push(file.path);
+          },
+        }),
+      },
+    } as any,
+    opened,
+  };
+}
+
 async function runTests() {
   console.log('=== ChatController Tests ===');
   const { ChatController } = await import('../src/ui/chat-controller');
@@ -125,6 +148,43 @@ async function runTests() {
     controller.cleanup();
   });
 
+  await test('processCommand normalizes legacy string context before calling api.chat', async () => {
+    const chatCalls: any[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async (...args: any[]) => {
+          chatCalls.push(args);
+          return 'normalized';
+        },
+        chatStream: async function* () { },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+    });
+
+    await controller.processCommand('Explain this', 'Selected Text:\nalpha' as any, 'alpha');
+
+    expect(chatCalls).toEqual([[
+      'Explain this',
+      [{
+        id: 'legacy-selection-context',
+        type: 'selection',
+        data: 'Editor selection',
+        summary: 'Editor selection',
+        content: 'Selected Text:\nalpha',
+      }],
+      'alpha',
+    ]]);
+
+    controller.cleanup();
+  });
+
   await test('help output keeps local commands concise and lists dynamic skill commands separately', async () => {
     const messages: any[] = [];
 
@@ -156,6 +216,189 @@ async function runTests() {
     expect(help).toContain('Save webpage to vault');
     expect(help).toContain('`/wiki:query`');
     expect(help).notToContain('`/save <url>`');
+
+    controller.cleanup();
+  });
+
+  await test('streaming file write request warns when no write tool ran', async () => {
+    const messages: any[] = [];
+    const streamEvents: any[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'fallback',
+        chatStream: async function* () {
+          yield { type: 'text_delta', content: 'Copy this JSON into a new canvas file.' };
+          yield { type: 'done', text: 'Copy this JSON into a new canvas file.' };
+        },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onMessageAdded: (message) => messages.push(message),
+      onStreamEvent: (event) => streamEvents.push(event),
+    });
+
+    await controller.processCommand('Create a canvas file for this article');
+
+    expect(messages.map(message => message.role)).toEqual(['user', 'system']);
+    expect(messages[messages.length - 1].content).toContain('No file was created or modified');
+    expect(streamEvents.map(event => event.type)).toEqual(['done']);
+
+    controller.cleanup();
+  });
+
+  await test('streaming successful write tool result opens the file in the workspace', async () => {
+    const { app, opened } = createWorkspaceApp();
+    const messages: any[] = [];
+
+    const controller = new ChatController({
+      app,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'fallback',
+        chatStream: async function* () {
+          yield {
+            type: 'tool_call',
+            name: 'create_file',
+            args: {
+              path: 'Assets/Canvas/summary.canvas',
+              content: '{"nodes":[],"edges":[]}',
+            },
+          };
+          yield {
+            type: 'tool_result',
+            name: 'create_file',
+            result: {
+              success: true,
+              path: 'Assets/Canvas/summary.canvas',
+              message: 'File created: Assets/Canvas/summary.canvas',
+            },
+          };
+          yield { type: 'done', text: 'Done.' };
+        },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onMessageAdded: (message) => messages.push(message),
+      onStreamEvent: () => { },
+    });
+
+    await controller.processCommand('Create a canvas file for this article');
+
+    expect(opened).toEqual(['Assets/Canvas/summary.canvas']);
+    expect(messages.map(message => message.role)).toEqual(['user']);
+
+    controller.cleanup();
+  });
+
+  await test('streaming failed write tool result suppresses false success text and shows a workspace warning', async () => {
+    const messages: any[] = [];
+    const streamEvents: any[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'fallback',
+        chatStream: async function* () {
+          yield {
+            type: 'tool_call',
+            name: 'create_file',
+            args: {
+              path: '../summary.canvas',
+              content: '{"nodes":[],"edges":[]}',
+            },
+          };
+          yield {
+            type: 'tool_result',
+            name: 'create_file',
+            result: {
+              success: false,
+              error: 'Unsafe vault path',
+            },
+          };
+          yield { type: 'text_delta', content: 'I created the canvas file.' };
+          yield { type: 'done', text: 'I created the canvas file.' };
+        },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onMessageAdded: (message) => messages.push(message),
+      onStreamEvent: (event) => streamEvents.push(event),
+    });
+
+    await controller.processCommand('Create a canvas file for this article');
+
+    expect(messages.map(message => message.role)).toEqual(['user', 'system']);
+    expect(messages[messages.length - 1].content).toContain('No file was created or modified');
+    expect(messages[messages.length - 1].content).toContain('Unsafe vault path');
+    expect(streamEvents.map(event => event.type)).toEqual(['tool_call', 'tool_result', 'done']);
+
+    controller.cleanup();
+  });
+
+  await test('cancelActiveStream aborts the current streaming response and preserves partial text', async () => {
+    const messages: any[] = [];
+    const streamEvents: any[] = [];
+    let abortSignalSeen = false;
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'fallback',
+        chatStream: async function* (_query: string, _context: any[], _selection: string, signal?: AbortSignal) {
+          if (!signal) {
+            throw new Error('Expected chatStream to receive an AbortSignal');
+          }
+          abortSignalSeen = true;
+          yield { type: 'text_delta', content: 'partial' as const };
+          await new Promise<void>((resolve, reject) => {
+            signal.addEventListener('abort', () => {
+              const error = new Error('Aborted');
+              (error as any).name = 'AbortError';
+              reject(error);
+            });
+          });
+        },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onMessageAdded: (message) => messages.push(message),
+      onStreamEvent: (event) => streamEvents.push(event),
+    });
+
+    const run = controller.processCommand('Stream something');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    controller.cancelActiveStream();
+    await run;
+
+    expect(abortSignalSeen).toBe(true);
+    expect(streamEvents).toEqual([
+      { type: 'text_delta', content: 'partial' },
+      { type: 'done', text: 'partial', interrupted: true },
+    ]);
+    expect(messages[0].content).toBe('Stream something');
+    expect(messages[messages.length - 1]).toEqual({
+      id: messages[messages.length - 1].id,
+      role: 'system',
+      content: 'Response stopped.',
+      timestamp: messages[messages.length - 1].timestamp,
+    });
 
     controller.cleanup();
   });

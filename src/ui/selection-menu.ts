@@ -2,7 +2,8 @@ import { App, MarkdownRenderer, Component, Notice } from 'obsidian';
 import { EditorView, showTooltip } from '@codemirror/view';
 import { StateField, Extension, StateEffect } from '@codemirror/state';
 import { ModelService } from '../services/model-service';
-import { ChatController, ChatMessage } from './chat-controller';
+import { ChatController } from './chat-controller';
+import { ChatMessage } from './types';
 
 // Define the states for our UI
 type SelectionMenuState =
@@ -159,9 +160,15 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
 
                             // Context: The selected text
                             const selectionText = view.state.doc.sliceString(state.from, state.to);
-                            const contextStr = `Selected Text:\n${selectionText}`;
+                            const selectionContext = [{
+                                id: 'selection-menu-context',
+                                type: 'selection',
+                                data: 'Editor selection',
+                                summary: 'Editor selection',
+                                content: `Selected Text:\n${selectionText}`,
+                            }];
 
-                            await state.controller.processCommand(text, contextStr, selectionText);
+                            await state.controller.processCommand(text, selectionContext, selectionText);
                         }
                         if (e.key === 'Escape') {
                             e.preventDefault();

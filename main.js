@@ -39,9 +39,9 @@ var __publicField = (obj, key, value) => {
   return value;
 };
 
-// ../../node_modules/@mozilla/readability/Readability.js
+// node_modules/@mozilla/readability/Readability.js
 var require_Readability = __commonJS({
-  "../../node_modules/@mozilla/readability/Readability.js"(exports, module2) {
+  "node_modules/@mozilla/readability/Readability.js"(exports, module2) {
     function Readability2(doc, options) {
       if (options && options.documentElement) {
         doc = options;
@@ -2025,9 +2025,9 @@ var require_Readability = __commonJS({
   }
 });
 
-// ../../node_modules/@mozilla/readability/Readability-readerable.js
+// node_modules/@mozilla/readability/Readability-readerable.js
 var require_Readability_readerable = __commonJS({
-  "../../node_modules/@mozilla/readability/Readability-readerable.js"(exports, module2) {
+  "node_modules/@mozilla/readability/Readability-readerable.js"(exports, module2) {
     var REGEXPS = {
       // NOTE: These two regular expressions are duplicated in
       // Readability.js. Please keep both copies in sync.
@@ -2051,11 +2051,11 @@ var require_Readability_readerable = __commonJS({
       var nodes = doc.querySelectorAll("p, pre, article");
       var brNodes = doc.querySelectorAll("div > br");
       if (brNodes.length) {
-        var set = new Set(nodes);
+        var set2 = new Set(nodes);
         [].forEach.call(brNodes, function(node) {
-          set.add(node.parentNode);
+          set2.add(node.parentNode);
         });
-        nodes = Array.from(set);
+        nodes = Array.from(set2);
       }
       var score = 0;
       return [].some.call(nodes, function(node) {
@@ -2086,9 +2086,9 @@ var require_Readability_readerable = __commonJS({
   }
 });
 
-// ../../node_modules/@mozilla/readability/index.js
+// node_modules/@mozilla/readability/index.js
 var require_readability = __commonJS({
-  "../../node_modules/@mozilla/readability/index.js"(exports, module2) {
+  "node_modules/@mozilla/readability/index.js"(exports, module2) {
     var Readability2 = require_Readability();
     var isProbablyReaderable = require_Readability_readerable();
     module2.exports = {
@@ -2104,7 +2104,7 @@ __export(main_exports, {
   default: () => ObsidianCliPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian23 = require("obsidian");
+var import_obsidian25 = require("obsidian");
 
 // src/services/model-service.ts
 var import_obsidian3 = require("obsidian");
@@ -3873,7 +3873,8 @@ var GeminiChatSession = class {
       })) : void 0
     };
   }
-  async *sendMessageStream(text) {
+  async *sendMessageStream(text, signal) {
+    this.throwIfAborted(signal);
     let streamResult;
     if (typeof text === "string") {
       streamResult = await this.chat.sendMessageStream(text);
@@ -3890,6 +3891,10 @@ var GeminiChatSession = class {
     const streamedParts = [];
     const collectedFunctionCalls = [];
     for await (const chunk of streamResult.stream) {
+      if (signal?.aborted) {
+        await streamResult.stream.return?.(void 0);
+        this.throwIfAborted(signal);
+      }
       const candidate = chunk.candidates?.[0];
       if (!candidate?.content?.parts)
         continue;
@@ -3908,6 +3913,7 @@ var GeminiChatSession = class {
     }
     let functionCalls = collectedFunctionCalls;
     try {
+      this.throwIfAborted(signal);
       const response = await streamResult.response;
       await this.patchHistoryWithThoughtSignatures(streamedParts);
       const responseFCs = response.functionCalls();
@@ -3920,6 +3926,13 @@ var GeminiChatSession = class {
       yield { type: "tool_call", name: fc.name, args: fc.args };
     }
     yield { type: "done", text: fullText };
+  }
+  throwIfAborted(signal) {
+    if (signal?.aborted) {
+      const error = new Error("Stream aborted");
+      error.name = "AbortError";
+      throw error;
+    }
   }
   async getHistory() {
     const history = await this.chat.getHistory();
@@ -4060,7 +4073,7 @@ var OpenAIProvider = class {
     }
     return result;
   }
-  async *chatCompletionStream(messages, tools) {
+  async *chatCompletionStream(messages, tools, signal) {
     const url = `${this.config.baseUrl || "https://api.openai.com/v1"}/chat/completions`;
     const body = {
       model: this.config.modelName,
@@ -4084,7 +4097,8 @@ var OpenAIProvider = class {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${this.config.apiKey}`
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal
     });
     if (!response.ok) {
       throw new Error(`OpenAI API Error: ${response.status}`);
@@ -4095,6 +4109,7 @@ var OpenAIProvider = class {
     let fullText = "";
     const pendingToolCalls = /* @__PURE__ */ new Map();
     while (true) {
+      this.throwIfAborted(signal);
       const { done, value } = await reader.read();
       if (done)
         break;
@@ -4149,6 +4164,13 @@ var OpenAIProvider = class {
     }
     yield { type: "done", text: fullText };
   }
+  throwIfAborted(signal) {
+    if (signal?.aborted) {
+      const error = new Error("Stream aborted");
+      error.name = "AbortError";
+      throw error;
+    }
+  }
 };
 var OpenAIChatSession = class {
   constructor(config, tools, provider) {
@@ -4183,7 +4205,7 @@ var OpenAIChatSession = class {
     this.history.push(rawMessage);
     return OpenAIProvider.toGenerationResult(rawMessage);
   }
-  async *sendMessageStream(text) {
+  async *sendMessageStream(text, signal) {
     if (typeof text === "string") {
       this.history.push({ role: "user", content: text });
     } else {
@@ -4204,7 +4226,7 @@ var OpenAIChatSession = class {
     }
     let fullText = "";
     const toolCalls = [];
-    for await (const event of this.provider.chatCompletionStream(this.history, this.tools)) {
+    for await (const event of this.provider.chatCompletionStream(this.history, this.tools, signal)) {
       if (event.type === "text_delta") {
         fullText += event.content;
       } else if (event.type === "tool_call") {
@@ -4238,6 +4260,94 @@ var OpenAIChatSession = class {
     }
   }
 };
+
+// src/utils/file-operation-contract.ts
+var FILE_OPERATION_CONTRACT_TEXT = "The user is asking you to create, save, update, or otherwise modify a vault file. You must call an appropriate vault write tool such as create_file, create_note, update_file, update_note, append_to_note, save_webpage, rename_note, or delete_note. Do not provide copy-paste instructions, raw file contents, or claims that a file was created unless a write tool actually runs successfully.";
+var FILE_WRITE_TOOL_NAMES = [
+  "create_file",
+  "update_file",
+  "create_note",
+  "update_note",
+  "append_to_note",
+  "rename_note",
+  "delete_note",
+  "save_webpage"
+];
+var FILE_WRITE_INTENT_TERMS = [
+  "create",
+  "save",
+  "write",
+  "modify",
+  "update",
+  "append",
+  "rename",
+  "delete",
+  "\u521B\u5EFA",
+  "\u65B0\u5EFA",
+  "\u751F\u6210",
+  "\u4FDD\u5B58",
+  "\u5199\u5165",
+  "\u4FEE\u6539",
+  "\u66F4\u65B0",
+  "\u8FFD\u52A0",
+  "\u91CD\u547D\u540D",
+  "\u5220\u9664"
+];
+var FILE_TARGET_TERMS = [
+  "file",
+  "note",
+  "canvas",
+  ".canvas",
+  ".base",
+  ".md",
+  "markdown",
+  "\u6587\u4EF6",
+  "\u7B14\u8BB0",
+  "\u5DE5\u4F5C\u533A"
+];
+function isFileWriteRequest(message) {
+  const normalized = message.toLowerCase();
+  const writeIntent = FILE_WRITE_INTENT_TERMS.some((term) => normalized.includes(term));
+  if (!writeIntent)
+    return false;
+  return FILE_TARGET_TERMS.some((term) => normalized.includes(term));
+}
+function isFileWriteToolName(name) {
+  return FILE_WRITE_TOOL_NAMES.includes(name);
+}
+function isSuccessfulWriteToolResult(result) {
+  return result?.success === true || result?.status === "success";
+}
+function getFileWriteError(result) {
+  if (typeof result?.error === "string" && result.error.trim())
+    return result.error.trim();
+  if (typeof result?.message === "string" && result.message.trim()) {
+    if (result?.success === false || result?.status === "error") {
+      return result.message.trim();
+    }
+  }
+  return "";
+}
+function buildFileWriteFailureMessage(attemptedWrite, lastError) {
+  if (!attemptedWrite) {
+    return "No file was created or modified because no vault write tool ran. Please try again; file requests must be completed through workspace tools, not copy-paste output.";
+  }
+  const errorSuffix = lastError ? ` Last tool error: ${lastError}.` : "";
+  return `No file was created or modified because no vault write tool completed successfully.${errorSuffix} Please try again; file requests must be completed through workspace tools, not copy-paste output.`;
+}
+function getFileWriteResultPath(action, result, args) {
+  if (typeof result?.path === "string")
+    return result.path;
+  if (typeof result?.target === "string")
+    return result.target;
+  if (action === "create_note" && typeof args.filename === "string")
+    return args.filename;
+  if (action === "rename_note" && typeof args.newPath === "string")
+    return args.newPath;
+  if (typeof args.path === "string")
+    return args.path;
+  return "";
+}
 
 // src/runtime/chat-runtime.ts
 var DefaultChatRuntime = class {
@@ -4275,12 +4385,18 @@ ${activeSkill.instructions}
       prompt += `[Selected Text: ${request.selection}]
 `;
     }
+    if (isFileWriteRequest(request.userMessage)) {
+      prompt += "[File Operation Contract]\n";
+      prompt += `${FILE_OPERATION_CONTRACT_TEXT}
+`;
+    }
     prompt += `User Request: ${request.userMessage}`;
     return {
       prompt,
       tools: this.buildSkillModeTools(activeSkill),
       activeSkillName: activeSkill?.skill.name,
-      allowedToolNames: activeSkill?.tools.map((tool) => tool.name)
+      allowedToolNames: activeSkill?.tools.map((tool) => tool.name),
+      requiresFileWrite: isFileWriteRequest(request.userMessage)
     };
   }
   async query(turn) {
@@ -4289,36 +4405,53 @@ ${activeSkill.instructions}
     let loopCount = 0;
     const maxLoops = 10;
     const skillScope = this.createSkillScope(turn);
+    const fileWriteState = this.createFileWriteState(turn);
     while (result.functionCalls && result.functionCalls.length > 0) {
       loopCount++;
       if (loopCount > maxLoops)
         break;
       const toolResults = [];
       for (const call of result.functionCalls) {
+        const response = await this.executeToolCall(call.name, call.args, skillScope);
+        this.recordFileWriteResult(fileWriteState, call.name, response);
+        if (this.isApprovalResponse(response)) {
+          const approvalMessage = response.message || this.formatApprovalMessage(response);
+          if (this.deps.memoryManager) {
+            const userRequest = this.extractUserRequest(turn.prompt);
+            await this.deps.memoryManager.recordMessage("user", userRequest);
+            await this.deps.memoryManager.recordMessage("model", approvalMessage);
+          }
+          return approvalMessage;
+        }
         toolResults.push({
           name: call.name,
-          response: await this.executeToolCall(call.name, call.args, skillScope)
+          response
         });
       }
       result = await chat.sendMessage(toolResults);
     }
+    const finalText = this.resolveFinalText(turn, fileWriteState, result.text);
     if (this.deps.memoryManager) {
       const userRequest = this.extractUserRequest(turn.prompt);
       await this.deps.memoryManager.recordMessage("user", userRequest);
-      await this.deps.memoryManager.recordMessage("model", result.text);
+      await this.deps.memoryManager.recordMessage("model", finalText);
     }
-    return result.text;
+    return finalText;
   }
-  async *queryStream(turn) {
+  async *queryStream(turn, signal) {
     const chat = this.deps.memoryManager ? this.deps.memoryManager.getOrCreateSession(turn.tools) : this.deps.provider.startChat(turn.tools);
     let loopCount = 0;
     const maxLoops = 10;
     let input = turn.prompt;
     let fullResponseText = "";
+    let approvalMessage = "";
     const skillScope = this.createSkillScope(turn);
+    const fileWriteState = this.createFileWriteState(turn);
     while (loopCount <= maxLoops) {
+      this.throwIfAborted(signal);
       const pendingCalls = [];
-      for await (const event of chat.sendMessageStream(input)) {
+      for await (const event of chat.sendMessageStream(input, signal)) {
+        this.throwIfAborted(signal);
         if (event.type === "tool_call") {
           pendingCalls.push({ name: event.name, args: event.args });
           yield event;
@@ -4336,19 +4469,66 @@ ${activeSkill.instructions}
         break;
       const toolResults = [];
       for (const call of pendingCalls) {
+        this.throwIfAborted(signal);
         const toolResult = await this.executeToolCall(call.name, call.args, skillScope);
+        this.recordFileWriteResult(fileWriteState, call.name, toolResult);
         yield { type: "tool_result", name: call.name, result: toolResult };
+        if (this.isApprovalResponse(toolResult)) {
+          approvalMessage = toolResult.message || this.formatApprovalMessage(toolResult);
+          fullResponseText = "";
+          break;
+        }
         toolResults.push({ name: call.name, response: toolResult });
       }
+      if (approvalMessage)
+        break;
       input = toolResults;
       fullResponseText = "";
+    }
+    if (!approvalMessage) {
+      fullResponseText = this.resolveFinalText(turn, fileWriteState, fullResponseText);
     }
     if (this.deps.memoryManager) {
       const userRequest = this.extractUserRequest(turn.prompt);
       await this.deps.memoryManager.recordMessage("user", userRequest);
-      await this.deps.memoryManager.recordMessage("model", fullResponseText);
+      await this.deps.memoryManager.recordMessage("model", approvalMessage || fullResponseText);
     }
     yield { type: "done", text: fullResponseText };
+  }
+  isApprovalResponse(result) {
+    return !!result && result.approval_required === true;
+  }
+  formatApprovalMessage(result) {
+    const action = result.action || "perform this action";
+    const target = result.target ? `: ${result.target}` : "";
+    return `Approval required to ${action}${target}`;
+  }
+  createFileWriteState(turn) {
+    return {
+      required: turn.requiresFileWrite === true,
+      attempted: false,
+      succeeded: false,
+      lastError: ""
+    };
+  }
+  recordFileWriteResult(state, toolName, result) {
+    if (!state.required || !isFileWriteToolName(toolName))
+      return;
+    state.attempted = true;
+    if (isSuccessfulWriteToolResult(result)) {
+      state.succeeded = true;
+      return;
+    }
+    const error = getFileWriteError(result);
+    if (error)
+      state.lastError = error;
+  }
+  resolveFinalText(turn, state, modelText) {
+    if (!turn.requiresFileWrite)
+      return modelText;
+    if (state.succeeded)
+      return modelText;
+    return buildFileWriteFailureMessage(state.attempted, state.lastError);
   }
   formatContextItems(contextItems) {
     if (!contextItems?.length)
@@ -4451,6 +4631,13 @@ ${skillSummary}` : "Get detailed instructions for a specific workflow.";
     const marker = "User Request: ";
     const index = prompt.lastIndexOf(marker);
     return index >= 0 ? prompt.slice(index + marker.length) : prompt;
+  }
+  throwIfAborted(signal) {
+    if (signal?.aborted) {
+      const error = new Error("Stream aborted");
+      error.name = "AbortError";
+      throw error;
+    }
   }
 };
 
@@ -4673,7 +4860,7 @@ var ModelService = class {
       return `Error: ${e.message}`;
     }
   }
-  async *chatStream(userMessage, contextItems, selection = "") {
+  async *chatStream(userMessage, contextItems, selection = "", signal) {
     logger.info(`Processing streaming chat: ${userMessage.substring(0, 50)}...`, "ModelService.chatStream");
     if (!this.hasValidConfig()) {
       const providerLabel = this.getActiveProviderConfig()?.label || "AI";
@@ -4687,10 +4874,13 @@ var ModelService = class {
         contextItems,
         selection
       });
-      for await (const event of runtime.queryStream(preparedTurn)) {
+      for await (const event of runtime.queryStream(preparedTurn, signal)) {
         yield event;
       }
     } catch (e) {
+      if (this.isAbortError(e)) {
+        throw e;
+      }
       logger.error("Stream chat failed", e, "ModelService.chatStream");
       yield { type: "error", message: e.message };
     }
@@ -4774,6 +4964,9 @@ var ModelService = class {
       skillRegistry: this.skillRegistry
     });
   }
+  isAbortError(error) {
+    return error?.name === "AbortError";
+  }
   async shutdown() {
     window.removeEventListener("unhandledrejection", this.unhandledRejectionHandler);
     await this.flushMemorySession();
@@ -4782,24 +4975,126 @@ var ModelService = class {
 
 // src/settings.ts
 var import_obsidian4 = require("obsidian");
+var SETTINGS_SECTIONS = [
+  {
+    id: "connection",
+    title: "Connection",
+    description: "Provider, API key, model selection, and connection checks.",
+    keywords: ["provider", "api key", "base url", "model", "connection", "openai", "gemini", "deepseek", "qwen"]
+  },
+  {
+    id: "runtime",
+    title: "Runtime",
+    description: "Context window and system prompt behavior.",
+    keywords: ["runtime", "context window", "token", "system prompt", "persona", "prompt"]
+  },
+  {
+    id: "guardian",
+    title: "Guardian",
+    description: "Inline assistance, trigger behavior, and privacy controls.",
+    keywords: ["guardian", "auto mode", "manual mode", "privacy", "ignored folders", "sensitivity"]
+  },
+  {
+    id: "permissions",
+    title: "Permissions",
+    description: "File, plugin, and execution safeguards.",
+    keywords: ["permissions", "file creation", "file modification", "plugin control", "confirm"]
+  },
+  {
+    id: "appearance",
+    title: "Appearance",
+    description: "Terminal theme and visual density.",
+    keywords: ["appearance", "theme", "font", "opacity", "terminal"]
+  },
+  {
+    id: "capture",
+    title: "Capture",
+    description: "WeChat inbox monitoring and storage paths.",
+    keywords: ["wechat", "capture", "inbox", "storage", "clippings"]
+  },
+  {
+    id: "knowledge",
+    title: "Knowledge",
+    description: "Knowledge compiler sources, output, and batching.",
+    keywords: ["knowledge", "wiki", "compile", "source folders", "batch"]
+  },
+  {
+    id: "plugin-skills",
+    title: "Plugin Skills",
+    description: "Auto-generated plugin workflows and exclusions.",
+    keywords: ["plugin", "skills", "generator", "exclude", "startup"]
+  }
+];
+function normalizeSearchQuery(query) {
+  return query.trim().toLowerCase();
+}
+function getMatchingSettingsSections(query) {
+  const normalized = normalizeSearchQuery(query);
+  if (!normalized)
+    return SETTINGS_SECTIONS.map((section) => section.id);
+  return SETTINGS_SECTIONS.filter((section) => {
+    const haystack = [section.title, section.description, ...section.keywords].join(" ").toLowerCase();
+    return haystack.includes(normalized);
+  }).map((section) => section.id);
+}
+function getSettingsSectionStatuses(settings) {
+  const statuses = {};
+  const activeConfig = settings.providers[settings.activeProvider];
+  if (!activeConfig?.apiKey?.trim()) {
+    statuses.connection = { label: "Needs key", tone: "warning" };
+  } else if (!BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider)) {
+    statuses.connection = { label: "Custom", tone: "accent" };
+  }
+  if (!settings.enableGuardian) {
+    statuses.guardian = { label: "Off", tone: "muted" };
+  }
+  if (settings.allowPluginControl || !settings.confirmExecutions) {
+    statuses.permissions = { label: "Risk", tone: "danger" };
+  }
+  if (!settings.autoGeneratePluginSkills) {
+    statuses["plugin-skills"] = { label: "Off", tone: "muted" };
+  }
+  return statuses;
+}
+function getSectionMeta(id) {
+  const section = SETTINGS_SECTIONS.find((candidate) => candidate.id === id);
+  if (!section) {
+    throw new Error(`Unknown settings section: ${id}`);
+  }
+  return section;
+}
 var SettingTab = class extends import_obsidian4.PluginSettingTab {
   plugin;
   renderToken = 0;
+  activeSectionId = "connection";
+  searchQuery = "";
+  revealApiKey = false;
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
-  /** 获取当前激活 provider 的配置 */
   getActiveConfig() {
-    const s = this.plugin.settings;
-    return s.providers[s.activeProvider];
+    const settings = this.plugin.settings;
+    return settings.providers[settings.activeProvider];
   }
-  /** 动态加载 model 列表到下拉框 */
+  getVisibleSections() {
+    return getMatchingSettingsSections(this.searchQuery);
+  }
+  ensureActiveSection(visibleSections) {
+    if (!visibleSections.length)
+      return;
+    if (!visibleSections.includes(this.activeSectionId)) {
+      this.activeSectionId = visibleSections[0];
+    }
+  }
+  async persistSettings() {
+    await this.plugin.saveSettings();
+  }
   async loadDynamicModelOptions(dropdown, token, forceRefresh = false) {
     const config = this.getActiveConfig();
     const currentModel = config?.model || "";
     dropdown.selectEl.empty();
-    dropdown.addOption("__loading__", `Loading models...`);
+    dropdown.addOption("__loading__", "Loading models...");
     dropdown.setValue("__loading__");
     dropdown.setDisabled(true);
     try {
@@ -4808,15 +5103,13 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
         return;
       dropdown.selectEl.empty();
       const options = models.length > 0 ? models : [{ value: currentModel, label: `${currentModel} (Current)` }];
-      options.forEach((option) => {
-        dropdown.addOption(option.value, option.label);
-      });
+      options.forEach((option) => dropdown.addOption(option.value, option.label));
       if (currentModel && !options.some((option) => option.value === currentModel)) {
         dropdown.addOption(currentModel, `${currentModel} (Current)`);
       }
       dropdown.setValue(currentModel || options[0]?.value || "");
       dropdown.setDisabled(false);
-    } catch (error) {
+    } catch (_error) {
       if (token !== this.renderToken)
         return;
       dropdown.selectEl.empty();
@@ -4835,49 +5128,210 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
     const token = ++this.renderToken;
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Obsidian Shell Configuration" });
-    const desc = containerEl.createEl("p", { cls: "setting-item-description" });
-    desc.setText("Powered by multiple AI providers. Acting as your Vault OS.");
-    containerEl.createEl("h3", { text: "\u{1F511} API Configuration", cls: "ocli-settings-header" });
-    const settings = this.plugin.settings;
-    const activeConfig = this.getActiveConfig();
-    new import_obsidian4.Setting(containerEl).setName("AI Provider").setDesc("Select the AI provider to use.").addDropdown((drop) => {
-      for (const [id, config] of Object.entries(settings.providers)) {
-        const configured = !!config.apiKey;
-        drop.addOption(id, configured ? config.label : `${config.label} \u26A0\uFE0F`);
+    const visibleSections = this.getVisibleSections();
+    this.ensureActiveSection(visibleSections);
+    const root = containerEl.createDiv({ cls: "ocli-settings-page" });
+    this.renderHeader(root);
+    this.renderSummary(root);
+    const layout = root.createDiv({ cls: "ocli-settings-layout" });
+    this.renderSidebar(layout.createDiv({ cls: "ocli-settings-sidebar" }), visibleSections);
+    this.renderMain(layout.createDiv({ cls: "ocli-settings-main" }), visibleSections, token);
+  }
+  renderHeader(containerEl) {
+    const hero = containerEl.createDiv({ cls: "ocli-settings-hero" });
+    hero.createEl("h2", { text: "Obsidian Shell Configuration", cls: "ocli-settings-title" });
+    hero.createEl("p", {
+      text: "A cleaner control center for provider setup, runtime behavior, and plugin capabilities.",
+      cls: "ocli-settings-subtitle"
+    });
+    const searchRow = hero.createDiv({ cls: "ocli-settings-search-row" });
+    const searchInput = searchRow.createEl("input", {
+      cls: "ocli-settings-search",
+      attr: {
+        type: "search",
+        placeholder: "Search settings",
+        "aria-label": "Search settings"
       }
-      drop.setValue(settings.activeProvider);
-      drop.onChange(async (value) => {
-        await this.plugin.modelService.switchProvider(value, () => this.plugin.saveSettings());
+    });
+    searchInput.value = this.searchQuery;
+    searchInput.addEventListener("input", () => {
+      this.searchQuery = searchInput.value;
+      this.display();
+    });
+  }
+  renderSummary(containerEl) {
+    const summary = containerEl.createDiv({ cls: "ocli-settings-summary" });
+    const activeConfig = this.getActiveConfig();
+    const statuses = getSettingsSectionStatuses(this.plugin.settings);
+    const providerBadge = statuses.connection;
+    this.renderSummaryCard(
+      summary,
+      "Active Provider",
+      activeConfig?.label || "Not configured",
+      providerBadge?.label || "Ready",
+      providerBadge?.tone || "success"
+    );
+    this.renderSummaryCard(
+      summary,
+      "Current Model",
+      activeConfig?.model || "Not selected",
+      activeConfig?.type === "gemini" ? "Gemini API" : "OpenAI-compatible",
+      "accent"
+    );
+    const safetyTone = statuses.permissions?.tone || (this.plugin.settings.confirmExecutions ? "success" : "warning");
+    const safetyValue = this.plugin.settings.allowPluginControl ? "Plugin control enabled" : this.plugin.settings.confirmExecutions ? "Confirm before writes" : "Direct execution";
+    const safetyDetail = this.plugin.settings.allowPluginControl ? "High-risk actions unlocked" : "Approval flow active";
+    this.renderSummaryCard(summary, "Safety", safetyValue, safetyDetail, safetyTone);
+  }
+  renderSummaryCard(containerEl, label, value, detail, tone) {
+    const card = containerEl.createDiv({ cls: "ocli-settings-summary-card" });
+    card.createDiv({ cls: "ocli-settings-summary-label", text: label });
+    card.createDiv({ cls: "ocli-settings-summary-value", text: value });
+    const footer = card.createDiv({ cls: "ocli-settings-summary-footer" });
+    footer.createSpan({ cls: `ocli-settings-badge is-${tone}`, text: detail });
+  }
+  renderSidebar(containerEl, visibleSections) {
+    const nav = containerEl.createDiv({ cls: "ocli-settings-nav" });
+    nav.createDiv({ cls: "ocli-settings-nav-title", text: "Sections" });
+    if (!visibleSections.length) {
+      nav.createDiv({ cls: "ocli-settings-empty-nav", text: "No matching sections." });
+      return;
+    }
+    const list = nav.createDiv({ cls: "ocli-settings-nav-list" });
+    const statuses = getSettingsSectionStatuses(this.plugin.settings);
+    visibleSections.forEach((sectionId) => {
+      const meta = getSectionMeta(sectionId);
+      const button = list.createEl("button", {
+        cls: `ocli-settings-nav-item${sectionId === this.activeSectionId ? " is-active" : ""}`,
+        attr: { type: "button" }
+      });
+      const copy = button.createDiv({ cls: "ocli-settings-nav-copy" });
+      copy.createDiv({ cls: "ocli-settings-nav-label", text: meta.title });
+      copy.createDiv({ cls: "ocli-settings-nav-description", text: meta.description });
+      const status = statuses[sectionId];
+      if (status) {
+        button.createSpan({ cls: `ocli-settings-badge is-${status.tone}`, text: status.label });
+      }
+      button.addEventListener("click", () => {
+        this.activeSectionId = sectionId;
+        if (this.searchQuery.trim()) {
+          this.searchQuery = "";
+        }
         this.display();
       });
     });
-    if (activeConfig) {
-      new import_obsidian4.Setting(containerEl).setName("API Key").setDesc(`Enter your ${activeConfig.label} API key.`).addText((text) => text.setPlaceholder("sk-...").setValue(activeConfig.apiKey).onChange(async (value) => {
-        activeConfig.apiKey = value;
-        await this.plugin.saveSettings();
-      }));
-      if (this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl) {
-        new import_obsidian4.Setting(containerEl).setName("Base URL").setDesc("API Base URL.").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(activeConfig.baseUrl).onChange(async (value) => {
-          activeConfig.baseUrl = value;
-          await this.plugin.saveSettings();
-        }));
-      }
-      new import_obsidian4.Setting(containerEl).setName("Model").setDesc("Choose the model (loaded dynamically from API).").addDropdown((drop) => {
-        drop.addOption(activeConfig.model, `${activeConfig.model} (Current)`);
-        drop.setValue(activeConfig.model);
-        void this.loadDynamicModelOptions(drop, token);
-        drop.onChange(async (value) => {
-          if (value === "__loading__" || value === "__failed__")
-            return;
-          await this.plugin.modelService.switchModel(value, () => this.plugin.saveSettings());
-        });
-      });
+  }
+  renderMain(containerEl, visibleSections, token) {
+    if (!visibleSections.length) {
+      const empty = containerEl.createDiv({ cls: "ocli-settings-empty-state" });
+      empty.createEl("h3", { text: "No matching settings" });
+      empty.createEl("p", { text: "Try searching by provider, prompt, permissions, or knowledge." });
+      return;
     }
-    const providerActions = new import_obsidian4.Setting(containerEl);
-    providerActions.addButton((btn) => btn.setButtonText("+ Add Provider").onClick(() => {
+    const query = normalizeSearchQuery(this.searchQuery);
+    const sectionsToRender = query ? visibleSections : [this.activeSectionId];
+    sectionsToRender.forEach((sectionId) => {
+      const meta = getSectionMeta(sectionId);
+      const status = getSettingsSectionStatuses(this.plugin.settings)[sectionId];
+      const card = containerEl.createDiv({ cls: "ocli-settings-section-card" });
+      const header = card.createDiv({ cls: "ocli-settings-section-header" });
+      const headerCopy = header.createDiv({ cls: "ocli-settings-section-copy" });
+      headerCopy.createEl(query ? "h3" : "h2", { text: meta.title, cls: "ocli-settings-section-title" });
+      headerCopy.createEl("p", { text: meta.description, cls: "ocli-settings-section-description" });
+      if (status) {
+        header.createSpan({ cls: `ocli-settings-badge is-${status.tone}`, text: status.label });
+      }
+      const content = card.createDiv({ cls: "ocli-settings-section-content" });
+      this.renderSectionContent(sectionId, content, token);
+    });
+  }
+  renderSectionContent(sectionId, containerEl, token) {
+    switch (sectionId) {
+      case "connection":
+        this.renderConnectionSection(containerEl, token);
+        return;
+      case "runtime":
+        this.renderRuntimeSection(containerEl);
+        return;
+      case "guardian":
+        this.renderGuardianSection(containerEl);
+        return;
+      case "permissions":
+        this.renderPermissionsSection(containerEl);
+        return;
+      case "appearance":
+        this.renderAppearanceSection(containerEl);
+        return;
+      case "capture":
+        this.renderCaptureSection(containerEl);
+        return;
+      case "knowledge":
+        this.renderKnowledgeSection(containerEl);
+        return;
+      case "plugin-skills":
+        this.renderPluginSkillsSection(containerEl);
+        return;
+    }
+  }
+  renderConnectionSection(containerEl, token) {
+    const settings = this.plugin.settings;
+    const activeConfig = this.getActiveConfig();
+    if (!activeConfig) {
+      containerEl.createDiv({ cls: "ocli-settings-inline-note is-warning", text: "No active provider found." });
+      return;
+    }
+    const badgeStatus = !activeConfig.apiKey.trim() ? `No API key configured for ${activeConfig.label}.` : `Using ${activeConfig.type === "gemini" ? "Gemini API" : "OpenAI-compatible API"}.`;
+    containerEl.createDiv({
+      cls: `ocli-settings-inline-note ${activeConfig.apiKey.trim() ? "is-success" : "is-warning"}`,
+      text: badgeStatus
+    });
+    new import_obsidian4.Setting(containerEl).setName("AI Provider").setDesc("Select the provider configuration to use.").addDropdown((drop) => {
+      Object.entries(settings.providers).forEach(([id, config]) => {
+        const configured = !!config.apiKey.trim();
+        drop.addOption(id, configured ? config.label : `${config.label} !`);
+      });
+      drop.setValue(settings.activeProvider);
+      drop.onChange(async (value) => {
+        await this.plugin.modelService.switchProvider(value, () => this.persistSettings());
+        this.revealApiKey = false;
+        this.activeSectionId = "connection";
+        this.display();
+      });
+    });
+    new import_obsidian4.Setting(containerEl).setName("API Key").setDesc(`Enter your ${activeConfig.label} API key.`).addText((text) => this.configureSecretInput(text, activeConfig)).addButton((btn) => btn.setButtonText(this.revealApiKey ? "Hide" : "Reveal").onClick(() => {
+      this.revealApiKey = !this.revealApiKey;
+      this.display();
+    })).addButton((btn) => btn.setButtonText("Clear").onClick(async () => {
+      activeConfig.apiKey = "";
+      this.revealApiKey = false;
+      await this.persistSettings();
+      this.display();
+    }));
+    if (this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl) {
+      new import_obsidian4.Setting(containerEl).setName("Base URL").setDesc("Override the API endpoint for compatible providers.").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(activeConfig.baseUrl).onChange(async (value) => {
+        activeConfig.baseUrl = value;
+        await this.persistSettings();
+      }));
+    }
+    new import_obsidian4.Setting(containerEl).setName("Model").setDesc("Choose the model loaded from the active provider.").addDropdown((drop) => {
+      if (activeConfig.model) {
+        drop.addOption(activeConfig.model, `${activeConfig.model} (Current)`);
+      } else {
+        drop.addOption("__empty__", "Select a model");
+      }
+      drop.setValue(activeConfig.model || "__empty__");
+      void this.loadDynamicModelOptions(drop, token);
+      drop.onChange(async (value) => {
+        if (value === "__loading__" || value === "__failed__" || value === "__empty__")
+          return;
+        await this.plugin.modelService.switchModel(value, () => this.persistSettings());
+        this.display();
+      });
+    });
+    const actions = containerEl.createDiv({ cls: "ocli-settings-actions" });
+    this.createActionButton(actions, "+ Add Provider", async () => {
       new AddProviderModal(this.app, async (label, baseUrl) => {
-        const key = "custom-" + Date.now();
+        const key = `custom-${Date.now()}`;
         settings.providers[key] = {
           type: "openai-compatible",
           label,
@@ -4886,157 +5340,196 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
           model: ""
         };
         settings.activeProvider = key;
-        await this.plugin.saveSettings();
+        await this.persistSettings();
+        this.revealApiKey = false;
+        this.activeSectionId = "connection";
         this.display();
       }).open();
-    }));
-    const isBuiltin = BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider);
-    if (!isBuiltin && activeConfig) {
-      providerActions.addButton((btn) => btn.setButtonText(`Delete "${activeConfig.label}"`).setWarning().onClick(async () => {
-        delete settings.providers[settings.activeProvider];
-        settings.activeProvider = "gemini";
-        await this.plugin.saveSettings();
-        this.display();
-        new import_obsidian4.Notice("Provider deleted");
-      }));
-    }
-    new import_obsidian4.Setting(containerEl).addButton((btn) => btn.setButtonText("Test Connection").onClick(async () => {
+    }, "accent");
+    this.createActionButton(actions, "Test Connection", async () => {
+      const label = activeConfig.label || "AI provider";
+      if (!activeConfig.apiKey.trim()) {
+        new import_obsidian4.Notice(`No API key configured for ${label}.`);
+        return;
+      }
       try {
-        const label = activeConfig?.label || "AI";
         new import_obsidian4.Notice(`Testing connection to ${label}...`);
         await this.plugin.modelService.updateSettings(this.plugin.settings);
         const success = await this.plugin.modelService.checkAvailability();
-        if (success) {
-          new import_obsidian4.Notice("\u2705 Connection successful!");
-        } else {
-          new import_obsidian4.Notice("\u274C Connection failed. Check API key and settings.");
-        }
+        new import_obsidian4.Notice(success ? "Connection successful." : "Connection failed. Check API key and settings.");
       } catch (error) {
-        new import_obsidian4.Notice(`\u274C Connection failed: ${error.message}`);
+        new import_obsidian4.Notice(`Connection failed: ${error.message}`);
       }
-    }));
+      this.display();
+    }, "primary");
+    const isBuiltin = BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider);
+    if (!isBuiltin) {
+      this.createActionButton(actions, `Delete "${activeConfig.label}"`, async () => {
+        delete settings.providers[settings.activeProvider];
+        settings.activeProvider = "gemini";
+        this.revealApiKey = false;
+        await this.persistSettings();
+        new import_obsidian4.Notice("Provider deleted");
+        this.display();
+      }, "danger");
+    }
+  }
+  configureSecretInput(text, config) {
+    text.setPlaceholder("sk-...");
+    text.setValue(config.apiKey);
+    text.onChange(async (value) => {
+      config.apiKey = value;
+      await this.persistSettings();
+    });
+    if (text.inputEl) {
+      const inputEl = text.inputEl;
+      inputEl.type = this.revealApiKey ? "text" : "password";
+      inputEl.autocomplete = "off";
+      inputEl.spellcheck = false;
+    }
+    return text;
+  }
+  renderRuntimeSection(containerEl) {
     new import_obsidian4.Setting(containerEl).setName("Context Window Limit").setDesc("Limit token usage. Higher values allow reading larger files but cost more.").addSlider((slider) => slider.setLimits(1e4, 1e6, 1e4).setValue(this.plugin.settings.contextWindow).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.contextWindow = value;
-      await this.plugin.saveSettings();
+      await this.persistSettings();
     }));
-    containerEl.createEl("h3", { text: "\u{1F6E1}\uFE0F Guardian Behavior", cls: "ocli-settings-header" });
-    new import_obsidian4.Setting(containerEl).setName("Enable Guardian").setDesc("Allow AI to passively analyze text and offer suggestions.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableGuardian).onChange(async (value) => {
-      this.plugin.settings.enableGuardian = value;
-      await this.plugin.saveSettings();
-      this.display();
-    }));
-    if (this.plugin.settings.enableGuardian) {
-      new import_obsidian4.Setting(containerEl).setName("Auto Mode").setDesc("Automatically analyze text after 5 seconds of inactivity.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.guardianAutoMode).onChange(async (value) => {
-        this.plugin.settings.guardianAutoMode = value;
-        await this.plugin.saveSettings();
-      }));
-      new import_obsidian4.Setting(containerEl).setName("Manual Mode Hotkey").setDesc("Configure the hotkey to manually trigger Guardian (Default: Mod+Shift+G).").addButton((btn) => btn.setButtonText("Configure Hotkey").onClick(() => {
-        this.app.setting.openTabById("hotkeys");
-        this.app.setting.activeTab.setQuery("Guardian: Manual Trigger");
-      }));
-      new import_obsidian4.Setting(containerEl).setName("Guardian Sensitivity").setDesc("Low (Manual) <-> High (Copilot Style)").addSlider((slider) => slider.setLimits(0, 100, 25).setValue(this.plugin.settings.guardianSensitivity).setDynamicTooltip().onChange(async (value) => {
-        this.plugin.settings.guardianSensitivity = value;
-        await this.plugin.saveSettings();
-      }));
-      new import_obsidian4.Setting(containerEl).setName("UI Style").setDesc("How suggestions appear in the editor.").addDropdown((drop) => drop.addOption("ghost", "Ghost Text (Inline)").addOption("gutter", "Gutter Dot (Subtle)").addOption("hybrid", "Hybrid (Both)").setValue(this.plugin.settings.guardianUIStyle).onChange(async (value) => {
-        this.plugin.settings.guardianUIStyle = value;
-        await this.plugin.saveSettings();
-      }));
-      new import_obsidian4.Setting(containerEl).setName("Privacy Mode").setDesc("Anonymize data before sending (Replace names/emails). Reduces accuracy.").addToggle((toggle) => toggle.setValue(this.plugin.settings.privacyMode).onChange(async (value) => {
-        this.plugin.settings.privacyMode = value;
-        await this.plugin.saveSettings();
-      }));
-      new import_obsidian4.Setting(containerEl).setName("Ignored Folders").setDesc('Path patterns to ignore (one per line). e.g. "Private/"').setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Private/\nSecrets/\nTemplates/").setValue(this.plugin.settings.ignoredFolders).onChange(async (value) => {
-        this.plugin.settings.ignoredFolders = value;
-        await this.plugin.saveSettings();
-      }));
-    }
-    containerEl.createEl("h3", { text: "\u26A1 Permissions & Capabilities", cls: "ocli-settings-header" });
-    new import_obsidian4.Setting(containerEl).setName("Allow File Creation").setDesc("Let AI create new notes (`/new`).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileCreation).onChange(async (value) => {
-      this.plugin.settings.allowFileCreation = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian4.Setting(containerEl).setName("Allow File Modification").setDesc("Let AI modify notes other than the one you are editing (e.g. Append to Daily Note).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileModification).onChange(async (value) => {
-      this.plugin.settings.allowFileModification = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian4.Setting(containerEl).setName("Allow Plugin Control").setDesc("WARNING: Let AI execute commands from OTHER plugins (Dataview, Kanban, etc).").setClass("gemini-danger-setting").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowPluginControl).onChange(async (value) => {
-      if (value)
-        new import_obsidian4.Notice("\u26A0\uFE0F Permission Granted: AI can now control your plugins.");
-      this.plugin.settings.allowPluginControl = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian4.Setting(containerEl).setName("Confirm Executions").setDesc("Human-in-the-loop: Always ask for confirmation before writing files or running commands.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmExecutions).onChange(async (value) => {
-      this.plugin.settings.confirmExecutions = value;
-      await this.plugin.saveSettings();
-    }));
-    containerEl.createEl("h3", { text: "\u{1F5A5}\uFE0F Terminal Appearance", cls: "ocli-settings-header" });
-    new import_obsidian4.Setting(containerEl).setName("Theme Style").addDropdown((drop) => drop.addOption("hacker-green", "Hacker Green").addOption("cyberpunk", "Cyberpunk Neon").addOption("obsidian-native", "Obsidian Native").setValue(this.plugin.settings.terminalTheme).onChange(async (value) => {
-      this.plugin.settings.terminalTheme = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian4.Setting(containerEl).setName("Font Size").addSlider((slider) => slider.setLimits(12, 24, 1).setValue(this.plugin.settings.terminalFontSize).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.terminalFontSize = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian4.Setting(containerEl).setName("Background Opacity").addSlider((slider) => slider.setLimits(0.5, 1, 0.05).setValue(this.plugin.settings.terminalOpacity).setDynamicTooltip().onChange(async (value) => {
-      this.plugin.settings.terminalOpacity = value;
-      await this.plugin.saveSettings();
-    }));
-    containerEl.createEl("h3", { text: "\u{1F9E0} System Persona", cls: "ocli-settings-header" });
     new import_obsidian4.Setting(containerEl).setName("Customize System Prompt").setDesc("Override the default AI personality.").addToggle((toggle) => toggle.setValue(this.plugin.settings.customizePrompt).onChange(async (value) => {
       this.plugin.settings.customizePrompt = value;
-      await this.plugin.saveSettings();
+      await this.persistSettings();
       this.display();
     }));
     if (this.plugin.settings.customizePrompt) {
       new import_obsidian4.Setting(containerEl).setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("You are a helpful assistant...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
         this.plugin.settings.systemPrompt = value;
-        await this.plugin.saveSettings();
+        await this.persistSettings();
       }));
-      new import_obsidian4.Setting(containerEl).addButton((btn) => btn.setButtonText("Restore Default Prompt").onClick(async () => {
+      const actions = containerEl.createDiv({ cls: "ocli-settings-actions" });
+      this.createActionButton(actions, "Restore Default Prompt", async () => {
         this.plugin.settings.systemPrompt = DEFAULT_SETTINGS.systemPrompt;
-        await this.plugin.saveSettings();
+        await this.persistSettings();
         this.display();
-      }));
+      });
     }
-    containerEl.createEl("h3", { text: "\u{1F4E8} WeChat Inbox", cls: "ocli-settings-header" });
-    new import_obsidian4.Setting(containerEl).setName("WeChat Inbox Path").setDesc('The file to monitor for new WeChat links (e.g., "Inbox.md").').addText((text) => text.setPlaceholder("Inbox.md").setValue(this.plugin.settings.wechatInboxPath).onChange(async (value) => {
+  }
+  renderGuardianSection(containerEl) {
+    new import_obsidian4.Setting(containerEl).setName("Enable Guardian").setDesc("Allow AI to passively analyze text and offer suggestions.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableGuardian).onChange(async (value) => {
+      this.plugin.settings.enableGuardian = value;
+      await this.persistSettings();
+      this.display();
+    }));
+    if (!this.plugin.settings.enableGuardian)
+      return;
+    new import_obsidian4.Setting(containerEl).setName("Auto Mode").setDesc("Automatically analyze text after 5 seconds of inactivity.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.guardianAutoMode).onChange(async (value) => {
+      this.plugin.settings.guardianAutoMode = value;
+      await this.persistSettings();
+    }));
+    new import_obsidian4.Setting(containerEl).setName("Manual Mode Hotkey").setDesc("Open the Obsidian hotkey settings for Guardian.").addButton((btn) => btn.setButtonText("Configure Hotkey").onClick(() => {
+      this.app.setting.openTabById("hotkeys");
+      this.app.setting.activeTab.setQuery("Guardian: Manual Trigger");
+    }));
+    new import_obsidian4.Setting(containerEl).setName("Guardian Sensitivity").setDesc("Low (manual) to high (copilot style).").addSlider((slider) => slider.setLimits(0, 100, 25).setValue(this.plugin.settings.guardianSensitivity).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.guardianSensitivity = value;
+      await this.persistSettings();
+    }));
+    new import_obsidian4.Setting(containerEl).setName("UI Style").setDesc("Choose how suggestions appear in the editor.").addDropdown((drop) => drop.addOption("ghost", "Ghost Text (Inline)").addOption("gutter", "Gutter Dot (Subtle)").addOption("hybrid", "Hybrid (Both)").setValue(this.plugin.settings.guardianUIStyle).onChange(async (value) => {
+      this.plugin.settings.guardianUIStyle = value;
+      await this.persistSettings();
+    }));
+    new import_obsidian4.Setting(containerEl).setName("Privacy Mode").setDesc("Anonymize names and emails before sending. Reduces accuracy.").addToggle((toggle) => toggle.setValue(this.plugin.settings.privacyMode).onChange(async (value) => {
+      this.plugin.settings.privacyMode = value;
+      await this.persistSettings();
+    }));
+    new import_obsidian4.Setting(containerEl).setName("Ignored Folders").setDesc("Path patterns to ignore, one per line.").setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Private/\nSecrets/\nTemplates/").setValue(this.plugin.settings.ignoredFolders).onChange(async (value) => {
+      this.plugin.settings.ignoredFolders = value;
+      await this.persistSettings();
+    }));
+  }
+  renderPermissionsSection(containerEl) {
+    new import_obsidian4.Setting(containerEl).setName("Allow File Creation").setDesc("Let AI create new notes (`/new`).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileCreation).onChange(async (value) => {
+      this.plugin.settings.allowFileCreation = value;
+      await this.persistSettings();
+    }));
+    new import_obsidian4.Setting(containerEl).setName("Allow File Modification").setDesc("Let AI modify notes other than the one you are editing.").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileModification).onChange(async (value) => {
+      this.plugin.settings.allowFileModification = value;
+      await this.persistSettings();
+    }));
+    new import_obsidian4.Setting(containerEl).setName("Allow Plugin Control").setDesc("Let AI execute commands from other plugins.").setClass("gemini-danger-setting").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowPluginControl).onChange(async (value) => {
+      if (value)
+        new import_obsidian4.Notice("Permission granted: AI can now control your plugins.");
+      this.plugin.settings.allowPluginControl = value;
+      await this.persistSettings();
+      this.display();
+    }));
+    new import_obsidian4.Setting(containerEl).setName("Confirm Executions").setDesc("Always ask for confirmation before writing files or running commands.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmExecutions).onChange(async (value) => {
+      this.plugin.settings.confirmExecutions = value;
+      await this.persistSettings();
+      this.display();
+    }));
+  }
+  renderAppearanceSection(containerEl) {
+    new import_obsidian4.Setting(containerEl).setName("Theme Style").setDesc("Adjust the terminal look and feel.").addDropdown((drop) => drop.addOption("hacker-green", "Hacker Green").addOption("cyberpunk", "Cyberpunk Neon").addOption("obsidian-native", "Obsidian Native").setValue(this.plugin.settings.terminalTheme).onChange(async (value) => {
+      this.plugin.settings.terminalTheme = value;
+      await this.persistSettings();
+    }));
+    new import_obsidian4.Setting(containerEl).setName("Font Size").addSlider((slider) => slider.setLimits(12, 24, 1).setValue(this.plugin.settings.terminalFontSize).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.terminalFontSize = value;
+      await this.persistSettings();
+    }));
+    new import_obsidian4.Setting(containerEl).setName("Background Opacity").addSlider((slider) => slider.setLimits(0.5, 1, 0.05).setValue(this.plugin.settings.terminalOpacity).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.terminalOpacity = value;
+      await this.persistSettings();
+    }));
+  }
+  renderCaptureSection(containerEl) {
+    new import_obsidian4.Setting(containerEl).setName("WeChat Inbox Path").setDesc("The file to monitor for new WeChat links.").addText((text) => text.setPlaceholder("Inbox.md").setValue(this.plugin.settings.wechatInboxPath).onChange(async (value) => {
       this.plugin.settings.wechatInboxPath = value;
-      await this.plugin.saveSettings();
+      await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("WeChat Storage Path").setDesc('The folder to store saved articles (e.g., "Clippings").').addText((text) => text.setPlaceholder("Clippings").setValue(this.plugin.settings.wechatStoragePath).onChange(async (value) => {
+    new import_obsidian4.Setting(containerEl).setName("WeChat Storage Path").setDesc("The folder to store saved articles.").addText((text) => text.setPlaceholder("Clippings").setValue(this.plugin.settings.wechatStoragePath).onChange(async (value) => {
       this.plugin.settings.wechatStoragePath = value;
-      await this.plugin.saveSettings();
+      await this.persistSettings();
     }));
-    containerEl.createEl("h3", { text: "\u{1F4DA} Knowledge Compiler", cls: "ocli-settings-header" });
-    const knowledgeDesc = containerEl.createEl("p", { cls: "setting-item-description" });
-    knowledgeDesc.setText("Compile notes from watched folders into a structured knowledge wiki.");
-    new import_obsidian4.Setting(containerEl).setName("Auto Compile").setDesc("Automatically compile notes when they are created or modified in watched folders.").addToggle((toggle) => toggle.setValue(this.plugin.settings.knowledgeAutoCompile).onChange(async (value) => {
+  }
+  renderKnowledgeSection(containerEl) {
+    new import_obsidian4.Setting(containerEl).setName("Auto Compile").setDesc("Compile notes automatically when watched folders change.").addToggle((toggle) => toggle.setValue(this.plugin.settings.knowledgeAutoCompile).onChange(async (value) => {
       this.plugin.settings.knowledgeAutoCompile = value;
-      await this.plugin.saveSettings();
+      await this.persistSettings();
     }));
     new import_obsidian4.Setting(containerEl).setName("Wiki Output Folder").setDesc("The folder where compiled wiki pages are stored.").addText((text) => text.setPlaceholder("Knowledge Wiki").setValue(this.plugin.settings.knowledgeWikiFolder).onChange(async (value) => {
       this.plugin.settings.knowledgeWikiFolder = value || "Knowledge Wiki";
-      await this.plugin.saveSettings();
+      await this.persistSettings();
     }));
     new import_obsidian4.Setting(containerEl).setName("Max Compile Batch").setDesc("Maximum number of notes to compile in a single batch.").addSlider((slider) => slider.setLimits(1, 200, 1).setValue(this.plugin.settings.knowledgeMaxCompileBatch).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.knowledgeMaxCompileBatch = value;
-      await this.plugin.saveSettings();
+      await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Source Folders").setDesc("Folders to watch for notes to compile (one per line).").setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Clippings\nReading Notes").setValue((this.plugin.settings.knowledgeSourceFolders || []).join("\n")).onChange(async (value) => {
-      this.plugin.settings.knowledgeSourceFolders = value.split("\n").map((s) => s.trim()).filter((s) => s.length > 0);
-      await this.plugin.saveSettings();
+    new import_obsidian4.Setting(containerEl).setName("Source Folders").setDesc("Folders to watch, one per line.").setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Clippings\nReading Notes").setValue((this.plugin.settings.knowledgeSourceFolders || []).join("\n")).onChange(async (value) => {
+      this.plugin.settings.knowledgeSourceFolders = value.split("\n").map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+      await this.persistSettings();
     }));
-    containerEl.createEl("h3", { text: "\u{1F50C} Plugin Skill Generator", cls: "ocli-settings-header" });
-    new import_obsidian4.Setting(containerEl).setName("Auto-generate plugin skills").setDesc("Automatically generate AI skills for installed plugins on startup.").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoGeneratePluginSkills).onChange(async (value) => {
+  }
+  renderPluginSkillsSection(containerEl) {
+    new import_obsidian4.Setting(containerEl).setName("Auto-generate plugin skills").setDesc("Generate AI skills for installed plugins on startup.").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoGeneratePluginSkills).onChange(async (value) => {
       this.plugin.settings.autoGeneratePluginSkills = value;
-      await this.plugin.saveSettings();
+      await this.persistSettings();
+      this.display();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Excluded plugins").setDesc("Plugin IDs to exclude from skill generation (comma-separated).").addText((text) => text.setPlaceholder("plugin-id-1, plugin-id-2").setValue(this.plugin.settings.pluginSkillExcludeList.join(", ")).onChange(async (value) => {
-      this.plugin.settings.pluginSkillExcludeList = value.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-      await this.plugin.saveSettings();
+    new import_obsidian4.Setting(containerEl).setName("Excluded plugins").setDesc("Plugin IDs to exclude from skill generation, comma-separated.").addText((text) => text.setPlaceholder("plugin-id-1, plugin-id-2").setValue(this.plugin.settings.pluginSkillExcludeList.join(", ")).onChange(async (value) => {
+      this.plugin.settings.pluginSkillExcludeList = value.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+      await this.persistSettings();
     }));
+  }
+  createActionButton(containerEl, label, onClick, variant = "default") {
+    const button = containerEl.createEl("button", {
+      text: label,
+      cls: `ocli-settings-action is-${variant}`,
+      attr: { type: "button" }
+    });
+    button.addEventListener("click", () => {
+      void onClick();
+    });
+    return button;
   }
 };
 var AddProviderModal = class extends import_obsidian4.Modal {
@@ -5050,11 +5543,11 @@ var AddProviderModal = class extends import_obsidian4.Modal {
     contentEl.createEl("h3", { text: "Add OpenAI Compatible Provider" });
     let labelValue = "";
     let baseUrlValue = "";
-    new import_obsidian4.Setting(contentEl).setName("Provider Name").setDesc("Display name (e.g., SiliconFlow, Groq, Ollama)").addText((text) => text.setPlaceholder("My Provider").onChange((v) => {
-      labelValue = v;
+    new import_obsidian4.Setting(contentEl).setName("Provider Name").setDesc("Display name (for example: SiliconFlow, Groq, Ollama)").addText((text) => text.setPlaceholder("My Provider").onChange((value) => {
+      labelValue = value;
     }));
-    new import_obsidian4.Setting(contentEl).setName("Base URL").setDesc("API endpoint URL").addText((text) => text.setPlaceholder("https://api.example.com/v1").onChange((v) => {
-      baseUrlValue = v;
+    new import_obsidian4.Setting(contentEl).setName("Base URL").setDesc("API endpoint URL").addText((text) => text.setPlaceholder("https://api.example.com/v1").onChange((value) => {
+      baseUrlValue = value;
     }));
     new import_obsidian4.Setting(contentEl).addButton((btn) => btn.setButtonText("Add").setCta().onClick(() => {
       if (!labelValue.trim()) {
@@ -5075,7 +5568,7 @@ var AddProviderModal = class extends import_obsidian4.Modal {
 };
 
 // src/ui/shell-view.ts
-var import_obsidian9 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 
 // src/ui/chat-controller.ts
 var import_obsidian5 = require("obsidian");
@@ -5087,10 +5580,11 @@ var ChatController = class {
   onMessageAdded;
   onStatusChanged;
   onStreamEvent;
-  // 文件搜索缓存
+  activeStreamController = null;
+  // 鏂囦欢鎼滅储缂撳瓨
   fileSearchCache = null;
   FILE_SEARCH_CACHE_TTL = 5e3;
-  // 5秒缓存
+  // 5绉掔紦瀛?
   fileSearchCacheCleanupTimer = null;
   constructor(options) {
     this.app = options.app;
@@ -5110,7 +5604,7 @@ var ChatController = class {
     this.api.clearSession();
     this.addMessage("system", "Session cleared.");
   }
-  // 清理过期的文件搜索缓存
+  // 娓呯悊杩囨湡鐨勬枃浠舵悳绱㈢紦瀛?
   cleanupExpiredFileSearchCache() {
     if (this.fileSearchCache) {
       const now = Date.now();
@@ -5120,8 +5614,10 @@ var ChatController = class {
       }
     }
   }
-  // 清理资源（在组件卸载时调用）
+  // 娓呯悊璧勬簮锛堝湪缁勪欢鍗歌浇鏃惰皟鐢級
   cleanup() {
+    this.activeStreamController?.abort();
+    this.activeStreamController = null;
     if (this.fileSearchCacheCleanupTimer !== null) {
       window.clearInterval(this.fileSearchCacheCleanupTimer);
       this.fileSearchCacheCleanupTimer = null;
@@ -5131,38 +5627,120 @@ var ChatController = class {
   async processCommand(query, context = [], selection = "") {
     if (!query.trim())
       return;
+    const normalizedContext = this.normalizeContextItems(context);
     if (query.startsWith("/")) {
       await this.handleSlashCommand(query);
       return;
     }
     this.addMessage("user", query);
     this.setResponding(true);
+    const streamController = new AbortController();
+    this.activeStreamController = streamController;
+    let fullText = "";
+    let sawDone = false;
     try {
       if (this.onStreamEvent) {
-        let fullText = "";
-        for await (const event of this.api.chatStream(query, context, selection)) {
-          this.onStreamEvent(event);
+        const isWriteRequest = this.isFileWriteRequest(query);
+        let approvalRequest = null;
+        let attemptedFileWrite = false;
+        let successfulFileWrite = false;
+        let lastWriteError = "";
+        const writeToolArgs = /* @__PURE__ */ new Map();
+        const bufferedTextEvents = [];
+        for await (const event of this.api.chatStream(query, normalizedContext, selection, streamController.signal)) {
+          if (event.type === "tool_call" && this.isFileWriteTool(event.name)) {
+            attemptedFileWrite = true;
+            const calls = writeToolArgs.get(event.name) || [];
+            calls.push(event.args || {});
+            writeToolArgs.set(event.name, calls);
+          }
+          if (event.type === "tool_result") {
+            const args = this.shiftToolArgs(writeToolArgs, event.name);
+            if (this.isFileWriteTool(event.name)) {
+              attemptedFileWrite = true;
+              if (this.isSuccessfulToolResult(event.result)) {
+                successfulFileWrite = true;
+              } else {
+                const error = this.getWriteToolError(event.result);
+                if (error)
+                  lastWriteError = error;
+              }
+            }
+            const nextApproval = this.toApprovalRequest(event.result);
+            if (nextApproval) {
+              approvalRequest = nextApproval;
+              this.addApprovalMessage(nextApproval);
+            } else if (this.isFileWriteTool(event.name)) {
+              await this.openFileFromToolResult(event.name, event.result, args);
+              if (successfulFileWrite && bufferedTextEvents.length > 0) {
+                for (const bufferedEvent of bufferedTextEvents) {
+                  this.onStreamEvent(bufferedEvent);
+                }
+                bufferedTextEvents.length = 0;
+              }
+            }
+          }
+          if (event.type === "text_delta") {
+            if (approvalRequest || isWriteRequest && !successfulFileWrite) {
+              bufferedTextEvents.push(event);
+            } else {
+              this.onStreamEvent(event);
+            }
+          } else if (event.type === "done") {
+            if (approvalRequest || isWriteRequest && !successfulFileWrite) {
+              this.onStreamEvent({ ...event, text: "" });
+            } else {
+              this.onStreamEvent(event);
+            }
+          } else if (event.type === "tool_call" || event.type === "tool_result") {
+            this.onStreamEvent(event);
+          } else if (event.type === "error") {
+            this.onStreamEvent(event);
+          }
           if (event.type === "done") {
-            fullText = event.text;
+            sawDone = true;
+            fullText = approvalRequest ? "" : event.text;
           } else if (event.type === "error") {
             this.addMessage("system", `Error: ${event.message}`);
             return;
+          } else if (event.type === "text_delta") {
+            fullText += event.content;
           }
         }
-        const msg = {
-          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-          role: "ai",
-          content: fullText,
-          timestamp: Date.now()
-        };
-        this.messages.push(msg);
+        if (!approvalRequest) {
+          if (isWriteRequest && !successfulFileWrite) {
+            this.addMessage(
+              "system",
+              this.getFileWriteFailureMessage(attemptedFileWrite, lastWriteError)
+            );
+          } else {
+            if (sawDone || fullText) {
+              const msg = {
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                role: "ai",
+                content: fullText,
+                timestamp: Date.now(),
+                metadata: sawDone ? void 0 : { interrupted: true }
+              };
+              this.messages.push(msg);
+            }
+          }
+        }
       } else {
-        const response = await this.api.chat(query, context, selection);
+        const response = await this.api.chat(query, normalizedContext, selection);
         this.addMessage("ai", response);
       }
     } catch (error) {
+      if (this.isAbortError(error)) {
+        this.onStreamEvent?.({ type: "done", text: fullText, interrupted: true });
+        this.addMessage("system", "Response stopped.");
+        return;
+      }
       this.handleError(error);
     } finally {
+      if (this.activeStreamController === streamController) {
+        this.activeStreamController = null;
+      }
       this.setResponding(false);
     }
   }
@@ -5251,27 +5829,34 @@ ${toolsList}`);
 ${JSON.stringify(result, null, 2)}
 \`\`\``;
   }
-  handleStructuredResult(result) {
-    if (result?.approval_required) {
-      this.addApprovalMessage({
-        action: result.action,
-        target: result.target,
-        args: result.args || {},
-        message: result.message || "Approval required."
-      });
+  toApprovalRequest(result) {
+    if (!result?.approval_required)
+      return null;
+    return {
+      action: result.action,
+      target: result.target,
+      args: result.args || {},
+      message: result.message || "Approval required."
+    };
+  }
+  handleStructuredResult(result, action, args = {}) {
+    const approvalRequest = this.toApprovalRequest(result);
+    if (approvalRequest) {
+      this.addApprovalMessage(approvalRequest);
       return;
     }
     if (result?.error) {
       this.addMessage("system", `Error: ${result.error}`);
       return;
     }
+    void this.openFileFromToolResult(action || "", result, args);
     this.addMessage("system", this.formatSlashCommandResult(result));
   }
   async approveApproval(request) {
     this.setResponding(true);
     try {
       const result = await this.api.executeApprovedAction(request.action, request.args);
-      this.handleStructuredResult(result);
+      this.handleStructuredResult(result, request.action, request.args);
     } catch (error) {
       this.handleError(error);
     } finally {
@@ -5280,6 +5865,13 @@ ${JSON.stringify(result, null, 2)}
   }
   cancelApproval(request) {
     this.addMessage("system", `Cancelled: ${request.target}`);
+  }
+  cancelActiveStream() {
+    if (!this.activeStreamController || this.activeStreamController.signal.aborted) {
+      return false;
+    }
+    this.activeStreamController.abort();
+    return true;
   }
   async handleOpenFile(searchTerm) {
     const now = Date.now();
@@ -5317,6 +5909,48 @@ ${list}`);
 ${list}`);
     }
   }
+  isFileWriteRequest(message) {
+    return isFileWriteRequest(message);
+  }
+  isFileWriteTool(name) {
+    return isFileWriteToolName(name);
+  }
+  shiftToolArgs(toolArgs, name) {
+    const calls = toolArgs.get(name);
+    if (!calls || calls.length === 0)
+      return {};
+    const args = calls.shift() || {};
+    if (calls.length === 0)
+      toolArgs.delete(name);
+    return args;
+  }
+  isSuccessfulToolResult(result) {
+    return isSuccessfulWriteToolResult(result);
+  }
+  getResultPath(action, result, args) {
+    return getFileWriteResultPath(action, result, args);
+  }
+  getWriteToolError(result) {
+    return getFileWriteError(result);
+  }
+  getFileWriteFailureMessage(attemptedWrite, lastError) {
+    return buildFileWriteFailureMessage(attemptedWrite, lastError);
+  }
+  async openFileFromToolResult(action, result, args = {}) {
+    if (!this.isSuccessfulToolResult(result))
+      return;
+    const path = this.getResultPath(action, result, args);
+    if (!path)
+      return;
+    try {
+      const file = this.app.vault?.getAbstractFileByPath?.(path);
+      if (!file)
+        return;
+      await this.app.workspace?.getLeaf?.(false)?.openFile?.(file);
+    } catch (error) {
+      logger.warn(`Unable to open file after write: ${path}`, "ChatController.openFileFromToolResult", error);
+    }
+  }
   addMessage(role, content, approval) {
     const msg = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
@@ -5345,43 +5979,60 @@ ${list}`);
       msg = error.message;
     this.addMessage("system", `Error: ${msg}`);
   }
+  isAbortError(error) {
+    return error?.name === "AbortError";
+  }
+  normalizeContextItems(context) {
+    if (Array.isArray(context)) {
+      return context;
+    }
+    const text = typeof context === "string" ? context.trim() : "";
+    if (!text) {
+      return [];
+    }
+    return [{
+      id: "legacy-selection-context",
+      type: "selection",
+      data: "Editor selection",
+      summary: "Editor selection",
+      content: text
+    }];
+  }
   /**
-   * 后台执行 file-back，不阻塞 UI
-   * 手动模式（👍按钮）和自动模式共用
+   * 鍚庡彴鎵ц file-back锛屼笉闃诲 UI
+   * 鎵嬪姩妯″紡锛堭煈嶆寜閽級鍜岃嚜鍔ㄦā寮忓叡鐢?
    */
   runFileBackInBackground(msgId) {
     const targetMsg = this.messages.find((m) => m.id === msgId && m.role === "ai");
     if (!targetMsg)
       return;
-    const fileBackPrompt = `\u7528\u6237\u5BF9\u4EE5\u4E0B\u56DE\u7B54\u70B9\u8D5E\uFF0C\u8BF7\u5C06\u5176\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\u4F7F\u7528 file_back_knowledge \u5DE5\u5177\uFF0C\u63D0\u53D6\u6807\u9898\u548C\u6838\u5FC3\u5185\u5BB9\uFF0C\u5E76\u63D0\u53D6\u76F8\u5173\u7684 topics \u4E3B\u9898\u6807\u7B7E\u3002
-
-\u56DE\u7B54\u5185\u5BB9\uFF1A
-${targetMsg.content}`;
+    const fileBackPrompt = `\u9422\u3126\u57DB\u7035\u901B\u4E92\u6D93\u5B2A\u6D16\u7EDB\u65C2\u5063\u74A7\u70C7\u7D1D\u7487\u5CF0\u76A2\u934F\u8DFA\u7D8A\u5997\uFF45\u57CC\u942D\u30E8\u7611\u6434\u64B1\u20AC\u5099\u5A07\u9422?file_back_knowledge \u5BB8\u30E5\u53FF\u951B\u5C7E\u5F41\u9359\u6828\u7223\u68F0\u6A3A\u62F0\u93CD\u7A3F\u7E3E\u9350\u546D\uE190\u951B\u5C7D\u82DF\u93BB\u612C\u5F47\u9429\u7A3F\u53E7\u9428?topics \u6D93\u5A5A\uE57D\u93CD\u56E9\uE137\u9286\u4FD3n
+\u9365\u70B5\u74DF\u9350\u546D\uE190\u951B\u6B55n${targetMsg.content}`;
     this.api.chat(fileBackPrompt, [], "").then(() => {
-      this.addMessage("system", "\u5DF2\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002");
+      this.addMessage("system", "Archived to the knowledge wiki.");
     }).catch((error) => {
       logger.error("File-back failed", error, "ChatController");
     });
   }
   /**
-   * 自动 file-back 已移除：改为 AI 在 query_knowledge 流程中自主判断是否调用 file_back_knowledge
-   * 手动模式保留：用户点赞（👍）时通过 /file-back 命令触发
+   * 鑷姩 file-back 宸茬Щ闄わ細鏀逛负 AI 鍦?query_knowledge 娴佺▼涓嚜涓诲垽鏂槸鍚﹁皟鐢?file_back_knowledge
+   * 鎵嬪姩妯″紡淇濈暀锛氱敤鎴风偣璧烇紙馃憤锛夋椂閫氳繃 /file-back 鍛戒护瑙﹀彂
    */
   /**
-   * /wiki:compile [path] — 编译笔记到知识 wiki
-   * 无参数：编译当前笔记 + 所有 pending
-   * 文件路径：编译指定文件
-   * 目录路径：扫描目录下所有 .md 注册并编译
+   * /wiki:compile [path] 鈥?缂栬瘧绗旇鍒扮煡璇?wiki
+   * 鏃犲弬鏁帮細缂栬瘧褰撳墠绗旇 + 鎵€鏈?pending
+   * 鏂囦欢璺緞锛氱紪璇戞寚瀹氭枃浠?
+   * 鐩綍璺緞锛氭壂鎻忕洰褰曚笅鎵€鏈?.md 娉ㄥ唽骞剁紪璇?
    */
   async handleForget(field) {
     const f = field.trim().toLowerCase();
     if (!f) {
-      this.addMessage("system", "\u7528\u6CD5: `/forget <field>` \u6216 `/forget all`\n\n\u53EF\u9057\u5FD8\u5B57\u6BB5: name, profession, expertise, preferences, workflows, projects, goals, all");
+      this.addMessage("system", "\u9422\u3126\u7876: `/forget <field>` \u93B4?`/forget all`\n\n\u9359\uE21E\u4ED0\u8E47\u6A3A\u74E7\u5A08? name, profession, expertise, preferences, workflows, projects, goals, all");
       return;
     }
     const profile = this.api.getUserProfile();
     if (!profile) {
-      this.addMessage("system", "\u6682\u65E0\u7528\u6237\u8BB0\u5FC6\u6570\u636E\u3002");
+      this.addMessage("system", "No user memory data available.");
       return;
     }
     if (f === "all") {
@@ -5393,36 +6044,36 @@ ${targetMsg.content}`;
         workflows: [],
         context: { currentProjects: [], goals: [], challenges: [] }
       });
-      this.addMessage("system", "\u5DF2\u6E05\u9664\u6240\u6709\u7528\u6237\u8BB0\u5FC6\u3002");
+      this.addMessage("system", "Cleared all remembered user data.");
     } else if (f === "name") {
       await this.api.updateProfile({ name: "" });
-      this.addMessage("system", "\u5DF2\u9057\u5FD8: name");
+      this.addMessage("system", "\u5BB8\u67E5\u4ED0\u8E47? name");
     } else if (f === "profession") {
       await this.api.updateProfile({ profession: "" });
-      this.addMessage("system", "\u5DF2\u9057\u5FD8: profession");
+      this.addMessage("system", "\u5BB8\u67E5\u4ED0\u8E47? profession");
     } else if (f === "expertise") {
       await this.api.updateProfile({ expertise: [] });
-      this.addMessage("system", "\u5DF2\u9057\u5FD8: expertise");
+      this.addMessage("system", "\u5BB8\u67E5\u4ED0\u8E47? expertise");
     } else if (f === "preferences") {
       await this.api.updateProfile({ preferences: { language: "zh-CN", responseStyle: "balanced", topics: [] } });
-      this.addMessage("system", "\u5DF2\u9057\u5FD8: preferences");
+      this.addMessage("system", "\u5BB8\u67E5\u4ED0\u8E47? preferences");
     } else if (f === "workflows") {
       await this.api.updateProfile({ workflows: [] });
-      this.addMessage("system", "\u5DF2\u9057\u5FD8: workflows");
+      this.addMessage("system", "\u5BB8\u67E5\u4ED0\u8E47? workflows");
     } else if (f === "projects") {
       await this.api.updateProfile({ context: { ...profile.context, currentProjects: [] } });
-      this.addMessage("system", "\u5DF2\u9057\u5FD8: projects");
+      this.addMessage("system", "\u5BB8\u67E5\u4ED0\u8E47? projects");
     } else if (f === "goals") {
       await this.api.updateProfile({ context: { ...profile.context, goals: [] } });
-      this.addMessage("system", "\u5DF2\u9057\u5FD8: goals");
+      this.addMessage("system", "\u5BB8\u67E5\u4ED0\u8E47? goals");
     } else {
-      this.addMessage("system", `\u672A\u77E5\u5B57\u6BB5: ${f}
-\u53EF\u9057\u5FD8\u5B57\u6BB5: name, profession, expertise, preferences, workflows, projects, goals, all`);
+      this.addMessage("system", `\u93C8\uE046\u7161\u701B\u6941\uE18C: ${f}
+\u9359\uE21E\u4ED0\u8E47\u6A3A\u74E7\u5A08? name, profession, expertise, preferences, workflows, projects, goals, all`);
     }
   }
   async handleNewNote(argStr) {
     if (!argStr.trim()) {
-      this.addMessage("system", "\u7528\u6CD5: `/new <title>` \u6216 `/new <title> <content>`");
+      this.addMessage("system", "\u9422\u3126\u7876: `/new <title>` \u93B4?`/new <title> <content>`");
       return;
     }
     const firstNewline = argStr.indexOf("\n");
@@ -5432,57 +6083,56 @@ ${targetMsg.content}`;
     try {
       const existing = this.app.vault.getAbstractFileByPath(path);
       if (existing) {
-        this.addMessage("system", `\u6587\u4EF6\u5DF2\u5B58\u5728: ${path}`);
+        this.addMessage("system", `\u93C2\u56E6\u6B22\u5BB8\u63D2\u74E8\u9366? ${path}`);
         return;
       }
       const file = await this.app.vault.create(path, content);
       const leaf = this.app.workspace.getLeaf(false);
       await leaf.openFile(file);
-      this.addMessage("system", `\u5DF2\u521B\u5EFA\u5E76\u6253\u5F00: [[${path}]]`);
+      this.addMessage("system", `\u5BB8\u63D2\u57B1\u5BE4\u54C4\u82DF\u93B5\u64B3\u7D11: [[${path}]]`);
     } catch (e) {
-      this.addMessage("system", `\u521B\u5EFA\u5931\u8D25: ${e.message}`);
+      this.addMessage("system", `\u9352\u6D98\u7F13\u6FB6\u8FAB\u89E6: ${e.message}`);
     }
   }
   async handleEdit(instruction) {
     if (!instruction.trim()) {
-      this.addMessage("system", "\u7528\u6CD5: \u5148\u5728\u7F16\u8F91\u5668\u4E2D\u9009\u4E2D\u6587\u672C\uFF0C\u7136\u540E `/edit <\u6307\u4EE4>`\n\u4F8B: `/edit \u7FFB\u8BD1\u6210\u82F1\u6587`");
+      this.addMessage("system", "Usage: select some text first, then run `/edit <instruction>`.\nExample: `/edit translate to English`");
       return;
     }
     const activeView = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
     const editor = activeView?.editor;
     const selection = editor?.getSelection();
     if (!selection) {
-      this.addMessage("system", "\u8BF7\u5148\u5728\u7F16\u8F91\u5668\u4E2D\u9009\u4E2D\u8981\u7F16\u8F91\u7684\u6587\u672C\u3002");
+      this.addMessage("system", "Please select the text you want to edit first.");
       return;
     }
     this.setResponding(true);
     try {
-      const prompt = `\u8BF7\u6839\u636E\u4EE5\u4E0B\u6307\u4EE4\u4FEE\u6539\u6587\u672C\uFF0C\u53EA\u8FD4\u56DE\u4FEE\u6539\u540E\u7684\u6587\u672C\uFF0C\u4E0D\u8981\u89E3\u91CA\u3002
+      const prompt = `\u7487\u950B\u7274\u93B9\uE1BB\u4E92\u6D93\u5B2B\u5BDA\u6D60\u3084\u6168\u93C0\u89C4\u6783\u93C8\uE10A\u7D1D\u9359\uE047\u7E51\u9365\u70B0\u6168\u93C0\u7470\u6097\u9428\u52EC\u6783\u93C8\uE10A\u7D1D\u6D93\u5D88\uE6E6\u7459\uFF49\u5674\u9286\u4FD3n
+\u93B8\u56E6\u62A4: ${instruction}
 
-\u6307\u4EE4: ${instruction}
-
-\u539F\u6587:
+\u9358\u71B8\u6783:
 ${selection}`;
       const result = await this.api.chat(prompt, [], selection);
       this.addMessage("ai", result);
     } catch (e) {
-      this.addMessage("system", `\u7F16\u8F91\u5931\u8D25: ${e.message}`);
+      this.addMessage("system", `\u7F02\u682C\u7DEB\u6FB6\u8FAB\u89E6: ${e.message}`);
     } finally {
       this.setResponding(false);
     }
   }
   async handleSave(url) {
     if (!url.trim()) {
-      this.addMessage("system", "\u7528\u6CD5: `/save <url>`\n\u652F\u6301: \u7F51\u9875\u3001YouTube\u3001Bilibili\u3001\u5FAE\u4FE1\u516C\u4F17\u53F7");
+      this.addMessage("system", "\u9422\u3126\u7876: `/save <url>`\n\u93C0\uE21B\u5BD4: \u7F03\u6226\u3009\u9286\u4E4AouTube\u9286\u4E05ilibili\u9286\u4F78\u4E95\u6DC7\u2033\u53D5\u6D7C\u6940\u5F7F");
       return;
     }
     this.setResponding(true);
     try {
-      const prompt = `\u8BF7\u4F7F\u7528 save_webpage \u5DE5\u5177\u4FDD\u5B58\u8FD9\u4E2A\u94FE\u63A5: ${url.trim()}`;
+      const prompt = `\u7487\u8702\u5A07\u9422?save_webpage \u5BB8\u30E5\u53FF\u6DC7\u6FC6\u74E8\u6769\u6B0E\u91DC\u95BE\u70AC\u5E34: ${url.trim()}`;
       const result = await this.api.chat(prompt, [], "");
       this.addMessage("ai", result);
     } catch (e) {
-      this.addMessage("system", `\u4FDD\u5B58\u5931\u8D25: ${e.message}`);
+      this.addMessage("system", `\u6DC7\u6FC6\u74E8\u6FB6\u8FAB\u89E6: ${e.message}`);
     } finally {
       this.setResponding(false);
     }
@@ -5506,14 +6156,14 @@ ${selection}`;
     let help = `## Shell Commands
 
 `;
-    help += localCommands.map((entry) => `- \`${entry.command}\` \u2014 ${entry.description}`).join("\n");
+    help += localCommands.map((entry) => `- \`${entry.command}\` \u9225?${entry.description}`).join("\n");
     if (skillCommands.length > 0) {
       help += `
 
 ## Skill Commands
 
 `;
-      help += skillCommands.map((entry) => `- \`${entry.command}\` \u2014 ${entry.description}`).join("\n");
+      help += skillCommands.map((entry) => `- \`${entry.command}\` \u9225?${entry.description}`).join("\n");
     }
     help += `
 
@@ -5523,22 +6173,22 @@ Type \`/\` to browse commands and \`@\` to mention files.`;
   showLegacyHelp() {
     const help = `## Shell Commands
 
-| \u547D\u4EE4 | \u8BF4\u660E |
+| Command | Description |
 |------|------|
-| \`/clear\` | \u6E05\u9664\u4F1A\u8BDD\u5386\u53F2 |
-| \`/profile\` | \u67E5\u770B\u7528\u6237\u753B\u50CF |
-| \`/forget [field]\` | \u9057\u5FD8\u7528\u6237\u8BB0\u5FC6 (name/profession/expertise/preferences/workflows/projects/goals/all) |
-| \`/new <title>\` | \u521B\u5EFA\u65B0\u7B14\u8BB0 |
-| \`/edit <\u6307\u4EE4>\` | AI \u7F16\u8F91\u9009\u4E2D\u6587\u672C |
-| \`/open <file>\` | \u6253\u5F00\u6587\u4EF6 |
-| \`/save <url>\` | \u4FDD\u5B58\u7F51\u9875/\u89C6\u9891\u5230 vault |
-| \`/tools\` | \u5217\u51FA\u53EF\u7528\u5DE5\u5177 |
-| \`/wiki:compile [path]\` | \u7F16\u8BD1\u7B14\u8BB0\u5230\u77E5\u8BC6 wiki |
-| \`/wiki:index\` | \u6253\u5F00\u77E5\u8BC6\u7D22\u5F15 |
-| \`/wiki:lint\` | \u77E5\u8BC6\u5E93\u5065\u5EB7\u68C0\u67E5 |
-| \`/help\` | \u663E\u793A\u672C\u5E2E\u52A9 |
+| \`/clear\` | Clear session history |
+| \`/profile\` | View the user profile |
+| \`/forget [field]\` | Forget saved user memory |
+| \`/new <title>\` | Create a new note |
+| \`/edit <instruction>\` | AI edit the selected text |
+| \`/open <file>\` | Open a file |
+| \`/save <url>\` | Save a webpage or video into the vault |
+| \`/tools\` | List available tools |
+| \`/wiki:compile [path]\` | Compile notes into the knowledge wiki |
+| \`/wiki:index\` | Open the knowledge wiki index |
+| \`/wiki:lint\` | Run the knowledge wiki health check |
+| \`/help\` | Show this help |
 
-**\u63D0\u793A**: \u8F93\u5165 \`/\` \u67E5\u770B\u547D\u4EE4\u81EA\u52A8\u8865\u5168\uFF0C\u8F93\u5165 \`@\` \u5F15\u7528\u6587\u4EF6\u3002`;
+**Tip**: Type \`/\` for command suggestions and \`@\` to mention files.`;
     this.addMessage("system", help);
   }
   async handleWikiCompile(pathArg) {
@@ -5546,7 +6196,7 @@ Type \`/\` to browse commands and \`@\` to mention files.`;
     const plugin = this.app.plugins?.plugins?.["obsidian-cli"];
     const runtime = plugin?.knowledgeRuntime;
     if (!runtime) {
-      this.addMessage("system", "Knowledge \u7CFB\u7EDF\u672A\u521D\u59CB\u5316\u3002");
+      this.addMessage("system", "Knowledge system is not initialized.");
       return;
     }
     this.setResponding(true);
@@ -5554,25 +6204,25 @@ Type \`/\` to browse commands and \`@\` to mention files.`;
       if (!path) {
         const activeFile = this.app.workspace.getActiveFile();
         if (activeFile) {
-          this.addMessage("system", `\u7F16\u8BD1: ${activeFile.path}...`);
+          this.addMessage("system", `\u7F02\u682C\u7627: ${activeFile.path}...`);
           const r = await runtime.compileByPath(activeFile.path);
-          this.addMessage("system", `\u5B8C\u6210: \u6CE8\u518C ${r.registered}\uFF0C\u6210\u529F ${r.success}\uFF0C\u5931\u8D25 ${r.failed}`);
+          this.addMessage("system", `\u7039\u5C7E\u579A: \u5A09\u3125\u553D ${r.registered}\u951B\u5C7E\u579A\u9354?${r.success}\u951B\u5C7D\u3051\u7490?${r.failed}`);
         }
         const maxBatch = runtime.settings.knowledgeMaxCompileBatch || 50;
         const result = await runtime.compiler.compileAllPending(maxBatch, (current, total, noteId) => {
-          this.addMessage("system", `[${current}/${total}] \u7F16\u8BD1: ${noteId}`);
+          this.addMessage("system", `[${current}/${total}] \u7F02\u682C\u7627: ${noteId}`);
         });
         if (result.success > 0) {
           await runtime.indexer.rebuildIndex();
         }
-        this.addMessage("system", `\u6279\u91CF\u7F16\u8BD1\u5B8C\u6210: ${result.success} \u6210\u529F, ${result.failed} \u5931\u8D25`);
+        this.addMessage("system", `\u93B5\u5F52\u567A\u7F02\u682C\u7627\u7039\u5C7E\u579A: ${result.success} \u93B4\u612C\u59DB, ${result.failed} \u6FB6\u8FAB\u89E6`);
       } else {
-        this.addMessage("system", `\u7F16\u8BD1: ${path}...`);
+        this.addMessage("system", `\u7F02\u682C\u7627: ${path}...`);
         const r = await runtime.compileByPath(path);
-        this.addMessage("system", `\u5B8C\u6210: \u6CE8\u518C ${r.registered}\uFF0C\u6210\u529F ${r.success}\uFF0C\u5931\u8D25 ${r.failed}`);
+        this.addMessage("system", `\u7039\u5C7E\u579A: \u5A09\u3125\u553D ${r.registered}\u951B\u5C7E\u579A\u9354?${r.success}\u951B\u5C7D\u3051\u7490?${r.failed}`);
       }
     } catch (e) {
-      this.addMessage("system", `\u7F16\u8BD1\u5931\u8D25: ${e.message}`);
+      this.addMessage("system", `\u7F02\u682C\u7627\u6FB6\u8FAB\u89E6: ${e.message}`);
     } finally {
       this.setResponding(false);
     }
@@ -6061,29 +6711,6 @@ var DiffModal = class extends import_obsidian8.Modal {
   }
 };
 
-// src/ui/approval-card.ts
-function renderApprovalCard(container, request, handlers) {
-  const card = container.createDiv({ cls: "shell-approval-card" });
-  card.createDiv({ cls: "shell-approval-title", text: "Approval Required" });
-  card.createDiv({ cls: "shell-approval-message", text: request.message });
-  const actions = card.createDiv({ cls: "shell-approval-actions" });
-  const approveButton = actions.createEl("button", {
-    cls: "shell-approval-btn shell-approval-confirm",
-    text: "Approve"
-  });
-  const cancelButton = actions.createEl("button", {
-    cls: "shell-approval-btn shell-approval-cancel",
-    text: "Cancel"
-  });
-  approveButton.addEventListener("click", () => {
-    void handlers.onApprove();
-  });
-  cancelButton.addEventListener("click", () => {
-    void handlers.onCancel();
-  });
-  return card;
-}
-
 // src/ui/command-suggestions.ts
 function buildCommandSuggestions(localCommands, skillCommands, query) {
   const merged = /* @__PURE__ */ new Map();
@@ -6097,6 +6724,69 @@ function buildCommandSuggestions(localCommands, skillCommands, query) {
     });
   }
   return Array.from(merged.values()).filter((command) => command.label.toLowerCase().includes(query.toLowerCase())).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// src/ui/components/context-chips.ts
+var import_obsidian9 = require("obsidian");
+var ContextChips = class {
+  constructor(containerEl, handlers) {
+    this.containerEl = containerEl;
+    this.handlers = handlers;
+    this.setIconFn = handlers.setIcon ?? import_obsidian9.setIcon;
+  }
+  setIconFn;
+  update(contexts) {
+    if (!this.containerEl)
+      return;
+    this.containerEl.empty();
+    contexts.forEach((ctx) => {
+      const chip = this.containerEl.createDiv({
+        cls: `context-chip context-chip-${ctx.type}`,
+        title: ctx.data
+      });
+      const iconEl = chip.createSpan({ cls: "chip-icon" });
+      this.setIconFn(iconEl, getContextIconName(ctx.type));
+      chip.createSpan({ cls: "chip-label", text: getContextChipLabel(ctx) });
+      const removeButton = chip.createEl("button", {
+        cls: "chip-remove clickable-icon",
+        text: "x",
+        attr: { "aria-label": "Remove context" }
+      });
+      removeButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.handlers.onRemove(ctx.id);
+      });
+      if (ctx.type === "file") {
+        chip.addEventListener("click", () => {
+          this.handlers.onOpenFile?.(ctx.data);
+        });
+      }
+    });
+  }
+};
+function getContextChipLabel(ctx) {
+  if (ctx.type === "file") {
+    return basename(ctx.data);
+  }
+  return ctx.summary || ctx.data;
+}
+function getContextIconName(type) {
+  switch (type) {
+    case "image":
+      return "image";
+    case "url":
+      return "link";
+    case "youtube":
+      return "youtube";
+    case "file":
+      return "file-text";
+    default:
+      return "sticky-note";
+  }
+}
+function basename(path) {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.split("/").pop() || path;
 }
 
 // src/ui/controllers/context-controller.ts
@@ -6126,33 +6816,23 @@ var ContextController = class {
     return { contextItems, selection };
   }
   renderContextChips(container, onRemove) {
-    if (!container)
-      return;
-    container.empty();
-    const contexts = this.deps.contextManager.getContexts();
-    contexts.forEach((ctx) => {
-      const chip = container.createDiv({ cls: "context-chip" });
-      chip.createSpan({ cls: "chip-icon", text: this.getIconForType(ctx.type) });
-      chip.createSpan({ cls: "chip-label", text: ctx.summary || ctx.data });
-      const removeBtn = chip.createSpan({ cls: "chip-remove", text: "\u8133" });
-      removeBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        onRemove(ctx.id);
-      });
-    });
+    new ContextChips(container, {
+      onRemove,
+      onOpenFile: (path) => this.deps.app.workspace.openLinkText(path, "", false)
+    }).update(this.deps.contextManager.getContexts());
   }
   getIconForType(type) {
     switch (type) {
       case "image":
-        return "\u{1F5BC}\uFE0F";
+        return "image";
       case "url":
-        return "\u{1F310}";
+        return "link";
       case "youtube":
-        return "\u25B6\uFE0F";
+        return "youtube";
       case "file":
-        return "\u{1F4C4}";
+        return "file-text";
       default:
-        return "\u{1F4CC}";
+        return "sticky-note";
     }
   }
 };
@@ -6166,6 +6846,9 @@ function detectSuggestionTrigger(value, cursor) {
   }
   if (lastWord.startsWith("@")) {
     return { type: "file", query: lastWord.substring(1) };
+  }
+  if (lastWord.startsWith("$")) {
+    return { type: "skill", query: lastWord.substring(1) };
   }
   return null;
 }
@@ -6255,179 +6938,1334 @@ var StreamController = class {
   }
 };
 
+// src/ui/components/command-dropdown.ts
+var CommandDropdown = class {
+  constructor(containerEl, handlers) {
+    this.containerEl = containerEl;
+    this.handlers = handlers;
+  }
+  items = [];
+  selectedIndex = 0;
+  type = "command";
+  update({ type, items, selectedIndex }) {
+    this.type = type;
+    this.items = [...items];
+    this.selectedIndex = selectedIndex;
+    this.containerEl.empty();
+    if (this.items.length === 0) {
+      this.hide();
+      return;
+    }
+    this.containerEl.style.display = "block";
+    this.setAttribute(this.containerEl, "role", "listbox");
+    this.items.forEach((item, index) => {
+      const el = this.containerEl.createDiv({
+        cls: `suggestion-item${index === this.selectedIndex ? " is-selected" : ""}`,
+        attr: { role: "option", "aria-selected": String(index === this.selectedIndex) }
+      });
+      el.createSpan({ cls: "suggestion-icon", text: this.getIcon() });
+      el.createSpan({ cls: "suggestion-text", text: item.label });
+      if (item.desc) {
+        el.createSpan({ cls: "suggestion-desc", text: item.desc });
+      }
+      el.createSpan({ cls: "suggestion-source", text: item.source || this.getDefaultSource() });
+      el.addEventListener("click", () => this.handlers.onSelect(item, index));
+    });
+  }
+  handleKeyDown(event) {
+    if (this.items.length === 0)
+      return false;
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      this.handlers.onNavigate(-1);
+      return true;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      this.handlers.onNavigate(1);
+      return true;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const item = this.items[this.selectedIndex];
+      if (item)
+        this.handlers.onSelect(item, this.selectedIndex);
+      return true;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.handlers.onCancel();
+      return true;
+    }
+    return false;
+  }
+  hide() {
+    this.containerEl.style.display = "none";
+    this.containerEl.empty();
+    this.items = [];
+  }
+  getIcon() {
+    if (this.type === "file")
+      return "@";
+    if (this.type === "skill")
+      return "$";
+    return "/";
+  }
+  getDefaultSource() {
+    if (this.type === "file")
+      return "file";
+    if (this.type === "skill")
+      return "skill";
+    return "local";
+  }
+  setAttribute(el, name, value) {
+    if (typeof el.setAttribute === "function") {
+      el.setAttribute(name, value);
+    }
+  }
+};
+
+// src/ui/components/input-toolbar.ts
+var InputToolbar = class {
+  constructor(containerEl, handlers) {
+    this.containerEl = containerEl;
+    this.handlers = handlers;
+    this.containerEl.empty();
+    const modelSelectContainer = this.containerEl.createDiv({ cls: "shell-model-select-container" });
+    this.providerSelectEl = modelSelectContainer.createEl("select", {
+      cls: "shell-model-select shell-provider-select",
+      attr: { title: "Select AI Provider" }
+    });
+    this.modelSelectEl = modelSelectContainer.createEl("select", {
+      cls: "shell-model-select shell-main-model-select",
+      attr: { title: "Select AI Model" }
+    });
+    const actions = this.containerEl.createDiv({ cls: "shell-action-buttons" });
+    this.imageButtonEl = actions.createEl("button", {
+      cls: "clickable-icon shell-image-btn",
+      text: "Image",
+      attr: { "aria-label": "Add image context", title: "Add image context" }
+    });
+    this.stopButtonEl = actions.createEl("button", {
+      cls: "clickable-icon shell-stop-btn",
+      text: "Stop",
+      attr: { "aria-label": "Stop response", title: "Stop response" }
+    });
+    this.sendButtonEl = actions.createEl("button", {
+      cls: "clickable-icon shell-send-btn",
+      text: "Send",
+      attr: { "aria-label": "Send message", title: "Send message" }
+    });
+    this.providerSelectEl.addEventListener("change", () => this.handleProviderChange());
+    this.modelSelectEl.addEventListener("change", () => this.handleModelChange());
+    this.imageButtonEl.addEventListener("click", () => {
+      if (!this.imageButtonEl.disabled)
+        void this.handlers.onImage?.();
+    });
+    this.stopButtonEl.addEventListener("click", () => {
+      if (!this.stopButtonEl.disabled)
+        void this.handlers.onStop?.();
+    });
+    this.sendButtonEl.addEventListener("click", () => {
+      void this.handlers.onSend?.();
+    });
+  }
+  providerSelectEl;
+  modelSelectEl;
+  imageButtonEl;
+  sendButtonEl;
+  stopButtonEl;
+  providers = /* @__PURE__ */ new Map();
+  activeProviderId = "";
+  updateProviders(providers, activeProviderId) {
+    this.providers = new Map(providers.map((provider) => [provider.id, provider]));
+    this.activeProviderId = activeProviderId;
+    this.providerSelectEl.empty();
+    providers.forEach((provider) => {
+      const option = this.providerSelectEl.createEl("option", {
+        value: provider.id,
+        text: provider.configured ? provider.label : `${provider.label} !`
+      });
+      option.selected = provider.id === activeProviderId;
+    });
+    this.providerSelectEl.value = activeProviderId;
+  }
+  updateModels(update) {
+    this.modelSelectEl.empty();
+    if (update.loading) {
+      const loadingOption = this.modelSelectEl.createEl("option", {
+        value: "",
+        text: `Loading ${update.providerLabel} models...`
+      });
+      loadingOption.selected = true;
+      this.modelSelectEl.value = "";
+      this.modelSelectEl.disabled = true;
+      return;
+    }
+    if (!update.models.length) {
+      const emptyOption = this.modelSelectEl.createEl("option", {
+        value: "",
+        text: "No models available"
+      });
+      emptyOption.selected = true;
+      emptyOption.disabled = true;
+      this.modelSelectEl.value = "";
+      this.modelSelectEl.disabled = true;
+      return;
+    }
+    update.models.forEach((model) => {
+      const option = this.modelSelectEl.createEl("option", {
+        value: model.value,
+        text: model.label
+      });
+      option.selected = model.value === update.activeModelId;
+    });
+    this.modelSelectEl.value = update.activeModelId;
+    this.modelSelectEl.disabled = false;
+  }
+  updateCapabilities(capabilities) {
+    this.imageButtonEl.disabled = !capabilities.supportsImageInput;
+    this.stopButtonEl.disabled = !capabilities.supportsCancellation;
+  }
+  getProviderSelectEl() {
+    return this.providerSelectEl;
+  }
+  getModelSelectEl() {
+    return this.modelSelectEl;
+  }
+  handleProviderChange() {
+    const providerId = this.providerSelectEl.value;
+    const provider = this.providers.get(providerId);
+    if (!provider?.configured) {
+      this.providerSelectEl.value = this.activeProviderId;
+      this.handlers.onUnavailableProvider(providerId);
+      return;
+    }
+    void this.handlers.onProviderChange(providerId);
+  }
+  handleModelChange() {
+    if (!this.modelSelectEl.value)
+      return;
+    void this.handlers.onModelChange(this.modelSelectEl.value);
+  }
+};
+
+// src/ui/components/history-menu.ts
+var HistoryMenu = class {
+  constructor(containerEl, handlers) {
+    this.containerEl = containerEl;
+    this.handlers = handlers;
+  }
+  items = [];
+  filterQuery = "";
+  update(items) {
+    this.items = items.map((item) => ({ ...item }));
+    this.filterQuery = "";
+    this.render();
+  }
+  hide() {
+    this.containerEl.style.display = "none";
+    this.containerEl.empty();
+    this.filterQuery = "";
+  }
+  render() {
+    this.containerEl.empty();
+    this.containerEl.style.display = "block";
+    if (this.items.length === 0) {
+      this.containerEl.createDiv({
+        cls: "ocli-history-empty",
+        text: "No saved conversations yet."
+      });
+      return;
+    }
+    const toolbar = this.containerEl.createDiv({ cls: "ocli-history-toolbar" });
+    const searchInput = toolbar.createEl("input", {
+      cls: "ocli-history-search",
+      value: this.filterQuery,
+      attr: {
+        type: "search",
+        placeholder: "Search conversations or notes",
+        "aria-label": "Search conversations"
+      }
+    });
+    searchInput.addEventListener("input", (event) => {
+      const target = event.target;
+      this.filterQuery = target?.value || "";
+      this.render();
+    });
+    searchInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape")
+        return;
+      event.preventDefault();
+      this.handlers.onClose?.();
+    });
+    const filteredItems = this.getFilteredItems();
+    toolbar.createSpan({
+      cls: "ocli-history-count",
+      text: `${filteredItems.length} / ${this.items.length}`
+    });
+    searchInput.focus();
+    if (filteredItems.length === 0) {
+      this.containerEl.createDiv({
+        cls: "ocli-history-empty",
+        text: "No matching conversations."
+      });
+      return;
+    }
+    this.buildGroups(filteredItems).forEach((group) => {
+      const section = this.containerEl.createDiv({ cls: "ocli-history-group" });
+      section.createDiv({ cls: "ocli-history-group-title", text: group.title });
+      group.items.forEach((item) => this.renderItem(section, item));
+    });
+  }
+  getFilteredItems() {
+    const query = this.filterQuery.trim().toLowerCase();
+    if (!query) {
+      return this.items.map((item) => ({ ...item }));
+    }
+    return this.items.filter((item) => {
+      const haystack = [
+        item.title,
+        item.providerId,
+        item.modelId,
+        item.currentNote
+      ].filter((value) => typeof value === "string" && value.length > 0).join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+  }
+  formatTimestamp(value) {
+    if (!Number.isFinite(value))
+      return "";
+    return new Date(value).toLocaleString();
+  }
+  buildGroups(items) {
+    const now = Date.now();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    const todayStart = startOfToday.getTime();
+    const recentThreshold = todayStart - 7 * 24 * 60 * 60 * 1e3;
+    const pinned = items.filter((item) => Number.isFinite(item.pinnedAt));
+    const today = items.filter((item) => !item.pinnedAt && item.updatedAt >= todayStart);
+    const recent = items.filter((item) => !item.pinnedAt && item.updatedAt < todayStart && item.updatedAt >= recentThreshold);
+    const older = items.filter((item) => !item.pinnedAt && item.updatedAt < recentThreshold);
+    return [
+      { title: "Pinned", items: this.sortItems(pinned, true) },
+      { title: "Today", items: this.sortItems(today) },
+      { title: "Recent", items: this.sortItems(recent) },
+      { title: "Older", items: this.sortItems(older) }
+    ].filter((group) => group.items.length > 0);
+  }
+  sortItems(items, usePinnedAt = false) {
+    return [...items].sort((a, b) => {
+      const left = usePinnedAt ? a.pinnedAt || a.updatedAt : a.updatedAt;
+      const right = usePinnedAt ? b.pinnedAt || b.updatedAt : b.updatedAt;
+      return right - left;
+    });
+  }
+  renderItem(containerEl, item) {
+    const row = containerEl.createDiv({
+      cls: `ocli-history-item${item.isActive ? " is-active" : ""}`,
+      attr: { role: "button", tabindex: "0" }
+    });
+    if (item.currentNote) {
+      row.setAttribute("title", item.currentNote);
+    }
+    const body = row.createDiv({ cls: "ocli-history-body" });
+    body.createSpan({ cls: "ocli-history-title", text: item.title });
+    const meta = body.createDiv({ cls: "ocli-history-meta" });
+    meta.createSpan({ cls: "ocli-history-provider", text: item.providerId || "Unknown provider" });
+    if (item.modelId) {
+      meta.createSpan({ cls: "ocli-history-model", text: item.modelId });
+    }
+    if (item.currentNote) {
+      meta.createSpan({ cls: "ocli-history-note", text: item.currentNote });
+    }
+    meta.createSpan({ cls: "ocli-history-updated", text: this.formatTimestamp(item.updatedAt) });
+    const actions = row.createDiv({ cls: "ocli-history-actions" });
+    const pinButton = actions.createEl("button", {
+      cls: "ocli-history-pin clickable-icon",
+      text: item.pinnedAt ? "Unpin" : "Pin",
+      attr: { "aria-label": `${item.pinnedAt ? "Unpin" : "Pin"} ${item.title}` }
+    });
+    const deleteButton = actions.createEl("button", {
+      cls: "ocli-history-delete clickable-icon",
+      text: "Delete",
+      attr: { "aria-label": `Delete ${item.title}` }
+    });
+    row.addEventListener("click", () => {
+      void this.handlers.onOpen(item.id);
+    });
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ")
+        return;
+      event.preventDefault();
+      void this.handlers.onOpen(item.id);
+    });
+    pinButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void this.handlers.onTogglePin?.(item.id);
+    });
+    deleteButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void this.handlers.onDelete(item.id);
+    });
+  }
+};
+
 // src/ui/renderers/thinking-renderer.ts
 var ThinkingRenderer = class {
-  constructor(timeline) {
+  constructor(timeline, options = {}) {
     this.timeline = timeline;
+    this.now = options.now ?? (() => Date.now());
   }
-  currentThinkingNode = null;
+  currentThinkingBlock = null;
+  currentStartedAt = 0;
   nodeCount = 0;
+  now;
   appendThinking(content) {
-    if (!this.currentThinkingNode) {
-      this.currentThinkingNode = this.timeline.createDiv({ cls: "think-node is-thinking" });
-      const header = this.currentThinkingNode.createDiv({ cls: "think-node-header" });
-      header.createSpan({ cls: "think-node-icon", text: "\u{1F4A1}" });
-      header.createSpan({ cls: "think-node-label" });
-      this.currentThinkingNode.createDiv({ cls: "think-node-detail" });
-      header.addEventListener("click", () => {
-        this.currentThinkingNode?.toggleClass("is-expanded", !this.currentThinkingNode.hasClass("is-expanded"));
+    if (!this.currentThinkingBlock) {
+      this.currentStartedAt = this.now();
+      this.currentThinkingBlock = this.timeline.createDiv({ cls: "ocli-thinking-block is-thinking" });
+      const header = this.currentThinkingBlock.createDiv({ cls: "ocli-thinking-header" });
+      header.createSpan({ cls: "ocli-thinking-caret", text: ">" });
+      header.createSpan({ cls: "ocli-thinking-label", text: "Thinking" });
+      header.createSpan({ cls: "ocli-thinking-timer", text: "0s" });
+      this.setAttribute(header, "role", "button");
+      this.setAttribute(header, "tabindex", "0");
+      this.setAttribute(header, "aria-expanded", "true");
+      this.currentThinkingBlock.createDiv({ cls: "ocli-thinking-content" });
+      header.addEventListener("click", () => this.toggleCollapsed());
+      header.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ")
+          return;
+        event.preventDefault();
+        this.toggleCollapsed();
       });
       this.nodeCount++;
     }
-    const detail = this.currentThinkingNode.querySelector(".think-node-detail");
-    const label = this.currentThinkingNode.querySelector(".think-node-label");
+    const detail = this.currentThinkingBlock.querySelector(".ocli-thinking-content");
+    const label = this.currentThinkingBlock.querySelector(".ocli-thinking-label");
+    const timer = this.currentThinkingBlock.querySelector(".ocli-thinking-timer");
     if (detail)
       detail.textContent = (detail.textContent || "") + content;
     if (label) {
       const fullText = detail?.textContent || "";
-      label.textContent = fullText.length > 30 ? `${fullText.substring(0, 30)}...` : fullText;
+      label.textContent = this.preview(fullText);
     }
+    if (timer)
+      timer.textContent = this.formatDuration(this.now() - this.currentStartedAt);
   }
   finalizeCurrentThinking() {
-    if (!this.currentThinkingNode)
+    if (!this.currentThinkingBlock)
       return;
-    this.currentThinkingNode.removeClass("is-thinking");
-    this.currentThinkingNode = null;
+    this.removeClass(this.currentThinkingBlock, "is-thinking");
+    this.addClass(this.currentThinkingBlock, "is-complete");
+    const label = this.currentThinkingBlock.querySelector(".ocli-thinking-label");
+    const timer = this.currentThinkingBlock.querySelector(".ocli-thinking-timer");
+    const duration = this.formatDuration(this.now() - this.currentStartedAt);
+    if (label)
+      label.textContent = `Thought for ${duration}`;
+    if (timer)
+      timer.textContent = duration;
+    this.currentThinkingBlock = null;
   }
   getNodeCount() {
     return this.nodeCount;
+  }
+  toggleCollapsed() {
+    if (!this.currentThinkingBlock)
+      return;
+    const header = this.currentThinkingBlock.querySelector(".ocli-thinking-header");
+    const nextCollapsed = !this.hasClass(this.currentThinkingBlock, "is-collapsed");
+    this.toggleClass(this.currentThinkingBlock, "is-collapsed", nextCollapsed);
+    if (header) {
+      this.setAttribute(header, "aria-expanded", String(!nextCollapsed));
+    }
+  }
+  preview(value) {
+    return value.length > 48 ? `${value.substring(0, 48)}...` : value;
+  }
+  formatDuration(durationMs) {
+    const seconds = Math.max(0, Math.floor(durationMs / 1e3));
+    return `${seconds}s`;
+  }
+  setAttribute(el, name, value) {
+    if (typeof el.setAttribute === "function") {
+      el.setAttribute(name, value);
+    }
+  }
+  hasClass(el, name) {
+    if (typeof el.hasClass === "function") {
+      return el.hasClass(name);
+    }
+    return el.classList.contains(name);
+  }
+  addClass(el, name) {
+    if (typeof el.addClass === "function") {
+      el.addClass(name);
+    } else {
+      el.classList.add(name);
+    }
+  }
+  removeClass(el, name) {
+    if (typeof el.removeClass === "function") {
+      el.removeClass(name);
+    } else {
+      el.classList.remove(name);
+    }
+  }
+  toggleClass(el, name, enabled) {
+    if (typeof el.toggleClass === "function") {
+      el.toggleClass(name, enabled);
+      return;
+    }
+    if (enabled)
+      this.addClass(el, name);
+    else
+      this.removeClass(el, name);
   }
 };
 
 // src/ui/renderers/tool-renderer.ts
+function getToolSummary(name, input = {}) {
+  const lowerName = name.toLowerCase();
+  const path = firstString(input, ["path", "filePath", "filename", "target"]);
+  const query = firstString(input, ["query", "q", "prompt", "topic"]);
+  const url = firstString(input, ["url", "href"]);
+  const command = firstString(input, ["command", "action"]);
+  if (lowerName.startsWith("plugin-") || lowerName.includes("plugin")) {
+    return `Plugin: ${name}`;
+  }
+  if (lowerName.includes("read") && path) {
+    return `Read: ${path}`;
+  }
+  if ((lowerName.includes("write") || lowerName.includes("create") || lowerName.includes("save")) && path) {
+    return `Write: ${path}`;
+  }
+  if ((lowerName.includes("edit") || lowerName.includes("modify") || lowerName.includes("update")) && path) {
+    return `Edit: ${path}`;
+  }
+  if (lowerName.includes("delete") && path) {
+    return `Delete: ${path}`;
+  }
+  if (lowerName.includes("search") && query) {
+    return `Search: ${truncate(query)}`;
+  }
+  if ((lowerName.includes("web") || lowerName.includes("url") || lowerName.includes("clip")) && (url || query)) {
+    return `Web: ${truncate(url || query)}`;
+  }
+  if ((lowerName.includes("knowledge") || lowerName.includes("wiki") || lowerName.includes("file_back")) && (query || path)) {
+    return `Knowledge: ${truncate(query || path)}`;
+  }
+  if (command) {
+    return `${name}: ${truncate(command)}`;
+  }
+  return name;
+}
+function getToolStatus(_result, error) {
+  return error ? "Error" : "Completed";
+}
 var ToolRenderer = class {
-  constructor(timeline) {
+  constructor(timeline, options = {}) {
     this.timeline = timeline;
+    this.options = options;
+    this.now = options.now ?? (() => Date.now());
   }
   nodeCount = 0;
-  addToolCall(name, args) {
-    const node = this.timeline.createDiv({ cls: "think-node is-tool" });
+  now;
+  runsById = /* @__PURE__ */ new Map();
+  addToolCall(name, args = {}) {
+    const id = `tool-${this.nodeCount + 1}`;
+    const node = this.timeline.createDiv({ cls: "ocli-tool-call think-node is-tool is-running" });
     node.dataset.toolName = name;
-    const header = node.createDiv({ cls: "think-node-header" });
-    header.createSpan({ cls: "think-node-icon", text: "\u{1F527}" });
-    header.createSpan({ cls: "think-node-label", text: name });
-    const detail = node.createDiv({ cls: "think-node-detail" });
-    detail.textContent = JSON.stringify(args, null, 2);
-    header.addEventListener("click", () => {
-      node.toggleClass("is-expanded", !node.hasClass("is-expanded"));
+    node.dataset.toolRunId = id;
+    const header = node.createDiv({ cls: "ocli-tool-header think-node-header" });
+    header.createSpan({ cls: "ocli-tool-icon think-node-icon", text: "tool" });
+    header.createSpan({ cls: "ocli-tool-label think-node-label", text: getToolSummary(name, args) });
+    header.createSpan({ cls: "ocli-tool-status", text: "Running" });
+    this.setAttribute(header, "role", "button");
+    this.setAttribute(header, "tabindex", "0");
+    this.setAttribute(header, "aria-expanded", "false");
+    const detail = node.createDiv({ cls: "ocli-tool-detail think-node-detail" });
+    detail.textContent = `--- Input ---
+${safeStringify(args)}`;
+    header.addEventListener("click", () => this.toggleExpanded(node, header));
+    header.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ")
+        return;
+      event.preventDefault();
+      this.toggleExpanded(node, header);
     });
+    const run = {
+      id,
+      name,
+      status: "running",
+      input: args,
+      startedAt: this.now()
+    };
+    this.runsById.set(id, run);
+    this.options.onToolUpdate?.({ ...run, input: { ...run.input } });
     this.nodeCount++;
   }
   updateToolResult(name, result, error) {
-    const nodes = Array.from(this.timeline.querySelectorAll(".think-node")).filter((node) => node.hasClass?.("is-tool"));
-    let targetNode = null;
-    for (let i = nodes.length - 1; i >= 0; i--) {
-      if (nodes[i].dataset.toolName === name) {
-        targetNode = nodes[i];
-        break;
-      }
-    }
+    const targetNode = this.findLatestNode(name);
     if (!targetNode)
       return;
-    const detail = targetNode.querySelector(".think-node-detail");
+    const detail = targetNode.querySelector(".ocli-tool-detail") ?? targetNode.querySelector(".think-node-detail");
+    const statusCandidate = targetNode.querySelector(".ocli-tool-status");
+    const status = statusCandidate && this.hasClass(statusCandidate, "ocli-tool-status") ? statusCandidate : null;
+    const resultText = error ? `Error: ${error}` : safeStringify(result);
     if (detail) {
-      const resultText = error ? `Error: ${error}` : JSON.stringify(result, null, 2);
       detail.textContent += `
 --- Result ---
 ${resultText}`;
+    }
+    if (status) {
+      status.textContent = getToolStatus(result, error);
+    }
+    this.removeClass(targetNode, "is-running");
+    this.addClass(targetNode, error ? "is-error" : "is-complete");
+    const id = targetNode.dataset.toolRunId;
+    const previousRun = id ? this.runsById.get(id) : null;
+    if (previousRun) {
+      const updatedRun = {
+        ...previousRun,
+        status: error ? "error" : "completed",
+        result,
+        error,
+        finishedAt: this.now()
+      };
+      this.runsById.set(previousRun.id, updatedRun);
+      this.options.onToolUpdate?.({
+        ...updatedRun,
+        input: { ...updatedRun.input }
+      });
     }
   }
   getNodeCount() {
     return this.nodeCount;
   }
+  findLatestNode(name) {
+    const nodes = this.getToolNodes();
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      if (nodes[i].dataset.toolName === name) {
+        return nodes[i];
+      }
+    }
+    return null;
+  }
+  getToolNodes() {
+    const newNodes = Array.from(this.timeline.querySelectorAll(".ocli-tool-call"));
+    if (newNodes.length > 0)
+      return newNodes;
+    return Array.from(this.timeline.querySelectorAll(".think-node")).filter((node) => node.hasClass?.("is-tool") || node.classList?.contains?.("is-tool"));
+  }
+  toggleExpanded(node, header) {
+    const expanded = !this.hasClass(node, "is-expanded");
+    this.toggleClass(node, "is-expanded", expanded);
+    this.setAttribute(header, "aria-expanded", String(expanded));
+  }
+  setAttribute(el, name, value) {
+    if (typeof el.setAttribute === "function") {
+      el.setAttribute(name, value);
+    }
+  }
+  hasClass(el, name) {
+    if (typeof el.hasClass === "function") {
+      return el.hasClass(name);
+    }
+    return el.classList.contains(name);
+  }
+  addClass(el, name) {
+    if (typeof el.addClass === "function") {
+      el.addClass(name);
+    } else {
+      el.classList.add(name);
+    }
+  }
+  removeClass(el, name) {
+    if (typeof el.removeClass === "function") {
+      el.removeClass(name);
+    } else {
+      el.classList.remove(name);
+    }
+  }
+  toggleClass(el, name, enabled) {
+    if (typeof el.toggleClass === "function") {
+      el.toggleClass(name, enabled);
+      return;
+    }
+    if (enabled)
+      this.addClass(el, name);
+    else
+      this.removeClass(el, name);
+  }
+};
+function firstString(input, keys) {
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+function truncate(value) {
+  return value.length > 80 ? `${value.substring(0, 77)}...` : value;
+}
+function safeStringify(value) {
+  if (typeof value === "string")
+    return value;
+  try {
+    return JSON.stringify(value ?? null, null, 2);
+  } catch (_error) {
+    return String(value);
+  }
+}
+
+// src/ui/renderers/message-renderer.ts
+var import_obsidian10 = require("obsidian");
+
+// src/ui/approval-card.ts
+function renderApprovalCard(container, request, handlers) {
+  const card = container.createDiv({ cls: "shell-approval-card" });
+  card.createDiv({ cls: "shell-approval-title", text: "Approval Required" });
+  card.createDiv({ cls: "shell-approval-message", text: request.message });
+  const actions = card.createDiv({ cls: "shell-approval-actions" });
+  const approveButton = actions.createEl("button", {
+    cls: "shell-approval-btn shell-approval-confirm",
+    text: "Approve"
+  });
+  const cancelButton = actions.createEl("button", {
+    cls: "shell-approval-btn shell-approval-cancel",
+    text: "Cancel"
+  });
+  approveButton.addEventListener("click", () => {
+    void handlers.onApprove();
+  });
+  cancelButton.addEventListener("click", () => {
+    void handlers.onCancel();
+  });
+  return card;
+}
+
+// src/ui/renderers/code-block-renderer.ts
+var CodeBlockRenderer = class {
+  constructor(options = {}) {
+    this.options = options;
+  }
+  process(container) {
+    this.processCodeBlocks(container);
+    this.processInternalLinks(container);
+  }
+  processCodeBlocks(container) {
+    const codeBlocks = Array.from(container.querySelectorAll("pre > code"));
+    codeBlocks.forEach((codeBlock) => {
+      const pre = codeBlock.parentElement;
+      if (!pre || pre.querySelector?.(".shell-code-block-header"))
+        return;
+      const header = pre.createDiv({ cls: "shell-code-block-header" });
+      const lang = this.getLanguage(codeBlock);
+      header.createDiv({
+        cls: "shell-code-block-filename",
+        text: `untitled.${lang === "text" ? "txt" : lang}`
+      });
+      const buttons = header.createDiv({ cls: "shell-code-block-buttons" });
+      const reviewButton = buttons.createEl("button", {
+        cls: "shell-apply-btn clickable-icon",
+        title: "Review Changes",
+        attr: { "aria-label": "Review Changes" }
+      });
+      reviewButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="16" x2="12" y2="12"></line><line x1="10" y1="14" x2="10" y2="10"></line></svg>';
+      reviewButton.addEventListener("click", () => {
+        void this.options.onReviewCodeBlock?.(codeBlock.textContent || "");
+      });
+      pre.insertBefore(header, codeBlock);
+    });
+  }
+  processInternalLinks(container) {
+    const links = Array.from(container.querySelectorAll("a.internal-link"));
+    links.forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        const href = link.getAttribute("href") || link.getAttribute("data-href") || "";
+        if (href)
+          this.options.onInternalLinkClick?.(href);
+      });
+    });
+  }
+  getLanguage(codeBlock) {
+    const classNames = Array.from(codeBlock.classList || []);
+    const langClass = classNames.find((cls) => cls.startsWith("language-"));
+    return langClass ? langClass.replace("language-", "") : "text";
+  }
+};
+
+// src/ui/renderers/message-renderer.ts
+var MessageRenderer = class {
+  constructor(options) {
+    this.options = options;
+    this.renderMarkdown = options.renderMarkdown ?? import_obsidian10.MarkdownRenderer.render.bind(import_obsidian10.MarkdownRenderer);
+    this.codeBlockRenderer = new CodeBlockRenderer({
+      onReviewCodeBlock: options.onReviewCodeBlock,
+      onInternalLinkClick: options.onInternalLinkClick
+    });
+  }
+  renderMarkdown;
+  codeBlockRenderer;
+  async renderMessage(container, message) {
+    const entry = container.createDiv({ cls: `shell-entry ${message.role}` });
+    try {
+      if (message.approval) {
+        renderApprovalCard(entry, message.approval, {
+          onApprove: () => this.options.onApprove?.(message),
+          onCancel: () => this.options.onCancel?.(message)
+        });
+      } else if (message.role === "ai") {
+        await this.renderAiContent(entry, message.content);
+        this.addActionToolbar(entry, message);
+      } else if (message.role === "user") {
+        this.setText(entry, message.content);
+      } else {
+        this.setText(entry, `[System] ${message.content}`);
+      }
+    } catch (error) {
+      this.options.onRenderError?.(error);
+      this.setText(entry, "Error rendering message");
+    }
+    this.options.onScrollRequest?.();
+    return entry;
+  }
+  async renderAiContent(container, content, options = {}) {
+    await Promise.resolve(this.renderMarkdown(
+      this.options.app,
+      content,
+      container,
+      "",
+      this.options.component
+    ));
+    if (options.postProcess !== false) {
+      this.processAiContent(container);
+    }
+  }
+  processAiContent(container) {
+    this.codeBlockRenderer.process(container);
+  }
+  addActionToolbar(container, message) {
+    const toolbar = container.createDiv({ cls: "shell-feedback-bar shell-message-actions" });
+    const copyButton = toolbar.createEl("button", {
+      cls: "shell-message-action-btn shell-copy-btn clickable-icon",
+      title: "Copy message",
+      attr: { "aria-label": "Copy message" }
+    });
+    copyButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>';
+    copyButton.addEventListener("click", () => {
+      void this.copyMessage(message);
+    });
+    const thumbsUpButton = toolbar.createEl("button", {
+      cls: "shell-feedback-btn shell-thumbs-up",
+      title: "Useful - save to knowledge wiki",
+      attr: { "aria-label": "Useful - save to knowledge wiki" }
+    });
+    thumbsUpButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>';
+    thumbsUpButton.addEventListener("click", () => {
+      this.activateFeedback(thumbsUpButton, thumbsDownButton);
+      void this.options.onFeedbackUp?.(message);
+    });
+    const thumbsDownButton = toolbar.createEl("button", {
+      cls: "shell-feedback-btn shell-thumbs-down",
+      title: "Not useful",
+      attr: { "aria-label": "Not useful" }
+    });
+    thumbsDownButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
+    thumbsDownButton.addEventListener("click", () => {
+      this.activateFeedback(thumbsDownButton, thumbsUpButton);
+      void this.options.onFeedbackDown?.(message);
+    });
+    return toolbar;
+  }
+  async copyMessage(message) {
+    if (this.options.onCopy) {
+      await this.options.onCopy(message.content, message);
+      return;
+    }
+    await navigator.clipboard?.writeText(message.content);
+  }
+  activateFeedback(active, inactive) {
+    active.addClass?.("active") ?? active.classList.add("active");
+    inactive.removeClass?.("active") ?? inactive.classList.remove("active");
+  }
+  setText(entry, text) {
+    if (typeof entry.setText === "function") {
+      entry.setText(text);
+    } else {
+      entry.textContent = text;
+    }
+  }
+};
+
+// src/ui/tabs/tab-bar.ts
+var TabBar = class {
+  constructor(containerEl, callbacks) {
+    this.containerEl = containerEl;
+    this.callbacks = callbacks;
+    this.addClass(this.containerEl, "ocli-tab-badges");
+    this.containerEl.setAttribute("role", "tablist");
+  }
+  update(items) {
+    this.containerEl.empty();
+    this.containerEl.setAttribute("role", "tablist");
+    for (const item of items) {
+      this.renderBadge(item);
+    }
+    const newButton = this.containerEl.createDiv({
+      cls: "ocli-tab-badge ocli-tab-new",
+      text: "+"
+    });
+    newButton.setAttribute("role", "button");
+    newButton.setAttribute("aria-label", "New chat");
+    newButton.addEventListener("click", () => this.callbacks.onNewTab());
+  }
+  destroy() {
+    this.containerEl.empty();
+    this.removeClass(this.containerEl, "ocli-tab-badges");
+  }
+  renderBadge(item) {
+    const stateClass = item.isActive ? "ocli-tab-badge-active" : item.needsAttention ? "ocli-tab-badge-attention" : item.isStreaming ? "ocli-tab-badge-streaming" : "ocli-tab-badge-idle";
+    const badge = this.containerEl.createDiv({
+      cls: `ocli-tab-badge ${stateClass}`,
+      text: String(item.index)
+    });
+    badge.setAttribute("role", "tab");
+    badge.setAttribute("aria-selected", item.isActive ? "true" : "false");
+    badge.setAttribute("aria-label", item.title);
+    badge.setAttribute("title", item.title);
+    if (item.providerId) {
+      badge.setAttribute("data-provider", item.providerId);
+    }
+    badge.addEventListener("click", () => this.callbacks.onTabClick(item.id));
+    if (item.canClose) {
+      badge.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        this.callbacks.onTabClose(item.id);
+      });
+    }
+  }
+  addClass(el, className) {
+    if (typeof el.addClass === "function") {
+      el.addClass(className);
+      return;
+    }
+    el.classList.add(className);
+  }
+  removeClass(el, className) {
+    if (typeof el.removeClass === "function") {
+      el.removeClass(className);
+      return;
+    }
+    el.classList.remove(className);
+  }
+};
+
+// src/ui/state/chat-state.ts
+var ChatState = class {
+  constructor(tabId) {
+    this.tabId = tabId;
+  }
+  messages = [];
+  tools = /* @__PURE__ */ new Map();
+  streaming = false;
+  dirty = false;
+  getTabId() {
+    return this.tabId;
+  }
+  addMessage(message) {
+    this.messages.push(this.cloneMessage(message));
+    this.markDirty();
+  }
+  updateMessage(id, patch) {
+    const index = this.messages.findIndex((message) => message.id === id);
+    if (index < 0)
+      return;
+    this.messages[index] = this.cloneMessage({
+      ...this.messages[index],
+      ...patch
+    });
+    this.markDirty();
+  }
+  removeMessage(id) {
+    const next = this.messages.filter((message) => message.id !== id);
+    if (next.length === this.messages.length)
+      return;
+    this.messages = next;
+    this.markDirty();
+  }
+  clearMessages() {
+    if (this.messages.length === 0)
+      return;
+    this.messages = [];
+    this.markDirty();
+  }
+  getMessages() {
+    return this.messages.map((message) => this.cloneMessage(message));
+  }
+  setStreaming(value) {
+    if (this.streaming === value)
+      return;
+    this.streaming = value;
+    this.markDirty();
+  }
+  isStreaming() {
+    return this.streaming;
+  }
+  upsertTool(run) {
+    this.tools.set(run.id, this.cloneTool(run));
+    this.markDirty();
+  }
+  getTools() {
+    return Array.from(this.tools.values()).map((tool) => this.cloneTool(tool));
+  }
+  markClean() {
+    this.dirty = false;
+  }
+  isDirty() {
+    return this.dirty;
+  }
+  markDirty() {
+    this.dirty = true;
+  }
+  cloneMessage(message) {
+    return {
+      ...message,
+      approval: message.approval ? {
+        ...message.approval,
+        args: { ...message.approval.args }
+      } : void 0,
+      metadata: message.metadata ? { ...message.metadata } : void 0
+    };
+  }
+  cloneTool(tool) {
+    return {
+      ...tool,
+      input: { ...tool.input }
+    };
+  }
+};
+
+// src/ui/tabs/tab.ts
+function createTabData(options) {
+  const state = new ChatState(options.id);
+  if (options.snapshot) {
+    for (const message of options.snapshot.messages) {
+      state.addMessage(message);
+    }
+    state.markClean();
+  }
+  return {
+    id: options.id,
+    index: options.index,
+    title: options.title,
+    createdAt: options.snapshot?.createdAt,
+    updatedAt: options.snapshot?.updatedAt,
+    pinnedAt: options.snapshot?.pinnedAt,
+    isActive: options.isActive,
+    isStreaming: false,
+    needsAttention: false,
+    state,
+    providerId: options.snapshot?.providerId,
+    modelId: options.snapshot?.modelId,
+    currentNote: options.snapshot?.currentNote
+  };
+}
+
+// src/ui/tabs/tab-manager.ts
+var TabManager = class {
+  tabs = [];
+  nextUntitledNumber = 1;
+  createId;
+  onChanged;
+  constructor(options = {}) {
+    this.createId = options.createId ?? (() => `tab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    this.onChanged = options.onChanged;
+  }
+  createTab(snapshot) {
+    for (const tab2 of this.tabs) {
+      tab2.isActive = false;
+    }
+    const tab = createTabData({
+      id: snapshot?.id ?? this.createId(),
+      index: this.tabs.length + 1,
+      title: snapshot?.title || `Chat ${this.nextUntitledNumber++}`,
+      isActive: true,
+      snapshot
+    });
+    this.tabs.push(tab);
+    this.reindex();
+    this.emitChanged();
+    return tab;
+  }
+  getActiveTab() {
+    return this.tabs.find((tab) => tab.isActive) ?? null;
+  }
+  getAllTabs() {
+    return [...this.tabs];
+  }
+  switchTab(id) {
+    const target = this.tabs.find((tab) => tab.id === id);
+    if (!target)
+      return false;
+    for (const tab of this.tabs) {
+      tab.isActive = tab.id === id;
+    }
+    target.needsAttention = false;
+    this.emitChanged();
+    return true;
+  }
+  closeTab(id) {
+    if (this.tabs.length <= 1)
+      return false;
+    const index = this.tabs.findIndex((tab) => tab.id === id);
+    if (index < 0)
+      return false;
+    const wasActive = this.tabs[index].isActive;
+    this.tabs.splice(index, 1);
+    if (wasActive && !this.tabs.some((tab) => tab.isActive)) {
+      const nextIndex = Math.min(index, this.tabs.length - 1);
+      this.tabs[nextIndex].isActive = true;
+    }
+    this.reindex();
+    this.emitChanged();
+    return true;
+  }
+  markStreaming(id, streaming) {
+    const tab = this.tabs.find((item) => item.id === id);
+    if (!tab || tab.isStreaming === streaming)
+      return;
+    tab.isStreaming = streaming;
+    this.emitChanged();
+  }
+  markAttention(id, attention) {
+    const tab = this.tabs.find((item) => item.id === id);
+    if (!tab || tab.needsAttention === attention)
+      return;
+    tab.needsAttention = attention;
+    this.emitChanged();
+  }
+  updateTab(id, patch) {
+    const tab = this.tabs.find((item) => item.id === id);
+    if (!tab)
+      return false;
+    Object.assign(tab, patch);
+    this.emitChanged();
+    return true;
+  }
+  toTabBarItems() {
+    return this.tabs.map((tab) => ({
+      id: tab.id,
+      index: tab.index,
+      title: tab.title,
+      isActive: tab.isActive,
+      isStreaming: tab.isStreaming,
+      needsAttention: tab.needsAttention,
+      canClose: this.tabs.length > 1,
+      providerId: tab.providerId
+    }));
+  }
+  reindex() {
+    this.tabs.forEach((tab, index) => {
+      tab.index = index + 1;
+    });
+  }
+  emitChanged() {
+    this.onChanged?.();
+  }
+};
+
+// src/ui/history/conversation-controller.ts
+var ConversationController = class {
+  constructor(deps) {
+    this.deps = deps;
+    this.now = deps.now ?? (() => Date.now());
+  }
+  now;
+  async listHistory() {
+    return this.deps.store.list();
+  }
+  async saveActiveTab(tab) {
+    if (!tab)
+      return null;
+    const messages = tab.state.getMessages();
+    if (messages.length === 0)
+      return null;
+    const timestamp2 = this.now();
+    const snapshot = {
+      id: tab.id,
+      title: this.resolveTitle(tab, messages),
+      createdAt: tab.createdAt ?? timestamp2,
+      updatedAt: timestamp2,
+      providerId: tab.providerId || this.deps.getProviderId(),
+      modelId: tab.modelId || this.deps.getModelId(),
+      currentNote: tab.currentNote || this.deps.getCurrentNotePath?.(),
+      pinnedAt: tab.pinnedAt,
+      messages
+    };
+    await this.deps.store.save(snapshot);
+    tab.title = snapshot.title;
+    tab.createdAt = snapshot.createdAt;
+    tab.updatedAt = snapshot.updatedAt;
+    tab.providerId = snapshot.providerId;
+    tab.modelId = snapshot.modelId;
+    tab.currentNote = snapshot.currentNote;
+    tab.pinnedAt = snapshot.pinnedAt;
+    tab.state.markClean();
+    return snapshot;
+  }
+  restoreConversation(snapshot, tabManager) {
+    return tabManager.createTab(snapshot);
+  }
+  async deleteConversation(id) {
+    await this.deps.store.delete(id);
+  }
+  async togglePinned(id, pinned) {
+    const snapshot = (await this.deps.store.list()).find((item) => item.id === id);
+    if (!snapshot)
+      return null;
+    const next = {
+      ...snapshot,
+      pinnedAt: pinned ? this.now() : void 0
+    };
+    await this.deps.store.save(next);
+    return next;
+  }
+  resolveTitle(tab, messages) {
+    if (tab.title && !/^Chat \d+$/.test(tab.title)) {
+      return tab.title;
+    }
+    const firstUserMessage = messages.find((message) => message.role === "user" && message.content.trim().length > 0);
+    if (!firstUserMessage) {
+      return tab.title || "New chat";
+    }
+    const normalized = firstUserMessage.content.replace(/\s+/g, " ").trim();
+    if (normalized.length <= 60) {
+      return normalized;
+    }
+    return `${normalized.slice(0, 57)}...`;
+  }
+};
+
+// src/ui/history/conversation-store.ts
+var CONVERSATION_STORE_DIR = ".obsidian/obsidian-cli";
+var CONVERSATION_STORE_PATH = `${CONVERSATION_STORE_DIR}/conversations.json`;
+var ConversationStore = class {
+  constructor(app, options = {}) {
+    this.app = app;
+    this.maxConversations = options.maxConversations ?? 100;
+    this.path = options.path ?? CONVERSATION_STORE_PATH;
+    this.dir = this.path.split("/").slice(0, -1).join("/");
+  }
+  maxConversations;
+  path;
+  dir;
+  async list() {
+    const file = await this.readFile();
+    return this.sortAndClone(file.conversations);
+  }
+  async save(snapshot) {
+    const file = await this.readFile();
+    const next = file.conversations.filter((conversation) => conversation.id !== snapshot.id);
+    next.push(this.cloneSnapshot(snapshot));
+    await this.writeFile({
+      version: 1,
+      conversations: this.sortAndClone(next).slice(0, this.maxConversations)
+    });
+  }
+  async delete(id) {
+    const file = await this.readFile();
+    const next = file.conversations.filter((conversation) => conversation.id !== id);
+    await this.writeFile({
+      version: 1,
+      conversations: this.sortAndClone(next).slice(0, this.maxConversations)
+    });
+  }
+  async readFile() {
+    const adapter = this.getAdapter();
+    try {
+      if (!await adapter.exists(this.path)) {
+        return this.emptyFile();
+      }
+      const raw = await adapter.read(this.path);
+      const parsed = JSON.parse(raw);
+      if (!this.isConversationFile(parsed)) {
+        return this.emptyFile();
+      }
+      return {
+        version: 1,
+        conversations: parsed.conversations.map((conversation) => this.cloneSnapshot(conversation))
+      };
+    } catch {
+      return this.emptyFile();
+    }
+  }
+  async writeFile(file) {
+    await this.ensureDirectory(this.dir);
+    await this.getAdapter().write(this.path, JSON.stringify(file, null, 2));
+  }
+  async ensureDirectory(path) {
+    if (!path)
+      return;
+    const adapter = this.getAdapter();
+    const parts = path.split("/").filter(Boolean);
+    let current = "";
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      if (!await adapter.exists(current)) {
+        await adapter.mkdir(current);
+      }
+    }
+  }
+  getAdapter() {
+    return this.app.vault.adapter;
+  }
+  emptyFile() {
+    return { version: 1, conversations: [] };
+  }
+  isConversationFile(value) {
+    return value && value.version === 1 && Array.isArray(value.conversations) && value.conversations.every((conversation) => typeof conversation?.id === "string" && typeof conversation.title === "string" && typeof conversation.createdAt === "number" && typeof conversation.updatedAt === "number" && typeof conversation.providerId === "string" && typeof conversation.modelId === "string" && Array.isArray(conversation.messages));
+  }
+  sortAndClone(conversations) {
+    return [...conversations].sort((a, b) => b.updatedAt - a.updatedAt).map((conversation) => this.cloneSnapshot(conversation));
+  }
+  cloneSnapshot(snapshot) {
+    return {
+      ...snapshot,
+      messages: snapshot.messages.map((message) => ({
+        ...message,
+        approval: message.approval ? {
+          ...message.approval,
+          args: { ...message.approval.args }
+        } : void 0,
+        metadata: message.metadata ? { ...message.metadata } : void 0
+      }))
+    };
+  }
 };
 
 // src/ui/shell-view.ts
-var ShellView = class extends import_obsidian9.ItemView {
-  modelService;
-  chatController;
-  contextManager;
-  outputContainer;
-  inputEl;
-  suggestionContainer;
-  currentSelection = "";
-  inputController;
-  contextController;
-  streamController;
-  thinkingRenderer = null;
-  toolRenderer = null;
-  // Heartbeat monitoring
-  heartbeatInterval = null;
-  lastActivityTime = Date.now();
-  heartbeatIntervalMs = 3e4;
-  // 30s check
-  isResponding = false;
-  modelSelectEl = null;
-  providerSelectEl = null;
-  modelLoadRequestId = 0;
-  unsubscribeProvider = null;
-  // Streaming state
-  streamContainer = null;
-  streamTimeline = null;
-  streamContent = null;
-  streamAccumulatedText = "";
-  streamRenderTimer = null;
-  localCommandSuggestions = [
-    { label: "/clear", desc: "Clear session history" },
-    { label: "/profile", desc: "View user profile" },
-    { label: "/file-back", desc: "Archive a previous AI answer to the knowledge wiki" },
-    { label: "/forget", desc: "Forget user memory (name/profession/all...)" },
-    { label: "/new", desc: "Create new note" },
-    { label: "/edit", desc: "AI edit selected text" },
-    { label: "/open", desc: "Open file" },
-    { label: "/tools", desc: "List available MCP tools" },
-    { label: "/help", desc: "Show all commands" },
-    { label: "/wiki:compile", desc: "Compile notes to knowledge wiki" },
-    { label: "/wiki:index", desc: "Open knowledge wiki index" },
-    { label: "/wiki:lint", desc: "Run knowledge health check" }
-  ];
-  // Event Handlers
-  handleInputBound = () => {
-    this.adjustHeight();
-    this.handleInput();
-  };
-  handleKeyDownBound = async (e) => {
-    if (this.inputController.getIsSuggesting()) {
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        this.navigateSuggestions(-1);
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
-        this.navigateSuggestions(1);
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        this.selectSuggestion();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        this.hideSuggestions();
-      }
-      return;
-    }
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      if (e.isComposing)
-        return;
-      const query = this.inputEl.value.trim();
-      if (!query)
-        return;
-      this.inputEl.value = "";
-      this.adjustHeight();
-      await this.processCommand(query);
-    }
-  };
-  handleContainerClickBound = (e) => {
-    if (window.getSelection()?.toString())
-      return;
-    const target = e.target;
-    if (target.closest(".shell-suggestions") || target.closest(".shell-context-chips") || target.closest(".shell-model-select-container") || target.closest(".shell-action-buttons"))
-      return;
-    this.inputEl.focus();
-  };
-  handlePasteBound = (e) => this.handlePaste(e);
-  handleDropBound = (e) => this.handleDrop(e);
-  constructor(leaf, modelService) {
+var ShellView = class extends import_obsidian11.ItemView {
+  constructor(leaf, modelService, plugin) {
     super(leaf);
+    this.plugin = plugin;
     this.modelService = modelService;
+    this.tabManager = new TabManager({
+      onChanged: () => this.updateTabBar()
+    });
+    const conversationStore = new ConversationStore(this.app);
+    this.conversationController = new ConversationController({
+      store: conversationStore,
+      getProviderId: () => this.getActiveProviderId(),
+      getModelId: () => this.getActiveModelId(),
+      getCurrentNotePath: () => this.getCurrentNotePath()
+    });
     this.contextManager = new ContextManager();
     this.inputController = new InputController();
     this.contextController = new ContextController({
@@ -6458,6 +8296,91 @@ var ShellView = class extends import_obsidian9.ItemView {
       onScrollRequest: () => this.scrollToEnd()
     });
   }
+  modelService;
+  chatController;
+  contextManager;
+  outputContainer;
+  inputEl;
+  suggestionContainer;
+  currentSelection = "";
+  inputController;
+  commandDropdown = null;
+  inputToolbar = null;
+  contextController;
+  streamController;
+  thinkingRenderer = null;
+  toolRenderer = null;
+  messageRenderer = null;
+  tabManager;
+  tabBar = null;
+  tabBarContainerEl = null;
+  tabSessions = /* @__PURE__ */ new Map();
+  conversationController;
+  historyMenu = null;
+  historyMenuContainerEl = null;
+  // Heartbeat monitoring
+  heartbeatInterval = null;
+  lastActivityTime = Date.now();
+  heartbeatIntervalMs = 3e4;
+  // 30s check
+  isResponding = false;
+  modelSelectEl = null;
+  providerSelectEl = null;
+  modelLoadRequestId = 0;
+  unsubscribeProvider = null;
+  // Streaming state
+  streamContainer = null;
+  streamTimeline = null;
+  streamContent = null;
+  streamAccumulatedText = "";
+  streamRenderTimer = null;
+  streamNodeCount = 0;
+  localCommandSuggestions = [
+    { label: "/clear", desc: "Clear session history" },
+    { label: "/profile", desc: "View user profile" },
+    { label: "/file-back", desc: "Archive a previous AI answer to the knowledge wiki" },
+    { label: "/forget", desc: "Forget user memory (name/profession/all...)" },
+    { label: "/new", desc: "Create new note" },
+    { label: "/edit", desc: "AI edit selected text" },
+    { label: "/open", desc: "Open file" },
+    { label: "/tools", desc: "List available MCP tools" },
+    { label: "/help", desc: "Show all commands" },
+    { label: "/wiki:compile", desc: "Compile notes to knowledge wiki" },
+    { label: "/wiki:index", desc: "Open knowledge wiki index" },
+    { label: "/wiki:lint", desc: "Run knowledge health check" }
+  ];
+  // Event Handlers
+  handleInputBound = () => {
+    this.adjustHeight();
+    this.handleInput();
+  };
+  handleKeyDownBound = async (e) => {
+    if (this.inputController.getIsSuggesting() && this.commandDropdown?.handleKeyDown(e)) {
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (e.isComposing)
+        return;
+      const query = this.inputEl.value.trim();
+      if (!query)
+        return;
+      this.inputEl.value = "";
+      this.adjustHeight();
+      await this.processCommand(query);
+    }
+  };
+  handleContainerClickBound = (e) => {
+    if (window.getSelection()?.toString())
+      return;
+    const target = e.target;
+    if (target.closest(".shell-suggestions") || target.closest(".shell-context-chips") || target.closest(".shell-model-select-container") || target.closest(".shell-action-buttons") || target.closest(".ocli-history-menu") || target.closest(".shell-history-btn"))
+      return;
+    this.hideHistoryMenu();
+    this.inputEl.focus();
+  };
+  handlePasteBound = (e) => this.handlePaste(e);
+  handleDropBound = (e) => this.handleDrop(e);
   getViewType() {
     return VIEW_TYPE_SHELL;
   }
@@ -6470,18 +8393,29 @@ var ShellView = class extends import_obsidian9.ItemView {
   async onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    this.chatController = new ChatController({
-      app: this.app,
-      api: this.modelService,
-      onMessageAdded: (msg) => this.appendMessage(msg),
-      onStatusChanged: (status) => this.handleStatusChange(status),
-      onStreamEvent: (event) => this.handleStreamEvent(event)
-    });
     const container = contentEl.createDiv({ cls: "ocli-shell-view" });
     const header = container.createDiv({ cls: "shell-header" });
     const headerTitle = header.createDiv({ cls: "shell-header-title" });
     headerTitle.createEl("h1", { text: "Obsidian Shell", cls: "shell-title" });
+    this.tabBarContainerEl = headerTitle.createDiv({ cls: "shell-tab-bar-container" });
     const headerButtons = header.createDiv({ cls: "shell-header-buttons" });
+    this.historyMenuContainerEl = header.createDiv({ cls: "ocli-history-menu" });
+    this.historyMenu = new HistoryMenu(this.historyMenuContainerEl, {
+      onOpen: (id) => this.openConversationFromHistory(id),
+      onDelete: (id) => this.deleteConversationFromHistory(id),
+      onTogglePin: (id) => this.toggleConversationPin(id),
+      onClose: () => this.hideHistoryMenu()
+    });
+    this.historyMenu.hide();
+    const historyBtn = headerButtons.createEl("button", {
+      cls: "clickable-icon shell-history-btn",
+      attr: { "aria-label": "Conversation history" }
+    });
+    historyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v5l3 3"></path><path d="M3.05 11a9 9 0 1 1 .5 4"></path><path d="M3 4v7h7"></path></svg>';
+    historyBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void this.toggleHistoryMenu();
+    });
     const clearBtn = headerButtons.createEl("button", {
       cls: "clickable-icon",
       attr: { "aria-label": "Clear Chat" }
@@ -6508,9 +8442,9 @@ ${tool.name}: ${tool.description}
 `;
           }
         });
-        new import_obsidian9.Notice(toolsList, 8e3);
+        new import_obsidian11.Notice(toolsList, 8e3);
       } else {
-        new import_obsidian9.Notice("No tools available or tools not loaded yet.");
+        new import_obsidian11.Notice("No tools available or tools not loaded yet.");
       }
     });
     const settingsBtn = headerButtons.createEl("button", {
@@ -6523,16 +8457,36 @@ ${tool.name}: ${tool.description}
       this.app.setting.openTabById("obsidian-cli");
     });
     this.outputContainer = container.createDiv({ cls: "shell-output-area" });
-    this.appendMessage({
-      id: "init",
-      role: "system",
-      content: "Kernel initialized.",
-      timestamp: Date.now()
+    this.tabBar = new TabBar(this.tabBarContainerEl, {
+      onTabClick: (id) => {
+        void this.switchTab(id);
+      },
+      onTabClose: (id) => {
+        void this.closeTab(id);
+      },
+      onNewTab: () => {
+        void this.createAndShowTab();
+      }
     });
+    if (this.tabManager.getAllTabs().length === 0) {
+      this.tabManager.createTab();
+    }
+    const activeTab = this.tabManager.getActiveTab();
+    if (activeTab) {
+      this.activateTabSession(activeTab.id);
+      this.applyTabMetadata(activeTab);
+    }
+    this.updateTabBar();
+    this.renderActiveTabMessages();
     const inputContainer = container.createDiv({ cls: "shell-input-container" });
     const contextContainer = inputContainer.createDiv({ cls: "shell-context-chips" });
     this.renderContextChips(contextContainer);
     this.suggestionContainer = inputContainer.createDiv({ cls: "shell-suggestions" });
+    this.commandDropdown = new CommandDropdown(this.suggestionContainer, {
+      onNavigate: (dir) => this.navigateSuggestions(dir),
+      onSelect: (_item, index) => this.selectSuggestionAt(index),
+      onCancel: () => this.hideSuggestions()
+    });
     const inputWrapper = inputContainer.createDiv({ cls: "shell-input-wrapper" });
     this.inputEl = inputWrapper.createEl("textarea", {
       cls: "shell-input",
@@ -6545,52 +8499,34 @@ ${tool.name}: ${tool.description}
     });
     this.updatePlaceholder();
     const inputControls = inputContainer.createDiv({ cls: "shell-input-controls" });
-    const modelSelectContainer = inputControls.createDiv({ cls: "shell-model-select-container" });
-    this.providerSelectEl = modelSelectContainer.createEl("select", {
-      cls: "shell-model-select shell-provider-select",
-      attr: { title: "Select AI Provider" }
+    this.inputToolbar = new InputToolbar(inputControls, {
+      onProviderChange: (id) => this.handleProviderChange(id),
+      onUnavailableProvider: (id) => this.handleUnavailableProvider(id),
+      onModelChange: (id) => this.handleModelChange(id),
+      onSend: async () => {
+        const query = this.inputEl.value.trim();
+        if (!query)
+          return;
+        this.inputEl.value = "";
+        this.adjustHeight();
+        await this.processCommand(query);
+      },
+      onStop: () => this.stopActiveResponse()
     });
-    this.populateProviderOptions(this.providerSelectEl);
-    this.providerSelectEl.addEventListener("change", async (e) => {
-      const target = e.target;
-      const id = target.value;
-      const plugin = this.app.plugins.plugins["obsidian-cli"];
-      const config = plugin?.settings?.providers?.[id];
-      if (!config?.apiKey) {
-        new import_obsidian9.Notice(`${config?.label || id} \u672A\u914D\u7F6E API Key\uFF0C\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E`);
-        this.app.setting.open();
-        this.app.setting.openTabById("obsidian-cli");
-        if (this.providerSelectEl)
-          this.populateProviderOptions(this.providerSelectEl);
-        return;
-      }
-      await this.modelService.switchProvider(id, () => plugin.saveSettings());
-      new import_obsidian9.Notice(`\u5DF2\u5207\u6362\u5230 ${config.label}`);
-    });
-    this.modelSelectEl = modelSelectContainer.createEl("select", {
-      cls: "shell-model-select shell-main-model-select",
-      attr: { title: "Select AI Model" }
-    });
-    void this.populateModelOptions(this.modelSelectEl);
-    this.modelSelectEl.addEventListener("change", async (e) => {
-      const target = e.target;
-      if (!target.value)
-        return;
-      const plugin = this.app.plugins.plugins["obsidian-cli"];
-      await this.modelService.switchModel(target.value, () => plugin.saveSettings());
-      new import_obsidian9.Notice(`Switched to ${target.options[target.selectedIndex].text}`);
-    });
-    inputControls.createDiv({ cls: "shell-action-buttons" });
+    this.providerSelectEl = this.inputToolbar.getProviderSelectEl();
+    this.modelSelectEl = this.inputToolbar.getModelSelectEl();
+    this.refreshInputToolbarProviders();
+    void this.refreshInputToolbarModels();
+    this.updateInputToolbarCapabilities();
     this.inputEl.addEventListener("input", this.handleInputBound);
     this.inputEl.addEventListener("keydown", this.handleKeyDownBound);
     container.addEventListener("click", this.handleContainerClickBound);
     this.inputEl.addEventListener("paste", this.handlePasteBound);
     this.inputEl.addEventListener("drop", this.handleDropBound);
     this.unsubscribeProvider = this.modelService.onProviderChanged(() => {
-      if (this.providerSelectEl)
-        this.populateProviderOptions(this.providerSelectEl);
-      if (this.modelSelectEl)
-        void this.populateModelOptions(this.modelSelectEl, true);
+      this.refreshInputToolbarProviders();
+      void this.refreshInputToolbarModels(true);
+      this.updateInputToolbarCapabilities();
       this.updatePlaceholder();
     });
     this.startHeartbeat();
@@ -6613,17 +8549,29 @@ ${tool.name}: ${tool.description}
     this.suggestionContainer.style.display = "block";
     let suggestions;
     if (type === "command") {
+      const skillCommands = this.modelService.getSkillCommands().map((command) => ({
+        command: command.command,
+        description: command.description
+      }));
+      const skillCommandLabels = new Set(skillCommands.map((command) => command.command));
       suggestions = buildCommandSuggestions(
         this.localCommandSuggestions,
-        this.modelService.getSkillCommands().map((command) => ({
-          command: command.command,
-          description: command.description
-        })),
+        skillCommands,
         query
-      );
+      ).map((item) => ({
+        ...item,
+        source: skillCommandLabels.has(item.label) ? "skill" : "local"
+      }));
+    } else if (type === "skill") {
+      suggestions = this.modelService.getSkillCommands().filter((command) => command.skillName.toLowerCase().includes(query.toLowerCase()) || command.command.toLowerCase().includes(query.toLowerCase())).slice(0, 10).map((command) => ({
+        label: `$${command.skillName}`,
+        desc: command.description,
+        value: command.command,
+        source: "skill"
+      }));
     } else {
       const files = this.app.vault.getFiles();
-      suggestions = files.filter((f) => f.path.toLowerCase().includes(query.toLowerCase())).slice(0, 10).map((f) => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]` }));
+      suggestions = files.filter((f) => f.path.toLowerCase().includes(query.toLowerCase())).slice(0, 10).map((f) => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]`, source: "file" }));
     }
     this.inputController.setSuggestions(type, suggestions);
     if (this.inputController.getSuggestions().length === 0) {
@@ -6633,22 +8581,13 @@ ${tool.name}: ${tool.description}
     this.renderSuggestions();
   }
   renderSuggestions() {
-    this.suggestionContainer.empty();
-    this.inputController.getSuggestions().forEach((item, index) => {
-      const el = this.suggestionContainer.createDiv({
-        cls: `suggestion-item ${index === this.inputController.getSelectedIndex() ? "is-selected" : ""}`
-      });
-      el.createSpan({ cls: "suggestion-icon", text: this.inputController.getSuggestionType() === "command" ? "/" : "@" });
-      el.createSpan({ cls: "suggestion-text", text: item.label });
-      if (item.desc) {
-        el.createSpan({ cls: "suggestion-desc", text: item.desc });
-      }
-      el.addEventListener("click", () => {
-        while (this.inputController.getSelectedIndex() !== index) {
-          this.inputController.navigate(1);
-        }
-        this.selectSuggestion();
-      });
+    const type = this.inputController.getSuggestionType();
+    if (!type)
+      return;
+    this.commandDropdown?.update({
+      type,
+      items: this.inputController.getSuggestions(),
+      selectedIndex: this.inputController.getSelectedIndex()
     });
   }
   navigateSuggestions(dir) {
@@ -6668,14 +8607,20 @@ ${tool.name}: ${tool.description}
     this.hideSuggestions();
     this.inputEl.focus();
   }
+  selectSuggestionAt(index) {
+    while (this.inputController.getSelectedIndex() !== index) {
+      this.inputController.navigate(1);
+    }
+    this.selectSuggestion();
+  }
   hideSuggestions() {
     this.inputController.hide();
-    this.suggestionContainer.style.display = "none";
-    this.suggestionContainer.empty();
+    this.commandDropdown?.hide();
   }
   // ==================== Chat Logic ====================
   async processCommand(query) {
     try {
+      this.ensureActiveTabSession();
       const { contextItems, selection } = await this.contextController.collectCommandContext();
       this.currentSelection = selection;
       this.updateActivity();
@@ -6693,35 +8638,7 @@ ${tool.name}: ${tool.description}
     }
   }
   appendMessage(msg) {
-    const entry = this.outputContainer.createDiv({ cls: `shell-entry ${msg.role}` });
-    if (msg.approval) {
-      renderApprovalCard(entry, msg.approval, {
-        onApprove: async () => {
-          await this.chatController.approveApproval(msg.approval);
-        },
-        onCancel: () => {
-          this.chatController.cancelApproval(msg.approval);
-        }
-      });
-      this.scrollToEnd();
-    } else if (msg.role === "ai") {
-      import_obsidian9.MarkdownRenderer.render(this.app, msg.content, entry, "", this).then(() => {
-        this.postProcessAiContent(entry);
-        requestAnimationFrame(() => {
-          this.scrollToEnd();
-        });
-        this.addFeedbackBar(entry, msg.content);
-      }).catch((error) => {
-        logger.error("Markdown rendering failed", error, "ShellView");
-        entry.setText("Error rendering message");
-      });
-    } else if (msg.role === "user") {
-      entry.setText(msg.content);
-      this.scrollToEnd();
-    } else {
-      entry.setText(`[System] ${msg.content}`);
-      this.scrollToEnd();
-    }
+    void this.getMessageRenderer().renderMessage(this.outputContainer, msg);
     this.updateActivity();
   }
   scrollToEnd() {
@@ -6731,6 +8648,7 @@ ${tool.name}: ${tool.description}
   }
   handleStatusChange(isResponding) {
     this.isResponding = isResponding;
+    this.updateInputToolbarCapabilities();
     if (isResponding) {
       const loadingId = "loading-indicator";
       let loadingDiv = document.getElementById(loadingId);
@@ -6760,10 +8678,14 @@ ${tool.name}: ${tool.description}
     this.streamContainer = this.outputContainer.createDiv({ cls: "shell-entry ai shell-stream-container" });
     this.streamTimeline = this.streamContainer.createDiv({ cls: "shell-think-timeline" });
     this.thinkingRenderer = new ThinkingRenderer(this.streamTimeline);
-    this.toolRenderer = new ToolRenderer(this.streamTimeline);
+    this.toolRenderer = new ToolRenderer(this.streamTimeline, {
+      onToolUpdate: (run) => {
+        this.tabManager.getActiveTab()?.state.upsertTool(run);
+      }
+    });
     const summary = this.streamTimeline.createDiv({ cls: "shell-think-summary" });
     summary.createSpan({ cls: "think-toggle", text: "\u25BC" });
-    summary.createSpan({ cls: "think-summary-text", text: "\u601D\u8003\u4E2D..." });
+    summary.createSpan({ cls: "think-summary-text", text: "Thinking in progress..." });
     summary.addEventListener("click", () => {
       this.streamTimeline?.toggleClass("is-collapsed", !this.streamTimeline.hasClass("is-collapsed"));
     });
@@ -6787,12 +8709,10 @@ ${tool.name}: ${tool.description}
     if (!this.streamContent)
       return;
     this.streamContent.empty();
-    import_obsidian9.MarkdownRenderer.render(
-      this.app,
-      this.streamAccumulatedText,
+    this.getMessageRenderer().renderAiContent(
       this.streamContent,
-      "",
-      this
+      this.streamAccumulatedText,
+      { postProcess: false }
     ).then(() => {
       const cursor = document.createElement("span");
       cursor.className = "shell-stream-cursor";
@@ -6808,29 +8728,28 @@ ${tool.name}: ${tool.description}
     this.thinkingRenderer?.finalizeCurrentThinking();
     if (this.streamContent && this.streamAccumulatedText) {
       this.streamContent.empty();
-      import_obsidian9.MarkdownRenderer.render(
-        this.app,
-        this.streamAccumulatedText,
+      this.getMessageRenderer().renderAiContent(
         this.streamContent,
-        "",
-        this
+        this.streamAccumulatedText
       ).then(() => {
-        if (this.streamContent) {
-          this.postProcessAiContent(this.streamContent);
-        }
         this.scrollToEnd();
       });
     }
     if (this.streamTimeline && this.streamNodeCount > 0) {
       const summaryText = this.streamTimeline.querySelector(".think-summary-text");
       if (summaryText)
-        summaryText.textContent = `\u601D\u8003\u4E86 ${this.streamNodeCount} \u6B65`;
+        summaryText.textContent = `Thought through ${this.streamNodeCount} steps`;
       this.streamTimeline.addClass("is-collapsed");
     } else if (this.streamTimeline && this.streamNodeCount === 0) {
       this.streamTimeline.style.display = "none";
     }
     if (this.streamContainer) {
-      this.addFeedbackBar(this.streamContainer, this.streamAccumulatedText);
+      this.getMessageRenderer().addActionToolbar(this.streamContainer, {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        role: "ai",
+        content: this.streamAccumulatedText,
+        timestamp: Date.now()
+      });
     }
     this.streamContainer = null;
     this.streamTimeline = null;
@@ -6839,68 +8758,62 @@ ${tool.name}: ${tool.description}
     this.streamNodeCount = 0;
     this.thinkingRenderer = null;
     this.toolRenderer = null;
+    void this.persistActiveTab();
   }
-  postProcessAiContent(container) {
-    const codeBlocks = container.querySelectorAll("pre > code");
-    codeBlocks.forEach((codeBlock) => {
-      const pre = codeBlock.parentElement;
-      if (pre) {
-        const header = pre.createDiv({ cls: "shell-code-block-header" });
-        const langClass = Array.from(codeBlock.classList).find((cls) => cls.startsWith("language-"));
-        const lang = langClass ? langClass.replace("language-", "") : "text";
-        header.createDiv({ cls: "shell-code-block-filename", text: `untitled.${lang === "text" ? "txt" : lang}` });
-        const buttons = header.createDiv({ cls: "shell-code-block-buttons" });
-        const btn = buttons.createEl("button", { cls: "shell-apply-btn clickable-icon", title: "Review Changes" });
-        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="16" x2="12" y2="12"></line><line x1="10" y1="14" x2="10" y2="10"></line></svg>';
-        btn.addEventListener("click", async () => {
-          const activeFile = this.app.workspace.getActiveFile();
-          if (!activeFile) {
-            new import_obsidian9.Notice("No active file to apply changes to.");
-            return;
+  getMessageRenderer() {
+    if (!this.messageRenderer) {
+      this.messageRenderer = new MessageRenderer({
+        app: this.app,
+        component: this,
+        onApprove: async (message) => {
+          if (message.approval) {
+            await this.chatController.approveApproval(message.approval);
           }
-          const originalContent = await this.app.vault.read(activeFile);
-          const newContent = codeBlock.textContent || "";
-          new DiffModal(this.app, originalContent, newContent, async () => {
-            await this.app.vault.modify(activeFile, newContent);
-            new import_obsidian9.Notice("Changes applied.");
-          }).open();
-        });
-        pre.insertBefore(header, codeBlock);
-      }
-    });
-    container.querySelectorAll("a.internal-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const href = link.getAttribute("href") || link.getAttribute("data-href") || "";
-        if (href)
-          this.app.workspace.openLinkText(href, "", false);
+        },
+        onCancel: (message) => {
+          if (message.approval) {
+            this.chatController.cancelApproval(message.approval);
+          }
+        },
+        onFeedbackUp: (message) => {
+          void this.chatController.processCommand(`/file-back ${message.id}`, [], "");
+        },
+        onReviewCodeBlock: (content) => this.reviewCodeBlock(content),
+        onInternalLinkClick: (href) => {
+          void this.app.workspace.openLinkText(href, "", false);
+        },
+        onScrollRequest: () => this.scrollToEnd(),
+        onRenderError: (error) => {
+          logger.error("Markdown rendering failed", error, "ShellView");
+        }
       });
-    });
+    }
+    return this.messageRenderer;
   }
-  addFeedbackBar(container, content) {
-    const msgId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    const feedbackBar = container.createDiv({ cls: "shell-feedback-bar" });
-    const thumbsUpBtn = feedbackBar.createEl("button", { cls: "shell-feedback-btn shell-thumbs-up", title: "Useful - save to knowledge wiki" });
-    thumbsUpBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>';
-    const thumbsDownBtn = feedbackBar.createEl("button", { cls: "shell-feedback-btn shell-thumbs-down", title: "Not useful" });
-    thumbsDownBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
-    thumbsUpBtn.addEventListener("click", () => {
-      thumbsUpBtn.addClass("active");
-      thumbsDownBtn.removeClass("active");
-      this.chatController.processCommand(`/file-back ${msgId}`, [], "");
-    });
-    thumbsDownBtn.addEventListener("click", () => {
-      thumbsDownBtn.addClass("active");
-      thumbsUpBtn.removeClass("active");
-    });
+  async reviewCodeBlock(newContent) {
+    const activeFile = this.app.workspace.getActiveFile();
+    if (!activeFile) {
+      new import_obsidian11.Notice("No active file to apply changes to.");
+      return;
+    }
+    const originalContent = await this.app.vault.read(activeFile);
+    new DiffModal(this.app, originalContent, newContent, async () => {
+      await this.app.vault.modify(activeFile, newContent);
+      new import_obsidian11.Notice("Changes applied.");
+    }).open();
   }
   async onClose() {
+    await this.persistAllTabs();
     this.stopHeartbeat();
+    this.hideHistoryMenu();
+    this.tabBar?.destroy();
+    this.tabBar = null;
     this.unsubscribeProvider?.();
     this.unsubscribeProvider = null;
-    if (this.chatController) {
-      this.chatController.cleanup();
+    for (const session of this.tabSessions.values()) {
+      session.chatController.cleanup();
     }
+    this.tabSessions.clear();
     if (this.inputEl) {
       this.inputEl.removeEventListener("input", this.handleInputBound);
       this.inputEl.removeEventListener("keydown", this.handleKeyDownBound);
@@ -6928,7 +8841,7 @@ ${tool.name}: ${tool.description}
     const now = Date.now();
     const timeSinceLastActivity = now - this.lastActivityTime;
     if (this.isResponding && timeSinceLastActivity > 12e4) {
-      const warning = "\u26A0\uFE0F \u68C0\u6D4B\u5230\u957F\u65F6\u95F4\u65E0\u54CD\u5E94\uFF0C\u7CFB\u7EDF\u53EF\u80FD\u51FA\u73B0\u95EE\u9898";
+      const warning = "Long-running response detected. The provider may be stalled.";
       logger.warn(warning, "ObsidianShellView.heartbeat");
       this.appendMessage({
         id: "warn",
@@ -6944,35 +8857,15 @@ ${tool.name}: ${tool.description}
   }
   // ==================== Context Handling ====================
   renderContextChips(container) {
-    if (!container)
-      return;
-    container.empty();
-    const contexts = this.contextManager.getContexts();
-    contexts.forEach((ctx) => {
-      const chip = container.createDiv({ cls: "context-chip" });
-      chip.createSpan({ cls: "chip-icon", text: this.getIconForType(ctx.type) });
-      chip.createSpan({ cls: "chip-label", text: ctx.summary || ctx.data });
-      const removeBtn = chip.createSpan({ cls: "chip-remove", text: "\xD7" });
-      removeBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.contextManager.removeContext(ctx.id);
+    new ContextChips(container, {
+      onRemove: (id) => {
+        this.contextManager.removeContext(id);
         this.renderContextChips(container);
-      });
-    });
-  }
-  getIconForType(type) {
-    switch (type) {
-      case "image":
-        return "\u{1F5BC}\uFE0F";
-      case "url":
-        return "\u{1F310}";
-      case "youtube":
-        return "\u25B6\uFE0F";
-      case "file":
-        return "\u{1F4C4}";
-      default:
-        return "\u{1F4CE}";
-    }
+      },
+      onOpenFile: (path) => {
+        void this.app.workspace.openLinkText(path, "", false);
+      }
+    }).update(this.contextManager.getContexts());
   }
   async handlePaste(e) {
     const items = e.clipboardData?.items;
@@ -6982,7 +8875,7 @@ ${tool.name}: ${tool.description}
       const item = items[i];
       if (item.type.indexOf("image") !== -1) {
         if (!this.modelService.getProviderCapabilities().supportsImageInput) {
-          new import_obsidian9.Notice("The active provider does not support image context.");
+          new import_obsidian11.Notice("The active provider does not support image context.");
           return;
         }
         e.preventDefault();
@@ -7020,7 +8913,7 @@ ${tool.name}: ${tool.description}
   handleDrop(e) {
     e.preventDefault();
     if (!this.modelService.getProviderCapabilities().supportsImageInput) {
-      new import_obsidian9.Notice("The active provider does not support image context.");
+      new import_obsidian11.Notice("The active provider does not support image context.");
       return;
     }
     if (e.dataTransfer?.files) {
@@ -7051,8 +8944,105 @@ ${tool.name}: ${tool.description}
       return false;
     }
   }
+  refreshInputToolbarProviders() {
+    const settings = this.getPluginInstance()?.settings;
+    if (!settings?.providers || !this.inputToolbar)
+      return;
+    this.inputToolbar.updateProviders(
+      Object.entries(settings.providers).map(([id, config]) => ({
+        id,
+        label: config.label,
+        configured: !!config.apiKey
+      })),
+      settings.activeProvider || "gemini"
+    );
+  }
+  async refreshInputToolbarModels(forceRefresh = false) {
+    const settings = this.getPluginInstance()?.settings;
+    if (!settings?.providers || !this.inputToolbar)
+      return;
+    const config = settings.providers[settings.activeProvider];
+    if (!config)
+      return;
+    const requestId = ++this.modelLoadRequestId;
+    this.inputToolbar.updateModels({
+      loading: true,
+      providerLabel: config.label,
+      models: [],
+      activeModelId: ""
+    });
+    try {
+      const models = await this.modelService.getAvailableModels(forceRefresh);
+      if (requestId !== this.modelLoadRequestId)
+        return;
+      this.inputToolbar.updateModels({
+        loading: false,
+        providerLabel: config.label,
+        models,
+        activeModelId: config.model || ""
+      });
+    } catch (error) {
+      if (requestId !== this.modelLoadRequestId)
+        return;
+      logger.warn(
+        `Failed to load model list: ${error?.message || "Unknown error"}`,
+        "ShellView.refreshInputToolbarModels"
+      );
+      this.inputToolbar.updateModels({
+        loading: false,
+        providerLabel: config.label,
+        models: [],
+        activeModelId: ""
+      });
+    }
+  }
+  updateInputToolbarCapabilities() {
+    this.inputToolbar?.updateCapabilities({
+      supportsImageInput: this.modelService.getProviderCapabilities().supportsImageInput,
+      supportsCancellation: this.tabManager.getActiveTab()?.isStreaming ?? this.isResponding
+    });
+  }
+  async handleProviderChange(id) {
+    const plugin = this.getPluginInstance();
+    const config = plugin?.settings?.providers?.[id];
+    if (!config?.apiKey) {
+      this.handleUnavailableProvider(id);
+      return;
+    }
+    await this.modelService.switchProvider(id, plugin ? () => plugin.saveSettings() : void 0);
+    const activeTab = this.tabManager.getActiveTab();
+    if (activeTab) {
+      this.tabManager.updateTab(activeTab.id, {
+        providerId: id,
+        modelId: plugin?.settings?.providers?.[id]?.model || "",
+        currentNote: this.getCurrentNotePath()
+      });
+    }
+    new import_obsidian11.Notice(`Switched to ${config.label}`);
+  }
+  handleUnavailableProvider(id) {
+    const plugin = this.getPluginInstance();
+    const config = plugin?.settings?.providers?.[id];
+    new import_obsidian11.Notice(`${config?.label || id} API Key is not configured. Please configure it in settings.`);
+    this.app.setting.open();
+    this.app.setting.openTabById("obsidian-cli");
+    this.refreshInputToolbarProviders();
+  }
+  async handleModelChange(modelId) {
+    const plugin = this.getPluginInstance();
+    await this.modelService.switchModel(modelId, plugin ? () => plugin.saveSettings() : void 0);
+    const activeTab = this.tabManager.getActiveTab();
+    if (activeTab) {
+      this.tabManager.updateTab(activeTab.id, {
+        providerId: this.getActiveProviderId(),
+        modelId,
+        currentNote: this.getCurrentNotePath()
+      });
+    }
+    new import_obsidian11.Notice(`Switched to ${modelId}`);
+  }
   async populateModelOptions(selectEl, forceRefresh = false) {
-    const settings = this.app.plugins.plugins["obsidian-cli"]?.settings;
+    const settings = this.getPluginInstance()?.settings;
     if (!settings?.providers)
       return;
     const requestId = ++this.modelLoadRequestId;
@@ -7117,7 +9107,7 @@ ${tool.name}: ${tool.description}
     }
   }
   populateProviderOptions(selectEl) {
-    const settings = this.app.plugins.plugins["obsidian-cli"]?.settings;
+    const settings = this.getPluginInstance()?.settings;
     if (!settings?.providers)
       return;
     selectEl.empty();
@@ -7126,7 +9116,7 @@ ${tool.name}: ${tool.description}
       const configured = !!config.apiKey;
       const option = selectEl.createEl("option", {
         value: id,
-        text: configured ? config.label : `${config.label} \u26A0\uFE0F`
+        text: configured ? config.label : `${config.label} !`
       });
       if (id === active)
         option.selected = true;
@@ -7135,28 +9125,335 @@ ${tool.name}: ${tool.description}
   updatePlaceholder() {
     if (!this.inputEl)
       return;
-    const settings = this.app.plugins.plugins["obsidian-cli"]?.settings;
+    const settings = this.getPluginInstance()?.settings;
     const config = settings?.providers?.[settings?.activeProvider];
     const label = config?.label || "AI";
     this.inputEl.setAttr("placeholder", `Ask ${label}... (/ for commands, @ for files)`);
   }
   async updateModelSelector(forceRefresh = false) {
-    if (this.providerSelectEl) {
-      this.populateProviderOptions(this.providerSelectEl);
-    }
-    if (this.modelSelectEl) {
-      await this.populateModelOptions(this.modelSelectEl, forceRefresh);
-    }
+    this.refreshInputToolbarProviders();
+    await this.refreshInputToolbarModels(forceRefresh);
   }
   clearChat() {
     this.outputContainer.empty();
+    const activeTab = this.tabManager.getActiveTab();
+    activeTab?.state.clearMessages();
+    if (activeTab) {
+      this.tabManager.updateTab(activeTab.id, {
+        title: `Chat ${activeTab.index}`,
+        createdAt: void 0,
+        updatedAt: void 0,
+        pinnedAt: void 0,
+        providerId: this.getActiveProviderId(),
+        modelId: this.getActiveModelId(),
+        currentNote: this.getCurrentNotePath()
+      });
+      void this.conversationController.deleteConversation(activeTab.id);
+    }
     this.appendMessage({
       id: "init",
       role: "system",
       content: "Chat cleared.",
       timestamp: Date.now()
     });
-    new import_obsidian9.Notice("Chat cleared");
+    new import_obsidian11.Notice("Chat cleared");
+  }
+  async createAndShowTab() {
+    await this.persistActiveTab();
+    const tab = this.tabManager.createTab();
+    this.activateTabSession(tab.id);
+    this.applyTabMetadata(tab);
+    this.resetStreamState();
+    this.renderActiveTabMessages();
+    this.hideHistoryMenu();
+    this.inputEl?.focus();
+  }
+  async switchTab(id) {
+    if (this.tabManager.getActiveTab()?.id === id) {
+      this.hideHistoryMenu();
+      return;
+    }
+    await this.persistActiveTab();
+    if (!this.tabManager.switchTab(id))
+      return;
+    const activeTab = this.tabManager.getActiveTab();
+    this.activateTabSession(id);
+    if (activeTab) {
+      await this.syncProviderStateForTab(activeTab);
+    }
+    this.resetStreamState();
+    this.renderActiveTabMessages();
+    this.hideHistoryMenu();
+    this.inputEl?.focus();
+  }
+  async closeTab(id) {
+    const tabToClose = this.tabManager.getAllTabs().find((item) => item.id === id) ?? null;
+    await this.persistTab(tabToClose);
+    const wasActive = this.tabManager.getActiveTab()?.id === id;
+    if (!this.tabManager.closeTab(id))
+      return;
+    const session = this.tabSessions.get(id);
+    session?.chatController.cleanup();
+    this.tabSessions.delete(id);
+    this.hideHistoryMenu();
+    if (wasActive) {
+      const activeTab = this.tabManager.getActiveTab();
+      if (activeTab) {
+        this.activateTabSession(activeTab.id);
+        await this.syncProviderStateForTab(activeTab);
+        this.resetStreamState();
+        this.renderActiveTabMessages();
+      }
+    }
+  }
+  getPluginInstance() {
+    return this.plugin ?? this.app.plugins.plugins["obsidian-cli"];
+  }
+  ensureActiveTabSession() {
+    let activeTab = this.tabManager.getActiveTab();
+    if (!activeTab) {
+      activeTab = this.tabManager.createTab();
+      this.applyTabMetadata(activeTab);
+    }
+    return this.activateTabSession(activeTab.id);
+  }
+  activateTabSession(id) {
+    const session = this.getOrCreateTabSession(id);
+    this.chatController = session.chatController;
+    this.contextManager = session.contextManager;
+    this.contextController = session.contextController;
+    return session;
+  }
+  getOrCreateTabSession(id) {
+    const existing = this.tabSessions.get(id);
+    if (existing)
+      return existing;
+    const contextManager = new ContextManager();
+    const contextController = new ContextController({
+      app: this.app,
+      contextManager
+    });
+    const chatController = new ChatController({
+      app: this.app,
+      api: this.modelService,
+      onMessageAdded: (msg) => this.handleTabMessageAdded(id, msg),
+      onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
+      onStreamEvent: (event) => this.handleTabStreamEvent(id, event)
+    });
+    const session = { chatController, contextManager, contextController };
+    this.tabSessions.set(id, session);
+    return session;
+  }
+  handleTabMessageAdded(tabId, msg) {
+    const tab = this.tabManager.getAllTabs().find((item) => item.id === tabId);
+    if (tab) {
+      tab.state.addMessage(msg);
+    }
+    if (this.tabManager.getActiveTab()?.id === tabId) {
+      this.appendMessage(msg);
+    } else {
+      this.tabManager.markAttention(tabId, true);
+    }
+  }
+  handleTabStatusChanged(tabId, isResponding) {
+    this.tabManager.markStreaming(tabId, isResponding);
+    if (this.tabManager.getActiveTab()?.id === tabId) {
+      this.handleStatusChange(isResponding);
+    }
+  }
+  handleTabStreamEvent(tabId, event) {
+    if (event.type === "done") {
+      const tab = this.tabManager.getAllTabs().find((item) => item.id === tabId);
+      if (tab && event.text) {
+        tab.state.addMessage({
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+          role: "ai",
+          content: event.text,
+          timestamp: Date.now(),
+          metadata: event.interrupted ? { interrupted: true } : void 0
+        });
+      }
+    }
+    if (this.tabManager.getActiveTab()?.id === tabId) {
+      this.handleStreamEvent(event);
+    } else {
+      this.tabManager.markAttention(tabId, true);
+    }
+  }
+  updateTabBar() {
+    this.tabBar?.update(this.tabManager.toTabBarItems());
+  }
+  async toggleHistoryMenu() {
+    if (!this.historyMenu || !this.historyMenuContainerEl)
+      return;
+    if (this.historyMenuContainerEl.style.display === "block") {
+      this.hideHistoryMenu();
+      return;
+    }
+    await this.refreshHistoryMenu();
+  }
+  hideHistoryMenu() {
+    this.historyMenu?.hide();
+  }
+  async openConversationFromHistory(id) {
+    const existing = this.tabManager.getAllTabs().find((tab) => tab.id === id);
+    if (existing) {
+      await this.switchTab(existing.id);
+      return;
+    }
+    const history = await this.conversationController.listHistory();
+    const snapshot = history.find((item) => item.id === id);
+    if (!snapshot) {
+      new import_obsidian11.Notice("Saved conversation not found.");
+      this.hideHistoryMenu();
+      return;
+    }
+    await this.persistActiveTab();
+    const restoredTab = this.conversationController.restoreConversation(snapshot, this.tabManager);
+    this.activateTabSession(restoredTab.id);
+    await this.syncProviderStateForTab(restoredTab);
+    this.resetStreamState();
+    this.renderActiveTabMessages();
+    this.hideHistoryMenu();
+    this.inputEl?.focus();
+  }
+  async deleteConversationFromHistory(id) {
+    await this.conversationController.deleteConversation(id);
+    await this.refreshHistoryMenu();
+    new import_obsidian11.Notice("Conversation deleted.");
+  }
+  async persistAllTabs() {
+    for (const tab of this.tabManager.getAllTabs()) {
+      await this.persistTab(tab);
+    }
+  }
+  async persistActiveTab() {
+    await this.persistTab(this.tabManager.getActiveTab());
+  }
+  async persistTab(tab) {
+    const snapshot = await this.conversationController.saveActiveTab(tab);
+    if (!snapshot)
+      return;
+    this.tabManager.updateTab(snapshot.id, {
+      title: snapshot.title,
+      providerId: snapshot.providerId,
+      modelId: snapshot.modelId,
+      currentNote: snapshot.currentNote,
+      createdAt: snapshot.createdAt,
+      updatedAt: snapshot.updatedAt,
+      pinnedAt: snapshot.pinnedAt
+    });
+  }
+  applyTabMetadata(tab) {
+    this.tabManager.updateTab(tab.id, {
+      providerId: tab.providerId || this.getActiveProviderId(),
+      modelId: tab.modelId || this.getActiveModelId(),
+      currentNote: tab.currentNote || this.getCurrentNotePath(),
+      createdAt: tab.createdAt,
+      updatedAt: tab.updatedAt,
+      pinnedAt: tab.pinnedAt
+    });
+  }
+  async syncProviderStateForTab(tab) {
+    const plugin = this.getPluginInstance();
+    const settings = plugin?.settings;
+    const providerId = tab.providerId;
+    const modelId = tab.modelId;
+    if (providerId && settings?.providers?.[providerId]?.apiKey && providerId !== settings.activeProvider) {
+      await this.modelService.switchProvider(providerId, plugin ? () => plugin.saveSettings() : void 0);
+    }
+    if (modelId && modelId !== this.getActiveModelId()) {
+      await this.modelService.switchModel(modelId, plugin ? () => plugin.saveSettings() : void 0);
+    }
+    this.refreshInputToolbarProviders();
+    await this.refreshInputToolbarModels(true);
+    this.handleStatusChange(tab.isStreaming);
+    this.updatePlaceholder();
+  }
+  toHistoryMenuItem(snapshot) {
+    return {
+      id: snapshot.id,
+      title: snapshot.title,
+      updatedAt: snapshot.updatedAt,
+      providerId: snapshot.providerId,
+      modelId: snapshot.modelId,
+      currentNote: snapshot.currentNote,
+      pinnedAt: snapshot.pinnedAt,
+      isActive: snapshot.id === this.tabManager.getActiveTab()?.id
+    };
+  }
+  async refreshHistoryMenu() {
+    const history = await this.conversationController.listHistory();
+    this.historyMenu?.update(history.map((snapshot) => this.toHistoryMenuItem(snapshot)));
+  }
+  async toggleConversationPin(id) {
+    const history = await this.conversationController.listHistory();
+    const snapshot = history.find((item) => item.id === id);
+    if (!snapshot) {
+      new import_obsidian11.Notice("Saved conversation not found.");
+      await this.refreshHistoryMenu();
+      return;
+    }
+    const nextPinned = !snapshot.pinnedAt;
+    const updated = await this.conversationController.togglePinned(id, nextPinned);
+    if (!updated) {
+      new import_obsidian11.Notice("Unable to update conversation pin.");
+      await this.refreshHistoryMenu();
+      return;
+    }
+    this.tabManager.updateTab(id, {
+      pinnedAt: updated.pinnedAt
+    });
+    await this.refreshHistoryMenu();
+    new import_obsidian11.Notice(updated.pinnedAt ? "Conversation pinned." : "Conversation unpinned.");
+  }
+  stopActiveResponse() {
+    if (!this.chatController?.cancelActiveStream()) {
+      return;
+    }
+    this.updateInputToolbarCapabilities();
+  }
+  getActiveProviderId() {
+    return this.getPluginInstance()?.settings?.activeProvider || "gemini";
+  }
+  getActiveModelId() {
+    const settings = this.getPluginInstance()?.settings;
+    return settings?.providers?.[settings.activeProvider]?.model || "";
+  }
+  getCurrentNotePath() {
+    return this.app.workspace.getActiveFile()?.path;
+  }
+  renderActiveTabMessages() {
+    if (!this.outputContainer)
+      return;
+    this.outputContainer.empty();
+    const activeTab = this.tabManager.getActiveTab();
+    const messages = activeTab?.state.getMessages() ?? [];
+    if (messages.length === 0) {
+      this.appendMessage({
+        id: "init",
+        role: "system",
+        content: "Kernel initialized.",
+        timestamp: Date.now()
+      });
+      return;
+    }
+    for (const message of messages) {
+      this.appendMessage(message);
+    }
+  }
+  resetStreamState() {
+    if (this.streamRenderTimer !== null) {
+      window.clearTimeout(this.streamRenderTimer);
+      this.streamRenderTimer = null;
+    }
+    this.streamContainer = null;
+    this.streamTimeline = null;
+    this.streamContent = null;
+    this.streamAccumulatedText = "";
+    this.streamNodeCount = 0;
+    this.thinkingRenderer = null;
+    this.toolRenderer = null;
   }
 };
 
@@ -7402,8 +9699,8 @@ function showGhostText(view, text, line, ch, replaceRange) {
 }
 
 // src/ui/guardian-modal.ts
-var import_obsidian10 = require("obsidian");
-var GuardianModal = class extends import_obsidian10.Modal {
+var import_obsidian12 = require("obsidian");
+var GuardianModal = class extends import_obsidian12.Modal {
   result;
   onSubmit;
   constructor(app, onSubmit) {
@@ -7413,20 +9710,20 @@ var GuardianModal = class extends import_obsidian10.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h2", { text: "Guardian Manual Trigger" });
-    new import_obsidian10.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
+    new import_obsidian12.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
       this.result = value;
     }).inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         this.submit();
       }
     }));
-    new import_obsidian10.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
+    new import_obsidian12.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
       this.submit();
     }));
   }
   submit() {
     if (!this.result) {
-      new import_obsidian10.Notice("Please enter an instruction.");
+      new import_obsidian12.Notice("Please enter an instruction.");
       return;
     }
     this.close();
@@ -7438,8 +9735,13 @@ var GuardianModal = class extends import_obsidian10.Modal {
   }
 };
 
+// src/ui/guardian-request.ts
+async function requestGuardianResponse(modelService, prompt, systemPromptOverride) {
+  return modelService.generate(prompt, systemPromptOverride);
+}
+
 // src/ui/selection-menu.ts
-var import_obsidian11 = require("obsidian");
+var import_obsidian13 = require("obsidian");
 var import_view3 = require("@codemirror/view");
 var import_state5 = require("@codemirror/state");
 var pluginContextMap = /* @__PURE__ */ new WeakMap();
@@ -7526,7 +9828,7 @@ var selectionMenuField = import_state5.StateField.define({
               messages.forEach((msg) => {
                 const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
                 if (msg.role === "ai") {
-                  import_obsidian11.MarkdownRenderer.render(context.app, msg.content, msgEl, "", new import_obsidian11.Component());
+                  import_obsidian13.MarkdownRenderer.render(context.app, msg.content, msgEl, "", new import_obsidian13.Component());
                 } else {
                   msgEl.setText(msg.content);
                 }
@@ -7558,9 +9860,15 @@ var selectionMenuField = import_state5.StateField.define({
                 return;
               textarea.value = "";
               const selectionText = view.state.doc.sliceString(state.from, state.to);
-              const contextStr = `Selected Text:
-${selectionText}`;
-              await state.controller.processCommand(text, contextStr, selectionText);
+              const selectionContext = [{
+                id: "selection-menu-context",
+                type: "selection",
+                data: "Editor selection",
+                summary: "Editor selection",
+                content: `Selected Text:
+${selectionText}`
+              }];
+              await state.controller.processCommand(text, selectionContext, selectionText);
             }
             if (e.key === "Escape") {
               e.preventDefault();
@@ -7574,7 +9882,7 @@ ${selectionText}`;
           copyBtn.onclick = () => {
             const selectionText = view.state.doc.sliceString(state.from, state.to);
             navigator.clipboard.writeText(selectionText);
-            new import_obsidian11.Notice("Selection copied");
+            new import_obsidian13.Notice("Selection copied");
           };
           const replaceBtn = actions.createEl("button", { text: "Replace with Last Response" });
           replaceBtn.onclick = () => {
@@ -7586,7 +9894,7 @@ ${selectionText}`;
                 effects: setSelectionMenuState.of({ type: "hidden" })
               });
             } else {
-              new import_obsidian11.Notice("No AI response to replace with.");
+              new import_obsidian13.Notice("No AI response to replace with.");
             }
           };
           dom.appendChild(container);
@@ -7610,10 +9918,10 @@ function selectionMenuExtension(app, modelService) {
 }
 
 // src/knowledge/runtime.ts
-var import_obsidian17 = require("obsidian");
+var import_obsidian19 = require("obsidian");
 
 // src/knowledge/compiler.ts
-var import_obsidian13 = require("obsidian");
+var import_obsidian15 = require("obsidian");
 
 // src/knowledge/types.ts
 function normalizeTopicSlug(raw) {
@@ -7629,7 +9937,7 @@ var WIKI_INDEX_BASE_FILENAME = "index.base";
 var ONTOLOGY_SCHEMA_FILENAME = "_ontology.md";
 
 // src/knowledge/frontmatter.ts
-var import_obsidian12 = require("obsidian");
+var import_obsidian14 = require("obsidian");
 function generateSourceId() {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   let suffix = "";
@@ -7756,7 +10064,7 @@ function getUnregisteredFiles(app, watchedFolders, wikiFolder) {
 }
 function getSummaryFrontmatter(app, summaryPath) {
   const file = app.vault.getAbstractFileByPath(summaryPath);
-  if (!file || !(file instanceof import_obsidian12.TFile))
+  if (!file || !(file instanceof import_obsidian14.TFile))
     return null;
   const cache = app.metadataCache.getFileCache(file);
   if (!cache?.frontmatter)
@@ -7925,24 +10233,24 @@ function parseDiscoveryResponse(response) {
     return null;
   }
 }
-function buildOntologyFile(schema) {
+function buildOntologyFile(schema4) {
   let fm = "---\n";
   fm += "knowledge_generated: true\n";
   fm += "knowledge_artifact_type: ontology_schema\n";
-  fm += `version: ${schema.version}
+  fm += `version: ${schema4.version}
 `;
-  if (schema.categories.length > 0) {
+  if (schema4.categories.length > 0) {
     fm += "categories:\n";
-    for (const c of schema.categories) {
+    for (const c of schema4.categories) {
       fm += `  - name: "${c.name.replace(/"/g, '\\"')}"
 `;
       fm += `    description: "${c.description.replace(/"/g, '\\"')}"
 `;
     }
   }
-  if (schema.entity_types.length > 0) {
+  if (schema4.entity_types.length > 0) {
     fm += "entity_types:\n";
-    for (const e of schema.entity_types) {
+    for (const e of schema4.entity_types) {
       fm += `  - name: "${e.name.replace(/"/g, '\\"')}"
 `;
       fm += `    description: "${e.description.replace(/"/g, '\\"')}"
@@ -8341,7 +10649,7 @@ var KnowledgeCompiler = class {
    * @param schemaHash 可选的 schema 内容 hash，写入 summary frontmatter
    * @param concurrency Map 阶段并行度（默认 3）
    */
-  async compileNote(file, schema, schemaHash, concurrency = 3) {
+  async compileNote(file, schema4, schemaHash, concurrency = 3) {
     const sourceId = await ensureSourceId(this.app, file);
     await setKnowledgeStatus(this.app, file, "processing");
     try {
@@ -8349,7 +10657,7 @@ var KnowledgeCompiler = class {
       const contentHash = computeContentHash(content);
       let extraction;
       if (content.length <= 3e4) {
-        const prompt = buildCompilerPrompt(content, file.path, schema);
+        const prompt = buildCompilerPrompt(content, file.path, schema4);
         const response = await this.generateFn(prompt);
         extraction = parseCompilerResponse(response);
       } else {
@@ -8360,7 +10668,7 @@ var KnowledgeCompiler = class {
           const batchResults = await Promise.allSettled(
             batch.map(async (chunk, batchIdx) => {
               const chunkIdx = i + batchIdx;
-              const chunkPrompt = buildCompilerPrompt(chunk, file.path, schema);
+              const chunkPrompt = buildCompilerPrompt(chunk, file.path, schema4);
               const prefix = `[\u6CE8\u610F\uFF1A\u8FD9\u662F\u6587\u6863\u7684\u7B2C ${chunkIdx + 1}/${chunks.length} \u5757\uFF0C\u8BF7\u53EA\u63D0\u53D6\u672C\u5757\u4E2D\u7684\u4FE1\u606F]
 
 `;
@@ -8409,7 +10717,7 @@ var KnowledgeCompiler = class {
         await this.app.vault.createFolder(articlesDir);
       }
       const existingFile = this.app.vault.getAbstractFileByPath(summaryPath);
-      if (existingFile && existingFile instanceof import_obsidian13.TFile) {
+      if (existingFile && existingFile instanceof import_obsidian15.TFile) {
         const existingContent = await this.app.vault.read(existingFile);
         if (!existingContent.includes("knowledge_generated: true")) {
           await setKnowledgeStatus(this.app, file, "failed", {
@@ -8440,14 +10748,14 @@ var KnowledgeCompiler = class {
    * @param schema 可选的 ontology schema，整个 batch 使用同一份
    * @param schemaHash 可选的 schema 内容 hash
    */
-  async compileAllPending(maxBatch = 50, onProgress, schema, schemaHash, concurrency) {
+  async compileAllPending(maxBatch = 50, onProgress, schema4, schemaHash, concurrency) {
     const pendingFiles = getFilesByKnowledgeStatus(this.app, "pending").slice(0, maxBatch);
     let success = 0;
     let failed = 0;
     for (let i = 0; i < pendingFiles.length; i++) {
       const file = pendingFiles[i];
       onProgress?.(i + 1, pendingFiles.length, file.path);
-      const result = await this.compileNote(file, schema, schemaHash, concurrency);
+      const result = await this.compileNote(file, schema4, schemaHash, concurrency);
       if (result) {
         success++;
       } else {
@@ -8459,7 +10767,7 @@ var KnowledgeCompiler = class {
 };
 
 // src/knowledge/indexer.ts
-var import_obsidian14 = require("obsidian");
+var import_obsidian16 = require("obsidian");
 function buildBaseFileContent(articlesFolder) {
   return `# Knowledge Wiki \u7D22\u5F15 - \u7531\u63D2\u4EF6\u81EA\u52A8\u751F\u6210
 # \u8BF7\u52FF\u624B\u52A8\u7F16\u8F91\u6B64\u6587\u4EF6
@@ -8515,7 +10823,7 @@ var WikiIndexer = class {
     const internalPlugins = this.app.internalPlugins;
     const basesPlugin = internalPlugins?.plugins?.["bases"];
     if (!basesPlugin || !basesPlugin.enabled) {
-      new import_obsidian14.Notice(
+      new import_obsidian16.Notice(
         "Knowledge Wiki \u9700\u8981\u542F\u7528 Bases \u6838\u5FC3\u63D2\u4EF6\u624D\u80FD\u6B63\u5E38\u663E\u793A\u7D22\u5F15\u89C6\u56FE\u3002\n\u8BF7\u5728 \u8BBE\u7F6E \u2192 \u6838\u5FC3\u63D2\u4EF6 \u4E2D\u542F\u7528 Bases\u3002",
         8e3
       );
@@ -8525,7 +10833,7 @@ var WikiIndexer = class {
   async migrateLegacyIndex() {
     const oldIndexPath = `${this.wikiFolder}/${WIKI_INDEX_FILENAME}`;
     const oldIndex = this.app.vault.getAbstractFileByPath(oldIndexPath);
-    if (oldIndex && oldIndex instanceof import_obsidian14.TFile) {
+    if (oldIndex && oldIndex instanceof import_obsidian16.TFile) {
       const content = await this.app.vault.read(oldIndex);
       if (content.includes("knowledge_generated: true")) {
         await this.app.vault.trash(oldIndex, true);
@@ -8551,7 +10859,7 @@ var WikiIndexer = class {
     const articlesFolder = `${this.wikiFolder}/Articles`;
     const content = buildBaseFileContent(articlesFolder);
     const existing = this.app.vault.getAbstractFileByPath(basePath);
-    if (existing && existing instanceof import_obsidian14.TFile) {
+    if (existing && existing instanceof import_obsidian16.TFile) {
       await this.app.vault.modify(existing, content);
     } else {
       await this.app.vault.create(basePath, content);
@@ -8568,7 +10876,7 @@ var WikiIndexer = class {
 };
 
 // src/knowledge/linter.ts
-var import_obsidian15 = require("obsidian");
+var import_obsidian17 = require("obsidian");
 function checkMissingSummaries(doneFiles, existingFiles) {
   return doneFiles.map((f) => ({
     ...f,
@@ -8716,7 +11024,7 @@ var KnowledgeLinter = class {
       }
     }
     const existing = this.app.vault.getAbstractFileByPath(reportPath);
-    if (existing && existing instanceof import_obsidian15.TFile) {
+    if (existing && existing instanceof import_obsidian17.TFile) {
       await this.app.vault.modify(existing, reportContent);
     } else {
       await this.app.vault.create(reportPath, reportContent);
@@ -8726,7 +11034,7 @@ var KnowledgeLinter = class {
 };
 
 // src/knowledge/watcher.ts
-var import_obsidian16 = require("obsidian");
+var import_obsidian18 = require("obsidian");
 function isInWatchedFolder(filePath, watchedFolders) {
   return watchedFolders.some((folder) => {
     const normalized = folder.endsWith("/") ? folder : folder + "/";
@@ -8787,7 +11095,7 @@ var KnowledgeWatcher = class {
     const key = file.path;
     if (this.debouncedHandlers.has(key))
       return;
-    const handler = (0, import_obsidian16.debounce)(async () => {
+    const handler = (0, import_obsidian18.debounce)(async () => {
       const status = getKnowledgeStatus(this.app, file);
       if (status === "done") {
         this.writingPaths.add(file.path);
@@ -9146,7 +11454,7 @@ var KnowledgeRuntime = class {
       settings.knowledgeSourceFolders || [],
       wikiFolder
     );
-    const debouncedAutoCompile = (0, import_obsidian17.debounce)(async () => {
+    const debouncedAutoCompile = (0, import_obsidian19.debounce)(async () => {
       if (!this.settings.knowledgeAutoCompile)
         return;
       if (this.autoCompiling)
@@ -9159,7 +11467,7 @@ var KnowledgeRuntime = class {
         const result = await this.compiler.compileAllPending(maxBatch, void 0, ontology?.schema, ontology?.hash);
         if (result.success > 0) {
           await this.indexer.rebuildIndex();
-          new import_obsidian17.Notice(`Auto-compiled: ${result.success} notes`);
+          new import_obsidian19.Notice(`Auto-compiled: ${result.success} notes`);
         }
         if (result.failed > 0) {
           console.warn(`[KnowledgeRuntime] Auto-compile: ${result.failed} failed`);
@@ -9251,7 +11559,7 @@ var KnowledgeRuntime = class {
       `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`
     );
     let currentSchemaHash;
-    if (schemaFile && schemaFile instanceof import_obsidian17.TFile) {
+    if (schemaFile && schemaFile instanceof import_obsidian19.TFile) {
       const schemaContent = await this.app.vault.read(schemaFile);
       currentSchemaHash = computeSchemaHash(schemaContent);
     }
@@ -9299,7 +11607,7 @@ var KnowledgeRuntime = class {
         if (record.status !== "done" && record.status !== "failed")
           continue;
         const file = this.app.vault.getAbstractFileByPath(record.path);
-        if (!file || !(file instanceof import_obsidian17.TFile))
+        if (!file || !(file instanceof import_obsidian19.TFile))
           continue;
         const existing = getKnowledgeStatus(this.app, file);
         if (existing)
@@ -9315,7 +11623,7 @@ var KnowledgeRuntime = class {
       await adapter.remove(LEGACY_REGISTRY_PATH);
       if (migrated > 0) {
         console.log(`[KnowledgeRuntime] Migrated ${migrated} records from registry to frontmatter`);
-        new import_obsidian17.Notice(`Knowledge Wiki: migrated ${migrated} records to frontmatter`);
+        new import_obsidian19.Notice(`Knowledge Wiki: migrated ${migrated} records to frontmatter`);
       }
     } catch (e) {
       console.error(`[KnowledgeRuntime] Registry migration error:`, e);
@@ -9328,10 +11636,10 @@ var KnowledgeRuntime = class {
       callback: async () => {
         const file = this.app.workspace.getActiveFile();
         if (!file) {
-          new import_obsidian17.Notice("Please open a note first.");
+          new import_obsidian19.Notice("Please open a note first.");
           return;
         }
-        new import_obsidian17.Notice(`Compiling: ${file.path}...`);
+        new import_obsidian19.Notice(`Compiling: ${file.path}...`);
         const status = getKnowledgeStatus(this.app, file);
         if (status === "done" || status === "failed") {
           await setKnowledgeStatus(this.app, file, "pending");
@@ -9343,9 +11651,9 @@ var KnowledgeRuntime = class {
         const result = await this.compiler.compileNote(file, ontology?.schema, ontology?.hash);
         if (result) {
           await this.indexer.rebuildIndex();
-          new import_obsidian17.Notice(`Compiled: ${result}`);
+          new import_obsidian19.Notice(`Compiled: ${result}`);
         } else {
-          new import_obsidian17.Notice(`Compilation failed`);
+          new import_obsidian19.Notice(`Compilation failed`);
         }
       }
     });
@@ -9353,14 +11661,14 @@ var KnowledgeRuntime = class {
       id: "knowledge-compile-all",
       name: "Knowledge: Compile all pending",
       callback: async () => {
-        new import_obsidian17.Notice("Compiling all pending notes...");
+        new import_obsidian19.Notice("Compiling all pending notes...");
         const maxBatch = this.settings.knowledgeMaxCompileBatch || 50;
         const ontology = await this.loadOntologySchema();
         const result = await this.compiler.compileAllPending(maxBatch, void 0, ontology?.schema, ontology?.hash);
         if (result.success > 0) {
           await this.indexer.rebuildIndex();
         }
-        new import_obsidian17.Notice(`Compiled: ${result.success} success, ${result.failed} failed`);
+        new import_obsidian19.Notice(`Compiled: ${result.success} success, ${result.failed} failed`);
       }
     });
     plugin.addCommand({
@@ -9370,10 +11678,10 @@ var KnowledgeRuntime = class {
         const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
         const basePath = `${wikiFolder}/${WIKI_INDEX_BASE_FILENAME}`;
         const file = this.app.vault.getAbstractFileByPath(basePath);
-        if (file && file instanceof import_obsidian17.TFile) {
+        if (file && file instanceof import_obsidian19.TFile) {
           await this.app.workspace.getLeaf(false).openFile(file);
         } else {
-          new import_obsidian17.Notice("Knowledge index not found. Compile some notes first.");
+          new import_obsidian19.Notice("Knowledge index not found. Compile some notes first.");
         }
       }
     });
@@ -9381,11 +11689,11 @@ var KnowledgeRuntime = class {
       id: "knowledge-lint",
       name: "Knowledge: Run knowledge lint",
       callback: async () => {
-        new import_obsidian17.Notice("Running knowledge lint...");
+        new import_obsidian19.Notice("Running knowledge lint...");
         const reportPath = await this.linter.generateReport();
-        new import_obsidian17.Notice(`Health report generated: ${reportPath}`);
+        new import_obsidian19.Notice(`Health report generated: ${reportPath}`);
         const file = this.app.vault.getAbstractFileByPath(reportPath);
-        if (file && file instanceof import_obsidian17.TFile) {
+        if (file && file instanceof import_obsidian19.TFile) {
           await this.app.workspace.getLeaf(false).openFile(file);
         }
       }
@@ -9394,14 +11702,14 @@ var KnowledgeRuntime = class {
   registerEvents(plugin) {
     plugin.registerEvent(
       this.app.vault.on("create", (file) => {
-        if (file instanceof import_obsidian17.TFile && file.extension === "md") {
+        if (file instanceof import_obsidian19.TFile && file.extension === "md") {
           this.watcher.onFileCreate(file);
         }
       })
     );
     plugin.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (file instanceof import_obsidian17.TFile && file.extension === "md") {
+        if (file instanceof import_obsidian19.TFile && file.extension === "md") {
           this.watcher.onFileModify(file);
         }
       })
@@ -9413,7 +11721,7 @@ var KnowledgeRuntime = class {
     );
     plugin.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file instanceof import_obsidian17.TFile) {
+        if (file instanceof import_obsidian19.TFile) {
           this.metadataIndex.onFileDeleted(file.path);
         }
       })
@@ -9456,18 +11764,18 @@ var KnowledgeRuntime = class {
     const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
     const schemaPath = `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`;
     const file = this.app.vault.getAbstractFileByPath(schemaPath);
-    if (!file || !(file instanceof import_obsidian17.TFile))
+    if (!file || !(file instanceof import_obsidian19.TFile))
       return null;
     try {
       const rawContent = await this.app.vault.read(file);
       const frontmatter = extractFrontmatter(rawContent);
-      const schema = parseOntologySchema(frontmatter);
-      if (!schema) {
+      const schema4 = parseOntologySchema(frontmatter);
+      if (!schema4) {
         console.warn("[KnowledgeRuntime] Ontology file exists but schema parse failed");
         return null;
       }
       const hash = computeSchemaHash(rawContent);
-      return { schema, hash };
+      return { schema: schema4, hash };
     } catch (e) {
       console.error("[KnowledgeRuntime] Failed to load ontology schema:", e);
       return null;
@@ -9541,12 +11849,12 @@ var KnowledgeRuntime = class {
         recentClaims: recentClaims.slice(-20)
       });
       const response = await this.modelService.generate(prompt);
-      const schema = parseDiscoveryResponse(response);
-      if (!schema) {
+      const schema4 = parseDiscoveryResponse(response);
+      if (!schema4) {
         console.error("[KnowledgeRuntime] Failed to parse ontology discovery response");
         return null;
       }
-      const content = buildOntologyFile(schema);
+      const content = buildOntologyFile(schema4);
       await this.app.vault.create(schemaPath, content);
       console.log(`[KnowledgeRuntime] Ontology schema created at ${schemaPath}`);
       return schemaPath;
@@ -9562,7 +11870,7 @@ var KnowledgeRuntime = class {
       throw new Error(`\u8DEF\u5F84\u4E0D\u5B58\u5728: ${path}`);
     const ontology = await this.loadOntologySchema();
     let registered = 0;
-    if (abstractFile instanceof import_obsidian17.TFile) {
+    if (abstractFile instanceof import_obsidian19.TFile) {
       const status = getKnowledgeStatus(this.app, abstractFile);
       if (!status) {
         await ensureSourceId(this.app, abstractFile);
@@ -9677,7 +11985,7 @@ var USER_SKILLS_DIR = ".obsidian/obsidian-cli/skills";
 function joinPath(...segments) {
   return segments.filter(Boolean).join("/").replace(/\/{2,}/g, "/");
 }
-function basename(path) {
+function basename2(path) {
   const parts = path.split("/");
   return parts[parts.length - 1] || "";
 }
@@ -9704,7 +12012,7 @@ async function listSkillFilePaths(adapter, dirPath = USER_SKILLS_DIR) {
   const listed = await adapter.list(dirPath);
   const paths = /* @__PURE__ */ new Set();
   for (const filePath of listed.files) {
-    if (basename(filePath) === SKILL_FILE_NAME) {
+    if (basename2(filePath) === SKILL_FILE_NAME) {
       paths.add(filePath);
     }
   }
@@ -9803,7 +12111,7 @@ var SkillLoader = class {
     return new UserSkill(frontmatter, body.trim(), this.toolRegistry);
   }
   extractFrontmatter(content) {
-    const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
     if (!match) {
       return { frontmatter: null, body: content };
     }
@@ -9892,7 +12200,7 @@ var BuiltinSkill = class {
   toolNames;
   toolRegistry;
   executor;
-  constructor(fm, instructions, toolRegistry, executor3, enabledFn) {
+  constructor(fm, instructions, toolRegistry, executor5, enabledFn) {
     this.name = fm.name;
     this.description = fm.description;
     this.triggers = fm.triggers;
@@ -9900,7 +12208,7 @@ var BuiltinSkill = class {
     this.instructions = instructions;
     this.toolNames = fm.tools ?? [];
     this.toolRegistry = toolRegistry;
-    this.executor = executor3;
+    this.executor = executor5;
   }
   getInstructions() {
     return this.instructions;
@@ -9928,18 +12236,18 @@ var SkillRegistry = class {
    * 从 SKILL.md 字符串 + executor 注册内置 Skill
    * SKILL.md 在编译时通过 esbuild text loader 导入
    */
-  registerBuiltinFromMd(skillMd, executor3, enabledFn) {
+  registerBuiltinFromMd(skillMd, executor5, enabledFn) {
     const { frontmatter, body } = this.parseFrontmatter(skillMd);
     if (!frontmatter || !frontmatter.name) {
       console.error("[SkillRegistry] Invalid SKILL.md: missing name");
       return;
     }
-    const skill = new BuiltinSkill(frontmatter, body.trim(), this.toolRegistry, executor3, enabledFn);
+    const skill = new BuiltinSkill(frontmatter, body.trim(), this.toolRegistry, executor5, enabledFn);
     this.registerBuiltin(skill);
   }
   /** 解析 YAML frontmatter（简易解析，复用 SkillLoader 的逻辑） */
   parseFrontmatter(content) {
-    const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
     if (!match)
       return { frontmatter: null, body: content };
     try {
@@ -10172,7 +12480,8 @@ ${lines.join("\n")}`;
 };
 
 // src/skills/builtin/vault-ops.ts
-var import_obsidian18 = require("obsidian");
+var import_obsidian20 = require("obsidian");
+var MAX_FILE_READ_CHARS = 2e4;
 var readNote = {
   name: "read_note",
   description: "Read the content of a specific note in the vault.",
@@ -10242,7 +12551,7 @@ var updateNote = {
       return { success: false, error: "File modification is disabled" };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.path);
-    if (!file || !(file instanceof import_obsidian18.TFile))
+    if (!file || !(file instanceof import_obsidian20.TFile))
       return { success: false, error: "File not found" };
     if (ctx.settings.confirmExecutions && !args.approved) {
       return buildApprovalResponse("update_note", args.path, {
@@ -10270,7 +12579,7 @@ var appendToNote = {
       return { success: false, error: "File modification is disabled" };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.path);
-    if (!file || !(file instanceof import_obsidian18.TFile))
+    if (!file || !(file instanceof import_obsidian20.TFile))
       return { success: false, error: "File not found" };
     if (ctx.settings.confirmExecutions && !args.approved) {
       return buildApprovalResponse("append_to_note", args.path, {
@@ -10413,6 +12722,129 @@ var openFile = {
     return { success: true, path: target.path, message: `\u2705 Opened: ${target.path}` };
   }
 };
+var readFile = {
+  name: "read_file",
+  description: "Read the exact content of a text file in the vault, including .md, .canvas, .base, and .json files.",
+  parameters: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: 'Exact vault path to the file, e.g. "Boards/map.canvas"' }
+    },
+    required: ["path"]
+  },
+  async execute(args, ctx) {
+    const pathResult = normalizeVaultPath(args.path);
+    if (pathResult.error)
+      return { success: false, error: pathResult.error };
+    const file = ctx.app.vault.getAbstractFileByPath(pathResult.path);
+    if (!isReadableVaultFile(file)) {
+      return { success: false, error: "File not found" };
+    }
+    const content = await ctx.app.vault.read(file);
+    const truncated = content.length > MAX_FILE_READ_CHARS;
+    return {
+      success: true,
+      path: file.path,
+      content: truncated ? content.slice(0, MAX_FILE_READ_CHARS) : content,
+      truncated
+    };
+  }
+};
+var createFile = {
+  name: "create_file",
+  description: "Create a new text file in the vault without changing its extension. Supports .md, .canvas, .base, and .json files.",
+  parameters: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: 'Exact vault path for the new file, e.g. "Bases/tasks.base"' },
+      content: { type: "string", description: "The complete file content to write" }
+    },
+    required: ["path", "content"]
+  },
+  async execute(args, ctx) {
+    const pathResult = normalizeVaultPath(args.path);
+    if (pathResult.error)
+      return { success: false, error: pathResult.error };
+    if (isObsidianConfigPath(pathResult.path)) {
+      return { success: false, error: "Writing .obsidian files is not allowed" };
+    }
+    if (!ctx.settings.allowFileCreation) {
+      return { success: false, error: "File creation is disabled" };
+    }
+    if (ctx.app.vault.getAbstractFileByPath(pathResult.path)) {
+      return { success: false, error: `File already exists: ${pathResult.path}` };
+    }
+    if (ctx.settings.confirmExecutions && !args.approved) {
+      return buildApprovalResponse("create_file", pathResult.path, {
+        path: pathResult.path,
+        content: args.content || ""
+      }, "create file");
+    }
+    await ensureParentFolder(ctx.app, pathResult.path);
+    await ctx.app.vault.create(pathResult.path, args.content || "");
+    return {
+      success: true,
+      path: pathResult.path,
+      message: `File created: ${pathResult.path}`
+    };
+  }
+};
+var updateFile = {
+  name: "update_file",
+  description: "Replace the exact content of an existing text file in the vault. Supports .md, .canvas, .base, and .json files.",
+  parameters: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "Exact vault path to the file to update" },
+      content: { type: "string", description: "The complete replacement file content" }
+    },
+    required: ["path", "content"]
+  },
+  async execute(args, ctx) {
+    const pathResult = normalizeVaultPath(args.path);
+    if (pathResult.error)
+      return { success: false, error: pathResult.error };
+    if (isObsidianConfigPath(pathResult.path)) {
+      return { success: false, error: "Writing .obsidian files is not allowed" };
+    }
+    if (!ctx.settings.allowFileModification) {
+      return { success: false, error: "File modification is disabled" };
+    }
+    const file = ctx.app.vault.getAbstractFileByPath(pathResult.path);
+    if (!isReadableVaultFile(file)) {
+      return { success: false, error: "File not found" };
+    }
+    if (ctx.settings.confirmExecutions && !args.approved) {
+      return buildApprovalResponse("update_file", pathResult.path, {
+        path: pathResult.path,
+        content: args.content
+      }, "update file");
+    }
+    await ctx.app.vault.modify(file, args.content);
+    return {
+      success: true,
+      path: pathResult.path,
+      message: `File updated: ${pathResult.path}`
+    };
+  }
+};
+function normalizeVaultPath(rawPath) {
+  if (typeof rawPath !== "string" || !rawPath.trim()) {
+    return { path: "", error: "Missing path parameter" };
+  }
+  const path = rawPath.trim().replace(/\\/g, "/");
+  const parts = path.split("/");
+  if (path.startsWith("/") || /^[A-Za-z]:/.test(path) || parts.some((part) => part === "..") || parts.some((part) => part.trim() === "")) {
+    return { path, error: "Unsafe vault path" };
+  }
+  return { path };
+}
+function isObsidianConfigPath(path) {
+  return path === ".obsidian" || path.startsWith(".obsidian/");
+}
+function isReadableVaultFile(file) {
+  return !!file && typeof file.path === "string";
+}
 async function ensureParentFolder(app, path) {
   const parts = path.split("/");
   if (parts.length <= 1)
@@ -10443,7 +12875,10 @@ var ALL_VAULT_TOOLS = [
   renameNote,
   listNotes,
   searchVault,
-  openFile
+  openFile,
+  readFile,
+  createFile,
+  updateFile
 ];
 function registerVaultTools(registry) {
   for (const tool of ALL_VAULT_TOOLS) {
@@ -10453,9 +12888,9 @@ function registerVaultTools(registry) {
 }
 
 // src/skills/builtin/web-search/executor.ts
-var import_obsidian19 = require("obsidian");
+var import_obsidian21 = require("obsidian");
 var defaultDeps2 = {
-  requestUrl: (options) => (0, import_obsidian19.requestUrl)(options),
+  requestUrl: (options) => (0, import_obsidian21.requestUrl)(options),
   wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 };
 function createWebSearchTool(deps = defaultDeps2) {
@@ -10543,9 +12978,9 @@ function resolveSavedNotePath(filename, preferredFolder, exists) {
 }
 
 // src/services/video-transcription.ts
-var import_obsidian20 = require("obsidian");
+var import_obsidian22 = require("obsidian");
 var defaultDeps3 = {
-  requestUrl: (options) => (0, import_obsidian20.requestUrl)(options),
+  requestUrl: (options) => (0, import_obsidian22.requestUrl)(options),
   fetchImpl: (input, init) => fetch(input, init),
   createGeminiModel: (provider) => {
     const genAI = new GoogleGenerativeAI(provider.apiKey);
@@ -10556,12 +12991,12 @@ function toBase64(buffer) {
   if (typeof Buffer !== "undefined") {
     return Buffer.from(new Uint8Array(buffer)).toString("base64");
   }
-  let binary = "";
+  let binary2 = "";
   const bytes = new Uint8Array(buffer);
   for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+    binary2 += String.fromCharCode(bytes[i]);
   }
-  return btoa(binary);
+  return btoa(binary2);
 }
 function joinUrl(baseUrl, path) {
   return `${baseUrl.replace(/\/+$/, "")}${path}`;
@@ -11219,20 +13654,6477 @@ function registerTools4(registry) {
   registry.register(executePluginCommand);
 }
 
+// src/skills/builtin/json-canvas/executor.ts
+var NODE_TYPES = /* @__PURE__ */ new Set(["text", "file", "link", "group"]);
+var SIDES = /* @__PURE__ */ new Set(["top", "right", "bottom", "left"]);
+var ENDS = /* @__PURE__ */ new Set(["none", "arrow"]);
+var executor3 = {
+  async execute() {
+    return { ok: true };
+  }
+};
+var validateJsonCanvas = {
+  name: "validate_json_canvas",
+  description: "Validate JSON Canvas content for parseability, unique IDs, required node fields, and valid edge references.",
+  parameters: {
+    type: "object",
+    properties: {
+      content: { type: "string", description: "The full .canvas JSON content to validate" }
+    },
+    required: ["content"]
+  },
+  async execute(args) {
+    return validateCanvasContent(args.content);
+  }
+};
+function registerTools5(registry) {
+  registry.register(validateJsonCanvas);
+}
+function validateCanvasContent(content) {
+  const errors = [];
+  if (typeof content !== "string") {
+    return { success: false, errors: ["content must be a JSON string"] };
+  }
+  let canvas;
+  try {
+    canvas = JSON.parse(content);
+  } catch (error) {
+    return { success: false, errors: [`Invalid JSON: ${error.message}`] };
+  }
+  if (!canvas || typeof canvas !== "object" || Array.isArray(canvas)) {
+    return { success: false, errors: ["Canvas root must be an object"] };
+  }
+  const nodes = canvas.nodes ?? [];
+  const edges = canvas.edges ?? [];
+  if (!Array.isArray(nodes))
+    errors.push("nodes must be an array when present");
+  if (!Array.isArray(edges))
+    errors.push("edges must be an array when present");
+  if (errors.length > 0)
+    return { success: false, errors };
+  const nodeIds = /* @__PURE__ */ new Set();
+  const allIds = /* @__PURE__ */ new Set();
+  nodes.forEach((node, index) => {
+    validateId(node?.id, `nodes[${index}].id`, allIds, errors);
+    if (typeof node?.id === "string")
+      nodeIds.add(node.id);
+    if (!NODE_TYPES.has(node?.type)) {
+      errors.push(`nodes[${index}].type must be one of text, file, link, group`);
+    }
+    for (const field of ["x", "y", "width", "height"]) {
+      if (!Number.isInteger(node?.[field])) {
+        errors.push(`nodes[${index}].${field} must be an integer`);
+      }
+    }
+    if (node?.type === "text" && typeof node.text !== "string") {
+      errors.push(`nodes[${index}] text nodes require a text field`);
+    }
+    if (node?.type === "file" && typeof node.file !== "string") {
+      errors.push(`nodes[${index}] file nodes require a file field`);
+    }
+    if (node?.type === "link" && typeof node.url !== "string") {
+      errors.push(`nodes[${index}] link nodes require a url field`);
+    }
+  });
+  edges.forEach((edge, index) => {
+    validateId(edge?.id, `edges[${index}].id`, allIds, errors);
+    for (const field of ["fromNode", "toNode"]) {
+      if (typeof edge?.[field] !== "string") {
+        errors.push(`edges[${index}].${field} must be a node id`);
+      } else if (!nodeIds.has(edge[field])) {
+        errors.push(`edges[${index}].${field} references missing node "${edge[field]}"`);
+      }
+    }
+    for (const field of ["fromSide", "toSide"]) {
+      if (edge?.[field] !== void 0 && !SIDES.has(edge[field])) {
+        errors.push(`edges[${index}].${field} must be one of top, right, bottom, left`);
+      }
+    }
+    for (const field of ["fromEnd", "toEnd"]) {
+      if (edge?.[field] !== void 0 && !ENDS.has(edge[field])) {
+        errors.push(`edges[${index}].${field} must be none or arrow`);
+      }
+    }
+  });
+  return { success: errors.length === 0, errors };
+}
+function validateId(id, label, seen, errors) {
+  if (typeof id !== "string" || !/^[a-f0-9]{16}$/.test(id)) {
+    errors.push(`${label} must be a unique 16-character lowercase hexadecimal string`);
+    return;
+  }
+  if (seen.has(id)) {
+    errors.push(`Duplicate id "${id}"`);
+    return;
+  }
+  seen.add(id);
+}
+
+// node_modules/yaml/browser/dist/nodes/identity.js
+var ALIAS = Symbol.for("yaml.alias");
+var DOC = Symbol.for("yaml.document");
+var MAP = Symbol.for("yaml.map");
+var PAIR = Symbol.for("yaml.pair");
+var SCALAR = Symbol.for("yaml.scalar");
+var SEQ = Symbol.for("yaml.seq");
+var NODE_TYPE = Symbol.for("yaml.node.type");
+var isAlias = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === ALIAS;
+var isDocument = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === DOC;
+var isMap = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
+var isPair = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === PAIR;
+var isScalar = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
+var isSeq = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
+function isCollection(node) {
+  if (node && typeof node === "object")
+    switch (node[NODE_TYPE]) {
+      case MAP:
+      case SEQ:
+        return true;
+    }
+  return false;
+}
+function isNode(node) {
+  if (node && typeof node === "object")
+    switch (node[NODE_TYPE]) {
+      case ALIAS:
+      case MAP:
+      case SCALAR:
+      case SEQ:
+        return true;
+    }
+  return false;
+}
+var hasAnchor = (node) => (isScalar(node) || isCollection(node)) && !!node.anchor;
+
+// node_modules/yaml/browser/dist/visit.js
+var BREAK = Symbol("break visit");
+var SKIP = Symbol("skip children");
+var REMOVE = Symbol("remove node");
+function visit(node, visitor) {
+  const visitor_ = initVisitor(visitor);
+  if (isDocument(node)) {
+    const cd = visit_(null, node.contents, visitor_, Object.freeze([node]));
+    if (cd === REMOVE)
+      node.contents = null;
+  } else
+    visit_(null, node, visitor_, Object.freeze([]));
+}
+visit.BREAK = BREAK;
+visit.SKIP = SKIP;
+visit.REMOVE = REMOVE;
+function visit_(key, node, visitor, path) {
+  const ctrl = callVisitor(key, node, visitor, path);
+  if (isNode(ctrl) || isPair(ctrl)) {
+    replaceNode(key, path, ctrl);
+    return visit_(key, ctrl, visitor, path);
+  }
+  if (typeof ctrl !== "symbol") {
+    if (isCollection(node)) {
+      path = Object.freeze(path.concat(node));
+      for (let i = 0; i < node.items.length; ++i) {
+        const ci = visit_(i, node.items[i], visitor, path);
+        if (typeof ci === "number")
+          i = ci - 1;
+        else if (ci === BREAK)
+          return BREAK;
+        else if (ci === REMOVE) {
+          node.items.splice(i, 1);
+          i -= 1;
+        }
+      }
+    } else if (isPair(node)) {
+      path = Object.freeze(path.concat(node));
+      const ck = visit_("key", node.key, visitor, path);
+      if (ck === BREAK)
+        return BREAK;
+      else if (ck === REMOVE)
+        node.key = null;
+      const cv = visit_("value", node.value, visitor, path);
+      if (cv === BREAK)
+        return BREAK;
+      else if (cv === REMOVE)
+        node.value = null;
+    }
+  }
+  return ctrl;
+}
+async function visitAsync(node, visitor) {
+  const visitor_ = initVisitor(visitor);
+  if (isDocument(node)) {
+    const cd = await visitAsync_(null, node.contents, visitor_, Object.freeze([node]));
+    if (cd === REMOVE)
+      node.contents = null;
+  } else
+    await visitAsync_(null, node, visitor_, Object.freeze([]));
+}
+visitAsync.BREAK = BREAK;
+visitAsync.SKIP = SKIP;
+visitAsync.REMOVE = REMOVE;
+async function visitAsync_(key, node, visitor, path) {
+  const ctrl = await callVisitor(key, node, visitor, path);
+  if (isNode(ctrl) || isPair(ctrl)) {
+    replaceNode(key, path, ctrl);
+    return visitAsync_(key, ctrl, visitor, path);
+  }
+  if (typeof ctrl !== "symbol") {
+    if (isCollection(node)) {
+      path = Object.freeze(path.concat(node));
+      for (let i = 0; i < node.items.length; ++i) {
+        const ci = await visitAsync_(i, node.items[i], visitor, path);
+        if (typeof ci === "number")
+          i = ci - 1;
+        else if (ci === BREAK)
+          return BREAK;
+        else if (ci === REMOVE) {
+          node.items.splice(i, 1);
+          i -= 1;
+        }
+      }
+    } else if (isPair(node)) {
+      path = Object.freeze(path.concat(node));
+      const ck = await visitAsync_("key", node.key, visitor, path);
+      if (ck === BREAK)
+        return BREAK;
+      else if (ck === REMOVE)
+        node.key = null;
+      const cv = await visitAsync_("value", node.value, visitor, path);
+      if (cv === BREAK)
+        return BREAK;
+      else if (cv === REMOVE)
+        node.value = null;
+    }
+  }
+  return ctrl;
+}
+function initVisitor(visitor) {
+  if (typeof visitor === "object" && (visitor.Collection || visitor.Node || visitor.Value)) {
+    return Object.assign({
+      Alias: visitor.Node,
+      Map: visitor.Node,
+      Scalar: visitor.Node,
+      Seq: visitor.Node
+    }, visitor.Value && {
+      Map: visitor.Value,
+      Scalar: visitor.Value,
+      Seq: visitor.Value
+    }, visitor.Collection && {
+      Map: visitor.Collection,
+      Seq: visitor.Collection
+    }, visitor);
+  }
+  return visitor;
+}
+function callVisitor(key, node, visitor, path) {
+  if (typeof visitor === "function")
+    return visitor(key, node, path);
+  if (isMap(node))
+    return visitor.Map?.(key, node, path);
+  if (isSeq(node))
+    return visitor.Seq?.(key, node, path);
+  if (isPair(node))
+    return visitor.Pair?.(key, node, path);
+  if (isScalar(node))
+    return visitor.Scalar?.(key, node, path);
+  if (isAlias(node))
+    return visitor.Alias?.(key, node, path);
+  return void 0;
+}
+function replaceNode(key, path, node) {
+  const parent = path[path.length - 1];
+  if (isCollection(parent)) {
+    parent.items[key] = node;
+  } else if (isPair(parent)) {
+    if (key === "key")
+      parent.key = node;
+    else
+      parent.value = node;
+  } else if (isDocument(parent)) {
+    parent.contents = node;
+  } else {
+    const pt = isAlias(parent) ? "alias" : "scalar";
+    throw new Error(`Cannot replace node with ${pt} parent`);
+  }
+}
+
+// node_modules/yaml/browser/dist/doc/directives.js
+var escapeChars = {
+  "!": "%21",
+  ",": "%2C",
+  "[": "%5B",
+  "]": "%5D",
+  "{": "%7B",
+  "}": "%7D"
+};
+var escapeTagName = (tn) => tn.replace(/[!,[\]{}]/g, (ch) => escapeChars[ch]);
+var Directives = class {
+  constructor(yaml, tags) {
+    this.docStart = null;
+    this.docEnd = false;
+    this.yaml = Object.assign({}, Directives.defaultYaml, yaml);
+    this.tags = Object.assign({}, Directives.defaultTags, tags);
+  }
+  clone() {
+    const copy = new Directives(this.yaml, this.tags);
+    copy.docStart = this.docStart;
+    return copy;
+  }
+  /**
+   * During parsing, get a Directives instance for the current document and
+   * update the stream state according to the current version's spec.
+   */
+  atDocument() {
+    const res = new Directives(this.yaml, this.tags);
+    switch (this.yaml.version) {
+      case "1.1":
+        this.atNextDocument = true;
+        break;
+      case "1.2":
+        this.atNextDocument = false;
+        this.yaml = {
+          explicit: Directives.defaultYaml.explicit,
+          version: "1.2"
+        };
+        this.tags = Object.assign({}, Directives.defaultTags);
+        break;
+    }
+    return res;
+  }
+  /**
+   * @param onError - May be called even if the action was successful
+   * @returns `true` on success
+   */
+  add(line, onError) {
+    if (this.atNextDocument) {
+      this.yaml = { explicit: Directives.defaultYaml.explicit, version: "1.1" };
+      this.tags = Object.assign({}, Directives.defaultTags);
+      this.atNextDocument = false;
+    }
+    const parts = line.trim().split(/[ \t]+/);
+    const name = parts.shift();
+    switch (name) {
+      case "%TAG": {
+        if (parts.length !== 2) {
+          onError(0, "%TAG directive should contain exactly two parts");
+          if (parts.length < 2)
+            return false;
+        }
+        const [handle, prefix] = parts;
+        this.tags[handle] = prefix;
+        return true;
+      }
+      case "%YAML": {
+        this.yaml.explicit = true;
+        if (parts.length !== 1) {
+          onError(0, "%YAML directive should contain exactly one part");
+          return false;
+        }
+        const [version] = parts;
+        if (version === "1.1" || version === "1.2") {
+          this.yaml.version = version;
+          return true;
+        } else {
+          const isValid = /^\d+\.\d+$/.test(version);
+          onError(6, `Unsupported YAML version ${version}`, isValid);
+          return false;
+        }
+      }
+      default:
+        onError(0, `Unknown directive ${name}`, true);
+        return false;
+    }
+  }
+  /**
+   * Resolves a tag, matching handles to those defined in %TAG directives.
+   *
+   * @returns Resolved tag, which may also be the non-specific tag `'!'` or a
+   *   `'!local'` tag, or `null` if unresolvable.
+   */
+  tagName(source, onError) {
+    if (source === "!")
+      return "!";
+    if (source[0] !== "!") {
+      onError(`Not a valid tag: ${source}`);
+      return null;
+    }
+    if (source[1] === "<") {
+      const verbatim = source.slice(2, -1);
+      if (verbatim === "!" || verbatim === "!!") {
+        onError(`Verbatim tags aren't resolved, so ${source} is invalid.`);
+        return null;
+      }
+      if (source[source.length - 1] !== ">")
+        onError("Verbatim tags must end with a >");
+      return verbatim;
+    }
+    const [, handle, suffix] = source.match(/^(.*!)([^!]*)$/s);
+    if (!suffix)
+      onError(`The ${source} tag has no suffix`);
+    const prefix = this.tags[handle];
+    if (prefix) {
+      try {
+        return prefix + decodeURIComponent(suffix);
+      } catch (error) {
+        onError(String(error));
+        return null;
+      }
+    }
+    if (handle === "!")
+      return source;
+    onError(`Could not resolve tag: ${source}`);
+    return null;
+  }
+  /**
+   * Given a fully resolved tag, returns its printable string form,
+   * taking into account current tag prefixes and defaults.
+   */
+  tagString(tag) {
+    for (const [handle, prefix] of Object.entries(this.tags)) {
+      if (tag.startsWith(prefix))
+        return handle + escapeTagName(tag.substring(prefix.length));
+    }
+    return tag[0] === "!" ? tag : `!<${tag}>`;
+  }
+  toString(doc) {
+    const lines = this.yaml.explicit ? [`%YAML ${this.yaml.version || "1.2"}`] : [];
+    const tagEntries = Object.entries(this.tags);
+    let tagNames;
+    if (doc && tagEntries.length > 0 && isNode(doc.contents)) {
+      const tags = {};
+      visit(doc.contents, (_key, node) => {
+        if (isNode(node) && node.tag)
+          tags[node.tag] = true;
+      });
+      tagNames = Object.keys(tags);
+    } else
+      tagNames = [];
+    for (const [handle, prefix] of tagEntries) {
+      if (handle === "!!" && prefix === "tag:yaml.org,2002:")
+        continue;
+      if (!doc || tagNames.some((tn) => tn.startsWith(prefix)))
+        lines.push(`%TAG ${handle} ${prefix}`);
+    }
+    return lines.join("\n");
+  }
+};
+Directives.defaultYaml = { explicit: false, version: "1.2" };
+Directives.defaultTags = { "!!": "tag:yaml.org,2002:" };
+
+// node_modules/yaml/browser/dist/doc/anchors.js
+function anchorIsValid(anchor) {
+  if (/[\x00-\x19\s,[\]{}]/.test(anchor)) {
+    const sa = JSON.stringify(anchor);
+    const msg = `Anchor must not contain whitespace or control characters: ${sa}`;
+    throw new Error(msg);
+  }
+  return true;
+}
+function anchorNames(root) {
+  const anchors = /* @__PURE__ */ new Set();
+  visit(root, {
+    Value(_key, node) {
+      if (node.anchor)
+        anchors.add(node.anchor);
+    }
+  });
+  return anchors;
+}
+function findNewAnchor(prefix, exclude) {
+  for (let i = 1; true; ++i) {
+    const name = `${prefix}${i}`;
+    if (!exclude.has(name))
+      return name;
+  }
+}
+function createNodeAnchors(doc, prefix) {
+  const aliasObjects = [];
+  const sourceObjects = /* @__PURE__ */ new Map();
+  let prevAnchors = null;
+  return {
+    onAnchor: (source) => {
+      aliasObjects.push(source);
+      prevAnchors ?? (prevAnchors = anchorNames(doc));
+      const anchor = findNewAnchor(prefix, prevAnchors);
+      prevAnchors.add(anchor);
+      return anchor;
+    },
+    /**
+     * With circular references, the source node is only resolved after all
+     * of its child nodes are. This is why anchors are set only after all of
+     * the nodes have been created.
+     */
+    setAnchors: () => {
+      for (const source of aliasObjects) {
+        const ref = sourceObjects.get(source);
+        if (typeof ref === "object" && ref.anchor && (isScalar(ref.node) || isCollection(ref.node))) {
+          ref.node.anchor = ref.anchor;
+        } else {
+          const error = new Error("Failed to resolve repeated object (this should not happen)");
+          error.source = source;
+          throw error;
+        }
+      }
+    },
+    sourceObjects
+  };
+}
+
+// node_modules/yaml/browser/dist/doc/applyReviver.js
+function applyReviver(reviver, obj, key, val) {
+  if (val && typeof val === "object") {
+    if (Array.isArray(val)) {
+      for (let i = 0, len = val.length; i < len; ++i) {
+        const v0 = val[i];
+        const v1 = applyReviver(reviver, val, String(i), v0);
+        if (v1 === void 0)
+          delete val[i];
+        else if (v1 !== v0)
+          val[i] = v1;
+      }
+    } else if (val instanceof Map) {
+      for (const k of Array.from(val.keys())) {
+        const v0 = val.get(k);
+        const v1 = applyReviver(reviver, val, k, v0);
+        if (v1 === void 0)
+          val.delete(k);
+        else if (v1 !== v0)
+          val.set(k, v1);
+      }
+    } else if (val instanceof Set) {
+      for (const v0 of Array.from(val)) {
+        const v1 = applyReviver(reviver, val, v0, v0);
+        if (v1 === void 0)
+          val.delete(v0);
+        else if (v1 !== v0) {
+          val.delete(v0);
+          val.add(v1);
+        }
+      }
+    } else {
+      for (const [k, v0] of Object.entries(val)) {
+        const v1 = applyReviver(reviver, val, k, v0);
+        if (v1 === void 0)
+          delete val[k];
+        else if (v1 !== v0)
+          val[k] = v1;
+      }
+    }
+  }
+  return reviver.call(obj, key, val);
+}
+
+// node_modules/yaml/browser/dist/nodes/toJS.js
+function toJS(value, arg, ctx) {
+  if (Array.isArray(value))
+    return value.map((v, i) => toJS(v, String(i), ctx));
+  if (value && typeof value.toJSON === "function") {
+    if (!ctx || !hasAnchor(value))
+      return value.toJSON(arg, ctx);
+    const data = { aliasCount: 0, count: 1, res: void 0 };
+    ctx.anchors.set(value, data);
+    ctx.onCreate = (res2) => {
+      data.res = res2;
+      delete ctx.onCreate;
+    };
+    const res = value.toJSON(arg, ctx);
+    if (ctx.onCreate)
+      ctx.onCreate(res);
+    return res;
+  }
+  if (typeof value === "bigint" && !ctx?.keep)
+    return Number(value);
+  return value;
+}
+
+// node_modules/yaml/browser/dist/nodes/Node.js
+var NodeBase = class {
+  constructor(type) {
+    Object.defineProperty(this, NODE_TYPE, { value: type });
+  }
+  /** Create a copy of this node.  */
+  clone() {
+    const copy = Object.create(Object.getPrototypeOf(this), Object.getOwnPropertyDescriptors(this));
+    if (this.range)
+      copy.range = this.range.slice();
+    return copy;
+  }
+  /** A plain JavaScript representation of this node. */
+  toJS(doc, { mapAsMap, maxAliasCount, onAnchor, reviver } = {}) {
+    if (!isDocument(doc))
+      throw new TypeError("A document argument is required");
+    const ctx = {
+      anchors: /* @__PURE__ */ new Map(),
+      doc,
+      keep: true,
+      mapAsMap: mapAsMap === true,
+      mapKeyWarned: false,
+      maxAliasCount: typeof maxAliasCount === "number" ? maxAliasCount : 100
+    };
+    const res = toJS(this, "", ctx);
+    if (typeof onAnchor === "function")
+      for (const { count, res: res2 } of ctx.anchors.values())
+        onAnchor(res2, count);
+    return typeof reviver === "function" ? applyReviver(reviver, { "": res }, "", res) : res;
+  }
+};
+
+// node_modules/yaml/browser/dist/nodes/Alias.js
+var Alias = class extends NodeBase {
+  constructor(source) {
+    super(ALIAS);
+    this.source = source;
+    Object.defineProperty(this, "tag", {
+      set() {
+        throw new Error("Alias nodes cannot have tags");
+      }
+    });
+  }
+  /**
+   * Resolve the value of this alias within `doc`, finding the last
+   * instance of the `source` anchor before this node.
+   */
+  resolve(doc, ctx) {
+    let nodes;
+    if (ctx?.aliasResolveCache) {
+      nodes = ctx.aliasResolveCache;
+    } else {
+      nodes = [];
+      visit(doc, {
+        Node: (_key, node) => {
+          if (isAlias(node) || hasAnchor(node))
+            nodes.push(node);
+        }
+      });
+      if (ctx)
+        ctx.aliasResolveCache = nodes;
+    }
+    let found = void 0;
+    for (const node of nodes) {
+      if (node === this)
+        break;
+      if (node.anchor === this.source)
+        found = node;
+    }
+    return found;
+  }
+  toJSON(_arg, ctx) {
+    if (!ctx)
+      return { source: this.source };
+    const { anchors, doc, maxAliasCount } = ctx;
+    const source = this.resolve(doc, ctx);
+    if (!source) {
+      const msg = `Unresolved alias (the anchor must be set before the alias): ${this.source}`;
+      throw new ReferenceError(msg);
+    }
+    let data = anchors.get(source);
+    if (!data) {
+      toJS(source, null, ctx);
+      data = anchors.get(source);
+    }
+    if (data?.res === void 0) {
+      const msg = "This should not happen: Alias anchor was not resolved?";
+      throw new ReferenceError(msg);
+    }
+    if (maxAliasCount >= 0) {
+      data.count += 1;
+      if (data.aliasCount === 0)
+        data.aliasCount = getAliasCount(doc, source, anchors);
+      if (data.count * data.aliasCount > maxAliasCount) {
+        const msg = "Excessive alias count indicates a resource exhaustion attack";
+        throw new ReferenceError(msg);
+      }
+    }
+    return data.res;
+  }
+  toString(ctx, _onComment, _onChompKeep) {
+    const src = `*${this.source}`;
+    if (ctx) {
+      anchorIsValid(this.source);
+      if (ctx.options.verifyAliasOrder && !ctx.anchors.has(this.source)) {
+        const msg = `Unresolved alias (the anchor must be set before the alias): ${this.source}`;
+        throw new Error(msg);
+      }
+      if (ctx.implicitKey)
+        return `${src} `;
+    }
+    return src;
+  }
+};
+function getAliasCount(doc, node, anchors) {
+  if (isAlias(node)) {
+    const source = node.resolve(doc);
+    const anchor = anchors && source && anchors.get(source);
+    return anchor ? anchor.count * anchor.aliasCount : 0;
+  } else if (isCollection(node)) {
+    let count = 0;
+    for (const item of node.items) {
+      const c = getAliasCount(doc, item, anchors);
+      if (c > count)
+        count = c;
+    }
+    return count;
+  } else if (isPair(node)) {
+    const kc = getAliasCount(doc, node.key, anchors);
+    const vc = getAliasCount(doc, node.value, anchors);
+    return Math.max(kc, vc);
+  }
+  return 1;
+}
+
+// node_modules/yaml/browser/dist/nodes/Scalar.js
+var isScalarValue = (value) => !value || typeof value !== "function" && typeof value !== "object";
+var Scalar = class extends NodeBase {
+  constructor(value) {
+    super(SCALAR);
+    this.value = value;
+  }
+  toJSON(arg, ctx) {
+    return ctx?.keep ? this.value : toJS(this.value, arg, ctx);
+  }
+  toString() {
+    return String(this.value);
+  }
+};
+Scalar.BLOCK_FOLDED = "BLOCK_FOLDED";
+Scalar.BLOCK_LITERAL = "BLOCK_LITERAL";
+Scalar.PLAIN = "PLAIN";
+Scalar.QUOTE_DOUBLE = "QUOTE_DOUBLE";
+Scalar.QUOTE_SINGLE = "QUOTE_SINGLE";
+
+// node_modules/yaml/browser/dist/doc/createNode.js
+var defaultTagPrefix = "tag:yaml.org,2002:";
+function findTagObject(value, tagName, tags) {
+  if (tagName) {
+    const match = tags.filter((t) => t.tag === tagName);
+    const tagObj = match.find((t) => !t.format) ?? match[0];
+    if (!tagObj)
+      throw new Error(`Tag ${tagName} not found`);
+    return tagObj;
+  }
+  return tags.find((t) => t.identify?.(value) && !t.format);
+}
+function createNode(value, tagName, ctx) {
+  if (isDocument(value))
+    value = value.contents;
+  if (isNode(value))
+    return value;
+  if (isPair(value)) {
+    const map2 = ctx.schema[MAP].createNode?.(ctx.schema, null, ctx);
+    map2.items.push(value);
+    return map2;
+  }
+  if (value instanceof String || value instanceof Number || value instanceof Boolean || typeof BigInt !== "undefined" && value instanceof BigInt) {
+    value = value.valueOf();
+  }
+  const { aliasDuplicateObjects, onAnchor, onTagObj, schema: schema4, sourceObjects } = ctx;
+  let ref = void 0;
+  if (aliasDuplicateObjects && value && typeof value === "object") {
+    ref = sourceObjects.get(value);
+    if (ref) {
+      ref.anchor ?? (ref.anchor = onAnchor(value));
+      return new Alias(ref.anchor);
+    } else {
+      ref = { anchor: null, node: null };
+      sourceObjects.set(value, ref);
+    }
+  }
+  if (tagName?.startsWith("!!"))
+    tagName = defaultTagPrefix + tagName.slice(2);
+  let tagObj = findTagObject(value, tagName, schema4.tags);
+  if (!tagObj) {
+    if (value && typeof value.toJSON === "function") {
+      value = value.toJSON();
+    }
+    if (!value || typeof value !== "object") {
+      const node2 = new Scalar(value);
+      if (ref)
+        ref.node = node2;
+      return node2;
+    }
+    tagObj = value instanceof Map ? schema4[MAP] : Symbol.iterator in Object(value) ? schema4[SEQ] : schema4[MAP];
+  }
+  if (onTagObj) {
+    onTagObj(tagObj);
+    delete ctx.onTagObj;
+  }
+  const node = tagObj?.createNode ? tagObj.createNode(ctx.schema, value, ctx) : typeof tagObj?.nodeClass?.from === "function" ? tagObj.nodeClass.from(ctx.schema, value, ctx) : new Scalar(value);
+  if (tagName)
+    node.tag = tagName;
+  else if (!tagObj.default)
+    node.tag = tagObj.tag;
+  if (ref)
+    ref.node = node;
+  return node;
+}
+
+// node_modules/yaml/browser/dist/nodes/Collection.js
+function collectionFromPath(schema4, path, value) {
+  let v = value;
+  for (let i = path.length - 1; i >= 0; --i) {
+    const k = path[i];
+    if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
+      const a = [];
+      a[k] = v;
+      v = a;
+    } else {
+      v = /* @__PURE__ */ new Map([[k, v]]);
+    }
+  }
+  return createNode(v, void 0, {
+    aliasDuplicateObjects: false,
+    keepUndefined: false,
+    onAnchor: () => {
+      throw new Error("This should not happen, please report a bug.");
+    },
+    schema: schema4,
+    sourceObjects: /* @__PURE__ */ new Map()
+  });
+}
+var isEmptyPath = (path) => path == null || typeof path === "object" && !!path[Symbol.iterator]().next().done;
+var Collection = class extends NodeBase {
+  constructor(type, schema4) {
+    super(type);
+    Object.defineProperty(this, "schema", {
+      value: schema4,
+      configurable: true,
+      enumerable: false,
+      writable: true
+    });
+  }
+  /**
+   * Create a copy of this collection.
+   *
+   * @param schema - If defined, overwrites the original's schema
+   */
+  clone(schema4) {
+    const copy = Object.create(Object.getPrototypeOf(this), Object.getOwnPropertyDescriptors(this));
+    if (schema4)
+      copy.schema = schema4;
+    copy.items = copy.items.map((it) => isNode(it) || isPair(it) ? it.clone(schema4) : it);
+    if (this.range)
+      copy.range = this.range.slice();
+    return copy;
+  }
+  /**
+   * Adds a value to the collection. For `!!map` and `!!omap` the value must
+   * be a Pair instance or a `{ key, value }` object, which may not have a key
+   * that already exists in the map.
+   */
+  addIn(path, value) {
+    if (isEmptyPath(path))
+      this.add(value);
+    else {
+      const [key, ...rest] = path;
+      const node = this.get(key, true);
+      if (isCollection(node))
+        node.addIn(rest, value);
+      else if (node === void 0 && this.schema)
+        this.set(key, collectionFromPath(this.schema, rest, value));
+      else
+        throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+    }
+  }
+  /**
+   * Removes a value from the collection.
+   * @returns `true` if the item was found and removed.
+   */
+  deleteIn(path) {
+    const [key, ...rest] = path;
+    if (rest.length === 0)
+      return this.delete(key);
+    const node = this.get(key, true);
+    if (isCollection(node))
+      return node.deleteIn(rest);
+    else
+      throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+  }
+  /**
+   * Returns item at `key`, or `undefined` if not found. By default unwraps
+   * scalar values from their surrounding node; to disable set `keepScalar` to
+   * `true` (collections are always returned intact).
+   */
+  getIn(path, keepScalar) {
+    const [key, ...rest] = path;
+    const node = this.get(key, true);
+    if (rest.length === 0)
+      return !keepScalar && isScalar(node) ? node.value : node;
+    else
+      return isCollection(node) ? node.getIn(rest, keepScalar) : void 0;
+  }
+  hasAllNullValues(allowScalar) {
+    return this.items.every((node) => {
+      if (!isPair(node))
+        return false;
+      const n = node.value;
+      return n == null || allowScalar && isScalar(n) && n.value == null && !n.commentBefore && !n.comment && !n.tag;
+    });
+  }
+  /**
+   * Checks if the collection includes a value with the key `key`.
+   */
+  hasIn(path) {
+    const [key, ...rest] = path;
+    if (rest.length === 0)
+      return this.has(key);
+    const node = this.get(key, true);
+    return isCollection(node) ? node.hasIn(rest) : false;
+  }
+  /**
+   * Sets a value in this collection. For `!!set`, `value` needs to be a
+   * boolean to add/remove the item from the set.
+   */
+  setIn(path, value) {
+    const [key, ...rest] = path;
+    if (rest.length === 0) {
+      this.set(key, value);
+    } else {
+      const node = this.get(key, true);
+      if (isCollection(node))
+        node.setIn(rest, value);
+      else if (node === void 0 && this.schema)
+        this.set(key, collectionFromPath(this.schema, rest, value));
+      else
+        throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+    }
+  }
+};
+
+// node_modules/yaml/browser/dist/stringify/stringifyComment.js
+var stringifyComment = (str) => str.replace(/^(?!$)(?: $)?/gm, "#");
+function indentComment(comment, indent) {
+  if (/^\n+$/.test(comment))
+    return comment.substring(1);
+  return indent ? comment.replace(/^(?! *$)/gm, indent) : comment;
+}
+var lineComment = (str, indent, comment) => str.endsWith("\n") ? indentComment(comment, indent) : comment.includes("\n") ? "\n" + indentComment(comment, indent) : (str.endsWith(" ") ? "" : " ") + comment;
+
+// node_modules/yaml/browser/dist/stringify/foldFlowLines.js
+var FOLD_FLOW = "flow";
+var FOLD_BLOCK = "block";
+var FOLD_QUOTED = "quoted";
+function foldFlowLines(text, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+  if (!lineWidth || lineWidth < 0)
+    return text;
+  if (lineWidth < minContentWidth)
+    minContentWidth = 0;
+  const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent.length);
+  if (text.length <= endStep)
+    return text;
+  const folds = [];
+  const escapedFolds = {};
+  let end = lineWidth - indent.length;
+  if (typeof indentAtStart === "number") {
+    if (indentAtStart > lineWidth - Math.max(2, minContentWidth))
+      folds.push(0);
+    else
+      end = lineWidth - indentAtStart;
+  }
+  let split = void 0;
+  let prev = void 0;
+  let overflow = false;
+  let i = -1;
+  let escStart = -1;
+  let escEnd = -1;
+  if (mode === FOLD_BLOCK) {
+    i = consumeMoreIndentedLines(text, i, indent.length);
+    if (i !== -1)
+      end = i + endStep;
+  }
+  for (let ch; ch = text[i += 1]; ) {
+    if (mode === FOLD_QUOTED && ch === "\\") {
+      escStart = i;
+      switch (text[i + 1]) {
+        case "x":
+          i += 3;
+          break;
+        case "u":
+          i += 5;
+          break;
+        case "U":
+          i += 9;
+          break;
+        default:
+          i += 1;
+      }
+      escEnd = i;
+    }
+    if (ch === "\n") {
+      if (mode === FOLD_BLOCK)
+        i = consumeMoreIndentedLines(text, i, indent.length);
+      end = i + indent.length + endStep;
+      split = void 0;
+    } else {
+      if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
+        const next = text[i + 1];
+        if (next && next !== " " && next !== "\n" && next !== "	")
+          split = i;
+      }
+      if (i >= end) {
+        if (split) {
+          folds.push(split);
+          end = split + endStep;
+          split = void 0;
+        } else if (mode === FOLD_QUOTED) {
+          while (prev === " " || prev === "	") {
+            prev = ch;
+            ch = text[i += 1];
+            overflow = true;
+          }
+          const j = i > escEnd + 1 ? i - 2 : escStart - 1;
+          if (escapedFolds[j])
+            return text;
+          folds.push(j);
+          escapedFolds[j] = true;
+          end = j + endStep;
+          split = void 0;
+        } else {
+          overflow = true;
+        }
+      }
+    }
+    prev = ch;
+  }
+  if (overflow && onOverflow)
+    onOverflow();
+  if (folds.length === 0)
+    return text;
+  if (onFold)
+    onFold();
+  let res = text.slice(0, folds[0]);
+  for (let i2 = 0; i2 < folds.length; ++i2) {
+    const fold = folds[i2];
+    const end2 = folds[i2 + 1] || text.length;
+    if (fold === 0)
+      res = `
+${indent}${text.slice(0, end2)}`;
+    else {
+      if (mode === FOLD_QUOTED && escapedFolds[fold])
+        res += `${text[fold]}\\`;
+      res += `
+${indent}${text.slice(fold + 1, end2)}`;
+    }
+  }
+  return res;
+}
+function consumeMoreIndentedLines(text, i, indent) {
+  let end = i;
+  let start = i + 1;
+  let ch = text[start];
+  while (ch === " " || ch === "	") {
+    if (i < start + indent) {
+      ch = text[++i];
+    } else {
+      do {
+        ch = text[++i];
+      } while (ch && ch !== "\n");
+      end = i;
+      start = i + 1;
+      ch = text[start];
+    }
+  }
+  return end;
+}
+
+// node_modules/yaml/browser/dist/stringify/stringifyString.js
+var getFoldOptions = (ctx, isBlock2) => ({
+  indentAtStart: isBlock2 ? ctx.indent.length : ctx.indentAtStart,
+  lineWidth: ctx.options.lineWidth,
+  minContentWidth: ctx.options.minContentWidth
+});
+var containsDocumentMarker = (str) => /^(%|---|\.\.\.)/m.test(str);
+function lineLengthOverLimit(str, lineWidth, indentLength) {
+  if (!lineWidth || lineWidth < 0)
+    return false;
+  const limit = lineWidth - indentLength;
+  const strLen = str.length;
+  if (strLen <= limit)
+    return false;
+  for (let i = 0, start = 0; i < strLen; ++i) {
+    if (str[i] === "\n") {
+      if (i - start > limit)
+        return true;
+      start = i + 1;
+      if (strLen - start <= limit)
+        return false;
+    }
+  }
+  return true;
+}
+function doubleQuotedString(value, ctx) {
+  const json = JSON.stringify(value);
+  if (ctx.options.doubleQuotedAsJSON)
+    return json;
+  const { implicitKey } = ctx;
+  const minMultiLineLength = ctx.options.doubleQuotedMinMultiLineLength;
+  const indent = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
+  let str = "";
+  let start = 0;
+  for (let i = 0, ch = json[i]; ch; ch = json[++i]) {
+    if (ch === " " && json[i + 1] === "\\" && json[i + 2] === "n") {
+      str += json.slice(start, i) + "\\ ";
+      i += 1;
+      start = i;
+      ch = "\\";
+    }
+    if (ch === "\\")
+      switch (json[i + 1]) {
+        case "u":
+          {
+            str += json.slice(start, i);
+            const code = json.substr(i + 2, 4);
+            switch (code) {
+              case "0000":
+                str += "\\0";
+                break;
+              case "0007":
+                str += "\\a";
+                break;
+              case "000b":
+                str += "\\v";
+                break;
+              case "001b":
+                str += "\\e";
+                break;
+              case "0085":
+                str += "\\N";
+                break;
+              case "00a0":
+                str += "\\_";
+                break;
+              case "2028":
+                str += "\\L";
+                break;
+              case "2029":
+                str += "\\P";
+                break;
+              default:
+                if (code.substr(0, 2) === "00")
+                  str += "\\x" + code.substr(2);
+                else
+                  str += json.substr(i, 6);
+            }
+            i += 5;
+            start = i + 1;
+          }
+          break;
+        case "n":
+          if (implicitKey || json[i + 2] === '"' || json.length < minMultiLineLength) {
+            i += 1;
+          } else {
+            str += json.slice(start, i) + "\n\n";
+            while (json[i + 2] === "\\" && json[i + 3] === "n" && json[i + 4] !== '"') {
+              str += "\n";
+              i += 2;
+            }
+            str += indent;
+            if (json[i + 2] === " ")
+              str += "\\";
+            i += 1;
+            start = i + 1;
+          }
+          break;
+        default:
+          i += 1;
+      }
+  }
+  str = start ? str + json.slice(start) : json;
+  return implicitKey ? str : foldFlowLines(str, indent, FOLD_QUOTED, getFoldOptions(ctx, false));
+}
+function singleQuotedString(value, ctx) {
+  if (ctx.options.singleQuote === false || ctx.implicitKey && value.includes("\n") || /[ \t]\n|\n[ \t]/.test(value))
+    return doubleQuotedString(value, ctx);
+  const indent = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
+  const res = "'" + value.replace(/'/g, "''").replace(/\n+/g, `$&
+${indent}`) + "'";
+  return ctx.implicitKey ? res : foldFlowLines(res, indent, FOLD_FLOW, getFoldOptions(ctx, false));
+}
+function quotedString(value, ctx) {
+  const { singleQuote } = ctx.options;
+  let qs;
+  if (singleQuote === false)
+    qs = doubleQuotedString;
+  else {
+    const hasDouble = value.includes('"');
+    const hasSingle = value.includes("'");
+    if (hasDouble && !hasSingle)
+      qs = singleQuotedString;
+    else if (hasSingle && !hasDouble)
+      qs = doubleQuotedString;
+    else
+      qs = singleQuote ? singleQuotedString : doubleQuotedString;
+  }
+  return qs(value, ctx);
+}
+var blockEndNewlines;
+try {
+  blockEndNewlines = new RegExp("(^|(?<!\n))\n+(?!\n|$)", "g");
+} catch {
+  blockEndNewlines = /\n+(?!\n|$)/g;
+}
+function blockString({ comment, type, value }, ctx, onComment, onChompKeep) {
+  const { blockQuote, commentString, lineWidth } = ctx.options;
+  if (!blockQuote || /\n[\t ]+$/.test(value)) {
+    return quotedString(value, ctx);
+  }
+  const indent = ctx.indent || (ctx.forceBlockIndent || containsDocumentMarker(value) ? "  " : "");
+  const literal = blockQuote === "literal" ? true : blockQuote === "folded" || type === Scalar.BLOCK_FOLDED ? false : type === Scalar.BLOCK_LITERAL ? true : !lineLengthOverLimit(value, lineWidth, indent.length);
+  if (!value)
+    return literal ? "|\n" : ">\n";
+  let chomp;
+  let endStart;
+  for (endStart = value.length; endStart > 0; --endStart) {
+    const ch = value[endStart - 1];
+    if (ch !== "\n" && ch !== "	" && ch !== " ")
+      break;
+  }
+  let end = value.substring(endStart);
+  const endNlPos = end.indexOf("\n");
+  if (endNlPos === -1) {
+    chomp = "-";
+  } else if (value === end || endNlPos !== end.length - 1) {
+    chomp = "+";
+    if (onChompKeep)
+      onChompKeep();
+  } else {
+    chomp = "";
+  }
+  if (end) {
+    value = value.slice(0, -end.length);
+    if (end[end.length - 1] === "\n")
+      end = end.slice(0, -1);
+    end = end.replace(blockEndNewlines, `$&${indent}`);
+  }
+  let startWithSpace = false;
+  let startEnd;
+  let startNlPos = -1;
+  for (startEnd = 0; startEnd < value.length; ++startEnd) {
+    const ch = value[startEnd];
+    if (ch === " ")
+      startWithSpace = true;
+    else if (ch === "\n")
+      startNlPos = startEnd;
+    else
+      break;
+  }
+  let start = value.substring(0, startNlPos < startEnd ? startNlPos + 1 : startEnd);
+  if (start) {
+    value = value.substring(start.length);
+    start = start.replace(/\n+/g, `$&${indent}`);
+  }
+  const indentSize = indent ? "2" : "1";
+  let header = (startWithSpace ? indentSize : "") + chomp;
+  if (comment) {
+    header += " " + commentString(comment.replace(/ ?[\r\n]+/g, " "));
+    if (onComment)
+      onComment();
+  }
+  if (!literal) {
+    const foldedValue = value.replace(/\n+/g, "\n$&").replace(/(?:^|\n)([\t ].*)(?:([\n\t ]*)\n(?![\n\t ]))?/g, "$1$2").replace(/\n+/g, `$&${indent}`);
+    let literalFallback = false;
+    const foldOptions = getFoldOptions(ctx, true);
+    if (blockQuote !== "folded" && type !== Scalar.BLOCK_FOLDED) {
+      foldOptions.onOverflow = () => {
+        literalFallback = true;
+      };
+    }
+    const body = foldFlowLines(`${start}${foldedValue}${end}`, indent, FOLD_BLOCK, foldOptions);
+    if (!literalFallback)
+      return `>${header}
+${indent}${body}`;
+  }
+  value = value.replace(/\n+/g, `$&${indent}`);
+  return `|${header}
+${indent}${start}${value}${end}`;
+}
+function plainString(item, ctx, onComment, onChompKeep) {
+  const { type, value } = item;
+  const { actualString, implicitKey, indent, indentStep, inFlow } = ctx;
+  if (implicitKey && value.includes("\n") || inFlow && /[[\]{},]/.test(value)) {
+    return quotedString(value, ctx);
+  }
+  if (/^[\n\t ,[\]{}#&*!|>'"%@`]|^[?-]$|^[?-][ \t]|[\n:][ \t]|[ \t]\n|[\n\t ]#|[\n\t :]$/.test(value)) {
+    return implicitKey || inFlow || !value.includes("\n") ? quotedString(value, ctx) : blockString(item, ctx, onComment, onChompKeep);
+  }
+  if (!implicitKey && !inFlow && type !== Scalar.PLAIN && value.includes("\n")) {
+    return blockString(item, ctx, onComment, onChompKeep);
+  }
+  if (containsDocumentMarker(value)) {
+    if (indent === "") {
+      ctx.forceBlockIndent = true;
+      return blockString(item, ctx, onComment, onChompKeep);
+    } else if (implicitKey && indent === indentStep) {
+      return quotedString(value, ctx);
+    }
+  }
+  const str = value.replace(/\n+/g, `$&
+${indent}`);
+  if (actualString) {
+    const test = (tag) => tag.default && tag.tag !== "tag:yaml.org,2002:str" && tag.test?.test(str);
+    const { compat, tags } = ctx.doc.schema;
+    if (tags.some(test) || compat?.some(test))
+      return quotedString(value, ctx);
+  }
+  return implicitKey ? str : foldFlowLines(str, indent, FOLD_FLOW, getFoldOptions(ctx, false));
+}
+function stringifyString(item, ctx, onComment, onChompKeep) {
+  const { implicitKey, inFlow } = ctx;
+  const ss = typeof item.value === "string" ? item : Object.assign({}, item, { value: String(item.value) });
+  let { type } = item;
+  if (type !== Scalar.QUOTE_DOUBLE) {
+    if (/[\x00-\x08\x0b-\x1f\x7f-\x9f\u{D800}-\u{DFFF}]/u.test(ss.value))
+      type = Scalar.QUOTE_DOUBLE;
+  }
+  const _stringify = (_type) => {
+    switch (_type) {
+      case Scalar.BLOCK_FOLDED:
+      case Scalar.BLOCK_LITERAL:
+        return implicitKey || inFlow ? quotedString(ss.value, ctx) : blockString(ss, ctx, onComment, onChompKeep);
+      case Scalar.QUOTE_DOUBLE:
+        return doubleQuotedString(ss.value, ctx);
+      case Scalar.QUOTE_SINGLE:
+        return singleQuotedString(ss.value, ctx);
+      case Scalar.PLAIN:
+        return plainString(ss, ctx, onComment, onChompKeep);
+      default:
+        return null;
+    }
+  };
+  let res = _stringify(type);
+  if (res === null) {
+    const { defaultKeyType, defaultStringType } = ctx.options;
+    const t = implicitKey && defaultKeyType || defaultStringType;
+    res = _stringify(t);
+    if (res === null)
+      throw new Error(`Unsupported default string type ${t}`);
+  }
+  return res;
+}
+
+// node_modules/yaml/browser/dist/stringify/stringify.js
+function createStringifyContext(doc, options) {
+  const opt = Object.assign({
+    blockQuote: true,
+    commentString: stringifyComment,
+    defaultKeyType: null,
+    defaultStringType: "PLAIN",
+    directives: null,
+    doubleQuotedAsJSON: false,
+    doubleQuotedMinMultiLineLength: 40,
+    falseStr: "false",
+    flowCollectionPadding: true,
+    indentSeq: true,
+    lineWidth: 80,
+    minContentWidth: 20,
+    nullStr: "null",
+    simpleKeys: false,
+    singleQuote: null,
+    trailingComma: false,
+    trueStr: "true",
+    verifyAliasOrder: true
+  }, doc.schema.toStringOptions, options);
+  let inFlow;
+  switch (opt.collectionStyle) {
+    case "block":
+      inFlow = false;
+      break;
+    case "flow":
+      inFlow = true;
+      break;
+    default:
+      inFlow = null;
+  }
+  return {
+    anchors: /* @__PURE__ */ new Set(),
+    doc,
+    flowCollectionPadding: opt.flowCollectionPadding ? " " : "",
+    indent: "",
+    indentStep: typeof opt.indent === "number" ? " ".repeat(opt.indent) : "  ",
+    inFlow,
+    options: opt
+  };
+}
+function getTagObject(tags, item) {
+  if (item.tag) {
+    const match = tags.filter((t) => t.tag === item.tag);
+    if (match.length > 0)
+      return match.find((t) => t.format === item.format) ?? match[0];
+  }
+  let tagObj = void 0;
+  let obj;
+  if (isScalar(item)) {
+    obj = item.value;
+    let match = tags.filter((t) => t.identify?.(obj));
+    if (match.length > 1) {
+      const testMatch = match.filter((t) => t.test);
+      if (testMatch.length > 0)
+        match = testMatch;
+    }
+    tagObj = match.find((t) => t.format === item.format) ?? match.find((t) => !t.format);
+  } else {
+    obj = item;
+    tagObj = tags.find((t) => t.nodeClass && obj instanceof t.nodeClass);
+  }
+  if (!tagObj) {
+    const name = obj?.constructor?.name ?? (obj === null ? "null" : typeof obj);
+    throw new Error(`Tag not resolved for ${name} value`);
+  }
+  return tagObj;
+}
+function stringifyProps(node, tagObj, { anchors, doc }) {
+  if (!doc.directives)
+    return "";
+  const props = [];
+  const anchor = (isScalar(node) || isCollection(node)) && node.anchor;
+  if (anchor && anchorIsValid(anchor)) {
+    anchors.add(anchor);
+    props.push(`&${anchor}`);
+  }
+  const tag = node.tag ?? (tagObj.default ? null : tagObj.tag);
+  if (tag)
+    props.push(doc.directives.tagString(tag));
+  return props.join(" ");
+}
+function stringify(item, ctx, onComment, onChompKeep) {
+  if (isPair(item))
+    return item.toString(ctx, onComment, onChompKeep);
+  if (isAlias(item)) {
+    if (ctx.doc.directives)
+      return item.toString(ctx);
+    if (ctx.resolvedAliases?.has(item)) {
+      throw new TypeError(`Cannot stringify circular structure without alias nodes`);
+    } else {
+      if (ctx.resolvedAliases)
+        ctx.resolvedAliases.add(item);
+      else
+        ctx.resolvedAliases = /* @__PURE__ */ new Set([item]);
+      item = item.resolve(ctx.doc);
+    }
+  }
+  let tagObj = void 0;
+  const node = isNode(item) ? item : ctx.doc.createNode(item, { onTagObj: (o) => tagObj = o });
+  tagObj ?? (tagObj = getTagObject(ctx.doc.schema.tags, node));
+  const props = stringifyProps(node, tagObj, ctx);
+  if (props.length > 0)
+    ctx.indentAtStart = (ctx.indentAtStart ?? 0) + props.length + 1;
+  const str = typeof tagObj.stringify === "function" ? tagObj.stringify(node, ctx, onComment, onChompKeep) : isScalar(node) ? stringifyString(node, ctx, onComment, onChompKeep) : node.toString(ctx, onComment, onChompKeep);
+  if (!props)
+    return str;
+  return isScalar(node) || str[0] === "{" || str[0] === "[" ? `${props} ${str}` : `${props}
+${ctx.indent}${str}`;
+}
+
+// node_modules/yaml/browser/dist/stringify/stringifyPair.js
+function stringifyPair({ key, value }, ctx, onComment, onChompKeep) {
+  const { allNullValues, doc, indent, indentStep, options: { commentString, indentSeq, simpleKeys } } = ctx;
+  let keyComment = isNode(key) && key.comment || null;
+  if (simpleKeys) {
+    if (keyComment) {
+      throw new Error("With simple keys, key nodes cannot have comments");
+    }
+    if (isCollection(key) || !isNode(key) && typeof key === "object") {
+      const msg = "With simple keys, collection cannot be used as a key value";
+      throw new Error(msg);
+    }
+  }
+  let explicitKey = !simpleKeys && (!key || keyComment && value == null && !ctx.inFlow || isCollection(key) || (isScalar(key) ? key.type === Scalar.BLOCK_FOLDED || key.type === Scalar.BLOCK_LITERAL : typeof key === "object"));
+  ctx = Object.assign({}, ctx, {
+    allNullValues: false,
+    implicitKey: !explicitKey && (simpleKeys || !allNullValues),
+    indent: indent + indentStep
+  });
+  let keyCommentDone = false;
+  let chompKeep = false;
+  let str = stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
+  if (!explicitKey && !ctx.inFlow && str.length > 1024) {
+    if (simpleKeys)
+      throw new Error("With simple keys, single line scalar must not span more than 1024 characters");
+    explicitKey = true;
+  }
+  if (ctx.inFlow) {
+    if (allNullValues || value == null) {
+      if (keyCommentDone && onComment)
+        onComment();
+      return str === "" ? "?" : explicitKey ? `? ${str}` : str;
+    }
+  } else if (allNullValues && !simpleKeys || value == null && explicitKey) {
+    str = `? ${str}`;
+    if (keyComment && !keyCommentDone) {
+      str += lineComment(str, ctx.indent, commentString(keyComment));
+    } else if (chompKeep && onChompKeep)
+      onChompKeep();
+    return str;
+  }
+  if (keyCommentDone)
+    keyComment = null;
+  if (explicitKey) {
+    if (keyComment)
+      str += lineComment(str, ctx.indent, commentString(keyComment));
+    str = `? ${str}
+${indent}:`;
+  } else {
+    str = `${str}:`;
+    if (keyComment)
+      str += lineComment(str, ctx.indent, commentString(keyComment));
+  }
+  let vsb, vcb, valueComment;
+  if (isNode(value)) {
+    vsb = !!value.spaceBefore;
+    vcb = value.commentBefore;
+    valueComment = value.comment;
+  } else {
+    vsb = false;
+    vcb = null;
+    valueComment = null;
+    if (value && typeof value === "object")
+      value = doc.createNode(value);
+  }
+  ctx.implicitKey = false;
+  if (!explicitKey && !keyComment && isScalar(value))
+    ctx.indentAtStart = str.length + 1;
+  chompKeep = false;
+  if (!indentSeq && indentStep.length >= 2 && !ctx.inFlow && !explicitKey && isSeq(value) && !value.flow && !value.tag && !value.anchor) {
+    ctx.indent = ctx.indent.substring(2);
+  }
+  let valueCommentDone = false;
+  const valueStr = stringify(value, ctx, () => valueCommentDone = true, () => chompKeep = true);
+  let ws = " ";
+  if (keyComment || vsb || vcb) {
+    ws = vsb ? "\n" : "";
+    if (vcb) {
+      const cs = commentString(vcb);
+      ws += `
+${indentComment(cs, ctx.indent)}`;
+    }
+    if (valueStr === "" && !ctx.inFlow) {
+      if (ws === "\n" && valueComment)
+        ws = "\n\n";
+    } else {
+      ws += `
+${ctx.indent}`;
+    }
+  } else if (!explicitKey && isCollection(value)) {
+    const vs0 = valueStr[0];
+    const nl0 = valueStr.indexOf("\n");
+    const hasNewline = nl0 !== -1;
+    const flow = ctx.inFlow ?? value.flow ?? value.items.length === 0;
+    if (hasNewline || !flow) {
+      let hasPropsLine = false;
+      if (hasNewline && (vs0 === "&" || vs0 === "!")) {
+        let sp0 = valueStr.indexOf(" ");
+        if (vs0 === "&" && sp0 !== -1 && sp0 < nl0 && valueStr[sp0 + 1] === "!") {
+          sp0 = valueStr.indexOf(" ", sp0 + 1);
+        }
+        if (sp0 === -1 || nl0 < sp0)
+          hasPropsLine = true;
+      }
+      if (!hasPropsLine)
+        ws = `
+${ctx.indent}`;
+    }
+  } else if (valueStr === "" || valueStr[0] === "\n") {
+    ws = "";
+  }
+  str += ws + valueStr;
+  if (ctx.inFlow) {
+    if (valueCommentDone && onComment)
+      onComment();
+  } else if (valueComment && !valueCommentDone) {
+    str += lineComment(str, ctx.indent, commentString(valueComment));
+  } else if (chompKeep && onChompKeep) {
+    onChompKeep();
+  }
+  return str;
+}
+
+// node_modules/yaml/browser/dist/log.js
+function warn(logLevel, warning) {
+  if (logLevel === "debug" || logLevel === "warn") {
+    console.warn(warning);
+  }
+}
+
+// node_modules/yaml/browser/dist/schema/yaml-1.1/merge.js
+var MERGE_KEY = "<<";
+var merge = {
+  identify: (value) => value === MERGE_KEY || typeof value === "symbol" && value.description === MERGE_KEY,
+  default: "key",
+  tag: "tag:yaml.org,2002:merge",
+  test: /^<<$/,
+  resolve: () => Object.assign(new Scalar(Symbol(MERGE_KEY)), {
+    addToJSMap: addMergeToJSMap
+  }),
+  stringify: () => MERGE_KEY
+};
+var isMergeKey = (ctx, key) => (merge.identify(key) || isScalar(key) && (!key.type || key.type === Scalar.PLAIN) && merge.identify(key.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge.tag && tag.default);
+function addMergeToJSMap(ctx, map2, value) {
+  value = ctx && isAlias(value) ? value.resolve(ctx.doc) : value;
+  if (isSeq(value))
+    for (const it of value.items)
+      mergeValue(ctx, map2, it);
+  else if (Array.isArray(value))
+    for (const it of value)
+      mergeValue(ctx, map2, it);
+  else
+    mergeValue(ctx, map2, value);
+}
+function mergeValue(ctx, map2, value) {
+  const source = ctx && isAlias(value) ? value.resolve(ctx.doc) : value;
+  if (!isMap(source))
+    throw new Error("Merge sources must be maps or map aliases");
+  const srcMap = source.toJSON(null, ctx, Map);
+  for (const [key, value2] of srcMap) {
+    if (map2 instanceof Map) {
+      if (!map2.has(key))
+        map2.set(key, value2);
+    } else if (map2 instanceof Set) {
+      map2.add(key);
+    } else if (!Object.prototype.hasOwnProperty.call(map2, key)) {
+      Object.defineProperty(map2, key, {
+        value: value2,
+        writable: true,
+        enumerable: true,
+        configurable: true
+      });
+    }
+  }
+  return map2;
+}
+
+// node_modules/yaml/browser/dist/nodes/addPairToJSMap.js
+function addPairToJSMap(ctx, map2, { key, value }) {
+  if (isNode(key) && key.addToJSMap)
+    key.addToJSMap(ctx, map2, value);
+  else if (isMergeKey(ctx, key))
+    addMergeToJSMap(ctx, map2, value);
+  else {
+    const jsKey = toJS(key, "", ctx);
+    if (map2 instanceof Map) {
+      map2.set(jsKey, toJS(value, jsKey, ctx));
+    } else if (map2 instanceof Set) {
+      map2.add(jsKey);
+    } else {
+      const stringKey = stringifyKey(key, jsKey, ctx);
+      const jsValue = toJS(value, stringKey, ctx);
+      if (stringKey in map2)
+        Object.defineProperty(map2, stringKey, {
+          value: jsValue,
+          writable: true,
+          enumerable: true,
+          configurable: true
+        });
+      else
+        map2[stringKey] = jsValue;
+    }
+  }
+  return map2;
+}
+function stringifyKey(key, jsKey, ctx) {
+  if (jsKey === null)
+    return "";
+  if (typeof jsKey !== "object")
+    return String(jsKey);
+  if (isNode(key) && ctx?.doc) {
+    const strCtx = createStringifyContext(ctx.doc, {});
+    strCtx.anchors = /* @__PURE__ */ new Set();
+    for (const node of ctx.anchors.keys())
+      strCtx.anchors.add(node.anchor);
+    strCtx.inFlow = true;
+    strCtx.inStringifyKey = true;
+    const strKey = key.toString(strCtx);
+    if (!ctx.mapKeyWarned) {
+      let jsonStr = JSON.stringify(strKey);
+      if (jsonStr.length > 40)
+        jsonStr = jsonStr.substring(0, 36) + '..."';
+      warn(ctx.doc.options.logLevel, `Keys with collection values will be stringified due to JS Object restrictions: ${jsonStr}. Set mapAsMap: true to use object keys.`);
+      ctx.mapKeyWarned = true;
+    }
+    return strKey;
+  }
+  return JSON.stringify(jsKey);
+}
+
+// node_modules/yaml/browser/dist/nodes/Pair.js
+function createPair(key, value, ctx) {
+  const k = createNode(key, void 0, ctx);
+  const v = createNode(value, void 0, ctx);
+  return new Pair(k, v);
+}
+var Pair = class {
+  constructor(key, value = null) {
+    Object.defineProperty(this, NODE_TYPE, { value: PAIR });
+    this.key = key;
+    this.value = value;
+  }
+  clone(schema4) {
+    let { key, value } = this;
+    if (isNode(key))
+      key = key.clone(schema4);
+    if (isNode(value))
+      value = value.clone(schema4);
+    return new Pair(key, value);
+  }
+  toJSON(_, ctx) {
+    const pair = ctx?.mapAsMap ? /* @__PURE__ */ new Map() : {};
+    return addPairToJSMap(ctx, pair, this);
+  }
+  toString(ctx, onComment, onChompKeep) {
+    return ctx?.doc ? stringifyPair(this, ctx, onComment, onChompKeep) : JSON.stringify(this);
+  }
+};
+
+// node_modules/yaml/browser/dist/stringify/stringifyCollection.js
+function stringifyCollection(collection, ctx, options) {
+  const flow = ctx.inFlow ?? collection.flow;
+  const stringify4 = flow ? stringifyFlowCollection : stringifyBlockCollection;
+  return stringify4(collection, ctx, options);
+}
+function stringifyBlockCollection({ comment, items }, ctx, { blockItemPrefix, flowChars, itemIndent, onChompKeep, onComment }) {
+  const { indent, options: { commentString } } = ctx;
+  const itemCtx = Object.assign({}, ctx, { indent: itemIndent, type: null });
+  let chompKeep = false;
+  const lines = [];
+  for (let i = 0; i < items.length; ++i) {
+    const item = items[i];
+    let comment2 = null;
+    if (isNode(item)) {
+      if (!chompKeep && item.spaceBefore)
+        lines.push("");
+      addCommentBefore(ctx, lines, item.commentBefore, chompKeep);
+      if (item.comment)
+        comment2 = item.comment;
+    } else if (isPair(item)) {
+      const ik = isNode(item.key) ? item.key : null;
+      if (ik) {
+        if (!chompKeep && ik.spaceBefore)
+          lines.push("");
+        addCommentBefore(ctx, lines, ik.commentBefore, chompKeep);
+      }
+    }
+    chompKeep = false;
+    let str2 = stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
+    if (comment2)
+      str2 += lineComment(str2, itemIndent, commentString(comment2));
+    if (chompKeep && comment2)
+      chompKeep = false;
+    lines.push(blockItemPrefix + str2);
+  }
+  let str;
+  if (lines.length === 0) {
+    str = flowChars.start + flowChars.end;
+  } else {
+    str = lines[0];
+    for (let i = 1; i < lines.length; ++i) {
+      const line = lines[i];
+      str += line ? `
+${indent}${line}` : "\n";
+    }
+  }
+  if (comment) {
+    str += "\n" + indentComment(commentString(comment), indent);
+    if (onComment)
+      onComment();
+  } else if (chompKeep && onChompKeep)
+    onChompKeep();
+  return str;
+}
+function stringifyFlowCollection({ items }, ctx, { flowChars, itemIndent }) {
+  const { indent, indentStep, flowCollectionPadding: fcPadding, options: { commentString } } = ctx;
+  itemIndent += indentStep;
+  const itemCtx = Object.assign({}, ctx, {
+    indent: itemIndent,
+    inFlow: true,
+    type: null
+  });
+  let reqNewline = false;
+  let linesAtValue = 0;
+  const lines = [];
+  for (let i = 0; i < items.length; ++i) {
+    const item = items[i];
+    let comment = null;
+    if (isNode(item)) {
+      if (item.spaceBefore)
+        lines.push("");
+      addCommentBefore(ctx, lines, item.commentBefore, false);
+      if (item.comment)
+        comment = item.comment;
+    } else if (isPair(item)) {
+      const ik = isNode(item.key) ? item.key : null;
+      if (ik) {
+        if (ik.spaceBefore)
+          lines.push("");
+        addCommentBefore(ctx, lines, ik.commentBefore, false);
+        if (ik.comment)
+          reqNewline = true;
+      }
+      const iv = isNode(item.value) ? item.value : null;
+      if (iv) {
+        if (iv.comment)
+          comment = iv.comment;
+        if (iv.commentBefore)
+          reqNewline = true;
+      } else if (item.value == null && ik?.comment) {
+        comment = ik.comment;
+      }
+    }
+    if (comment)
+      reqNewline = true;
+    let str = stringify(item, itemCtx, () => comment = null);
+    reqNewline || (reqNewline = lines.length > linesAtValue || str.includes("\n"));
+    if (i < items.length - 1) {
+      str += ",";
+    } else if (ctx.options.trailingComma) {
+      if (ctx.options.lineWidth > 0) {
+        reqNewline || (reqNewline = lines.reduce((sum, line) => sum + line.length + 2, 2) + (str.length + 2) > ctx.options.lineWidth);
+      }
+      if (reqNewline) {
+        str += ",";
+      }
+    }
+    if (comment)
+      str += lineComment(str, itemIndent, commentString(comment));
+    lines.push(str);
+    linesAtValue = lines.length;
+  }
+  const { start, end } = flowChars;
+  if (lines.length === 0) {
+    return start + end;
+  } else {
+    if (!reqNewline) {
+      const len = lines.reduce((sum, line) => sum + line.length + 2, 2);
+      reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
+    }
+    if (reqNewline) {
+      let str = start;
+      for (const line of lines)
+        str += line ? `
+${indentStep}${indent}${line}` : "\n";
+      return `${str}
+${indent}${end}`;
+    } else {
+      return `${start}${fcPadding}${lines.join(" ")}${fcPadding}${end}`;
+    }
+  }
+}
+function addCommentBefore({ indent, options: { commentString } }, lines, comment, chompKeep) {
+  if (comment && chompKeep)
+    comment = comment.replace(/^\n+/, "");
+  if (comment) {
+    const ic = indentComment(commentString(comment), indent);
+    lines.push(ic.trimStart());
+  }
+}
+
+// node_modules/yaml/browser/dist/nodes/YAMLMap.js
+function findPair(items, key) {
+  const k = isScalar(key) ? key.value : key;
+  for (const it of items) {
+    if (isPair(it)) {
+      if (it.key === key || it.key === k)
+        return it;
+      if (isScalar(it.key) && it.key.value === k)
+        return it;
+    }
+  }
+  return void 0;
+}
+var YAMLMap = class extends Collection {
+  static get tagName() {
+    return "tag:yaml.org,2002:map";
+  }
+  constructor(schema4) {
+    super(MAP, schema4);
+    this.items = [];
+  }
+  /**
+   * A generic collection parsing method that can be extended
+   * to other node classes that inherit from YAMLMap
+   */
+  static from(schema4, obj, ctx) {
+    const { keepUndefined, replacer } = ctx;
+    const map2 = new this(schema4);
+    const add = (key, value) => {
+      if (typeof replacer === "function")
+        value = replacer.call(obj, key, value);
+      else if (Array.isArray(replacer) && !replacer.includes(key))
+        return;
+      if (value !== void 0 || keepUndefined)
+        map2.items.push(createPair(key, value, ctx));
+    };
+    if (obj instanceof Map) {
+      for (const [key, value] of obj)
+        add(key, value);
+    } else if (obj && typeof obj === "object") {
+      for (const key of Object.keys(obj))
+        add(key, obj[key]);
+    }
+    if (typeof schema4.sortMapEntries === "function") {
+      map2.items.sort(schema4.sortMapEntries);
+    }
+    return map2;
+  }
+  /**
+   * Adds a value to the collection.
+   *
+   * @param overwrite - If not set `true`, using a key that is already in the
+   *   collection will throw. Otherwise, overwrites the previous value.
+   */
+  add(pair, overwrite) {
+    let _pair;
+    if (isPair(pair))
+      _pair = pair;
+    else if (!pair || typeof pair !== "object" || !("key" in pair)) {
+      _pair = new Pair(pair, pair?.value);
+    } else
+      _pair = new Pair(pair.key, pair.value);
+    const prev = findPair(this.items, _pair.key);
+    const sortEntries = this.schema?.sortMapEntries;
+    if (prev) {
+      if (!overwrite)
+        throw new Error(`Key ${_pair.key} already set`);
+      if (isScalar(prev.value) && isScalarValue(_pair.value))
+        prev.value.value = _pair.value;
+      else
+        prev.value = _pair.value;
+    } else if (sortEntries) {
+      const i = this.items.findIndex((item) => sortEntries(_pair, item) < 0);
+      if (i === -1)
+        this.items.push(_pair);
+      else
+        this.items.splice(i, 0, _pair);
+    } else {
+      this.items.push(_pair);
+    }
+  }
+  delete(key) {
+    const it = findPair(this.items, key);
+    if (!it)
+      return false;
+    const del = this.items.splice(this.items.indexOf(it), 1);
+    return del.length > 0;
+  }
+  get(key, keepScalar) {
+    const it = findPair(this.items, key);
+    const node = it?.value;
+    return (!keepScalar && isScalar(node) ? node.value : node) ?? void 0;
+  }
+  has(key) {
+    return !!findPair(this.items, key);
+  }
+  set(key, value) {
+    this.add(new Pair(key, value), true);
+  }
+  /**
+   * @param ctx - Conversion context, originally set in Document#toJS()
+   * @param {Class} Type - If set, forces the returned collection type
+   * @returns Instance of Type, Map, or Object
+   */
+  toJSON(_, ctx, Type) {
+    const map2 = Type ? new Type() : ctx?.mapAsMap ? /* @__PURE__ */ new Map() : {};
+    if (ctx?.onCreate)
+      ctx.onCreate(map2);
+    for (const item of this.items)
+      addPairToJSMap(ctx, map2, item);
+    return map2;
+  }
+  toString(ctx, onComment, onChompKeep) {
+    if (!ctx)
+      return JSON.stringify(this);
+    for (const item of this.items) {
+      if (!isPair(item))
+        throw new Error(`Map items must all be pairs; found ${JSON.stringify(item)} instead`);
+    }
+    if (!ctx.allNullValues && this.hasAllNullValues(false))
+      ctx = Object.assign({}, ctx, { allNullValues: true });
+    return stringifyCollection(this, ctx, {
+      blockItemPrefix: "",
+      flowChars: { start: "{", end: "}" },
+      itemIndent: ctx.indent || "",
+      onChompKeep,
+      onComment
+    });
+  }
+};
+
+// node_modules/yaml/browser/dist/schema/common/map.js
+var map = {
+  collection: "map",
+  default: true,
+  nodeClass: YAMLMap,
+  tag: "tag:yaml.org,2002:map",
+  resolve(map2, onError) {
+    if (!isMap(map2))
+      onError("Expected a mapping for this tag");
+    return map2;
+  },
+  createNode: (schema4, obj, ctx) => YAMLMap.from(schema4, obj, ctx)
+};
+
+// node_modules/yaml/browser/dist/nodes/YAMLSeq.js
+var YAMLSeq = class extends Collection {
+  static get tagName() {
+    return "tag:yaml.org,2002:seq";
+  }
+  constructor(schema4) {
+    super(SEQ, schema4);
+    this.items = [];
+  }
+  add(value) {
+    this.items.push(value);
+  }
+  /**
+   * Removes a value from the collection.
+   *
+   * `key` must contain a representation of an integer for this to succeed.
+   * It may be wrapped in a `Scalar`.
+   *
+   * @returns `true` if the item was found and removed.
+   */
+  delete(key) {
+    const idx = asItemIndex(key);
+    if (typeof idx !== "number")
+      return false;
+    const del = this.items.splice(idx, 1);
+    return del.length > 0;
+  }
+  get(key, keepScalar) {
+    const idx = asItemIndex(key);
+    if (typeof idx !== "number")
+      return void 0;
+    const it = this.items[idx];
+    return !keepScalar && isScalar(it) ? it.value : it;
+  }
+  /**
+   * Checks if the collection includes a value with the key `key`.
+   *
+   * `key` must contain a representation of an integer for this to succeed.
+   * It may be wrapped in a `Scalar`.
+   */
+  has(key) {
+    const idx = asItemIndex(key);
+    return typeof idx === "number" && idx < this.items.length;
+  }
+  /**
+   * Sets a value in this collection. For `!!set`, `value` needs to be a
+   * boolean to add/remove the item from the set.
+   *
+   * If `key` does not contain a representation of an integer, this will throw.
+   * It may be wrapped in a `Scalar`.
+   */
+  set(key, value) {
+    const idx = asItemIndex(key);
+    if (typeof idx !== "number")
+      throw new Error(`Expected a valid index, not ${key}.`);
+    const prev = this.items[idx];
+    if (isScalar(prev) && isScalarValue(value))
+      prev.value = value;
+    else
+      this.items[idx] = value;
+  }
+  toJSON(_, ctx) {
+    const seq2 = [];
+    if (ctx?.onCreate)
+      ctx.onCreate(seq2);
+    let i = 0;
+    for (const item of this.items)
+      seq2.push(toJS(item, String(i++), ctx));
+    return seq2;
+  }
+  toString(ctx, onComment, onChompKeep) {
+    if (!ctx)
+      return JSON.stringify(this);
+    return stringifyCollection(this, ctx, {
+      blockItemPrefix: "- ",
+      flowChars: { start: "[", end: "]" },
+      itemIndent: (ctx.indent || "") + "  ",
+      onChompKeep,
+      onComment
+    });
+  }
+  static from(schema4, obj, ctx) {
+    const { replacer } = ctx;
+    const seq2 = new this(schema4);
+    if (obj && Symbol.iterator in Object(obj)) {
+      let i = 0;
+      for (let it of obj) {
+        if (typeof replacer === "function") {
+          const key = obj instanceof Set ? it : String(i++);
+          it = replacer.call(obj, key, it);
+        }
+        seq2.items.push(createNode(it, void 0, ctx));
+      }
+    }
+    return seq2;
+  }
+};
+function asItemIndex(key) {
+  let idx = isScalar(key) ? key.value : key;
+  if (idx && typeof idx === "string")
+    idx = Number(idx);
+  return typeof idx === "number" && Number.isInteger(idx) && idx >= 0 ? idx : null;
+}
+
+// node_modules/yaml/browser/dist/schema/common/seq.js
+var seq = {
+  collection: "seq",
+  default: true,
+  nodeClass: YAMLSeq,
+  tag: "tag:yaml.org,2002:seq",
+  resolve(seq2, onError) {
+    if (!isSeq(seq2))
+      onError("Expected a sequence for this tag");
+    return seq2;
+  },
+  createNode: (schema4, obj, ctx) => YAMLSeq.from(schema4, obj, ctx)
+};
+
+// node_modules/yaml/browser/dist/schema/common/string.js
+var string = {
+  identify: (value) => typeof value === "string",
+  default: true,
+  tag: "tag:yaml.org,2002:str",
+  resolve: (str) => str,
+  stringify(item, ctx, onComment, onChompKeep) {
+    ctx = Object.assign({ actualString: true }, ctx);
+    return stringifyString(item, ctx, onComment, onChompKeep);
+  }
+};
+
+// node_modules/yaml/browser/dist/schema/common/null.js
+var nullTag = {
+  identify: (value) => value == null,
+  createNode: () => new Scalar(null),
+  default: true,
+  tag: "tag:yaml.org,2002:null",
+  test: /^(?:~|[Nn]ull|NULL)?$/,
+  resolve: () => new Scalar(null),
+  stringify: ({ source }, ctx) => typeof source === "string" && nullTag.test.test(source) ? source : ctx.options.nullStr
+};
+
+// node_modules/yaml/browser/dist/schema/core/bool.js
+var boolTag = {
+  identify: (value) => typeof value === "boolean",
+  default: true,
+  tag: "tag:yaml.org,2002:bool",
+  test: /^(?:[Tt]rue|TRUE|[Ff]alse|FALSE)$/,
+  resolve: (str) => new Scalar(str[0] === "t" || str[0] === "T"),
+  stringify({ source, value }, ctx) {
+    if (source && boolTag.test.test(source)) {
+      const sv = source[0] === "t" || source[0] === "T";
+      if (value === sv)
+        return source;
+    }
+    return value ? ctx.options.trueStr : ctx.options.falseStr;
+  }
+};
+
+// node_modules/yaml/browser/dist/stringify/stringifyNumber.js
+function stringifyNumber({ format, minFractionDigits, tag, value }) {
+  if (typeof value === "bigint")
+    return String(value);
+  const num = typeof value === "number" ? value : Number(value);
+  if (!isFinite(num))
+    return isNaN(num) ? ".nan" : num < 0 ? "-.inf" : ".inf";
+  let n = Object.is(value, -0) ? "-0" : JSON.stringify(value);
+  if (!format && minFractionDigits && (!tag || tag === "tag:yaml.org,2002:float") && /^\d/.test(n)) {
+    let i = n.indexOf(".");
+    if (i < 0) {
+      i = n.length;
+      n += ".";
+    }
+    let d = minFractionDigits - (n.length - i - 1);
+    while (d-- > 0)
+      n += "0";
+  }
+  return n;
+}
+
+// node_modules/yaml/browser/dist/schema/core/float.js
+var floatNaN = {
+  identify: (value) => typeof value === "number",
+  default: true,
+  tag: "tag:yaml.org,2002:float",
+  test: /^(?:[-+]?\.(?:inf|Inf|INF)|\.nan|\.NaN|\.NAN)$/,
+  resolve: (str) => str.slice(-3).toLowerCase() === "nan" ? NaN : str[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
+  stringify: stringifyNumber
+};
+var floatExp = {
+  identify: (value) => typeof value === "number",
+  default: true,
+  tag: "tag:yaml.org,2002:float",
+  format: "EXP",
+  test: /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)[eE][-+]?[0-9]+$/,
+  resolve: (str) => parseFloat(str),
+  stringify(node) {
+    const num = Number(node.value);
+    return isFinite(num) ? num.toExponential() : stringifyNumber(node);
+  }
+};
+var float = {
+  identify: (value) => typeof value === "number",
+  default: true,
+  tag: "tag:yaml.org,2002:float",
+  test: /^[-+]?(?:\.[0-9]+|[0-9]+\.[0-9]*)$/,
+  resolve(str) {
+    const node = new Scalar(parseFloat(str));
+    const dot = str.indexOf(".");
+    if (dot !== -1 && str[str.length - 1] === "0")
+      node.minFractionDigits = str.length - dot - 1;
+    return node;
+  },
+  stringify: stringifyNumber
+};
+
+// node_modules/yaml/browser/dist/schema/core/int.js
+var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
+var intResolve = (str, offset, radix, { intAsBigInt }) => intAsBigInt ? BigInt(str) : parseInt(str.substring(offset), radix);
+function intStringify(node, radix, prefix) {
+  const { value } = node;
+  if (intIdentify(value) && value >= 0)
+    return prefix + value.toString(radix);
+  return stringifyNumber(node);
+}
+var intOct = {
+  identify: (value) => intIdentify(value) && value >= 0,
+  default: true,
+  tag: "tag:yaml.org,2002:int",
+  format: "OCT",
+  test: /^0o[0-7]+$/,
+  resolve: (str, _onError, opt) => intResolve(str, 2, 8, opt),
+  stringify: (node) => intStringify(node, 8, "0o")
+};
+var int = {
+  identify: intIdentify,
+  default: true,
+  tag: "tag:yaml.org,2002:int",
+  test: /^[-+]?[0-9]+$/,
+  resolve: (str, _onError, opt) => intResolve(str, 0, 10, opt),
+  stringify: stringifyNumber
+};
+var intHex = {
+  identify: (value) => intIdentify(value) && value >= 0,
+  default: true,
+  tag: "tag:yaml.org,2002:int",
+  format: "HEX",
+  test: /^0x[0-9a-fA-F]+$/,
+  resolve: (str, _onError, opt) => intResolve(str, 2, 16, opt),
+  stringify: (node) => intStringify(node, 16, "0x")
+};
+
+// node_modules/yaml/browser/dist/schema/core/schema.js
+var schema = [
+  map,
+  seq,
+  string,
+  nullTag,
+  boolTag,
+  intOct,
+  int,
+  intHex,
+  floatNaN,
+  floatExp,
+  float
+];
+
+// node_modules/yaml/browser/dist/schema/json/schema.js
+function intIdentify2(value) {
+  return typeof value === "bigint" || Number.isInteger(value);
+}
+var stringifyJSON = ({ value }) => JSON.stringify(value);
+var jsonScalars = [
+  {
+    identify: (value) => typeof value === "string",
+    default: true,
+    tag: "tag:yaml.org,2002:str",
+    resolve: (str) => str,
+    stringify: stringifyJSON
+  },
+  {
+    identify: (value) => value == null,
+    createNode: () => new Scalar(null),
+    default: true,
+    tag: "tag:yaml.org,2002:null",
+    test: /^null$/,
+    resolve: () => null,
+    stringify: stringifyJSON
+  },
+  {
+    identify: (value) => typeof value === "boolean",
+    default: true,
+    tag: "tag:yaml.org,2002:bool",
+    test: /^true$|^false$/,
+    resolve: (str) => str === "true",
+    stringify: stringifyJSON
+  },
+  {
+    identify: intIdentify2,
+    default: true,
+    tag: "tag:yaml.org,2002:int",
+    test: /^-?(?:0|[1-9][0-9]*)$/,
+    resolve: (str, _onError, { intAsBigInt }) => intAsBigInt ? BigInt(str) : parseInt(str, 10),
+    stringify: ({ value }) => intIdentify2(value) ? value.toString() : JSON.stringify(value)
+  },
+  {
+    identify: (value) => typeof value === "number",
+    default: true,
+    tag: "tag:yaml.org,2002:float",
+    test: /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*)?(?:[eE][-+]?[0-9]+)?$/,
+    resolve: (str) => parseFloat(str),
+    stringify: stringifyJSON
+  }
+];
+var jsonError = {
+  default: true,
+  tag: "",
+  test: /^/,
+  resolve(str, onError) {
+    onError(`Unresolved plain scalar ${JSON.stringify(str)}`);
+    return str;
+  }
+};
+var schema2 = [map, seq].concat(jsonScalars, jsonError);
+
+// node_modules/yaml/browser/dist/schema/yaml-1.1/binary.js
+var binary = {
+  identify: (value) => value instanceof Uint8Array,
+  // Buffer inherits from Uint8Array
+  default: false,
+  tag: "tag:yaml.org,2002:binary",
+  /**
+   * Returns a Buffer in node and an Uint8Array in browsers
+   *
+   * To use the resulting buffer as an image, you'll want to do something like:
+   *
+   *   const blob = new Blob([buffer], { type: 'image/jpeg' })
+   *   document.querySelector('#photo').src = URL.createObjectURL(blob)
+   */
+  resolve(src, onError) {
+    if (typeof atob === "function") {
+      const str = atob(src.replace(/[\n\r]/g, ""));
+      const buffer = new Uint8Array(str.length);
+      for (let i = 0; i < str.length; ++i)
+        buffer[i] = str.charCodeAt(i);
+      return buffer;
+    } else {
+      onError("This environment does not support reading binary tags; either Buffer or atob is required");
+      return src;
+    }
+  },
+  stringify({ comment, type, value }, ctx, onComment, onChompKeep) {
+    if (!value)
+      return "";
+    const buf = value;
+    let str;
+    if (typeof btoa === "function") {
+      let s = "";
+      for (let i = 0; i < buf.length; ++i)
+        s += String.fromCharCode(buf[i]);
+      str = btoa(s);
+    } else {
+      throw new Error("This environment does not support writing binary tags; either Buffer or btoa is required");
+    }
+    type ?? (type = Scalar.BLOCK_LITERAL);
+    if (type !== Scalar.QUOTE_DOUBLE) {
+      const lineWidth = Math.max(ctx.options.lineWidth - ctx.indent.length, ctx.options.minContentWidth);
+      const n = Math.ceil(str.length / lineWidth);
+      const lines = new Array(n);
+      for (let i = 0, o = 0; i < n; ++i, o += lineWidth) {
+        lines[i] = str.substr(o, lineWidth);
+      }
+      str = lines.join(type === Scalar.BLOCK_LITERAL ? "\n" : " ");
+    }
+    return stringifyString({ comment, type, value: str }, ctx, onComment, onChompKeep);
+  }
+};
+
+// node_modules/yaml/browser/dist/schema/yaml-1.1/pairs.js
+function resolvePairs(seq2, onError) {
+  if (isSeq(seq2)) {
+    for (let i = 0; i < seq2.items.length; ++i) {
+      let item = seq2.items[i];
+      if (isPair(item))
+        continue;
+      else if (isMap(item)) {
+        if (item.items.length > 1)
+          onError("Each pair must have its own sequence indicator");
+        const pair = item.items[0] || new Pair(new Scalar(null));
+        if (item.commentBefore)
+          pair.key.commentBefore = pair.key.commentBefore ? `${item.commentBefore}
+${pair.key.commentBefore}` : item.commentBefore;
+        if (item.comment) {
+          const cn = pair.value ?? pair.key;
+          cn.comment = cn.comment ? `${item.comment}
+${cn.comment}` : item.comment;
+        }
+        item = pair;
+      }
+      seq2.items[i] = isPair(item) ? item : new Pair(item);
+    }
+  } else
+    onError("Expected a sequence for this tag");
+  return seq2;
+}
+function createPairs(schema4, iterable, ctx) {
+  const { replacer } = ctx;
+  const pairs2 = new YAMLSeq(schema4);
+  pairs2.tag = "tag:yaml.org,2002:pairs";
+  let i = 0;
+  if (iterable && Symbol.iterator in Object(iterable))
+    for (let it of iterable) {
+      if (typeof replacer === "function")
+        it = replacer.call(iterable, String(i++), it);
+      let key, value;
+      if (Array.isArray(it)) {
+        if (it.length === 2) {
+          key = it[0];
+          value = it[1];
+        } else
+          throw new TypeError(`Expected [key, value] tuple: ${it}`);
+      } else if (it && it instanceof Object) {
+        const keys = Object.keys(it);
+        if (keys.length === 1) {
+          key = keys[0];
+          value = it[key];
+        } else {
+          throw new TypeError(`Expected tuple with one key, not ${keys.length} keys`);
+        }
+      } else {
+        key = it;
+      }
+      pairs2.items.push(createPair(key, value, ctx));
+    }
+  return pairs2;
+}
+var pairs = {
+  collection: "seq",
+  default: false,
+  tag: "tag:yaml.org,2002:pairs",
+  resolve: resolvePairs,
+  createNode: createPairs
+};
+
+// node_modules/yaml/browser/dist/schema/yaml-1.1/omap.js
+var YAMLOMap = class extends YAMLSeq {
+  constructor() {
+    super();
+    this.add = YAMLMap.prototype.add.bind(this);
+    this.delete = YAMLMap.prototype.delete.bind(this);
+    this.get = YAMLMap.prototype.get.bind(this);
+    this.has = YAMLMap.prototype.has.bind(this);
+    this.set = YAMLMap.prototype.set.bind(this);
+    this.tag = YAMLOMap.tag;
+  }
+  /**
+   * If `ctx` is given, the return type is actually `Map<unknown, unknown>`,
+   * but TypeScript won't allow widening the signature of a child method.
+   */
+  toJSON(_, ctx) {
+    if (!ctx)
+      return super.toJSON(_);
+    const map2 = /* @__PURE__ */ new Map();
+    if (ctx?.onCreate)
+      ctx.onCreate(map2);
+    for (const pair of this.items) {
+      let key, value;
+      if (isPair(pair)) {
+        key = toJS(pair.key, "", ctx);
+        value = toJS(pair.value, key, ctx);
+      } else {
+        key = toJS(pair, "", ctx);
+      }
+      if (map2.has(key))
+        throw new Error("Ordered maps must not include duplicate keys");
+      map2.set(key, value);
+    }
+    return map2;
+  }
+  static from(schema4, iterable, ctx) {
+    const pairs2 = createPairs(schema4, iterable, ctx);
+    const omap2 = new this();
+    omap2.items = pairs2.items;
+    return omap2;
+  }
+};
+YAMLOMap.tag = "tag:yaml.org,2002:omap";
+var omap = {
+  collection: "seq",
+  identify: (value) => value instanceof Map,
+  nodeClass: YAMLOMap,
+  default: false,
+  tag: "tag:yaml.org,2002:omap",
+  resolve(seq2, onError) {
+    const pairs2 = resolvePairs(seq2, onError);
+    const seenKeys = [];
+    for (const { key } of pairs2.items) {
+      if (isScalar(key)) {
+        if (seenKeys.includes(key.value)) {
+          onError(`Ordered maps must not include duplicate keys: ${key.value}`);
+        } else {
+          seenKeys.push(key.value);
+        }
+      }
+    }
+    return Object.assign(new YAMLOMap(), pairs2);
+  },
+  createNode: (schema4, iterable, ctx) => YAMLOMap.from(schema4, iterable, ctx)
+};
+
+// node_modules/yaml/browser/dist/schema/yaml-1.1/bool.js
+function boolStringify({ value, source }, ctx) {
+  const boolObj = value ? trueTag : falseTag;
+  if (source && boolObj.test.test(source))
+    return source;
+  return value ? ctx.options.trueStr : ctx.options.falseStr;
+}
+var trueTag = {
+  identify: (value) => value === true,
+  default: true,
+  tag: "tag:yaml.org,2002:bool",
+  test: /^(?:Y|y|[Yy]es|YES|[Tt]rue|TRUE|[Oo]n|ON)$/,
+  resolve: () => new Scalar(true),
+  stringify: boolStringify
+};
+var falseTag = {
+  identify: (value) => value === false,
+  default: true,
+  tag: "tag:yaml.org,2002:bool",
+  test: /^(?:N|n|[Nn]o|NO|[Ff]alse|FALSE|[Oo]ff|OFF)$/,
+  resolve: () => new Scalar(false),
+  stringify: boolStringify
+};
+
+// node_modules/yaml/browser/dist/schema/yaml-1.1/float.js
+var floatNaN2 = {
+  identify: (value) => typeof value === "number",
+  default: true,
+  tag: "tag:yaml.org,2002:float",
+  test: /^(?:[-+]?\.(?:inf|Inf|INF)|\.nan|\.NaN|\.NAN)$/,
+  resolve: (str) => str.slice(-3).toLowerCase() === "nan" ? NaN : str[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
+  stringify: stringifyNumber
+};
+var floatExp2 = {
+  identify: (value) => typeof value === "number",
+  default: true,
+  tag: "tag:yaml.org,2002:float",
+  format: "EXP",
+  test: /^[-+]?(?:[0-9][0-9_]*)?(?:\.[0-9_]*)?[eE][-+]?[0-9]+$/,
+  resolve: (str) => parseFloat(str.replace(/_/g, "")),
+  stringify(node) {
+    const num = Number(node.value);
+    return isFinite(num) ? num.toExponential() : stringifyNumber(node);
+  }
+};
+var float2 = {
+  identify: (value) => typeof value === "number",
+  default: true,
+  tag: "tag:yaml.org,2002:float",
+  test: /^[-+]?(?:[0-9][0-9_]*)?\.[0-9_]*$/,
+  resolve(str) {
+    const node = new Scalar(parseFloat(str.replace(/_/g, "")));
+    const dot = str.indexOf(".");
+    if (dot !== -1) {
+      const f = str.substring(dot + 1).replace(/_/g, "");
+      if (f[f.length - 1] === "0")
+        node.minFractionDigits = f.length;
+    }
+    return node;
+  },
+  stringify: stringifyNumber
+};
+
+// node_modules/yaml/browser/dist/schema/yaml-1.1/int.js
+var intIdentify3 = (value) => typeof value === "bigint" || Number.isInteger(value);
+function intResolve2(str, offset, radix, { intAsBigInt }) {
+  const sign = str[0];
+  if (sign === "-" || sign === "+")
+    offset += 1;
+  str = str.substring(offset).replace(/_/g, "");
+  if (intAsBigInt) {
+    switch (radix) {
+      case 2:
+        str = `0b${str}`;
+        break;
+      case 8:
+        str = `0o${str}`;
+        break;
+      case 16:
+        str = `0x${str}`;
+        break;
+    }
+    const n2 = BigInt(str);
+    return sign === "-" ? BigInt(-1) * n2 : n2;
+  }
+  const n = parseInt(str, radix);
+  return sign === "-" ? -1 * n : n;
+}
+function intStringify2(node, radix, prefix) {
+  const { value } = node;
+  if (intIdentify3(value)) {
+    const str = value.toString(radix);
+    return value < 0 ? "-" + prefix + str.substr(1) : prefix + str;
+  }
+  return stringifyNumber(node);
+}
+var intBin = {
+  identify: intIdentify3,
+  default: true,
+  tag: "tag:yaml.org,2002:int",
+  format: "BIN",
+  test: /^[-+]?0b[0-1_]+$/,
+  resolve: (str, _onError, opt) => intResolve2(str, 2, 2, opt),
+  stringify: (node) => intStringify2(node, 2, "0b")
+};
+var intOct2 = {
+  identify: intIdentify3,
+  default: true,
+  tag: "tag:yaml.org,2002:int",
+  format: "OCT",
+  test: /^[-+]?0[0-7_]+$/,
+  resolve: (str, _onError, opt) => intResolve2(str, 1, 8, opt),
+  stringify: (node) => intStringify2(node, 8, "0")
+};
+var int2 = {
+  identify: intIdentify3,
+  default: true,
+  tag: "tag:yaml.org,2002:int",
+  test: /^[-+]?[0-9][0-9_]*$/,
+  resolve: (str, _onError, opt) => intResolve2(str, 0, 10, opt),
+  stringify: stringifyNumber
+};
+var intHex2 = {
+  identify: intIdentify3,
+  default: true,
+  tag: "tag:yaml.org,2002:int",
+  format: "HEX",
+  test: /^[-+]?0x[0-9a-fA-F_]+$/,
+  resolve: (str, _onError, opt) => intResolve2(str, 2, 16, opt),
+  stringify: (node) => intStringify2(node, 16, "0x")
+};
+
+// node_modules/yaml/browser/dist/schema/yaml-1.1/set.js
+var YAMLSet = class extends YAMLMap {
+  constructor(schema4) {
+    super(schema4);
+    this.tag = YAMLSet.tag;
+  }
+  add(key) {
+    let pair;
+    if (isPair(key))
+      pair = key;
+    else if (key && typeof key === "object" && "key" in key && "value" in key && key.value === null)
+      pair = new Pair(key.key, null);
+    else
+      pair = new Pair(key, null);
+    const prev = findPair(this.items, pair.key);
+    if (!prev)
+      this.items.push(pair);
+  }
+  /**
+   * If `keepPair` is `true`, returns the Pair matching `key`.
+   * Otherwise, returns the value of that Pair's key.
+   */
+  get(key, keepPair) {
+    const pair = findPair(this.items, key);
+    return !keepPair && isPair(pair) ? isScalar(pair.key) ? pair.key.value : pair.key : pair;
+  }
+  set(key, value) {
+    if (typeof value !== "boolean")
+      throw new Error(`Expected boolean value for set(key, value) in a YAML set, not ${typeof value}`);
+    const prev = findPair(this.items, key);
+    if (prev && !value) {
+      this.items.splice(this.items.indexOf(prev), 1);
+    } else if (!prev && value) {
+      this.items.push(new Pair(key));
+    }
+  }
+  toJSON(_, ctx) {
+    return super.toJSON(_, ctx, Set);
+  }
+  toString(ctx, onComment, onChompKeep) {
+    if (!ctx)
+      return JSON.stringify(this);
+    if (this.hasAllNullValues(true))
+      return super.toString(Object.assign({}, ctx, { allNullValues: true }), onComment, onChompKeep);
+    else
+      throw new Error("Set items must all have null values");
+  }
+  static from(schema4, iterable, ctx) {
+    const { replacer } = ctx;
+    const set2 = new this(schema4);
+    if (iterable && Symbol.iterator in Object(iterable))
+      for (let value of iterable) {
+        if (typeof replacer === "function")
+          value = replacer.call(iterable, value, value);
+        set2.items.push(createPair(value, null, ctx));
+      }
+    return set2;
+  }
+};
+YAMLSet.tag = "tag:yaml.org,2002:set";
+var set = {
+  collection: "map",
+  identify: (value) => value instanceof Set,
+  nodeClass: YAMLSet,
+  default: false,
+  tag: "tag:yaml.org,2002:set",
+  createNode: (schema4, iterable, ctx) => YAMLSet.from(schema4, iterable, ctx),
+  resolve(map2, onError) {
+    if (isMap(map2)) {
+      if (map2.hasAllNullValues(true))
+        return Object.assign(new YAMLSet(), map2);
+      else
+        onError("Set items must all have null values");
+    } else
+      onError("Expected a mapping for this tag");
+    return map2;
+  }
+};
+
+// node_modules/yaml/browser/dist/schema/yaml-1.1/timestamp.js
+function parseSexagesimal(str, asBigInt) {
+  const sign = str[0];
+  const parts = sign === "-" || sign === "+" ? str.substring(1) : str;
+  const num = (n) => asBigInt ? BigInt(n) : Number(n);
+  const res = parts.replace(/_/g, "").split(":").reduce((res2, p) => res2 * num(60) + num(p), num(0));
+  return sign === "-" ? num(-1) * res : res;
+}
+function stringifySexagesimal(node) {
+  let { value } = node;
+  let num = (n) => n;
+  if (typeof value === "bigint")
+    num = (n) => BigInt(n);
+  else if (isNaN(value) || !isFinite(value))
+    return stringifyNumber(node);
+  let sign = "";
+  if (value < 0) {
+    sign = "-";
+    value *= num(-1);
+  }
+  const _60 = num(60);
+  const parts = [value % _60];
+  if (value < 60) {
+    parts.unshift(0);
+  } else {
+    value = (value - parts[0]) / _60;
+    parts.unshift(value % _60);
+    if (value >= 60) {
+      value = (value - parts[0]) / _60;
+      parts.unshift(value);
+    }
+  }
+  return sign + parts.map((n) => String(n).padStart(2, "0")).join(":").replace(/000000\d*$/, "");
+}
+var intTime = {
+  identify: (value) => typeof value === "bigint" || Number.isInteger(value),
+  default: true,
+  tag: "tag:yaml.org,2002:int",
+  format: "TIME",
+  test: /^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+$/,
+  resolve: (str, _onError, { intAsBigInt }) => parseSexagesimal(str, intAsBigInt),
+  stringify: stringifySexagesimal
+};
+var floatTime = {
+  identify: (value) => typeof value === "number",
+  default: true,
+  tag: "tag:yaml.org,2002:float",
+  format: "TIME",
+  test: /^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*$/,
+  resolve: (str) => parseSexagesimal(str, false),
+  stringify: stringifySexagesimal
+};
+var timestamp = {
+  identify: (value) => value instanceof Date,
+  default: true,
+  tag: "tag:yaml.org,2002:timestamp",
+  // If the time zone is omitted, the timestamp is assumed to be specified in UTC. The time part
+  // may be omitted altogether, resulting in a date format. In such a case, the time part is
+  // assumed to be 00:00:00Z (start of day, UTC).
+  test: RegExp("^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:(?:t|T|[ \\t]+)([0-9]{1,2}):([0-9]{1,2}):([0-9]{1,2}(\\.[0-9]+)?)(?:[ \\t]*(Z|[-+][012]?[0-9](?::[0-9]{2})?))?)?$"),
+  resolve(str) {
+    const match = str.match(timestamp.test);
+    if (!match)
+      throw new Error("!!timestamp expects a date, starting with yyyy-mm-dd");
+    const [, year, month, day, hour, minute, second] = match.map(Number);
+    const millisec = match[7] ? Number((match[7] + "00").substr(1, 3)) : 0;
+    let date = Date.UTC(year, month - 1, day, hour || 0, minute || 0, second || 0, millisec);
+    const tz = match[8];
+    if (tz && tz !== "Z") {
+      let d = parseSexagesimal(tz, false);
+      if (Math.abs(d) < 30)
+        d *= 60;
+      date -= 6e4 * d;
+    }
+    return new Date(date);
+  },
+  stringify: ({ value }) => value?.toISOString().replace(/(T00:00:00)?\.000Z$/, "") ?? ""
+};
+
+// node_modules/yaml/browser/dist/schema/yaml-1.1/schema.js
+var schema3 = [
+  map,
+  seq,
+  string,
+  nullTag,
+  trueTag,
+  falseTag,
+  intBin,
+  intOct2,
+  int2,
+  intHex2,
+  floatNaN2,
+  floatExp2,
+  float2,
+  binary,
+  merge,
+  omap,
+  pairs,
+  set,
+  intTime,
+  floatTime,
+  timestamp
+];
+
+// node_modules/yaml/browser/dist/schema/tags.js
+var schemas = /* @__PURE__ */ new Map([
+  ["core", schema],
+  ["failsafe", [map, seq, string]],
+  ["json", schema2],
+  ["yaml11", schema3],
+  ["yaml-1.1", schema3]
+]);
+var tagsByName = {
+  binary,
+  bool: boolTag,
+  float,
+  floatExp,
+  floatNaN,
+  floatTime,
+  int,
+  intHex,
+  intOct,
+  intTime,
+  map,
+  merge,
+  null: nullTag,
+  omap,
+  pairs,
+  seq,
+  set,
+  timestamp
+};
+var coreKnownTags = {
+  "tag:yaml.org,2002:binary": binary,
+  "tag:yaml.org,2002:merge": merge,
+  "tag:yaml.org,2002:omap": omap,
+  "tag:yaml.org,2002:pairs": pairs,
+  "tag:yaml.org,2002:set": set,
+  "tag:yaml.org,2002:timestamp": timestamp
+};
+function getTags(customTags, schemaName, addMergeTag) {
+  const schemaTags = schemas.get(schemaName);
+  if (schemaTags && !customTags) {
+    return addMergeTag && !schemaTags.includes(merge) ? schemaTags.concat(merge) : schemaTags.slice();
+  }
+  let tags = schemaTags;
+  if (!tags) {
+    if (Array.isArray(customTags))
+      tags = [];
+    else {
+      const keys = Array.from(schemas.keys()).filter((key) => key !== "yaml11").map((key) => JSON.stringify(key)).join(", ");
+      throw new Error(`Unknown schema "${schemaName}"; use one of ${keys} or define customTags array`);
+    }
+  }
+  if (Array.isArray(customTags)) {
+    for (const tag of customTags)
+      tags = tags.concat(tag);
+  } else if (typeof customTags === "function") {
+    tags = customTags(tags.slice());
+  }
+  if (addMergeTag)
+    tags = tags.concat(merge);
+  return tags.reduce((tags2, tag) => {
+    const tagObj = typeof tag === "string" ? tagsByName[tag] : tag;
+    if (!tagObj) {
+      const tagName = JSON.stringify(tag);
+      const keys = Object.keys(tagsByName).map((key) => JSON.stringify(key)).join(", ");
+      throw new Error(`Unknown custom tag ${tagName}; use one of ${keys}`);
+    }
+    if (!tags2.includes(tagObj))
+      tags2.push(tagObj);
+    return tags2;
+  }, []);
+}
+
+// node_modules/yaml/browser/dist/schema/Schema.js
+var sortMapEntriesByKey = (a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+var Schema = class {
+  constructor({ compat, customTags, merge: merge2, resolveKnownTags, schema: schema4, sortMapEntries, toStringDefaults }) {
+    this.compat = Array.isArray(compat) ? getTags(compat, "compat") : compat ? getTags(null, compat) : null;
+    this.name = typeof schema4 === "string" && schema4 || "core";
+    this.knownTags = resolveKnownTags ? coreKnownTags : {};
+    this.tags = getTags(customTags, this.name, merge2);
+    this.toStringOptions = toStringDefaults ?? null;
+    Object.defineProperty(this, MAP, { value: map });
+    Object.defineProperty(this, SCALAR, { value: string });
+    Object.defineProperty(this, SEQ, { value: seq });
+    this.sortMapEntries = typeof sortMapEntries === "function" ? sortMapEntries : sortMapEntries === true ? sortMapEntriesByKey : null;
+  }
+  clone() {
+    const copy = Object.create(Schema.prototype, Object.getOwnPropertyDescriptors(this));
+    copy.tags = this.tags.slice();
+    return copy;
+  }
+};
+
+// node_modules/yaml/browser/dist/stringify/stringifyDocument.js
+function stringifyDocument(doc, options) {
+  const lines = [];
+  let hasDirectives = options.directives === true;
+  if (options.directives !== false && doc.directives) {
+    const dir = doc.directives.toString(doc);
+    if (dir) {
+      lines.push(dir);
+      hasDirectives = true;
+    } else if (doc.directives.docStart)
+      hasDirectives = true;
+  }
+  if (hasDirectives)
+    lines.push("---");
+  const ctx = createStringifyContext(doc, options);
+  const { commentString } = ctx.options;
+  if (doc.commentBefore) {
+    if (lines.length !== 1)
+      lines.unshift("");
+    const cs = commentString(doc.commentBefore);
+    lines.unshift(indentComment(cs, ""));
+  }
+  let chompKeep = false;
+  let contentComment = null;
+  if (doc.contents) {
+    if (isNode(doc.contents)) {
+      if (doc.contents.spaceBefore && hasDirectives)
+        lines.push("");
+      if (doc.contents.commentBefore) {
+        const cs = commentString(doc.contents.commentBefore);
+        lines.push(indentComment(cs, ""));
+      }
+      ctx.forceBlockIndent = !!doc.comment;
+      contentComment = doc.contents.comment;
+    }
+    const onChompKeep = contentComment ? void 0 : () => chompKeep = true;
+    let body = stringify(doc.contents, ctx, () => contentComment = null, onChompKeep);
+    if (contentComment)
+      body += lineComment(body, "", commentString(contentComment));
+    if ((body[0] === "|" || body[0] === ">") && lines[lines.length - 1] === "---") {
+      lines[lines.length - 1] = `--- ${body}`;
+    } else
+      lines.push(body);
+  } else {
+    lines.push(stringify(doc.contents, ctx));
+  }
+  if (doc.directives?.docEnd) {
+    if (doc.comment) {
+      const cs = commentString(doc.comment);
+      if (cs.includes("\n")) {
+        lines.push("...");
+        lines.push(indentComment(cs, ""));
+      } else {
+        lines.push(`... ${cs}`);
+      }
+    } else {
+      lines.push("...");
+    }
+  } else {
+    let dc = doc.comment;
+    if (dc && chompKeep)
+      dc = dc.replace(/^\n+/, "");
+    if (dc) {
+      if ((!chompKeep || contentComment) && lines[lines.length - 1] !== "")
+        lines.push("");
+      lines.push(indentComment(commentString(dc), ""));
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
+// node_modules/yaml/browser/dist/doc/Document.js
+var Document = class {
+  constructor(value, replacer, options) {
+    this.commentBefore = null;
+    this.comment = null;
+    this.errors = [];
+    this.warnings = [];
+    Object.defineProperty(this, NODE_TYPE, { value: DOC });
+    let _replacer = null;
+    if (typeof replacer === "function" || Array.isArray(replacer)) {
+      _replacer = replacer;
+    } else if (options === void 0 && replacer) {
+      options = replacer;
+      replacer = void 0;
+    }
+    const opt = Object.assign({
+      intAsBigInt: false,
+      keepSourceTokens: false,
+      logLevel: "warn",
+      prettyErrors: true,
+      strict: true,
+      stringKeys: false,
+      uniqueKeys: true,
+      version: "1.2"
+    }, options);
+    this.options = opt;
+    let { version } = opt;
+    if (options?._directives) {
+      this.directives = options._directives.atDocument();
+      if (this.directives.yaml.explicit)
+        version = this.directives.yaml.version;
+    } else
+      this.directives = new Directives({ version });
+    this.setSchema(version, options);
+    this.contents = value === void 0 ? null : this.createNode(value, _replacer, options);
+  }
+  /**
+   * Create a deep copy of this Document and its contents.
+   *
+   * Custom Node values that inherit from `Object` still refer to their original instances.
+   */
+  clone() {
+    const copy = Object.create(Document.prototype, {
+      [NODE_TYPE]: { value: DOC }
+    });
+    copy.commentBefore = this.commentBefore;
+    copy.comment = this.comment;
+    copy.errors = this.errors.slice();
+    copy.warnings = this.warnings.slice();
+    copy.options = Object.assign({}, this.options);
+    if (this.directives)
+      copy.directives = this.directives.clone();
+    copy.schema = this.schema.clone();
+    copy.contents = isNode(this.contents) ? this.contents.clone(copy.schema) : this.contents;
+    if (this.range)
+      copy.range = this.range.slice();
+    return copy;
+  }
+  /** Adds a value to the document. */
+  add(value) {
+    if (assertCollection(this.contents))
+      this.contents.add(value);
+  }
+  /** Adds a value to the document. */
+  addIn(path, value) {
+    if (assertCollection(this.contents))
+      this.contents.addIn(path, value);
+  }
+  /**
+   * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
+   *
+   * If `node` already has an anchor, `name` is ignored.
+   * Otherwise, the `node.anchor` value will be set to `name`,
+   * or if an anchor with that name is already present in the document,
+   * `name` will be used as a prefix for a new unique anchor.
+   * If `name` is undefined, the generated anchor will use 'a' as a prefix.
+   */
+  createAlias(node, name) {
+    if (!node.anchor) {
+      const prev = anchorNames(this);
+      node.anchor = // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+      !name || prev.has(name) ? findNewAnchor(name || "a", prev) : name;
+    }
+    return new Alias(node.anchor);
+  }
+  createNode(value, replacer, options) {
+    let _replacer = void 0;
+    if (typeof replacer === "function") {
+      value = replacer.call({ "": value }, "", value);
+      _replacer = replacer;
+    } else if (Array.isArray(replacer)) {
+      const keyToStr = (v) => typeof v === "number" || v instanceof String || v instanceof Number;
+      const asStr = replacer.filter(keyToStr).map(String);
+      if (asStr.length > 0)
+        replacer = replacer.concat(asStr);
+      _replacer = replacer;
+    } else if (options === void 0 && replacer) {
+      options = replacer;
+      replacer = void 0;
+    }
+    const { aliasDuplicateObjects, anchorPrefix, flow, keepUndefined, onTagObj, tag } = options ?? {};
+    const { onAnchor, setAnchors, sourceObjects } = createNodeAnchors(
+      this,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+      anchorPrefix || "a"
+    );
+    const ctx = {
+      aliasDuplicateObjects: aliasDuplicateObjects ?? true,
+      keepUndefined: keepUndefined ?? false,
+      onAnchor,
+      onTagObj,
+      replacer: _replacer,
+      schema: this.schema,
+      sourceObjects
+    };
+    const node = createNode(value, tag, ctx);
+    if (flow && isCollection(node))
+      node.flow = true;
+    setAnchors();
+    return node;
+  }
+  /**
+   * Convert a key and a value into a `Pair` using the current schema,
+   * recursively wrapping all values as `Scalar` or `Collection` nodes.
+   */
+  createPair(key, value, options = {}) {
+    const k = this.createNode(key, null, options);
+    const v = this.createNode(value, null, options);
+    return new Pair(k, v);
+  }
+  /**
+   * Removes a value from the document.
+   * @returns `true` if the item was found and removed.
+   */
+  delete(key) {
+    return assertCollection(this.contents) ? this.contents.delete(key) : false;
+  }
+  /**
+   * Removes a value from the document.
+   * @returns `true` if the item was found and removed.
+   */
+  deleteIn(path) {
+    if (isEmptyPath(path)) {
+      if (this.contents == null)
+        return false;
+      this.contents = null;
+      return true;
+    }
+    return assertCollection(this.contents) ? this.contents.deleteIn(path) : false;
+  }
+  /**
+   * Returns item at `key`, or `undefined` if not found. By default unwraps
+   * scalar values from their surrounding node; to disable set `keepScalar` to
+   * `true` (collections are always returned intact).
+   */
+  get(key, keepScalar) {
+    return isCollection(this.contents) ? this.contents.get(key, keepScalar) : void 0;
+  }
+  /**
+   * Returns item at `path`, or `undefined` if not found. By default unwraps
+   * scalar values from their surrounding node; to disable set `keepScalar` to
+   * `true` (collections are always returned intact).
+   */
+  getIn(path, keepScalar) {
+    if (isEmptyPath(path))
+      return !keepScalar && isScalar(this.contents) ? this.contents.value : this.contents;
+    return isCollection(this.contents) ? this.contents.getIn(path, keepScalar) : void 0;
+  }
+  /**
+   * Checks if the document includes a value with the key `key`.
+   */
+  has(key) {
+    return isCollection(this.contents) ? this.contents.has(key) : false;
+  }
+  /**
+   * Checks if the document includes a value at `path`.
+   */
+  hasIn(path) {
+    if (isEmptyPath(path))
+      return this.contents !== void 0;
+    return isCollection(this.contents) ? this.contents.hasIn(path) : false;
+  }
+  /**
+   * Sets a value in this document. For `!!set`, `value` needs to be a
+   * boolean to add/remove the item from the set.
+   */
+  set(key, value) {
+    if (this.contents == null) {
+      this.contents = collectionFromPath(this.schema, [key], value);
+    } else if (assertCollection(this.contents)) {
+      this.contents.set(key, value);
+    }
+  }
+  /**
+   * Sets a value in this document. For `!!set`, `value` needs to be a
+   * boolean to add/remove the item from the set.
+   */
+  setIn(path, value) {
+    if (isEmptyPath(path)) {
+      this.contents = value;
+    } else if (this.contents == null) {
+      this.contents = collectionFromPath(this.schema, Array.from(path), value);
+    } else if (assertCollection(this.contents)) {
+      this.contents.setIn(path, value);
+    }
+  }
+  /**
+   * Change the YAML version and schema used by the document.
+   * A `null` version disables support for directives, explicit tags, anchors, and aliases.
+   * It also requires the `schema` option to be given as a `Schema` instance value.
+   *
+   * Overrides all previously set schema options.
+   */
+  setSchema(version, options = {}) {
+    if (typeof version === "number")
+      version = String(version);
+    let opt;
+    switch (version) {
+      case "1.1":
+        if (this.directives)
+          this.directives.yaml.version = "1.1";
+        else
+          this.directives = new Directives({ version: "1.1" });
+        opt = { resolveKnownTags: false, schema: "yaml-1.1" };
+        break;
+      case "1.2":
+      case "next":
+        if (this.directives)
+          this.directives.yaml.version = version;
+        else
+          this.directives = new Directives({ version });
+        opt = { resolveKnownTags: true, schema: "core" };
+        break;
+      case null:
+        if (this.directives)
+          delete this.directives;
+        opt = null;
+        break;
+      default: {
+        const sv = JSON.stringify(version);
+        throw new Error(`Expected '1.1', '1.2' or null as first argument, but found: ${sv}`);
+      }
+    }
+    if (options.schema instanceof Object)
+      this.schema = options.schema;
+    else if (opt)
+      this.schema = new Schema(Object.assign(opt, options));
+    else
+      throw new Error(`With a null YAML version, the { schema: Schema } option is required`);
+  }
+  // json & jsonArg are only used from toJSON()
+  toJS({ json, jsonArg, mapAsMap, maxAliasCount, onAnchor, reviver } = {}) {
+    const ctx = {
+      anchors: /* @__PURE__ */ new Map(),
+      doc: this,
+      keep: !json,
+      mapAsMap: mapAsMap === true,
+      mapKeyWarned: false,
+      maxAliasCount: typeof maxAliasCount === "number" ? maxAliasCount : 100
+    };
+    const res = toJS(this.contents, jsonArg ?? "", ctx);
+    if (typeof onAnchor === "function")
+      for (const { count, res: res2 } of ctx.anchors.values())
+        onAnchor(res2, count);
+    return typeof reviver === "function" ? applyReviver(reviver, { "": res }, "", res) : res;
+  }
+  /**
+   * A JSON representation of the document `contents`.
+   *
+   * @param jsonArg Used by `JSON.stringify` to indicate the array index or
+   *   property name.
+   */
+  toJSON(jsonArg, onAnchor) {
+    return this.toJS({ json: true, jsonArg, mapAsMap: false, onAnchor });
+  }
+  /** A YAML representation of the document. */
+  toString(options = {}) {
+    if (this.errors.length > 0)
+      throw new Error("Document with errors cannot be stringified");
+    if ("indent" in options && (!Number.isInteger(options.indent) || Number(options.indent) <= 0)) {
+      const s = JSON.stringify(options.indent);
+      throw new Error(`"indent" option must be a positive integer, not ${s}`);
+    }
+    return stringifyDocument(this, options);
+  }
+};
+function assertCollection(contents) {
+  if (isCollection(contents))
+    return true;
+  throw new Error("Expected a YAML collection as document contents");
+}
+
+// node_modules/yaml/browser/dist/errors.js
+var YAMLError = class extends Error {
+  constructor(name, pos, code, message) {
+    super();
+    this.name = name;
+    this.code = code;
+    this.message = message;
+    this.pos = pos;
+  }
+};
+var YAMLParseError = class extends YAMLError {
+  constructor(pos, code, message) {
+    super("YAMLParseError", pos, code, message);
+  }
+};
+var YAMLWarning = class extends YAMLError {
+  constructor(pos, code, message) {
+    super("YAMLWarning", pos, code, message);
+  }
+};
+var prettifyError = (src, lc) => (error) => {
+  if (error.pos[0] === -1)
+    return;
+  error.linePos = error.pos.map((pos) => lc.linePos(pos));
+  const { line, col } = error.linePos[0];
+  error.message += ` at line ${line}, column ${col}`;
+  let ci = col - 1;
+  let lineStr = src.substring(lc.lineStarts[line - 1], lc.lineStarts[line]).replace(/[\n\r]+$/, "");
+  if (ci >= 60 && lineStr.length > 80) {
+    const trimStart = Math.min(ci - 39, lineStr.length - 79);
+    lineStr = "\u2026" + lineStr.substring(trimStart);
+    ci -= trimStart - 1;
+  }
+  if (lineStr.length > 80)
+    lineStr = lineStr.substring(0, 79) + "\u2026";
+  if (line > 1 && /^ *$/.test(lineStr.substring(0, ci))) {
+    let prev = src.substring(lc.lineStarts[line - 2], lc.lineStarts[line - 1]);
+    if (prev.length > 80)
+      prev = prev.substring(0, 79) + "\u2026\n";
+    lineStr = prev + lineStr;
+  }
+  if (/[^ ]/.test(lineStr)) {
+    let count = 1;
+    const end = error.linePos[1];
+    if (end?.line === line && end.col > col) {
+      count = Math.max(1, Math.min(end.col - col, 80 - ci));
+    }
+    const pointer = " ".repeat(ci) + "^".repeat(count);
+    error.message += `:
+
+${lineStr}
+${pointer}
+`;
+  }
+};
+
+// node_modules/yaml/browser/dist/compose/resolve-props.js
+function resolveProps(tokens, { flow, indicator, next, offset, onError, parentIndent, startOnNewline }) {
+  let spaceBefore = false;
+  let atNewline = startOnNewline;
+  let hasSpace = startOnNewline;
+  let comment = "";
+  let commentSep = "";
+  let hasNewline = false;
+  let reqSpace = false;
+  let tab = null;
+  let anchor = null;
+  let tag = null;
+  let newlineAfterProp = null;
+  let comma = null;
+  let found = null;
+  let start = null;
+  for (const token of tokens) {
+    if (reqSpace) {
+      if (token.type !== "space" && token.type !== "newline" && token.type !== "comma")
+        onError(token.offset, "MISSING_CHAR", "Tags and anchors must be separated from the next token by white space");
+      reqSpace = false;
+    }
+    if (tab) {
+      if (atNewline && token.type !== "comment" && token.type !== "newline") {
+        onError(tab, "TAB_AS_INDENT", "Tabs are not allowed as indentation");
+      }
+      tab = null;
+    }
+    switch (token.type) {
+      case "space":
+        if (!flow && (indicator !== "doc-start" || next?.type !== "flow-collection") && token.source.includes("	")) {
+          tab = token;
+        }
+        hasSpace = true;
+        break;
+      case "comment": {
+        if (!hasSpace)
+          onError(token, "MISSING_CHAR", "Comments must be separated from other tokens by white space characters");
+        const cb = token.source.substring(1) || " ";
+        if (!comment)
+          comment = cb;
+        else
+          comment += commentSep + cb;
+        commentSep = "";
+        atNewline = false;
+        break;
+      }
+      case "newline":
+        if (atNewline) {
+          if (comment)
+            comment += token.source;
+          else if (!found || indicator !== "seq-item-ind")
+            spaceBefore = true;
+        } else
+          commentSep += token.source;
+        atNewline = true;
+        hasNewline = true;
+        if (anchor || tag)
+          newlineAfterProp = token;
+        hasSpace = true;
+        break;
+      case "anchor":
+        if (anchor)
+          onError(token, "MULTIPLE_ANCHORS", "A node can have at most one anchor");
+        if (token.source.endsWith(":"))
+          onError(token.offset + token.source.length - 1, "BAD_ALIAS", "Anchor ending in : is ambiguous", true);
+        anchor = token;
+        start ?? (start = token.offset);
+        atNewline = false;
+        hasSpace = false;
+        reqSpace = true;
+        break;
+      case "tag": {
+        if (tag)
+          onError(token, "MULTIPLE_TAGS", "A node can have at most one tag");
+        tag = token;
+        start ?? (start = token.offset);
+        atNewline = false;
+        hasSpace = false;
+        reqSpace = true;
+        break;
+      }
+      case indicator:
+        if (anchor || tag)
+          onError(token, "BAD_PROP_ORDER", `Anchors and tags must be after the ${token.source} indicator`);
+        if (found)
+          onError(token, "UNEXPECTED_TOKEN", `Unexpected ${token.source} in ${flow ?? "collection"}`);
+        found = token;
+        atNewline = indicator === "seq-item-ind" || indicator === "explicit-key-ind";
+        hasSpace = false;
+        break;
+      case "comma":
+        if (flow) {
+          if (comma)
+            onError(token, "UNEXPECTED_TOKEN", `Unexpected , in ${flow}`);
+          comma = token;
+          atNewline = false;
+          hasSpace = false;
+          break;
+        }
+      default:
+        onError(token, "UNEXPECTED_TOKEN", `Unexpected ${token.type} token`);
+        atNewline = false;
+        hasSpace = false;
+    }
+  }
+  const last = tokens[tokens.length - 1];
+  const end = last ? last.offset + last.source.length : offset;
+  if (reqSpace && next && next.type !== "space" && next.type !== "newline" && next.type !== "comma" && (next.type !== "scalar" || next.source !== "")) {
+    onError(next.offset, "MISSING_CHAR", "Tags and anchors must be separated from the next token by white space");
+  }
+  if (tab && (atNewline && tab.indent <= parentIndent || next?.type === "block-map" || next?.type === "block-seq"))
+    onError(tab, "TAB_AS_INDENT", "Tabs are not allowed as indentation");
+  return {
+    comma,
+    found,
+    spaceBefore,
+    comment,
+    hasNewline,
+    anchor,
+    tag,
+    newlineAfterProp,
+    end,
+    start: start ?? end
+  };
+}
+
+// node_modules/yaml/browser/dist/compose/util-contains-newline.js
+function containsNewline(key) {
+  if (!key)
+    return null;
+  switch (key.type) {
+    case "alias":
+    case "scalar":
+    case "double-quoted-scalar":
+    case "single-quoted-scalar":
+      if (key.source.includes("\n"))
+        return true;
+      if (key.end) {
+        for (const st of key.end)
+          if (st.type === "newline")
+            return true;
+      }
+      return false;
+    case "flow-collection":
+      for (const it of key.items) {
+        for (const st of it.start)
+          if (st.type === "newline")
+            return true;
+        if (it.sep) {
+          for (const st of it.sep)
+            if (st.type === "newline")
+              return true;
+        }
+        if (containsNewline(it.key) || containsNewline(it.value))
+          return true;
+      }
+      return false;
+    default:
+      return true;
+  }
+}
+
+// node_modules/yaml/browser/dist/compose/util-flow-indent-check.js
+function flowIndentCheck(indent, fc, onError) {
+  if (fc?.type === "flow-collection") {
+    const end = fc.end[0];
+    if (end.indent === indent && (end.source === "]" || end.source === "}") && containsNewline(fc)) {
+      const msg = "Flow end indicator should be more indented than parent";
+      onError(end, "BAD_INDENT", msg, true);
+    }
+  }
+}
+
+// node_modules/yaml/browser/dist/compose/util-map-includes.js
+function mapIncludes(ctx, items, search) {
+  const { uniqueKeys } = ctx.options;
+  if (uniqueKeys === false)
+    return false;
+  const isEqual = typeof uniqueKeys === "function" ? uniqueKeys : (a, b) => a === b || isScalar(a) && isScalar(b) && a.value === b.value;
+  return items.some((pair) => isEqual(pair.key, search));
+}
+
+// node_modules/yaml/browser/dist/compose/resolve-block-map.js
+var startColMsg = "All mapping items must start at the same column";
+function resolveBlockMap({ composeNode: composeNode2, composeEmptyNode: composeEmptyNode2 }, ctx, bm, onError, tag) {
+  const NodeClass = tag?.nodeClass ?? YAMLMap;
+  const map2 = new NodeClass(ctx.schema);
+  if (ctx.atRoot)
+    ctx.atRoot = false;
+  let offset = bm.offset;
+  let commentEnd = null;
+  for (const collItem of bm.items) {
+    const { start, key, sep, value } = collItem;
+    const keyProps = resolveProps(start, {
+      indicator: "explicit-key-ind",
+      next: key ?? sep?.[0],
+      offset,
+      onError,
+      parentIndent: bm.indent,
+      startOnNewline: true
+    });
+    const implicitKey = !keyProps.found;
+    if (implicitKey) {
+      if (key) {
+        if (key.type === "block-seq")
+          onError(offset, "BLOCK_AS_IMPLICIT_KEY", "A block sequence may not be used as an implicit map key");
+        else if ("indent" in key && key.indent !== bm.indent)
+          onError(offset, "BAD_INDENT", startColMsg);
+      }
+      if (!keyProps.anchor && !keyProps.tag && !sep) {
+        commentEnd = keyProps.end;
+        if (keyProps.comment) {
+          if (map2.comment)
+            map2.comment += "\n" + keyProps.comment;
+          else
+            map2.comment = keyProps.comment;
+        }
+        continue;
+      }
+      if (keyProps.newlineAfterProp || containsNewline(key)) {
+        onError(key ?? start[start.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
+      }
+    } else if (keyProps.found?.indent !== bm.indent) {
+      onError(offset, "BAD_INDENT", startColMsg);
+    }
+    ctx.atKey = true;
+    const keyStart = keyProps.end;
+    const keyNode = key ? composeNode2(ctx, key, keyProps, onError) : composeEmptyNode2(ctx, keyStart, start, null, keyProps, onError);
+    if (ctx.schema.compat)
+      flowIndentCheck(bm.indent, key, onError);
+    ctx.atKey = false;
+    if (mapIncludes(ctx, map2.items, keyNode))
+      onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
+    const valueProps = resolveProps(sep ?? [], {
+      indicator: "map-value-ind",
+      next: value,
+      offset: keyNode.range[2],
+      onError,
+      parentIndent: bm.indent,
+      startOnNewline: !key || key.type === "block-scalar"
+    });
+    offset = valueProps.end;
+    if (valueProps.found) {
+      if (implicitKey) {
+        if (value?.type === "block-map" && !valueProps.hasNewline)
+          onError(offset, "BLOCK_AS_IMPLICIT_KEY", "Nested mappings are not allowed in compact mappings");
+        if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
+          onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
+      }
+      const valueNode = value ? composeNode2(ctx, value, valueProps, onError) : composeEmptyNode2(ctx, offset, sep, null, valueProps, onError);
+      if (ctx.schema.compat)
+        flowIndentCheck(bm.indent, value, onError);
+      offset = valueNode.range[2];
+      const pair = new Pair(keyNode, valueNode);
+      if (ctx.options.keepSourceTokens)
+        pair.srcToken = collItem;
+      map2.items.push(pair);
+    } else {
+      if (implicitKey)
+        onError(keyNode.range, "MISSING_CHAR", "Implicit map keys need to be followed by map values");
+      if (valueProps.comment) {
+        if (keyNode.comment)
+          keyNode.comment += "\n" + valueProps.comment;
+        else
+          keyNode.comment = valueProps.comment;
+      }
+      const pair = new Pair(keyNode);
+      if (ctx.options.keepSourceTokens)
+        pair.srcToken = collItem;
+      map2.items.push(pair);
+    }
+  }
+  if (commentEnd && commentEnd < offset)
+    onError(commentEnd, "IMPOSSIBLE", "Map comment with trailing content");
+  map2.range = [bm.offset, offset, commentEnd ?? offset];
+  return map2;
+}
+
+// node_modules/yaml/browser/dist/compose/resolve-block-seq.js
+function resolveBlockSeq({ composeNode: composeNode2, composeEmptyNode: composeEmptyNode2 }, ctx, bs, onError, tag) {
+  const NodeClass = tag?.nodeClass ?? YAMLSeq;
+  const seq2 = new NodeClass(ctx.schema);
+  if (ctx.atRoot)
+    ctx.atRoot = false;
+  if (ctx.atKey)
+    ctx.atKey = false;
+  let offset = bs.offset;
+  let commentEnd = null;
+  for (const { start, value } of bs.items) {
+    const props = resolveProps(start, {
+      indicator: "seq-item-ind",
+      next: value,
+      offset,
+      onError,
+      parentIndent: bs.indent,
+      startOnNewline: true
+    });
+    if (!props.found) {
+      if (props.anchor || props.tag || value) {
+        if (value?.type === "block-seq")
+          onError(props.end, "BAD_INDENT", "All sequence items must start at the same column");
+        else
+          onError(offset, "MISSING_CHAR", "Sequence item without - indicator");
+      } else {
+        commentEnd = props.end;
+        if (props.comment)
+          seq2.comment = props.comment;
+        continue;
+      }
+    }
+    const node = value ? composeNode2(ctx, value, props, onError) : composeEmptyNode2(ctx, props.end, start, null, props, onError);
+    if (ctx.schema.compat)
+      flowIndentCheck(bs.indent, value, onError);
+    offset = node.range[2];
+    seq2.items.push(node);
+  }
+  seq2.range = [bs.offset, offset, commentEnd ?? offset];
+  return seq2;
+}
+
+// node_modules/yaml/browser/dist/compose/resolve-end.js
+function resolveEnd(end, offset, reqSpace, onError) {
+  let comment = "";
+  if (end) {
+    let hasSpace = false;
+    let sep = "";
+    for (const token of end) {
+      const { source, type } = token;
+      switch (type) {
+        case "space":
+          hasSpace = true;
+          break;
+        case "comment": {
+          if (reqSpace && !hasSpace)
+            onError(token, "MISSING_CHAR", "Comments must be separated from other tokens by white space characters");
+          const cb = source.substring(1) || " ";
+          if (!comment)
+            comment = cb;
+          else
+            comment += sep + cb;
+          sep = "";
+          break;
+        }
+        case "newline":
+          if (comment)
+            sep += source;
+          hasSpace = true;
+          break;
+        default:
+          onError(token, "UNEXPECTED_TOKEN", `Unexpected ${type} at node end`);
+      }
+      offset += source.length;
+    }
+  }
+  return { comment, offset };
+}
+
+// node_modules/yaml/browser/dist/compose/resolve-flow-collection.js
+var blockMsg = "Block collections are not allowed within flow collections";
+var isBlock = (token) => token && (token.type === "block-map" || token.type === "block-seq");
+function resolveFlowCollection({ composeNode: composeNode2, composeEmptyNode: composeEmptyNode2 }, ctx, fc, onError, tag) {
+  const isMap2 = fc.start.source === "{";
+  const fcName = isMap2 ? "flow map" : "flow sequence";
+  const NodeClass = tag?.nodeClass ?? (isMap2 ? YAMLMap : YAMLSeq);
+  const coll = new NodeClass(ctx.schema);
+  coll.flow = true;
+  const atRoot = ctx.atRoot;
+  if (atRoot)
+    ctx.atRoot = false;
+  if (ctx.atKey)
+    ctx.atKey = false;
+  let offset = fc.offset + fc.start.source.length;
+  for (let i = 0; i < fc.items.length; ++i) {
+    const collItem = fc.items[i];
+    const { start, key, sep, value } = collItem;
+    const props = resolveProps(start, {
+      flow: fcName,
+      indicator: "explicit-key-ind",
+      next: key ?? sep?.[0],
+      offset,
+      onError,
+      parentIndent: fc.indent,
+      startOnNewline: false
+    });
+    if (!props.found) {
+      if (!props.anchor && !props.tag && !sep && !value) {
+        if (i === 0 && props.comma)
+          onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
+        else if (i < fc.items.length - 1)
+          onError(props.start, "UNEXPECTED_TOKEN", `Unexpected empty item in ${fcName}`);
+        if (props.comment) {
+          if (coll.comment)
+            coll.comment += "\n" + props.comment;
+          else
+            coll.comment = props.comment;
+        }
+        offset = props.end;
+        continue;
+      }
+      if (!isMap2 && ctx.options.strict && containsNewline(key))
+        onError(
+          key,
+          // checked by containsNewline()
+          "MULTILINE_IMPLICIT_KEY",
+          "Implicit keys of flow sequence pairs need to be on a single line"
+        );
+    }
+    if (i === 0) {
+      if (props.comma)
+        onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
+    } else {
+      if (!props.comma)
+        onError(props.start, "MISSING_CHAR", `Missing , between ${fcName} items`);
+      if (props.comment) {
+        let prevItemComment = "";
+        loop:
+          for (const st of start) {
+            switch (st.type) {
+              case "comma":
+              case "space":
+                break;
+              case "comment":
+                prevItemComment = st.source.substring(1);
+                break loop;
+              default:
+                break loop;
+            }
+          }
+        if (prevItemComment) {
+          let prev = coll.items[coll.items.length - 1];
+          if (isPair(prev))
+            prev = prev.value ?? prev.key;
+          if (prev.comment)
+            prev.comment += "\n" + prevItemComment;
+          else
+            prev.comment = prevItemComment;
+          props.comment = props.comment.substring(prevItemComment.length + 1);
+        }
+      }
+    }
+    if (!isMap2 && !sep && !props.found) {
+      const valueNode = value ? composeNode2(ctx, value, props, onError) : composeEmptyNode2(ctx, props.end, sep, null, props, onError);
+      coll.items.push(valueNode);
+      offset = valueNode.range[2];
+      if (isBlock(value))
+        onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
+    } else {
+      ctx.atKey = true;
+      const keyStart = props.end;
+      const keyNode = key ? composeNode2(ctx, key, props, onError) : composeEmptyNode2(ctx, keyStart, start, null, props, onError);
+      if (isBlock(key))
+        onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
+      ctx.atKey = false;
+      const valueProps = resolveProps(sep ?? [], {
+        flow: fcName,
+        indicator: "map-value-ind",
+        next: value,
+        offset: keyNode.range[2],
+        onError,
+        parentIndent: fc.indent,
+        startOnNewline: false
+      });
+      if (valueProps.found) {
+        if (!isMap2 && !props.found && ctx.options.strict) {
+          if (sep)
+            for (const st of sep) {
+              if (st === valueProps.found)
+                break;
+              if (st.type === "newline") {
+                onError(st, "MULTILINE_IMPLICIT_KEY", "Implicit keys of flow sequence pairs need to be on a single line");
+                break;
+              }
+            }
+          if (props.start < valueProps.found.offset - 1024)
+            onError(valueProps.found, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit flow sequence key");
+        }
+      } else if (value) {
+        if ("source" in value && value.source?.[0] === ":")
+          onError(value, "MISSING_CHAR", `Missing space after : in ${fcName}`);
+        else
+          onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
+      }
+      const valueNode = value ? composeNode2(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode2(ctx, valueProps.end, sep, null, valueProps, onError) : null;
+      if (valueNode) {
+        if (isBlock(value))
+          onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
+      } else if (valueProps.comment) {
+        if (keyNode.comment)
+          keyNode.comment += "\n" + valueProps.comment;
+        else
+          keyNode.comment = valueProps.comment;
+      }
+      const pair = new Pair(keyNode, valueNode);
+      if (ctx.options.keepSourceTokens)
+        pair.srcToken = collItem;
+      if (isMap2) {
+        const map2 = coll;
+        if (mapIncludes(ctx, map2.items, keyNode))
+          onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
+        map2.items.push(pair);
+      } else {
+        const map2 = new YAMLMap(ctx.schema);
+        map2.flow = true;
+        map2.items.push(pair);
+        const endRange = (valueNode ?? keyNode).range;
+        map2.range = [keyNode.range[0], endRange[1], endRange[2]];
+        coll.items.push(map2);
+      }
+      offset = valueNode ? valueNode.range[2] : valueProps.end;
+    }
+  }
+  const expectedEnd = isMap2 ? "}" : "]";
+  const [ce, ...ee] = fc.end;
+  let cePos = offset;
+  if (ce?.source === expectedEnd)
+    cePos = ce.offset + ce.source.length;
+  else {
+    const name = fcName[0].toUpperCase() + fcName.substring(1);
+    const msg = atRoot ? `${name} must end with a ${expectedEnd}` : `${name} in block collection must be sufficiently indented and end with a ${expectedEnd}`;
+    onError(offset, atRoot ? "MISSING_CHAR" : "BAD_INDENT", msg);
+    if (ce && ce.source.length !== 1)
+      ee.unshift(ce);
+  }
+  if (ee.length > 0) {
+    const end = resolveEnd(ee, cePos, ctx.options.strict, onError);
+    if (end.comment) {
+      if (coll.comment)
+        coll.comment += "\n" + end.comment;
+      else
+        coll.comment = end.comment;
+    }
+    coll.range = [fc.offset, cePos, end.offset];
+  } else {
+    coll.range = [fc.offset, cePos, cePos];
+  }
+  return coll;
+}
+
+// node_modules/yaml/browser/dist/compose/compose-collection.js
+function resolveCollection(CN2, ctx, token, onError, tagName, tag) {
+  const coll = token.type === "block-map" ? resolveBlockMap(CN2, ctx, token, onError, tag) : token.type === "block-seq" ? resolveBlockSeq(CN2, ctx, token, onError, tag) : resolveFlowCollection(CN2, ctx, token, onError, tag);
+  const Coll = coll.constructor;
+  if (tagName === "!" || tagName === Coll.tagName) {
+    coll.tag = Coll.tagName;
+    return coll;
+  }
+  if (tagName)
+    coll.tag = tagName;
+  return coll;
+}
+function composeCollection(CN2, ctx, token, props, onError) {
+  const tagToken = props.tag;
+  const tagName = !tagToken ? null : ctx.directives.tagName(tagToken.source, (msg) => onError(tagToken, "TAG_RESOLVE_FAILED", msg));
+  if (token.type === "block-seq") {
+    const { anchor, newlineAfterProp: nl } = props;
+    const lastProp = anchor && tagToken ? anchor.offset > tagToken.offset ? anchor : tagToken : anchor ?? tagToken;
+    if (lastProp && (!nl || nl.offset < lastProp.offset)) {
+      const message = "Missing newline after block sequence props";
+      onError(lastProp, "MISSING_CHAR", message);
+    }
+  }
+  const expType = token.type === "block-map" ? "map" : token.type === "block-seq" ? "seq" : token.start.source === "{" ? "map" : "seq";
+  if (!tagToken || !tagName || tagName === "!" || tagName === YAMLMap.tagName && expType === "map" || tagName === YAMLSeq.tagName && expType === "seq") {
+    return resolveCollection(CN2, ctx, token, onError, tagName);
+  }
+  let tag = ctx.schema.tags.find((t) => t.tag === tagName && t.collection === expType);
+  if (!tag) {
+    const kt = ctx.schema.knownTags[tagName];
+    if (kt?.collection === expType) {
+      ctx.schema.tags.push(Object.assign({}, kt, { default: false }));
+      tag = kt;
+    } else {
+      if (kt) {
+        onError(tagToken, "BAD_COLLECTION_TYPE", `${kt.tag} used for ${expType} collection, but expects ${kt.collection ?? "scalar"}`, true);
+      } else {
+        onError(tagToken, "TAG_RESOLVE_FAILED", `Unresolved tag: ${tagName}`, true);
+      }
+      return resolveCollection(CN2, ctx, token, onError, tagName);
+    }
+  }
+  const coll = resolveCollection(CN2, ctx, token, onError, tagName, tag);
+  const res = tag.resolve?.(coll, (msg) => onError(tagToken, "TAG_RESOLVE_FAILED", msg), ctx.options) ?? coll;
+  const node = isNode(res) ? res : new Scalar(res);
+  node.range = coll.range;
+  node.tag = tagName;
+  if (tag?.format)
+    node.format = tag.format;
+  return node;
+}
+
+// node_modules/yaml/browser/dist/compose/resolve-block-scalar.js
+function resolveBlockScalar(ctx, scalar, onError) {
+  const start = scalar.offset;
+  const header = parseBlockScalarHeader(scalar, ctx.options.strict, onError);
+  if (!header)
+    return { value: "", type: null, comment: "", range: [start, start, start] };
+  const type = header.mode === ">" ? Scalar.BLOCK_FOLDED : Scalar.BLOCK_LITERAL;
+  const lines = scalar.source ? splitLines(scalar.source) : [];
+  let chompStart = lines.length;
+  for (let i = lines.length - 1; i >= 0; --i) {
+    const content = lines[i][1];
+    if (content === "" || content === "\r")
+      chompStart = i;
+    else
+      break;
+  }
+  if (chompStart === 0) {
+    const value2 = header.chomp === "+" && lines.length > 0 ? "\n".repeat(Math.max(1, lines.length - 1)) : "";
+    let end2 = start + header.length;
+    if (scalar.source)
+      end2 += scalar.source.length;
+    return { value: value2, type, comment: header.comment, range: [start, end2, end2] };
+  }
+  let trimIndent = scalar.indent + header.indent;
+  let offset = scalar.offset + header.length;
+  let contentStart = 0;
+  for (let i = 0; i < chompStart; ++i) {
+    const [indent, content] = lines[i];
+    if (content === "" || content === "\r") {
+      if (header.indent === 0 && indent.length > trimIndent)
+        trimIndent = indent.length;
+    } else {
+      if (indent.length < trimIndent) {
+        const message = "Block scalars with more-indented leading empty lines must use an explicit indentation indicator";
+        onError(offset + indent.length, "MISSING_CHAR", message);
+      }
+      if (header.indent === 0)
+        trimIndent = indent.length;
+      contentStart = i;
+      if (trimIndent === 0 && !ctx.atRoot) {
+        const message = "Block scalar values in collections must be indented";
+        onError(offset, "BAD_INDENT", message);
+      }
+      break;
+    }
+    offset += indent.length + content.length + 1;
+  }
+  for (let i = lines.length - 1; i >= chompStart; --i) {
+    if (lines[i][0].length > trimIndent)
+      chompStart = i + 1;
+  }
+  let value = "";
+  let sep = "";
+  let prevMoreIndented = false;
+  for (let i = 0; i < contentStart; ++i)
+    value += lines[i][0].slice(trimIndent) + "\n";
+  for (let i = contentStart; i < chompStart; ++i) {
+    let [indent, content] = lines[i];
+    offset += indent.length + content.length + 1;
+    const crlf = content[content.length - 1] === "\r";
+    if (crlf)
+      content = content.slice(0, -1);
+    if (content && indent.length < trimIndent) {
+      const src = header.indent ? "explicit indentation indicator" : "first line";
+      const message = `Block scalar lines must not be less indented than their ${src}`;
+      onError(offset - content.length - (crlf ? 2 : 1), "BAD_INDENT", message);
+      indent = "";
+    }
+    if (type === Scalar.BLOCK_LITERAL) {
+      value += sep + indent.slice(trimIndent) + content;
+      sep = "\n";
+    } else if (indent.length > trimIndent || content[0] === "	") {
+      if (sep === " ")
+        sep = "\n";
+      else if (!prevMoreIndented && sep === "\n")
+        sep = "\n\n";
+      value += sep + indent.slice(trimIndent) + content;
+      sep = "\n";
+      prevMoreIndented = true;
+    } else if (content === "") {
+      if (sep === "\n")
+        value += "\n";
+      else
+        sep = "\n";
+    } else {
+      value += sep + content;
+      sep = " ";
+      prevMoreIndented = false;
+    }
+  }
+  switch (header.chomp) {
+    case "-":
+      break;
+    case "+":
+      for (let i = chompStart; i < lines.length; ++i)
+        value += "\n" + lines[i][0].slice(trimIndent);
+      if (value[value.length - 1] !== "\n")
+        value += "\n";
+      break;
+    default:
+      value += "\n";
+  }
+  const end = start + header.length + scalar.source.length;
+  return { value, type, comment: header.comment, range: [start, end, end] };
+}
+function parseBlockScalarHeader({ offset, props }, strict, onError) {
+  if (props[0].type !== "block-scalar-header") {
+    onError(props[0], "IMPOSSIBLE", "Block scalar header not found");
+    return null;
+  }
+  const { source } = props[0];
+  const mode = source[0];
+  let indent = 0;
+  let chomp = "";
+  let error = -1;
+  for (let i = 1; i < source.length; ++i) {
+    const ch = source[i];
+    if (!chomp && (ch === "-" || ch === "+"))
+      chomp = ch;
+    else {
+      const n = Number(ch);
+      if (!indent && n)
+        indent = n;
+      else if (error === -1)
+        error = offset + i;
+    }
+  }
+  if (error !== -1)
+    onError(error, "UNEXPECTED_TOKEN", `Block scalar header includes extra characters: ${source}`);
+  let hasSpace = false;
+  let comment = "";
+  let length = source.length;
+  for (let i = 1; i < props.length; ++i) {
+    const token = props[i];
+    switch (token.type) {
+      case "space":
+        hasSpace = true;
+      case "newline":
+        length += token.source.length;
+        break;
+      case "comment":
+        if (strict && !hasSpace) {
+          const message = "Comments must be separated from other tokens by white space characters";
+          onError(token, "MISSING_CHAR", message);
+        }
+        length += token.source.length;
+        comment = token.source.substring(1);
+        break;
+      case "error":
+        onError(token, "UNEXPECTED_TOKEN", token.message);
+        length += token.source.length;
+        break;
+      default: {
+        const message = `Unexpected token in block scalar header: ${token.type}`;
+        onError(token, "UNEXPECTED_TOKEN", message);
+        const ts = token.source;
+        if (ts && typeof ts === "string")
+          length += ts.length;
+      }
+    }
+  }
+  return { mode, indent, chomp, comment, length };
+}
+function splitLines(source) {
+  const split = source.split(/\n( *)/);
+  const first = split[0];
+  const m = first.match(/^( *)/);
+  const line0 = m?.[1] ? [m[1], first.slice(m[1].length)] : ["", first];
+  const lines = [line0];
+  for (let i = 1; i < split.length; i += 2)
+    lines.push([split[i], split[i + 1]]);
+  return lines;
+}
+
+// node_modules/yaml/browser/dist/compose/resolve-flow-scalar.js
+function resolveFlowScalar(scalar, strict, onError) {
+  const { offset, type, source, end } = scalar;
+  let _type;
+  let value;
+  const _onError = (rel, code, msg) => onError(offset + rel, code, msg);
+  switch (type) {
+    case "scalar":
+      _type = Scalar.PLAIN;
+      value = plainValue(source, _onError);
+      break;
+    case "single-quoted-scalar":
+      _type = Scalar.QUOTE_SINGLE;
+      value = singleQuotedValue(source, _onError);
+      break;
+    case "double-quoted-scalar":
+      _type = Scalar.QUOTE_DOUBLE;
+      value = doubleQuotedValue(source, _onError);
+      break;
+    default:
+      onError(scalar, "UNEXPECTED_TOKEN", `Expected a flow scalar value, but found: ${type}`);
+      return {
+        value: "",
+        type: null,
+        comment: "",
+        range: [offset, offset + source.length, offset + source.length]
+      };
+  }
+  const valueEnd = offset + source.length;
+  const re = resolveEnd(end, valueEnd, strict, onError);
+  return {
+    value,
+    type: _type,
+    comment: re.comment,
+    range: [offset, valueEnd, re.offset]
+  };
+}
+function plainValue(source, onError) {
+  let badChar = "";
+  switch (source[0]) {
+    case "	":
+      badChar = "a tab character";
+      break;
+    case ",":
+      badChar = "flow indicator character ,";
+      break;
+    case "%":
+      badChar = "directive indicator character %";
+      break;
+    case "|":
+    case ">": {
+      badChar = `block scalar indicator ${source[0]}`;
+      break;
+    }
+    case "@":
+    case "`": {
+      badChar = `reserved character ${source[0]}`;
+      break;
+    }
+  }
+  if (badChar)
+    onError(0, "BAD_SCALAR_START", `Plain value cannot start with ${badChar}`);
+  return foldLines(source);
+}
+function singleQuotedValue(source, onError) {
+  if (source[source.length - 1] !== "'" || source.length === 1)
+    onError(source.length, "MISSING_CHAR", "Missing closing 'quote");
+  return foldLines(source.slice(1, -1)).replace(/''/g, "'");
+}
+function foldLines(source) {
+  let first, line;
+  try {
+    first = new RegExp("(.*?)(?<![ 	])[ 	]*\r?\n", "sy");
+    line = new RegExp("[ 	]*(.*?)(?:(?<![ 	])[ 	]*)?\r?\n", "sy");
+  } catch {
+    first = /(.*?)[ \t]*\r?\n/sy;
+    line = /[ \t]*(.*?)[ \t]*\r?\n/sy;
+  }
+  let match = first.exec(source);
+  if (!match)
+    return source;
+  let res = match[1];
+  let sep = " ";
+  let pos = first.lastIndex;
+  line.lastIndex = pos;
+  while (match = line.exec(source)) {
+    if (match[1] === "") {
+      if (sep === "\n")
+        res += sep;
+      else
+        sep = "\n";
+    } else {
+      res += sep + match[1];
+      sep = " ";
+    }
+    pos = line.lastIndex;
+  }
+  const last = /[ \t]*(.*)/sy;
+  last.lastIndex = pos;
+  match = last.exec(source);
+  return res + sep + (match?.[1] ?? "");
+}
+function doubleQuotedValue(source, onError) {
+  let res = "";
+  for (let i = 1; i < source.length - 1; ++i) {
+    const ch = source[i];
+    if (ch === "\r" && source[i + 1] === "\n")
+      continue;
+    if (ch === "\n") {
+      const { fold, offset } = foldNewline(source, i);
+      res += fold;
+      i = offset;
+    } else if (ch === "\\") {
+      let next = source[++i];
+      const cc = escapeCodes[next];
+      if (cc)
+        res += cc;
+      else if (next === "\n") {
+        next = source[i + 1];
+        while (next === " " || next === "	")
+          next = source[++i + 1];
+      } else if (next === "\r" && source[i + 1] === "\n") {
+        next = source[++i + 1];
+        while (next === " " || next === "	")
+          next = source[++i + 1];
+      } else if (next === "x" || next === "u" || next === "U") {
+        const length = { x: 2, u: 4, U: 8 }[next];
+        res += parseCharCode(source, i + 1, length, onError);
+        i += length;
+      } else {
+        const raw = source.substr(i - 1, 2);
+        onError(i - 1, "BAD_DQ_ESCAPE", `Invalid escape sequence ${raw}`);
+        res += raw;
+      }
+    } else if (ch === " " || ch === "	") {
+      const wsStart = i;
+      let next = source[i + 1];
+      while (next === " " || next === "	")
+        next = source[++i + 1];
+      if (next !== "\n" && !(next === "\r" && source[i + 2] === "\n"))
+        res += i > wsStart ? source.slice(wsStart, i + 1) : ch;
+    } else {
+      res += ch;
+    }
+  }
+  if (source[source.length - 1] !== '"' || source.length === 1)
+    onError(source.length, "MISSING_CHAR", 'Missing closing "quote');
+  return res;
+}
+function foldNewline(source, offset) {
+  let fold = "";
+  let ch = source[offset + 1];
+  while (ch === " " || ch === "	" || ch === "\n" || ch === "\r") {
+    if (ch === "\r" && source[offset + 2] !== "\n")
+      break;
+    if (ch === "\n")
+      fold += "\n";
+    offset += 1;
+    ch = source[offset + 1];
+  }
+  if (!fold)
+    fold = " ";
+  return { fold, offset };
+}
+var escapeCodes = {
+  "0": "\0",
+  // null character
+  a: "\x07",
+  // bell character
+  b: "\b",
+  // backspace
+  e: "\x1B",
+  // escape character
+  f: "\f",
+  // form feed
+  n: "\n",
+  // line feed
+  r: "\r",
+  // carriage return
+  t: "	",
+  // horizontal tab
+  v: "\v",
+  // vertical tab
+  N: "\x85",
+  // Unicode next line
+  _: "\xA0",
+  // Unicode non-breaking space
+  L: "\u2028",
+  // Unicode line separator
+  P: "\u2029",
+  // Unicode paragraph separator
+  " ": " ",
+  '"': '"',
+  "/": "/",
+  "\\": "\\",
+  "	": "	"
+};
+function parseCharCode(source, offset, length, onError) {
+  const cc = source.substr(offset, length);
+  const ok = cc.length === length && /^[0-9a-fA-F]+$/.test(cc);
+  const code = ok ? parseInt(cc, 16) : NaN;
+  if (isNaN(code)) {
+    const raw = source.substr(offset - 2, length + 2);
+    onError(offset - 2, "BAD_DQ_ESCAPE", `Invalid escape sequence ${raw}`);
+    return raw;
+  }
+  return String.fromCodePoint(code);
+}
+
+// node_modules/yaml/browser/dist/compose/compose-scalar.js
+function composeScalar(ctx, token, tagToken, onError) {
+  const { value, type, comment, range } = token.type === "block-scalar" ? resolveBlockScalar(ctx, token, onError) : resolveFlowScalar(token, ctx.options.strict, onError);
+  const tagName = tagToken ? ctx.directives.tagName(tagToken.source, (msg) => onError(tagToken, "TAG_RESOLVE_FAILED", msg)) : null;
+  let tag;
+  if (ctx.options.stringKeys && ctx.atKey) {
+    tag = ctx.schema[SCALAR];
+  } else if (tagName)
+    tag = findScalarTagByName(ctx.schema, value, tagName, tagToken, onError);
+  else if (token.type === "scalar")
+    tag = findScalarTagByTest(ctx, value, token, onError);
+  else
+    tag = ctx.schema[SCALAR];
+  let scalar;
+  try {
+    const res = tag.resolve(value, (msg) => onError(tagToken ?? token, "TAG_RESOLVE_FAILED", msg), ctx.options);
+    scalar = isScalar(res) ? res : new Scalar(res);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    onError(tagToken ?? token, "TAG_RESOLVE_FAILED", msg);
+    scalar = new Scalar(value);
+  }
+  scalar.range = range;
+  scalar.source = value;
+  if (type)
+    scalar.type = type;
+  if (tagName)
+    scalar.tag = tagName;
+  if (tag.format)
+    scalar.format = tag.format;
+  if (comment)
+    scalar.comment = comment;
+  return scalar;
+}
+function findScalarTagByName(schema4, value, tagName, tagToken, onError) {
+  if (tagName === "!")
+    return schema4[SCALAR];
+  const matchWithTest = [];
+  for (const tag of schema4.tags) {
+    if (!tag.collection && tag.tag === tagName) {
+      if (tag.default && tag.test)
+        matchWithTest.push(tag);
+      else
+        return tag;
+    }
+  }
+  for (const tag of matchWithTest)
+    if (tag.test?.test(value))
+      return tag;
+  const kt = schema4.knownTags[tagName];
+  if (kt && !kt.collection) {
+    schema4.tags.push(Object.assign({}, kt, { default: false, test: void 0 }));
+    return kt;
+  }
+  onError(tagToken, "TAG_RESOLVE_FAILED", `Unresolved tag: ${tagName}`, tagName !== "tag:yaml.org,2002:str");
+  return schema4[SCALAR];
+}
+function findScalarTagByTest({ atKey, directives, schema: schema4 }, value, token, onError) {
+  const tag = schema4.tags.find((tag2) => (tag2.default === true || atKey && tag2.default === "key") && tag2.test?.test(value)) || schema4[SCALAR];
+  if (schema4.compat) {
+    const compat = schema4.compat.find((tag2) => tag2.default && tag2.test?.test(value)) ?? schema4[SCALAR];
+    if (tag.tag !== compat.tag) {
+      const ts = directives.tagString(tag.tag);
+      const cs = directives.tagString(compat.tag);
+      const msg = `Value may be parsed as either ${ts} or ${cs}`;
+      onError(token, "TAG_RESOLVE_FAILED", msg, true);
+    }
+  }
+  return tag;
+}
+
+// node_modules/yaml/browser/dist/compose/util-empty-scalar-position.js
+function emptyScalarPosition(offset, before, pos) {
+  if (before) {
+    pos ?? (pos = before.length);
+    for (let i = pos - 1; i >= 0; --i) {
+      let st = before[i];
+      switch (st.type) {
+        case "space":
+        case "comment":
+        case "newline":
+          offset -= st.source.length;
+          continue;
+      }
+      st = before[++i];
+      while (st?.type === "space") {
+        offset += st.source.length;
+        st = before[++i];
+      }
+      break;
+    }
+  }
+  return offset;
+}
+
+// node_modules/yaml/browser/dist/compose/compose-node.js
+var CN = { composeNode, composeEmptyNode };
+function composeNode(ctx, token, props, onError) {
+  const atKey = ctx.atKey;
+  const { spaceBefore, comment, anchor, tag } = props;
+  let node;
+  let isSrcToken = true;
+  switch (token.type) {
+    case "alias":
+      node = composeAlias(ctx, token, onError);
+      if (anchor || tag)
+        onError(token, "ALIAS_PROPS", "An alias node must not specify any properties");
+      break;
+    case "scalar":
+    case "single-quoted-scalar":
+    case "double-quoted-scalar":
+    case "block-scalar":
+      node = composeScalar(ctx, token, tag, onError);
+      if (anchor)
+        node.anchor = anchor.source.substring(1);
+      break;
+    case "block-map":
+    case "block-seq":
+    case "flow-collection":
+      try {
+        node = composeCollection(CN, ctx, token, props, onError);
+        if (anchor)
+          node.anchor = anchor.source.substring(1);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        onError(token, "RESOURCE_EXHAUSTION", message);
+      }
+      break;
+    default: {
+      const message = token.type === "error" ? token.message : `Unsupported token (type: ${token.type})`;
+      onError(token, "UNEXPECTED_TOKEN", message);
+      isSrcToken = false;
+    }
+  }
+  node ?? (node = composeEmptyNode(ctx, token.offset, void 0, null, props, onError));
+  if (anchor && node.anchor === "")
+    onError(anchor, "BAD_ALIAS", "Anchor cannot be an empty string");
+  if (atKey && ctx.options.stringKeys && (!isScalar(node) || typeof node.value !== "string" || node.tag && node.tag !== "tag:yaml.org,2002:str")) {
+    const msg = "With stringKeys, all keys must be strings";
+    onError(tag ?? token, "NON_STRING_KEY", msg);
+  }
+  if (spaceBefore)
+    node.spaceBefore = true;
+  if (comment) {
+    if (token.type === "scalar" && token.source === "")
+      node.comment = comment;
+    else
+      node.commentBefore = comment;
+  }
+  if (ctx.options.keepSourceTokens && isSrcToken)
+    node.srcToken = token;
+  return node;
+}
+function composeEmptyNode(ctx, offset, before, pos, { spaceBefore, comment, anchor, tag, end }, onError) {
+  const token = {
+    type: "scalar",
+    offset: emptyScalarPosition(offset, before, pos),
+    indent: -1,
+    source: ""
+  };
+  const node = composeScalar(ctx, token, tag, onError);
+  if (anchor) {
+    node.anchor = anchor.source.substring(1);
+    if (node.anchor === "")
+      onError(anchor, "BAD_ALIAS", "Anchor cannot be an empty string");
+  }
+  if (spaceBefore)
+    node.spaceBefore = true;
+  if (comment) {
+    node.comment = comment;
+    node.range[2] = end;
+  }
+  return node;
+}
+function composeAlias({ options }, { offset, source, end }, onError) {
+  const alias = new Alias(source.substring(1));
+  if (alias.source === "")
+    onError(offset, "BAD_ALIAS", "Alias cannot be an empty string");
+  if (alias.source.endsWith(":"))
+    onError(offset + source.length - 1, "BAD_ALIAS", "Alias ending in : is ambiguous", true);
+  const valueEnd = offset + source.length;
+  const re = resolveEnd(end, valueEnd, options.strict, onError);
+  alias.range = [offset, valueEnd, re.offset];
+  if (re.comment)
+    alias.comment = re.comment;
+  return alias;
+}
+
+// node_modules/yaml/browser/dist/compose/compose-doc.js
+function composeDoc(options, directives, { offset, start, value, end }, onError) {
+  const opts = Object.assign({ _directives: directives }, options);
+  const doc = new Document(void 0, opts);
+  const ctx = {
+    atKey: false,
+    atRoot: true,
+    directives: doc.directives,
+    options: doc.options,
+    schema: doc.schema
+  };
+  const props = resolveProps(start, {
+    indicator: "doc-start",
+    next: value ?? end?.[0],
+    offset,
+    onError,
+    parentIndent: 0,
+    startOnNewline: true
+  });
+  if (props.found) {
+    doc.directives.docStart = true;
+    if (value && (value.type === "block-map" || value.type === "block-seq") && !props.hasNewline)
+      onError(props.end, "MISSING_CHAR", "Block collection cannot start on same line with directives-end marker");
+  }
+  doc.contents = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, start, null, props, onError);
+  const contentEnd = doc.contents.range[2];
+  const re = resolveEnd(end, contentEnd, false, onError);
+  if (re.comment)
+    doc.comment = re.comment;
+  doc.range = [offset, contentEnd, re.offset];
+  return doc;
+}
+
+// node_modules/yaml/browser/dist/compose/composer.js
+function getErrorPos(src) {
+  if (typeof src === "number")
+    return [src, src + 1];
+  if (Array.isArray(src))
+    return src.length === 2 ? src : [src[0], src[1]];
+  const { offset, source } = src;
+  return [offset, offset + (typeof source === "string" ? source.length : 1)];
+}
+function parsePrelude(prelude) {
+  let comment = "";
+  let atComment = false;
+  let afterEmptyLine = false;
+  for (let i = 0; i < prelude.length; ++i) {
+    const source = prelude[i];
+    switch (source[0]) {
+      case "#":
+        comment += (comment === "" ? "" : afterEmptyLine ? "\n\n" : "\n") + (source.substring(1) || " ");
+        atComment = true;
+        afterEmptyLine = false;
+        break;
+      case "%":
+        if (prelude[i + 1]?.[0] !== "#")
+          i += 1;
+        atComment = false;
+        break;
+      default:
+        if (!atComment)
+          afterEmptyLine = true;
+        atComment = false;
+    }
+  }
+  return { comment, afterEmptyLine };
+}
+var Composer = class {
+  constructor(options = {}) {
+    this.doc = null;
+    this.atDirectives = false;
+    this.prelude = [];
+    this.errors = [];
+    this.warnings = [];
+    this.onError = (source, code, message, warning) => {
+      const pos = getErrorPos(source);
+      if (warning)
+        this.warnings.push(new YAMLWarning(pos, code, message));
+      else
+        this.errors.push(new YAMLParseError(pos, code, message));
+    };
+    this.directives = new Directives({ version: options.version || "1.2" });
+    this.options = options;
+  }
+  decorate(doc, afterDoc) {
+    const { comment, afterEmptyLine } = parsePrelude(this.prelude);
+    if (comment) {
+      const dc = doc.contents;
+      if (afterDoc) {
+        doc.comment = doc.comment ? `${doc.comment}
+${comment}` : comment;
+      } else if (afterEmptyLine || doc.directives.docStart || !dc) {
+        doc.commentBefore = comment;
+      } else if (isCollection(dc) && !dc.flow && dc.items.length > 0) {
+        let it = dc.items[0];
+        if (isPair(it))
+          it = it.key;
+        const cb = it.commentBefore;
+        it.commentBefore = cb ? `${comment}
+${cb}` : comment;
+      } else {
+        const cb = dc.commentBefore;
+        dc.commentBefore = cb ? `${comment}
+${cb}` : comment;
+      }
+    }
+    if (afterDoc) {
+      Array.prototype.push.apply(doc.errors, this.errors);
+      Array.prototype.push.apply(doc.warnings, this.warnings);
+    } else {
+      doc.errors = this.errors;
+      doc.warnings = this.warnings;
+    }
+    this.prelude = [];
+    this.errors = [];
+    this.warnings = [];
+  }
+  /**
+   * Current stream status information.
+   *
+   * Mostly useful at the end of input for an empty stream.
+   */
+  streamInfo() {
+    return {
+      comment: parsePrelude(this.prelude).comment,
+      directives: this.directives,
+      errors: this.errors,
+      warnings: this.warnings
+    };
+  }
+  /**
+   * Compose tokens into documents.
+   *
+   * @param forceDoc - If the stream contains no document, still emit a final document including any comments and directives that would be applied to a subsequent document.
+   * @param endOffset - Should be set if `forceDoc` is also set, to set the document range end and to indicate errors correctly.
+   */
+  *compose(tokens, forceDoc = false, endOffset = -1) {
+    for (const token of tokens)
+      yield* this.next(token);
+    yield* this.end(forceDoc, endOffset);
+  }
+  /** Advance the composer by one CST token. */
+  *next(token) {
+    switch (token.type) {
+      case "directive":
+        this.directives.add(token.source, (offset, message, warning) => {
+          const pos = getErrorPos(token);
+          pos[0] += offset;
+          this.onError(pos, "BAD_DIRECTIVE", message, warning);
+        });
+        this.prelude.push(token.source);
+        this.atDirectives = true;
+        break;
+      case "document": {
+        const doc = composeDoc(this.options, this.directives, token, this.onError);
+        if (this.atDirectives && !doc.directives.docStart)
+          this.onError(token, "MISSING_CHAR", "Missing directives-end/doc-start indicator line");
+        this.decorate(doc, false);
+        if (this.doc)
+          yield this.doc;
+        this.doc = doc;
+        this.atDirectives = false;
+        break;
+      }
+      case "byte-order-mark":
+      case "space":
+        break;
+      case "comment":
+      case "newline":
+        this.prelude.push(token.source);
+        break;
+      case "error": {
+        const msg = token.source ? `${token.message}: ${JSON.stringify(token.source)}` : token.message;
+        const error = new YAMLParseError(getErrorPos(token), "UNEXPECTED_TOKEN", msg);
+        if (this.atDirectives || !this.doc)
+          this.errors.push(error);
+        else
+          this.doc.errors.push(error);
+        break;
+      }
+      case "doc-end": {
+        if (!this.doc) {
+          const msg = "Unexpected doc-end without preceding document";
+          this.errors.push(new YAMLParseError(getErrorPos(token), "UNEXPECTED_TOKEN", msg));
+          break;
+        }
+        this.doc.directives.docEnd = true;
+        const end = resolveEnd(token.end, token.offset + token.source.length, this.doc.options.strict, this.onError);
+        this.decorate(this.doc, true);
+        if (end.comment) {
+          const dc = this.doc.comment;
+          this.doc.comment = dc ? `${dc}
+${end.comment}` : end.comment;
+        }
+        this.doc.range[2] = end.offset;
+        break;
+      }
+      default:
+        this.errors.push(new YAMLParseError(getErrorPos(token), "UNEXPECTED_TOKEN", `Unsupported token ${token.type}`));
+    }
+  }
+  /**
+   * Call at end of input to yield any remaining document.
+   *
+   * @param forceDoc - If the stream contains no document, still emit a final document including any comments and directives that would be applied to a subsequent document.
+   * @param endOffset - Should be set if `forceDoc` is also set, to set the document range end and to indicate errors correctly.
+   */
+  *end(forceDoc = false, endOffset = -1) {
+    if (this.doc) {
+      this.decorate(this.doc, true);
+      yield this.doc;
+      this.doc = null;
+    } else if (forceDoc) {
+      const opts = Object.assign({ _directives: this.directives }, this.options);
+      const doc = new Document(void 0, opts);
+      if (this.atDirectives)
+        this.onError(endOffset, "MISSING_CHAR", "Missing directives-end indicator line");
+      doc.range = [0, endOffset, endOffset];
+      this.decorate(doc, false);
+      yield doc;
+    }
+  }
+};
+
+// node_modules/yaml/browser/dist/parse/cst-visit.js
+var BREAK2 = Symbol("break visit");
+var SKIP2 = Symbol("skip children");
+var REMOVE2 = Symbol("remove item");
+function visit2(cst, visitor) {
+  if ("type" in cst && cst.type === "document")
+    cst = { start: cst.start, value: cst.value };
+  _visit(Object.freeze([]), cst, visitor);
+}
+visit2.BREAK = BREAK2;
+visit2.SKIP = SKIP2;
+visit2.REMOVE = REMOVE2;
+visit2.itemAtPath = (cst, path) => {
+  let item = cst;
+  for (const [field, index] of path) {
+    const tok = item?.[field];
+    if (tok && "items" in tok) {
+      item = tok.items[index];
+    } else
+      return void 0;
+  }
+  return item;
+};
+visit2.parentCollection = (cst, path) => {
+  const parent = visit2.itemAtPath(cst, path.slice(0, -1));
+  const field = path[path.length - 1][0];
+  const coll = parent?.[field];
+  if (coll && "items" in coll)
+    return coll;
+  throw new Error("Parent collection not found");
+};
+function _visit(path, item, visitor) {
+  let ctrl = visitor(item, path);
+  if (typeof ctrl === "symbol")
+    return ctrl;
+  for (const field of ["key", "value"]) {
+    const token = item[field];
+    if (token && "items" in token) {
+      for (let i = 0; i < token.items.length; ++i) {
+        const ci = _visit(Object.freeze(path.concat([[field, i]])), token.items[i], visitor);
+        if (typeof ci === "number")
+          i = ci - 1;
+        else if (ci === BREAK2)
+          return BREAK2;
+        else if (ci === REMOVE2) {
+          token.items.splice(i, 1);
+          i -= 1;
+        }
+      }
+      if (typeof ctrl === "function" && field === "key")
+        ctrl = ctrl(item, path);
+    }
+  }
+  return typeof ctrl === "function" ? ctrl(item, path) : ctrl;
+}
+
+// node_modules/yaml/browser/dist/parse/cst.js
+var BOM = "\uFEFF";
+var DOCUMENT = "";
+var FLOW_END = "";
+var SCALAR2 = "";
+function tokenType(source) {
+  switch (source) {
+    case BOM:
+      return "byte-order-mark";
+    case DOCUMENT:
+      return "doc-mode";
+    case FLOW_END:
+      return "flow-error-end";
+    case SCALAR2:
+      return "scalar";
+    case "---":
+      return "doc-start";
+    case "...":
+      return "doc-end";
+    case "":
+    case "\n":
+    case "\r\n":
+      return "newline";
+    case "-":
+      return "seq-item-ind";
+    case "?":
+      return "explicit-key-ind";
+    case ":":
+      return "map-value-ind";
+    case "{":
+      return "flow-map-start";
+    case "}":
+      return "flow-map-end";
+    case "[":
+      return "flow-seq-start";
+    case "]":
+      return "flow-seq-end";
+    case ",":
+      return "comma";
+  }
+  switch (source[0]) {
+    case " ":
+    case "	":
+      return "space";
+    case "#":
+      return "comment";
+    case "%":
+      return "directive-line";
+    case "*":
+      return "alias";
+    case "&":
+      return "anchor";
+    case "!":
+      return "tag";
+    case "'":
+      return "single-quoted-scalar";
+    case '"':
+      return "double-quoted-scalar";
+    case "|":
+    case ">":
+      return "block-scalar-header";
+  }
+  return null;
+}
+
+// node_modules/yaml/browser/dist/parse/lexer.js
+function isEmpty(ch) {
+  switch (ch) {
+    case void 0:
+    case " ":
+    case "\n":
+    case "\r":
+    case "	":
+      return true;
+    default:
+      return false;
+  }
+}
+var hexDigits = new Set("0123456789ABCDEFabcdef");
+var tagChars = new Set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-#;/?:@&=+$_.!~*'()");
+var flowIndicatorChars = new Set(",[]{}");
+var invalidAnchorChars = new Set(" ,[]{}\n\r	");
+var isNotAnchorChar = (ch) => !ch || invalidAnchorChars.has(ch);
+var Lexer = class {
+  constructor() {
+    this.atEnd = false;
+    this.blockScalarIndent = -1;
+    this.blockScalarKeep = false;
+    this.buffer = "";
+    this.flowKey = false;
+    this.flowLevel = 0;
+    this.indentNext = 0;
+    this.indentValue = 0;
+    this.lineEndPos = null;
+    this.next = null;
+    this.pos = 0;
+  }
+  /**
+   * Generate YAML tokens from the `source` string. If `incomplete`,
+   * a part of the last line may be left as a buffer for the next call.
+   *
+   * @returns A generator of lexical tokens
+   */
+  *lex(source, incomplete = false) {
+    if (source) {
+      if (typeof source !== "string")
+        throw TypeError("source is not a string");
+      this.buffer = this.buffer ? this.buffer + source : source;
+      this.lineEndPos = null;
+    }
+    this.atEnd = !incomplete;
+    let next = this.next ?? "stream";
+    while (next && (incomplete || this.hasChars(1)))
+      next = yield* this.parseNext(next);
+  }
+  atLineEnd() {
+    let i = this.pos;
+    let ch = this.buffer[i];
+    while (ch === " " || ch === "	")
+      ch = this.buffer[++i];
+    if (!ch || ch === "#" || ch === "\n")
+      return true;
+    if (ch === "\r")
+      return this.buffer[i + 1] === "\n";
+    return false;
+  }
+  charAt(n) {
+    return this.buffer[this.pos + n];
+  }
+  continueScalar(offset) {
+    let ch = this.buffer[offset];
+    if (this.indentNext > 0) {
+      let indent = 0;
+      while (ch === " ")
+        ch = this.buffer[++indent + offset];
+      if (ch === "\r") {
+        const next = this.buffer[indent + offset + 1];
+        if (next === "\n" || !next && !this.atEnd)
+          return offset + indent + 1;
+      }
+      return ch === "\n" || indent >= this.indentNext || !ch && !this.atEnd ? offset + indent : -1;
+    }
+    if (ch === "-" || ch === ".") {
+      const dt = this.buffer.substr(offset, 3);
+      if ((dt === "---" || dt === "...") && isEmpty(this.buffer[offset + 3]))
+        return -1;
+    }
+    return offset;
+  }
+  getLine() {
+    let end = this.lineEndPos;
+    if (typeof end !== "number" || end !== -1 && end < this.pos) {
+      end = this.buffer.indexOf("\n", this.pos);
+      this.lineEndPos = end;
+    }
+    if (end === -1)
+      return this.atEnd ? this.buffer.substring(this.pos) : null;
+    if (this.buffer[end - 1] === "\r")
+      end -= 1;
+    return this.buffer.substring(this.pos, end);
+  }
+  hasChars(n) {
+    return this.pos + n <= this.buffer.length;
+  }
+  setNext(state) {
+    this.buffer = this.buffer.substring(this.pos);
+    this.pos = 0;
+    this.lineEndPos = null;
+    this.next = state;
+    return null;
+  }
+  peek(n) {
+    return this.buffer.substr(this.pos, n);
+  }
+  *parseNext(next) {
+    switch (next) {
+      case "stream":
+        return yield* this.parseStream();
+      case "line-start":
+        return yield* this.parseLineStart();
+      case "block-start":
+        return yield* this.parseBlockStart();
+      case "doc":
+        return yield* this.parseDocument();
+      case "flow":
+        return yield* this.parseFlowCollection();
+      case "quoted-scalar":
+        return yield* this.parseQuotedScalar();
+      case "block-scalar":
+        return yield* this.parseBlockScalar();
+      case "plain-scalar":
+        return yield* this.parsePlainScalar();
+    }
+  }
+  *parseStream() {
+    let line = this.getLine();
+    if (line === null)
+      return this.setNext("stream");
+    if (line[0] === BOM) {
+      yield* this.pushCount(1);
+      line = line.substring(1);
+    }
+    if (line[0] === "%") {
+      let dirEnd = line.length;
+      let cs = line.indexOf("#");
+      while (cs !== -1) {
+        const ch = line[cs - 1];
+        if (ch === " " || ch === "	") {
+          dirEnd = cs - 1;
+          break;
+        } else {
+          cs = line.indexOf("#", cs + 1);
+        }
+      }
+      while (true) {
+        const ch = line[dirEnd - 1];
+        if (ch === " " || ch === "	")
+          dirEnd -= 1;
+        else
+          break;
+      }
+      const n = (yield* this.pushCount(dirEnd)) + (yield* this.pushSpaces(true));
+      yield* this.pushCount(line.length - n);
+      this.pushNewline();
+      return "stream";
+    }
+    if (this.atLineEnd()) {
+      const sp = yield* this.pushSpaces(true);
+      yield* this.pushCount(line.length - sp);
+      yield* this.pushNewline();
+      return "stream";
+    }
+    yield DOCUMENT;
+    return yield* this.parseLineStart();
+  }
+  *parseLineStart() {
+    const ch = this.charAt(0);
+    if (!ch && !this.atEnd)
+      return this.setNext("line-start");
+    if (ch === "-" || ch === ".") {
+      if (!this.atEnd && !this.hasChars(4))
+        return this.setNext("line-start");
+      const s = this.peek(3);
+      if ((s === "---" || s === "...") && isEmpty(this.charAt(3))) {
+        yield* this.pushCount(3);
+        this.indentValue = 0;
+        this.indentNext = 0;
+        return s === "---" ? "doc" : "stream";
+      }
+    }
+    this.indentValue = yield* this.pushSpaces(false);
+    if (this.indentNext > this.indentValue && !isEmpty(this.charAt(1)))
+      this.indentNext = this.indentValue;
+    return yield* this.parseBlockStart();
+  }
+  *parseBlockStart() {
+    const [ch0, ch1] = this.peek(2);
+    if (!ch1 && !this.atEnd)
+      return this.setNext("block-start");
+    if ((ch0 === "-" || ch0 === "?" || ch0 === ":") && isEmpty(ch1)) {
+      const n = (yield* this.pushCount(1)) + (yield* this.pushSpaces(true));
+      this.indentNext = this.indentValue + 1;
+      this.indentValue += n;
+      return yield* this.parseBlockStart();
+    }
+    return "doc";
+  }
+  *parseDocument() {
+    yield* this.pushSpaces(true);
+    const line = this.getLine();
+    if (line === null)
+      return this.setNext("doc");
+    let n = yield* this.pushIndicators();
+    switch (line[n]) {
+      case "#":
+        yield* this.pushCount(line.length - n);
+      case void 0:
+        yield* this.pushNewline();
+        return yield* this.parseLineStart();
+      case "{":
+      case "[":
+        yield* this.pushCount(1);
+        this.flowKey = false;
+        this.flowLevel = 1;
+        return "flow";
+      case "}":
+      case "]":
+        yield* this.pushCount(1);
+        return "doc";
+      case "*":
+        yield* this.pushUntil(isNotAnchorChar);
+        return "doc";
+      case '"':
+      case "'":
+        return yield* this.parseQuotedScalar();
+      case "|":
+      case ">":
+        n += yield* this.parseBlockScalarHeader();
+        n += yield* this.pushSpaces(true);
+        yield* this.pushCount(line.length - n);
+        yield* this.pushNewline();
+        return yield* this.parseBlockScalar();
+      default:
+        return yield* this.parsePlainScalar();
+    }
+  }
+  *parseFlowCollection() {
+    let nl, sp;
+    let indent = -1;
+    do {
+      nl = yield* this.pushNewline();
+      if (nl > 0) {
+        sp = yield* this.pushSpaces(false);
+        this.indentValue = indent = sp;
+      } else {
+        sp = 0;
+      }
+      sp += yield* this.pushSpaces(true);
+    } while (nl + sp > 0);
+    const line = this.getLine();
+    if (line === null)
+      return this.setNext("flow");
+    if (indent !== -1 && indent < this.indentNext && line[0] !== "#" || indent === 0 && (line.startsWith("---") || line.startsWith("...")) && isEmpty(line[3])) {
+      const atFlowEndMarker = indent === this.indentNext - 1 && this.flowLevel === 1 && (line[0] === "]" || line[0] === "}");
+      if (!atFlowEndMarker) {
+        this.flowLevel = 0;
+        yield FLOW_END;
+        return yield* this.parseLineStart();
+      }
+    }
+    let n = 0;
+    while (line[n] === ",") {
+      n += yield* this.pushCount(1);
+      n += yield* this.pushSpaces(true);
+      this.flowKey = false;
+    }
+    n += yield* this.pushIndicators();
+    switch (line[n]) {
+      case void 0:
+        return "flow";
+      case "#":
+        yield* this.pushCount(line.length - n);
+        return "flow";
+      case "{":
+      case "[":
+        yield* this.pushCount(1);
+        this.flowKey = false;
+        this.flowLevel += 1;
+        return "flow";
+      case "}":
+      case "]":
+        yield* this.pushCount(1);
+        this.flowKey = true;
+        this.flowLevel -= 1;
+        return this.flowLevel ? "flow" : "doc";
+      case "*":
+        yield* this.pushUntil(isNotAnchorChar);
+        return "flow";
+      case '"':
+      case "'":
+        this.flowKey = true;
+        return yield* this.parseQuotedScalar();
+      case ":": {
+        const next = this.charAt(1);
+        if (this.flowKey || isEmpty(next) || next === ",") {
+          this.flowKey = false;
+          yield* this.pushCount(1);
+          yield* this.pushSpaces(true);
+          return "flow";
+        }
+      }
+      default:
+        this.flowKey = false;
+        return yield* this.parsePlainScalar();
+    }
+  }
+  *parseQuotedScalar() {
+    const quote = this.charAt(0);
+    let end = this.buffer.indexOf(quote, this.pos + 1);
+    if (quote === "'") {
+      while (end !== -1 && this.buffer[end + 1] === "'")
+        end = this.buffer.indexOf("'", end + 2);
+    } else {
+      while (end !== -1) {
+        let n = 0;
+        while (this.buffer[end - 1 - n] === "\\")
+          n += 1;
+        if (n % 2 === 0)
+          break;
+        end = this.buffer.indexOf('"', end + 1);
+      }
+    }
+    const qb = this.buffer.substring(0, end);
+    let nl = qb.indexOf("\n", this.pos);
+    if (nl !== -1) {
+      while (nl !== -1) {
+        const cs = this.continueScalar(nl + 1);
+        if (cs === -1)
+          break;
+        nl = qb.indexOf("\n", cs);
+      }
+      if (nl !== -1) {
+        end = nl - (qb[nl - 1] === "\r" ? 2 : 1);
+      }
+    }
+    if (end === -1) {
+      if (!this.atEnd)
+        return this.setNext("quoted-scalar");
+      end = this.buffer.length;
+    }
+    yield* this.pushToIndex(end + 1, false);
+    return this.flowLevel ? "flow" : "doc";
+  }
+  *parseBlockScalarHeader() {
+    this.blockScalarIndent = -1;
+    this.blockScalarKeep = false;
+    let i = this.pos;
+    while (true) {
+      const ch = this.buffer[++i];
+      if (ch === "+")
+        this.blockScalarKeep = true;
+      else if (ch > "0" && ch <= "9")
+        this.blockScalarIndent = Number(ch) - 1;
+      else if (ch !== "-")
+        break;
+    }
+    return yield* this.pushUntil((ch) => isEmpty(ch) || ch === "#");
+  }
+  *parseBlockScalar() {
+    let nl = this.pos - 1;
+    let indent = 0;
+    let ch;
+    loop:
+      for (let i2 = this.pos; ch = this.buffer[i2]; ++i2) {
+        switch (ch) {
+          case " ":
+            indent += 1;
+            break;
+          case "\n":
+            nl = i2;
+            indent = 0;
+            break;
+          case "\r": {
+            const next = this.buffer[i2 + 1];
+            if (!next && !this.atEnd)
+              return this.setNext("block-scalar");
+            if (next === "\n")
+              break;
+          }
+          default:
+            break loop;
+        }
+      }
+    if (!ch && !this.atEnd)
+      return this.setNext("block-scalar");
+    if (indent >= this.indentNext) {
+      if (this.blockScalarIndent === -1)
+        this.indentNext = indent;
+      else {
+        this.indentNext = this.blockScalarIndent + (this.indentNext === 0 ? 1 : this.indentNext);
+      }
+      do {
+        const cs = this.continueScalar(nl + 1);
+        if (cs === -1)
+          break;
+        nl = this.buffer.indexOf("\n", cs);
+      } while (nl !== -1);
+      if (nl === -1) {
+        if (!this.atEnd)
+          return this.setNext("block-scalar");
+        nl = this.buffer.length;
+      }
+    }
+    let i = nl + 1;
+    ch = this.buffer[i];
+    while (ch === " ")
+      ch = this.buffer[++i];
+    if (ch === "	") {
+      while (ch === "	" || ch === " " || ch === "\r" || ch === "\n")
+        ch = this.buffer[++i];
+      nl = i - 1;
+    } else if (!this.blockScalarKeep) {
+      do {
+        let i2 = nl - 1;
+        let ch2 = this.buffer[i2];
+        if (ch2 === "\r")
+          ch2 = this.buffer[--i2];
+        const lastChar = i2;
+        while (ch2 === " ")
+          ch2 = this.buffer[--i2];
+        if (ch2 === "\n" && i2 >= this.pos && i2 + 1 + indent > lastChar)
+          nl = i2;
+        else
+          break;
+      } while (true);
+    }
+    yield SCALAR2;
+    yield* this.pushToIndex(nl + 1, true);
+    return yield* this.parseLineStart();
+  }
+  *parsePlainScalar() {
+    const inFlow = this.flowLevel > 0;
+    let end = this.pos - 1;
+    let i = this.pos - 1;
+    let ch;
+    while (ch = this.buffer[++i]) {
+      if (ch === ":") {
+        const next = this.buffer[i + 1];
+        if (isEmpty(next) || inFlow && flowIndicatorChars.has(next))
+          break;
+        end = i;
+      } else if (isEmpty(ch)) {
+        let next = this.buffer[i + 1];
+        if (ch === "\r") {
+          if (next === "\n") {
+            i += 1;
+            ch = "\n";
+            next = this.buffer[i + 1];
+          } else
+            end = i;
+        }
+        if (next === "#" || inFlow && flowIndicatorChars.has(next))
+          break;
+        if (ch === "\n") {
+          const cs = this.continueScalar(i + 1);
+          if (cs === -1)
+            break;
+          i = Math.max(i, cs - 2);
+        }
+      } else {
+        if (inFlow && flowIndicatorChars.has(ch))
+          break;
+        end = i;
+      }
+    }
+    if (!ch && !this.atEnd)
+      return this.setNext("plain-scalar");
+    yield SCALAR2;
+    yield* this.pushToIndex(end + 1, true);
+    return inFlow ? "flow" : "doc";
+  }
+  *pushCount(n) {
+    if (n > 0) {
+      yield this.buffer.substr(this.pos, n);
+      this.pos += n;
+      return n;
+    }
+    return 0;
+  }
+  *pushToIndex(i, allowEmpty) {
+    const s = this.buffer.slice(this.pos, i);
+    if (s) {
+      yield s;
+      this.pos += s.length;
+      return s.length;
+    } else if (allowEmpty)
+      yield "";
+    return 0;
+  }
+  *pushIndicators() {
+    switch (this.charAt(0)) {
+      case "!":
+        return (yield* this.pushTag()) + (yield* this.pushSpaces(true)) + (yield* this.pushIndicators());
+      case "&":
+        return (yield* this.pushUntil(isNotAnchorChar)) + (yield* this.pushSpaces(true)) + (yield* this.pushIndicators());
+      case "-":
+      case "?":
+      case ":": {
+        const inFlow = this.flowLevel > 0;
+        const ch1 = this.charAt(1);
+        if (isEmpty(ch1) || inFlow && flowIndicatorChars.has(ch1)) {
+          if (!inFlow)
+            this.indentNext = this.indentValue + 1;
+          else if (this.flowKey)
+            this.flowKey = false;
+          return (yield* this.pushCount(1)) + (yield* this.pushSpaces(true)) + (yield* this.pushIndicators());
+        }
+      }
+    }
+    return 0;
+  }
+  *pushTag() {
+    if (this.charAt(1) === "<") {
+      let i = this.pos + 2;
+      let ch = this.buffer[i];
+      while (!isEmpty(ch) && ch !== ">")
+        ch = this.buffer[++i];
+      return yield* this.pushToIndex(ch === ">" ? i + 1 : i, false);
+    } else {
+      let i = this.pos + 1;
+      let ch = this.buffer[i];
+      while (ch) {
+        if (tagChars.has(ch))
+          ch = this.buffer[++i];
+        else if (ch === "%" && hexDigits.has(this.buffer[i + 1]) && hexDigits.has(this.buffer[i + 2])) {
+          ch = this.buffer[i += 3];
+        } else
+          break;
+      }
+      return yield* this.pushToIndex(i, false);
+    }
+  }
+  *pushNewline() {
+    const ch = this.buffer[this.pos];
+    if (ch === "\n")
+      return yield* this.pushCount(1);
+    else if (ch === "\r" && this.charAt(1) === "\n")
+      return yield* this.pushCount(2);
+    else
+      return 0;
+  }
+  *pushSpaces(allowTabs) {
+    let i = this.pos - 1;
+    let ch;
+    do {
+      ch = this.buffer[++i];
+    } while (ch === " " || allowTabs && ch === "	");
+    const n = i - this.pos;
+    if (n > 0) {
+      yield this.buffer.substr(this.pos, n);
+      this.pos = i;
+    }
+    return n;
+  }
+  *pushUntil(test) {
+    let i = this.pos;
+    let ch = this.buffer[i];
+    while (!test(ch))
+      ch = this.buffer[++i];
+    return yield* this.pushToIndex(i, false);
+  }
+};
+
+// node_modules/yaml/browser/dist/parse/line-counter.js
+var LineCounter = class {
+  constructor() {
+    this.lineStarts = [];
+    this.addNewLine = (offset) => this.lineStarts.push(offset);
+    this.linePos = (offset) => {
+      let low = 0;
+      let high = this.lineStarts.length;
+      while (low < high) {
+        const mid = low + high >> 1;
+        if (this.lineStarts[mid] < offset)
+          low = mid + 1;
+        else
+          high = mid;
+      }
+      if (this.lineStarts[low] === offset)
+        return { line: low + 1, col: 1 };
+      if (low === 0)
+        return { line: 0, col: offset };
+      const start = this.lineStarts[low - 1];
+      return { line: low, col: offset - start + 1 };
+    };
+  }
+};
+
+// node_modules/yaml/browser/dist/parse/parser.js
+function includesToken(list, type) {
+  for (let i = 0; i < list.length; ++i)
+    if (list[i].type === type)
+      return true;
+  return false;
+}
+function findNonEmptyIndex(list) {
+  for (let i = 0; i < list.length; ++i) {
+    switch (list[i].type) {
+      case "space":
+      case "comment":
+      case "newline":
+        break;
+      default:
+        return i;
+    }
+  }
+  return -1;
+}
+function isFlowToken(token) {
+  switch (token?.type) {
+    case "alias":
+    case "scalar":
+    case "single-quoted-scalar":
+    case "double-quoted-scalar":
+    case "flow-collection":
+      return true;
+    default:
+      return false;
+  }
+}
+function getPrevProps(parent) {
+  switch (parent.type) {
+    case "document":
+      return parent.start;
+    case "block-map": {
+      const it = parent.items[parent.items.length - 1];
+      return it.sep ?? it.start;
+    }
+    case "block-seq":
+      return parent.items[parent.items.length - 1].start;
+    default:
+      return [];
+  }
+}
+function getFirstKeyStartProps(prev) {
+  if (prev.length === 0)
+    return [];
+  let i = prev.length;
+  loop:
+    while (--i >= 0) {
+      switch (prev[i].type) {
+        case "doc-start":
+        case "explicit-key-ind":
+        case "map-value-ind":
+        case "seq-item-ind":
+        case "newline":
+          break loop;
+      }
+    }
+  while (prev[++i]?.type === "space") {
+  }
+  return prev.splice(i, prev.length);
+}
+function fixFlowSeqItems(fc) {
+  if (fc.start.type === "flow-seq-start") {
+    for (const it of fc.items) {
+      if (it.sep && !it.value && !includesToken(it.start, "explicit-key-ind") && !includesToken(it.sep, "map-value-ind")) {
+        if (it.key)
+          it.value = it.key;
+        delete it.key;
+        if (isFlowToken(it.value)) {
+          if (it.value.end)
+            Array.prototype.push.apply(it.value.end, it.sep);
+          else
+            it.value.end = it.sep;
+        } else
+          Array.prototype.push.apply(it.start, it.sep);
+        delete it.sep;
+      }
+    }
+  }
+}
+var Parser = class {
+  /**
+   * @param onNewLine - If defined, called separately with the start position of
+   *   each new line (in `parse()`, including the start of input).
+   */
+  constructor(onNewLine) {
+    this.atNewLine = true;
+    this.atScalar = false;
+    this.indent = 0;
+    this.offset = 0;
+    this.onKeyLine = false;
+    this.stack = [];
+    this.source = "";
+    this.type = "";
+    this.lexer = new Lexer();
+    this.onNewLine = onNewLine;
+  }
+  /**
+   * Parse `source` as a YAML stream.
+   * If `incomplete`, a part of the last line may be left as a buffer for the next call.
+   *
+   * Errors are not thrown, but yielded as `{ type: 'error', message }` tokens.
+   *
+   * @returns A generator of tokens representing each directive, document, and other structure.
+   */
+  *parse(source, incomplete = false) {
+    if (this.onNewLine && this.offset === 0)
+      this.onNewLine(0);
+    for (const lexeme of this.lexer.lex(source, incomplete))
+      yield* this.next(lexeme);
+    if (!incomplete)
+      yield* this.end();
+  }
+  /**
+   * Advance the parser by the `source` of one lexical token.
+   */
+  *next(source) {
+    this.source = source;
+    if (this.atScalar) {
+      this.atScalar = false;
+      yield* this.step();
+      this.offset += source.length;
+      return;
+    }
+    const type = tokenType(source);
+    if (!type) {
+      const message = `Not a YAML token: ${source}`;
+      yield* this.pop({ type: "error", offset: this.offset, message, source });
+      this.offset += source.length;
+    } else if (type === "scalar") {
+      this.atNewLine = false;
+      this.atScalar = true;
+      this.type = "scalar";
+    } else {
+      this.type = type;
+      yield* this.step();
+      switch (type) {
+        case "newline":
+          this.atNewLine = true;
+          this.indent = 0;
+          if (this.onNewLine)
+            this.onNewLine(this.offset + source.length);
+          break;
+        case "space":
+          if (this.atNewLine && source[0] === " ")
+            this.indent += source.length;
+          break;
+        case "explicit-key-ind":
+        case "map-value-ind":
+        case "seq-item-ind":
+          if (this.atNewLine)
+            this.indent += source.length;
+          break;
+        case "doc-mode":
+        case "flow-error-end":
+          return;
+        default:
+          this.atNewLine = false;
+      }
+      this.offset += source.length;
+    }
+  }
+  /** Call at end of input to push out any remaining constructions */
+  *end() {
+    while (this.stack.length > 0)
+      yield* this.pop();
+  }
+  get sourceToken() {
+    const st = {
+      type: this.type,
+      offset: this.offset,
+      indent: this.indent,
+      source: this.source
+    };
+    return st;
+  }
+  *step() {
+    const top = this.peek(1);
+    if (this.type === "doc-end" && top?.type !== "doc-end") {
+      while (this.stack.length > 0)
+        yield* this.pop();
+      this.stack.push({
+        type: "doc-end",
+        offset: this.offset,
+        source: this.source
+      });
+      return;
+    }
+    if (!top)
+      return yield* this.stream();
+    switch (top.type) {
+      case "document":
+        return yield* this.document(top);
+      case "alias":
+      case "scalar":
+      case "single-quoted-scalar":
+      case "double-quoted-scalar":
+        return yield* this.scalar(top);
+      case "block-scalar":
+        return yield* this.blockScalar(top);
+      case "block-map":
+        return yield* this.blockMap(top);
+      case "block-seq":
+        return yield* this.blockSequence(top);
+      case "flow-collection":
+        return yield* this.flowCollection(top);
+      case "doc-end":
+        return yield* this.documentEnd(top);
+    }
+    yield* this.pop();
+  }
+  peek(n) {
+    return this.stack[this.stack.length - n];
+  }
+  *pop(error) {
+    const token = error ?? this.stack.pop();
+    if (!token) {
+      const message = "Tried to pop an empty stack";
+      yield { type: "error", offset: this.offset, source: "", message };
+    } else if (this.stack.length === 0) {
+      yield token;
+    } else {
+      const top = this.peek(1);
+      if (token.type === "block-scalar") {
+        token.indent = "indent" in top ? top.indent : 0;
+      } else if (token.type === "flow-collection" && top.type === "document") {
+        token.indent = 0;
+      }
+      if (token.type === "flow-collection")
+        fixFlowSeqItems(token);
+      switch (top.type) {
+        case "document":
+          top.value = token;
+          break;
+        case "block-scalar":
+          top.props.push(token);
+          break;
+        case "block-map": {
+          const it = top.items[top.items.length - 1];
+          if (it.value) {
+            top.items.push({ start: [], key: token, sep: [] });
+            this.onKeyLine = true;
+            return;
+          } else if (it.sep) {
+            it.value = token;
+          } else {
+            Object.assign(it, { key: token, sep: [] });
+            this.onKeyLine = !it.explicitKey;
+            return;
+          }
+          break;
+        }
+        case "block-seq": {
+          const it = top.items[top.items.length - 1];
+          if (it.value)
+            top.items.push({ start: [], value: token });
+          else
+            it.value = token;
+          break;
+        }
+        case "flow-collection": {
+          const it = top.items[top.items.length - 1];
+          if (!it || it.value)
+            top.items.push({ start: [], key: token, sep: [] });
+          else if (it.sep)
+            it.value = token;
+          else
+            Object.assign(it, { key: token, sep: [] });
+          return;
+        }
+        default:
+          yield* this.pop();
+          yield* this.pop(token);
+      }
+      if ((top.type === "document" || top.type === "block-map" || top.type === "block-seq") && (token.type === "block-map" || token.type === "block-seq")) {
+        const last = token.items[token.items.length - 1];
+        if (last && !last.sep && !last.value && last.start.length > 0 && findNonEmptyIndex(last.start) === -1 && (token.indent === 0 || last.start.every((st) => st.type !== "comment" || st.indent < token.indent))) {
+          if (top.type === "document")
+            top.end = last.start;
+          else
+            top.items.push({ start: last.start });
+          token.items.splice(-1, 1);
+        }
+      }
+    }
+  }
+  *stream() {
+    switch (this.type) {
+      case "directive-line":
+        yield { type: "directive", offset: this.offset, source: this.source };
+        return;
+      case "byte-order-mark":
+      case "space":
+      case "comment":
+      case "newline":
+        yield this.sourceToken;
+        return;
+      case "doc-mode":
+      case "doc-start": {
+        const doc = {
+          type: "document",
+          offset: this.offset,
+          start: []
+        };
+        if (this.type === "doc-start")
+          doc.start.push(this.sourceToken);
+        this.stack.push(doc);
+        return;
+      }
+    }
+    yield {
+      type: "error",
+      offset: this.offset,
+      message: `Unexpected ${this.type} token in YAML stream`,
+      source: this.source
+    };
+  }
+  *document(doc) {
+    if (doc.value)
+      return yield* this.lineEnd(doc);
+    switch (this.type) {
+      case "doc-start": {
+        if (findNonEmptyIndex(doc.start) !== -1) {
+          yield* this.pop();
+          yield* this.step();
+        } else
+          doc.start.push(this.sourceToken);
+        return;
+      }
+      case "anchor":
+      case "tag":
+      case "space":
+      case "comment":
+      case "newline":
+        doc.start.push(this.sourceToken);
+        return;
+    }
+    const bv = this.startBlockValue(doc);
+    if (bv)
+      this.stack.push(bv);
+    else {
+      yield {
+        type: "error",
+        offset: this.offset,
+        message: `Unexpected ${this.type} token in YAML document`,
+        source: this.source
+      };
+    }
+  }
+  *scalar(scalar) {
+    if (this.type === "map-value-ind") {
+      const prev = getPrevProps(this.peek(2));
+      const start = getFirstKeyStartProps(prev);
+      let sep;
+      if (scalar.end) {
+        sep = scalar.end;
+        sep.push(this.sourceToken);
+        delete scalar.end;
+      } else
+        sep = [this.sourceToken];
+      const map2 = {
+        type: "block-map",
+        offset: scalar.offset,
+        indent: scalar.indent,
+        items: [{ start, key: scalar, sep }]
+      };
+      this.onKeyLine = true;
+      this.stack[this.stack.length - 1] = map2;
+    } else
+      yield* this.lineEnd(scalar);
+  }
+  *blockScalar(scalar) {
+    switch (this.type) {
+      case "space":
+      case "comment":
+      case "newline":
+        scalar.props.push(this.sourceToken);
+        return;
+      case "scalar":
+        scalar.source = this.source;
+        this.atNewLine = true;
+        this.indent = 0;
+        if (this.onNewLine) {
+          let nl = this.source.indexOf("\n") + 1;
+          while (nl !== 0) {
+            this.onNewLine(this.offset + nl);
+            nl = this.source.indexOf("\n", nl) + 1;
+          }
+        }
+        yield* this.pop();
+        break;
+      default:
+        yield* this.pop();
+        yield* this.step();
+    }
+  }
+  *blockMap(map2) {
+    const it = map2.items[map2.items.length - 1];
+    switch (this.type) {
+      case "newline":
+        this.onKeyLine = false;
+        if (it.value) {
+          const end = "end" in it.value ? it.value.end : void 0;
+          const last = Array.isArray(end) ? end[end.length - 1] : void 0;
+          if (last?.type === "comment")
+            end?.push(this.sourceToken);
+          else
+            map2.items.push({ start: [this.sourceToken] });
+        } else if (it.sep) {
+          it.sep.push(this.sourceToken);
+        } else {
+          it.start.push(this.sourceToken);
+        }
+        return;
+      case "space":
+      case "comment":
+        if (it.value) {
+          map2.items.push({ start: [this.sourceToken] });
+        } else if (it.sep) {
+          it.sep.push(this.sourceToken);
+        } else {
+          if (this.atIndentedComment(it.start, map2.indent)) {
+            const prev = map2.items[map2.items.length - 2];
+            const end = prev?.value?.end;
+            if (Array.isArray(end)) {
+              Array.prototype.push.apply(end, it.start);
+              end.push(this.sourceToken);
+              map2.items.pop();
+              return;
+            }
+          }
+          it.start.push(this.sourceToken);
+        }
+        return;
+    }
+    if (this.indent >= map2.indent) {
+      const atMapIndent = !this.onKeyLine && this.indent === map2.indent;
+      const atNextItem = atMapIndent && (it.sep || it.explicitKey) && this.type !== "seq-item-ind";
+      let start = [];
+      if (atNextItem && it.sep && !it.value) {
+        const nl = [];
+        for (let i = 0; i < it.sep.length; ++i) {
+          const st = it.sep[i];
+          switch (st.type) {
+            case "newline":
+              nl.push(i);
+              break;
+            case "space":
+              break;
+            case "comment":
+              if (st.indent > map2.indent)
+                nl.length = 0;
+              break;
+            default:
+              nl.length = 0;
+          }
+        }
+        if (nl.length >= 2)
+          start = it.sep.splice(nl[1]);
+      }
+      switch (this.type) {
+        case "anchor":
+        case "tag":
+          if (atNextItem || it.value) {
+            start.push(this.sourceToken);
+            map2.items.push({ start });
+            this.onKeyLine = true;
+          } else if (it.sep) {
+            it.sep.push(this.sourceToken);
+          } else {
+            it.start.push(this.sourceToken);
+          }
+          return;
+        case "explicit-key-ind":
+          if (!it.sep && !it.explicitKey) {
+            it.start.push(this.sourceToken);
+            it.explicitKey = true;
+          } else if (atNextItem || it.value) {
+            start.push(this.sourceToken);
+            map2.items.push({ start, explicitKey: true });
+          } else {
+            this.stack.push({
+              type: "block-map",
+              offset: this.offset,
+              indent: this.indent,
+              items: [{ start: [this.sourceToken], explicitKey: true }]
+            });
+          }
+          this.onKeyLine = true;
+          return;
+        case "map-value-ind":
+          if (it.explicitKey) {
+            if (!it.sep) {
+              if (includesToken(it.start, "newline")) {
+                Object.assign(it, { key: null, sep: [this.sourceToken] });
+              } else {
+                const start2 = getFirstKeyStartProps(it.start);
+                this.stack.push({
+                  type: "block-map",
+                  offset: this.offset,
+                  indent: this.indent,
+                  items: [{ start: start2, key: null, sep: [this.sourceToken] }]
+                });
+              }
+            } else if (it.value) {
+              map2.items.push({ start: [], key: null, sep: [this.sourceToken] });
+            } else if (includesToken(it.sep, "map-value-ind")) {
+              this.stack.push({
+                type: "block-map",
+                offset: this.offset,
+                indent: this.indent,
+                items: [{ start, key: null, sep: [this.sourceToken] }]
+              });
+            } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
+              const start2 = getFirstKeyStartProps(it.start);
+              const key = it.key;
+              const sep = it.sep;
+              sep.push(this.sourceToken);
+              delete it.key;
+              delete it.sep;
+              this.stack.push({
+                type: "block-map",
+                offset: this.offset,
+                indent: this.indent,
+                items: [{ start: start2, key, sep }]
+              });
+            } else if (start.length > 0) {
+              it.sep = it.sep.concat(start, this.sourceToken);
+            } else {
+              it.sep.push(this.sourceToken);
+            }
+          } else {
+            if (!it.sep) {
+              Object.assign(it, { key: null, sep: [this.sourceToken] });
+            } else if (it.value || atNextItem) {
+              map2.items.push({ start, key: null, sep: [this.sourceToken] });
+            } else if (includesToken(it.sep, "map-value-ind")) {
+              this.stack.push({
+                type: "block-map",
+                offset: this.offset,
+                indent: this.indent,
+                items: [{ start: [], key: null, sep: [this.sourceToken] }]
+              });
+            } else {
+              it.sep.push(this.sourceToken);
+            }
+          }
+          this.onKeyLine = true;
+          return;
+        case "alias":
+        case "scalar":
+        case "single-quoted-scalar":
+        case "double-quoted-scalar": {
+          const fs = this.flowScalar(this.type);
+          if (atNextItem || it.value) {
+            map2.items.push({ start, key: fs, sep: [] });
+            this.onKeyLine = true;
+          } else if (it.sep) {
+            this.stack.push(fs);
+          } else {
+            Object.assign(it, { key: fs, sep: [] });
+            this.onKeyLine = true;
+          }
+          return;
+        }
+        default: {
+          const bv = this.startBlockValue(map2);
+          if (bv) {
+            if (bv.type === "block-seq") {
+              if (!it.explicitKey && it.sep && !includesToken(it.sep, "newline")) {
+                yield* this.pop({
+                  type: "error",
+                  offset: this.offset,
+                  message: "Unexpected block-seq-ind on same line with key",
+                  source: this.source
+                });
+                return;
+              }
+            } else if (atMapIndent) {
+              map2.items.push({ start });
+            }
+            this.stack.push(bv);
+            return;
+          }
+        }
+      }
+    }
+    yield* this.pop();
+    yield* this.step();
+  }
+  *blockSequence(seq2) {
+    const it = seq2.items[seq2.items.length - 1];
+    switch (this.type) {
+      case "newline":
+        if (it.value) {
+          const end = "end" in it.value ? it.value.end : void 0;
+          const last = Array.isArray(end) ? end[end.length - 1] : void 0;
+          if (last?.type === "comment")
+            end?.push(this.sourceToken);
+          else
+            seq2.items.push({ start: [this.sourceToken] });
+        } else
+          it.start.push(this.sourceToken);
+        return;
+      case "space":
+      case "comment":
+        if (it.value)
+          seq2.items.push({ start: [this.sourceToken] });
+        else {
+          if (this.atIndentedComment(it.start, seq2.indent)) {
+            const prev = seq2.items[seq2.items.length - 2];
+            const end = prev?.value?.end;
+            if (Array.isArray(end)) {
+              Array.prototype.push.apply(end, it.start);
+              end.push(this.sourceToken);
+              seq2.items.pop();
+              return;
+            }
+          }
+          it.start.push(this.sourceToken);
+        }
+        return;
+      case "anchor":
+      case "tag":
+        if (it.value || this.indent <= seq2.indent)
+          break;
+        it.start.push(this.sourceToken);
+        return;
+      case "seq-item-ind":
+        if (this.indent !== seq2.indent)
+          break;
+        if (it.value || includesToken(it.start, "seq-item-ind"))
+          seq2.items.push({ start: [this.sourceToken] });
+        else
+          it.start.push(this.sourceToken);
+        return;
+    }
+    if (this.indent > seq2.indent) {
+      const bv = this.startBlockValue(seq2);
+      if (bv) {
+        this.stack.push(bv);
+        return;
+      }
+    }
+    yield* this.pop();
+    yield* this.step();
+  }
+  *flowCollection(fc) {
+    const it = fc.items[fc.items.length - 1];
+    if (this.type === "flow-error-end") {
+      let top;
+      do {
+        yield* this.pop();
+        top = this.peek(1);
+      } while (top?.type === "flow-collection");
+    } else if (fc.end.length === 0) {
+      switch (this.type) {
+        case "comma":
+        case "explicit-key-ind":
+          if (!it || it.sep)
+            fc.items.push({ start: [this.sourceToken] });
+          else
+            it.start.push(this.sourceToken);
+          return;
+        case "map-value-ind":
+          if (!it || it.value)
+            fc.items.push({ start: [], key: null, sep: [this.sourceToken] });
+          else if (it.sep)
+            it.sep.push(this.sourceToken);
+          else
+            Object.assign(it, { key: null, sep: [this.sourceToken] });
+          return;
+        case "space":
+        case "comment":
+        case "newline":
+        case "anchor":
+        case "tag":
+          if (!it || it.value)
+            fc.items.push({ start: [this.sourceToken] });
+          else if (it.sep)
+            it.sep.push(this.sourceToken);
+          else
+            it.start.push(this.sourceToken);
+          return;
+        case "alias":
+        case "scalar":
+        case "single-quoted-scalar":
+        case "double-quoted-scalar": {
+          const fs = this.flowScalar(this.type);
+          if (!it || it.value)
+            fc.items.push({ start: [], key: fs, sep: [] });
+          else if (it.sep)
+            this.stack.push(fs);
+          else
+            Object.assign(it, { key: fs, sep: [] });
+          return;
+        }
+        case "flow-map-end":
+        case "flow-seq-end":
+          fc.end.push(this.sourceToken);
+          return;
+      }
+      const bv = this.startBlockValue(fc);
+      if (bv)
+        this.stack.push(bv);
+      else {
+        yield* this.pop();
+        yield* this.step();
+      }
+    } else {
+      const parent = this.peek(2);
+      if (parent.type === "block-map" && (this.type === "map-value-ind" && parent.indent === fc.indent || this.type === "newline" && !parent.items[parent.items.length - 1].sep)) {
+        yield* this.pop();
+        yield* this.step();
+      } else if (this.type === "map-value-ind" && parent.type !== "flow-collection") {
+        const prev = getPrevProps(parent);
+        const start = getFirstKeyStartProps(prev);
+        fixFlowSeqItems(fc);
+        const sep = fc.end.splice(1, fc.end.length);
+        sep.push(this.sourceToken);
+        const map2 = {
+          type: "block-map",
+          offset: fc.offset,
+          indent: fc.indent,
+          items: [{ start, key: fc, sep }]
+        };
+        this.onKeyLine = true;
+        this.stack[this.stack.length - 1] = map2;
+      } else {
+        yield* this.lineEnd(fc);
+      }
+    }
+  }
+  flowScalar(type) {
+    if (this.onNewLine) {
+      let nl = this.source.indexOf("\n") + 1;
+      while (nl !== 0) {
+        this.onNewLine(this.offset + nl);
+        nl = this.source.indexOf("\n", nl) + 1;
+      }
+    }
+    return {
+      type,
+      offset: this.offset,
+      indent: this.indent,
+      source: this.source
+    };
+  }
+  startBlockValue(parent) {
+    switch (this.type) {
+      case "alias":
+      case "scalar":
+      case "single-quoted-scalar":
+      case "double-quoted-scalar":
+        return this.flowScalar(this.type);
+      case "block-scalar-header":
+        return {
+          type: "block-scalar",
+          offset: this.offset,
+          indent: this.indent,
+          props: [this.sourceToken],
+          source: ""
+        };
+      case "flow-map-start":
+      case "flow-seq-start":
+        return {
+          type: "flow-collection",
+          offset: this.offset,
+          indent: this.indent,
+          start: this.sourceToken,
+          items: [],
+          end: []
+        };
+      case "seq-item-ind":
+        return {
+          type: "block-seq",
+          offset: this.offset,
+          indent: this.indent,
+          items: [{ start: [this.sourceToken] }]
+        };
+      case "explicit-key-ind": {
+        this.onKeyLine = true;
+        const prev = getPrevProps(parent);
+        const start = getFirstKeyStartProps(prev);
+        start.push(this.sourceToken);
+        return {
+          type: "block-map",
+          offset: this.offset,
+          indent: this.indent,
+          items: [{ start, explicitKey: true }]
+        };
+      }
+      case "map-value-ind": {
+        this.onKeyLine = true;
+        const prev = getPrevProps(parent);
+        const start = getFirstKeyStartProps(prev);
+        return {
+          type: "block-map",
+          offset: this.offset,
+          indent: this.indent,
+          items: [{ start, key: null, sep: [this.sourceToken] }]
+        };
+      }
+    }
+    return null;
+  }
+  atIndentedComment(start, indent) {
+    if (this.type !== "comment")
+      return false;
+    if (this.indent <= indent)
+      return false;
+    return start.every((st) => st.type === "newline" || st.type === "space");
+  }
+  *documentEnd(docEnd) {
+    if (this.type !== "doc-mode") {
+      if (docEnd.end)
+        docEnd.end.push(this.sourceToken);
+      else
+        docEnd.end = [this.sourceToken];
+      if (this.type === "newline")
+        yield* this.pop();
+    }
+  }
+  *lineEnd(token) {
+    switch (this.type) {
+      case "comma":
+      case "doc-start":
+      case "doc-end":
+      case "flow-seq-end":
+      case "flow-map-end":
+      case "map-value-ind":
+        yield* this.pop();
+        yield* this.step();
+        break;
+      case "newline":
+        this.onKeyLine = false;
+      case "space":
+      case "comment":
+      default:
+        if (token.end)
+          token.end.push(this.sourceToken);
+        else
+          token.end = [this.sourceToken];
+        if (this.type === "newline")
+          yield* this.pop();
+    }
+  }
+};
+
+// node_modules/yaml/browser/dist/public-api.js
+function parseOptions(options) {
+  const prettyErrors = options.prettyErrors !== false;
+  const lineCounter = options.lineCounter || prettyErrors && new LineCounter() || null;
+  return { lineCounter, prettyErrors };
+}
+function parseDocument(source, options = {}) {
+  const { lineCounter, prettyErrors } = parseOptions(options);
+  const parser = new Parser(lineCounter?.addNewLine);
+  const composer = new Composer(options);
+  let doc = null;
+  for (const _doc of composer.compose(parser.parse(source), true, source.length)) {
+    if (!doc)
+      doc = _doc;
+    else if (doc.options.logLevel !== "silent") {
+      doc.errors.push(new YAMLParseError(_doc.range.slice(0, 2), "MULTIPLE_DOCS", "Source contains multiple documents; please use YAML.parseAllDocuments()"));
+      break;
+    }
+  }
+  if (prettyErrors && lineCounter) {
+    doc.errors.forEach(prettifyError(source, lineCounter));
+    doc.warnings.forEach(prettifyError(source, lineCounter));
+  }
+  return doc;
+}
+function parse(src, reviver, options) {
+  let _reviver = void 0;
+  if (typeof reviver === "function") {
+    _reviver = reviver;
+  } else if (options === void 0 && reviver && typeof reviver === "object") {
+    options = reviver;
+  }
+  const doc = parseDocument(src, options);
+  if (!doc)
+    return null;
+  doc.warnings.forEach((warning) => warn(doc.options.logLevel, warning));
+  if (doc.errors.length > 0) {
+    if (doc.options.logLevel !== "silent")
+      throw doc.errors[0];
+    else
+      doc.errors = [];
+  }
+  return doc.toJS(Object.assign({ reviver: _reviver }, options));
+}
+
+// src/skills/builtin/obsidian-bases/executor.ts
+var VIEW_TYPES = /* @__PURE__ */ new Set(["table", "cards", "list", "map"]);
+var executor4 = {
+  async execute() {
+    return { ok: true };
+  }
+};
+var validateBaseYaml = {
+  name: "validate_base_yaml",
+  description: "Validate Obsidian Bases YAML for parseability, view structure, and formula references.",
+  parameters: {
+    type: "object",
+    properties: {
+      content: { type: "string", description: "The full .base YAML content to validate" }
+    },
+    required: ["content"]
+  },
+  async execute(args) {
+    return validateBaseYamlContent(args.content);
+  }
+};
+function registerTools6(registry) {
+  registry.register(validateBaseYaml);
+}
+function validateBaseYamlContent(content) {
+  if (typeof content !== "string") {
+    return { success: false, errors: ["content must be a YAML string"] };
+  }
+  let base;
+  try {
+    base = parse(content);
+  } catch (error) {
+    return { success: false, errors: [`Invalid YAML: ${error.message}`] };
+  }
+  const errors = [];
+  if (!base || typeof base !== "object" || Array.isArray(base)) {
+    return { success: false, errors: ["Base root must be a YAML object"] };
+  }
+  validateObjectField(base.formulas, "formulas", errors);
+  validateObjectField(base.properties, "properties", errors);
+  validateObjectField(base.summaries, "summaries", errors);
+  if (!Array.isArray(base.views) || base.views.length === 0) {
+    errors.push("views must be a non-empty array");
+  } else {
+    validateViews(base.views, errors);
+  }
+  validateFormulaReferences(base, errors);
+  return { success: errors.length === 0, errors };
+}
+function validateObjectField(value, label, errors) {
+  if (value !== void 0 && (!value || typeof value !== "object" || Array.isArray(value))) {
+    errors.push(`${label} must be an object when present`);
+  }
+}
+function validateViews(views, errors) {
+  views.forEach((view, index) => {
+    if (!view || typeof view !== "object" || Array.isArray(view)) {
+      errors.push(`views[${index}] must be an object`);
+      return;
+    }
+    if (!VIEW_TYPES.has(view.type)) {
+      errors.push(`views[${index}].type must be one of table, cards, list, map`);
+    }
+    if (view.order !== void 0 && !Array.isArray(view.order)) {
+      errors.push(`views[${index}].order must be an array when present`);
+    }
+    if (view.filters !== void 0 && !isFilterShape(view.filters)) {
+      errors.push(`views[${index}].filters must be a filter string or filter object`);
+    }
+    if (view.groupBy !== void 0 && (!view.groupBy || typeof view.groupBy !== "object" || Array.isArray(view.groupBy))) {
+      errors.push(`views[${index}].groupBy must be an object when present`);
+    }
+    validateObjectField(view.summaries, `views[${index}].summaries`, errors);
+  });
+}
+function isFilterShape(value) {
+  return typeof value === "string" || !!value && typeof value === "object" && !Array.isArray(value);
+}
+function validateFormulaReferences(base, errors) {
+  const formulas = base.formulas && typeof base.formulas === "object" && !Array.isArray(base.formulas) ? new Set(Object.keys(base.formulas)) : /* @__PURE__ */ new Set();
+  for (const reference of collectFormulaReferences(base)) {
+    const formulaName = reference.slice("formula.".length);
+    if (!formulas.has(formulaName)) {
+      errors.push(`Reference ${reference} has no matching formulas.${formulaName} definition`);
+    }
+  }
+}
+function collectFormulaReferences(base) {
+  const references = /* @__PURE__ */ new Set();
+  for (const key of Object.keys(base.properties || {})) {
+    addFormulaReference(key, references);
+  }
+  for (const view of Array.isArray(base.views) ? base.views : []) {
+    for (const value of Array.isArray(view?.order) ? view.order : []) {
+      addFormulaReference(value, references);
+    }
+    if (view?.groupBy?.property) {
+      addFormulaReference(view.groupBy.property, references);
+    }
+    for (const key of Object.keys(view?.summaries || {})) {
+      addFormulaReference(key, references);
+    }
+  }
+  return [...references];
+}
+function addFormulaReference(value, references) {
+  if (typeof value === "string" && value.startsWith("formula.")) {
+    references.add(value);
+  }
+}
+
 // src/skills/builtin/web-search/SKILL.md
-var SKILL_default = '---\r\nname: web-search\r\ndescription: \u641C\u7D22\u4E92\u8054\u7F51\u83B7\u53D6\u6700\u65B0\u4FE1\u606F\u3001\u65B0\u95FB\u6216\u6587\u6863\u3002\u5F53\u7528\u6237\u8BE2\u95EE vault \u4E2D\u6CA1\u6709\u7684\u5B9E\u65F6\u4FE1\u606F\u65F6\u4F7F\u7528\u3002\r\ntriggers:\r\n  keywords: ["\u641C\u7D22", "\u641C\u4E00\u4E0B", "search", "google", "\u6700\u65B0", "\u65B0\u95FB"]\r\ntools: ["web_search"]\r\n---\r\n\r\n# Web Search\r\n\r\n\u4F7F\u7528 DuckDuckGo \u641C\u7D22\u4E92\u8054\u7F51\u3002\r\n\r\n## \u4F7F\u7528\u65B9\u5F0F\r\n\r\n\u63D0\u4F9B\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u53EF\u9009\u65F6\u95F4\u8303\u56F4\u8FC7\u6EE4\u3002\r\n\r\n## \u53C2\u6570\r\n\r\n- `query`\uFF08\u5FC5\u586B\uFF09\uFF1A\u641C\u7D22\u5173\u952E\u8BCD\r\n- `time_range`\uFF08\u53EF\u9009\uFF09\uFF1A\u65F6\u95F4\u8303\u56F4 \u2014 d(\u5929), w(\u5468), m(\u6708), y(\u5E74)\r\n\r\n## \u8F93\u51FA\u683C\u5F0F\r\n\r\n\u8FD4\u56DE\u6700\u591A 5 \u6761\u641C\u7D22\u7ED3\u679C\uFF0C\u6BCF\u6761\u5305\u542B title\u3001link\u3001snippet\u3002\r\n\u56DE\u7B54\u65F6\u4F7F\u7528 Markdown \u94FE\u63A5\u683C\u5F0F\uFF1A`[Title](URL)`\u3002\r\n';
+var SKILL_default = '---\nname: web-search\ndescription: \u641C\u7D22\u4E92\u8054\u7F51\u83B7\u53D6\u6700\u65B0\u4FE1\u606F\u3001\u65B0\u95FB\u6216\u6587\u6863\u3002\u5F53\u7528\u6237\u8BE2\u95EE vault \u4E2D\u6CA1\u6709\u7684\u5B9E\u65F6\u4FE1\u606F\u65F6\u4F7F\u7528\u3002\ntriggers:\n  keywords: ["\u641C\u7D22", "\u641C\u4E00\u4E0B", "search", "google", "\u6700\u65B0", "\u65B0\u95FB"]\ntools: ["web_search"]\n---\n\n# Web Search\n\n\u4F7F\u7528 DuckDuckGo \u641C\u7D22\u4E92\u8054\u7F51\u3002\n\n## \u4F7F\u7528\u65B9\u5F0F\n\n\u63D0\u4F9B\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u53EF\u9009\u65F6\u95F4\u8303\u56F4\u8FC7\u6EE4\u3002\n\n## \u53C2\u6570\n\n- `query`\uFF08\u5FC5\u586B\uFF09\uFF1A\u641C\u7D22\u5173\u952E\u8BCD\n- `time_range`\uFF08\u53EF\u9009\uFF09\uFF1A\u65F6\u95F4\u8303\u56F4 \u2014 d(\u5929), w(\u5468), m(\u6708), y(\u5E74)\n\n## \u8F93\u51FA\u683C\u5F0F\n\n\u8FD4\u56DE\u6700\u591A 5 \u6761\u641C\u7D22\u7ED3\u679C\uFF0C\u6BCF\u6761\u5305\u542B title\u3001link\u3001snippet\u3002\n\u56DE\u7B54\u65F6\u4F7F\u7528 Markdown \u94FE\u63A5\u683C\u5F0F\uFF1A`[Title](URL)`\u3002\n';
 
 // src/skills/builtin/web-clipper/SKILL.md
-var SKILL_default2 = '---\r\nname: web-clipper\r\ndescription: \u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault\u3002\u652F\u6301 YouTube\u3001Bilibili\u3001\u5FAE\u4FE1\u516C\u4F17\u53F7\u548C\u666E\u901A\u7F51\u9875\u3002\r\ntriggers:\r\n  commands: ["/save"]\r\n  keywords: ["\u4FDD\u5B58", "\u526A\u85CF", "save", "clip", "\u7F51\u9875", "webpage"]\r\ntools: ["save_webpage"]\r\n---\r\n\r\n# Web Clipper\r\n\r\n\u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault \u7684\u5B8C\u6574\u6D41\u7A0B\u3002\r\n\r\n## \u652F\u6301\u7684\u5185\u5BB9\u7C7B\u578B\r\n\r\n- **YouTube \u89C6\u9891**\uFF1A\u63D0\u53D6\u8F6C\u5F55\u6587\u672C\uFF0CAI \u751F\u6210\u6458\u8981\r\n- **Bilibili \u89C6\u9891**\uFF1A\u63D0\u53D6\u5B57\u5E55\uFF0CAI \u751F\u6210\u6458\u8981\r\n- **\u5FAE\u4FE1\u516C\u4F17\u53F7\u6587\u7AE0**\uFF1A\u7279\u6B8A DOM \u5904\u7406\uFF0C\u63D0\u53D6\u6B63\u6587\r\n- **\u666E\u901A\u7F51\u9875**\uFF1AReadability \u63D0\u53D6\u6B63\u6587\uFF0C\u8F6C\u4E3A Markdown\r\n\r\n## \u5DE5\u4F5C\u6D41\u7A0B\r\n\r\n1. \u68C0\u6D4B URL \u7C7B\u578B\uFF08\u89C6\u9891 / \u7F51\u9875\uFF09\r\n2. \u89C6\u9891\u8DEF\u5F84\uFF1A\u63D0\u53D6\u8F6C\u5F55 \u2192 AI \u6458\u8981 \u2192 \u751F\u6210\u7B14\u8BB0\r\n3. \u7F51\u9875\u8DEF\u5F84\uFF1AHTTP \u8BF7\u6C42 \u2192 HTML \u89E3\u6790 \u2192 Readability \u63D0\u53D6 \u2192 Markdown \u8F6C\u6362\r\n4. \u751F\u6210 YAML frontmatter\uFF08created, source, author, tags\uFF09\r\n5. \u4FDD\u5B58\u5230\u914D\u7F6E\u7684\u5B58\u50A8\u76EE\u5F55\r\n\r\n## \u8F93\u51FA\u683C\u5F0F\r\n\r\n```markdown\r\n---\r\ncreated: 2026-04-17T12:00:00.000Z\r\nsource: https://example.com/article\r\nauthor: Author Name\r\ntags: clipping\r\n---\r\n\r\n# Article Title\r\n\r\n[\u6B63\u6587\u5185\u5BB9]\r\n```\r\n';
+var SKILL_default2 = '---\nname: web-clipper\ndescription: \u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault\u3002\u652F\u6301 YouTube\u3001Bilibili\u3001\u5FAE\u4FE1\u516C\u4F17\u53F7\u548C\u666E\u901A\u7F51\u9875\u3002\ntriggers:\n  commands: ["/save"]\n  keywords: ["\u4FDD\u5B58", "\u526A\u85CF", "save", "clip", "\u7F51\u9875", "webpage"]\ntools: ["save_webpage"]\n---\n\n# Web Clipper\n\n\u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault \u7684\u5B8C\u6574\u6D41\u7A0B\u3002\n\n## \u652F\u6301\u7684\u5185\u5BB9\u7C7B\u578B\n\n- **YouTube \u89C6\u9891**\uFF1A\u63D0\u53D6\u8F6C\u5F55\u6587\u672C\uFF0CAI \u751F\u6210\u6458\u8981\n- **Bilibili \u89C6\u9891**\uFF1A\u63D0\u53D6\u5B57\u5E55\uFF0CAI \u751F\u6210\u6458\u8981\n- **\u5FAE\u4FE1\u516C\u4F17\u53F7\u6587\u7AE0**\uFF1A\u7279\u6B8A DOM \u5904\u7406\uFF0C\u63D0\u53D6\u6B63\u6587\n- **\u666E\u901A\u7F51\u9875**\uFF1AReadability \u63D0\u53D6\u6B63\u6587\uFF0C\u8F6C\u4E3A Markdown\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n1. \u68C0\u6D4B URL \u7C7B\u578B\uFF08\u89C6\u9891 / \u7F51\u9875\uFF09\n2. \u89C6\u9891\u8DEF\u5F84\uFF1A\u63D0\u53D6\u8F6C\u5F55 \u2192 AI \u6458\u8981 \u2192 \u751F\u6210\u7B14\u8BB0\n3. \u7F51\u9875\u8DEF\u5F84\uFF1AHTTP \u8BF7\u6C42 \u2192 HTML \u89E3\u6790 \u2192 Readability \u63D0\u53D6 \u2192 Markdown \u8F6C\u6362\n4. \u751F\u6210 YAML frontmatter\uFF08created, source, author, tags\uFF09\n5. \u4FDD\u5B58\u5230\u914D\u7F6E\u7684\u5B58\u50A8\u76EE\u5F55\n\n## \u8F93\u51FA\u683C\u5F0F\n\n```markdown\n---\ncreated: 2026-04-17T12:00:00.000Z\nsource: https://example.com/article\nauthor: Author Name\ntags: clipping\n---\n\n# Article Title\n\n[\u6B63\u6587\u5185\u5BB9]\n```\n';
 
 // src/skills/builtin/knowledge/SKILL.md
-var SKILL_default3 = '---\r\nname: knowledge\r\ndescription: \u4ECE\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\uFF0C\u6216\u5C06\u9AD8\u8D28\u91CF\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\u5F53\u7528\u6237\u7684\u95EE\u9898\u53EF\u80FD\u4E0E\u5DF2\u79EF\u7D2F\u7684\u77E5\u8BC6\u76F8\u5173\u65F6\u4F7F\u7528\u3002\r\ntriggers:\r\n  commands: ["/wiki:query"]\r\n  keywords: ["\u77E5\u8BC6\u5E93", "\u77E5\u8BC6", "knowledge", "wiki"]\r\ntools: ["query_knowledge", "file_back_knowledge"]\r\n---\r\n\r\n# Knowledge Wiki\r\n\r\n\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u7684\u68C0\u7D22\u548C\u5F52\u6863\u3002\r\n\r\n## \u5DE5\u4F5C\u6D41\u7A0B\r\n\r\n1. \u4F7F\u7528 `query_knowledge` \u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\r\n2. \u5982\u679C\u77E5\u8BC6\u5E93\u4E2D\u6CA1\u6709\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5E38\u56DE\u7B54\u5373\u53EF\uFF0C\u4E0D\u8981\u5F3A\u884C\u5F15\u7528\r\n3. \u77E5\u8BC6\u5E93\u68C0\u7D22\u4E0D\u8DB3\u65F6\uFF0C\u53EF\u4EE5\u7528 `search_vault` \u641C\u7D22\u6574\u4E2A vault \u8865\u5145\r\n\r\n## \u5F15\u7528\u89C4\u5219\r\n\r\n\u5982\u679C\u56DE\u7B54\u5F15\u7528\u4E86\u77E5\u8BC6\u5E93\u4E2D\u7684\u6587\u7AE0\uFF0C\u5FC5\u987B\u5728\u56DE\u7B54\u672B\u5C3E\u6DFB\u52A0\u5F15\u7528\u6765\u6E90\uFF1A\r\n\r\n```\r\n---\r\n\u{1F4DA} \u5F15\u7528\u6765\u6E90\uFF1A\r\n- [[\u6587\u7AE0\u8DEF\u5F84|\u6587\u7AE0\u6807\u9898]]\r\n```\r\n\r\n## \u56DE\u586B\u89C4\u5219\r\n\r\n\u5F53\u56DE\u7B54\u7EFC\u5408\u4E86\u591A\u4E2A\u77E5\u8BC6\u6765\u6E90\u3001\u4EA7\u51FA\u6709\u4EF7\u503C\u7684\u65B0\u6D1E\u5BDF\u6216\u5BF9\u6BD4\u5206\u6790\u65F6\uFF0C\r\n\u4F7F\u7528 `file_back_knowledge` \u5DE5\u5177\u5C06\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\r\n\r\n- \u4E0D\u8981\u5BF9\u7B80\u5355\u7684\u4E8B\u5B9E\u67E5\u8BE2\u505A\u56DE\u586B\uFF0C\u53EA\u56DE\u586B\u6709\u7EFC\u5408\u4EF7\u503C\u7684\u5185\u5BB9\r\n- \u7528\u6237\u70B9\u8D5E\uFF08\u{1F44D}\uFF09\u65F6\u65E0\u8BBA\u5224\u65AD\u5982\u4F55\u90FD\u6267\u884C\u56DE\u586B\r\n- \u7528\u6237\u70B9\u8E29\uFF08\u{1F44E}\uFF09\u65F6\u4E0D\u56DE\u586B\r\n';
+var SKILL_default3 = '---\nname: knowledge\ndescription: \u4ECE\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\uFF0C\u6216\u5C06\u9AD8\u8D28\u91CF\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\u5F53\u7528\u6237\u7684\u95EE\u9898\u53EF\u80FD\u4E0E\u5DF2\u79EF\u7D2F\u7684\u77E5\u8BC6\u76F8\u5173\u65F6\u4F7F\u7528\u3002\ntriggers:\n  commands: ["/wiki:query"]\n  keywords: ["\u77E5\u8BC6\u5E93", "\u77E5\u8BC6", "knowledge", "wiki"]\ntools: ["query_knowledge", "file_back_knowledge"]\n---\n\n# Knowledge Wiki\n\n\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u7684\u68C0\u7D22\u548C\u5F52\u6863\u3002\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n1. \u4F7F\u7528 `query_knowledge` \u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\n2. \u5982\u679C\u77E5\u8BC6\u5E93\u4E2D\u6CA1\u6709\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5E38\u56DE\u7B54\u5373\u53EF\uFF0C\u4E0D\u8981\u5F3A\u884C\u5F15\u7528\n3. \u77E5\u8BC6\u5E93\u68C0\u7D22\u4E0D\u8DB3\u65F6\uFF0C\u53EF\u4EE5\u7528 `search_vault` \u641C\u7D22\u6574\u4E2A vault \u8865\u5145\n\n## \u5F15\u7528\u89C4\u5219\n\n\u5982\u679C\u56DE\u7B54\u5F15\u7528\u4E86\u77E5\u8BC6\u5E93\u4E2D\u7684\u6587\u7AE0\uFF0C\u5FC5\u987B\u5728\u56DE\u7B54\u672B\u5C3E\u6DFB\u52A0\u5F15\u7528\u6765\u6E90\uFF1A\n\n```\n---\n\u{1F4DA} \u5F15\u7528\u6765\u6E90\uFF1A\n- [[\u6587\u7AE0\u8DEF\u5F84|\u6587\u7AE0\u6807\u9898]]\n```\n\n## \u56DE\u586B\u89C4\u5219\n\n\u5F53\u56DE\u7B54\u7EFC\u5408\u4E86\u591A\u4E2A\u77E5\u8BC6\u6765\u6E90\u3001\u4EA7\u51FA\u6709\u4EF7\u503C\u7684\u65B0\u6D1E\u5BDF\u6216\u5BF9\u6BD4\u5206\u6790\u65F6\uFF0C\n\u4F7F\u7528 `file_back_knowledge` \u5DE5\u5177\u5C06\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\n\n- \u4E0D\u8981\u5BF9\u7B80\u5355\u7684\u4E8B\u5B9E\u67E5\u8BE2\u505A\u56DE\u586B\uFF0C\u53EA\u56DE\u586B\u6709\u7EFC\u5408\u4EF7\u503C\u7684\u5185\u5BB9\n- \u7528\u6237\u70B9\u8D5E\uFF08\u{1F44D}\uFF09\u65F6\u65E0\u8BBA\u5224\u65AD\u5982\u4F55\u90FD\u6267\u884C\u56DE\u586B\n- \u7528\u6237\u70B9\u8E29\uFF08\u{1F44E}\uFF09\u65F6\u4E0D\u56DE\u586B\n';
 
 // src/skills/builtin/plugin-ctrl/SKILL.md
-var SKILL_default4 = '---\r\nname: plugin-ctrl\r\ndescription: \u53D1\u73B0\u548C\u4F7F\u7528 Obsidian \u63D2\u4EF6\u3002\u9700\u8981\u63D2\u4EF6\u80FD\u529B\u65F6\u5148\u901A\u8FC7\u6B64 skill \u67E5\u627E\u5408\u9002\u63D2\u4EF6\u3002\r\ntriggers:\r\n  keywords: ["\u63D2\u4EF6", "plugin", "plugins"]\r\ntools: ["list_plugins", "get_plugin_commands", "get_plugin_settings", "execute_plugin_command"]\r\n---\r\n\r\n# Plugin Control \u2014 \u63D2\u4EF6\u7F16\u6392\u5668\r\n\r\n\u67E5\u8BE2\u548C\u63A7\u5236 Obsidian \u63D2\u4EF6\u3002\u81EA\u52A8\u4E3A\u5DF2\u5B89\u88C5\u63D2\u4EF6\u751F\u6210\u4F7F\u7528 Skill\u3002\r\n\r\n## \u5DE5\u4F5C\u6D41\u7A0B\r\n\r\n\u5F53\u7528\u6237\u7684\u9700\u6C42\u53EF\u80FD\u7531\u67D0\u4E2A\u63D2\u4EF6\u5B8C\u6210\u65F6\uFF1A\r\n\r\n1. \u67E5\u770B skill \u6458\u8981\u5217\u8868\uFF0C\u662F\u5426\u5DF2\u6709\u5339\u914D\u7684 `plugin-*` skill\r\n2. \u5982\u679C\u6709 \u2192 \u76F4\u63A5\u8C03\u7528\u8BE5\u63D2\u4EF6 skill\uFF08\u5982 `use_skill("plugin-obsidian-tasks")`\uFF09\r\n3. \u5982\u679C\u6CA1\u6709 \u2192 \u4F7F\u7528 `list_plugins` \u67E5\u770B\u5DF2\u5B89\u88C5\u63D2\u4EF6\r\n4. \u627E\u5230\u5019\u9009\u63D2\u4EF6\u540E\uFF0C\u7528 `get_plugin_commands` \u4E86\u89E3\u5176\u80FD\u529B\r\n5. \u6839\u636E\u547D\u4EE4\u548C\u8BBE\u7F6E\u4FE1\u606F\uFF0C\u76F4\u63A5\u64CD\u4F5C\u5B8C\u6210\u4EFB\u52A1\r\n\r\n## \u53EF\u7528\u5DE5\u5177\r\n\r\n- `list_plugins` \u2014 \u5217\u51FA\u6240\u6709\u5DF2\u5B89\u88C5\u63D2\u4EF6\u53CA\u5176\u542F\u7528\u72B6\u6001\u548C skill \u72B6\u6001\r\n- `get_plugin_commands` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u53EF\u7528\u547D\u4EE4\r\n- `get_plugin_settings` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u8BBE\u7F6E\r\n- `execute_plugin_command` \u2014 \u6267\u884C\u6307\u5B9A\u63D2\u4EF6\u547D\u4EE4\r\n\r\n## \u539F\u5219\r\n\r\n- \u4F18\u5148\u4F7F\u7528\u5DF2\u6709 skill \u7684\u63D2\u4EF6\uFF08instructions \u66F4\u5B8C\u6574\uFF09\r\n- \u6CA1\u6709 skill \u7684\u63D2\u4EF6\uFF0C\u9000\u56DE\u5230\u547D\u4EE4\u7EA7\u64CD\u4F5C\r\n- \u53EA\u6709\u5728\u6CA1\u6709\u5408\u9002\u63D2\u4EF6\u65F6\uFF0C\u624D\u7528\u7EAF vault \u64CD\u4F5C\u521B\u5EFA\u666E\u901A Markdown\r\n';
+var SKILL_default4 = '---\nname: plugin-ctrl\ndescription: \u53D1\u73B0\u548C\u4F7F\u7528 Obsidian \u63D2\u4EF6\u3002\u9700\u8981\u63D2\u4EF6\u80FD\u529B\u65F6\u5148\u901A\u8FC7\u6B64 skill \u67E5\u627E\u5408\u9002\u63D2\u4EF6\u3002\ntriggers:\n  keywords: ["\u63D2\u4EF6", "plugin", "plugins"]\ntools: ["list_plugins", "get_plugin_commands", "get_plugin_settings", "execute_plugin_command"]\n---\n\n# Plugin Control \u2014 \u63D2\u4EF6\u7F16\u6392\u5668\n\n\u67E5\u8BE2\u548C\u63A7\u5236 Obsidian \u63D2\u4EF6\u3002\u81EA\u52A8\u4E3A\u5DF2\u5B89\u88C5\u63D2\u4EF6\u751F\u6210\u4F7F\u7528 Skill\u3002\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n\u5F53\u7528\u6237\u7684\u9700\u6C42\u53EF\u80FD\u7531\u67D0\u4E2A\u63D2\u4EF6\u5B8C\u6210\u65F6\uFF1A\n\n1. \u67E5\u770B skill \u6458\u8981\u5217\u8868\uFF0C\u662F\u5426\u5DF2\u6709\u5339\u914D\u7684 `plugin-*` skill\n2. \u5982\u679C\u6709 \u2192 \u76F4\u63A5\u8C03\u7528\u8BE5\u63D2\u4EF6 skill\uFF08\u5982 `use_skill("plugin-obsidian-tasks")`\uFF09\n3. \u5982\u679C\u6CA1\u6709 \u2192 \u4F7F\u7528 `list_plugins` \u67E5\u770B\u5DF2\u5B89\u88C5\u63D2\u4EF6\n4. \u627E\u5230\u5019\u9009\u63D2\u4EF6\u540E\uFF0C\u7528 `get_plugin_commands` \u4E86\u89E3\u5176\u80FD\u529B\n5. \u6839\u636E\u547D\u4EE4\u548C\u8BBE\u7F6E\u4FE1\u606F\uFF0C\u76F4\u63A5\u64CD\u4F5C\u5B8C\u6210\u4EFB\u52A1\n\n## \u53EF\u7528\u5DE5\u5177\n\n- `list_plugins` \u2014 \u5217\u51FA\u6240\u6709\u5DF2\u5B89\u88C5\u63D2\u4EF6\u53CA\u5176\u542F\u7528\u72B6\u6001\u548C skill \u72B6\u6001\n- `get_plugin_commands` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u53EF\u7528\u547D\u4EE4\n- `get_plugin_settings` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u8BBE\u7F6E\n- `execute_plugin_command` \u2014 \u6267\u884C\u6307\u5B9A\u63D2\u4EF6\u547D\u4EE4\n\n## \u539F\u5219\n\n- \u4F18\u5148\u4F7F\u7528\u5DF2\u6709 skill \u7684\u63D2\u4EF6\uFF08instructions \u66F4\u5B8C\u6574\uFF09\n- \u6CA1\u6709 skill \u7684\u63D2\u4EF6\uFF0C\u9000\u56DE\u5230\u547D\u4EE4\u7EA7\u64CD\u4F5C\n- \u53EA\u6709\u5728\u6CA1\u6709\u5408\u9002\u63D2\u4EF6\u65F6\uFF0C\u624D\u7528\u7EAF vault \u64CD\u4F5C\u521B\u5EFA\u666E\u901A Markdown\n';
+
+// src/skills/builtin/obsidian-markdown/SKILL.md
+var SKILL_default5 = '---\r\nname: obsidian-markdown\r\ndescription: Create and edit Obsidian Flavored Markdown with wikilinks, embeds, callouts, properties, tags, and note frontmatter.\r\ntriggers:\r\n  keywords: ["wikilink", "wikilinks", "callout", "frontmatter", "properties", "embed", "embeds", "markdown", "tags"]\r\ntools: ["read_note", "create_note", "update_note", "append_to_note", "search_vault", "list_notes", "open_file"]\r\n---\r\n\r\n# Obsidian Flavored Markdown\r\n\r\nUse this workflow when creating or editing Markdown notes that should render well in Obsidian.\r\n\r\n## Workflow\r\n\r\n1. Read the target note first when editing existing content.\r\n2. Put YAML properties at the top of the note when metadata is needed.\r\n3. Use wikilinks for vault notes and Markdown links for external URLs.\r\n4. Use embeds for notes, headings, blocks, images, PDFs, audio, and video.\r\n5. Use callouts for highlighted blocks.\r\n6. Open the file when the user wants to inspect the rendered result in Obsidian.\r\n\r\n## Wikilinks\r\n\r\n```markdown\r\n[[Note Name]]\r\n[[Note Name|Display Text]]\r\n[[Note Name#Heading]]\r\n[[Note Name#^block-id]]\r\n[[#Heading in same note]]\r\n```\r\n\r\nDefine a paragraph block ID by appending it to the paragraph:\r\n\r\n```markdown\r\nThis paragraph can be linked to. ^my-block-id\r\n```\r\n\r\nFor lists and quotes, place the block ID on a separate line after the block.\r\n\r\n## Embeds\r\n\r\n```markdown\r\n![[Note Name]]\r\n![[Note Name#Heading]]\r\n![[Note Name#^block-id]]\r\n![[image.png]]\r\n![[image.png|300]]\r\n![[image.png|640x480]]\r\n![[document.pdf#page=3]]\r\n```\r\n\r\nUse external Markdown image syntax only for external URLs:\r\n\r\n```markdown\r\n![Alt text](https://example.com/image.png)\r\n![Alt text|300](https://example.com/image.png)\r\n```\r\n\r\n## Callouts\r\n\r\n```markdown\r\n> [!note]\r\n> Basic callout.\r\n\r\n> [!warning] Custom Title\r\n> Callout with a custom title.\r\n\r\n> [!faq]- Collapsed by default\r\n> Foldable callout content.\r\n```\r\n\r\nCommon types: `note`, `abstract`, `summary`, `tldr`, `info`, `todo`, `tip`, `hint`, `important`, `success`, `check`, `done`, `question`, `help`, `faq`, `warning`, `caution`, `attention`, `failure`, `fail`, `missing`, `danger`, `error`, `bug`, `example`, `quote`, `cite`.\r\n\r\nNested callouts are valid:\r\n\r\n```markdown\r\n> [!question] Outer callout\r\n> > [!note] Inner callout\r\n> > Nested content\r\n```\r\n\r\n## Properties\r\n\r\n```yaml\r\n---\r\ntitle: My Note\r\ndate: 2024-01-15\r\ntags:\r\n  - project\r\n  - active\r\naliases:\r\n  - Alternative Name\r\ncssclasses:\r\n  - custom-class\r\nstatus: in-progress\r\nrating: 4.5\r\ncompleted: false\r\ndue: 2024-02-01T14:30:00\r\n---\r\n```\r\n\r\nDefault properties:\r\n\r\n- `tags`: searchable note tags\r\n- `aliases`: alternative names used by link suggestions\r\n- `cssclasses`: CSS classes applied by Obsidian\r\n\r\nProperty values may be text, numbers, checkboxes, dates, date-times, lists, or links. Quote wikilinks in YAML values, for example `related: "[[Other Note]]"`.\r\n\r\n## Tags\r\n\r\n```markdown\r\n#tag\r\n#nested/tag\r\n#tag-with-dashes\r\n#tag_with_underscores\r\n```\r\n\r\nTags can contain letters, numbers except as the first character, underscores, hyphens, and forward slashes.\r\n\r\n## Obsidian Extensions\r\n\r\n```markdown\r\n==Highlighted text==\r\n\r\n%%hidden inline comment%%\r\n\r\n%%\r\nHidden block comment.\r\n%%\r\n```\r\n\r\nMath and Mermaid diagrams are supported:\r\n\r\n````markdown\r\nInline math: $e^{i\\pi} + 1 = 0$\r\n\r\n$$\r\n\\frac{a}{b} = c\r\n$$\r\n\r\n```mermaid\r\ngraph TD\r\n    A[Start] --> B{Decision}\r\n```\r\n````\r\n\r\n## Link Choice\r\n\r\nUse `[[wikilinks]]` for notes inside the vault because Obsidian tracks renames. Use `[text](url)` only for external URLs.\r\n';
+
+// src/skills/builtin/json-canvas/SKILL.md
+var SKILL_default6 = '---\r\nname: json-canvas\r\ndescription: Create and edit JSON Canvas files (.canvas) with nodes, edges, groups, mind maps, flowcharts, and visual canvases.\r\ntriggers:\r\n  keywords: ["canvas", "json canvas", "mind map", "mindmap", "flowchart", "diagram", "board", ".canvas"]\r\ntools: ["read_file", "create_file", "update_file", "search_vault", "open_file", "validate_json_canvas"]\r\n---\r\n\r\n# JSON Canvas\r\n\r\nUse this workflow when creating or editing Obsidian `.canvas` files. Canvas files are JSON documents with two top-level arrays:\r\n\r\n```json\r\n{\r\n  "nodes": [],\r\n  "edges": []\r\n}\r\n```\r\n\r\n## Workflow\r\n\r\n1. Read the existing `.canvas` file when editing.\r\n2. Generate unique 16-character lowercase hexadecimal IDs for all nodes and edges.\r\n3. Add nodes with required fields: `id`, `type`, `x`, `y`, `width`, and `height`.\r\n4. Add edges only after both endpoint node IDs exist.\r\n5. Run `validate_json_canvas` before writing or after producing updated content.\r\n6. Use `create_file` or `update_file` to write the exact `.canvas` path.\r\n7. Use `open_file` when the user wants to inspect the result in Obsidian.\r\n\r\n## Nodes\r\n\r\nCommon node fields:\r\n\r\n```json\r\n{\r\n  "id": "6f0ad84f44ce9c17",\r\n  "type": "text",\r\n  "x": 0,\r\n  "y": 0,\r\n  "width": 400,\r\n  "height": 200,\r\n  "color": "5"\r\n}\r\n```\r\n\r\nValid node types:\r\n\r\n- `text`: requires `text`\r\n- `file`: requires `file`; optional `subpath`\r\n- `link`: requires `url`\r\n- `group`: optional `label`, `background`, and `backgroundStyle`\r\n\r\nText node example:\r\n\r\n```json\r\n{\r\n  "id": "6f0ad84f44ce9c17",\r\n  "type": "text",\r\n  "x": 0,\r\n  "y": 0,\r\n  "width": 400,\r\n  "height": 200,\r\n  "text": "# Main Idea\\n\\nThis is **Markdown** content."\r\n}\r\n```\r\n\r\nUse `\\n` for line breaks in JSON strings. Do not use literal `\\\\n`, because Obsidian renders those as backslash and n characters.\r\n\r\n## Edges\r\n\r\nEdges connect nodes through `fromNode` and `toNode`:\r\n\r\n```json\r\n{\r\n  "id": "0123456789abcdef",\r\n  "fromNode": "6f0ad84f44ce9c17",\r\n  "fromSide": "right",\r\n  "toNode": "a1b2c3d4e5f67890",\r\n  "toSide": "left",\r\n  "toEnd": "arrow",\r\n  "label": "leads to"\r\n}\r\n```\r\n\r\nValid sides: `top`, `right`, `bottom`, `left`.\r\nValid ends: `none`, `arrow`.\r\n\r\n## Layout\r\n\r\n- Coordinates can be negative.\r\n- `x` increases right, `y` increases down.\r\n- Leave 50-100px between nodes.\r\n- Leave 20-50px padding inside groups.\r\n- Align coordinates to multiples of 10 or 20 for cleaner layouts.\r\n\r\nSuggested sizes:\r\n\r\n- Small text: 200-300 by 80-150\r\n- Medium text: 300-450 by 150-300\r\n- Large text: 400-600 by 300-500\r\n- File preview: 300-500 by 200-400\r\n- Link preview: 250-400 by 100-200\r\n\r\n## Validation Checklist\r\n\r\nBefore writing a canvas file, ensure:\r\n\r\n1. JSON parses successfully.\r\n2. All IDs are unique across nodes and edges.\r\n3. Every edge endpoint references an existing node.\r\n4. Each node type has its required fields.\r\n5. Side and end values are valid.\r\n6. Newline characters inside node text are valid JSON escapes.\r\n';
+
+// src/skills/builtin/obsidian-bases/SKILL.md
+var SKILL_default7 = '---\r\nname: obsidian-bases\r\ndescription: Create and edit Obsidian Bases (.base files) with views, filters, formulas, properties, and summaries.\r\ntriggers:\r\n  keywords: ["bases", ".base", "table view", "card view", "cards view", "list view", "filter", "filters", "formula", "formulas", "database"]\r\ntools: ["read_file", "create_file", "update_file", "search_vault", "open_file", "validate_base_yaml"]\r\n---\r\n\r\n# Obsidian Bases\r\n\r\nUse this workflow when creating or editing `.base` files. Base files are YAML documents that define database-like views over notes.\r\n\r\n## Workflow\r\n\r\n1. Read the existing `.base` file when editing.\r\n2. Define global `filters` to scope which notes appear.\r\n3. Add `formulas` only when a computed property is needed.\r\n4. Configure `properties` display names when the raw property names are not user-friendly.\r\n5. Add one or more `views` with `type`, `name`, and `order`.\r\n6. Run `validate_base_yaml` before writing.\r\n7. Use `create_file` or `update_file` to write the exact `.base` path.\r\n8. Use `open_file` when the user wants to inspect the rendered base.\r\n\r\n## Schema\r\n\r\n```yaml\r\nfilters:\r\n  and: []\r\n\r\nformulas:\r\n  formula_name: \'expression\'\r\n\r\nproperties:\r\n  property_name:\r\n    displayName: "Display Name"\r\n  formula.formula_name:\r\n    displayName: "Formula Display Name"\r\n\r\nsummaries:\r\n  custom_summary_name: \'values.mean().round(3)\'\r\n\r\nviews:\r\n  - type: table\r\n    name: "View Name"\r\n    limit: 10\r\n    order:\r\n      - file.name\r\n      - property_name\r\n      - formula.formula_name\r\n```\r\n\r\nValid view types: `table`, `cards`, `list`, `map`.\r\n\r\n## Filters\r\n\r\nFilters can be a string:\r\n\r\n```yaml\r\nfilters: \'status == "done"\'\r\n```\r\n\r\nOr a recursive filter object:\r\n\r\n```yaml\r\nfilters:\r\n  and:\r\n    - \'status == "done"\'\r\n    - \'priority > 3\'\r\n```\r\n\r\nCommon file predicates:\r\n\r\n```yaml\r\nfilters:\r\n  or:\r\n    - file.hasTag("book")\r\n    - file.hasTag("article")\r\n```\r\n\r\n## Formulas\r\n\r\nUse single quotes around formulas that contain double quotes:\r\n\r\n```yaml\r\nformulas:\r\n  days_until_due: \'if(due, (date(due) - today()).days, "")\'\r\n  is_overdue: \'if(due, date(due) < today() && status != "done", false)\'\r\n```\r\n\r\nDuration arithmetic returns a Duration, not a number. Access a field first:\r\n\r\n```yaml\r\nformulas:\r\n  days_old: \'(now() - file.ctime).days\'\r\n```\r\n\r\n## Example\r\n\r\n```yaml\r\nfilters:\r\n  and:\r\n    - file.hasTag("task")\r\n    - \'file.ext == "md"\'\r\n\r\nformulas:\r\n  days_until_due: \'if(due, (date(due) - today()).days, "")\'\r\n\r\nproperties:\r\n  formula.days_until_due:\r\n    displayName: "Days Until Due"\r\n\r\nviews:\r\n  - type: table\r\n    name: "Active Tasks"\r\n    filters:\r\n      and:\r\n        - \'status != "done"\'\r\n    order:\r\n      - file.name\r\n      - status\r\n      - due\r\n      - formula.days_until_due\r\n```\r\n\r\n## YAML Quoting Rules\r\n\r\n- Quote strings containing `:`, `{`, `}`, `[`, `]`, `,`, `&`, `*`, `#`, `?`, `|`, `<`, `>`, `=`, `!`, `%`, `@`, or backticks.\r\n- Wrap formulas containing double quotes in single quotes.\r\n- Every `formula.name` reference in `views`, `properties`, or summaries must have a matching `formulas.name` definition.\r\n';
 
 // src/skills/builtin/plugin-ctrl/plugin-watcher.ts
-var import_obsidian21 = require("obsidian");
+var import_obsidian23 = require("obsidian");
 var POLL_INTERVAL_MS = 1e4;
 var GENERATE_DELAY_MS = 1e3;
 var MAX_RETRIES = 3;
@@ -11302,14 +20194,14 @@ var PluginWatcher = class {
     if (candidates.length === 0)
       return;
     console.log(`[PluginWatcher] Generating skills for ${candidates.length} plugins`);
-    new import_obsidian21.Notice(`Generating skills for ${candidates.length} plugins...`);
+    new import_obsidian23.Notice(`Generating skills for ${candidates.length} plugins...`);
     for (let i = 0; i < candidates.length; i++) {
       await this.generateAndRegister(candidates[i]);
       if (i < candidates.length - 1) {
         await this.delay(GENERATE_DELAY_MS);
       }
     }
-    new import_obsidian21.Notice(`Plugin skill generation finished (${candidates.length})`);
+    new import_obsidian23.Notice(`Plugin skill generation finished (${candidates.length})`);
   }
   async checkChanges() {
     if (!this.settings.autoGeneratePluginSkills)
@@ -11322,7 +20214,7 @@ var PluginWatcher = class {
       } else {
         const info = await this.generator.collectPluginInfo(id);
         if (!this.generator.shouldSkipPlugin(info)) {
-          new import_obsidian21.Notice(`Generating skill for ${info.name}...`);
+          new import_obsidian23.Notice(`Generating skill for ${info.name}...`);
           await this.generateAndRegister(id);
         }
       }
@@ -11377,7 +20269,7 @@ var PluginWatcher = class {
 };
 
 // src/skills/builtin/plugin-ctrl/skill-generator.ts
-var import_obsidian22 = require("obsidian");
+var import_obsidian24 = require("obsidian");
 var UI_KEYWORDS = [
   "open",
   "show",
@@ -11600,7 +20492,7 @@ var PluginSkillGenerator = class {
         return this.communityPluginsCache[pluginId] || "";
       }
       const url = "https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json";
-      const response = await (0, import_obsidian22.requestUrl)({ url });
+      const response = await (0, import_obsidian24.requestUrl)({ url });
       if (response.status !== 200)
         return "";
       const plugins = JSON.parse(response.text);
@@ -11633,7 +20525,7 @@ var PluginSkillGenerator = class {
   /** 抓取纯文本内容（用于 GitHub raw README） */
   async fetchRawText(url) {
     try {
-      const response = await (0, import_obsidian22.requestUrl)({ url });
+      const response = await (0, import_obsidian24.requestUrl)({ url });
       if (response.status !== 200)
         return "";
       return response.text;
@@ -11648,7 +20540,7 @@ var PluginSkillGenerator = class {
       const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
       let html = "";
       for (let attempt = 0; attempt < 3; attempt++) {
-        const response = await (0, import_obsidian22.requestUrl)({ url });
+        const response = await (0, import_obsidian24.requestUrl)({ url });
         console.log(`[SkillGenerator] web search for "${pluginName}": attempt=${attempt + 1}, status=${response.status}, html=${response.text.length} chars`);
         if (response.status === 200 && response.text.length > 2e4) {
           html = response.text;
@@ -11972,7 +20864,7 @@ var InboxAutosaveCoordinator = class {
 };
 
 // main.ts
-var ObsidianCliPlugin = class extends import_obsidian23.Plugin {
+var ObsidianCliPlugin = class extends import_obsidian25.Plugin {
   settings;
   modelService;
   knowledgeRuntime = null;
@@ -11982,10 +20874,10 @@ var ObsidianCliPlugin = class extends import_obsidian23.Plugin {
   pluginWatcher = null;
   inboxAutosave = null;
   // Debounce with trailing edge (default/false) for inactivity trigger
-  onEditorChangeDebounced = (0, import_obsidian23.debounce)(this.runGuardianCheck.bind(this), 3e3);
+  onEditorChangeDebounced = (0, import_obsidian25.debounce)(this.runGuardianCheck.bind(this), 3e3);
   async onload() {
     await this.loadSettings();
-    new import_obsidian23.Notice("Obsidian Shell: Plugin Loaded (v2)");
+    new import_obsidian25.Notice("Obsidian Shell: Plugin Loaded (v2)");
     this.toolRegistry = new ToolRegistry(this.app, this.settings);
     this.skillRegistry = new SkillRegistry(this.toolRegistry);
     this.modelService = new ModelService(this.app, this.settings, this.toolRegistry, this.skillRegistry);
@@ -11993,14 +20885,19 @@ var ObsidianCliPlugin = class extends import_obsidian23.Plugin {
       app: this.app,
       getInboxPath: () => this.settings.wechatInboxPath,
       saveUrl: async (url) => this.toolRegistry.execute("save_webpage", { url }),
-      notify: (message) => new import_obsidian23.Notice(message)
+      notify: (message) => new import_obsidian25.Notice(message)
     });
     registerVaultTools(this.toolRegistry);
     registerTools(this.toolRegistry);
     registerTools2(this.toolRegistry, this.modelService);
     registerTools4(this.toolRegistry);
+    registerTools5(this.toolRegistry);
+    registerTools6(this.toolRegistry);
     this.skillRegistry.registerBuiltinFromMd(SKILL_default, executor);
     this.skillRegistry.registerBuiltinFromMd(SKILL_default2, createExecutor(this.modelService));
+    this.skillRegistry.registerBuiltinFromMd(SKILL_default5, { execute: async () => ({ ok: true }) });
+    this.skillRegistry.registerBuiltinFromMd(SKILL_default6, executor3);
+    this.skillRegistry.registerBuiltinFromMd(SKILL_default7, executor4);
     this.skillRegistry.registerBuiltinFromMd(
       SKILL_default4,
       executor2,
@@ -12028,7 +20925,7 @@ var ObsidianCliPlugin = class extends import_obsidian23.Plugin {
     try {
       this.registerView(
         VIEW_TYPE_SHELL,
-        (leaf) => new ShellView(leaf, this.modelService)
+        (leaf) => new ShellView(leaf, this.modelService, this)
       );
     } catch (e) {
       console.log("[ObsidianCli] View type already registered, skipping.");
@@ -12062,7 +20959,7 @@ var ObsidianCliPlugin = class extends import_obsidian23.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (file instanceof import_obsidian23.TFile && file.extension === "md") {
+        if (file instanceof import_obsidian25.TFile && file.extension === "md") {
           void this.inboxAutosave?.handleFileModify(file);
         }
       })
@@ -12100,9 +20997,9 @@ var ObsidianCliPlugin = class extends import_obsidian23.Plugin {
     }
   }
   activateGuardianModal() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian23.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian25.MarkdownView);
     if (!view) {
-      new import_obsidian23.Notice("Please open a Markdown file first.");
+      new import_obsidian25.Notice("Please open a Markdown file first.");
       return;
     }
     new GuardianModal(this.app, (instruction) => {
@@ -12184,7 +21081,7 @@ var ObsidianCliPlugin = class extends import_obsidian23.Plugin {
       return;
     rawUrlMatches.sort((a, b) => b.index - a.index);
     for (const m of rawUrlMatches) {
-      new import_obsidian23.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
+      new import_obsidian25.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
       const result = await this.toolRegistry.execute("save_webpage", { url: m.url });
       if (result.success) {
         const finalPath = result.path;
@@ -12192,7 +21089,7 @@ var ObsidianCliPlugin = class extends import_obsidian23.Plugin {
         newContent = newContent.substring(0, m.index) + linkText + newContent.substring(m.index + m.length);
         modified = true;
       } else {
-        new import_obsidian23.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
+        new import_obsidian25.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
       }
     }
     if (modified) {
@@ -12250,7 +21147,7 @@ Instructions:
 4. Output JSON: {"type": "completion", "suggestion": "MARKDOWN_FORMATTED_TEXT"}
 5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
       }
-      const response = await this.modelService.chat(prompt, [], systemPromptOverride);
+      const response = await requestGuardianResponse(this.modelService, prompt, systemPromptOverride);
       let data;
       const braceStart = response.indexOf("{");
       if (braceStart === -1) {

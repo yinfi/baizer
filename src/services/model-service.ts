@@ -259,7 +259,7 @@ export class ModelService {
         }
     }
 
-    async *chatStream(userMessage: string, contextItems: any[], selection: string = ''): AsyncGenerator<StreamEvent, void, unknown> {
+    async *chatStream(userMessage: string, contextItems: any[], selection: string = '', signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
         logger.info(`Processing streaming chat: ${userMessage.substring(0, 50)}...`, 'ModelService.chatStream');
 
         if (!this.hasValidConfig()) {
@@ -275,10 +275,13 @@ export class ModelService {
                 contextItems,
                 selection,
             });
-            for await (const event of runtime.queryStream(preparedTurn)) {
+            for await (const event of runtime.queryStream(preparedTurn, signal)) {
                 yield event;
             }
         } catch (e: any) {
+            if (this.isAbortError(e)) {
+                throw e;
+            }
             logger.error('Stream chat failed', e, 'ModelService.chatStream');
             yield { type: 'error' as const, message: e.message };
         }
@@ -375,6 +378,10 @@ export class ModelService {
             toolRegistry: this.toolRegistry,
             skillRegistry: this.skillRegistry,
         });
+    }
+
+    private isAbortError(error: any): boolean {
+        return error?.name === 'AbortError';
     }
 
     async shutdown() {

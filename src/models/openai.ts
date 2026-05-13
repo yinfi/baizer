@@ -159,7 +159,7 @@ export class OpenAIProvider implements IModelProvider {
         return result;
     }
 
-    async *chatCompletionStream(messages: any[], tools?: ToolDefinition[]): AsyncGenerator<StreamEvent, void, unknown> {
+    async *chatCompletionStream(messages: any[], tools?: ToolDefinition[], signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
         const url = `${this.config.baseUrl || 'https://api.openai.com/v1'}/chat/completions`;
 
         const body: any = {
@@ -186,7 +186,8 @@ export class OpenAIProvider implements IModelProvider {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${this.config.apiKey}`
             },
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
+            signal,
         });
 
         if (!response.ok) {
@@ -200,6 +201,7 @@ export class OpenAIProvider implements IModelProvider {
         const pendingToolCalls = new Map<number, { name: string; arguments: string }>();
 
         while (true) {
+            this.throwIfAborted(signal);
             const { done, value } = await reader.read();
             if (done) break;
 
@@ -257,6 +259,14 @@ export class OpenAIProvider implements IModelProvider {
 
         yield { type: 'done' as const, text: fullText };
     }
+
+    private throwIfAborted(signal?: AbortSignal): void {
+        if (signal?.aborted) {
+            const error = new Error('Stream aborted');
+            error.name = 'AbortError';
+            throw error;
+        }
+    }
 }
 
 class OpenAIChatSession implements IChatSession {
@@ -302,7 +312,7 @@ class OpenAIChatSession implements IChatSession {
         return OpenAIProvider.toGenerationResult(rawMessage);
     }
 
-    async *sendMessageStream(text: string | ToolResult[]): AsyncGenerator<StreamEvent, void, unknown> {
+    async *sendMessageStream(text: string | ToolResult[], signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
         if (typeof text === 'string') {
             this.history.push({ role: 'user', content: text });
         } else {
@@ -325,7 +335,7 @@ class OpenAIChatSession implements IChatSession {
         let fullText = '';
         const toolCalls: any[] = [];
 
-        for await (const event of this.provider.chatCompletionStream(this.history, this.tools)) {
+        for await (const event of this.provider.chatCompletionStream(this.history, this.tools, signal)) {
             if (event.type === 'text_delta') {
                 fullText += event.content;
             } else if (event.type === 'tool_call') {

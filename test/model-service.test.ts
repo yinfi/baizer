@@ -261,6 +261,57 @@ async function runTests() {
     ]);
   });
 
+  await test('chatStream forwards AbortSignal to runtime.queryStream', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const request = {
+      userMessage: 'hello stream',
+      contextItems: [{ type: 'file', data: 'note.md', content: 'content' }],
+      selection: 'selected text',
+    };
+    const signal = new AbortController().signal;
+    const calls: any[] = [];
+
+    service.hasValidConfig = () => true;
+    service.getActiveProviderConfig = () => ({ label: 'Test Provider' });
+    service.createChatRuntime = () => ({
+      prepareTurn: async (input: any) => {
+        calls.push({ type: 'prepareTurn', input });
+        return { prompt: 'prepared stream', tools: [] };
+      },
+      queryStream: async function* (prepared: any, receivedSignal?: AbortSignal) {
+        calls.push({ type: 'queryStream', prepared, receivedSignal });
+        yield { type: 'text_delta', content: 'hi' as const };
+        yield { type: 'done', text: 'hi' as const };
+      },
+    });
+
+    const events: any[] = [];
+    for await (const event of service.chatStream(
+      request.userMessage,
+      request.contextItems,
+      request.selection,
+      signal,
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'text_delta', content: 'hi' },
+      { type: 'done', text: 'hi' },
+    ]);
+    expect(calls).toEqual([
+      {
+        type: 'prepareTurn',
+        input: request,
+      },
+      {
+        type: 'queryStream',
+        prepared: { prompt: 'prepared stream', tools: [] },
+        receivedSignal: signal,
+      },
+    ]);
+  });
+
   await test('getProviderCapabilities proxies the active provider capability declaration', async () => {
     const service: any = Object.create(ModelService.prototype);
     service.provider = {

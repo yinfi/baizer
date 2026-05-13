@@ -53,12 +53,12 @@ export type StreamEvent =
     | { type: 'text_delta'; content: string }
     | { type: 'tool_call'; name: string; args: any }
     | { type: 'tool_result'; name: string; result: any; error?: string }
-    | { type: 'done'; text: string }
+    | { type: 'done'; text: string; interrupted?: boolean }
     | { type: 'error'; message: string };
 
 export interface IChatSession {
     sendMessage(text: string | ToolResult[]): Promise<GenerationResult>;
-    sendMessageStream(text: string | ToolResult[]): AsyncGenerator<StreamEvent, void, unknown>;
+    sendMessageStream(text: string | ToolResult[], signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown>;
     getHistory(): Promise<ChatMessage[]>;
     clearHistory(): Promise<void>;
 }

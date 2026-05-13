@@ -35,6 +35,7 @@ async function runTests() {
   await test('detectSuggestionTrigger identifies slash and file triggers', () => {
     expect(detectSuggestionTrigger('/sa', 3)).toEqual({ type: 'command', query: 'sa' });
     expect(detectSuggestionTrigger('see @rea', 8)).toEqual({ type: 'file', query: 'rea' });
+    expect(detectSuggestionTrigger('use $web', 8)).toEqual({ type: 'skill', query: 'web' });
     expect(detectSuggestionTrigger('hello world', 11)).toBe(null);
   });
 

@@ -1,5 +1,5 @@
 {
-  "activeProvider": "openai",
+  "activeProvider": "deepseek",
   "providers": {
     "gemini": {
       "type": "gemini",
@@ -20,7 +20,7 @@
       "label": "DeepSeek",
       "apiKey": "sk-f77e4080467448af9cf56717918905af",
       "baseUrl": "https://api.deepseek.com",
-      "model": "deepseek-chat"
+      "model": "deepseek-v4-flash"
     },
     "qwen": {
       "type": "openai-compatible",
