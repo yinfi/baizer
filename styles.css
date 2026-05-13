@@ -1353,47 +1353,69 @@ textarea.shell-input::placeholder {
     top: 12px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 12px;
+    gap: 14px;
+    padding: 14px;
     border: 1px solid var(--background-modifier-border);
-    border-radius: 12px;
-    background: var(--background-primary-alt);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--background-primary-alt) 86%, var(--background-secondary));
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--background-modifier-border) 35%, transparent);
+}
+
+.ocli-settings-nav-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .ocli-settings-nav-title {
     color: var(--text-muted);
     font-size: var(--font-smallest);
+    font-weight: var(--font-medium);
     text-transform: uppercase;
+}
+
+.ocli-settings-nav-kicker {
+    color: var(--text-faint);
+    font-size: var(--font-smallest);
 }
 
 .ocli-settings-nav-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
 }
 
 .ocli-settings-nav-item {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
+    display: block;
     width: 100%;
-    padding: 10px 12px;
+    padding: 0;
     border: 1px solid var(--background-modifier-border);
-    border-radius: 10px;
-    background: var(--background-secondary);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--background-secondary) 78%, transparent);
     color: var(--text-normal);
     text-align: left;
     cursor: pointer;
+    transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
 }
 
 .ocli-settings-nav-item:hover {
-    background: var(--background-modifier-hover);
+    background: color-mix(in srgb, var(--background-modifier-hover) 82%, var(--background-secondary));
+    border-color: var(--background-modifier-border-hover);
+    transform: translateY(-1px);
 }
 
 .ocli-settings-nav-item.is-active {
-    background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-secondary));
-    border-color: color-mix(in srgb, var(--interactive-accent) 40%, var(--background-modifier-border));
+    background: color-mix(in srgb, var(--interactive-accent) 11%, var(--background-secondary));
+    border-color: color-mix(in srgb, var(--interactive-accent) 52%, var(--background-modifier-border));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+}
+
+.ocli-settings-nav-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 14px;
 }
 
 .ocli-settings-nav-copy {
@@ -1402,14 +1424,7 @@ textarea.shell-input::placeholder {
 
 .ocli-settings-nav-label {
     font-size: var(--font-ui-small);
-    font-weight: var(--font-medium);
-}
-
-.ocli-settings-nav-description {
-    margin-top: 4px;
-    color: var(--text-muted);
-    font-size: var(--font-smallest);
-    line-height: 1.35;
+    font-weight: var(--font-semibold);
 }
 
 .ocli-settings-main {
@@ -1510,6 +1525,12 @@ textarea.shell-input::placeholder {
     background: var(--background-modifier-hover);
 }
 
+.ocli-settings-action:disabled {
+    cursor: default;
+    opacity: 0.45;
+    transform: none;
+}
+
 .ocli-settings-action.is-primary {
     border-color: color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border));
     background: color-mix(in srgb, var(--interactive-accent) 11%, var(--background-secondary));
@@ -1540,6 +1561,22 @@ textarea.shell-input::placeholder {
 .ocli-settings-inline-note.is-success {
     color: var(--color-green);
     background: color-mix(in srgb, var(--color-green) 10%, transparent);
+}
+
+.ocli-settings-inline-note.is-danger {
+    color: var(--text-error);
+    background: color-mix(in srgb, var(--text-error) 12%, transparent);
+}
+
+.ocli-settings-inline-note.is-accent {
+    color: var(--text-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+}
+
+.ocli-settings-inline-hint {
+    margin-top: 10px;
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
 }
 
 .ocli-settings-empty-state,
