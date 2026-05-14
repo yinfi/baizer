@@ -25,6 +25,11 @@ function expect(actual: any) {
         throw new Error(`Expected ${expectedStr} but got ${actualStr}`);
       }
     },
+    toContain: (expected: string) => {
+      if (typeof actual !== 'string' || !actual.includes(expected)) {
+        throw new Error(`Expected "${actual}" to contain "${expected}"`);
+      }
+    },
   };
 }
 
@@ -74,6 +79,25 @@ class FakeElement {
     for (const handler of this.listeners.click || []) {
       handler();
     }
+  }
+
+  querySelector(selector: string): FakeElement | null {
+    return this.querySelectorAll(selector)[0] ?? null;
+  }
+
+  querySelectorAll(selector: string): FakeElement[] {
+    if (!selector.startsWith('.')) return [];
+    const className = selector.slice(1);
+    return this.findAll((item) => item.className.split(' ').includes(className));
+  }
+
+  private findAll(predicate: (item: FakeElement) => boolean): FakeElement[] {
+    const matches: FakeElement[] = [];
+    for (const child of this.children) {
+      if (predicate(child)) matches.push(child);
+      matches.push(...child.findAll(predicate));
+    }
+    return matches;
   }
 }
 
@@ -306,6 +330,37 @@ async function runTests() {
 
     expect(approved).toBe(1);
     expect(cancelled).toBe(1);
+  });
+
+  await test('renderApprovalCard shows old and proposed content for note replacement previews', async () => {
+    const container = new FakeElement();
+
+    renderApprovalCard(
+      container as any,
+      {
+        action: 'update_note',
+        target: 'Docs/current.md',
+        args: { path: 'Docs/current.md', content: '# New title\n\nImproved body' },
+        message: 'Approval required to update note: Docs/current.md',
+        preview: {
+          kind: 'note-replace',
+          target: 'Docs/current.md',
+          summary: 'Replace note content',
+          oldContent: '# Old title\n\nDraft body',
+          newContent: '# New title\n\nImproved body',
+          risk: 'medium',
+          supportsPartialApply: false,
+          undoable: true,
+        },
+      },
+      {
+        onApprove: () => { },
+        onCancel: () => { },
+      },
+    );
+
+    expect(container.querySelector('.shell-change-preview-old-content')?.textContent).toContain('# Old title');
+    expect(container.querySelector('.shell-change-preview-new-content')?.textContent).toContain('# New title');
   });
 
   await test('applyPreviewedChange records direct-write audit entries after applying the change', async () => {

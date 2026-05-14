@@ -1,6 +1,6 @@
 import { App, Notice, TFile } from 'obsidian';
 import { PLUGIN_ID } from '../../mcp/types';
-import { KnowledgeNoteStatus, KnowledgeGlobalCounts } from '../../knowledge/status-service';
+import { KnowledgeNoteStatus } from '../../knowledge/status-service';
 
 interface KnowledgeStatusPanelOptions {
   app: App;
@@ -30,17 +30,13 @@ export class KnowledgeStatusPanel {
       return;
     }
 
-    const [status, counts] = await Promise.all([
-      statusService.getNoteStatus(activeFile.path),
-      statusService.getGlobalCounts(),
-    ]);
-
+    const status = await statusService.getNoteStatus(activeFile.path);
     if (!status) {
       this.renderEmpty('Knowledge status is unavailable for this note.');
       return;
     }
 
-    this.renderStatus(activeFile, status, counts, runtime);
+    this.renderStatus(activeFile, status, runtime);
   }
 
   private renderEmpty(message: string) {
@@ -55,7 +51,6 @@ export class KnowledgeStatusPanel {
   private renderStatus(
     activeFile: TFile,
     status: KnowledgeNoteStatus,
-    counts: KnowledgeGlobalCounts,
     runtime: any,
   ) {
     const header = (this.container as any).createDiv({ cls: 'shell-knowledge-status-header' }) as HTMLElement;
@@ -63,16 +58,10 @@ export class KnowledgeStatusPanel {
     header.createDiv({ cls: `shell-knowledge-status-badge is-${status.state}`, text: status.state });
 
     const meta = (this.container as any).createDiv({ cls: 'shell-knowledge-status-meta' }) as HTMLElement;
-    meta.createDiv({ cls: 'shell-knowledge-status-path', text: activeFile.path });
     meta.createDiv({
       cls: 'shell-knowledge-status-details',
-      text: this.buildMetaSummary(activeFile, status),
+      text: this.buildSummary(status),
     });
-
-    const countsRow = (this.container as any).createDiv({ cls: 'shell-knowledge-status-counts' }) as HTMLElement;
-    countsRow.createDiv({ cls: 'shell-knowledge-status-count', text: `Pending ${counts.pending}` });
-    countsRow.createDiv({ cls: 'shell-knowledge-status-count', text: `Stale ${counts.stale}` });
-    countsRow.createDiv({ cls: 'shell-knowledge-status-count', text: `Failed ${counts.failed}` });
 
     const actions = (this.container as any).createDiv({ cls: 'shell-knowledge-status-actions' }) as HTMLElement;
     this.createAction(actions, 'Compile Current Note', async () => {
@@ -101,36 +90,50 @@ export class KnowledgeStatusPanel {
     });
   }
 
-  private buildMetaSummary(activeFile: TFile, status: KnowledgeNoteStatus) {
-    const parts = [
-      `Backlinks ${this.countBacklinks(activeFile)}`,
-    ];
-
-    if (status.compiledAt) {
-      parts.push(`Compiled ${status.compiledAt}`);
+  private buildSummary(status: KnowledgeNoteStatus) {
+    switch (status.state) {
+      case 'failed':
+        return `Failed: ${this.summarizeError(status.error)}`;
+      case 'stale':
+        return 'Needs recompilation.';
+      case 'pending':
+        return 'Waiting to compile.';
+      case 'processing':
+        return 'Compiling now.';
+      case 'done':
+        return status.compiledAt
+          ? `Compiled ${status.compiledAt}`
+          : 'Compiled successfully.';
+      case 'unregistered':
+      default:
+        return 'Not added to the knowledge wiki.';
     }
-
-    if (status.summaryPath) {
-      parts.push(`Summary ${status.summaryPath}`);
-    }
-
-    if (status.error) {
-      parts.push(`Error ${status.error}`);
-    }
-
-    return parts.join(' • ');
   }
 
-  private countBacklinks(file: TFile) {
-    const backlinks = this.options.app.metadataCache.getBacklinksForFile?.(file);
-    if (backlinks instanceof Map) {
-      return backlinks.size;
+  private summarizeError(error: string | null) {
+    if (!error) {
+      return 'unknown error';
     }
 
-    if (backlinks && typeof backlinks === 'object') {
-      return Object.keys(backlinks).length;
+    const normalized = error.replace(/\s+/g, ' ').trim();
+    if (/quota exceeded|exceeded your current quota/i.test(normalized)) {
+      return 'quota exceeded';
     }
 
-    return 0;
+    if (/rate limit/i.test(normalized)) {
+      return 'rate limited';
+    }
+
+    if (/timed out|timeout/i.test(normalized)) {
+      return 'request timed out';
+    }
+
+    if (/network/i.test(normalized)) {
+      return 'network error';
+    }
+
+    const withoutUrls = normalized.replace(/https?:\/\/\S+/gi, '').replace(/\s+/g, ' ').trim();
+    const sentence = withoutUrls.split(/[.!?]/)[0]?.trim() || withoutUrls;
+    return sentence.slice(0, 120) || 'unknown error';
   }
 }

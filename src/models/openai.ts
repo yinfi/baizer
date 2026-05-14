@@ -191,14 +191,20 @@ export class OpenAIProvider implements IModelProvider {
         });
 
         if (!response.ok) {
-            throw new Error(`OpenAI API Error: ${response.status}`);
+            let detail = '';
+            try {
+                detail = await response.text();
+            } catch {
+                detail = '';
+            }
+            throw new Error(`OpenAI API Error: ${response.status}${detail ? ` - ${detail}` : ''}`);
         }
 
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let fullText = '';
-        const pendingToolCalls = new Map<number, { name: string; arguments: string }>();
+        const pendingToolCalls = new Map<number, { id?: string; name: string; arguments: string }>();
 
         while (true) {
             this.throwIfAborted(signal);
@@ -236,6 +242,7 @@ export class OpenAIProvider implements IModelProvider {
                                 pendingToolCalls.set(idx, { name: '', arguments: '' });
                             }
                             const pending = pendingToolCalls.get(idx)!;
+                            if (tc.id) pending.id = tc.id;
                             if (tc.function?.name) pending.name += tc.function.name;
                             if (tc.function?.arguments) pending.arguments += tc.function.arguments;
                         }
@@ -250,9 +257,9 @@ export class OpenAIProvider implements IModelProvider {
             if (tc.name) {
                 try {
                     const args = tc.arguments ? JSON.parse(tc.arguments) : {};
-                    yield { type: 'tool_call' as const, name: tc.name, args };
+                    yield { type: 'tool_call' as const, id: tc.id, name: tc.name, args };
                 } catch {
-                    yield { type: 'tool_call' as const, name: tc.name, args: {} };
+                    yield { type: 'tool_call' as const, id: tc.id, name: tc.name, args: {} };
                 }
             }
         }
@@ -284,6 +291,7 @@ class OpenAIChatSession implements IChatSession {
 
     async sendMessage(text: string | ToolResult[]): Promise<GenerationResult> {
         if (typeof text === 'string') {
+            this.dropUnresolvedToolCalls();
             this.history.push({ role: 'user', content: text });
         } else {
             // 将 tool results 追加到 history，匹配上一条 assistant message 中的 tool_call_id
@@ -314,6 +322,7 @@ class OpenAIChatSession implements IChatSession {
 
     async *sendMessageStream(text: string | ToolResult[], signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
         if (typeof text === 'string') {
+            this.dropUnresolvedToolCalls();
             this.history.push({ role: 'user', content: text });
         } else {
             const lastMsg = this.history[this.history.length - 1];
@@ -340,7 +349,7 @@ class OpenAIChatSession implements IChatSession {
                 fullText += event.content;
             } else if (event.type === 'tool_call') {
                 toolCalls.push({
-                    id: `call_${Date.now()}_${toolCalls.length}`,
+                    id: event.id || `call_${Date.now()}_${toolCalls.length}`,
                     type: 'function',
                     function: { name: event.name, arguments: JSON.stringify(event.args) }
                 });
@@ -370,6 +379,13 @@ class OpenAIChatSession implements IChatSession {
         this.history = [];
         if (this.config.systemPrompt) {
             this.history.push({ role: 'system', content: this.config.systemPrompt });
+        }
+    }
+
+    private dropUnresolvedToolCalls(): void {
+        const lastMsg = this.history[this.history.length - 1];
+        if (lastMsg?.role === 'assistant' && lastMsg.tool_calls?.length) {
+            this.history.pop();
         }
     }
 }

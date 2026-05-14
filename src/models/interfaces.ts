@@ -51,7 +51,7 @@ export interface GenerationResult {
 export type StreamEvent =
     | { type: 'thinking'; content: string }
     | { type: 'text_delta'; content: string }
-    | { type: 'tool_call'; name: string; args: any }
+    | { type: 'tool_call'; name: string; args: any; id?: string }
     | { type: 'tool_result'; name: string; result: any; error?: string }
     | { type: 'done'; text: string; interrupted?: boolean }
     | { type: 'error'; message: string };
