@@ -4104,7 +4104,13 @@ var OpenAIProvider = class {
       signal
     });
     if (!response.ok) {
-      throw new Error(`OpenAI API Error: ${response.status}`);
+      let detail = "";
+      try {
+        detail = await response.text();
+      } catch {
+        detail = "";
+      }
+      throw new Error(`OpenAI API Error: ${response.status}${detail ? ` - ${detail}` : ""}`);
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -4145,6 +4151,8 @@ var OpenAIProvider = class {
                 pendingToolCalls.set(idx, { name: "", arguments: "" });
               }
               const pending = pendingToolCalls.get(idx);
+              if (tc.id)
+                pending.id = tc.id;
               if (tc.function?.name)
                 pending.name += tc.function.name;
               if (tc.function?.arguments)
@@ -4159,9 +4167,9 @@ var OpenAIProvider = class {
       if (tc.name) {
         try {
           const args = tc.arguments ? JSON.parse(tc.arguments) : {};
-          yield { type: "tool_call", name: tc.name, args };
+          yield { type: "tool_call", id: tc.id, name: tc.name, args };
         } catch {
-          yield { type: "tool_call", name: tc.name, args: {} };
+          yield { type: "tool_call", id: tc.id, name: tc.name, args: {} };
         }
       }
     }
@@ -4187,6 +4195,7 @@ var OpenAIChatSession = class {
   history = [];
   async sendMessage(text) {
     if (typeof text === "string") {
+      this.dropUnresolvedToolCalls();
       this.history.push({ role: "user", content: text });
     } else {
       const lastMsg = this.history[this.history.length - 1];
@@ -4210,6 +4219,7 @@ var OpenAIChatSession = class {
   }
   async *sendMessageStream(text, signal) {
     if (typeof text === "string") {
+      this.dropUnresolvedToolCalls();
       this.history.push({ role: "user", content: text });
     } else {
       const lastMsg = this.history[this.history.length - 1];
@@ -4234,7 +4244,7 @@ var OpenAIChatSession = class {
         fullText += event.content;
       } else if (event.type === "tool_call") {
         toolCalls.push({
-          id: `call_${Date.now()}_${toolCalls.length}`,
+          id: event.id || `call_${Date.now()}_${toolCalls.length}`,
           type: "function",
           function: { name: event.name, arguments: JSON.stringify(event.args) }
         });
@@ -4260,6 +4270,12 @@ var OpenAIChatSession = class {
     this.history = [];
     if (this.config.systemPrompt) {
       this.history.push({ role: "system", content: this.config.systemPrompt });
+    }
+  }
+  dropUnresolvedToolCalls() {
+    const lastMsg = this.history[this.history.length - 1];
+    if (lastMsg?.role === "assistant" && lastMsg.tool_calls?.length) {
+      this.history.pop();
     }
   }
 };
@@ -8953,15 +8969,12 @@ var KnowledgeStatusPanel = class {
       this.renderEmpty("Knowledge system is not available.");
       return;
     }
-    const [status, counts] = await Promise.all([
-      statusService.getNoteStatus(activeFile.path),
-      statusService.getGlobalCounts()
-    ]);
+    const status = await statusService.getNoteStatus(activeFile.path);
     if (!status) {
       this.renderEmpty("Knowledge status is unavailable for this note.");
       return;
     }
-    this.renderStatus(activeFile, status, counts, runtime);
+    this.renderStatus(activeFile, status, runtime);
   }
   renderEmpty(message) {
     const body = this.container.createDiv({ cls: "shell-knowledge-status-empty" });
@@ -8971,20 +8984,15 @@ var KnowledgeStatusPanel = class {
       body.textContent = message;
     }
   }
-  renderStatus(activeFile, status, counts, runtime) {
+  renderStatus(activeFile, status, runtime) {
     const header = this.container.createDiv({ cls: "shell-knowledge-status-header" });
     header.createDiv({ cls: "shell-knowledge-status-title", text: activeFile.basename });
     header.createDiv({ cls: `shell-knowledge-status-badge is-${status.state}`, text: status.state });
     const meta = this.container.createDiv({ cls: "shell-knowledge-status-meta" });
-    meta.createDiv({ cls: "shell-knowledge-status-path", text: activeFile.path });
     meta.createDiv({
       cls: "shell-knowledge-status-details",
-      text: this.buildMetaSummary(activeFile, status)
+      text: this.buildSummary(status)
     });
-    const countsRow = this.container.createDiv({ cls: "shell-knowledge-status-counts" });
-    countsRow.createDiv({ cls: "shell-knowledge-status-count", text: `Pending ${counts.pending}` });
-    countsRow.createDiv({ cls: "shell-knowledge-status-count", text: `Stale ${counts.stale}` });
-    countsRow.createDiv({ cls: "shell-knowledge-status-count", text: `Failed ${counts.failed}` });
     const actions = this.container.createDiv({ cls: "shell-knowledge-status-actions" });
     this.createAction(actions, "Compile Current Note", async () => {
       const result = await runtime?.compileByPath?.(activeFile.path);
@@ -9010,30 +9018,43 @@ var KnowledgeStatusPanel = class {
       void handler();
     });
   }
-  buildMetaSummary(activeFile, status) {
-    const parts = [
-      `Backlinks ${this.countBacklinks(activeFile)}`
-    ];
-    if (status.compiledAt) {
-      parts.push(`Compiled ${status.compiledAt}`);
+  buildSummary(status) {
+    switch (status.state) {
+      case "failed":
+        return `Failed: ${this.summarizeError(status.error)}`;
+      case "stale":
+        return "Needs recompilation.";
+      case "pending":
+        return "Waiting to compile.";
+      case "processing":
+        return "Compiling now.";
+      case "done":
+        return status.compiledAt ? `Compiled ${status.compiledAt}` : "Compiled successfully.";
+      case "unregistered":
+      default:
+        return "Not added to the knowledge wiki.";
     }
-    if (status.summaryPath) {
-      parts.push(`Summary ${status.summaryPath}`);
-    }
-    if (status.error) {
-      parts.push(`Error ${status.error}`);
-    }
-    return parts.join(" \u2022 ");
   }
-  countBacklinks(file) {
-    const backlinks = this.options.app.metadataCache.getBacklinksForFile?.(file);
-    if (backlinks instanceof Map) {
-      return backlinks.size;
+  summarizeError(error) {
+    if (!error) {
+      return "unknown error";
     }
-    if (backlinks && typeof backlinks === "object") {
-      return Object.keys(backlinks).length;
+    const normalized = error.replace(/\s+/g, " ").trim();
+    if (/quota exceeded|exceeded your current quota/i.test(normalized)) {
+      return "quota exceeded";
     }
-    return 0;
+    if (/rate limit/i.test(normalized)) {
+      return "rate limited";
+    }
+    if (/timed out|timeout/i.test(normalized)) {
+      return "request timed out";
+    }
+    if (/network/i.test(normalized)) {
+      return "network error";
+    }
+    const withoutUrls = normalized.replace(/https?:\/\/\S+/gi, "").replace(/\s+/g, " ").trim();
+    const sentence = withoutUrls.split(/[.!?]/)[0]?.trim() || withoutUrls;
+    return sentence.slice(0, 120) || "unknown error";
   }
 };
 
@@ -9362,6 +9383,25 @@ function renderChangePreviewCard(container, preview) {
       conditions.createDiv({ cls: "shell-change-preview-precondition", text: condition });
     }
   }
+  if (preview.oldContent !== void 0 || preview.newContent !== void 0) {
+    const content = card.createDiv({ cls: "shell-change-preview-content" });
+    if (preview.oldContent !== void 0) {
+      const oldBlock = content.createDiv({ cls: "shell-change-preview-block shell-change-preview-old" });
+      oldBlock.createDiv({ cls: "shell-change-preview-label", text: "Current content" });
+      oldBlock.createEl("pre", {
+        cls: "shell-change-preview-old-content shell-change-preview-code",
+        text: preview.oldContent
+      });
+    }
+    if (preview.newContent !== void 0) {
+      const newBlock = content.createDiv({ cls: "shell-change-preview-block shell-change-preview-new" });
+      newBlock.createDiv({ cls: "shell-change-preview-label", text: "Proposed content" });
+      newBlock.createEl("pre", {
+        cls: "shell-change-preview-new-content shell-change-preview-code",
+        text: preview.newContent
+      });
+    }
+  }
   return card;
 }
 
@@ -9504,22 +9544,22 @@ var MessageRenderer = class {
     copyButton.addEventListener("click", () => {
       void this.copyMessage(message);
     });
-    const archiveButton = toolbar.createEl("button", {
-      cls: "shell-message-action-btn shell-archive-btn",
-      text: "Archive",
-      title: "Archive to knowledge wiki",
-      attr: { "aria-label": "Archive to knowledge wiki" }
+    const thumbsUpButton = toolbar.createEl("button", {
+      cls: "shell-feedback-btn shell-thumbs-up",
+      title: "Useful",
+      attr: { "aria-label": "Useful" }
     });
-    archiveButton.addEventListener("click", () => {
-      this.activateFeedback(archiveButton, thumbsDownButton);
-      void this.options.onFeedbackUp?.(message);
-    });
+    thumbsUpButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12"></path><path d="M15 2H7.5a2 2 0 0 0-2 1.5L3 10v10h12.7a2 2 0 0 0 2-1.6l1.3-8A2 2 0 0 0 17 10h-5.5V4a2 2 0 0 0-2-2z"></path></svg>';
     const thumbsDownButton = toolbar.createEl("button", {
       cls: "shell-feedback-btn shell-thumbs-down",
       title: "Not useful",
       attr: { "aria-label": "Not useful" }
     });
     thumbsDownButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
+    thumbsUpButton.addEventListener("click", () => {
+      this.activateFeedback(thumbsUpButton, thumbsDownButton);
+      void this.options.onFeedbackUp?.(message);
+    });
     thumbsDownButton.addEventListener("click", () => {
       this.activateFeedback(thumbsDownButton, thumbsUpButton);
       void this.options.onFeedbackDown?.(message);

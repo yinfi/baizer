@@ -15,5 +15,25 @@ export function renderChangePreviewCard(
     }
   }
 
+  if (preview.oldContent !== undefined || preview.newContent !== undefined) {
+    const content = card.createDiv({ cls: 'shell-change-preview-content' });
+    if (preview.oldContent !== undefined) {
+      const oldBlock = content.createDiv({ cls: 'shell-change-preview-block shell-change-preview-old' });
+      oldBlock.createDiv({ cls: 'shell-change-preview-label', text: 'Current content' });
+      oldBlock.createEl('pre', {
+        cls: 'shell-change-preview-old-content shell-change-preview-code',
+        text: preview.oldContent,
+      });
+    }
+    if (preview.newContent !== undefined) {
+      const newBlock = content.createDiv({ cls: 'shell-change-preview-block shell-change-preview-new' });
+      newBlock.createDiv({ cls: 'shell-change-preview-label', text: 'Proposed content' });
+      newBlock.createEl('pre', {
+        cls: 'shell-change-preview-new-content shell-change-preview-code',
+        text: preview.newContent,
+      });
+    }
+  }
+
   return card;
 }

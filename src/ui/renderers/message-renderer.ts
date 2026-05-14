@@ -102,16 +102,12 @@ export class MessageRenderer {
       void this.copyMessage(message);
     });
 
-    const archiveButton = (toolbar as any).createEl('button', {
-      cls: 'shell-message-action-btn shell-archive-btn',
-      text: 'Archive',
-      title: 'Archive to knowledge wiki',
-      attr: { 'aria-label': 'Archive to knowledge wiki' },
+    const thumbsUpButton = (toolbar as any).createEl('button', {
+      cls: 'shell-feedback-btn shell-thumbs-up',
+      title: 'Useful',
+      attr: { 'aria-label': 'Useful' },
     }) as HTMLElement;
-    archiveButton.addEventListener('click', () => {
-      this.activateFeedback(archiveButton, thumbsDownButton);
-      void this.options.onFeedbackUp?.(message);
-    });
+    thumbsUpButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12"></path><path d="M15 2H7.5a2 2 0 0 0-2 1.5L3 10v10h12.7a2 2 0 0 0 2-1.6l1.3-8A2 2 0 0 0 17 10h-5.5V4a2 2 0 0 0-2-2z"></path></svg>';
 
     const thumbsDownButton = (toolbar as any).createEl('button', {
       cls: 'shell-feedback-btn shell-thumbs-down',
@@ -119,6 +115,11 @@ export class MessageRenderer {
       attr: { 'aria-label': 'Not useful' },
     }) as HTMLElement;
     thumbsDownButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
+
+    thumbsUpButton.addEventListener('click', () => {
+      this.activateFeedback(thumbsUpButton, thumbsDownButton);
+      void this.options.onFeedbackUp?.(message);
+    });
     thumbsDownButton.addEventListener('click', () => {
       this.activateFeedback(thumbsDownButton, thumbsUpButton);
       void this.options.onFeedbackDown?.(message);

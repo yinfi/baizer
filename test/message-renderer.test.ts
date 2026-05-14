@@ -210,7 +210,36 @@ async function runTests() {
     expect(rendered).toEqual(['**hi**']);
     expect(!!container.querySelector('.shell-message-actions')).toBe(true);
     expect(!!container.querySelector('.shell-copy-btn')).toBe(true);
-    expect(container.querySelector('.shell-archive-btn')?.getAttribute('title')).toBe('Archive to knowledge wiki');
+    expect(container.querySelector('.shell-thumbs-up')?.getAttribute('title')).toBe('Useful');
+    expect(!!container.querySelector('.shell-archive-btn')).toBe(false);
+  });
+
+  await test('feedback buttons can be clicked without referencing missing controls', async () => {
+    const container = new FakeElement();
+    const feedback: string[] = [];
+    const renderer = new MessageRenderer({
+      app: {},
+      component: {},
+      renderMarkdown: async (_app, markdown, el) => {
+        el.createDiv({ cls: 'rendered-markdown', text: markdown });
+      },
+      onFeedbackUp: async () => { feedback.push('up'); },
+      onFeedbackDown: async () => { feedback.push('down'); },
+    });
+
+    await renderer.renderMessage(container as any, {
+      id: 'a-feedback',
+      role: 'ai',
+      content: 'answer',
+      timestamp: 5,
+    });
+
+    container.querySelector('.shell-thumbs-up')?.click();
+    container.querySelector('.shell-thumbs-down')?.click();
+
+    expect(feedback).toEqual(['up', 'down']);
+    expect(container.querySelector('.shell-thumbs-up')?.hasClass('active')).toBe(false);
+    expect(container.querySelector('.shell-thumbs-down')?.hasClass('active')).toBe(true);
   });
 
   await test('renders approval cards and delegates approve and cancel callbacks', async () => {

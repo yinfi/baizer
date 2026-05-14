@@ -1081,6 +1081,57 @@ textarea.shell-input::placeholder {
     color: var(--text-normal);
 }
 
+.shell-change-preview-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-1);
+    padding: var(--size-4-2);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+}
+
+.shell-change-preview-summary {
+    font-weight: var(--font-semibold);
+}
+
+.shell-change-preview-target,
+.shell-change-preview-precondition,
+.shell-change-preview-label {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.shell-change-preview-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--size-4-2);
+}
+
+.shell-change-preview-block {
+    min-width: 0;
+}
+
+.shell-change-preview-code {
+    max-height: 280px;
+    overflow: auto;
+    margin: var(--size-2-1) 0 0;
+    padding: var(--size-4-2);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: var(--font-smaller);
+}
+
+@media (max-width: 700px) {
+    .shell-change-preview-content {
+        grid-template-columns: 1fr;
+    }
+}
+
 .shell-approval-actions {
     display: flex;
     gap: var(--size-4-1);
