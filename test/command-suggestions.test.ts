@@ -64,6 +64,65 @@ async function runTests() {
     expect(labels.includes('/file-back')).toBe(true);
     expect(labels.includes('/help')).toBe(true);
   });
+
+  await test('ShellView suggests scoped note context entries before matching files for @ mentions', async () => {
+    const { ShellView } = await import('../src/ui/shell-view');
+
+    const view = new ShellView({
+      app: {
+        vault: {
+          getFiles: () => [
+            { basename: 'Backlog', path: 'Projects/Backlog.md' },
+            { basename: 'Background', path: 'Notes/Background.md' },
+          ],
+        },
+      },
+    } as any, {
+      getSkillCommands: () => [],
+    } as any);
+
+    (view as any).app = {
+      vault: {
+        getFiles: () => [
+          { basename: 'Backlog', path: 'Projects/Backlog.md' },
+          { basename: 'Background', path: 'Notes/Background.md' },
+        ],
+      },
+    };
+    (view as any).suggestionContainer = {
+      empty: () => {},
+      style: { display: 'none' },
+    };
+    (view as any).commandDropdown = {
+      update: () => {},
+      hide: () => {},
+    };
+
+    view.showSuggestions('file', 'bac');
+
+    expect((view as any).inputController.getSuggestions()).toEqual([
+      {
+        label: '@backlinks',
+        desc: 'Add notes linking to the current note',
+        value: '@backlinks',
+        source: 'scope',
+        kind: 'scope',
+        scope: 'backlinks',
+      },
+      {
+        label: 'Backlog',
+        desc: 'Projects/Backlog.md',
+        value: '[[Projects/Backlog.md]]',
+        source: 'file',
+      },
+      {
+        label: 'Background',
+        desc: 'Notes/Background.md',
+        value: '[[Notes/Background.md]]',
+        source: 'file',
+      },
+    ]);
+  });
 }
 
 runTests().catch((e) => {

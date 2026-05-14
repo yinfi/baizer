@@ -3,6 +3,7 @@ import { EditorView, showTooltip } from '@codemirror/view';
 import { StateField, Extension, StateEffect } from '@codemirror/state';
 import { ModelService } from '../services/model-service';
 import { ChatController } from './chat-controller';
+import { DiffModal } from './diff-modal';
 import { ChatMessage } from './types';
 
 // Define the states for our UI
@@ -168,7 +169,7 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
                                 content: `Selected Text:\n${selectionText}`,
                             }];
 
-                            await state.controller.processCommand(text, selectionContext, selectionText);
+                            await state.controller.processCommand(text, selectionContext, selectionText, 'selection-menu');
                         }
                         if (e.key === 'Escape') {
                             e.preventDefault();
@@ -190,16 +191,27 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
 
                     const replaceBtn = actions.createEl('button', { text: 'Replace with Last Response' });
                     replaceBtn.onclick = () => {
-                        const msgs = state.controller.getMessages();
-                        const lastAiMsg = [...msgs].reverse().find(m => m.role === 'ai');
-                        if (lastAiMsg) {
-                            view.dispatch({
-                                changes: { from: state.from, to: state.to, insert: lastAiMsg.content },
-                                effects: setSelectionMenuState.of({ type: 'hidden' })
-                            });
-                        } else {
+                        const selectionText = view.state.doc.sliceString(state.from, state.to);
+                        const preview = state.controller.buildSelectionRewritePreview(selectionText);
+                        if (!preview) {
                             new Notice('No AI response to replace with.');
+                            return;
                         }
+
+                        new DiffModal(context.app, preview.oldContent || '', preview.newContent || '', async () => {
+                            const activeFile = context.app.workspace.getActiveFile();
+                            await state.controller.applyPreviewedChange({
+                                action: 'selection_rewrite',
+                                target: activeFile?.path || 'current-selection',
+                                previousContent: preview.oldContent || selectionText,
+                                apply: () => {
+                                    view.dispatch({
+                                        changes: { from: state.from, to: state.to, insert: preview.newContent || '' },
+                                        effects: setSelectionMenuState.of({ type: 'hidden' })
+                                    });
+                                },
+                            });
+                        }).open();
                     };
 
                     dom.appendChild(container);

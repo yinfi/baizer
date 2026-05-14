@@ -172,8 +172,54 @@ async function runTests() {
         content: 'views: []',
       },
       message: 'Approval required to create file: Bases/new.base',
+      preview: {
+        kind: 'note-create',
+        target: 'Bases/new.base',
+        summary: 'Create file',
+        newContent: 'views: []',
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: true,
+      },
     });
     expect(created).toEqual([]);
+  });
+
+  await test('update_file approval includes a replace preview with old and new content', async () => {
+    const { app, modified } = createMockApp();
+    const registry = new ToolRegistry(app, {
+      ...DEFAULT_SETTINGS,
+      allowFileModification: true,
+      confirmExecutions: true,
+    });
+    registerVaultTools(registry);
+
+    const result = await registry.execute('update_file', {
+      path: 'Bases/tasks.base',
+      content: 'views:\n  - type: table',
+    });
+
+    expect(result).toEqual({
+      approval_required: true,
+      action: 'update_file',
+      target: 'Bases/tasks.base',
+      args: {
+        path: 'Bases/tasks.base',
+        content: 'views:\n  - type: table',
+      },
+      message: 'Approval required to update file: Bases/tasks.base',
+      preview: {
+        kind: 'note-replace',
+        target: 'Bases/tasks.base',
+        summary: 'Replace file content',
+        oldContent: 'views: []',
+        newContent: 'views:\n  - type: table',
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: true,
+      },
+    });
+    expect(modified).toEqual([]);
   });
 
   await test('write file tools reject unsafe vault paths', async () => {

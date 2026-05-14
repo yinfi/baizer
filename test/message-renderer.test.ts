@@ -210,6 +210,7 @@ async function runTests() {
     expect(rendered).toEqual(['**hi**']);
     expect(!!container.querySelector('.shell-message-actions')).toBe(true);
     expect(!!container.querySelector('.shell-copy-btn')).toBe(true);
+    expect(container.querySelector('.shell-archive-btn')?.getAttribute('title')).toBe('Archive to knowledge wiki');
   });
 
   await test('renders approval cards and delegates approve and cancel callbacks', async () => {
@@ -232,14 +233,25 @@ async function runTests() {
         target: 'Clippings/example.md',
         args: {},
         message: 'Create note?',
+        preview: {
+          kind: 'note-create',
+          target: 'Clippings/example.md',
+          summary: 'Create note',
+          preconditions: ['Folder exists'],
+          risk: 'medium',
+          supportsPartialApply: false,
+          undoable: true,
+        },
       },
     });
 
     const buttons = container.querySelectorAll('.shell-approval-btn');
+    const previewTarget = container.querySelector('.shell-change-preview-target');
     buttons[0].click();
     buttons[1].click();
 
     expect(calls).toEqual(['approve', 'cancel']);
+    expect(previewTarget?.textContent).toBe('Clippings/example.md');
   });
 
   await test('code block renderer adds review headers and keeps review callback', () => {

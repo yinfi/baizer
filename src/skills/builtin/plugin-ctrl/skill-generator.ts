@@ -7,6 +7,7 @@ import {
   pluginSkillDirPath,
   pluginSkillFilePath,
 } from '../../skill-files';
+import { getPluginCommandPreconditions } from './executor';
 
 // ==================== 类型 ====================
 
@@ -394,6 +395,34 @@ export class PluginSkillGenerator {
     return [...tools];
   }
 
+  private buildPreconditionsSection(): string {
+    const bullets = getPluginCommandPreconditions()
+      .map((line) => `- ${line}`)
+      .join('\n');
+
+    return [
+      '## Preconditions',
+      bullets,
+      '',
+      'Use `open_file(path)` before `execute_plugin_command(commandId)` whenever a command depends on the active note, editor focus, or current selection.',
+    ].join('\n');
+  }
+
+  private ensurePreconditionsSection(body: string): string {
+    if (/^##\s+Preconditions\b/m.test(body)) {
+      return body;
+    }
+
+    const titleMatch = body.match(/^#[^\n]*\n*/);
+    if (!titleMatch) {
+      return `${this.buildPreconditionsSection()}\n\n${body}`;
+    }
+
+    const titleBlock = titleMatch[0].trimEnd();
+    const remainder = body.slice(titleMatch[0].length).trimStart();
+    return `${titleBlock}\n\n${this.buildPreconditionsSection()}\n\n${remainder}`;
+  }
+
   // ---------- Prompt（只让 LLM 生成 body） ----------
 
   buildPrompt(info: PluginInfo): string {
@@ -481,10 +510,22 @@ ${webSection}
     }
 
     // 空内容兜底：body 去掉标题后不足 50 字符，用模板替代
+    body = this.ensurePreconditionsSection(body);
+
     const bodyWithoutTitle = body.replace(/^#[^\n]*\n*/, '').trim();
     if (bodyWithoutTitle.length < 50) {
       const firstCmd = info.commands[0]?.id || `${info.id}:command`;
-      body = `# ${info.name}\n\n## 操作指南\n1. 执行插件命令：execute_plugin_command("${firstCmd}")\n2. 搜索相关笔记：search_vault("${info.name}")\n3. 读取笔记内容：read_note(path) 获取文件内容后分析`;
+      body = [
+        `# ${info.name}`,
+        '',
+        this.buildPreconditionsSection(),
+        '',
+        '## 操作指南',
+        `1. 搜索相关笔记：search_vault("${info.name}")`,
+        '2. 打开目标笔记：open_file(path)',
+        `3. 执行插件命令：execute_plugin_command("${firstCmd}")`,
+        '4. 读取或补充后续内容：read_note(path) 或 append_to_note(path, content)',
+      ].join('\n');
       console.warn(`[SkillGenerator] Body too short for ${info.id}, using fallback template`);
     }
 

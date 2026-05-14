@@ -1,13 +1,69 @@
 // src/skills/builtin/vault-ops.ts — Vault 文件操作工具集
 
 import { App, TFile } from 'obsidian';
-import { PluginSettings } from '../../mcp/types';
+import { PluginSettings, VaultWriteScope } from '../../mcp/types';
 import { Tool, ToolContext, ToolParameters } from '../types';
 import { ToolRegistry } from '../tool-registry';
+import { ChangePreview } from '../../ui/diff/change-preview';
 
 // ==================== 工具定义 ====================
 
 const MAX_FILE_READ_CHARS = 20000;
+
+export interface VaultWriteTargetCheck {
+  scope: VaultWriteScope;
+  target: string;
+  activeNote?: string | null;
+  configuredFolders?: string[];
+}
+
+function normalizeScopePath(path: string): string {
+  return path.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+}
+
+function isPathInsideFolder(target: string, folder: string): boolean {
+  const normalizedTarget = normalizeScopePath(target);
+  const normalizedFolder = normalizeScopePath(folder);
+  if (!normalizedFolder) return false;
+  return normalizedTarget === normalizedFolder || normalizedTarget.startsWith(`${normalizedFolder}/`);
+}
+
+export function canWriteToVaultTarget(input: VaultWriteTargetCheck): boolean {
+  const target = normalizeScopePath(input.target);
+  const activeNote = input.activeNote ? normalizeScopePath(input.activeNote) : '';
+  const configuredFolders = (input.configuredFolders || []).map(normalizeScopePath).filter(Boolean);
+
+  switch (input.scope) {
+    case 'read-only':
+      return false;
+    case 'current-note':
+      return !!activeNote && target === activeNote;
+    case 'configured-folders':
+      return configuredFolders.some((folder) => isPathInsideFolder(target, folder));
+    case 'all-vault':
+    default:
+      return true;
+  }
+}
+
+function getVaultWriteScope(settings: PluginSettings): VaultWriteScope {
+  return settings.vaultWriteScope || 'all-vault';
+}
+
+function getVaultWriteFolders(settings: PluginSettings): string[] {
+  return Array.isArray(settings.vaultWriteAllowedFolders) ? settings.vaultWriteAllowedFolders : [];
+}
+
+function getWriteScopeError(ctx: ToolContext, target: string): string | null {
+  const activeNote = ctx.app.workspace.getActiveFile?.()?.path || null;
+  const allowed = canWriteToVaultTarget({
+    scope: getVaultWriteScope(ctx.settings),
+    target,
+    activeNote,
+    configuredFolders: getVaultWriteFolders(ctx.settings),
+  });
+  return allowed ? null : `Write not allowed for path: ${target}`;
+}
 
 const readNote: Tool = {
   name: 'read_note',
@@ -43,6 +99,11 @@ const createNote: Tool = {
     if (!path) return { status: 'error', message: 'Missing filename parameter' };
     if (!path.endsWith('.md')) path += '.md';
 
+    const scopeError = getWriteScopeError(ctx, path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
+
     if (!ctx.settings.allowFileCreation) {
       return { success: false, error: 'File creation is disabled' };
     }
@@ -56,7 +117,15 @@ const createNote: Tool = {
       return buildApprovalResponse('create_note', path, {
         filename: path,
         content: args.content || '',
-      }, 'create note');
+      }, 'create note', {
+        kind: 'note-create',
+        target: path,
+        summary: 'Create note',
+        newContent: args.content || '',
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: true,
+      });
     }
 
     await ensureParentFolder(ctx.app, path);
@@ -77,16 +146,30 @@ const updateNote: Tool = {
     required: ['path', 'content'],
   },
   async execute(args, ctx) {
+    const scopeError = getWriteScopeError(ctx, args.path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
     if (!ctx.settings.allowFileModification) {
       return { success: false, error: 'File modification is disabled' };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.path);
     if (!file || !(file instanceof TFile)) return { success: false, error: 'File not found' };
     if (ctx.settings.confirmExecutions && !args.approved) {
+      const oldContent = await ctx.app.vault.read(file);
       return buildApprovalResponse('update_note', args.path, {
         path: args.path,
         content: args.content,
-      }, 'update note');
+      }, 'update note', {
+        kind: 'note-replace',
+        target: args.path,
+        summary: 'Replace note content',
+        oldContent,
+        newContent: args.content,
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: true,
+      });
     }
     await ctx.app.vault.modify(file, args.content);
     return { success: true, message: `✅ Updated: ${args.path}` };
@@ -105,16 +188,30 @@ const appendToNote: Tool = {
     required: ['path', 'content'],
   },
   async execute(args, ctx) {
+    const scopeError = getWriteScopeError(ctx, args.path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
     if (!ctx.settings.allowFileModification) {
       return { success: false, error: 'File modification is disabled' };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.path);
     if (!file || !(file instanceof TFile)) return { success: false, error: 'File not found' };
     if (ctx.settings.confirmExecutions && !args.approved) {
+      const existing = await ctx.app.vault.read(file);
       return buildApprovalResponse('append_to_note', args.path, {
         path: args.path,
         content: args.content,
-      }, 'append to note');
+      }, 'append to note', {
+        kind: 'note-append',
+        target: args.path,
+        summary: 'Append to note',
+        oldContent: existing,
+        newContent: `${existing}\n${args.content}`,
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: true,
+      });
     }
     const existing = await ctx.app.vault.read(file);
     await ctx.app.vault.modify(file, existing + '\n' + args.content);
@@ -133,6 +230,10 @@ const deleteNote: Tool = {
     required: ['path'],
   },
   async execute(args, ctx) {
+    const scopeError = getWriteScopeError(ctx, args.path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
     if (!ctx.settings.allowFileModification) {
       return { success: false, error: 'File modification is disabled' };
     }
@@ -141,7 +242,14 @@ const deleteNote: Tool = {
     if (ctx.settings.confirmExecutions && !args.approved) {
       return buildApprovalResponse('delete_note', args.path, {
         path: args.path,
-      }, 'delete note');
+      }, 'delete note', {
+        kind: 'note-delete',
+        target: args.path,
+        summary: 'Delete note',
+        risk: 'high',
+        supportsPartialApply: false,
+        undoable: true,
+      });
     }
     await ctx.app.vault.trash(file, true);
     return { success: true, message: `✅ Deleted: ${args.path}` };
@@ -160,6 +268,14 @@ const renameNote: Tool = {
     required: ['oldPath', 'newPath'],
   },
   async execute(args, ctx) {
+    const scopeError = getWriteScopeError(ctx, args.oldPath);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
+    const newPathScopeError = getWriteScopeError(ctx, args.newPath);
+    if (newPathScopeError) {
+      return { success: false, error: newPathScopeError };
+    }
     if (!ctx.settings.allowFileModification) {
       return { success: false, error: 'File modification is disabled' };
     }
@@ -169,7 +285,14 @@ const renameNote: Tool = {
       return buildApprovalResponse('rename_note', args.oldPath, {
         oldPath: args.oldPath,
         newPath: args.newPath,
-      }, 'rename note');
+      }, 'rename note', {
+        kind: 'note-rename',
+        target: args.oldPath,
+        summary: 'Rename note',
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: true,
+      });
     }
     await ctx.app.vault.rename(file, args.newPath);
     return { success: true, message: `✅ Renamed: ${args.oldPath} -> ${args.newPath}` };
@@ -303,6 +426,10 @@ const createFile: Tool = {
   async execute(args, ctx) {
     const pathResult = normalizeVaultPath(args.path);
     if (pathResult.error) return { success: false, error: pathResult.error };
+    const scopeError = getWriteScopeError(ctx, pathResult.path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
     if (isObsidianConfigPath(pathResult.path)) {
       return { success: false, error: 'Writing .obsidian files is not allowed' };
     }
@@ -316,7 +443,15 @@ const createFile: Tool = {
       return buildApprovalResponse('create_file', pathResult.path, {
         path: pathResult.path,
         content: args.content || '',
-      }, 'create file');
+      }, 'create file', {
+        kind: 'note-create',
+        target: pathResult.path,
+        summary: 'Create file',
+        newContent: args.content || '',
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: true,
+      });
     }
 
     await ensureParentFolder(ctx.app, pathResult.path);
@@ -343,6 +478,10 @@ const updateFile: Tool = {
   async execute(args, ctx) {
     const pathResult = normalizeVaultPath(args.path);
     if (pathResult.error) return { success: false, error: pathResult.error };
+    const scopeError = getWriteScopeError(ctx, pathResult.path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
     if (isObsidianConfigPath(pathResult.path)) {
       return { success: false, error: 'Writing .obsidian files is not allowed' };
     }
@@ -355,10 +494,20 @@ const updateFile: Tool = {
       return { success: false, error: 'File not found' };
     }
     if (ctx.settings.confirmExecutions && !args.approved) {
+      const oldContent = await ctx.app.vault.read(file);
       return buildApprovalResponse('update_file', pathResult.path, {
         path: pathResult.path,
         content: args.content,
-      }, 'update file');
+      }, 'update file', {
+        kind: 'note-replace',
+        target: pathResult.path,
+        summary: 'Replace file content',
+        oldContent,
+        newContent: args.content,
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: true,
+      });
     }
 
     await ctx.app.vault.modify(file, args.content);
@@ -415,6 +564,7 @@ function buildApprovalResponse(
   target: string,
   args: Record<string, any>,
   description: string,
+  preview?: ChangePreview,
 ) {
   return {
     approval_required: true,
@@ -422,6 +572,7 @@ function buildApprovalResponse(
     target,
     args,
     message: `Approval required to ${description}: ${target}`,
+    preview,
   };
 }
 

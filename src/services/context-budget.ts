@@ -18,6 +18,7 @@ const TYPE_PRIORITY: Record<ContextItem['type'], number> = {
   url: 2,
   youtube: 2,
   image: 1,
+  scope: 5,
 };
 
 export function budgetTextBlock(text: string, maxChars: number): string {

@@ -52,6 +52,34 @@ async function runTests() {
       cursor: 13,
     });
   });
+
+  await test('InputController returns a scope context item instead of inline text for scoped note mentions', () => {
+    const controller = new InputController();
+    controller.setSuggestions('file', [
+      {
+        label: '@backlinks',
+        desc: 'Add notes linking to the current note',
+        value: '@backlinks',
+        source: 'scope',
+        kind: 'scope',
+        scope: 'backlinks',
+      } as any,
+    ]);
+
+    const result = controller.selectSuggestion('compare @bac later', 12);
+
+    expect(result).toEqual({
+      text: 'compare later',
+      cursor: 8,
+      contextItem: {
+        id: 'scope:backlinks',
+        type: 'scope',
+        data: '@backlinks',
+        summary: 'Add notes linking to the current note',
+        scope: 'backlinks',
+      },
+    });
+  });
 }
 
 runTests().catch((e) => {

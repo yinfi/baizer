@@ -1,38 +1,34 @@
 import { App } from 'obsidian';
 import { ContextManager, ContextItem } from '../../services/context-manager';
+import { ObsidianContextService } from '../../services/obsidian-context-service';
 import { ContextChips } from '../components/context-chips';
 
 interface ContextControllerDeps {
   app: App;
   contextManager: ContextManager;
+  obsidianContextService?: ObsidianContextService;
 }
 
 export class ContextController {
   constructor(private deps: ContextControllerDeps) { }
 
   async collectCommandContext(): Promise<{ contextItems: ContextItem[]; selection: string }> {
+    const explicitScopes = this.deps.contextManager.getContexts()
+      .filter((ctx) => ctx.type === 'scope' && ctx.scope)
+      .map((ctx) => ctx.scope === 'tag' && ctx.tag ? `tag:${ctx.tag}` : ctx.scope!)
+      .filter((scope, index, items) => items.indexOf(scope) === index);
     const contextItems = await this.deps.contextManager.resolveContexts();
-    const activeFile = this.deps.app.workspace.getActiveFile();
+    const obsidianContextService = this.deps.obsidianContextService
+      ?? new ObsidianContextService(this.deps.app);
+    const snapshot = await obsidianContextService.collect({
+      includeBacklinks: explicitScopes.includes('backlinks'),
+      explicitScopes,
+    });
 
-    if (activeFile) {
-      contextItems.push({
-        id: 'active-file',
-        type: 'file',
-        data: activeFile.path,
-        content: await this.deps.app.vault.read(activeFile),
-      });
-    }
-
-    let selection = '';
-    const activeLeaf = this.deps.app.workspace.getMostRecentLeaf();
-    if (activeLeaf?.view) {
-      const editor = (activeLeaf.view as any).editor;
-      if (editor) {
-        selection = editor.getSelection();
-      }
-    }
-
-    return { contextItems, selection };
+    return {
+      contextItems: [...snapshot.contextItems, ...contextItems],
+      selection: snapshot.selection?.text || '',
+    };
   }
 
   renderContextChips(container: HTMLElement, onRemove: (id: string) => void) {
@@ -48,6 +44,7 @@ export class ContextController {
       case 'url': return 'link';
       case 'youtube': return 'youtube';
       case 'file': return 'file-text';
+      case 'scope': return 'at-sign';
       default: return 'sticky-note';
     }
   }

@@ -5,10 +5,12 @@ import { budgetContextItems } from './context-budget';
 
 export interface ContextItem {
     id: string;
-    type: 'file' | 'image' | 'url' | 'youtube' | 'text';
+    type: 'file' | 'image' | 'url' | 'youtube' | 'text' | 'scope';
     data: string;
     summary?: string;
     content?: string;
+    scope?: 'current' | 'backlinks' | 'recent' | 'tag';
+    tag?: string;
 }
 
 interface ContextManagerDeps {
@@ -59,6 +61,9 @@ export class ContextManager {
 
     async resolveContexts(): Promise<ContextItem[]> {
         for (const ctx of this.activeContexts) {
+            if (ctx.type === 'scope') {
+                continue;
+            }
             if (!ctx.content) {
                 if (ctx.type === 'url') {
                     ctx.content = await this.deps.fetchWebContent(ctx.data);
@@ -67,7 +72,7 @@ export class ContextManager {
                 }
             }
         }
-        return this.deps.budgetContexts(this.activeContexts);
+        return this.deps.budgetContexts(this.activeContexts.filter(ctx => ctx.type !== 'scope'));
     }
 
     private async fetchWebContent(url: string): Promise<string> {

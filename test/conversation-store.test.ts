@@ -158,6 +158,75 @@ async function runTests() {
       pinnedAt: 35,
     }]);
   });
+
+  await test('persists approval previews in stored conversations', async () => {
+    const { adapter, store } = createStore(ConversationStore);
+    const previewSnapshot = {
+      ...snapshot('preview', 50),
+      messages: [{
+        id: 'm-preview',
+        role: 'system',
+        content: 'Approval required',
+        timestamp: 50,
+        approval: {
+          action: 'create_file',
+          target: 'Plans/Native-AI.md',
+          args: { path: 'Plans/Native-AI.md' },
+          message: 'Approval required',
+          preview: {
+            kind: 'note-create',
+            target: 'Plans/Native-AI.md',
+            summary: 'Create note',
+            risk: 'medium',
+            supportsPartialApply: false,
+            undoable: true,
+          },
+        },
+      }],
+    } as any;
+
+    await store.save(previewSnapshot);
+
+    const saved = JSON.parse(adapter.files.get(CONVERSATION_STORE_PATH) || '{}');
+    const restored = await store.list();
+
+    expect(saved.conversations[0].messages[0].approval.preview.kind).toBe('note-create');
+    expect(restored[0].messages[0].approval.preview.target).toBe('Plans/Native-AI.md');
+  });
+
+  await test('returns defensive copies for approval previews in listed conversations', async () => {
+    const { store } = createStore(ConversationStore);
+
+    await store.save({
+      ...snapshot('preview-copy', 60),
+      messages: [{
+        id: 'm-preview-copy',
+        role: 'system',
+        content: 'Approval required',
+        timestamp: 60,
+        approval: {
+          action: 'update_file',
+          target: 'Plans/Native-AI.md',
+          args: { path: 'Plans/Native-AI.md' },
+          message: 'Approval required',
+          preview: {
+            kind: 'note-replace',
+            target: 'Plans/Native-AI.md',
+            summary: 'Replace note content',
+            preconditions: ['Note exists'],
+            risk: 'medium',
+            supportsPartialApply: false,
+            undoable: true,
+          },
+        },
+      }],
+    } as any);
+
+    const listed = await store.list();
+    listed[0].messages[0].approval.preview.preconditions.push('Mutated');
+
+    expect((await store.list())[0].messages[0].approval.preview.preconditions).toEqual(['Note exists']);
+  });
 }
 
 runTests().catch((e) => {

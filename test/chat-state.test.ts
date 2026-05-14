@@ -94,6 +94,57 @@ async function runTests() {
       finishedAt: 20,
     }]);
   });
+
+  await test('clones approval previews inside messages', () => {
+    const state = new ChatState('tab-1');
+
+    state.addMessage({
+      id: 'm3',
+      role: 'system',
+      content: 'Approval required',
+      timestamp: 3,
+      approval: {
+        action: 'create_file',
+        target: 'Plans/Native-AI.md',
+        args: { path: 'Plans/Native-AI.md' },
+        message: 'Approval required',
+        preview: {
+          kind: 'note-create',
+          target: 'Plans/Native-AI.md',
+          summary: 'Create note',
+          preconditions: ['Folder exists'],
+          risk: 'medium',
+          supportsPartialApply: false,
+          undoable: true,
+        },
+      },
+    } as any);
+
+    const messages = state.getMessages();
+    messages[0].approval.preview.preconditions.push('Mutated');
+
+    expect(state.getMessages()).toEqual([{
+      id: 'm3',
+      role: 'system',
+      content: 'Approval required',
+      timestamp: 3,
+      approval: {
+        action: 'create_file',
+        target: 'Plans/Native-AI.md',
+        args: { path: 'Plans/Native-AI.md' },
+        message: 'Approval required',
+        preview: {
+          kind: 'note-create',
+          target: 'Plans/Native-AI.md',
+          summary: 'Create note',
+          preconditions: ['Folder exists'],
+          risk: 'medium',
+          supportsPartialApply: false,
+          undoable: true,
+        },
+      },
+    }]);
+  });
 }
 
 runTests().catch((e) => {

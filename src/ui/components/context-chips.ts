@@ -50,6 +50,10 @@ export class ContextChips {
 }
 
 export function getContextChipLabel(ctx: ContextItem) {
+  if (ctx.type === 'scope') {
+    return ctx.data;
+  }
+
   if (ctx.type === 'file') {
     return basename(ctx.data);
   }
@@ -67,6 +71,8 @@ export function getContextIconName(type: ContextItem['type']) {
       return 'youtube';
     case 'file':
       return 'file-text';
+    case 'scope':
+      return 'at-sign';
     default:
       return 'sticky-note';
   }

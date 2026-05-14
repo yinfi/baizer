@@ -402,6 +402,133 @@ async function runTests() {
 
     controller.cleanup();
   });
+
+  await test('/edit sends the selected text through the unified slash-edit source', async () => {
+    const messages: any[] = [];
+    const chatCalls: any[] = [];
+    const app = {
+      workspace: {
+        getActiveViewOfType: () => ({
+          editor: {
+            getSelection: () => 'Selected paragraph',
+          },
+        }),
+      },
+    };
+
+    const controller = new ChatController({
+      app: app as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async (...args: any[]) => {
+          chatCalls.push(args);
+          return 'Edited result';
+        },
+        chatStream: async function* () { },
+        clearSession: async () => { },
+        getUserProfile: () => ({
+          preferences: {
+            responseStyle: 'balanced',
+          },
+        }),
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onMessageAdded: (message) => messages.push(message),
+    });
+
+    await controller.processCommand('/edit rewrite for clarity');
+
+    expect(chatCalls).toEqual([[
+      'rewrite for clarity',
+      [],
+      'Selected paragraph',
+      'slash-edit',
+    ]]);
+    expect(messages[messages.length - 1].content).toBe('Edited result');
+
+    controller.cleanup();
+  });
+
+  await test('buildSelectionRewritePreview turns the latest AI reply into a selection preview', async () => {
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'after',
+        chatStream: async function* () { },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+    });
+
+    await controller.processCommand('Rewrite this', [], 'before', 'selection-menu');
+
+    expect((controller as any).buildSelectionRewritePreview('before')).toEqual({
+      kind: 'editor-selection-replace',
+      target: 'current-selection',
+      summary: 'Replace the current editor selection',
+      oldContent: 'before',
+      newContent: 'after',
+      risk: 'medium',
+      supportsPartialApply: true,
+      undoable: true,
+    });
+
+    controller.cleanup();
+  });
+
+  await test('archiveMessage uses file_back_knowledge when the knowledge tool is available', async () => {
+    const messages: any[] = [];
+    const executedTools: any[] = [];
+    const controller = new ChatController({
+      app: {
+        plugins: {
+          plugins: {
+            'obsidian-cli': {
+              toolRegistry: {
+                execute: async (action: string, args: Record<string, any>) => {
+                  executedTools.push({ action, args });
+                  return { success: true, path: 'Knowledge Wiki/Articles/fb_test.md' };
+                },
+              },
+            },
+          },
+        },
+      } as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'fallback',
+        chatStream: async function* () { },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onMessageAdded: (message) => messages.push(message),
+    });
+
+    (controller as any).messages.push({
+      id: 'ai-archive',
+      role: 'ai',
+      content: '## Decision\n\nUse a knowledge status panel for the current note.',
+      timestamp: 5,
+    });
+
+    await controller.archiveMessage('ai-archive');
+
+    expect(executedTools[0].action).toBe('file_back_knowledge');
+    expect(executedTools[0].args.content).toContain('Use a knowledge status panel');
+    expect(executedTools[0].args.source_queries[0]).toBe('Archived from AI message ai-archive');
+    expect(messages[messages.length - 1].content).toContain('Archived to the knowledge wiki');
+
+    controller.cleanup();
+  });
 }
 
 runTests().catch((e) => {

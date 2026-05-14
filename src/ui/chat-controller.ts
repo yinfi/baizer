@@ -11,6 +11,7 @@ import {
     isSuccessfulWriteToolResult,
 } from '../utils/file-operation-contract';
 import { ApprovalRequest } from './approval-card';
+import { buildSelectionPreview } from './diff/change-preview';
 import { ChatMessage } from './types';
 
 export interface ChatControllerOptions {
@@ -83,7 +84,12 @@ export class ChatController {
         this.fileSearchCache = null;
     }
 
-    public async processCommand(query: string, context: any[] | string = [], selection: string = '') {
+    public async processCommand(
+        query: string,
+        context: any[] | string = [],
+        selection: string = '',
+        source: 'shell' | 'selection-menu' = 'shell',
+    ) {
         if (!query.trim()) return;
         const normalizedContext = this.normalizeContextItems(context);
 
@@ -110,7 +116,10 @@ export class ChatController {
                 let lastWriteError = '';
                 const writeToolArgs = new Map<string, any[]>();
                 const bufferedTextEvents: StreamEvent[] = [];
-                for await (const event of this.api.chatStream(query, normalizedContext, selection, streamController.signal)) {
+                const stream = source === 'shell'
+                    ? this.api.chatStream(query, normalizedContext, selection, streamController.signal)
+                    : this.api.chatStream(query, normalizedContext, selection, source, undefined, undefined, streamController.signal);
+                for await (const event of stream) {
                     if (event.type === 'tool_call' && this.isFileWriteTool(event.name)) {
                         attemptedFileWrite = true;
                         const calls = writeToolArgs.get(event.name) || [];
@@ -193,7 +202,9 @@ export class ChatController {
                     }
                 }
             } else {
-                const response = await this.api.chat(query, normalizedContext, selection);
+                const response = source === 'shell'
+                    ? await this.api.chat(query, normalizedContext, selection)
+                    : await this.api.chat(query, normalizedContext, selection, source);
                 this.addMessage('ai', response);
             }
         } catch (error: any) {
@@ -302,6 +313,7 @@ export class ChatController {
             target: result.target,
             args: result.args || {},
             message: result.message || 'Approval required.',
+            preview: result.preview,
         };
     }
 
@@ -344,6 +356,40 @@ export class ChatController {
 
         this.activeStreamController.abort();
         return true;
+    }
+
+    public buildSelectionRewritePreview(selectionText: string) {
+        const lastAiMessage = [...this.messages].reverse().find(message => message.role === 'ai');
+        if (!lastAiMessage) return null;
+
+        return buildSelectionPreview({
+            target: 'current-selection',
+            oldContent: selectionText,
+            newContent: lastAiMessage.content,
+        });
+    }
+
+    public async applyPreviewedChange(options: {
+        action: string;
+        target: string;
+        previousContent?: string;
+        undoable?: boolean;
+        apply: () => void | Promise<void>;
+    }) {
+        await options.apply();
+        const recordDirectWrite = (this.api as any).recordDirectWrite;
+        if (typeof recordDirectWrite === 'function') {
+            await recordDirectWrite.call(this.api, {
+                action: options.action,
+                target: options.target,
+                previousContent: options.previousContent,
+                undoable: options.undoable ?? true,
+            });
+        }
+    }
+
+    public async archiveMessage(messageId: string) {
+        await this.runFileBackInBackground(messageId);
     }
 
     private async handleOpenFile(searchTerm: string) {
@@ -496,9 +542,27 @@ export class ChatController {
      * 鍚庡彴鎵ц file-back锛屼笉闃诲 UI
      * 鎵嬪姩妯″紡锛堭煈嶆寜閽級鍜岃嚜鍔ㄦā寮忓叡鐢?
      */
-    private runFileBackInBackground(msgId: string) {
+    private async runFileBackInBackground(msgId: string) {
         const targetMsg = this.messages.find(m => m.id === msgId && m.role === 'ai');
         if (!targetMsg) return;
+
+        const toolRegistry = (this.app as any).plugins?.plugins?.['obsidian-cli']?.toolRegistry;
+        if (toolRegistry?.execute) {
+            try {
+                const result = await toolRegistry.execute('file_back_knowledge', this.buildFileBackArgs(targetMsg));
+                if (result?.success) {
+                    const suffix = result.path ? `: ${result.path}` : '.';
+                    this.addMessage('system', `Archived to the knowledge wiki${suffix}`);
+                } else {
+                    this.addMessage('system', `Archive failed: ${result?.error || 'Unknown error'}`);
+                }
+                return;
+            } catch (error: any) {
+                logger.error('File-back failed', error, 'ChatController');
+                this.addMessage('system', `Archive failed: ${error?.message || 'Unknown error'}`);
+                return;
+            }
+        }
 
         const fileBackPrompt = `鐢ㄦ埛瀵逛互涓嬪洖绛旂偣璧烇紝璇峰皢鍏跺綊妗ｅ埌鐭ヨ瘑搴撱€備娇鐢?file_back_knowledge 宸ュ叿锛屾彁鍙栨爣棰樺拰鏍稿績鍐呭锛屽苟鎻愬彇鐩稿叧鐨?topics 涓婚鏍囩銆俓n\n鍥炵瓟鍐呭锛歕n${targetMsg.content}`;
         this.api.chat(fileBackPrompt, [], '').then(() => {
@@ -506,6 +570,44 @@ export class ChatController {
         }).catch((error: any) => {
             logger.error('File-back failed', error, 'ChatController');
         });
+    }
+
+    private buildFileBackArgs(targetMsg: ChatMessage) {
+        return {
+            title: this.deriveFileBackTitle(targetMsg.content),
+            content: targetMsg.content,
+            topics: [],
+            source_queries: [this.deriveFileBackSourceQuery(targetMsg.id)],
+        };
+    }
+
+    private deriveFileBackSourceQuery(messageId: string) {
+        const targetIndex = this.messages.findIndex((message) => message.id === messageId);
+        if (targetIndex > 0) {
+            for (let index = targetIndex - 1; index >= 0; index--) {
+                const message = this.messages[index];
+                if (message.role === 'user' && message.content.trim()) {
+                    return message.content.trim();
+                }
+            }
+        }
+
+        return `Archived from AI message ${messageId}`;
+    }
+
+    private deriveFileBackTitle(content: string) {
+        const headingMatch = content.match(/^#{1,6}\s+(.+)$/m);
+        const rawTitle = headingMatch?.[1] || content
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .find(Boolean)
+            || 'Knowledge Archive';
+        const normalized = rawTitle
+            .replace(/[*_`>#-]/g, ' ')
+            .replace(/\[\[|\]\]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        return normalized.slice(0, 80) || 'Knowledge Archive';
     }
 
     /**
@@ -608,7 +710,12 @@ export class ChatController {
         this.setResponding(true);
         try {
             const prompt = `璇锋牴鎹互涓嬫寚浠や慨鏀规枃鏈紝鍙繑鍥炰慨鏀瑰悗鐨勬枃鏈紝涓嶈瑙ｉ噴銆俓n\n鎸囦护: ${instruction}\n\n鍘熸枃:\n${selection}`;
-            const result = await this.api.chat(prompt, [], selection);
+            const result = await this.api.chat(
+                instruction,
+                [],
+                selection,
+                'slash-edit',
+            );
             this.addMessage('ai', result);
         } catch (e: any) {
             this.addMessage('system', `缂栬緫澶辫触: ${e.message}`);
