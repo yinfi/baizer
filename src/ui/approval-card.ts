@@ -1,8 +1,12 @@
+import { ChangePreview } from './diff/change-preview';
+import { renderChangePreviewCard } from './components/change-preview-card';
+
 export interface ApprovalRequest {
   action: string;
   target: string;
   args: Record<string, any>;
   message: string;
+  preview?: ChangePreview;
 }
 
 interface ApprovalCardHandlers {
@@ -18,6 +22,9 @@ export function renderApprovalCard(
   const card = container.createDiv({ cls: 'shell-approval-card' });
   card.createDiv({ cls: 'shell-approval-title', text: 'Approval Required' });
   card.createDiv({ cls: 'shell-approval-message', text: request.message });
+  if (request.preview) {
+    renderChangePreviewCard(card, request.preview);
+  }
 
   const actions = card.createDiv({ cls: 'shell-approval-actions' });
   const approveButton = actions.createEl('button', {

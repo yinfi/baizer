@@ -84,6 +84,19 @@ async function runTests() {
         commandId: 'obsidian-kanban:create-new-board',
       },
       message: 'Approval required to execute plugin command: obsidian-kanban:create-new-board',
+      preview: {
+        kind: 'plugin-command',
+        target: 'obsidian-kanban:create-new-board',
+        summary: 'Execute plugin command',
+        commandId: 'obsidian-kanban:create-new-board',
+        preconditions: [
+          'Open the target note before execution.',
+          'Confirm the relevant editor pane or selection is focused before execution.',
+        ],
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: false,
+      },
     });
     expect(executeCalls.length).toBe(0);
   });

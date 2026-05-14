@@ -11,15 +11,26 @@ import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
+import { computeContentHash } from '../knowledge/compiler';
+import { getFileWriteResultPath } from '../utils/file-operation-contract';
+import {
+    formatGenerationPlanBlock,
+    GenerationSource,
+    GenerationStrategyService,
+} from './generation-strategy-service';
+import { ObsidianContextSnapshot } from './obsidian-context-service';
+import { OperationAuditLog } from './operation-audit-log';
 
 export class ModelService {
     private provider: IModelProvider;
     private memoryManager: MemoryManager | null = null;
     private readonly modelListCache = new Map<string, { timestamp: number; models: ModelOption[] }>();
     private readonly modelListCacheTtlMs = 10 * 60 * 1000;
+    private readonly generationStrategyService = new GenerationStrategyService();
     private providerChangedCallbacks: Array<() => void> = [];
     private skillRegistry: SkillRegistry;
     private toolRegistry: ToolRegistry;
+    private operationAuditLog: OperationAuditLog;
 
     constructor(
         private app: App,
@@ -29,6 +40,7 @@ export class ModelService {
     ) {
         this.toolRegistry = toolRegistry;
         this.skillRegistry = skillRegistry;
+        this.operationAuditLog = new OperationAuditLog(this.app);
         this.initializeProvider();
         this.setupErrorHandlers();
     }
@@ -234,7 +246,15 @@ export class ModelService {
         return [{ value: currentModel, label: `${currentModel} (Current)` }, ...options];
     }
 
-    async chat(userMessage: string, contextItems: any[], selection: string = ''): Promise<string> {
+    async chat(
+        userMessage: string,
+        contextItems: any[],
+        selection: string = '',
+        source: GenerationSource = 'shell',
+        obsidianContext?: ObsidianContextSnapshot,
+        userProfile?: UserProfile | null,
+        systemPromptOverride?: string,
+    ): Promise<string> {
         logger.info(`Processing chat message: ${userMessage.substring(0, 50)}...`, 'ModelService.chat');
 
         if (!this.hasValidConfig()) {
@@ -251,6 +271,10 @@ export class ModelService {
                 userMessage,
                 contextItems,
                 selection,
+                source,
+                obsidianContext,
+                userProfile: userProfile ?? this.getUserProfile(),
+                systemPromptOverride,
             });
             return await runtime.query(preparedTurn);
         } catch (e: any) {
@@ -259,7 +283,15 @@ export class ModelService {
         }
     }
 
-    async *chatStream(userMessage: string, contextItems: any[], selection: string = '', signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
+    async *chatStream(
+        userMessage: string,
+        contextItems: any[],
+        selection: string = '',
+        source: GenerationSource | AbortSignal = 'shell',
+        obsidianContext?: ObsidianContextSnapshot,
+        userProfile?: UserProfile | null,
+        signal?: AbortSignal,
+    ): AsyncGenerator<StreamEvent, void, unknown> {
         logger.info(`Processing streaming chat: ${userMessage.substring(0, 50)}...`, 'ModelService.chatStream');
 
         if (!this.hasValidConfig()) {
@@ -269,13 +301,18 @@ export class ModelService {
         }
 
         try {
+            const resolvedSource = this.isAbortSignalValue(source) ? 'shell' : source;
+            const resolvedSignal = this.isAbortSignalValue(source) ? source : signal;
             const runtime = this.createChatRuntime();
             const preparedTurn = await runtime.prepareTurn({
                 userMessage,
                 contextItems,
                 selection,
+                source: resolvedSource,
+                obsidianContext,
+                userProfile: userProfile ?? this.getUserProfile(),
             });
-            for await (const event of runtime.queryStream(preparedTurn, signal)) {
+            for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
                 yield event;
             }
         } catch (e: any) {
@@ -287,13 +324,28 @@ export class ModelService {
         }
     }
 
-    async generate(prompt: string, systemPrompt?: string): Promise<string> {
+    async generate(
+        prompt: string,
+        systemPrompt?: string,
+        source: GenerationSource = 'shell',
+        obsidianContext?: ObsidianContextSnapshot,
+        userProfile?: UserProfile | null,
+    ): Promise<string> {
         if (!this.hasValidConfig()) {
             throw new Error(`${this.getActiveProviderConfig()?.label || 'AI'} API Key not configured`);
         }
 
         try {
-            const result = await this.provider.generateContent(prompt, systemPrompt);
+            const shouldApplyGenerationPlan = source !== 'shell' || !!obsidianContext || !!userProfile;
+            const finalPrompt = shouldApplyGenerationPlan
+                ? this.buildPlannedGenerationPrompt(
+                    prompt,
+                    source,
+                    obsidianContext,
+                    userProfile ?? this.getUserProfile(),
+                )
+                : prompt;
+            const result = await this.provider.generateContent(finalPrompt, systemPrompt);
             return result.text;
         } catch (e: any) {
             logger.error('Stateless generation failed', e, 'ModelService.generate');
@@ -365,9 +417,31 @@ export class ModelService {
     }
 
     async executeApprovedAction(action: string, args: Record<string, any>): Promise<any> {
-        return this.toolRegistry.execute(action, {
+        const result = await this.toolRegistry.execute(action, {
             ...args,
             approved: true,
+        });
+        await this.recordOperationAudit({
+            action,
+            target: getFileWriteResultPath(action, result, args) || action,
+            approvalSource: 'user-click',
+            undoable: this.isUndoableApprovedAction(action),
+        });
+        return result;
+    }
+
+    async recordDirectWrite(input: {
+        action: string;
+        target: string;
+        previousContent?: string;
+        undoable?: boolean;
+    }): Promise<void> {
+        await this.recordOperationAudit({
+            action: input.action,
+            target: input.target,
+            approvalSource: 'direct-write',
+            previousContent: input.previousContent,
+            undoable: input.undoable ?? true,
         });
     }
 
@@ -382,6 +456,70 @@ export class ModelService {
 
     private isAbortError(error: any): boolean {
         return error?.name === 'AbortError';
+    }
+
+    private isAbortSignalValue(value: unknown): value is AbortSignal {
+        return !!value
+            && typeof value === 'object'
+            && 'aborted' in value
+            && typeof (value as AbortSignal).addEventListener === 'function';
+    }
+
+    private async recordOperationAudit(input: {
+        action: string;
+        target: string;
+        approvalSource: 'user-click' | 'direct-write';
+        previousContent?: string;
+        undoable: boolean;
+    }): Promise<void> {
+        if (!input.target) return;
+
+        const config = this.getActiveProviderConfig();
+        await this.operationAuditLog.record({
+            action: input.action,
+            target: input.target,
+            provider: this.settings?.activeProvider,
+            model: config?.model,
+            approvalSource: input.approvalSource,
+            previousContentHash: input.previousContent ? computeContentHash(input.previousContent) : undefined,
+            undoable: input.undoable,
+        });
+    }
+
+    private isUndoableApprovedAction(action: string): boolean {
+        return !['delete_note', 'rename_note'].includes(action);
+    }
+
+    private buildPlannedGenerationPrompt(
+        prompt: string,
+        source: GenerationSource,
+        obsidianContext?: ObsidianContextSnapshot,
+        userProfile?: UserProfile | null,
+    ): string {
+        const generationStrategyService = this.generationStrategyService ?? new GenerationStrategyService();
+        const context = obsidianContext ?? {
+            activeNote: null,
+            selection: null,
+            activeHeading: null,
+            frontmatter: {},
+            tags: [],
+            outgoingLinks: [],
+            backlinks: [],
+            recentNotes: [],
+            explicitScopes: [],
+            contextItems: [],
+        };
+        const plan = generationStrategyService.resolvePlan({
+            userMessage: prompt,
+            source,
+            context,
+            profile: userProfile,
+        });
+        const writingProfile = generationStrategyService.buildWritingProfile(
+            context,
+            userProfile,
+        );
+        return `${formatGenerationPlanBlock(plan, writingProfile)}User Request: ${prompt}`;
     }
 
     async shutdown() {

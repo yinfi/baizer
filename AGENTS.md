@@ -35,6 +35,8 @@ npm run dev
 | Module | Purpose |
 |--------|---------|
 | `src/services/model-service.ts` | UI-facing model facade, provider switching, settings updates |
+| `src/services/obsidian-context-service.ts` | Collect current note, selection, backlinks, recent notes, and explicit scope context |
+| `src/services/operation-audit-log.ts` | Persist user-visible write and approval records for later inspection |
 | `src/runtime/chat-runtime.ts` | Prompt preparation, tool loop, and stream execution |
 | `src/runtime/runtime-factory.ts` | Runtime construction |
 | `src/runtime/provider-capabilities.ts` | Provider capability declaration |
@@ -56,6 +58,7 @@ npm run dev
 | `src/knowledge/compiler.ts` | Note compilation into structured wiki summaries |
 | `src/knowledge/indexer.ts` | Index and base-file generation |
 | `src/knowledge/linter.ts` | Knowledge health checks |
+| `src/knowledge/status-service.ts` | Active-note knowledge status derivation, stale detection, and aggregate counts |
 
 ### UI Components
 
@@ -78,15 +81,22 @@ npm run dev
 2. **Runtime boundary**
    - `ModelService` should stay a facade
    - Prompt assembly, function-call loops, and streaming execution belong in `ChatRuntime`
+   - Note-aware context collection belongs in `ObsidianContextService`, not in view/controller code
 
 3. **Approval flow**
    - Sensitive tools return structured `approval_required`
    - The UI renders approval cards
    - Approved actions replay through `ModelService.executeApprovedAction(...)`
+   - Editor-side direct writes should reuse the same preview-first mental model and log through `OperationAuditLog`
 
 4. **Capability-driven UI**
    - Providers declare capabilities such as image input and custom base URL support
    - Prefer capability checks over provider-name branching in UI code
+
+5. **Context and preview first**
+   - Prefer `@current`, `@backlinks`, `@recent`, and `@tag:*` scopes over ad hoc prompt stuffing
+   - New AI mutation flows should produce a `preview` or diffable intermediate state before they write
+   - Shell, Guardian, and selection-menu flows should converge on shared services rather than parallel prompt logic
 
 ## Notes For Development
 
@@ -94,10 +104,14 @@ npm run dev
 - External dependencies such as `obsidian`, `electron`, and `@codemirror/*` stay external in esbuild
 - Mobile compatibility matters: avoid Node-only runtime dependencies in production plugin code
 - Destructive or privileged operations must respect:
+  - `vaultWriteScope`
+  - `vaultWriteAllowedFolders`
   - `allowFileCreation`
   - `allowFileModification`
   - `allowPluginControl`
   - `confirmExecutions`
+- `.obsidian` writes remain blocked even when the write scope is broad
+- Plugin-command previews should state preconditions explicitly when they depend on the active note, editor focus, or current selection
 
 ## Shell And Skill Routing
 

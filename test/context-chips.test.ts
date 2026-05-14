@@ -102,10 +102,12 @@ async function runTests() {
   await test('derives filename-first labels and icon names for context types', () => {
     expect(getContextChipLabel({ id: '1', type: 'file', data: 'Folder/Note.md' })).toBe('Note.md');
     expect(getContextChipLabel({ id: '2', type: 'url', data: 'https://example.com/a', summary: 'Example' })).toBe('Example');
+    expect(getContextChipLabel({ id: '3', type: 'scope', data: '@current', summary: 'Current note', scope: 'current' } as any)).toBe('@current');
     expect(getContextIconName('file')).toBe('file-text');
     expect(getContextIconName('image')).toBe('image');
     expect(getContextIconName('url')).toBe('link');
     expect(getContextIconName('youtube')).toBe('youtube');
+    expect(getContextIconName('scope' as any)).toBe('at-sign');
   });
 
   await test('renders chips with title, remove action, and open-file action', () => {
@@ -127,12 +129,14 @@ async function runTests() {
       { id: 'img-1', type: 'image', data: 'data:image/png;base64,abc', summary: 'Pasted Image' },
       { id: 'url-1', type: 'url', data: 'https://example.com', summary: 'Example' },
       { id: 'yt-1', type: 'youtube', data: 'https://youtu.be/abc', summary: 'Video' },
+      { id: 'scope-1', type: 'scope', data: '@backlinks', summary: 'Backlinks', scope: 'backlinks' } as any,
     ]);
 
-    expect(container.children.length).toBe(4);
+    expect(container.children.length).toBe(5);
     expect(container.children[0].attributes.title).toBe('Folder/Note.md');
     expect(container.children[0].querySelector('.chip-label')?.textContent).toBe('Note.md');
-    expect(icons).toEqual(['file-text', 'image', 'link', 'youtube']);
+    expect(container.children[4].querySelector('.chip-label')?.textContent).toBe('@backlinks');
+    expect(icons).toEqual(['file-text', 'image', 'link', 'youtube', 'at-sign']);
 
     container.children[0].click();
     container.children[0].querySelector('.chip-remove')?.click();

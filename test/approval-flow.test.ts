@@ -127,6 +127,15 @@ async function runTests() {
             target: 'Clippings/example.md',
             args: { filename: 'Clippings/example.md', content: '# Saved' },
             message: 'Approval required to create note: Clippings/example.md',
+            preview: {
+              kind: 'note-create',
+              target: 'Clippings/example.md',
+              summary: 'Create note',
+              newContent: '# Saved',
+              risk: 'medium',
+              supportsPartialApply: false,
+              undoable: true,
+            },
           };
         },
         executeApprovedAction: async (action: string, args: any) => {
@@ -157,6 +166,15 @@ async function runTests() {
       target: 'Clippings/example.md',
       args: { filename: 'Clippings/example.md', content: '# Saved' },
       message: 'Approval required to create note: Clippings/example.md',
+      preview: {
+        kind: 'note-create',
+        target: 'Clippings/example.md',
+        summary: 'Create note',
+        newContent: '# Saved',
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: true,
+      },
     });
 
     await controller.approveApproval(messages[messages.length - 1].approval);
@@ -200,6 +218,15 @@ async function runTests() {
                 content: '{"nodes":[],"edges":[]}',
               },
               message: 'Approval required to create file: Assets/Canvas/summary.canvas',
+              preview: {
+                kind: 'note-create',
+                target: 'Assets/Canvas/summary.canvas',
+                summary: 'Create file',
+                newContent: '{"nodes":[],"edges":[]}',
+                risk: 'medium',
+                supportsPartialApply: false,
+                undoable: true,
+              },
             },
           };
           yield { type: 'text_delta', content: 'I created the canvas file.' };
@@ -226,6 +253,15 @@ async function runTests() {
         content: '{"nodes":[],"edges":[]}',
       },
       message: 'Approval required to create file: Assets/Canvas/summary.canvas',
+      preview: {
+        kind: 'note-create',
+        target: 'Assets/Canvas/summary.canvas',
+        summary: 'Create file',
+        newContent: '{"nodes":[],"edges":[]}',
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: true,
+      },
     });
     expect(streamEvents.map(event => event.type)).toEqual(['tool_call', 'tool_result', 'done']);
     expect(streamEvents[streamEvents.length - 1].text).toBe('');
@@ -245,6 +281,14 @@ async function runTests() {
         target: 'Clippings/example.md',
         args: { filename: 'Clippings/example.md' },
         message: 'Approval required to create note: Clippings/example.md',
+        preview: {
+          kind: 'note-create',
+          target: 'Clippings/example.md',
+          summary: 'Create note',
+          risk: 'medium',
+          supportsPartialApply: false,
+          undoable: true,
+        },
       },
       {
         onApprove: async () => { approved += 1; },
@@ -253,7 +297,7 @@ async function runTests() {
     );
 
     const card = container.children[0];
-    const actions = card.children[2];
+    const actions = card.children.find((child: any) => child.className === 'shell-approval-actions');
     const approveButton = actions.children[0];
     const cancelButton = actions.children[1];
 
@@ -262,6 +306,46 @@ async function runTests() {
 
     expect(approved).toBe(1);
     expect(cancelled).toBe(1);
+  });
+
+  await test('applyPreviewedChange records direct-write audit entries after applying the change', async () => {
+    const auditCalls: any[] = [];
+    const applied: string[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        recordDirectWrite: async (entry: any) => {
+          auditCalls.push(entry);
+        },
+        chat: async () => 'unused',
+        chatStream: async function* () { },
+        clearSession: async () => { },
+        getSkillCommands: () => [],
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+    });
+
+    await controller.applyPreviewedChange({
+      action: 'selection_rewrite',
+      target: 'Notes/Native AI.md',
+      previousContent: 'before',
+      apply: async () => {
+        applied.push('done');
+      },
+    });
+
+    expect(applied).toEqual(['done']);
+    expect(auditCalls).toEqual([{
+      action: 'selection_rewrite',
+      target: 'Notes/Native AI.md',
+      previousContent: 'before',
+      undoable: true,
+    }]);
+
+    controller.cleanup();
   });
 }
 

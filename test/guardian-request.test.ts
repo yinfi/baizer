@@ -32,8 +32,8 @@ async function runTests() {
   await test('uses generate instead of chat and forwards the override system prompt', async () => {
     const calls: any[] = [];
     const modelService = {
-      generate: async (prompt: string, systemPrompt?: string) => {
-        calls.push({ prompt, systemPrompt });
+      generate: async (...args: any[]) => {
+        calls.push(args);
         return '{"type":"none"}';
       },
       chat: async () => {
@@ -43,15 +43,34 @@ async function runTests() {
 
     const result = await requestGuardianResponse(
       modelService,
-      'guardian prompt',
-      'Return ONLY JSON.',
+      {
+        prompt: 'guardian prompt',
+        systemPromptOverride: 'Return ONLY JSON.',
+        obsidianContext: {
+          activeNote: { path: 'Daily/2026-05-13.md', title: '2026-05-13' },
+        },
+        userProfile: {
+          preferences: {
+            responseStyle: 'balanced',
+          },
+        },
+      } as any,
     );
 
     expect(result).toBe('{"type":"none"}');
-    expect(calls).toEqual([{
-      prompt: 'guardian prompt',
-      systemPrompt: 'Return ONLY JSON.',
-    }]);
+    expect(calls).toEqual([[
+      'guardian prompt',
+      'Return ONLY JSON.',
+      'guardian',
+      {
+        activeNote: { path: 'Daily/2026-05-13.md', title: '2026-05-13' },
+      },
+      {
+        preferences: {
+          responseStyle: 'balanced',
+        },
+      },
+    ]]);
   });
 }
 

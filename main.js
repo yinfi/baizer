@@ -2104,10 +2104,10 @@ __export(main_exports, {
   default: () => ObsidianCliPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian25 = require("obsidian");
+var import_obsidian27 = require("obsidian");
 
 // src/services/model-service.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
 // src/memory/types.ts
 var DEFAULT_USER_PROFILE = {
@@ -2182,6 +2182,8 @@ var DEFAULT_SETTINGS = {
   ignoredFolders: "",
   privacyMode: false,
   // Permissions
+  vaultWriteScope: "all-vault",
+  vaultWriteAllowedFolders: [],
   allowFileCreation: true,
   allowFileModification: false,
   allowPluginControl: false,
@@ -2225,7 +2227,8 @@ var TYPE_PRIORITY = {
   text: 3,
   url: 2,
   youtube: 2,
-  image: 1
+  image: 1,
+  scope: 5
 };
 function budgetTextBlock(text, maxChars) {
   if (!text || text.length <= maxChars)
@@ -4349,11 +4352,158 @@ function getFileWriteResultPath(action, result, args) {
   return "";
 }
 
+// src/services/generation-quality.ts
+function evaluateGenerationQuality(input) {
+  const reasons = [];
+  const generated = normalizeText(input.generatedText);
+  const original = normalizeText(input.originalText || "");
+  if (!generated) {
+    reasons.push("Generated text is empty.");
+  }
+  if (input.plan.mode === "rewrite" && original && generated === original) {
+    reasons.push("Generated text is too close to the original text.");
+  }
+  if (input.plan.targetShape === "outline" && !hasOutlineShape(input.generatedText)) {
+    reasons.push("Expected outline-shaped markdown with headings or bullet groups.");
+  }
+  return {
+    ok: reasons.length === 0,
+    reasons
+  };
+}
+function normalizeText(value) {
+  return value.replace(/\s+/g, " ").trim();
+}
+function hasOutlineShape(value) {
+  return /(^|\n)#{1,6}\s+/.test(value) || /(^|\n)\s*[-*]\s+/.test(value);
+}
+
+// src/services/generation-strategy-service.ts
+function formatGenerationPlanBlock(generationPlan, writingProfile) {
+  const lines = [
+    "[Generation Plan]",
+    `Source: ${generationPlan.source}`,
+    `Mode: ${generationPlan.mode}`,
+    `Target Shape: ${generationPlan.targetShape}`,
+    `Preview Required: ${generationPlan.previewRequired ? "yes" : "no"}`,
+    `Preserve Voice: ${generationPlan.mustPreserveVoice ? "yes" : "no"}`,
+    `Use Obsidian Markdown: ${generationPlan.mustUseObsidianMarkdown ? "yes" : "no"}`
+  ];
+  if (writingProfile) {
+    lines.push(
+      `Writing Profile: style=${writingProfile.responseStyle}, tone=${writingProfile.noteTone}, headings=${writingProfile.headingDensity}, prefersLists=${writingProfile.prefersLists ? "yes" : "no"}`
+    );
+  }
+  if (generationPlan.qualityChecklist.length > 0) {
+    lines.push("Quality Checklist:");
+    for (const item of generationPlan.qualityChecklist) {
+      lines.push(`- ${item}`);
+    }
+  }
+  return `${lines.join("\n")}
+`;
+}
+var DEFAULT_WRITING_PROFILE = {
+  responseStyle: "balanced",
+  prefersLists: false,
+  headingDensity: "low",
+  noteTone: "neutral",
+  bannedPhrases: ["\u4F5C\u4E3A AI", "As an AI"]
+};
+var GenerationStrategyService = class {
+  resolvePlan(input) {
+    const normalizedMessage = input.userMessage.trim().toLowerCase();
+    if (input.source === "selection-menu" || input.source === "slash-edit") {
+      return {
+        source: input.source,
+        mode: "rewrite",
+        targetShape: "replacement",
+        previewRequired: true,
+        mustPreserveVoice: true,
+        mustUseObsidianMarkdown: true,
+        qualityChecklist: [
+          "Return only the revised replacement text.",
+          "Preserve markdown structure, links, and task syntax.",
+          "Improve clarity or structure beyond surface-level word swaps."
+        ]
+      };
+    }
+    if (this.isStructureRequest(normalizedMessage)) {
+      return {
+        source: input.source,
+        mode: "structure",
+        targetShape: "outline",
+        previewRequired: false,
+        mustPreserveVoice: true,
+        mustUseObsidianMarkdown: true,
+        qualityChecklist: [
+          "Produce a scan-friendly outline with meaningful headings or bullet groups.",
+          "Keep markdown valid for Obsidian, including task lists and links.",
+          "Do not drop concrete details that anchor the note context."
+        ]
+      };
+    }
+    if (input.source === "guardian") {
+      return {
+        source: input.source,
+        mode: "co-write",
+        targetShape: "replacement",
+        previewRequired: false,
+        mustPreserveVoice: true,
+        mustUseObsidianMarkdown: true,
+        qualityChecklist: [
+          "Continue the note naturally from the current context.",
+          "Stay close to the note voice and local structure.",
+          "Return markdown-ready text without meta commentary."
+        ]
+      };
+    }
+    return {
+      source: input.source,
+      mode: "summarize",
+      targetShape: "answer",
+      previewRequired: false,
+      mustPreserveVoice: false,
+      mustUseObsidianMarkdown: true,
+      qualityChecklist: [
+        "Answer the request directly.",
+        "Prefer markdown structure that matches the request.",
+        "Ground the answer in the available note context."
+      ]
+    };
+  }
+  buildWritingProfile(context, profile) {
+    const responseStyle = this.normalizeResponseStyle(profile?.preferences?.responseStyle);
+    const noteBody = context.contextItems.map((item) => item.content || "").join("\n");
+    const prefersLists = /(^|\n)\s*[-*]\s|\[[ xX]\]/.test(noteBody);
+    const headingMatches = noteBody.match(/^#{1,6}\s+/gm) ?? [];
+    const headingDensity = headingMatches.length >= 3 ? "high" : headingMatches.length >= 1 ? "medium" : "low";
+    const noteTone = /```|`[^`]+`|\bconst\b|\bfunction\b|\bapi\b/i.test(noteBody) ? "technical" : /\breflect|journal|feeling|思考|复盘/i.test(noteBody) ? "reflective" : /\bnext step|todo|plan|行动|待办/i.test(noteBody) ? "action-oriented" : "neutral";
+    return {
+      responseStyle,
+      prefersLists,
+      headingDensity,
+      noteTone,
+      bannedPhrases: [...DEFAULT_WRITING_PROFILE.bannedPhrases]
+    };
+  }
+  isStructureRequest(message) {
+    return /重组|大纲|outline|structure|结构/.test(message);
+  }
+  normalizeResponseStyle(value) {
+    if (value === "concise" || value === "detailed" || value === "balanced") {
+      return value;
+    }
+    return DEFAULT_WRITING_PROFILE.responseStyle;
+  }
+};
+
 // src/runtime/chat-runtime.ts
 var DefaultChatRuntime = class {
   constructor(deps) {
     this.deps = deps;
   }
+  generationStrategyService = new GenerationStrategyService();
   getTools() {
     return this.buildSkillModeTools();
   }
@@ -4364,7 +4514,24 @@ var DefaultChatRuntime = class {
       memoryContext = this.deps.memoryManager.buildContext();
     }
     const activeSkill = this.resolveRequestedSkill(request);
+    const obsidianContext = request.source ? this.createFallbackObsidianContext(request) : void 0;
+    const generationPlan = request.source && obsidianContext ? this.generationStrategyService.resolvePlan({
+      userMessage: request.userMessage,
+      source: request.source,
+      context: obsidianContext,
+      profile: request.userProfile
+    }) : void 0;
+    const writingProfile = obsidianContext ? this.generationStrategyService.buildWritingProfile(
+      obsidianContext,
+      request.userProfile
+    ) : void 0;
     let prompt = "";
+    if (request.systemPromptOverride) {
+      prompt += `[System Prompt Override]
+${request.systemPromptOverride}
+
+`;
+    }
     if (memoryContext) {
       prompt += `${memoryContext}
 
@@ -4385,6 +4552,9 @@ ${activeSkill.instructions}
       prompt += `[Selected Text: ${request.selection}]
 `;
     }
+    if (generationPlan) {
+      prompt += formatGenerationPlanBlock(generationPlan, writingProfile);
+    }
     if (isFileWriteRequest(request.userMessage)) {
       prompt += "[File Operation Contract]\n";
       prompt += `${FILE_OPERATION_CONTRACT_TEXT}
@@ -4396,7 +4566,11 @@ ${activeSkill.instructions}
       tools: this.buildSkillModeTools(activeSkill),
       activeSkillName: activeSkill?.skill.name,
       allowedToolNames: activeSkill?.tools.map((tool) => tool.name),
-      requiresFileWrite: isFileWriteRequest(request.userMessage)
+      requiresFileWrite: isFileWriteRequest(request.userMessage),
+      selection: request.selection,
+      generationPlan,
+      writingProfile,
+      systemPromptOverride: request.systemPromptOverride
     };
   }
   async query(turn) {
@@ -4431,12 +4605,13 @@ ${activeSkill.instructions}
       result = await chat.sendMessage(toolResults);
     }
     const finalText = this.resolveFinalText(turn, fileWriteState, result.text);
+    const qualityCheckedText = this.applyGenerationQuality(turn, finalText);
     if (this.deps.memoryManager) {
       const userRequest = this.extractUserRequest(turn.prompt);
       await this.deps.memoryManager.recordMessage("user", userRequest);
-      await this.deps.memoryManager.recordMessage("model", finalText);
+      await this.deps.memoryManager.recordMessage("model", qualityCheckedText);
     }
-    return finalText;
+    return qualityCheckedText;
   }
   async *queryStream(turn, signal) {
     const chat = this.deps.memoryManager ? this.deps.memoryManager.getOrCreateSession(turn.tools) : this.deps.provider.startChat(turn.tools);
@@ -4487,6 +4662,7 @@ ${activeSkill.instructions}
     }
     if (!approvalMessage) {
       fullResponseText = this.resolveFinalText(turn, fileWriteState, fullResponseText);
+      fullResponseText = this.applyGenerationQuality(turn, fullResponseText);
     }
     if (this.deps.memoryManager) {
       const userRequest = this.extractUserRequest(turn.prompt);
@@ -4530,6 +4706,19 @@ ${activeSkill.instructions}
       return modelText;
     return buildFileWriteFailureMessage(state.attempted, state.lastError);
   }
+  applyGenerationQuality(turn, modelText) {
+    if (!turn.generationPlan)
+      return modelText;
+    const evaluation = evaluateGenerationQuality({
+      originalText: turn.selection,
+      generatedText: modelText,
+      plan: turn.generationPlan
+    });
+    if (evaluation.ok)
+      return modelText;
+    return `Generation quality check failed:
+- ${evaluation.reasons.join("\n- ")}`;
+  }
   formatContextItems(contextItems) {
     if (!contextItems?.length)
       return "";
@@ -4539,6 +4728,26 @@ ${activeSkill.instructions}
       return `[Context (${item.type}): ${item.data}]
 ${item.content || ""}`;
     }).join("\n\n");
+  }
+  createFallbackObsidianContext(request) {
+    if (request.obsidianContext) {
+      return request.obsidianContext;
+    }
+    const activeFileContext = request.contextItems.find((item) => item.type === "file");
+    const path = activeFileContext?.data || "";
+    const title = path.split("/").pop()?.replace(/\.[^.]+$/, "") || "Current Note";
+    return {
+      activeNote: path ? { path, title } : null,
+      selection: request.selection ? { text: request.selection } : null,
+      activeHeading: null,
+      frontmatter: {},
+      tags: [],
+      outgoingLinks: [],
+      backlinks: [],
+      recentNotes: [],
+      explicitScopes: [],
+      contextItems: request.contextItems
+    };
   }
   buildSkillModeTools(activeSkill) {
     const tools = activeSkill?.tools?.length ? [...activeSkill.tools] : [...this.deps.toolRegistry.getAllDefinitions()];
@@ -4646,6 +4855,946 @@ function createChatRuntime(args) {
   return new DefaultChatRuntime(args);
 }
 
+// src/knowledge/compiler.ts
+var import_obsidian4 = require("obsidian");
+
+// src/knowledge/types.ts
+function normalizeTopicSlug(raw) {
+  return raw.trim().toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+}
+var LEGACY_REGISTRY_PATH = ".obsidian/obsidian-cli/knowledge-registry.json";
+var DEFAULT_WIKI_FOLDER = "Knowledge Wiki";
+var WIKI_ARTICLES_SUBFOLDER = "Articles";
+var WIKI_TOPICS_SUBFOLDER = "Topics";
+var WIKI_HEALTH_SUBFOLDER = "Health";
+var WIKI_INDEX_FILENAME = "index.md";
+var WIKI_INDEX_BASE_FILENAME = "index.base";
+var ONTOLOGY_SCHEMA_FILENAME = "_ontology.md";
+
+// src/knowledge/frontmatter.ts
+var import_obsidian3 = require("obsidian");
+function generateSourceId() {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let suffix = "";
+  for (let i = 0; i < 12; i++) {
+    suffix += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `ksrc_${suffix}`;
+}
+function getKnowledgeStatus(app, file) {
+  const cache = app.metadataCache.getFileCache(file);
+  const status = cache?.frontmatter?.knowledge_status;
+  if (!status)
+    return null;
+  if (["pending", "processing", "done", "failed"].includes(status)) {
+    return status;
+  }
+  return null;
+}
+function getSourceId(app, file) {
+  const cache = app.metadataCache.getFileCache(file);
+  return cache?.frontmatter?.knowledge_source_id ?? null;
+}
+async function setKnowledgeStatus(app, file, status, extra) {
+  try {
+    await app.fileManager.processFrontMatter(file, (fm) => {
+      fm.knowledge_status = status;
+      if (extra?.source_id)
+        fm.knowledge_source_id = extra.source_id;
+      if (extra?.compiled_at)
+        fm.knowledge_compiled_at = extra.compiled_at;
+      if (extra?.summary)
+        fm.knowledge_summary = extra.summary;
+      if (extra?.error) {
+        fm.knowledge_error = extra.error;
+      } else if (status === "done" || status === "pending") {
+        delete fm.knowledge_error;
+      }
+    });
+  } catch (e) {
+    console.warn(`[KnowledgeFrontmatter] processFrontMatter failed for ${file.path}, fixing YAML...`, e);
+    await fixAndSetFrontmatter(app, file, status, extra);
+  }
+}
+async function fixAndSetFrontmatter(app, file, status, extra) {
+  let content = await app.vault.read(file);
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (fmMatch) {
+    const fixedFm = fmMatch[1].replace(
+      /^(\s*\w[\w\s]*?):\s*(.+:.+)$/gm,
+      (_, key, val) => `${key}: "${val.replace(/"/g, '\\"')}"`
+    );
+    content = content.replace(fmMatch[1], fixedFm);
+  }
+  const fields = [`knowledge_status: ${status}`];
+  if (extra?.source_id)
+    fields.push(`knowledge_source_id: "${extra.source_id}"`);
+  if (extra?.compiled_at)
+    fields.push(`knowledge_compiled_at: "${extra.compiled_at}"`);
+  if (extra?.summary)
+    fields.push(`knowledge_summary: "${extra.summary}"`);
+  if (extra?.error)
+    fields.push(`knowledge_error: "${extra.error.replace(/"/g, '\\"')}"`);
+  if (fmMatch) {
+    const insertPoint = content.indexOf("\n---", 4);
+    content = content.slice(0, insertPoint) + "\n" + fields.join("\n") + content.slice(insertPoint);
+  } else {
+    content = "---\n" + fields.join("\n") + "\n---\n" + content;
+  }
+  await app.vault.modify(file, content);
+}
+async function ensureSourceId(app, file) {
+  const existing = getSourceId(app, file);
+  if (existing)
+    return existing;
+  const newId = generateSourceId();
+  try {
+    await app.fileManager.processFrontMatter(file, (fm) => {
+      fm.knowledge_source_id = newId;
+    });
+  } catch {
+    await fixAndSetFrontmatter(app, file, "pending", { source_id: newId });
+  }
+  return newId;
+}
+function getFilesByKnowledgeStatus(app, status, folders) {
+  const results = [];
+  const files = app.vault.getMarkdownFiles();
+  for (const file of files) {
+    if (folders && folders.length > 0) {
+      const inFolder = folders.some((f) => {
+        const normalized = f.endsWith("/") ? f : f + "/";
+        return file.path.startsWith(normalized);
+      });
+      if (!inFolder)
+        continue;
+    }
+    const cache = app.metadataCache.getFileCache(file);
+    if (cache?.frontmatter?.knowledge_status === status) {
+      results.push(file);
+    }
+  }
+  return results;
+}
+function getUnregisteredFiles(app, watchedFolders, wikiFolder) {
+  if (watchedFolders.length === 0)
+    return [];
+  const results = [];
+  const files = app.vault.getMarkdownFiles();
+  for (const file of files) {
+    if (file.path.startsWith(wikiFolder + "/"))
+      continue;
+    const inWatched = watchedFolders.some((f) => {
+      const normalized = f.endsWith("/") ? f : f + "/";
+      return file.path.startsWith(normalized);
+    });
+    if (!inWatched)
+      continue;
+    const cache = app.metadataCache.getFileCache(file);
+    if (!cache?.frontmatter?.knowledge_status) {
+      results.push(file);
+    }
+  }
+  return results;
+}
+function getSummaryFrontmatter2(app, summaryPath) {
+  const file = app.vault.getAbstractFileByPath(summaryPath);
+  if (!file || !(file instanceof import_obsidian3.TFile))
+    return null;
+  const cache = app.metadataCache.getFileCache(file);
+  if (!cache?.frontmatter)
+    return null;
+  return {
+    schema_hash: cache.frontmatter.schema_hash || void 0,
+    content_hash: cache.frontmatter.content_hash || void 0,
+    compiled_at: cache.frontmatter.compiled_at || void 0
+  };
+}
+
+// src/knowledge/ontology.ts
+function extractFrontmatter(rawContent) {
+  if (!rawContent.startsWith("---"))
+    return null;
+  const endIdx = rawContent.indexOf("\n---", 3);
+  if (endIdx === -1)
+    return null;
+  const yamlBlock = rawContent.substring(4, endIdx);
+  try {
+    return parseSimpleYaml(yamlBlock);
+  } catch {
+    return null;
+  }
+}
+function parseSimpleYaml(yaml) {
+  const result = {};
+  const lines = yaml.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim() || line.trim().startsWith("#")) {
+      i++;
+      continue;
+    }
+    const kvMatch = line.match(/^(\w[\w_]*)\s*:\s*(.*)$/);
+    if (!kvMatch) {
+      i++;
+      continue;
+    }
+    const key = kvMatch[1];
+    const inlineVal = kvMatch[2].trim();
+    if (!inlineVal && i + 1 < lines.length && lines[i + 1].match(/^\s+-/)) {
+      const arr = [];
+      i++;
+      while (i < lines.length) {
+        const arrLine = lines[i];
+        const itemMatch = arrLine.match(/^\s+-\s+(\w[\w_]*)\s*:\s*"?(.*?)"?\s*$/);
+        if (itemMatch) {
+          const obj = {};
+          obj[itemMatch[1]] = itemMatch[2];
+          i++;
+          while (i < lines.length) {
+            const propLine = lines[i];
+            const propMatch = propLine.match(/^\s{4,}(\w[\w_]*)\s*:\s*"?(.*?)"?\s*$/);
+            if (propMatch && !propLine.match(/^\s+-/)) {
+              obj[propMatch[1]] = propMatch[2];
+              i++;
+            } else {
+              break;
+            }
+          }
+          arr.push(obj);
+        } else if (arrLine.match(/^\s+-\s+"?(.*?)"?\s*$/)) {
+          arr.push(arrLine.match(/^\s+-\s+"?(.*?)"?\s*$/)[1]);
+          i++;
+        } else {
+          break;
+        }
+      }
+      result[key] = arr;
+    } else {
+      let val = inlineVal.replace(/^"(.*)"$/, "$1");
+      if (val === "true")
+        val = true;
+      else if (val === "false")
+        val = false;
+      else if (/^\d+$/.test(val))
+        val = parseInt(val, 10);
+      result[key] = val;
+      i++;
+    }
+  }
+  return result;
+}
+function parseOntologySchema(frontmatter) {
+  if (!frontmatter)
+    return null;
+  if (frontmatter.knowledge_artifact_type !== "ontology_schema")
+    return null;
+  const version = typeof frontmatter.version === "number" ? frontmatter.version : 1;
+  const categories = parseCategories(frontmatter.categories);
+  const entityTypes = parseEntityTypes(frontmatter.entity_types);
+  if (categories.length === 0 && entityTypes.length === 0)
+    return null;
+  return { version, categories, entity_types: entityTypes };
+}
+function parseCategories(raw) {
+  if (!Array.isArray(raw))
+    return [];
+  return raw.filter((c) => typeof c?.name === "string" && c.name.trim()).map((c) => ({
+    name: c.name.trim(),
+    description: typeof c.description === "string" ? c.description.trim() : ""
+  }));
+}
+function parseEntityTypes(raw) {
+  if (!Array.isArray(raw))
+    return [];
+  return raw.filter((e) => typeof e?.name === "string" && e.name.trim()).map((e) => ({
+    name: e.name.trim(),
+    description: typeof e.description === "string" ? e.description.trim() : ""
+  }));
+}
+function computeSchemaHash(rawContent) {
+  let hash = 5381;
+  for (let i = 0; i < rawContent.length; i++) {
+    hash = (hash << 5) + hash + rawContent.charCodeAt(i) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+function buildDiscoveryPrompt(stats) {
+  let prompt = `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u672C\u4F53\u5206\u6790\u5E08\u3002\u4EE5\u4E0B\u662F\u4ECE ${stats.totalCount} \u7BC7\u6587\u7AE0\u4E2D\u63D0\u53D6\u7684\u805A\u5408\u7EDF\u8BA1\uFF1A
+
+`;
+  prompt += "## \u9AD8\u9891\u4E3B\u9898\uFF08\u51FA\u73B0 3 \u6B21\u4EE5\u4E0A\uFF09\n";
+  for (const t of stats.topTopics) {
+    prompt += `- "${t.topic}"\uFF08${t.count} \u7BC7\uFF09
+`;
+  }
+  prompt += "\n## \u9AD8\u9891\u6982\u5FF5\uFF08\u51FA\u73B0 2 \u6B21\u4EE5\u4E0A\uFF09\n";
+  for (const c of stats.topConcepts) {
+    prompt += `- "${c.concept}"\uFF08${c.count} \u7BC7\uFF09
+`;
+  }
+  prompt += "\n## \u6838\u5FC3\u89C2\u70B9\u6837\u672C\uFF08\u6700\u8FD1 20 \u6761\uFF09\n";
+  for (const claim of stats.recentClaims.slice(0, 20)) {
+    prompt += `- ${claim}
+`;
+  }
+  prompt += `
+\u8BF7\u5206\u6790\u4EE5\u4E0A\u6570\u636E\uFF0C\u751F\u6210\u4E00\u4E2A\u77E5\u8BC6\u672C\u4F53 schema\uFF0C\u5305\u542B\uFF1A
+
+1. categories\uFF08\u77E5\u8BC6\u7C7B\u522B\uFF0C5-8 \u4E2A\uFF09\uFF1A\u6BCF\u4E2A\u7C7B\u522B\u6709 name \u548C description
+2. entity_types\uFF08\u5B9E\u4F53\u7C7B\u578B\uFF0C3-5 \u4E2A\uFF09\uFF1A\u6BCF\u4E2A\u7C7B\u578B\u6709 name \u548C description
+
+\u8981\u6C42\uFF1A
+- \u7C7B\u522B\u5E94\u8BE5\u80FD\u8986\u76D6\u4E0A\u8FF0\u4E3B\u9898\u548C\u89C2\u70B9\u7684 80% \u4EE5\u4E0A
+- \u7C7B\u522B\u4E4B\u95F4\u4E0D\u91CD\u53E0\uFF0C\u6BCF\u4E2A\u77E5\u8BC6\u6761\u76EE\u5E94\u8BE5\u53EA\u5C5E\u4E8E\u4E00\u4E2A\u7C7B\u522B
+- \u7528\u4E2D\u6587\u547D\u540D\uFF0Cdescription \u7528\u4E00\u53E5\u8BDD\u8BF4\u660E\u5224\u5B9A\u6807\u51C6
+
+\u4EE5 JSON \u683C\u5F0F\u8FD4\u56DE\uFF1A
+{"categories": [{"name": "...", "description": "..."}], "entity_types": [{"name": "...", "description": "..."}]}`;
+  return prompt;
+}
+function parseDiscoveryResponse(response) {
+  try {
+    const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
+    const parsed = JSON.parse(jsonStr);
+    const categories = parseCategories(parsed.categories);
+    const entityTypes = parseEntityTypes(parsed.entity_types);
+    if (categories.length === 0 && entityTypes.length === 0)
+      return null;
+    return { version: 1, categories, entity_types: entityTypes };
+  } catch {
+    return null;
+  }
+}
+function buildOntologyFile(schema4) {
+  let fm = "---\n";
+  fm += "knowledge_generated: true\n";
+  fm += "knowledge_artifact_type: ontology_schema\n";
+  fm += `version: ${schema4.version}
+`;
+  if (schema4.categories.length > 0) {
+    fm += "categories:\n";
+    for (const c of schema4.categories) {
+      fm += `  - name: "${c.name.replace(/"/g, '\\"')}"
+`;
+      fm += `    description: "${c.description.replace(/"/g, '\\"')}"
+`;
+    }
+  }
+  if (schema4.entity_types.length > 0) {
+    fm += "entity_types:\n";
+    for (const e of schema4.entity_types) {
+      fm += `  - name: "${e.name.replace(/"/g, '\\"')}"
+`;
+      fm += `    description: "${e.description.replace(/"/g, '\\"')}"
+`;
+    }
+  }
+  fm += "---\n";
+  fm += "# Knowledge Ontology Schema\n\n";
+  fm += "\u6B64\u6587\u4EF6\u5B9A\u4E49\u77E5\u8BC6\u63D0\u53D6\u7684\u672C\u4F53\u6A21\u578B\u3002\u7F16\u8F91\u4E0A\u65B9 frontmatter \u4E2D\u7684 categories \u548C entity_types \u6765\u5B9A\u5236\u63D0\u53D6\u89C4\u5219\u3002\n";
+  fm += "\u7F16\u8BD1\u5668\u4F1A\u81EA\u52A8\u8BFB\u53D6\u6B64 schema \u5E76\u6309\u5B9A\u4E49\u7684\u7C7B\u522B\u63D0\u53D6\u77E5\u8BC6\u3002\n";
+  return fm;
+}
+
+// src/knowledge/compiler.ts
+function stripFrontmatter(content) {
+  if (!content.startsWith("---"))
+    return content;
+  const endIdx = content.indexOf("---", 3);
+  if (endIdx === -1)
+    return content;
+  return content.substring(endIdx + 3).trimStart();
+}
+function computeContentHash2(content) {
+  const body = stripFrontmatter(content);
+  return computeSchemaHash(body);
+}
+function chunkDocument(content, maxChunkSize = 25e3, overlap = 500) {
+  if (content.length <= 3e4)
+    return [content];
+  const body = stripFrontmatter(content);
+  let contextPrefix = "";
+  if (content.startsWith("---")) {
+    const endIdx = content.indexOf("---", 3);
+    if (endIdx !== -1) {
+      contextPrefix = content.substring(0, endIdx + 3) + "\n";
+    }
+  }
+  contextPrefix += body.substring(0, 200) + "\n...\n\n";
+  const sections = [];
+  const headingRegex = /^#{2,3}\s+/m;
+  let remaining = body;
+  while (remaining.length > 0) {
+    if (remaining.length <= maxChunkSize) {
+      sections.push(remaining);
+      break;
+    }
+    const searchArea = remaining.substring(0, maxChunkSize);
+    let splitIdx = -1;
+    const lines = searchArea.split("\n");
+    let charCount = 0;
+    for (let i = lines.length - 1; i > 0; i--) {
+      charCount += lines[i].length + 1;
+      if (headingRegex.test(lines[i])) {
+        splitIdx = searchArea.length - charCount;
+        break;
+      }
+    }
+    if (splitIdx <= 0) {
+      const lastPara = searchArea.lastIndexOf("\n\n");
+      splitIdx = lastPara > 0 ? lastPara : maxChunkSize;
+    }
+    sections.push(remaining.substring(0, splitIdx));
+    const overlapStart = Math.max(0, splitIdx - overlap);
+    remaining = remaining.substring(overlapStart);
+  }
+  const prefixLen = contextPrefix.length;
+  const effectiveMax = maxChunkSize - prefixLen;
+  return sections.map((section, i) => {
+    const trimmed = section.length > effectiveMax ? section.substring(0, effectiveMax) : section;
+    return contextPrefix + trimmed;
+  });
+}
+function mergeExtractions(extractions) {
+  if (extractions.length === 0) {
+    return {
+      title: "",
+      author: "",
+      source_url: "",
+      created_at: "",
+      topics: [],
+      concepts: [],
+      key_claims: [],
+      review_flags: ["all_chunks_empty"]
+    };
+  }
+  if (extractions.length === 1)
+    return extractions[0];
+  const first = (field) => extractions.find((e) => {
+    const v = e[field];
+    return typeof v === "string" && v.length > 0;
+  })?.[field] || "";
+  const topicMap = /* @__PURE__ */ new Map();
+  for (const e of extractions) {
+    for (const t of e.topics) {
+      if (!topicMap.has(t.slug))
+        topicMap.set(t.slug, t);
+    }
+  }
+  const conceptSet = /* @__PURE__ */ new Set();
+  for (const e of extractions) {
+    for (const c of e.concepts)
+      conceptSet.add(c);
+  }
+  const claimSet = /* @__PURE__ */ new Set();
+  const claims = [];
+  for (const e of extractions) {
+    for (const c of e.key_claims) {
+      if (!claimSet.has(c)) {
+        claimSet.add(c);
+        claims.push(c);
+      }
+    }
+  }
+  const entityMap = /* @__PURE__ */ new Map();
+  for (const e of extractions) {
+    for (const ent of e.entities || []) {
+      const key = `${ent.name}::${ent.type}`;
+      const existing = entityMap.get(key);
+      if (!existing || ent.description.length > existing.description.length) {
+        entityMap.set(key, ent);
+      }
+    }
+  }
+  const catMap = /* @__PURE__ */ new Map();
+  for (const e of extractions) {
+    for (const ck of e.categorized_knowledge || []) {
+      if (!catMap.has(ck.category))
+        catMap.set(ck.category, /* @__PURE__ */ new Set());
+      for (const item of ck.items)
+        catMap.get(ck.category).add(item);
+    }
+  }
+  const categorized_knowledge = Array.from(catMap.entries()).map(([category, items]) => ({
+    category,
+    items: Array.from(items)
+  }));
+  const flagSet = /* @__PURE__ */ new Set();
+  for (const e of extractions) {
+    for (const f of e.review_flags)
+      flagSet.add(f);
+  }
+  flagSet.add(`compiled_from_${extractions.length}_chunks`);
+  return {
+    title: first("title"),
+    author: first("author"),
+    source_url: first("source_url"),
+    created_at: first("created_at"),
+    topics: Array.from(topicMap.values()),
+    concepts: Array.from(conceptSet),
+    key_claims: claims,
+    review_flags: Array.from(flagSet),
+    categorized_knowledge: categorized_knowledge.length > 0 ? categorized_knowledge : void 0,
+    entities: entityMap.size > 0 ? Array.from(entityMap.values()) : void 0
+  };
+}
+function buildCompilerPrompt(noteContent, notePath, ontologySchema) {
+  let prompt = `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u7F16\u8BD1\u5668\u3002\u8BF7\u4ECE\u4EE5\u4E0B\u7B14\u8BB0\u4E2D\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002
+
+\u7B14\u8BB0\u8DEF\u5F84: ${notePath}
+
+\u7B14\u8BB0\u5185\u5BB9:
+---
+${noteContent}
+---
+
+\u8BF7\u63D0\u53D6\u4EE5\u4E0B\u5B57\u6BB5\uFF0C\u4EE5 JSON \u683C\u5F0F\u8FD4\u56DE\uFF08\u4E0D\u8981\u6DFB\u52A0\u4EFB\u4F55\u5176\u4ED6\u6587\u5B57\uFF09\uFF1A
+
+\`\`\`json
+{
+  "title": "\u6587\u7AE0\u6807\u9898",
+  "author": "\u4F5C\u8005\uFF08\u5982\u679C\u80FD\u8BC6\u522B\uFF09",
+  "source_url": "\u6765\u6E90 URL\uFF08\u5982\u679C frontmatter \u4E2D\u6709 source \u5B57\u6BB5\uFF09",
+  "created_at": "\u521B\u5EFA\u65F6\u95F4\uFF08ISO 8601\uFF0C\u5982\u679C\u80FD\u8BC6\u522B\uFF09",
+  "topics": [
+    {"slug": "\u6807\u51C6\u5316\u7684-slug", "label": "\u663E\u793A\u6807\u7B7E"}
+  ],
+  "concepts": ["\u5173\u952E\u6982\u5FF51", "\u5173\u952E\u6982\u5FF52"],
+  "key_claims": ["\u6838\u5FC3\u89C2\u70B91", "\u6838\u5FC3\u89C2\u70B92"],
+  "review_flags": ["\u4F4E\u7F6E\u4FE1\u5EA6\u63D0\u53D6\u8BF4\u660E\uFF08\u5982\u6709\uFF09"]
+}
+\`\`\`
+
+\u89C4\u5219\uFF1A
+- topics \u7684 slug \u5FC5\u987B\u662F\u5C0F\u5199\u3001\u8FDE\u5B57\u7B26\u5206\u9694\u7684\u82F1\u6587\u6216\u4E2D\u6587
+- \u5982\u679C\u65E0\u6CD5\u786E\u5B9A\u67D0\u4E2A\u5B57\u6BB5\uFF0C\u7559\u7A7A\u5B57\u7B26\u4E32\u6216\u7A7A\u6570\u7EC4
+- review_flags \u7528\u4E8E\u6807\u8BB0\u4F60\u4E0D\u786E\u5B9A\u7684\u63D0\u53D6\u7ED3\u679C
+- \u4E0D\u8981\u7F16\u9020\u4FE1\u606F\uFF0C\u53EA\u63D0\u53D6\u7B14\u8BB0\u4E2D\u5B9E\u9645\u5B58\u5728\u7684\u5185\u5BB9`;
+  if (ontologySchema) {
+    prompt += "\n\n## \u672C\u4F53\u6A21\u578B\u63D0\u53D6\u8981\u6C42\n\n\u8BF7\u989D\u5916\u6309\u4EE5\u4E0B\u77E5\u8BC6\u7C7B\u522B\u5BF9\u63D0\u53D6\u5185\u5BB9\u8FDB\u884C\u5206\u7C7B\uFF1A\n\n";
+    for (const c of ontologySchema.categories) {
+      prompt += `- "${c.name}"\uFF1A${c.description}
+`;
+    }
+    if (ontologySchema.entity_types.length > 0) {
+      prompt += "\n\u8BF7\u989D\u5916\u8BC6\u522B\u4EE5\u4E0B\u7C7B\u578B\u7684\u5B9E\u4F53\uFF1A\n\n";
+      for (const e of ontologySchema.entity_types) {
+        prompt += `- "${e.name}"\uFF1A${e.description}
+`;
+      }
+    }
+    prompt += `
+\u5728 JSON \u8F93\u51FA\u4E2D\u65B0\u589E\u4EE5\u4E0B\u5B57\u6BB5\uFF1A
+
+"categorized_knowledge": [
+  {"category": "\u7C7B\u522B\u540D", "items": ["\u8BE5\u7C7B\u522B\u4E0B\u7684\u6761\u76EE1", "\u6761\u76EE2"]}
+],
+"entities": [
+  {"name": "\u5B9E\u4F53\u540D", "type": "\u5B9E\u4F53\u7C7B\u578B", "description": "\u4E00\u53E5\u8BDD\u63CF\u8FF0"}
+]
+
+\u89C4\u5219\uFF1A
+- \u6BCF\u4E2A item \u53EA\u5F52\u5165\u6700\u5339\u914D\u7684\u4E00\u4E2A category\uFF0C\u4E0D\u8981\u91CD\u590D\u5F52\u7C7B
+- \u5982\u679C\u6587\u7AE0\u5185\u5BB9\u4E0D\u6D89\u53CA\u67D0\u4E2A category\uFF0C\u8BE5 category \u7684 items \u4E3A\u7A7A\u6570\u7EC4
+- \u5B9E\u4F53\u540D\u4F7F\u7528\u6587\u7AE0\u4E2D\u6700\u5E38\u89C1\u7684\u79F0\u547C\u5F62\u5F0F`;
+  }
+  return prompt;
+}
+function parseCompilerResponse(response) {
+  try {
+    const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
+    const parsed = JSON.parse(jsonStr);
+    if (typeof parsed.title !== "string")
+      return null;
+    const topics = (parsed.topics || []).map((t) => ({
+      slug: normalizeTopicSlug(t.slug || t.label || ""),
+      label: t.label || t.slug || ""
+    })).filter((t) => t.slug.length > 0);
+    const reviewFlags = Array.isArray(parsed.review_flags) ? parsed.review_flags : [];
+    let categorized_knowledge;
+    let entities;
+    try {
+      if (Array.isArray(parsed.categorized_knowledge)) {
+        categorized_knowledge = parsed.categorized_knowledge.filter((ck) => typeof ck?.category === "string" && Array.isArray(ck?.items)).map((ck) => ({
+          category: ck.category,
+          items: ck.items.filter((i) => typeof i === "string")
+        }));
+      }
+      if (Array.isArray(parsed.entities)) {
+        entities = parsed.entities.filter((e) => typeof e?.name === "string" && typeof e?.type === "string").map((e) => ({
+          name: e.name,
+          type: e.type,
+          description: typeof e.description === "string" ? e.description : ""
+        }));
+      }
+    } catch {
+      reviewFlags.push("ontology_extraction_failed");
+      console.warn("[parseCompilerResponse] Ontology fields parse failed, base fields preserved");
+    }
+    return {
+      title: parsed.title || "",
+      author: parsed.author || "",
+      source_url: parsed.source_url || "",
+      created_at: parsed.created_at || "",
+      topics,
+      concepts: Array.isArray(parsed.concepts) ? parsed.concepts : [],
+      key_claims: Array.isArray(parsed.key_claims) ? parsed.key_claims : [],
+      review_flags: reviewFlags,
+      categorized_knowledge,
+      entities
+    };
+  } catch {
+    return null;
+  }
+}
+function buildSummaryMarkdown(sourceId, extraction, sourcePath, schemaHash, contentHash) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let fm = "---\n";
+  fm += "knowledge_generated: true\n";
+  fm += `knowledge_source_id: "${sourceId}"
+`;
+  fm += `title: "${extraction.title.replace(/"/g, '\\"')}"
+`;
+  if (extraction.source_url)
+    fm += `source_url: "${extraction.source_url}"
+`;
+  if (extraction.author)
+    fm += `author: "${extraction.author.replace(/"/g, '\\"')}"
+`;
+  if (extraction.created_at)
+    fm += `created_at: "${extraction.created_at}"
+`;
+  fm += `compiled_at: "${now}"
+`;
+  if (schemaHash)
+    fm += `schema_hash: "${schemaHash}"
+`;
+  if (contentHash)
+    fm += `content_hash: "${contentHash}"
+`;
+  if (extraction.topics.length > 0) {
+    fm += "topics:\n";
+    for (const t of extraction.topics) {
+      fm += `  - "${t.label.replace(/"/g, '\\"')}"
+`;
+    }
+  }
+  if (extraction.concepts.length > 0) {
+    fm += `concepts: ${JSON.stringify(extraction.concepts)}
+`;
+  }
+  if (extraction.key_claims.length > 0) {
+    fm += "key_claims:\n";
+    for (const claim of extraction.key_claims) {
+      fm += `  - "${claim.replace(/"/g, '\\"')}"
+`;
+    }
+  }
+  if (extraction.review_flags.length > 0) {
+    fm += `review_flags: ${JSON.stringify(extraction.review_flags)}
+`;
+  } else {
+    fm += "review_flags: []\n";
+  }
+  if (extraction.categorized_knowledge && extraction.categorized_knowledge.length > 0) {
+    fm += "categorized_knowledge:\n";
+    for (const ck of extraction.categorized_knowledge) {
+      fm += `  - category: "${ck.category.replace(/"/g, '\\"')}"
+`;
+      fm += `    items: ${JSON.stringify(ck.items)}
+`;
+    }
+  }
+  if (extraction.entities && extraction.entities.length > 0) {
+    fm += "entities:\n";
+    for (const e of extraction.entities) {
+      fm += `  - name: "${e.name.replace(/"/g, '\\"')}"
+`;
+      fm += `    type: "${e.type.replace(/"/g, '\\"')}"
+`;
+      fm += `    description: "${e.description.replace(/"/g, '\\"')}"
+`;
+    }
+  }
+  fm += "---\n";
+  let body = `# ${extraction.title}
+
+`;
+  body += "## \u6458\u8981\n\n";
+  if (extraction.key_claims.length > 0) {
+    body += extraction.key_claims.slice(0, 2).map((c) => `- ${c}`).join("\n") + "\n";
+  } else {
+    body += "\uFF08\u65E0\u6838\u5FC3\u89C2\u70B9\u63D0\u53D6\uFF09\n";
+  }
+  body += "\n## \u6838\u5FC3\u89C2\u70B9\n\n";
+  if (extraction.key_claims.length > 0) {
+    body += extraction.key_claims.map((c) => `- ${c}`).join("\n") + "\n";
+  } else {
+    body += "\uFF08\u65E0\uFF09\n";
+  }
+  body += "\n## \u5173\u952E\u6982\u5FF5\n\n";
+  if (extraction.concepts.length > 0) {
+    body += extraction.concepts.map((c) => `- ${c}`).join("\n") + "\n";
+  } else {
+    body += "\uFF08\u65E0\uFF09\n";
+  }
+  if (extraction.categorized_knowledge && extraction.categorized_knowledge.length > 0) {
+    body += "\n## \u77E5\u8BC6\u5206\u7C7B\n\n";
+    for (const ck of extraction.categorized_knowledge) {
+      if (ck.items.length > 0) {
+        body += `### ${ck.category}
+
+`;
+        body += ck.items.map((i) => `- ${i}`).join("\n") + "\n\n";
+      }
+    }
+  }
+  if (extraction.entities && extraction.entities.length > 0) {
+    body += "\n## \u5B9E\u4F53\n\n";
+    for (const e of extraction.entities) {
+      body += `- **${e.name}**\uFF08${e.type}\uFF09\uFF1A${e.description}
+`;
+    }
+    body += "\n";
+  }
+  body += "\n## \u539F\u59CB\u6765\u6E90\n\n";
+  if (sourcePath) {
+    body += `[[${sourcePath}]]
+`;
+  } else {
+    body += "\u539F\u59CB\u6765\u6E90\u5DF2\u5220\u9664\u3002\n";
+  }
+  return fm + body;
+}
+var KnowledgeCompiler = class {
+  constructor(app, generateFn, wikiFolder) {
+    this.app = app;
+    this.generateFn = generateFn;
+    this.wikiFolder = wikiFolder;
+  }
+  /**
+   * 编译单篇笔记
+   * 短文章（<= 30000 字符）走单次 AI 调用
+   * 长文章走 Map-Reduce：分块并行提取 + 纯函数合并
+   * @param schema 可选的 ontology schema，传入时注入到 prompt
+   * @param schemaHash 可选的 schema 内容 hash，写入 summary frontmatter
+   * @param concurrency Map 阶段并行度（默认 3）
+   */
+  async compileNote(file, schema4, schemaHash, concurrency = 3) {
+    const sourceId = await ensureSourceId(this.app, file);
+    await setKnowledgeStatus(this.app, file, "processing");
+    try {
+      const content = await this.app.vault.read(file);
+      const contentHash = computeContentHash2(content);
+      let extraction;
+      if (content.length <= 3e4) {
+        const prompt = buildCompilerPrompt(content, file.path, schema4);
+        const response = await this.generateFn(prompt);
+        extraction = parseCompilerResponse(response);
+      } else {
+        const chunks = chunkDocument(content);
+        const allResults = [];
+        for (let i = 0; i < chunks.length; i += concurrency) {
+          const batch = chunks.slice(i, i + concurrency);
+          const batchResults = await Promise.allSettled(
+            batch.map(async (chunk, batchIdx) => {
+              const chunkIdx = i + batchIdx;
+              const chunkPrompt = buildCompilerPrompt(chunk, file.path, schema4);
+              const prefix = `[\u6CE8\u610F\uFF1A\u8FD9\u662F\u6587\u6863\u7684\u7B2C ${chunkIdx + 1}/${chunks.length} \u5757\uFF0C\u8BF7\u53EA\u63D0\u53D6\u672C\u5757\u4E2D\u7684\u4FE1\u606F]
+
+`;
+              const response = await this.generateFn(prefix + chunkPrompt);
+              return parseCompilerResponse(response);
+            })
+          );
+          allResults.push(...batchResults);
+        }
+        const extractions = [];
+        const failedChunks = [];
+        allResults.forEach((r, idx) => {
+          if (r.status === "fulfilled" && r.value) {
+            extractions.push(r.value);
+          } else {
+            failedChunks.push(idx);
+          }
+        });
+        if (extractions.length === 0) {
+          await setKnowledgeStatus(this.app, file, "failed", {
+            error: `All ${chunks.length} chunks failed extraction`
+          });
+          return null;
+        }
+        extraction = mergeExtractions(extractions);
+        for (const idx of failedChunks) {
+          extraction.review_flags.push(`chunk_${idx}_extraction_failed`);
+        }
+      }
+      if (!extraction) {
+        await setKnowledgeStatus(this.app, file, "failed", {
+          error: "Failed to parse AI response"
+        });
+        return null;
+      }
+      const summaryPath = `${this.wikiFolder}/Articles/${sourceId}.md`;
+      const summaryContent = buildSummaryMarkdown(
+        sourceId,
+        extraction,
+        file.path,
+        schemaHash,
+        contentHash
+      );
+      const articlesDir = `${this.wikiFolder}/Articles`;
+      if (!this.app.vault.getAbstractFileByPath(articlesDir)) {
+        await this.app.vault.createFolder(articlesDir);
+      }
+      const existingFile = this.app.vault.getAbstractFileByPath(summaryPath);
+      if (existingFile && existingFile instanceof import_obsidian4.TFile) {
+        const existingContent = await this.app.vault.read(existingFile);
+        if (!existingContent.includes("knowledge_generated: true")) {
+          await setKnowledgeStatus(this.app, file, "failed", {
+            error: "Target file exists and is not a generated file"
+          });
+          return null;
+        }
+        await this.app.vault.modify(existingFile, summaryContent);
+      } else {
+        await this.app.vault.create(summaryPath, summaryContent);
+      }
+      await setKnowledgeStatus(this.app, file, "done", {
+        source_id: sourceId,
+        compiled_at: (/* @__PURE__ */ new Date()).toISOString(),
+        summary: summaryPath
+      });
+      return summaryPath;
+    } catch (e) {
+      try {
+        await setKnowledgeStatus(this.app, file, "failed", { error: e.message });
+      } catch {
+      }
+      return null;
+    }
+  }
+  /**
+   * 批量编译所有 pending 项
+   * @param schema 可选的 ontology schema，整个 batch 使用同一份
+   * @param schemaHash 可选的 schema 内容 hash
+   */
+  async compileAllPending(maxBatch = 50, onProgress, schema4, schemaHash, concurrency) {
+    const pendingFiles = getFilesByKnowledgeStatus(this.app, "pending").slice(0, maxBatch);
+    let success = 0;
+    let failed = 0;
+    for (let i = 0; i < pendingFiles.length; i++) {
+      const file = pendingFiles[i];
+      onProgress?.(i + 1, pendingFiles.length, file.path);
+      const result = await this.compileNote(file, schema4, schemaHash, concurrency);
+      if (result) {
+        success++;
+      } else {
+        failed++;
+      }
+    }
+    return { success, failed };
+  }
+};
+
+// src/services/operation-audit-log.ts
+var OPERATION_AUDIT_LOG_DIR = ".obsidian/obsidian-cli";
+var OPERATION_AUDIT_LOG_PATH = `${OPERATION_AUDIT_LOG_DIR}/operations.json`;
+var OperationAuditLog = class {
+  constructor(app, options = {}) {
+    this.app = app;
+    this.maxRecords = options.maxRecords ?? 200;
+    this.path = options.path ?? OPERATION_AUDIT_LOG_PATH;
+    this.dir = this.path.split("/").slice(0, -1).join("/");
+  }
+  maxRecords;
+  path;
+  dir;
+  async list() {
+    const file = await this.readFile();
+    return this.sortAndClone(file.operations);
+  }
+  async record(input) {
+    const file = await this.readFile();
+    const record = this.createRecord(input);
+    const operations = [record, ...file.operations].sort((a, b) => b.timestamp - a.timestamp).slice(0, this.maxRecords);
+    await this.writeFile({
+      version: 1,
+      operations
+    });
+    return this.cloneRecord(record);
+  }
+  createRecord(input) {
+    const timestamp2 = input.timestamp ?? Date.now();
+    return {
+      id: input.id ?? `${timestamp2}-${Math.random().toString(36).slice(2, 10)}`,
+      action: input.action,
+      target: input.target,
+      timestamp: timestamp2,
+      provider: input.provider,
+      model: input.model,
+      approvalSource: input.approvalSource,
+      previousContentHash: input.previousContentHash,
+      undoable: input.undoable
+    };
+  }
+  async readFile() {
+    const adapter = this.getAdapter();
+    try {
+      if (!await adapter.exists(this.path)) {
+        return this.emptyFile();
+      }
+      const raw = await adapter.read(this.path);
+      const parsed = JSON.parse(raw);
+      if (!this.isOperationAuditFile(parsed)) {
+        return this.emptyFile();
+      }
+      return {
+        version: 1,
+        operations: parsed.operations.map((record) => this.cloneRecord(record))
+      };
+    } catch {
+      return this.emptyFile();
+    }
+  }
+  async writeFile(file) {
+    await this.ensureDirectory(this.dir);
+    await this.getAdapter().write(this.path, JSON.stringify(file, null, 2));
+  }
+  async ensureDirectory(path) {
+    if (!path)
+      return;
+    const adapter = this.getAdapter();
+    const parts = path.split("/").filter(Boolean);
+    let current = "";
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      if (!await adapter.exists(current)) {
+        await adapter.mkdir(current);
+      }
+    }
+  }
+  getAdapter() {
+    return this.app.vault.adapter;
+  }
+  emptyFile() {
+    return { version: 1, operations: [] };
+  }
+  isOperationAuditFile(value) {
+    return value && value.version === 1 && Array.isArray(value.operations) && value.operations.every((record) => typeof record?.id === "string" && typeof record.action === "string" && typeof record.target === "string" && typeof record.timestamp === "number" && (record.provider === void 0 || typeof record.provider === "string") && (record.model === void 0 || typeof record.model === "string") && (record.approvalSource === "user-click" || record.approvalSource === "direct-write") && (record.previousContentHash === void 0 || typeof record.previousContentHash === "string") && typeof record.undoable === "boolean");
+  }
+  sortAndClone(records) {
+    return [...records].sort((a, b) => b.timestamp - a.timestamp).map((record) => this.cloneRecord(record));
+  }
+  cloneRecord(record) {
+    return { ...record };
+  }
+};
+
 // src/services/model-service.ts
 var ModelService = class {
   constructor(app, settings, toolRegistry, skillRegistry) {
@@ -4653,6 +5802,7 @@ var ModelService = class {
     this.settings = settings;
     this.toolRegistry = toolRegistry;
     this.skillRegistry = skillRegistry;
+    this.operationAuditLog = new OperationAuditLog(this.app);
     this.initializeProvider();
     this.setupErrorHandlers();
   }
@@ -4660,9 +5810,11 @@ var ModelService = class {
   memoryManager = null;
   modelListCache = /* @__PURE__ */ new Map();
   modelListCacheTtlMs = 10 * 60 * 1e3;
+  generationStrategyService = new GenerationStrategyService();
   providerChangedCallbacks = [];
   skillRegistry;
   toolRegistry;
+  operationAuditLog;
   initializeProvider() {
     const config = this.getActiveProviderConfig();
     if (!config) {
@@ -4838,13 +5990,13 @@ var ModelService = class {
       return options;
     return [{ value: currentModel, label: `${currentModel} (Current)` }, ...options];
   }
-  async chat(userMessage, contextItems, selection = "") {
+  async chat(userMessage, contextItems, selection = "", source = "shell", obsidianContext, userProfile, systemPromptOverride) {
     logger.info(`Processing chat message: ${userMessage.substring(0, 50)}...`, "ModelService.chat");
     if (!this.hasValidConfig()) {
       const providerLabel = this.getActiveProviderConfig()?.label || "AI";
       const error = `${providerLabel} API Key not configured!`;
       logger.error(error, new Error(error), "ModelService.chat");
-      new import_obsidian3.Notice(error);
+      new import_obsidian5.Notice(error);
       return "Error: API Key missing.";
     }
     try {
@@ -4852,7 +6004,11 @@ var ModelService = class {
       const preparedTurn = await runtime.prepareTurn({
         userMessage,
         contextItems,
-        selection
+        selection,
+        source,
+        obsidianContext,
+        userProfile: userProfile ?? this.getUserProfile(),
+        systemPromptOverride
       });
       return await runtime.query(preparedTurn);
     } catch (e) {
@@ -4860,7 +6016,7 @@ var ModelService = class {
       return `Error: ${e.message}`;
     }
   }
-  async *chatStream(userMessage, contextItems, selection = "", signal) {
+  async *chatStream(userMessage, contextItems, selection = "", source = "shell", obsidianContext, userProfile, signal) {
     logger.info(`Processing streaming chat: ${userMessage.substring(0, 50)}...`, "ModelService.chatStream");
     if (!this.hasValidConfig()) {
       const providerLabel = this.getActiveProviderConfig()?.label || "AI";
@@ -4868,13 +6024,18 @@ var ModelService = class {
       return;
     }
     try {
+      const resolvedSource = this.isAbortSignalValue(source) ? "shell" : source;
+      const resolvedSignal = this.isAbortSignalValue(source) ? source : signal;
       const runtime = this.createChatRuntime();
       const preparedTurn = await runtime.prepareTurn({
         userMessage,
         contextItems,
-        selection
+        selection,
+        source: resolvedSource,
+        obsidianContext,
+        userProfile: userProfile ?? this.getUserProfile()
       });
-      for await (const event of runtime.queryStream(preparedTurn, signal)) {
+      for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
         yield event;
       }
     } catch (e) {
@@ -4885,12 +6046,19 @@ var ModelService = class {
       yield { type: "error", message: e.message };
     }
   }
-  async generate(prompt, systemPrompt) {
+  async generate(prompt, systemPrompt, source = "shell", obsidianContext, userProfile) {
     if (!this.hasValidConfig()) {
       throw new Error(`${this.getActiveProviderConfig()?.label || "AI"} API Key not configured`);
     }
     try {
-      const result = await this.provider.generateContent(prompt, systemPrompt);
+      const shouldApplyGenerationPlan = source !== "shell" || !!obsidianContext || !!userProfile;
+      const finalPrompt = shouldApplyGenerationPlan ? this.buildPlannedGenerationPrompt(
+        prompt,
+        source,
+        obsidianContext,
+        userProfile ?? this.getUserProfile()
+      ) : prompt;
+      const result = await this.provider.generateContent(finalPrompt, systemPrompt);
       return result.text;
     } catch (e) {
       logger.error("Stateless generation failed", e, "ModelService.generate");
@@ -4951,9 +6119,25 @@ var ModelService = class {
     });
   }
   async executeApprovedAction(action, args) {
-    return this.toolRegistry.execute(action, {
+    const result = await this.toolRegistry.execute(action, {
       ...args,
       approved: true
+    });
+    await this.recordOperationAudit({
+      action,
+      target: getFileWriteResultPath(action, result, args) || action,
+      approvalSource: "user-click",
+      undoable: this.isUndoableApprovedAction(action)
+    });
+    return result;
+  }
+  async recordDirectWrite(input) {
+    await this.recordOperationAudit({
+      action: input.action,
+      target: input.target,
+      approvalSource: "direct-write",
+      previousContent: input.previousContent,
+      undoable: input.undoable ?? true
     });
   }
   createChatRuntime() {
@@ -4967,6 +6151,52 @@ var ModelService = class {
   isAbortError(error) {
     return error?.name === "AbortError";
   }
+  isAbortSignalValue(value) {
+    return !!value && typeof value === "object" && "aborted" in value && typeof value.addEventListener === "function";
+  }
+  async recordOperationAudit(input) {
+    if (!input.target)
+      return;
+    const config = this.getActiveProviderConfig();
+    await this.operationAuditLog.record({
+      action: input.action,
+      target: input.target,
+      provider: this.settings?.activeProvider,
+      model: config?.model,
+      approvalSource: input.approvalSource,
+      previousContentHash: input.previousContent ? computeContentHash2(input.previousContent) : void 0,
+      undoable: input.undoable
+    });
+  }
+  isUndoableApprovedAction(action) {
+    return !["delete_note", "rename_note"].includes(action);
+  }
+  buildPlannedGenerationPrompt(prompt, source, obsidianContext, userProfile) {
+    const generationStrategyService = this.generationStrategyService ?? new GenerationStrategyService();
+    const context = obsidianContext ?? {
+      activeNote: null,
+      selection: null,
+      activeHeading: null,
+      frontmatter: {},
+      tags: [],
+      outgoingLinks: [],
+      backlinks: [],
+      recentNotes: [],
+      explicitScopes: [],
+      contextItems: []
+    };
+    const plan = generationStrategyService.resolvePlan({
+      userMessage: prompt,
+      source,
+      context,
+      profile: userProfile
+    });
+    const writingProfile = generationStrategyService.buildWritingProfile(
+      context,
+      userProfile
+    );
+    return `${formatGenerationPlanBlock(plan, writingProfile)}User Request: ${prompt}`;
+  }
   async shutdown() {
     window.removeEventListener("unhandledrejection", this.unhandledRejectionHandler);
     await this.flushMemorySession();
@@ -4974,7 +6204,7 @@ var ModelService = class {
 };
 
 // src/settings.ts
-var import_obsidian4 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 var SETTINGS_SECTIONS = [
   {
     id: "connection",
@@ -5097,7 +6327,7 @@ function getSectionMeta(id) {
   }
   return section;
 }
-var SettingTab = class extends import_obsidian4.PluginSettingTab {
+var SettingTab = class extends import_obsidian6.PluginSettingTab {
   plugin;
   renderToken = 0;
   activeSectionId = "connection";
@@ -5325,7 +6555,7 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
       cls: `ocli-settings-inline-note ${activeConfig.apiKey.trim() ? "is-success" : "is-warning"}`,
       text: badgeStatus
     });
-    new import_obsidian4.Setting(containerEl).setName("AI Provider").setDesc("Select the provider configuration to use.").addDropdown((drop) => {
+    new import_obsidian6.Setting(containerEl).setName("AI Provider").setDesc("Select the provider configuration to use.").addDropdown((drop) => {
       Object.entries(settings.providers).forEach(([id, config]) => {
         const configured = !!config.apiKey.trim();
         drop.addOption(id, configured ? config.label : `${config.label} !`);
@@ -5339,7 +6569,7 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
         this.display();
       });
     });
-    new import_obsidian4.Setting(containerEl).setName("API Key").setDesc(`Enter your ${activeConfig.label} API key.`).addText((text) => this.configureSecretInput(text, activeConfig)).addButton((btn) => btn.setButtonText(this.revealApiKey ? "Hide" : "Reveal").onClick(() => {
+    new import_obsidian6.Setting(containerEl).setName("API Key").setDesc(`Enter your ${activeConfig.label} API key.`).addText((text) => this.configureSecretInput(text, activeConfig)).addButton((btn) => btn.setButtonText(this.revealApiKey ? "Hide" : "Reveal").onClick(() => {
       this.revealApiKey = !this.revealApiKey;
       this.display();
     })).addButton((btn) => btn.setButtonText("Clear").onClick(async () => {
@@ -5350,13 +6580,13 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
       this.display();
     }));
     if (this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl) {
-      new import_obsidian4.Setting(containerEl).setName("Base URL").setDesc("Override the API endpoint for compatible providers.").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(activeConfig.baseUrl).onChange(async (value) => {
+      new import_obsidian6.Setting(containerEl).setName("Base URL").setDesc("Override the API endpoint for compatible providers.").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(activeConfig.baseUrl).onChange(async (value) => {
         activeConfig.baseUrl = value;
         this.resetConnectionTestStatus();
         await this.persistSettings();
       }));
     }
-    new import_obsidian4.Setting(containerEl).setName("Model").setDesc("Choose the model loaded from the active provider.").addDropdown((drop) => {
+    new import_obsidian6.Setting(containerEl).setName("Model").setDesc("Choose the model loaded from the active provider.").addDropdown((drop) => {
       if (activeConfig.model) {
         drop.addOption(activeConfig.model, `${activeConfig.model} (Current)`);
       } else {
@@ -5400,7 +6630,7 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
       this.revealApiKey = false;
       this.resetConnectionTestStatus();
       await this.persistSettings();
-      new import_obsidian4.Notice("Provider deleted");
+      new import_obsidian6.Notice("Provider deleted");
       this.display();
     }, "danger", !deletion.canDelete);
     this.createActionButton(actions, this.connectionTestStatus.state === "testing" ? "Testing..." : "Test Connection", async () => {
@@ -5458,17 +6688,17 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
     return text;
   }
   renderRuntimeSection(containerEl) {
-    new import_obsidian4.Setting(containerEl).setName("Context Window Limit").setDesc("Limit token usage. Higher values allow reading larger files but cost more.").addSlider((slider) => slider.setLimits(1e4, 1e6, 1e4).setValue(this.plugin.settings.contextWindow).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Context Window Limit").setDesc("Limit token usage. Higher values allow reading larger files but cost more.").addSlider((slider) => slider.setLimits(1e4, 1e6, 1e4).setValue(this.plugin.settings.contextWindow).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.contextWindow = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Customize System Prompt").setDesc("Override the default AI personality.").addToggle((toggle) => toggle.setValue(this.plugin.settings.customizePrompt).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Customize System Prompt").setDesc("Override the default AI personality.").addToggle((toggle) => toggle.setValue(this.plugin.settings.customizePrompt).onChange(async (value) => {
       this.plugin.settings.customizePrompt = value;
       await this.persistSettings();
       this.display();
     }));
     if (this.plugin.settings.customizePrompt) {
-      new import_obsidian4.Setting(containerEl).setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("You are a helpful assistant...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
+      new import_obsidian6.Setting(containerEl).setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("You are a helpful assistant...").setValue(this.plugin.settings.systemPrompt).onChange(async (value) => {
         this.plugin.settings.systemPrompt = value;
         await this.persistSettings();
       }));
@@ -5481,109 +6711,120 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
     }
   }
   renderGuardianSection(containerEl) {
-    new import_obsidian4.Setting(containerEl).setName("Enable Guardian").setDesc("Allow AI to passively analyze text and offer suggestions.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableGuardian).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Enable Guardian").setDesc("Allow AI to passively analyze text and offer suggestions.").addToggle((toggle) => toggle.setValue(this.plugin.settings.enableGuardian).onChange(async (value) => {
       this.plugin.settings.enableGuardian = value;
       await this.persistSettings();
       this.display();
     }));
     if (!this.plugin.settings.enableGuardian)
       return;
-    new import_obsidian4.Setting(containerEl).setName("Auto Mode").setDesc("Automatically analyze text after 5 seconds of inactivity.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.guardianAutoMode).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Auto Mode").setDesc("Automatically analyze text after 5 seconds of inactivity.").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.guardianAutoMode).onChange(async (value) => {
       this.plugin.settings.guardianAutoMode = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Manual Mode Hotkey").setDesc("Open the Obsidian hotkey settings for Guardian.").addButton((btn) => btn.setButtonText("Configure Hotkey").onClick(() => {
+    new import_obsidian6.Setting(containerEl).setName("Manual Mode Hotkey").setDesc("Open the Obsidian hotkey settings for Guardian.").addButton((btn) => btn.setButtonText("Configure Hotkey").onClick(() => {
       this.app.setting.openTabById("hotkeys");
       this.app.setting.activeTab.setQuery("Guardian: Manual Trigger");
     }));
-    new import_obsidian4.Setting(containerEl).setName("Guardian Sensitivity").setDesc("Low (manual) to high (copilot style).").addSlider((slider) => slider.setLimits(0, 100, 25).setValue(this.plugin.settings.guardianSensitivity).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Guardian Sensitivity").setDesc("Low (manual) to high (copilot style).").addSlider((slider) => slider.setLimits(0, 100, 25).setValue(this.plugin.settings.guardianSensitivity).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.guardianSensitivity = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("UI Style").setDesc("Choose how suggestions appear in the editor.").addDropdown((drop) => drop.addOption("ghost", "Ghost Text (Inline)").addOption("gutter", "Gutter Dot (Subtle)").addOption("hybrid", "Hybrid (Both)").setValue(this.plugin.settings.guardianUIStyle).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("UI Style").setDesc("Choose how suggestions appear in the editor.").addDropdown((drop) => drop.addOption("ghost", "Ghost Text (Inline)").addOption("gutter", "Gutter Dot (Subtle)").addOption("hybrid", "Hybrid (Both)").setValue(this.plugin.settings.guardianUIStyle).onChange(async (value) => {
       this.plugin.settings.guardianUIStyle = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Privacy Mode").setDesc("Anonymize names and emails before sending. Reduces accuracy.").addToggle((toggle) => toggle.setValue(this.plugin.settings.privacyMode).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Privacy Mode").setDesc("Anonymize names and emails before sending. Reduces accuracy.").addToggle((toggle) => toggle.setValue(this.plugin.settings.privacyMode).onChange(async (value) => {
       this.plugin.settings.privacyMode = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Ignored Folders").setDesc("Path patterns to ignore, one per line.").setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Private/\nSecrets/\nTemplates/").setValue(this.plugin.settings.ignoredFolders).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Ignored Folders").setDesc("Path patterns to ignore, one per line.").setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Private/\nSecrets/\nTemplates/").setValue(this.plugin.settings.ignoredFolders).onChange(async (value) => {
       this.plugin.settings.ignoredFolders = value;
       await this.persistSettings();
     }));
   }
   renderPermissionsSection(containerEl) {
-    new import_obsidian4.Setting(containerEl).setName("Allow File Creation").setDesc("Let AI create new notes (`/new`).").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileCreation).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Vault Write Scope").setDesc("Choose how broadly AI can write inside your vault.").addDropdown((drop) => drop.addOption("read-only", "Read Only").addOption("current-note", "Current Note").addOption("configured-folders", "Configured Folders").addOption("all-vault", "All Vault").setValue(this.plugin.settings.vaultWriteScope).onChange(async (value) => {
+      this.plugin.settings.vaultWriteScope = value;
+      await this.persistSettings();
+      this.display();
+    }));
+    if (this.plugin.settings.vaultWriteScope === "configured-folders") {
+      new import_obsidian6.Setting(containerEl).setName("Writable Folders").setDesc("One vault folder per line. AI can create or modify files only inside these folders.").setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Projects/\nInbox/").setValue(this.plugin.settings.vaultWriteAllowedFolders.join("\n")).onChange(async (value) => {
+        this.plugin.settings.vaultWriteAllowedFolders = value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+        await this.persistSettings();
+      }));
+    }
+    new import_obsidian6.Setting(containerEl).setName("Allow File Creation").setDesc("Allow note and file creation after the selected write scope is satisfied.").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileCreation).onChange(async (value) => {
       this.plugin.settings.allowFileCreation = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Allow File Modification").setDesc("Let AI modify notes other than the one you are editing.").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileModification).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Allow File Modification").setDesc("Allow note and file modification after the selected write scope is satisfied.").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowFileModification).onChange(async (value) => {
       this.plugin.settings.allowFileModification = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Allow Plugin Control").setDesc("Let AI execute commands from other plugins.").setClass("gemini-danger-setting").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowPluginControl).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Allow Plugin Control").setDesc("Let AI execute commands from other plugins.").setClass("gemini-danger-setting").addToggle((toggle) => toggle.setValue(this.plugin.settings.allowPluginControl).onChange(async (value) => {
       if (value)
-        new import_obsidian4.Notice("Permission granted: AI can now control your plugins.");
+        new import_obsidian6.Notice("Permission granted: AI can now control your plugins.");
       this.plugin.settings.allowPluginControl = value;
       await this.persistSettings();
       this.display();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Confirm Executions").setDesc("Always ask for confirmation before writing files or running commands.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmExecutions).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Confirm Executions").setDesc("Always ask for confirmation before writing files or running commands.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmExecutions).onChange(async (value) => {
       this.plugin.settings.confirmExecutions = value;
       await this.persistSettings();
       this.display();
     }));
   }
   renderAppearanceSection(containerEl) {
-    new import_obsidian4.Setting(containerEl).setName("Theme Style").setDesc("Adjust the terminal look and feel.").addDropdown((drop) => drop.addOption("hacker-green", "Hacker Green").addOption("cyberpunk", "Cyberpunk Neon").addOption("obsidian-native", "Obsidian Native").setValue(this.plugin.settings.terminalTheme).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Theme Style").setDesc("Adjust the terminal look and feel.").addDropdown((drop) => drop.addOption("hacker-green", "Hacker Green").addOption("cyberpunk", "Cyberpunk Neon").addOption("obsidian-native", "Obsidian Native").setValue(this.plugin.settings.terminalTheme).onChange(async (value) => {
       this.plugin.settings.terminalTheme = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Font Size").addSlider((slider) => slider.setLimits(12, 24, 1).setValue(this.plugin.settings.terminalFontSize).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Font Size").addSlider((slider) => slider.setLimits(12, 24, 1).setValue(this.plugin.settings.terminalFontSize).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.terminalFontSize = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Background Opacity").addSlider((slider) => slider.setLimits(0.5, 1, 0.05).setValue(this.plugin.settings.terminalOpacity).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Background Opacity").addSlider((slider) => slider.setLimits(0.5, 1, 0.05).setValue(this.plugin.settings.terminalOpacity).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.terminalOpacity = value;
       await this.persistSettings();
     }));
   }
   renderCaptureSection(containerEl) {
-    new import_obsidian4.Setting(containerEl).setName("WeChat Inbox Path").setDesc("The file to monitor for new WeChat links.").addText((text) => text.setPlaceholder("Inbox.md").setValue(this.plugin.settings.wechatInboxPath).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("WeChat Inbox Path").setDesc("The file to monitor for new WeChat links.").addText((text) => text.setPlaceholder("Inbox.md").setValue(this.plugin.settings.wechatInboxPath).onChange(async (value) => {
       this.plugin.settings.wechatInboxPath = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("WeChat Storage Path").setDesc("The folder to store saved articles.").addText((text) => text.setPlaceholder("Clippings").setValue(this.plugin.settings.wechatStoragePath).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("WeChat Storage Path").setDesc("The folder to store saved articles.").addText((text) => text.setPlaceholder("Clippings").setValue(this.plugin.settings.wechatStoragePath).onChange(async (value) => {
       this.plugin.settings.wechatStoragePath = value;
       await this.persistSettings();
     }));
   }
   renderKnowledgeSection(containerEl) {
-    new import_obsidian4.Setting(containerEl).setName("Auto Compile").setDesc("Compile notes automatically when watched folders change.").addToggle((toggle) => toggle.setValue(this.plugin.settings.knowledgeAutoCompile).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Auto Compile").setDesc("Compile notes automatically when watched folders change.").addToggle((toggle) => toggle.setValue(this.plugin.settings.knowledgeAutoCompile).onChange(async (value) => {
       this.plugin.settings.knowledgeAutoCompile = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Wiki Output Folder").setDesc("The folder where compiled wiki pages are stored.").addText((text) => text.setPlaceholder("Knowledge Wiki").setValue(this.plugin.settings.knowledgeWikiFolder).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Wiki Output Folder").setDesc("The folder where compiled wiki pages are stored.").addText((text) => text.setPlaceholder("Knowledge Wiki").setValue(this.plugin.settings.knowledgeWikiFolder).onChange(async (value) => {
       this.plugin.settings.knowledgeWikiFolder = value || "Knowledge Wiki";
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Max Compile Batch").setDesc("Maximum number of notes to compile in a single batch.").addSlider((slider) => slider.setLimits(1, 200, 1).setValue(this.plugin.settings.knowledgeMaxCompileBatch).setDynamicTooltip().onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Max Compile Batch").setDesc("Maximum number of notes to compile in a single batch.").addSlider((slider) => slider.setLimits(1, 200, 1).setValue(this.plugin.settings.knowledgeMaxCompileBatch).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.knowledgeMaxCompileBatch = value;
       await this.persistSettings();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Source Folders").setDesc("Folders to watch, one per line.").setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Clippings\nReading Notes").setValue((this.plugin.settings.knowledgeSourceFolders || []).join("\n")).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Source Folders").setDesc("Folders to watch, one per line.").setClass("ocli-full-width-textarea").addTextArea((text) => text.setPlaceholder("Clippings\nReading Notes").setValue((this.plugin.settings.knowledgeSourceFolders || []).join("\n")).onChange(async (value) => {
       this.plugin.settings.knowledgeSourceFolders = value.split("\n").map((entry) => entry.trim()).filter((entry) => entry.length > 0);
       await this.persistSettings();
     }));
   }
   renderPluginSkillsSection(containerEl) {
-    new import_obsidian4.Setting(containerEl).setName("Auto-generate plugin skills").setDesc("Generate AI skills for installed plugins on startup.").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoGeneratePluginSkills).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Auto-generate plugin skills").setDesc("Generate AI skills for installed plugins on startup.").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoGeneratePluginSkills).onChange(async (value) => {
       this.plugin.settings.autoGeneratePluginSkills = value;
       await this.persistSettings();
       this.display();
     }));
-    new import_obsidian4.Setting(containerEl).setName("Excluded plugins").setDesc("Plugin IDs to exclude from skill generation, comma-separated.").addText((text) => text.setPlaceholder("plugin-id-1, plugin-id-2").setValue(this.plugin.settings.pluginSkillExcludeList.join(", ")).onChange(async (value) => {
+    new import_obsidian6.Setting(containerEl).setName("Excluded plugins").setDesc("Plugin IDs to exclude from skill generation, comma-separated.").addText((text) => text.setPlaceholder("plugin-id-1, plugin-id-2").setValue(this.plugin.settings.pluginSkillExcludeList.join(", ")).onChange(async (value) => {
       this.plugin.settings.pluginSkillExcludeList = value.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0);
       await this.persistSettings();
     }));
@@ -5603,7 +6844,7 @@ var SettingTab = class extends import_obsidian4.PluginSettingTab {
     return button;
   }
 };
-var AddProviderModal = class extends import_obsidian4.Modal {
+var AddProviderModal = class extends import_obsidian6.Modal {
   onSubmit;
   constructor(app, onSubmit) {
     super(app);
@@ -5614,19 +6855,19 @@ var AddProviderModal = class extends import_obsidian4.Modal {
     contentEl.createEl("h3", { text: "Add OpenAI Compatible Provider" });
     let labelValue = "";
     let baseUrlValue = "";
-    new import_obsidian4.Setting(contentEl).setName("Provider Name").setDesc("Display name (for example: SiliconFlow, Groq, Ollama)").addText((text) => text.setPlaceholder("My Provider").onChange((value) => {
+    new import_obsidian6.Setting(contentEl).setName("Provider Name").setDesc("Display name (for example: SiliconFlow, Groq, Ollama)").addText((text) => text.setPlaceholder("My Provider").onChange((value) => {
       labelValue = value;
     }));
-    new import_obsidian4.Setting(contentEl).setName("Base URL").setDesc("API endpoint URL").addText((text) => text.setPlaceholder("https://api.example.com/v1").onChange((value) => {
+    new import_obsidian6.Setting(contentEl).setName("Base URL").setDesc("API endpoint URL").addText((text) => text.setPlaceholder("https://api.example.com/v1").onChange((value) => {
       baseUrlValue = value;
     }));
-    new import_obsidian4.Setting(contentEl).addButton((btn) => btn.setButtonText("Add").setCta().onClick(() => {
+    new import_obsidian6.Setting(contentEl).addButton((btn) => btn.setButtonText("Add").setCta().onClick(() => {
       if (!labelValue.trim()) {
-        new import_obsidian4.Notice("Please enter a provider name");
+        new import_obsidian6.Notice("Please enter a provider name");
         return;
       }
       if (!baseUrlValue.trim()) {
-        new import_obsidian4.Notice("Please enter a base URL");
+        new import_obsidian6.Notice("Please enter a base URL");
         return;
       }
       this.onSubmit(labelValue.trim(), baseUrlValue.trim());
@@ -5639,10 +6880,34 @@ var AddProviderModal = class extends import_obsidian4.Modal {
 };
 
 // src/ui/shell-view.ts
-var import_obsidian11 = require("obsidian");
+var import_obsidian14 = require("obsidian");
 
 // src/ui/chat-controller.ts
-var import_obsidian5 = require("obsidian");
+var import_obsidian7 = require("obsidian");
+
+// src/ui/diff/change-preview.ts
+function cloneChangePreview(preview) {
+  if (!preview)
+    return void 0;
+  return {
+    ...preview,
+    preconditions: preview.preconditions ? [...preview.preconditions] : void 0
+  };
+}
+function buildSelectionPreview(input) {
+  return {
+    kind: "editor-selection-replace",
+    target: input.target,
+    summary: "Replace the current editor selection",
+    oldContent: input.oldContent,
+    newContent: input.newContent,
+    risk: "medium",
+    supportsPartialApply: true,
+    undoable: true
+  };
+}
+
+// src/ui/chat-controller.ts
 var ChatController = class {
   app;
   api;
@@ -5695,7 +6960,7 @@ var ChatController = class {
     }
     this.fileSearchCache = null;
   }
-  async processCommand(query, context = [], selection = "") {
+  async processCommand(query, context = [], selection = "", source = "shell") {
     if (!query.trim())
       return;
     const normalizedContext = this.normalizeContextItems(context);
@@ -5718,7 +6983,8 @@ var ChatController = class {
         let lastWriteError = "";
         const writeToolArgs = /* @__PURE__ */ new Map();
         const bufferedTextEvents = [];
-        for await (const event of this.api.chatStream(query, normalizedContext, selection, streamController.signal)) {
+        const stream = source === "shell" ? this.api.chatStream(query, normalizedContext, selection, streamController.signal) : this.api.chatStream(query, normalizedContext, selection, source, void 0, void 0, streamController.signal);
+        for await (const event of stream) {
           if (event.type === "tool_call" && this.isFileWriteTool(event.name)) {
             attemptedFileWrite = true;
             const calls = writeToolArgs.get(event.name) || [];
@@ -5798,7 +7064,7 @@ var ChatController = class {
           }
         }
       } else {
-        const response = await this.api.chat(query, normalizedContext, selection);
+        const response = source === "shell" ? await this.api.chat(query, normalizedContext, selection) : await this.api.chat(query, normalizedContext, selection, source);
         this.addMessage("ai", response);
       }
     } catch (error) {
@@ -5907,7 +7173,8 @@ ${JSON.stringify(result, null, 2)}
       action: result.action,
       target: result.target,
       args: result.args || {},
-      message: result.message || "Approval required."
+      message: result.message || "Approval required.",
+      preview: result.preview
     };
   }
   handleStructuredResult(result, action, args = {}) {
@@ -5943,6 +7210,31 @@ ${JSON.stringify(result, null, 2)}
     }
     this.activeStreamController.abort();
     return true;
+  }
+  buildSelectionRewritePreview(selectionText) {
+    const lastAiMessage = [...this.messages].reverse().find((message) => message.role === "ai");
+    if (!lastAiMessage)
+      return null;
+    return buildSelectionPreview({
+      target: "current-selection",
+      oldContent: selectionText,
+      newContent: lastAiMessage.content
+    });
+  }
+  async applyPreviewedChange(options) {
+    await options.apply();
+    const recordDirectWrite = this.api.recordDirectWrite;
+    if (typeof recordDirectWrite === "function") {
+      await recordDirectWrite.call(this.api, {
+        action: options.action,
+        target: options.target,
+        previousContent: options.previousContent,
+        undoable: options.undoable ?? true
+      });
+    }
+  }
+  async archiveMessage(messageId) {
+    await this.runFileBackInBackground(messageId);
   }
   async handleOpenFile(searchTerm) {
     const now = Date.now();
@@ -6073,10 +7365,27 @@ ${list}`);
    * 鍚庡彴鎵ц file-back锛屼笉闃诲 UI
    * 鎵嬪姩妯″紡锛堭煈嶆寜閽級鍜岃嚜鍔ㄦā寮忓叡鐢?
    */
-  runFileBackInBackground(msgId) {
+  async runFileBackInBackground(msgId) {
     const targetMsg = this.messages.find((m) => m.id === msgId && m.role === "ai");
     if (!targetMsg)
       return;
+    const toolRegistry = this.app.plugins?.plugins?.["obsidian-cli"]?.toolRegistry;
+    if (toolRegistry?.execute) {
+      try {
+        const result = await toolRegistry.execute("file_back_knowledge", this.buildFileBackArgs(targetMsg));
+        if (result?.success) {
+          const suffix = result.path ? `: ${result.path}` : ".";
+          this.addMessage("system", `Archived to the knowledge wiki${suffix}`);
+        } else {
+          this.addMessage("system", `Archive failed: ${result?.error || "Unknown error"}`);
+        }
+        return;
+      } catch (error) {
+        logger.error("File-back failed", error, "ChatController");
+        this.addMessage("system", `Archive failed: ${error?.message || "Unknown error"}`);
+        return;
+      }
+    }
     const fileBackPrompt = `\u9422\u3126\u57DB\u7035\u901B\u4E92\u6D93\u5B2A\u6D16\u7EDB\u65C2\u5063\u74A7\u70C7\u7D1D\u7487\u5CF0\u76A2\u934F\u8DFA\u7D8A\u5997\uFF45\u57CC\u942D\u30E8\u7611\u6434\u64B1\u20AC\u5099\u5A07\u9422?file_back_knowledge \u5BB8\u30E5\u53FF\u951B\u5C7E\u5F41\u9359\u6828\u7223\u68F0\u6A3A\u62F0\u93CD\u7A3F\u7E3E\u9350\u546D\uE190\u951B\u5C7D\u82DF\u93BB\u612C\u5F47\u9429\u7A3F\u53E7\u9428?topics \u6D93\u5A5A\uE57D\u93CD\u56E9\uE137\u9286\u4FD3n
 \u9365\u70B5\u74DF\u9350\u546D\uE190\u951B\u6B55n${targetMsg.content}`;
     this.api.chat(fileBackPrompt, [], "").then(() => {
@@ -6084,6 +7393,32 @@ ${list}`);
     }).catch((error) => {
       logger.error("File-back failed", error, "ChatController");
     });
+  }
+  buildFileBackArgs(targetMsg) {
+    return {
+      title: this.deriveFileBackTitle(targetMsg.content),
+      content: targetMsg.content,
+      topics: [],
+      source_queries: [this.deriveFileBackSourceQuery(targetMsg.id)]
+    };
+  }
+  deriveFileBackSourceQuery(messageId) {
+    const targetIndex = this.messages.findIndex((message) => message.id === messageId);
+    if (targetIndex > 0) {
+      for (let index = targetIndex - 1; index >= 0; index--) {
+        const message = this.messages[index];
+        if (message.role === "user" && message.content.trim()) {
+          return message.content.trim();
+        }
+      }
+    }
+    return `Archived from AI message ${messageId}`;
+  }
+  deriveFileBackTitle(content) {
+    const headingMatch = content.match(/^#{1,6}\s+(.+)$/m);
+    const rawTitle = headingMatch?.[1] || content.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "Knowledge Archive";
+    const normalized = rawTitle.replace(/[*_`>#-]/g, " ").replace(/\[\[|\]\]/g, " ").replace(/\s+/g, " ").trim();
+    return normalized.slice(0, 80) || "Knowledge Archive";
   }
   /**
    * 鑷姩 file-back 宸茬Щ闄わ細鏀逛负 AI 鍦?query_knowledge 娴佺▼涓嚜涓诲垽鏂槸鍚﹁皟鐢?file_back_knowledge
@@ -6170,7 +7505,7 @@ ${list}`);
       this.addMessage("system", "Usage: select some text first, then run `/edit <instruction>`.\nExample: `/edit translate to English`");
       return;
     }
-    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
     const editor = activeView?.editor;
     const selection = editor?.getSelection();
     if (!selection) {
@@ -6184,7 +7519,12 @@ ${list}`);
 
 \u9358\u71B8\u6783:
 ${selection}`;
-      const result = await this.api.chat(prompt, [], selection);
+      const result = await this.api.chat(
+        instruction,
+        [],
+        selection,
+        "slash-edit"
+      );
       this.addMessage("ai", result);
     } catch (e) {
       this.addMessage("system", `\u7F02\u682C\u7DEB\u6FB6\u8FAB\u89E6: ${e.message}`);
@@ -6301,12 +7641,12 @@ Type \`/\` to browse commands and \`@\` to mention files.`;
 };
 
 // src/services/context-manager.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/utils/video_utils.ts
-var import_obsidian6 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 var defaultDeps = {
-  requestUrl: (options) => (0, import_obsidian6.requestUrl)(options),
+  requestUrl: (options) => (0, import_obsidian8.requestUrl)(options),
   userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "Mozilla/5.0"
 };
 function extractBalancedJson(source, marker) {
@@ -6482,7 +7822,7 @@ async function getYoutubeTranscript(url, deps) {
     };
   } catch (e) {
     console.error("Failed to get YouTube transcript", e);
-    new import_obsidian6.Notice(`YouTube Transcript Error: ${e.message}`);
+    new import_obsidian8.Notice(`YouTube Transcript Error: ${e.message}`);
     return null;
   }
 }
@@ -6576,7 +7916,7 @@ async function getBilibiliTranscript(url, deps) {
     };
   } catch (e) {
     console.error("Failed to get Bilibili transcript", e);
-    new import_obsidian6.Notice(`Bilibili Transcript Error: ${e.message}`);
+    new import_obsidian8.Notice(`Bilibili Transcript Error: ${e.message}`);
     return null;
   }
 }
@@ -6635,6 +7975,9 @@ var ContextManager = class {
   }
   async resolveContexts() {
     for (const ctx of this.activeContexts) {
+      if (ctx.type === "scope") {
+        continue;
+      }
       if (!ctx.content) {
         if (ctx.type === "url") {
           ctx.content = await this.deps.fetchWebContent(ctx.data);
@@ -6643,11 +7986,11 @@ var ContextManager = class {
         }
       }
     }
-    return this.deps.budgetContexts(this.activeContexts);
+    return this.deps.budgetContexts(this.activeContexts.filter((ctx) => ctx.type !== "scope"));
   }
   async fetchWebContent(url) {
     try {
-      const res = await (0, import_obsidian7.requestUrl)({ url });
+      const res = await (0, import_obsidian9.requestUrl)({ url });
       if (res.status !== 200) {
         return `[Error fetching content from ${url}: HTTP ${res.status}]`;
       }
@@ -6680,8 +8023,8 @@ ${transcript.text.substring(0, 4e3)}`;
 };
 
 // src/ui/diff-modal.ts
-var import_obsidian8 = require("obsidian");
-var DiffModal = class extends import_obsidian8.Modal {
+var import_obsidian10 = require("obsidian");
+var DiffModal = class extends import_obsidian10.Modal {
   constructor(app, original, modified, onApply) {
     super(app);
     this.original = original;
@@ -6699,8 +8042,8 @@ var DiffModal = class extends import_obsidian8.Modal {
     buttonContainer.style.justifyContent = "flex-end";
     buttonContainer.style.gap = "10px";
     buttonContainer.style.marginTop = "20px";
-    new import_obsidian8.ButtonComponent(buttonContainer).setButtonText("Cancel").onClick(() => this.close());
-    new import_obsidian8.ButtonComponent(buttonContainer).setButtonText("Apply Changes").setCta().onClick(() => {
+    new import_obsidian10.ButtonComponent(buttonContainer).setButtonText("Cancel").onClick(() => this.close());
+    new import_obsidian10.ButtonComponent(buttonContainer).setButtonText("Apply Changes").setCta().onClick(() => {
       this.onApply();
       this.close();
     });
@@ -6797,13 +8140,200 @@ function buildCommandSuggestions(localCommands, skillCommands, query) {
   return Array.from(merged.values()).filter((command) => command.label.toLowerCase().includes(query.toLowerCase())).sort((a, b) => a.label.localeCompare(b.label));
 }
 
+// src/services/obsidian-context-service.ts
+var DEFAULT_OPTIONS = {
+  maxRecentNotes: 5,
+  maxBacklinks: 5,
+  maxSummaryChars: 180,
+  maxSectionChars: 1200
+};
+var ObsidianContextService = class {
+  constructor(app, options = {}) {
+    this.app = app;
+    this.options = { ...DEFAULT_OPTIONS, ...options };
+  }
+  options;
+  async collect(options = {}) {
+    const explicitScopes = [...options.explicitScopes ?? []];
+    const activeFile = this.app.workspace.getActiveFile?.();
+    if (!activeFile) {
+      return {
+        activeNote: null,
+        selection: null,
+        activeHeading: null,
+        frontmatter: {},
+        tags: [],
+        outgoingLinks: [],
+        backlinks: [],
+        recentNotes: [],
+        explicitScopes,
+        contextItems: []
+      };
+    }
+    const content = await this.app.vault.read(activeFile);
+    const editor = this.app.workspace.getMostRecentLeaf?.()?.view?.editor;
+    const selectionText = this.normalizeSelection(editor?.getSelection?.());
+    const selectionLine = this.normalizeLine(editor?.getCursor?.("from")?.line);
+    const cache = this.app.metadataCache.getFileCache?.(activeFile) ?? {};
+    const tags = this.extractTags(cache);
+    const outgoingLinks = this.extractOutgoingLinks(cache);
+    const activeHeading = this.findActiveHeading(content, selectionLine);
+    const activeSection = this.extractActiveSection(content, activeHeading);
+    const backlinks = await this.collectBacklinks(activeFile, options.includeBacklinks === true);
+    const recentNotes = this.collectRecentNotes(activeFile.path);
+    const contextItems = [
+      {
+        id: `active-note:${activeFile.path}`,
+        type: "file",
+        data: activeFile.path,
+        summary: `Active note: ${this.toTitle(activeFile)}`,
+        content: budgetTextBlock(activeSection, this.options.maxSectionChars)
+      }
+    ];
+    if (selectionText) {
+      contextItems.push({
+        id: `selection:${activeFile.path}`,
+        type: "text",
+        data: "Selected text",
+        summary: "Current editor selection",
+        content: selectionText
+      });
+    }
+    if (backlinks.length > 0) {
+      contextItems.push({
+        id: `backlinks:${activeFile.path}`,
+        type: "text",
+        data: `Backlinks summary for ${activeFile.path}`,
+        summary: `${backlinks.length} backlink notes`,
+        content: backlinks.map((backlink) => `- ${backlink.path}: ${backlink.summary}`).join("\n")
+      });
+    }
+    return {
+      activeNote: {
+        path: activeFile.path,
+        title: this.toTitle(activeFile)
+      },
+      selection: selectionText ? {
+        text: selectionText,
+        from: selectionLine,
+        to: selectionLine
+      } : null,
+      activeHeading,
+      frontmatter: cache.frontmatter ?? {},
+      tags,
+      outgoingLinks,
+      backlinks,
+      recentNotes,
+      explicitScopes,
+      contextItems
+    };
+  }
+  normalizeSelection(value) {
+    if (typeof value !== "string")
+      return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  normalizeLine(value) {
+    return typeof value === "number" && value >= 0 ? value : null;
+  }
+  extractTags(cache) {
+    if (!Array.isArray(cache?.tags))
+      return [];
+    return cache.tags.map((tag) => typeof tag?.tag === "string" ? tag.tag : null).filter((tag) => !!tag);
+  }
+  extractOutgoingLinks(cache) {
+    if (!Array.isArray(cache?.links))
+      return [];
+    return cache.links.map((link) => typeof link?.link === "string" ? link.link : null).filter((link) => !!link);
+  }
+  findActiveHeading(content, selectionLine) {
+    const lines = content.split("\n");
+    const searchLine = selectionLine ?? lines.length - 1;
+    for (let index = Math.min(searchLine, lines.length - 1); index >= 0; index -= 1) {
+      const line = lines[index]?.trim();
+      if (/^#{1,6}\s+/.test(line)) {
+        return line;
+      }
+    }
+    return null;
+  }
+  extractActiveSection(content, activeHeading) {
+    if (!activeHeading) {
+      return content;
+    }
+    const lines = content.split("\n");
+    const startIndex = lines.findIndex((line) => line.trim() === activeHeading.trim());
+    if (startIndex < 0) {
+      return content;
+    }
+    const headingLevel = this.headingLevel(activeHeading);
+    let endIndex = lines.length;
+    for (let index = startIndex + 1; index < lines.length; index += 1) {
+      const line = lines[index].trim();
+      if (!/^#{1,6}\s+/.test(line))
+        continue;
+      if (this.headingLevel(line) <= headingLevel) {
+        endIndex = index;
+        break;
+      }
+    }
+    return lines.slice(startIndex, endIndex).join("\n").trim();
+  }
+  headingLevel(line) {
+    const match = line.match(/^(#{1,6})\s+/);
+    return match ? match[1].length : 7;
+  }
+  async collectBacklinks(activeFile, includeBacklinks) {
+    if (!includeBacklinks)
+      return [];
+    const backlinkMap = this.app.metadataCache.getBacklinksForFile?.(activeFile);
+    if (!backlinkMap)
+      return [];
+    const entries = Array.from(backlinkMap instanceof Map ? backlinkMap.keys() : Object.keys(backlinkMap));
+    const results = [];
+    for (const path of entries.slice(0, this.options.maxBacklinks)) {
+      const file = this.app.vault.getAbstractFileByPath?.(path);
+      if (!file)
+        continue;
+      const content = await this.app.vault.read(file);
+      results.push({
+        path,
+        summary: this.summarizeText(content)
+      });
+    }
+    return results;
+  }
+  collectRecentNotes(activePath) {
+    const recentPaths = this.app.workspace.getLastOpenFiles?.();
+    if (!Array.isArray(recentPaths))
+      return [];
+    return recentPaths.slice(0, this.options.maxRecentNotes).map((path) => ({
+      path,
+      title: this.basename(path)
+    })).filter((note) => typeof note.path === "string" && note.path.length > 0).sort((a, b) => a.path === activePath ? -1 : b.path === activePath ? 1 : 0);
+  }
+  summarizeText(text) {
+    const normalized = text.replace(/\s+/g, " ").trim();
+    return budgetTextBlock(normalized, this.options.maxSummaryChars);
+  }
+  toTitle(file) {
+    return typeof file?.basename === "string" && file.basename.length > 0 ? file.basename : this.basename(file?.path || "");
+  }
+  basename(path) {
+    const normalized = path.replace(/\\/g, "/");
+    const value = normalized.split("/").pop() || path;
+    return value.replace(/\.[^.]+$/, "");
+  }
+};
+
 // src/ui/components/context-chips.ts
-var import_obsidian9 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 var ContextChips = class {
   constructor(containerEl, handlers) {
     this.containerEl = containerEl;
     this.handlers = handlers;
-    this.setIconFn = handlers.setIcon ?? import_obsidian9.setIcon;
+    this.setIconFn = handlers.setIcon ?? import_obsidian11.setIcon;
   }
   setIconFn;
   update(contexts) {
@@ -6836,6 +8366,9 @@ var ContextChips = class {
   }
 };
 function getContextChipLabel(ctx) {
+  if (ctx.type === "scope") {
+    return ctx.data;
+  }
   if (ctx.type === "file") {
     return basename(ctx.data);
   }
@@ -6851,6 +8384,8 @@ function getContextIconName(type) {
       return "youtube";
     case "file":
       return "file-text";
+    case "scope":
+      return "at-sign";
     default:
       return "sticky-note";
   }
@@ -6866,25 +8401,17 @@ var ContextController = class {
     this.deps = deps;
   }
   async collectCommandContext() {
+    const explicitScopes = this.deps.contextManager.getContexts().filter((ctx) => ctx.type === "scope" && ctx.scope).map((ctx) => ctx.scope === "tag" && ctx.tag ? `tag:${ctx.tag}` : ctx.scope).filter((scope, index, items) => items.indexOf(scope) === index);
     const contextItems = await this.deps.contextManager.resolveContexts();
-    const activeFile = this.deps.app.workspace.getActiveFile();
-    if (activeFile) {
-      contextItems.push({
-        id: "active-file",
-        type: "file",
-        data: activeFile.path,
-        content: await this.deps.app.vault.read(activeFile)
-      });
-    }
-    let selection = "";
-    const activeLeaf = this.deps.app.workspace.getMostRecentLeaf();
-    if (activeLeaf?.view) {
-      const editor = activeLeaf.view.editor;
-      if (editor) {
-        selection = editor.getSelection();
-      }
-    }
-    return { contextItems, selection };
+    const obsidianContextService = this.deps.obsidianContextService ?? new ObsidianContextService(this.deps.app);
+    const snapshot = await obsidianContextService.collect({
+      includeBacklinks: explicitScopes.includes("backlinks"),
+      explicitScopes
+    });
+    return {
+      contextItems: [...snapshot.contextItems, ...contextItems],
+      selection: snapshot.selection?.text || ""
+    };
   }
   renderContextChips(container, onRemove) {
     new ContextChips(container, {
@@ -6902,6 +8429,8 @@ var ContextController = class {
         return "youtube";
       case "file":
         return "file-text";
+      case "scope":
+        return "at-sign";
       default:
         return "sticky-note";
     }
@@ -6956,13 +8485,33 @@ var InputController = class {
       return null;
     const textBeforeCursor = value.substring(0, cursor);
     const lastWord = textBeforeCursor.split(/\s+/).pop() || "";
-    const replacement = this.suggestionType === "command" ? item.label : item.value || item.label;
-    const newTextBefore = textBeforeCursor.substring(0, textBeforeCursor.length - lastWord.length) + replacement + " ";
-    const newText = newTextBefore + value.substring(cursor);
+    const replaceStart = textBeforeCursor.substring(0, textBeforeCursor.length - lastWord.length);
+    let newTextBefore = "";
+    let newText = "";
+    if (item.kind === "scope") {
+      const prefix = replaceStart.endsWith(" ") ? replaceStart.slice(0, -1) : replaceStart;
+      const suffix = value.substring(cursor).startsWith(" ") ? value.substring(cursor + 1) : value.substring(cursor);
+      const separator = prefix && suffix ? " " : "";
+      newTextBefore = `${prefix}${separator}`;
+      newText = `${newTextBefore}${suffix}`;
+    } else {
+      const replacement = this.suggestionType === "command" ? item.label : item.value || item.label;
+      newTextBefore = replaceStart + replacement + " ";
+      newText = newTextBefore + value.substring(cursor);
+    }
+    const contextItem = item.kind === "scope" && item.scope ? {
+      id: item.scope === "tag" && item.tag ? `scope:tag:${item.tag}` : `scope:${item.scope}`,
+      type: "scope",
+      data: item.label,
+      summary: item.desc,
+      scope: item.scope,
+      tag: item.tag
+    } : void 0;
     this.hide();
     return {
       text: newText,
-      cursor: newTextBefore.length
+      cursor: newTextBefore.length,
+      contextItem
     };
   }
   getSuggestions() {
@@ -7383,6 +8932,111 @@ var HistoryMenu = class {
   }
 };
 
+// src/ui/components/knowledge-status-panel.ts
+var import_obsidian12 = require("obsidian");
+var KnowledgeStatusPanel = class {
+  constructor(container, options) {
+    this.container = container;
+    this.options = options;
+  }
+  async refresh() {
+    this.container.empty();
+    this.container.addClass?.("shell-knowledge-status-panel") ?? this.container.classList.add("shell-knowledge-status-panel");
+    const activeFile = this.options.app.workspace.getActiveFile?.();
+    if (!(activeFile instanceof import_obsidian12.TFile)) {
+      this.renderEmpty("Open a note to view knowledge status.");
+      return;
+    }
+    const runtime = this.options.plugin?.knowledgeRuntime;
+    const statusService = runtime?.getStatusService?.();
+    if (!statusService) {
+      this.renderEmpty("Knowledge system is not available.");
+      return;
+    }
+    const [status, counts] = await Promise.all([
+      statusService.getNoteStatus(activeFile.path),
+      statusService.getGlobalCounts()
+    ]);
+    if (!status) {
+      this.renderEmpty("Knowledge status is unavailable for this note.");
+      return;
+    }
+    this.renderStatus(activeFile, status, counts, runtime);
+  }
+  renderEmpty(message) {
+    const body = this.container.createDiv({ cls: "shell-knowledge-status-empty" });
+    if (typeof body.setText === "function") {
+      body.setText(message);
+    } else {
+      body.textContent = message;
+    }
+  }
+  renderStatus(activeFile, status, counts, runtime) {
+    const header = this.container.createDiv({ cls: "shell-knowledge-status-header" });
+    header.createDiv({ cls: "shell-knowledge-status-title", text: activeFile.basename });
+    header.createDiv({ cls: `shell-knowledge-status-badge is-${status.state}`, text: status.state });
+    const meta = this.container.createDiv({ cls: "shell-knowledge-status-meta" });
+    meta.createDiv({ cls: "shell-knowledge-status-path", text: activeFile.path });
+    meta.createDiv({
+      cls: "shell-knowledge-status-details",
+      text: this.buildMetaSummary(activeFile, status)
+    });
+    const countsRow = this.container.createDiv({ cls: "shell-knowledge-status-counts" });
+    countsRow.createDiv({ cls: "shell-knowledge-status-count", text: `Pending ${counts.pending}` });
+    countsRow.createDiv({ cls: "shell-knowledge-status-count", text: `Stale ${counts.stale}` });
+    countsRow.createDiv({ cls: "shell-knowledge-status-count", text: `Failed ${counts.failed}` });
+    const actions = this.container.createDiv({ cls: "shell-knowledge-status-actions" });
+    this.createAction(actions, "Compile Current Note", async () => {
+      const result = await runtime?.compileByPath?.(activeFile.path);
+      if (result) {
+        new import_obsidian12.Notice(`Knowledge compile: ${result.success} success, ${result.failed} failed`);
+      }
+      await this.refresh();
+    });
+    this.createAction(actions, "Open Knowledge Index", () => {
+      this.options.app.commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
+    });
+    this.createAction(actions, "Run Knowledge Lint", () => {
+      this.options.app.commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
+    });
+  }
+  createAction(container, label, handler) {
+    const button = container.createEl("button", {
+      cls: "shell-knowledge-status-action",
+      text: label,
+      attr: { type: "button" }
+    });
+    button.addEventListener("click", () => {
+      void handler();
+    });
+  }
+  buildMetaSummary(activeFile, status) {
+    const parts = [
+      `Backlinks ${this.countBacklinks(activeFile)}`
+    ];
+    if (status.compiledAt) {
+      parts.push(`Compiled ${status.compiledAt}`);
+    }
+    if (status.summaryPath) {
+      parts.push(`Summary ${status.summaryPath}`);
+    }
+    if (status.error) {
+      parts.push(`Error ${status.error}`);
+    }
+    return parts.join(" \u2022 ");
+  }
+  countBacklinks(file) {
+    const backlinks = this.options.app.metadataCache.getBacklinksForFile?.(file);
+    if (backlinks instanceof Map) {
+      return backlinks.size;
+    }
+    if (backlinks && typeof backlinks === "object") {
+      return Object.keys(backlinks).length;
+    }
+    return 0;
+  }
+};
+
 // src/ui/renderers/thinking-renderer.ts
 var ThinkingRenderer = class {
   constructor(timeline, options = {}) {
@@ -7695,13 +9349,30 @@ function safeStringify(value) {
 }
 
 // src/ui/renderers/message-renderer.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian13 = require("obsidian");
+
+// src/ui/components/change-preview-card.ts
+function renderChangePreviewCard(container, preview) {
+  const card = container.createDiv({ cls: "shell-change-preview-card" });
+  card.createDiv({ cls: "shell-change-preview-summary", text: preview.summary });
+  card.createDiv({ cls: "shell-change-preview-target", text: preview.target });
+  if (preview.preconditions?.length) {
+    const conditions = card.createDiv({ cls: "shell-change-preview-preconditions" });
+    for (const condition of preview.preconditions) {
+      conditions.createDiv({ cls: "shell-change-preview-precondition", text: condition });
+    }
+  }
+  return card;
+}
 
 // src/ui/approval-card.ts
 function renderApprovalCard(container, request, handlers) {
   const card = container.createDiv({ cls: "shell-approval-card" });
   card.createDiv({ cls: "shell-approval-title", text: "Approval Required" });
   card.createDiv({ cls: "shell-approval-message", text: request.message });
+  if (request.preview) {
+    renderChangePreviewCard(card, request.preview);
+  }
   const actions = card.createDiv({ cls: "shell-approval-actions" });
   const approveButton = actions.createEl("button", {
     cls: "shell-approval-btn shell-approval-confirm",
@@ -7776,7 +9447,7 @@ var CodeBlockRenderer = class {
 var MessageRenderer = class {
   constructor(options) {
     this.options = options;
-    this.renderMarkdown = options.renderMarkdown ?? import_obsidian10.MarkdownRenderer.render.bind(import_obsidian10.MarkdownRenderer);
+    this.renderMarkdown = options.renderMarkdown ?? import_obsidian13.MarkdownRenderer.render.bind(import_obsidian13.MarkdownRenderer);
     this.codeBlockRenderer = new CodeBlockRenderer({
       onReviewCodeBlock: options.onReviewCodeBlock,
       onInternalLinkClick: options.onInternalLinkClick
@@ -7833,14 +9504,14 @@ var MessageRenderer = class {
     copyButton.addEventListener("click", () => {
       void this.copyMessage(message);
     });
-    const thumbsUpButton = toolbar.createEl("button", {
-      cls: "shell-feedback-btn shell-thumbs-up",
-      title: "Useful - save to knowledge wiki",
-      attr: { "aria-label": "Useful - save to knowledge wiki" }
+    const archiveButton = toolbar.createEl("button", {
+      cls: "shell-message-action-btn shell-archive-btn",
+      text: "Archive",
+      title: "Archive to knowledge wiki",
+      attr: { "aria-label": "Archive to knowledge wiki" }
     });
-    thumbsUpButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>';
-    thumbsUpButton.addEventListener("click", () => {
-      this.activateFeedback(thumbsUpButton, thumbsDownButton);
+    archiveButton.addEventListener("click", () => {
+      this.activateFeedback(archiveButton, thumbsDownButton);
       void this.options.onFeedbackUp?.(message);
     });
     const thumbsDownButton = toolbar.createEl("button", {
@@ -8010,7 +9681,8 @@ var ChatState = class {
       ...message,
       approval: message.approval ? {
         ...message.approval,
-        args: { ...message.approval.args }
+        args: { ...message.approval.args },
+        preview: cloneChangePreview(message.approval.preview)
       } : void 0,
       metadata: message.metadata ? { ...message.metadata } : void 0
     };
@@ -8313,7 +9985,8 @@ var ConversationStore = class {
         ...message,
         approval: message.approval ? {
           ...message.approval,
-          args: { ...message.approval.args }
+          args: { ...message.approval.args },
+          preview: cloneChangePreview(message.approval.preview)
         } : void 0,
         metadata: message.metadata ? { ...message.metadata } : void 0
       }))
@@ -8322,7 +9995,7 @@ var ConversationStore = class {
 };
 
 // src/ui/shell-view.ts
-var ShellView = class extends import_obsidian11.ItemView {
+var ShellView = class extends import_obsidian14.ItemView {
   constructor(leaf, modelService, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -8389,6 +10062,8 @@ var ShellView = class extends import_obsidian11.ItemView {
   conversationController;
   historyMenu = null;
   historyMenuContainerEl = null;
+  knowledgeStatusPanel = null;
+  knowledgeStatusContainerEl = null;
   // Heartbeat monitoring
   heartbeatInterval = null;
   lastActivityTime = Date.now();
@@ -8478,6 +10153,22 @@ var ShellView = class extends import_obsidian11.ItemView {
       onClose: () => this.hideHistoryMenu()
     });
     this.historyMenu.hide();
+    this.knowledgeStatusContainerEl = container.createDiv({ cls: "shell-knowledge-status-host" });
+    this.knowledgeStatusPanel = new KnowledgeStatusPanel(this.knowledgeStatusContainerEl, {
+      app: this.app,
+      plugin: this.plugin
+    });
+    void this.refreshKnowledgeStatusPanel();
+    this.registerEvent(
+      this.app.workspace.on("file-open", () => {
+        void this.refreshKnowledgeStatusPanel();
+      })
+    );
+    this.registerEvent(
+      this.app.metadataCache.on("changed", () => {
+        void this.refreshKnowledgeStatusPanel();
+      })
+    );
     const historyBtn = headerButtons.createEl("button", {
       cls: "clickable-icon shell-history-btn",
       attr: { "aria-label": "Conversation history" }
@@ -8513,9 +10204,9 @@ ${tool.name}: ${tool.description}
 `;
           }
         });
-        new import_obsidian11.Notice(toolsList, 8e3);
+        new import_obsidian14.Notice(toolsList, 8e3);
       } else {
-        new import_obsidian11.Notice("No tools available or tools not loaded yet.");
+        new import_obsidian14.Notice("No tools available or tools not loaded yet.");
       }
     });
     const settingsBtn = headerButtons.createEl("button", {
@@ -8641,8 +10332,10 @@ ${tool.name}: ${tool.description}
         source: "skill"
       }));
     } else {
+      const scopeSuggestions = this.buildContextScopeSuggestions(query);
       const files = this.app.vault.getFiles();
-      suggestions = files.filter((f) => f.path.toLowerCase().includes(query.toLowerCase())).slice(0, 10).map((f) => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]`, source: "file" }));
+      const fileSuggestions = files.filter((f) => f.path.toLowerCase().includes(query.toLowerCase())).slice(0, 10).map((f) => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]`, source: "file" }));
+      suggestions = [...scopeSuggestions, ...fileSuggestions];
     }
     this.inputController.setSuggestions(type, suggestions);
     if (this.inputController.getSuggestions().length === 0) {
@@ -8675,8 +10368,65 @@ ${tool.name}: ${tool.description}
       return;
     this.inputEl.value = selection.text;
     this.inputEl.selectionStart = this.inputEl.selectionEnd = selection.cursor;
+    if (selection.contextItem) {
+      this.contextManager.addContext(selection.contextItem);
+      this.renderContextChips(this.outputContainer.parentElement?.querySelector(".shell-context-chips"));
+    }
     this.hideSuggestions();
     this.inputEl.focus();
+  }
+  buildContextScopeSuggestions(query) {
+    const normalized = query.toLowerCase();
+    const suggestions = [
+      {
+        label: "@current",
+        desc: "Add the current note",
+        value: "@current",
+        source: "scope",
+        kind: "scope",
+        scope: "current"
+      },
+      {
+        label: "@backlinks",
+        desc: "Add notes linking to the current note",
+        value: "@backlinks",
+        source: "scope",
+        kind: "scope",
+        scope: "backlinks"
+      },
+      {
+        label: "@recent",
+        desc: "Add recently opened notes",
+        value: "@recent",
+        source: "scope",
+        kind: "scope",
+        scope: "recent"
+      }
+    ];
+    if (normalized.startsWith("tag:")) {
+      const tag = query.slice(4).trim();
+      if (tag) {
+        suggestions.unshift({
+          label: `@tag:${tag}`,
+          desc: `Add notes tagged ${tag}`,
+          value: `@tag:${tag}`,
+          source: "scope",
+          kind: "scope",
+          scope: "tag",
+          tag
+        });
+      }
+    } else if ("tag:".includes(normalized) || normalized.includes("tag")) {
+      suggestions.push({
+        label: "@tag:",
+        desc: "Add notes matching a tag",
+        value: "@tag:",
+        source: "scope",
+        kind: "scope",
+        scope: "tag"
+      });
+    }
+    return suggestions.filter((item) => item.label.toLowerCase().includes(`@${normalized}`) || item.desc.toLowerCase().includes(normalized)).slice(0, 10);
   }
   selectSuggestionAt(index) {
     while (this.inputController.getSelectedIndex() !== index) {
@@ -8698,6 +10448,7 @@ ${tool.name}: ${tool.description}
       await this.chatController.processCommand(query, contextItems, this.currentSelection);
       this.contextManager.clearContexts();
       this.renderContextChips(this.outputContainer.parentElement?.querySelector(".shell-context-chips"));
+      await this.refreshKnowledgeStatusPanel();
     } catch (error) {
       logger.error("Command processing failed", error, "ShellView.processCommand");
       this.appendMessage({
@@ -8846,8 +10597,9 @@ ${tool.name}: ${tool.description}
             this.chatController.cancelApproval(message.approval);
           }
         },
-        onFeedbackUp: (message) => {
-          void this.chatController.processCommand(`/file-back ${message.id}`, [], "");
+        onFeedbackUp: async (message) => {
+          await this.chatController.archiveMessage(message.id);
+          await this.refreshKnowledgeStatusPanel();
         },
         onReviewCodeBlock: (content) => this.reviewCodeBlock(content),
         onInternalLinkClick: (href) => {
@@ -8864,14 +10616,24 @@ ${tool.name}: ${tool.description}
   async reviewCodeBlock(newContent) {
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) {
-      new import_obsidian11.Notice("No active file to apply changes to.");
+      new import_obsidian14.Notice("No active file to apply changes to.");
       return;
     }
     const originalContent = await this.app.vault.read(activeFile);
     new DiffModal(this.app, originalContent, newContent, async () => {
-      await this.app.vault.modify(activeFile, newContent);
-      new import_obsidian11.Notice("Changes applied.");
+      await this.chatController.applyPreviewedChange({
+        action: "review_code_block",
+        target: activeFile.path,
+        previousContent: originalContent,
+        apply: async () => {
+          await this.app.vault.modify(activeFile, newContent);
+          new import_obsidian14.Notice("Changes applied.");
+        }
+      });
     }).open();
+  }
+  async refreshKnowledgeStatusPanel() {
+    await this.knowledgeStatusPanel?.refresh();
   }
   async onClose() {
     await this.persistAllTabs();
@@ -8946,7 +10708,7 @@ ${tool.name}: ${tool.description}
       const item = items[i];
       if (item.type.indexOf("image") !== -1) {
         if (!this.modelService.getProviderCapabilities().supportsImageInput) {
-          new import_obsidian11.Notice("The active provider does not support image context.");
+          new import_obsidian14.Notice("The active provider does not support image context.");
           return;
         }
         e.preventDefault();
@@ -8984,7 +10746,7 @@ ${tool.name}: ${tool.description}
   handleDrop(e) {
     e.preventDefault();
     if (!this.modelService.getProviderCapabilities().supportsImageInput) {
-      new import_obsidian11.Notice("The active provider does not support image context.");
+      new import_obsidian14.Notice("The active provider does not support image context.");
       return;
     }
     if (e.dataTransfer?.files) {
@@ -9089,12 +10851,12 @@ ${tool.name}: ${tool.description}
         currentNote: this.getCurrentNotePath()
       });
     }
-    new import_obsidian11.Notice(`Switched to ${config.label}`);
+    new import_obsidian14.Notice(`Switched to ${config.label}`);
   }
   handleUnavailableProvider(id) {
     const plugin = this.getPluginInstance();
     const config = plugin?.settings?.providers?.[id];
-    new import_obsidian11.Notice(`${config?.label || id} API Key is not configured. Please configure it in settings.`);
+    new import_obsidian14.Notice(`${config?.label || id} API Key is not configured. Please configure it in settings.`);
     this.app.setting.open();
     this.app.setting.openTabById("obsidian-cli");
     this.refreshInputToolbarProviders();
@@ -9110,7 +10872,7 @@ ${tool.name}: ${tool.description}
         currentNote: this.getCurrentNotePath()
       });
     }
-    new import_obsidian11.Notice(`Switched to ${modelId}`);
+    new import_obsidian14.Notice(`Switched to ${modelId}`);
   }
   async populateModelOptions(selectEl, forceRefresh = false) {
     const settings = this.getPluginInstance()?.settings;
@@ -9227,7 +10989,7 @@ ${tool.name}: ${tool.description}
       content: "Chat cleared.",
       timestamp: Date.now()
     });
-    new import_obsidian11.Notice("Chat cleared");
+    new import_obsidian14.Notice("Chat cleared");
   }
   async createAndShowTab() {
     await this.persistActiveTab();
@@ -9375,7 +11137,7 @@ ${tool.name}: ${tool.description}
     const history = await this.conversationController.listHistory();
     const snapshot = history.find((item) => item.id === id);
     if (!snapshot) {
-      new import_obsidian11.Notice("Saved conversation not found.");
+      new import_obsidian14.Notice("Saved conversation not found.");
       this.hideHistoryMenu();
       return;
     }
@@ -9391,7 +11153,7 @@ ${tool.name}: ${tool.description}
   async deleteConversationFromHistory(id) {
     await this.conversationController.deleteConversation(id);
     await this.refreshHistoryMenu();
-    new import_obsidian11.Notice("Conversation deleted.");
+    new import_obsidian14.Notice("Conversation deleted.");
   }
   async persistAllTabs() {
     for (const tab of this.tabManager.getAllTabs()) {
@@ -9461,14 +11223,14 @@ ${tool.name}: ${tool.description}
     const history = await this.conversationController.listHistory();
     const snapshot = history.find((item) => item.id === id);
     if (!snapshot) {
-      new import_obsidian11.Notice("Saved conversation not found.");
+      new import_obsidian14.Notice("Saved conversation not found.");
       await this.refreshHistoryMenu();
       return;
     }
     const nextPinned = !snapshot.pinnedAt;
     const updated = await this.conversationController.togglePinned(id, nextPinned);
     if (!updated) {
-      new import_obsidian11.Notice("Unable to update conversation pin.");
+      new import_obsidian14.Notice("Unable to update conversation pin.");
       await this.refreshHistoryMenu();
       return;
     }
@@ -9476,7 +11238,7 @@ ${tool.name}: ${tool.description}
       pinnedAt: updated.pinnedAt
     });
     await this.refreshHistoryMenu();
-    new import_obsidian11.Notice(updated.pinnedAt ? "Conversation pinned." : "Conversation unpinned.");
+    new import_obsidian14.Notice(updated.pinnedAt ? "Conversation pinned." : "Conversation unpinned.");
   }
   stopActiveResponse() {
     if (!this.chatController?.cancelActiveStream()) {
@@ -9770,8 +11532,8 @@ function showGhostText(view, text, line, ch, replaceRange) {
 }
 
 // src/ui/guardian-modal.ts
-var import_obsidian12 = require("obsidian");
-var GuardianModal = class extends import_obsidian12.Modal {
+var import_obsidian15 = require("obsidian");
+var GuardianModal = class extends import_obsidian15.Modal {
   result;
   onSubmit;
   constructor(app, onSubmit) {
@@ -9781,20 +11543,20 @@ var GuardianModal = class extends import_obsidian12.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h2", { text: "Guardian Manual Trigger" });
-    new import_obsidian12.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
+    new import_obsidian15.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
       this.result = value;
     }).inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         this.submit();
       }
     }));
-    new import_obsidian12.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
+    new import_obsidian15.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
       this.submit();
     }));
   }
   submit() {
     if (!this.result) {
-      new import_obsidian12.Notice("Please enter an instruction.");
+      new import_obsidian15.Notice("Please enter an instruction.");
       return;
     }
     this.close();
@@ -9807,12 +11569,18 @@ var GuardianModal = class extends import_obsidian12.Modal {
 };
 
 // src/ui/guardian-request.ts
-async function requestGuardianResponse(modelService, prompt, systemPromptOverride) {
-  return modelService.generate(prompt, systemPromptOverride);
+async function requestGuardianResponse(modelService, input) {
+  return modelService.generate(
+    input.prompt,
+    input.systemPromptOverride,
+    "guardian",
+    input.obsidianContext,
+    input.userProfile
+  );
 }
 
 // src/ui/selection-menu.ts
-var import_obsidian13 = require("obsidian");
+var import_obsidian16 = require("obsidian");
 var import_view3 = require("@codemirror/view");
 var import_state5 = require("@codemirror/state");
 var pluginContextMap = /* @__PURE__ */ new WeakMap();
@@ -9899,7 +11667,7 @@ var selectionMenuField = import_state5.StateField.define({
               messages.forEach((msg) => {
                 const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
                 if (msg.role === "ai") {
-                  import_obsidian13.MarkdownRenderer.render(context.app, msg.content, msgEl, "", new import_obsidian13.Component());
+                  import_obsidian16.MarkdownRenderer.render(context.app, msg.content, msgEl, "", new import_obsidian16.Component());
                 } else {
                   msgEl.setText(msg.content);
                 }
@@ -9939,7 +11707,7 @@ var selectionMenuField = import_state5.StateField.define({
                 content: `Selected Text:
 ${selectionText}`
               }];
-              await state.controller.processCommand(text, selectionContext, selectionText);
+              await state.controller.processCommand(text, selectionContext, selectionText, "selection-menu");
             }
             if (e.key === "Escape") {
               e.preventDefault();
@@ -9953,20 +11721,30 @@ ${selectionText}`
           copyBtn.onclick = () => {
             const selectionText = view.state.doc.sliceString(state.from, state.to);
             navigator.clipboard.writeText(selectionText);
-            new import_obsidian13.Notice("Selection copied");
+            new import_obsidian16.Notice("Selection copied");
           };
           const replaceBtn = actions.createEl("button", { text: "Replace with Last Response" });
           replaceBtn.onclick = () => {
-            const msgs = state.controller.getMessages();
-            const lastAiMsg = [...msgs].reverse().find((m) => m.role === "ai");
-            if (lastAiMsg) {
-              view.dispatch({
-                changes: { from: state.from, to: state.to, insert: lastAiMsg.content },
-                effects: setSelectionMenuState.of({ type: "hidden" })
-              });
-            } else {
-              new import_obsidian13.Notice("No AI response to replace with.");
+            const selectionText = view.state.doc.sliceString(state.from, state.to);
+            const preview = state.controller.buildSelectionRewritePreview(selectionText);
+            if (!preview) {
+              new import_obsidian16.Notice("No AI response to replace with.");
+              return;
             }
+            new DiffModal(context.app, preview.oldContent || "", preview.newContent || "", async () => {
+              const activeFile = context.app.workspace.getActiveFile();
+              await state.controller.applyPreviewedChange({
+                action: "selection_rewrite",
+                target: activeFile?.path || "current-selection",
+                previousContent: preview.oldContent || selectionText,
+                apply: () => {
+                  view.dispatch({
+                    changes: { from: state.from, to: state.to, insert: preview.newContent || "" },
+                    effects: setSelectionMenuState.of({ type: "hidden" })
+                  });
+                }
+              });
+            }).open();
           };
           dom.appendChild(container);
           setTimeout(() => textarea.focus(), 50);
@@ -9989,856 +11767,10 @@ function selectionMenuExtension(app, modelService) {
 }
 
 // src/knowledge/runtime.ts
-var import_obsidian19 = require("obsidian");
-
-// src/knowledge/compiler.ts
-var import_obsidian15 = require("obsidian");
-
-// src/knowledge/types.ts
-function normalizeTopicSlug(raw) {
-  return raw.trim().toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-}
-var LEGACY_REGISTRY_PATH = ".obsidian/obsidian-cli/knowledge-registry.json";
-var DEFAULT_WIKI_FOLDER = "Knowledge Wiki";
-var WIKI_ARTICLES_SUBFOLDER = "Articles";
-var WIKI_TOPICS_SUBFOLDER = "Topics";
-var WIKI_HEALTH_SUBFOLDER = "Health";
-var WIKI_INDEX_FILENAME = "index.md";
-var WIKI_INDEX_BASE_FILENAME = "index.base";
-var ONTOLOGY_SCHEMA_FILENAME = "_ontology.md";
-
-// src/knowledge/frontmatter.ts
-var import_obsidian14 = require("obsidian");
-function generateSourceId() {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let suffix = "";
-  for (let i = 0; i < 12; i++) {
-    suffix += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return `ksrc_${suffix}`;
-}
-function getKnowledgeStatus(app, file) {
-  const cache = app.metadataCache.getFileCache(file);
-  const status = cache?.frontmatter?.knowledge_status;
-  if (!status)
-    return null;
-  if (["pending", "processing", "done", "failed"].includes(status)) {
-    return status;
-  }
-  return null;
-}
-function getSourceId(app, file) {
-  const cache = app.metadataCache.getFileCache(file);
-  return cache?.frontmatter?.knowledge_source_id ?? null;
-}
-async function setKnowledgeStatus(app, file, status, extra) {
-  try {
-    await app.fileManager.processFrontMatter(file, (fm) => {
-      fm.knowledge_status = status;
-      if (extra?.source_id)
-        fm.knowledge_source_id = extra.source_id;
-      if (extra?.compiled_at)
-        fm.knowledge_compiled_at = extra.compiled_at;
-      if (extra?.summary)
-        fm.knowledge_summary = extra.summary;
-      if (extra?.error) {
-        fm.knowledge_error = extra.error;
-      } else if (status === "done" || status === "pending") {
-        delete fm.knowledge_error;
-      }
-    });
-  } catch (e) {
-    console.warn(`[KnowledgeFrontmatter] processFrontMatter failed for ${file.path}, fixing YAML...`, e);
-    await fixAndSetFrontmatter(app, file, status, extra);
-  }
-}
-async function fixAndSetFrontmatter(app, file, status, extra) {
-  let content = await app.vault.read(file);
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-  if (fmMatch) {
-    const fixedFm = fmMatch[1].replace(
-      /^(\s*\w[\w\s]*?):\s*(.+:.+)$/gm,
-      (_, key, val) => `${key}: "${val.replace(/"/g, '\\"')}"`
-    );
-    content = content.replace(fmMatch[1], fixedFm);
-  }
-  const fields = [`knowledge_status: ${status}`];
-  if (extra?.source_id)
-    fields.push(`knowledge_source_id: "${extra.source_id}"`);
-  if (extra?.compiled_at)
-    fields.push(`knowledge_compiled_at: "${extra.compiled_at}"`);
-  if (extra?.summary)
-    fields.push(`knowledge_summary: "${extra.summary}"`);
-  if (extra?.error)
-    fields.push(`knowledge_error: "${extra.error.replace(/"/g, '\\"')}"`);
-  if (fmMatch) {
-    const insertPoint = content.indexOf("\n---", 4);
-    content = content.slice(0, insertPoint) + "\n" + fields.join("\n") + content.slice(insertPoint);
-  } else {
-    content = "---\n" + fields.join("\n") + "\n---\n" + content;
-  }
-  await app.vault.modify(file, content);
-}
-async function ensureSourceId(app, file) {
-  const existing = getSourceId(app, file);
-  if (existing)
-    return existing;
-  const newId = generateSourceId();
-  try {
-    await app.fileManager.processFrontMatter(file, (fm) => {
-      fm.knowledge_source_id = newId;
-    });
-  } catch {
-    await fixAndSetFrontmatter(app, file, "pending", { source_id: newId });
-  }
-  return newId;
-}
-function getFilesByKnowledgeStatus(app, status, folders) {
-  const results = [];
-  const files = app.vault.getMarkdownFiles();
-  for (const file of files) {
-    if (folders && folders.length > 0) {
-      const inFolder = folders.some((f) => {
-        const normalized = f.endsWith("/") ? f : f + "/";
-        return file.path.startsWith(normalized);
-      });
-      if (!inFolder)
-        continue;
-    }
-    const cache = app.metadataCache.getFileCache(file);
-    if (cache?.frontmatter?.knowledge_status === status) {
-      results.push(file);
-    }
-  }
-  return results;
-}
-function getUnregisteredFiles(app, watchedFolders, wikiFolder) {
-  if (watchedFolders.length === 0)
-    return [];
-  const results = [];
-  const files = app.vault.getMarkdownFiles();
-  for (const file of files) {
-    if (file.path.startsWith(wikiFolder + "/"))
-      continue;
-    const inWatched = watchedFolders.some((f) => {
-      const normalized = f.endsWith("/") ? f : f + "/";
-      return file.path.startsWith(normalized);
-    });
-    if (!inWatched)
-      continue;
-    const cache = app.metadataCache.getFileCache(file);
-    if (!cache?.frontmatter?.knowledge_status) {
-      results.push(file);
-    }
-  }
-  return results;
-}
-function getSummaryFrontmatter(app, summaryPath) {
-  const file = app.vault.getAbstractFileByPath(summaryPath);
-  if (!file || !(file instanceof import_obsidian14.TFile))
-    return null;
-  const cache = app.metadataCache.getFileCache(file);
-  if (!cache?.frontmatter)
-    return null;
-  return {
-    schema_hash: cache.frontmatter.schema_hash || void 0,
-    content_hash: cache.frontmatter.content_hash || void 0,
-    compiled_at: cache.frontmatter.compiled_at || void 0
-  };
-}
-
-// src/knowledge/ontology.ts
-function extractFrontmatter(rawContent) {
-  if (!rawContent.startsWith("---"))
-    return null;
-  const endIdx = rawContent.indexOf("\n---", 3);
-  if (endIdx === -1)
-    return null;
-  const yamlBlock = rawContent.substring(4, endIdx);
-  try {
-    return parseSimpleYaml(yamlBlock);
-  } catch {
-    return null;
-  }
-}
-function parseSimpleYaml(yaml) {
-  const result = {};
-  const lines = yaml.split("\n");
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (!line.trim() || line.trim().startsWith("#")) {
-      i++;
-      continue;
-    }
-    const kvMatch = line.match(/^(\w[\w_]*)\s*:\s*(.*)$/);
-    if (!kvMatch) {
-      i++;
-      continue;
-    }
-    const key = kvMatch[1];
-    const inlineVal = kvMatch[2].trim();
-    if (!inlineVal && i + 1 < lines.length && lines[i + 1].match(/^\s+-/)) {
-      const arr = [];
-      i++;
-      while (i < lines.length) {
-        const arrLine = lines[i];
-        const itemMatch = arrLine.match(/^\s+-\s+(\w[\w_]*)\s*:\s*"?(.*?)"?\s*$/);
-        if (itemMatch) {
-          const obj = {};
-          obj[itemMatch[1]] = itemMatch[2];
-          i++;
-          while (i < lines.length) {
-            const propLine = lines[i];
-            const propMatch = propLine.match(/^\s{4,}(\w[\w_]*)\s*:\s*"?(.*?)"?\s*$/);
-            if (propMatch && !propLine.match(/^\s+-/)) {
-              obj[propMatch[1]] = propMatch[2];
-              i++;
-            } else {
-              break;
-            }
-          }
-          arr.push(obj);
-        } else if (arrLine.match(/^\s+-\s+"?(.*?)"?\s*$/)) {
-          arr.push(arrLine.match(/^\s+-\s+"?(.*?)"?\s*$/)[1]);
-          i++;
-        } else {
-          break;
-        }
-      }
-      result[key] = arr;
-    } else {
-      let val = inlineVal.replace(/^"(.*)"$/, "$1");
-      if (val === "true")
-        val = true;
-      else if (val === "false")
-        val = false;
-      else if (/^\d+$/.test(val))
-        val = parseInt(val, 10);
-      result[key] = val;
-      i++;
-    }
-  }
-  return result;
-}
-function parseOntologySchema(frontmatter) {
-  if (!frontmatter)
-    return null;
-  if (frontmatter.knowledge_artifact_type !== "ontology_schema")
-    return null;
-  const version = typeof frontmatter.version === "number" ? frontmatter.version : 1;
-  const categories = parseCategories(frontmatter.categories);
-  const entityTypes = parseEntityTypes(frontmatter.entity_types);
-  if (categories.length === 0 && entityTypes.length === 0)
-    return null;
-  return { version, categories, entity_types: entityTypes };
-}
-function parseCategories(raw) {
-  if (!Array.isArray(raw))
-    return [];
-  return raw.filter((c) => typeof c?.name === "string" && c.name.trim()).map((c) => ({
-    name: c.name.trim(),
-    description: typeof c.description === "string" ? c.description.trim() : ""
-  }));
-}
-function parseEntityTypes(raw) {
-  if (!Array.isArray(raw))
-    return [];
-  return raw.filter((e) => typeof e?.name === "string" && e.name.trim()).map((e) => ({
-    name: e.name.trim(),
-    description: typeof e.description === "string" ? e.description.trim() : ""
-  }));
-}
-function computeSchemaHash(rawContent) {
-  let hash = 5381;
-  for (let i = 0; i < rawContent.length; i++) {
-    hash = (hash << 5) + hash + rawContent.charCodeAt(i) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
-}
-function buildDiscoveryPrompt(stats) {
-  let prompt = `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u672C\u4F53\u5206\u6790\u5E08\u3002\u4EE5\u4E0B\u662F\u4ECE ${stats.totalCount} \u7BC7\u6587\u7AE0\u4E2D\u63D0\u53D6\u7684\u805A\u5408\u7EDF\u8BA1\uFF1A
-
-`;
-  prompt += "## \u9AD8\u9891\u4E3B\u9898\uFF08\u51FA\u73B0 3 \u6B21\u4EE5\u4E0A\uFF09\n";
-  for (const t of stats.topTopics) {
-    prompt += `- "${t.topic}"\uFF08${t.count} \u7BC7\uFF09
-`;
-  }
-  prompt += "\n## \u9AD8\u9891\u6982\u5FF5\uFF08\u51FA\u73B0 2 \u6B21\u4EE5\u4E0A\uFF09\n";
-  for (const c of stats.topConcepts) {
-    prompt += `- "${c.concept}"\uFF08${c.count} \u7BC7\uFF09
-`;
-  }
-  prompt += "\n## \u6838\u5FC3\u89C2\u70B9\u6837\u672C\uFF08\u6700\u8FD1 20 \u6761\uFF09\n";
-  for (const claim of stats.recentClaims.slice(0, 20)) {
-    prompt += `- ${claim}
-`;
-  }
-  prompt += `
-\u8BF7\u5206\u6790\u4EE5\u4E0A\u6570\u636E\uFF0C\u751F\u6210\u4E00\u4E2A\u77E5\u8BC6\u672C\u4F53 schema\uFF0C\u5305\u542B\uFF1A
-
-1. categories\uFF08\u77E5\u8BC6\u7C7B\u522B\uFF0C5-8 \u4E2A\uFF09\uFF1A\u6BCF\u4E2A\u7C7B\u522B\u6709 name \u548C description
-2. entity_types\uFF08\u5B9E\u4F53\u7C7B\u578B\uFF0C3-5 \u4E2A\uFF09\uFF1A\u6BCF\u4E2A\u7C7B\u578B\u6709 name \u548C description
-
-\u8981\u6C42\uFF1A
-- \u7C7B\u522B\u5E94\u8BE5\u80FD\u8986\u76D6\u4E0A\u8FF0\u4E3B\u9898\u548C\u89C2\u70B9\u7684 80% \u4EE5\u4E0A
-- \u7C7B\u522B\u4E4B\u95F4\u4E0D\u91CD\u53E0\uFF0C\u6BCF\u4E2A\u77E5\u8BC6\u6761\u76EE\u5E94\u8BE5\u53EA\u5C5E\u4E8E\u4E00\u4E2A\u7C7B\u522B
-- \u7528\u4E2D\u6587\u547D\u540D\uFF0Cdescription \u7528\u4E00\u53E5\u8BDD\u8BF4\u660E\u5224\u5B9A\u6807\u51C6
-
-\u4EE5 JSON \u683C\u5F0F\u8FD4\u56DE\uFF1A
-{"categories": [{"name": "...", "description": "..."}], "entity_types": [{"name": "...", "description": "..."}]}`;
-  return prompt;
-}
-function parseDiscoveryResponse(response) {
-  try {
-    const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-    const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
-    const parsed = JSON.parse(jsonStr);
-    const categories = parseCategories(parsed.categories);
-    const entityTypes = parseEntityTypes(parsed.entity_types);
-    if (categories.length === 0 && entityTypes.length === 0)
-      return null;
-    return { version: 1, categories, entity_types: entityTypes };
-  } catch {
-    return null;
-  }
-}
-function buildOntologyFile(schema4) {
-  let fm = "---\n";
-  fm += "knowledge_generated: true\n";
-  fm += "knowledge_artifact_type: ontology_schema\n";
-  fm += `version: ${schema4.version}
-`;
-  if (schema4.categories.length > 0) {
-    fm += "categories:\n";
-    for (const c of schema4.categories) {
-      fm += `  - name: "${c.name.replace(/"/g, '\\"')}"
-`;
-      fm += `    description: "${c.description.replace(/"/g, '\\"')}"
-`;
-    }
-  }
-  if (schema4.entity_types.length > 0) {
-    fm += "entity_types:\n";
-    for (const e of schema4.entity_types) {
-      fm += `  - name: "${e.name.replace(/"/g, '\\"')}"
-`;
-      fm += `    description: "${e.description.replace(/"/g, '\\"')}"
-`;
-    }
-  }
-  fm += "---\n";
-  fm += "# Knowledge Ontology Schema\n\n";
-  fm += "\u6B64\u6587\u4EF6\u5B9A\u4E49\u77E5\u8BC6\u63D0\u53D6\u7684\u672C\u4F53\u6A21\u578B\u3002\u7F16\u8F91\u4E0A\u65B9 frontmatter \u4E2D\u7684 categories \u548C entity_types \u6765\u5B9A\u5236\u63D0\u53D6\u89C4\u5219\u3002\n";
-  fm += "\u7F16\u8BD1\u5668\u4F1A\u81EA\u52A8\u8BFB\u53D6\u6B64 schema \u5E76\u6309\u5B9A\u4E49\u7684\u7C7B\u522B\u63D0\u53D6\u77E5\u8BC6\u3002\n";
-  return fm;
-}
-
-// src/knowledge/compiler.ts
-function stripFrontmatter(content) {
-  if (!content.startsWith("---"))
-    return content;
-  const endIdx = content.indexOf("---", 3);
-  if (endIdx === -1)
-    return content;
-  return content.substring(endIdx + 3).trimStart();
-}
-function computeContentHash(content) {
-  const body = stripFrontmatter(content);
-  return computeSchemaHash(body);
-}
-function chunkDocument(content, maxChunkSize = 25e3, overlap = 500) {
-  if (content.length <= 3e4)
-    return [content];
-  const body = stripFrontmatter(content);
-  let contextPrefix = "";
-  if (content.startsWith("---")) {
-    const endIdx = content.indexOf("---", 3);
-    if (endIdx !== -1) {
-      contextPrefix = content.substring(0, endIdx + 3) + "\n";
-    }
-  }
-  contextPrefix += body.substring(0, 200) + "\n...\n\n";
-  const sections = [];
-  const headingRegex = /^#{2,3}\s+/m;
-  let remaining = body;
-  while (remaining.length > 0) {
-    if (remaining.length <= maxChunkSize) {
-      sections.push(remaining);
-      break;
-    }
-    const searchArea = remaining.substring(0, maxChunkSize);
-    let splitIdx = -1;
-    const lines = searchArea.split("\n");
-    let charCount = 0;
-    for (let i = lines.length - 1; i > 0; i--) {
-      charCount += lines[i].length + 1;
-      if (headingRegex.test(lines[i])) {
-        splitIdx = searchArea.length - charCount;
-        break;
-      }
-    }
-    if (splitIdx <= 0) {
-      const lastPara = searchArea.lastIndexOf("\n\n");
-      splitIdx = lastPara > 0 ? lastPara : maxChunkSize;
-    }
-    sections.push(remaining.substring(0, splitIdx));
-    const overlapStart = Math.max(0, splitIdx - overlap);
-    remaining = remaining.substring(overlapStart);
-  }
-  const prefixLen = contextPrefix.length;
-  const effectiveMax = maxChunkSize - prefixLen;
-  return sections.map((section, i) => {
-    const trimmed = section.length > effectiveMax ? section.substring(0, effectiveMax) : section;
-    return contextPrefix + trimmed;
-  });
-}
-function mergeExtractions(extractions) {
-  if (extractions.length === 0) {
-    return {
-      title: "",
-      author: "",
-      source_url: "",
-      created_at: "",
-      topics: [],
-      concepts: [],
-      key_claims: [],
-      review_flags: ["all_chunks_empty"]
-    };
-  }
-  if (extractions.length === 1)
-    return extractions[0];
-  const first = (field) => extractions.find((e) => {
-    const v = e[field];
-    return typeof v === "string" && v.length > 0;
-  })?.[field] || "";
-  const topicMap = /* @__PURE__ */ new Map();
-  for (const e of extractions) {
-    for (const t of e.topics) {
-      if (!topicMap.has(t.slug))
-        topicMap.set(t.slug, t);
-    }
-  }
-  const conceptSet = /* @__PURE__ */ new Set();
-  for (const e of extractions) {
-    for (const c of e.concepts)
-      conceptSet.add(c);
-  }
-  const claimSet = /* @__PURE__ */ new Set();
-  const claims = [];
-  for (const e of extractions) {
-    for (const c of e.key_claims) {
-      if (!claimSet.has(c)) {
-        claimSet.add(c);
-        claims.push(c);
-      }
-    }
-  }
-  const entityMap = /* @__PURE__ */ new Map();
-  for (const e of extractions) {
-    for (const ent of e.entities || []) {
-      const key = `${ent.name}::${ent.type}`;
-      const existing = entityMap.get(key);
-      if (!existing || ent.description.length > existing.description.length) {
-        entityMap.set(key, ent);
-      }
-    }
-  }
-  const catMap = /* @__PURE__ */ new Map();
-  for (const e of extractions) {
-    for (const ck of e.categorized_knowledge || []) {
-      if (!catMap.has(ck.category))
-        catMap.set(ck.category, /* @__PURE__ */ new Set());
-      for (const item of ck.items)
-        catMap.get(ck.category).add(item);
-    }
-  }
-  const categorized_knowledge = Array.from(catMap.entries()).map(([category, items]) => ({
-    category,
-    items: Array.from(items)
-  }));
-  const flagSet = /* @__PURE__ */ new Set();
-  for (const e of extractions) {
-    for (const f of e.review_flags)
-      flagSet.add(f);
-  }
-  flagSet.add(`compiled_from_${extractions.length}_chunks`);
-  return {
-    title: first("title"),
-    author: first("author"),
-    source_url: first("source_url"),
-    created_at: first("created_at"),
-    topics: Array.from(topicMap.values()),
-    concepts: Array.from(conceptSet),
-    key_claims: claims,
-    review_flags: Array.from(flagSet),
-    categorized_knowledge: categorized_knowledge.length > 0 ? categorized_knowledge : void 0,
-    entities: entityMap.size > 0 ? Array.from(entityMap.values()) : void 0
-  };
-}
-function buildCompilerPrompt(noteContent, notePath, ontologySchema) {
-  let prompt = `\u4F60\u662F\u4E00\u4E2A\u77E5\u8BC6\u7F16\u8BD1\u5668\u3002\u8BF7\u4ECE\u4EE5\u4E0B\u7B14\u8BB0\u4E2D\u63D0\u53D6\u7ED3\u6784\u5316\u4FE1\u606F\u3002
-
-\u7B14\u8BB0\u8DEF\u5F84: ${notePath}
-
-\u7B14\u8BB0\u5185\u5BB9:
----
-${noteContent}
----
-
-\u8BF7\u63D0\u53D6\u4EE5\u4E0B\u5B57\u6BB5\uFF0C\u4EE5 JSON \u683C\u5F0F\u8FD4\u56DE\uFF08\u4E0D\u8981\u6DFB\u52A0\u4EFB\u4F55\u5176\u4ED6\u6587\u5B57\uFF09\uFF1A
-
-\`\`\`json
-{
-  "title": "\u6587\u7AE0\u6807\u9898",
-  "author": "\u4F5C\u8005\uFF08\u5982\u679C\u80FD\u8BC6\u522B\uFF09",
-  "source_url": "\u6765\u6E90 URL\uFF08\u5982\u679C frontmatter \u4E2D\u6709 source \u5B57\u6BB5\uFF09",
-  "created_at": "\u521B\u5EFA\u65F6\u95F4\uFF08ISO 8601\uFF0C\u5982\u679C\u80FD\u8BC6\u522B\uFF09",
-  "topics": [
-    {"slug": "\u6807\u51C6\u5316\u7684-slug", "label": "\u663E\u793A\u6807\u7B7E"}
-  ],
-  "concepts": ["\u5173\u952E\u6982\u5FF51", "\u5173\u952E\u6982\u5FF52"],
-  "key_claims": ["\u6838\u5FC3\u89C2\u70B91", "\u6838\u5FC3\u89C2\u70B92"],
-  "review_flags": ["\u4F4E\u7F6E\u4FE1\u5EA6\u63D0\u53D6\u8BF4\u660E\uFF08\u5982\u6709\uFF09"]
-}
-\`\`\`
-
-\u89C4\u5219\uFF1A
-- topics \u7684 slug \u5FC5\u987B\u662F\u5C0F\u5199\u3001\u8FDE\u5B57\u7B26\u5206\u9694\u7684\u82F1\u6587\u6216\u4E2D\u6587
-- \u5982\u679C\u65E0\u6CD5\u786E\u5B9A\u67D0\u4E2A\u5B57\u6BB5\uFF0C\u7559\u7A7A\u5B57\u7B26\u4E32\u6216\u7A7A\u6570\u7EC4
-- review_flags \u7528\u4E8E\u6807\u8BB0\u4F60\u4E0D\u786E\u5B9A\u7684\u63D0\u53D6\u7ED3\u679C
-- \u4E0D\u8981\u7F16\u9020\u4FE1\u606F\uFF0C\u53EA\u63D0\u53D6\u7B14\u8BB0\u4E2D\u5B9E\u9645\u5B58\u5728\u7684\u5185\u5BB9`;
-  if (ontologySchema) {
-    prompt += "\n\n## \u672C\u4F53\u6A21\u578B\u63D0\u53D6\u8981\u6C42\n\n\u8BF7\u989D\u5916\u6309\u4EE5\u4E0B\u77E5\u8BC6\u7C7B\u522B\u5BF9\u63D0\u53D6\u5185\u5BB9\u8FDB\u884C\u5206\u7C7B\uFF1A\n\n";
-    for (const c of ontologySchema.categories) {
-      prompt += `- "${c.name}"\uFF1A${c.description}
-`;
-    }
-    if (ontologySchema.entity_types.length > 0) {
-      prompt += "\n\u8BF7\u989D\u5916\u8BC6\u522B\u4EE5\u4E0B\u7C7B\u578B\u7684\u5B9E\u4F53\uFF1A\n\n";
-      for (const e of ontologySchema.entity_types) {
-        prompt += `- "${e.name}"\uFF1A${e.description}
-`;
-      }
-    }
-    prompt += `
-\u5728 JSON \u8F93\u51FA\u4E2D\u65B0\u589E\u4EE5\u4E0B\u5B57\u6BB5\uFF1A
-
-"categorized_knowledge": [
-  {"category": "\u7C7B\u522B\u540D", "items": ["\u8BE5\u7C7B\u522B\u4E0B\u7684\u6761\u76EE1", "\u6761\u76EE2"]}
-],
-"entities": [
-  {"name": "\u5B9E\u4F53\u540D", "type": "\u5B9E\u4F53\u7C7B\u578B", "description": "\u4E00\u53E5\u8BDD\u63CF\u8FF0"}
-]
-
-\u89C4\u5219\uFF1A
-- \u6BCF\u4E2A item \u53EA\u5F52\u5165\u6700\u5339\u914D\u7684\u4E00\u4E2A category\uFF0C\u4E0D\u8981\u91CD\u590D\u5F52\u7C7B
-- \u5982\u679C\u6587\u7AE0\u5185\u5BB9\u4E0D\u6D89\u53CA\u67D0\u4E2A category\uFF0C\u8BE5 category \u7684 items \u4E3A\u7A7A\u6570\u7EC4
-- \u5B9E\u4F53\u540D\u4F7F\u7528\u6587\u7AE0\u4E2D\u6700\u5E38\u89C1\u7684\u79F0\u547C\u5F62\u5F0F`;
-  }
-  return prompt;
-}
-function parseCompilerResponse(response) {
-  try {
-    const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-    const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
-    const parsed = JSON.parse(jsonStr);
-    if (typeof parsed.title !== "string")
-      return null;
-    const topics = (parsed.topics || []).map((t) => ({
-      slug: normalizeTopicSlug(t.slug || t.label || ""),
-      label: t.label || t.slug || ""
-    })).filter((t) => t.slug.length > 0);
-    const reviewFlags = Array.isArray(parsed.review_flags) ? parsed.review_flags : [];
-    let categorized_knowledge;
-    let entities;
-    try {
-      if (Array.isArray(parsed.categorized_knowledge)) {
-        categorized_knowledge = parsed.categorized_knowledge.filter((ck) => typeof ck?.category === "string" && Array.isArray(ck?.items)).map((ck) => ({
-          category: ck.category,
-          items: ck.items.filter((i) => typeof i === "string")
-        }));
-      }
-      if (Array.isArray(parsed.entities)) {
-        entities = parsed.entities.filter((e) => typeof e?.name === "string" && typeof e?.type === "string").map((e) => ({
-          name: e.name,
-          type: e.type,
-          description: typeof e.description === "string" ? e.description : ""
-        }));
-      }
-    } catch {
-      reviewFlags.push("ontology_extraction_failed");
-      console.warn("[parseCompilerResponse] Ontology fields parse failed, base fields preserved");
-    }
-    return {
-      title: parsed.title || "",
-      author: parsed.author || "",
-      source_url: parsed.source_url || "",
-      created_at: parsed.created_at || "",
-      topics,
-      concepts: Array.isArray(parsed.concepts) ? parsed.concepts : [],
-      key_claims: Array.isArray(parsed.key_claims) ? parsed.key_claims : [],
-      review_flags: reviewFlags,
-      categorized_knowledge,
-      entities
-    };
-  } catch {
-    return null;
-  }
-}
-function buildSummaryMarkdown(sourceId, extraction, sourcePath, schemaHash, contentHash) {
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  let fm = "---\n";
-  fm += "knowledge_generated: true\n";
-  fm += `knowledge_source_id: "${sourceId}"
-`;
-  fm += `title: "${extraction.title.replace(/"/g, '\\"')}"
-`;
-  if (extraction.source_url)
-    fm += `source_url: "${extraction.source_url}"
-`;
-  if (extraction.author)
-    fm += `author: "${extraction.author.replace(/"/g, '\\"')}"
-`;
-  if (extraction.created_at)
-    fm += `created_at: "${extraction.created_at}"
-`;
-  fm += `compiled_at: "${now}"
-`;
-  if (schemaHash)
-    fm += `schema_hash: "${schemaHash}"
-`;
-  if (contentHash)
-    fm += `content_hash: "${contentHash}"
-`;
-  if (extraction.topics.length > 0) {
-    fm += "topics:\n";
-    for (const t of extraction.topics) {
-      fm += `  - "${t.label.replace(/"/g, '\\"')}"
-`;
-    }
-  }
-  if (extraction.concepts.length > 0) {
-    fm += `concepts: ${JSON.stringify(extraction.concepts)}
-`;
-  }
-  if (extraction.key_claims.length > 0) {
-    fm += "key_claims:\n";
-    for (const claim of extraction.key_claims) {
-      fm += `  - "${claim.replace(/"/g, '\\"')}"
-`;
-    }
-  }
-  if (extraction.review_flags.length > 0) {
-    fm += `review_flags: ${JSON.stringify(extraction.review_flags)}
-`;
-  } else {
-    fm += "review_flags: []\n";
-  }
-  if (extraction.categorized_knowledge && extraction.categorized_knowledge.length > 0) {
-    fm += "categorized_knowledge:\n";
-    for (const ck of extraction.categorized_knowledge) {
-      fm += `  - category: "${ck.category.replace(/"/g, '\\"')}"
-`;
-      fm += `    items: ${JSON.stringify(ck.items)}
-`;
-    }
-  }
-  if (extraction.entities && extraction.entities.length > 0) {
-    fm += "entities:\n";
-    for (const e of extraction.entities) {
-      fm += `  - name: "${e.name.replace(/"/g, '\\"')}"
-`;
-      fm += `    type: "${e.type.replace(/"/g, '\\"')}"
-`;
-      fm += `    description: "${e.description.replace(/"/g, '\\"')}"
-`;
-    }
-  }
-  fm += "---\n";
-  let body = `# ${extraction.title}
-
-`;
-  body += "## \u6458\u8981\n\n";
-  if (extraction.key_claims.length > 0) {
-    body += extraction.key_claims.slice(0, 2).map((c) => `- ${c}`).join("\n") + "\n";
-  } else {
-    body += "\uFF08\u65E0\u6838\u5FC3\u89C2\u70B9\u63D0\u53D6\uFF09\n";
-  }
-  body += "\n## \u6838\u5FC3\u89C2\u70B9\n\n";
-  if (extraction.key_claims.length > 0) {
-    body += extraction.key_claims.map((c) => `- ${c}`).join("\n") + "\n";
-  } else {
-    body += "\uFF08\u65E0\uFF09\n";
-  }
-  body += "\n## \u5173\u952E\u6982\u5FF5\n\n";
-  if (extraction.concepts.length > 0) {
-    body += extraction.concepts.map((c) => `- ${c}`).join("\n") + "\n";
-  } else {
-    body += "\uFF08\u65E0\uFF09\n";
-  }
-  if (extraction.categorized_knowledge && extraction.categorized_knowledge.length > 0) {
-    body += "\n## \u77E5\u8BC6\u5206\u7C7B\n\n";
-    for (const ck of extraction.categorized_knowledge) {
-      if (ck.items.length > 0) {
-        body += `### ${ck.category}
-
-`;
-        body += ck.items.map((i) => `- ${i}`).join("\n") + "\n\n";
-      }
-    }
-  }
-  if (extraction.entities && extraction.entities.length > 0) {
-    body += "\n## \u5B9E\u4F53\n\n";
-    for (const e of extraction.entities) {
-      body += `- **${e.name}**\uFF08${e.type}\uFF09\uFF1A${e.description}
-`;
-    }
-    body += "\n";
-  }
-  body += "\n## \u539F\u59CB\u6765\u6E90\n\n";
-  if (sourcePath) {
-    body += `[[${sourcePath}]]
-`;
-  } else {
-    body += "\u539F\u59CB\u6765\u6E90\u5DF2\u5220\u9664\u3002\n";
-  }
-  return fm + body;
-}
-var KnowledgeCompiler = class {
-  constructor(app, generateFn, wikiFolder) {
-    this.app = app;
-    this.generateFn = generateFn;
-    this.wikiFolder = wikiFolder;
-  }
-  /**
-   * 编译单篇笔记
-   * 短文章（<= 30000 字符）走单次 AI 调用
-   * 长文章走 Map-Reduce：分块并行提取 + 纯函数合并
-   * @param schema 可选的 ontology schema，传入时注入到 prompt
-   * @param schemaHash 可选的 schema 内容 hash，写入 summary frontmatter
-   * @param concurrency Map 阶段并行度（默认 3）
-   */
-  async compileNote(file, schema4, schemaHash, concurrency = 3) {
-    const sourceId = await ensureSourceId(this.app, file);
-    await setKnowledgeStatus(this.app, file, "processing");
-    try {
-      const content = await this.app.vault.read(file);
-      const contentHash = computeContentHash(content);
-      let extraction;
-      if (content.length <= 3e4) {
-        const prompt = buildCompilerPrompt(content, file.path, schema4);
-        const response = await this.generateFn(prompt);
-        extraction = parseCompilerResponse(response);
-      } else {
-        const chunks = chunkDocument(content);
-        const allResults = [];
-        for (let i = 0; i < chunks.length; i += concurrency) {
-          const batch = chunks.slice(i, i + concurrency);
-          const batchResults = await Promise.allSettled(
-            batch.map(async (chunk, batchIdx) => {
-              const chunkIdx = i + batchIdx;
-              const chunkPrompt = buildCompilerPrompt(chunk, file.path, schema4);
-              const prefix = `[\u6CE8\u610F\uFF1A\u8FD9\u662F\u6587\u6863\u7684\u7B2C ${chunkIdx + 1}/${chunks.length} \u5757\uFF0C\u8BF7\u53EA\u63D0\u53D6\u672C\u5757\u4E2D\u7684\u4FE1\u606F]
-
-`;
-              const response = await this.generateFn(prefix + chunkPrompt);
-              return parseCompilerResponse(response);
-            })
-          );
-          allResults.push(...batchResults);
-        }
-        const extractions = [];
-        const failedChunks = [];
-        allResults.forEach((r, idx) => {
-          if (r.status === "fulfilled" && r.value) {
-            extractions.push(r.value);
-          } else {
-            failedChunks.push(idx);
-          }
-        });
-        if (extractions.length === 0) {
-          await setKnowledgeStatus(this.app, file, "failed", {
-            error: `All ${chunks.length} chunks failed extraction`
-          });
-          return null;
-        }
-        extraction = mergeExtractions(extractions);
-        for (const idx of failedChunks) {
-          extraction.review_flags.push(`chunk_${idx}_extraction_failed`);
-        }
-      }
-      if (!extraction) {
-        await setKnowledgeStatus(this.app, file, "failed", {
-          error: "Failed to parse AI response"
-        });
-        return null;
-      }
-      const summaryPath = `${this.wikiFolder}/Articles/${sourceId}.md`;
-      const summaryContent = buildSummaryMarkdown(
-        sourceId,
-        extraction,
-        file.path,
-        schemaHash,
-        contentHash
-      );
-      const articlesDir = `${this.wikiFolder}/Articles`;
-      if (!this.app.vault.getAbstractFileByPath(articlesDir)) {
-        await this.app.vault.createFolder(articlesDir);
-      }
-      const existingFile = this.app.vault.getAbstractFileByPath(summaryPath);
-      if (existingFile && existingFile instanceof import_obsidian15.TFile) {
-        const existingContent = await this.app.vault.read(existingFile);
-        if (!existingContent.includes("knowledge_generated: true")) {
-          await setKnowledgeStatus(this.app, file, "failed", {
-            error: "Target file exists and is not a generated file"
-          });
-          return null;
-        }
-        await this.app.vault.modify(existingFile, summaryContent);
-      } else {
-        await this.app.vault.create(summaryPath, summaryContent);
-      }
-      await setKnowledgeStatus(this.app, file, "done", {
-        source_id: sourceId,
-        compiled_at: (/* @__PURE__ */ new Date()).toISOString(),
-        summary: summaryPath
-      });
-      return summaryPath;
-    } catch (e) {
-      try {
-        await setKnowledgeStatus(this.app, file, "failed", { error: e.message });
-      } catch {
-      }
-      return null;
-    }
-  }
-  /**
-   * 批量编译所有 pending 项
-   * @param schema 可选的 ontology schema，整个 batch 使用同一份
-   * @param schemaHash 可选的 schema 内容 hash
-   */
-  async compileAllPending(maxBatch = 50, onProgress, schema4, schemaHash, concurrency) {
-    const pendingFiles = getFilesByKnowledgeStatus(this.app, "pending").slice(0, maxBatch);
-    let success = 0;
-    let failed = 0;
-    for (let i = 0; i < pendingFiles.length; i++) {
-      const file = pendingFiles[i];
-      onProgress?.(i + 1, pendingFiles.length, file.path);
-      const result = await this.compileNote(file, schema4, schemaHash, concurrency);
-      if (result) {
-        success++;
-      } else {
-        failed++;
-      }
-    }
-    return { success, failed };
-  }
-};
+var import_obsidian21 = require("obsidian");
 
 // src/knowledge/indexer.ts
-var import_obsidian16 = require("obsidian");
+var import_obsidian17 = require("obsidian");
 function buildBaseFileContent(articlesFolder) {
   return `# Knowledge Wiki \u7D22\u5F15 - \u7531\u63D2\u4EF6\u81EA\u52A8\u751F\u6210
 # \u8BF7\u52FF\u624B\u52A8\u7F16\u8F91\u6B64\u6587\u4EF6
@@ -10894,7 +11826,7 @@ var WikiIndexer = class {
     const internalPlugins = this.app.internalPlugins;
     const basesPlugin = internalPlugins?.plugins?.["bases"];
     if (!basesPlugin || !basesPlugin.enabled) {
-      new import_obsidian16.Notice(
+      new import_obsidian17.Notice(
         "Knowledge Wiki \u9700\u8981\u542F\u7528 Bases \u6838\u5FC3\u63D2\u4EF6\u624D\u80FD\u6B63\u5E38\u663E\u793A\u7D22\u5F15\u89C6\u56FE\u3002\n\u8BF7\u5728 \u8BBE\u7F6E \u2192 \u6838\u5FC3\u63D2\u4EF6 \u4E2D\u542F\u7528 Bases\u3002",
         8e3
       );
@@ -10904,7 +11836,7 @@ var WikiIndexer = class {
   async migrateLegacyIndex() {
     const oldIndexPath = `${this.wikiFolder}/${WIKI_INDEX_FILENAME}`;
     const oldIndex = this.app.vault.getAbstractFileByPath(oldIndexPath);
-    if (oldIndex && oldIndex instanceof import_obsidian16.TFile) {
+    if (oldIndex && oldIndex instanceof import_obsidian17.TFile) {
       const content = await this.app.vault.read(oldIndex);
       if (content.includes("knowledge_generated: true")) {
         await this.app.vault.trash(oldIndex, true);
@@ -10930,7 +11862,7 @@ var WikiIndexer = class {
     const articlesFolder = `${this.wikiFolder}/Articles`;
     const content = buildBaseFileContent(articlesFolder);
     const existing = this.app.vault.getAbstractFileByPath(basePath);
-    if (existing && existing instanceof import_obsidian16.TFile) {
+    if (existing && existing instanceof import_obsidian17.TFile) {
       await this.app.vault.modify(existing, content);
     } else {
       await this.app.vault.create(basePath, content);
@@ -10947,7 +11879,7 @@ var WikiIndexer = class {
 };
 
 // src/knowledge/linter.ts
-var import_obsidian17 = require("obsidian");
+var import_obsidian18 = require("obsidian");
 function checkMissingSummaries(doneFiles, existingFiles) {
   return doneFiles.map((f) => ({
     ...f,
@@ -11095,7 +12027,7 @@ var KnowledgeLinter = class {
       }
     }
     const existing = this.app.vault.getAbstractFileByPath(reportPath);
-    if (existing && existing instanceof import_obsidian17.TFile) {
+    if (existing && existing instanceof import_obsidian18.TFile) {
       await this.app.vault.modify(existing, reportContent);
     } else {
       await this.app.vault.create(reportPath, reportContent);
@@ -11105,7 +12037,7 @@ var KnowledgeLinter = class {
 };
 
 // src/knowledge/watcher.ts
-var import_obsidian18 = require("obsidian");
+var import_obsidian19 = require("obsidian");
 function isInWatchedFolder(filePath, watchedFolders) {
   return watchedFolders.some((folder) => {
     const normalized = folder.endsWith("/") ? folder : folder + "/";
@@ -11166,7 +12098,7 @@ var KnowledgeWatcher = class {
     const key = file.path;
     if (this.debouncedHandlers.has(key))
       return;
-    const handler = (0, import_obsidian18.debounce)(async () => {
+    const handler = (0, import_obsidian19.debounce)(async () => {
       const status = getKnowledgeStatus(this.app, file);
       if (status === "done") {
         this.writingPaths.add(file.path);
@@ -11505,6 +12437,152 @@ var MetadataIndex = class {
   }
 };
 
+// src/knowledge/status-service.ts
+var import_obsidian20 = require("obsidian");
+var KnowledgeStatusService = class {
+  constructor(app, config = {}) {
+    this.app = app;
+    this.config = {
+      watchedFolders: config.watchedFolders || [],
+      wikiFolder: config.wikiFolder || DEFAULT_WIKI_FOLDER
+    };
+  }
+  config;
+  updateConfig(config) {
+    this.config = {
+      watchedFolders: config.watchedFolders || this.config.watchedFolders,
+      wikiFolder: config.wikiFolder || this.config.wikiFolder
+    };
+  }
+  async getNoteStatus(noteOrPath) {
+    const file = this.resolveNote(noteOrPath);
+    if (!file || this.isWikiFile(file.path)) {
+      return null;
+    }
+    const cache = this.app.metadataCache.getFileCache(file);
+    const frontmatter = cache?.frontmatter || {};
+    const baseStatus = getKnowledgeStatus(this.app, file);
+    const summaryPath = typeof frontmatter.knowledge_summary === "string" ? frontmatter.knowledge_summary : null;
+    const compiledAt = typeof frontmatter.knowledge_compiled_at === "string" ? frontmatter.knowledge_compiled_at : null;
+    const error = typeof frontmatter.knowledge_error === "string" ? frontmatter.knowledge_error : null;
+    let state;
+    if (baseStatus === "failed") {
+      state = "failed";
+    } else if (baseStatus === "processing") {
+      state = "processing";
+    } else {
+      const currentSchemaHash = await this.getCurrentSchemaHash();
+      const stale = await this.isStaleFile(file, summaryPath, currentSchemaHash);
+      if (stale) {
+        state = "stale";
+      } else if (baseStatus === "pending") {
+        state = "pending";
+      } else if (baseStatus === "done") {
+        state = "done";
+      } else {
+        state = "unregistered";
+      }
+    }
+    const summaryFrontmatter = summaryPath ? getSummaryFrontmatter2(this.app, summaryPath) : null;
+    return {
+      path: file.path,
+      state,
+      summaryPath,
+      compiledAt: compiledAt || summaryFrontmatter?.compiled_at || null,
+      error
+    };
+  }
+  async getGlobalCounts() {
+    const counts = {
+      pending: 0,
+      failed: 0,
+      stale: 0
+    };
+    for (const file of this.getTrackedFiles()) {
+      const status = await this.getNoteStatus(file);
+      if (!status)
+        continue;
+      if (status.state === "pending")
+        counts.pending++;
+      if (status.state === "failed")
+        counts.failed++;
+      if (status.state === "stale")
+        counts.stale++;
+    }
+    return counts;
+  }
+  async getStaleFiles() {
+    const currentSchemaHash = await this.getCurrentSchemaHash();
+    const staleFiles = [];
+    for (const file of this.getTrackedFiles()) {
+      const baseStatus = getKnowledgeStatus(this.app, file);
+      if (baseStatus !== "done")
+        continue;
+      const cache = this.app.metadataCache.getFileCache(file);
+      const summaryPath = typeof cache?.frontmatter?.knowledge_summary === "string" ? cache.frontmatter.knowledge_summary : null;
+      if (await this.isStaleFile(file, summaryPath, currentSchemaHash)) {
+        staleFiles.push(file);
+      }
+    }
+    return staleFiles;
+  }
+  getTrackedFiles() {
+    return this.app.vault.getMarkdownFiles().filter(
+      (file) => !this.isWikiFile(file.path) && this.isInWatchedFolders(file.path)
+    );
+  }
+  resolveNote(noteOrPath) {
+    if (!noteOrPath)
+      return null;
+    if (noteOrPath instanceof import_obsidian20.TFile)
+      return noteOrPath;
+    const file = this.app.vault.getAbstractFileByPath(noteOrPath);
+    return file instanceof import_obsidian20.TFile ? file : null;
+  }
+  isWikiFile(path) {
+    return path.startsWith(`${this.config.wikiFolder}/`);
+  }
+  isInWatchedFolders(path) {
+    if (this.config.watchedFolders.length === 0)
+      return false;
+    return this.config.watchedFolders.some((folder) => {
+      const normalized = folder.endsWith("/") ? folder : `${folder}/`;
+      return path.startsWith(normalized);
+    });
+  }
+  async getCurrentSchemaHash() {
+    const schemaPath = `${this.config.wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`;
+    const file = this.app.vault.getAbstractFileByPath(schemaPath);
+    if (!(file instanceof import_obsidian20.TFile))
+      return void 0;
+    try {
+      const content = await this.app.vault.read(file);
+      return computeSchemaHash(content);
+    } catch {
+      return void 0;
+    }
+  }
+  async isStaleFile(file, summaryPath, currentSchemaHash) {
+    if (!summaryPath)
+      return false;
+    const summaryFrontmatter = getSummaryFrontmatter2(this.app, summaryPath);
+    if (!summaryFrontmatter)
+      return false;
+    if (currentSchemaHash && summaryFrontmatter.schema_hash && summaryFrontmatter.schema_hash !== currentSchemaHash) {
+      return true;
+    }
+    if (!summaryFrontmatter.content_hash) {
+      return false;
+    }
+    try {
+      const content = await this.app.vault.read(file);
+      return computeContentHash2(content) !== summaryFrontmatter.content_hash;
+    } catch {
+      return false;
+    }
+  }
+};
+
 // src/knowledge/runtime.ts
 var KnowledgeRuntime = class {
   constructor(app, settings, modelService) {
@@ -11520,12 +12598,16 @@ var KnowledgeRuntime = class {
     this.metadataIndex = new MetadataIndex(app, wikiFolder);
     this.indexer = new WikiIndexer(app, this.metadataIndex, wikiFolder);
     this.linter = new KnowledgeLinter(app, wikiFolder);
+    this.statusService = new KnowledgeStatusService(app, {
+      watchedFolders: settings.knowledgeSourceFolders || [],
+      wikiFolder
+    });
     this.watcher = new KnowledgeWatcher(
       app,
       settings.knowledgeSourceFolders || [],
       wikiFolder
     );
-    const debouncedAutoCompile = (0, import_obsidian19.debounce)(async () => {
+    const debouncedAutoCompile = (0, import_obsidian21.debounce)(async () => {
       if (!this.settings.knowledgeAutoCompile)
         return;
       if (this.autoCompiling)
@@ -11538,7 +12620,7 @@ var KnowledgeRuntime = class {
         const result = await this.compiler.compileAllPending(maxBatch, void 0, ontology?.schema, ontology?.hash);
         if (result.success > 0) {
           await this.indexer.rebuildIndex();
-          new import_obsidian19.Notice(`Auto-compiled: ${result.success} notes`);
+          new import_obsidian21.Notice(`Auto-compiled: ${result.success} notes`);
         }
         if (result.failed > 0) {
           console.warn(`[KnowledgeRuntime] Auto-compile: ${result.failed} failed`);
@@ -11561,12 +12643,16 @@ var KnowledgeRuntime = class {
   fileBackExecutor;
   metadataIndex;
   modelService;
+  statusService;
   /** 暴露给 SkillRegistry 注册 knowledge 工具 */
   getQueryExecutor() {
     return this.queryExecutor;
   }
   getFileBackExecutor() {
     return this.fileBackExecutor;
+  }
+  getStatusService() {
+    return this.statusService;
   }
   autoCompiling = false;
   async initialize() {
@@ -11623,6 +12709,11 @@ var KnowledgeRuntime = class {
    * 快速路径：先比较 ontology hash，没变则只检查 mtime 近期变化的文件
    */
   async detectStaleFiles(wikiFolder) {
+    const staleFiles = await this.statusService.getStaleFiles();
+    for (const file of staleFiles) {
+      await setKnowledgeStatus(this.app, file, "pending");
+    }
+    return staleFiles.length;
     const doneFiles = getFilesByKnowledgeStatus(this.app, "done");
     if (doneFiles.length === 0)
       return 0;
@@ -11630,7 +12721,7 @@ var KnowledgeRuntime = class {
       `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`
     );
     let currentSchemaHash;
-    if (schemaFile && schemaFile instanceof import_obsidian19.TFile) {
+    if (schemaFile && schemaFile instanceof import_obsidian21.TFile) {
       const schemaContent = await this.app.vault.read(schemaFile);
       currentSchemaHash = computeSchemaHash(schemaContent);
     }
@@ -11678,7 +12769,7 @@ var KnowledgeRuntime = class {
         if (record.status !== "done" && record.status !== "failed")
           continue;
         const file = this.app.vault.getAbstractFileByPath(record.path);
-        if (!file || !(file instanceof import_obsidian19.TFile))
+        if (!file || !(file instanceof import_obsidian21.TFile))
           continue;
         const existing = getKnowledgeStatus(this.app, file);
         if (existing)
@@ -11694,7 +12785,7 @@ var KnowledgeRuntime = class {
       await adapter.remove(LEGACY_REGISTRY_PATH);
       if (migrated > 0) {
         console.log(`[KnowledgeRuntime] Migrated ${migrated} records from registry to frontmatter`);
-        new import_obsidian19.Notice(`Knowledge Wiki: migrated ${migrated} records to frontmatter`);
+        new import_obsidian21.Notice(`Knowledge Wiki: migrated ${migrated} records to frontmatter`);
       }
     } catch (e) {
       console.error(`[KnowledgeRuntime] Registry migration error:`, e);
@@ -11707,10 +12798,10 @@ var KnowledgeRuntime = class {
       callback: async () => {
         const file = this.app.workspace.getActiveFile();
         if (!file) {
-          new import_obsidian19.Notice("Please open a note first.");
+          new import_obsidian21.Notice("Please open a note first.");
           return;
         }
-        new import_obsidian19.Notice(`Compiling: ${file.path}...`);
+        new import_obsidian21.Notice(`Compiling: ${file.path}...`);
         const status = getKnowledgeStatus(this.app, file);
         if (status === "done" || status === "failed") {
           await setKnowledgeStatus(this.app, file, "pending");
@@ -11722,9 +12813,9 @@ var KnowledgeRuntime = class {
         const result = await this.compiler.compileNote(file, ontology?.schema, ontology?.hash);
         if (result) {
           await this.indexer.rebuildIndex();
-          new import_obsidian19.Notice(`Compiled: ${result}`);
+          new import_obsidian21.Notice(`Compiled: ${result}`);
         } else {
-          new import_obsidian19.Notice(`Compilation failed`);
+          new import_obsidian21.Notice(`Compilation failed`);
         }
       }
     });
@@ -11732,14 +12823,14 @@ var KnowledgeRuntime = class {
       id: "knowledge-compile-all",
       name: "Knowledge: Compile all pending",
       callback: async () => {
-        new import_obsidian19.Notice("Compiling all pending notes...");
+        new import_obsidian21.Notice("Compiling all pending notes...");
         const maxBatch = this.settings.knowledgeMaxCompileBatch || 50;
         const ontology = await this.loadOntologySchema();
         const result = await this.compiler.compileAllPending(maxBatch, void 0, ontology?.schema, ontology?.hash);
         if (result.success > 0) {
           await this.indexer.rebuildIndex();
         }
-        new import_obsidian19.Notice(`Compiled: ${result.success} success, ${result.failed} failed`);
+        new import_obsidian21.Notice(`Compiled: ${result.success} success, ${result.failed} failed`);
       }
     });
     plugin.addCommand({
@@ -11749,10 +12840,10 @@ var KnowledgeRuntime = class {
         const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
         const basePath = `${wikiFolder}/${WIKI_INDEX_BASE_FILENAME}`;
         const file = this.app.vault.getAbstractFileByPath(basePath);
-        if (file && file instanceof import_obsidian19.TFile) {
+        if (file && file instanceof import_obsidian21.TFile) {
           await this.app.workspace.getLeaf(false).openFile(file);
         } else {
-          new import_obsidian19.Notice("Knowledge index not found. Compile some notes first.");
+          new import_obsidian21.Notice("Knowledge index not found. Compile some notes first.");
         }
       }
     });
@@ -11760,11 +12851,11 @@ var KnowledgeRuntime = class {
       id: "knowledge-lint",
       name: "Knowledge: Run knowledge lint",
       callback: async () => {
-        new import_obsidian19.Notice("Running knowledge lint...");
+        new import_obsidian21.Notice("Running knowledge lint...");
         const reportPath = await this.linter.generateReport();
-        new import_obsidian19.Notice(`Health report generated: ${reportPath}`);
+        new import_obsidian21.Notice(`Health report generated: ${reportPath}`);
         const file = this.app.vault.getAbstractFileByPath(reportPath);
-        if (file && file instanceof import_obsidian19.TFile) {
+        if (file && file instanceof import_obsidian21.TFile) {
           await this.app.workspace.getLeaf(false).openFile(file);
         }
       }
@@ -11773,14 +12864,14 @@ var KnowledgeRuntime = class {
   registerEvents(plugin) {
     plugin.registerEvent(
       this.app.vault.on("create", (file) => {
-        if (file instanceof import_obsidian19.TFile && file.extension === "md") {
+        if (file instanceof import_obsidian21.TFile && file.extension === "md") {
           this.watcher.onFileCreate(file);
         }
       })
     );
     plugin.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (file instanceof import_obsidian19.TFile && file.extension === "md") {
+        if (file instanceof import_obsidian21.TFile && file.extension === "md") {
           this.watcher.onFileModify(file);
         }
       })
@@ -11792,7 +12883,7 @@ var KnowledgeRuntime = class {
     );
     plugin.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file instanceof import_obsidian19.TFile) {
+        if (file instanceof import_obsidian21.TFile) {
           this.metadataIndex.onFileDeleted(file.path);
         }
       })
@@ -11824,7 +12915,12 @@ var KnowledgeRuntime = class {
     return context;
   }
   updateSettings(settings) {
+    this.settings = settings;
     this.watcher.updateWatchedFolders(settings.knowledgeSourceFolders || []);
+    this.statusService.updateConfig({
+      watchedFolders: settings.knowledgeSourceFolders || [],
+      wikiFolder: settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER
+    });
   }
   /**
    * 加载 ontology schema（每次 batch 开始时调用一次）
@@ -11835,7 +12931,7 @@ var KnowledgeRuntime = class {
     const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
     const schemaPath = `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`;
     const file = this.app.vault.getAbstractFileByPath(schemaPath);
-    if (!file || !(file instanceof import_obsidian19.TFile))
+    if (!file || !(file instanceof import_obsidian21.TFile))
       return null;
     try {
       const rawContent = await this.app.vault.read(file);
@@ -11941,7 +13037,7 @@ var KnowledgeRuntime = class {
       throw new Error(`\u8DEF\u5F84\u4E0D\u5B58\u5728: ${path}`);
     const ontology = await this.loadOntologySchema();
     let registered = 0;
-    if (abstractFile instanceof import_obsidian19.TFile) {
+    if (abstractFile instanceof import_obsidian21.TFile) {
       const status = getKnowledgeStatus(this.app, abstractFile);
       if (!status) {
         await ensureSourceId(this.app, abstractFile);
@@ -12551,8 +13647,50 @@ ${lines.join("\n")}`;
 };
 
 // src/skills/builtin/vault-ops.ts
-var import_obsidian20 = require("obsidian");
+var import_obsidian22 = require("obsidian");
 var MAX_FILE_READ_CHARS = 2e4;
+function normalizeScopePath(path) {
+  return path.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+function isPathInsideFolder(target, folder) {
+  const normalizedTarget = normalizeScopePath(target);
+  const normalizedFolder = normalizeScopePath(folder);
+  if (!normalizedFolder)
+    return false;
+  return normalizedTarget === normalizedFolder || normalizedTarget.startsWith(`${normalizedFolder}/`);
+}
+function canWriteToVaultTarget(input) {
+  const target = normalizeScopePath(input.target);
+  const activeNote = input.activeNote ? normalizeScopePath(input.activeNote) : "";
+  const configuredFolders = (input.configuredFolders || []).map(normalizeScopePath).filter(Boolean);
+  switch (input.scope) {
+    case "read-only":
+      return false;
+    case "current-note":
+      return !!activeNote && target === activeNote;
+    case "configured-folders":
+      return configuredFolders.some((folder) => isPathInsideFolder(target, folder));
+    case "all-vault":
+    default:
+      return true;
+  }
+}
+function getVaultWriteScope(settings) {
+  return settings.vaultWriteScope || "all-vault";
+}
+function getVaultWriteFolders(settings) {
+  return Array.isArray(settings.vaultWriteAllowedFolders) ? settings.vaultWriteAllowedFolders : [];
+}
+function getWriteScopeError(ctx, target) {
+  const activeNote = ctx.app.workspace.getActiveFile?.()?.path || null;
+  const allowed = canWriteToVaultTarget({
+    scope: getVaultWriteScope(ctx.settings),
+    target,
+    activeNote,
+    configuredFolders: getVaultWriteFolders(ctx.settings)
+  });
+  return allowed ? null : `Write not allowed for path: ${target}`;
+}
 var readNote = {
   name: "read_note",
   description: "Read the content of a specific note in the vault.",
@@ -12588,6 +13726,10 @@ var createNote = {
       return { status: "error", message: "Missing filename parameter" };
     if (!path.endsWith(".md"))
       path += ".md";
+    const scopeError = getWriteScopeError(ctx, path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
     if (!ctx.settings.allowFileCreation) {
       return { success: false, error: "File creation is disabled" };
     }
@@ -12599,7 +13741,15 @@ var createNote = {
       return buildApprovalResponse("create_note", path, {
         filename: path,
         content: args.content || ""
-      }, "create note");
+      }, "create note", {
+        kind: "note-create",
+        target: path,
+        summary: "Create note",
+        newContent: args.content || "",
+        risk: "medium",
+        supportsPartialApply: false,
+        undoable: true
+      });
     }
     await ensureParentFolder(ctx.app, path);
     await ctx.app.vault.create(path, args.content || "");
@@ -12618,17 +13768,31 @@ var updateNote = {
     required: ["path", "content"]
   },
   async execute(args, ctx) {
+    const scopeError = getWriteScopeError(ctx, args.path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
     if (!ctx.settings.allowFileModification) {
       return { success: false, error: "File modification is disabled" };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.path);
-    if (!file || !(file instanceof import_obsidian20.TFile))
+    if (!file || !(file instanceof import_obsidian22.TFile))
       return { success: false, error: "File not found" };
     if (ctx.settings.confirmExecutions && !args.approved) {
+      const oldContent = await ctx.app.vault.read(file);
       return buildApprovalResponse("update_note", args.path, {
         path: args.path,
         content: args.content
-      }, "update note");
+      }, "update note", {
+        kind: "note-replace",
+        target: args.path,
+        summary: "Replace note content",
+        oldContent,
+        newContent: args.content,
+        risk: "medium",
+        supportsPartialApply: false,
+        undoable: true
+      });
     }
     await ctx.app.vault.modify(file, args.content);
     return { success: true, message: `\u2705 Updated: ${args.path}` };
@@ -12646,17 +13810,32 @@ var appendToNote = {
     required: ["path", "content"]
   },
   async execute(args, ctx) {
+    const scopeError = getWriteScopeError(ctx, args.path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
     if (!ctx.settings.allowFileModification) {
       return { success: false, error: "File modification is disabled" };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.path);
-    if (!file || !(file instanceof import_obsidian20.TFile))
+    if (!file || !(file instanceof import_obsidian22.TFile))
       return { success: false, error: "File not found" };
     if (ctx.settings.confirmExecutions && !args.approved) {
+      const existing2 = await ctx.app.vault.read(file);
       return buildApprovalResponse("append_to_note", args.path, {
         path: args.path,
         content: args.content
-      }, "append to note");
+      }, "append to note", {
+        kind: "note-append",
+        target: args.path,
+        summary: "Append to note",
+        oldContent: existing2,
+        newContent: `${existing2}
+${args.content}`,
+        risk: "medium",
+        supportsPartialApply: false,
+        undoable: true
+      });
     }
     const existing = await ctx.app.vault.read(file);
     await ctx.app.vault.modify(file, existing + "\n" + args.content);
@@ -12674,6 +13853,10 @@ var deleteNote = {
     required: ["path"]
   },
   async execute(args, ctx) {
+    const scopeError = getWriteScopeError(ctx, args.path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
     if (!ctx.settings.allowFileModification) {
       return { success: false, error: "File modification is disabled" };
     }
@@ -12683,7 +13866,14 @@ var deleteNote = {
     if (ctx.settings.confirmExecutions && !args.approved) {
       return buildApprovalResponse("delete_note", args.path, {
         path: args.path
-      }, "delete note");
+      }, "delete note", {
+        kind: "note-delete",
+        target: args.path,
+        summary: "Delete note",
+        risk: "high",
+        supportsPartialApply: false,
+        undoable: true
+      });
     }
     await ctx.app.vault.trash(file, true);
     return { success: true, message: `\u2705 Deleted: ${args.path}` };
@@ -12701,6 +13891,14 @@ var renameNote = {
     required: ["oldPath", "newPath"]
   },
   async execute(args, ctx) {
+    const scopeError = getWriteScopeError(ctx, args.oldPath);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
+    const newPathScopeError = getWriteScopeError(ctx, args.newPath);
+    if (newPathScopeError) {
+      return { success: false, error: newPathScopeError };
+    }
     if (!ctx.settings.allowFileModification) {
       return { success: false, error: "File modification is disabled" };
     }
@@ -12711,7 +13909,14 @@ var renameNote = {
       return buildApprovalResponse("rename_note", args.oldPath, {
         oldPath: args.oldPath,
         newPath: args.newPath
-      }, "rename note");
+      }, "rename note", {
+        kind: "note-rename",
+        target: args.oldPath,
+        summary: "Rename note",
+        risk: "medium",
+        supportsPartialApply: false,
+        undoable: true
+      });
     }
     await ctx.app.vault.rename(file, args.newPath);
     return { success: true, message: `\u2705 Renamed: ${args.oldPath} -> ${args.newPath}` };
@@ -12836,6 +14041,10 @@ var createFile = {
     const pathResult = normalizeVaultPath(args.path);
     if (pathResult.error)
       return { success: false, error: pathResult.error };
+    const scopeError = getWriteScopeError(ctx, pathResult.path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
     if (isObsidianConfigPath(pathResult.path)) {
       return { success: false, error: "Writing .obsidian files is not allowed" };
     }
@@ -12849,7 +14058,15 @@ var createFile = {
       return buildApprovalResponse("create_file", pathResult.path, {
         path: pathResult.path,
         content: args.content || ""
-      }, "create file");
+      }, "create file", {
+        kind: "note-create",
+        target: pathResult.path,
+        summary: "Create file",
+        newContent: args.content || "",
+        risk: "medium",
+        supportsPartialApply: false,
+        undoable: true
+      });
     }
     await ensureParentFolder(ctx.app, pathResult.path);
     await ctx.app.vault.create(pathResult.path, args.content || "");
@@ -12875,6 +14092,10 @@ var updateFile = {
     const pathResult = normalizeVaultPath(args.path);
     if (pathResult.error)
       return { success: false, error: pathResult.error };
+    const scopeError = getWriteScopeError(ctx, pathResult.path);
+    if (scopeError) {
+      return { success: false, error: scopeError };
+    }
     if (isObsidianConfigPath(pathResult.path)) {
       return { success: false, error: "Writing .obsidian files is not allowed" };
     }
@@ -12886,10 +14107,20 @@ var updateFile = {
       return { success: false, error: "File not found" };
     }
     if (ctx.settings.confirmExecutions && !args.approved) {
+      const oldContent = await ctx.app.vault.read(file);
       return buildApprovalResponse("update_file", pathResult.path, {
         path: pathResult.path,
         content: args.content
-      }, "update file");
+      }, "update file", {
+        kind: "note-replace",
+        target: pathResult.path,
+        summary: "Replace file content",
+        oldContent,
+        newContent: args.content,
+        risk: "medium",
+        supportsPartialApply: false,
+        undoable: true
+      });
     }
     await ctx.app.vault.modify(file, args.content);
     return {
@@ -12928,13 +14159,14 @@ async function ensureParentFolder(app, path) {
   } catch (e) {
   }
 }
-function buildApprovalResponse(action, target, args, description) {
+function buildApprovalResponse(action, target, args, description, preview) {
   return {
     approval_required: true,
     action,
     target,
     args,
-    message: `Approval required to ${description}: ${target}`
+    message: `Approval required to ${description}: ${target}`,
+    preview
   };
 }
 var ALL_VAULT_TOOLS = [
@@ -12959,9 +14191,9 @@ function registerVaultTools(registry) {
 }
 
 // src/skills/builtin/web-search/executor.ts
-var import_obsidian21 = require("obsidian");
+var import_obsidian23 = require("obsidian");
 var defaultDeps2 = {
-  requestUrl: (options) => (0, import_obsidian21.requestUrl)(options),
+  requestUrl: (options) => (0, import_obsidian23.requestUrl)(options),
   wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 };
 function createWebSearchTool(deps = defaultDeps2) {
@@ -13049,9 +14281,9 @@ function resolveSavedNotePath(filename, preferredFolder, exists) {
 }
 
 // src/services/video-transcription.ts
-var import_obsidian22 = require("obsidian");
+var import_obsidian24 = require("obsidian");
 var defaultDeps3 = {
-  requestUrl: (options) => (0, import_obsidian22.requestUrl)(options),
+  requestUrl: (options) => (0, import_obsidian24.requestUrl)(options),
   fetchImpl: (input, init) => fetch(input, init),
   createGeminiModel: (provider) => {
     const genAI = new GoogleGenerativeAI(provider.apiKey);
@@ -13629,6 +14861,12 @@ function registerTools3(registry, queryExecutor, fileBackExecutor) {
 }
 
 // src/skills/builtin/plugin-ctrl/executor.ts
+function getPluginCommandPreconditions() {
+  return [
+    "Open the target note before execution.",
+    "Confirm the relevant editor pane or selection is focused before execution."
+  ];
+}
 var listPlugins = {
   name: "list_plugins",
   description: "List all installed plugins and their status, including whether they have an AI skill.",
@@ -13706,7 +14944,17 @@ var executePluginCommand = {
         args: {
           commandId: args.commandId
         },
-        message: `Approval required to execute plugin command: ${args.commandId}`
+        message: `Approval required to execute plugin command: ${args.commandId}`,
+        preview: {
+          kind: "plugin-command",
+          target: args.commandId,
+          summary: "Execute plugin command",
+          commandId: args.commandId,
+          preconditions: getPluginCommandPreconditions(),
+          risk: "medium",
+          supportsPartialApply: false,
+          undoable: false
+        }
       };
     }
     const success = ctx.app.commands.executeCommandById(args.commandId);
@@ -20174,16 +21422,16 @@ function addFormulaReference(value, references) {
 }
 
 // src/skills/builtin/web-search/SKILL.md
-var SKILL_default = '---\nname: web-search\ndescription: \u641C\u7D22\u4E92\u8054\u7F51\u83B7\u53D6\u6700\u65B0\u4FE1\u606F\u3001\u65B0\u95FB\u6216\u6587\u6863\u3002\u5F53\u7528\u6237\u8BE2\u95EE vault \u4E2D\u6CA1\u6709\u7684\u5B9E\u65F6\u4FE1\u606F\u65F6\u4F7F\u7528\u3002\ntriggers:\n  keywords: ["\u641C\u7D22", "\u641C\u4E00\u4E0B", "search", "google", "\u6700\u65B0", "\u65B0\u95FB"]\ntools: ["web_search"]\n---\n\n# Web Search\n\n\u4F7F\u7528 DuckDuckGo \u641C\u7D22\u4E92\u8054\u7F51\u3002\n\n## \u4F7F\u7528\u65B9\u5F0F\n\n\u63D0\u4F9B\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u53EF\u9009\u65F6\u95F4\u8303\u56F4\u8FC7\u6EE4\u3002\n\n## \u53C2\u6570\n\n- `query`\uFF08\u5FC5\u586B\uFF09\uFF1A\u641C\u7D22\u5173\u952E\u8BCD\n- `time_range`\uFF08\u53EF\u9009\uFF09\uFF1A\u65F6\u95F4\u8303\u56F4 \u2014 d(\u5929), w(\u5468), m(\u6708), y(\u5E74)\n\n## \u8F93\u51FA\u683C\u5F0F\n\n\u8FD4\u56DE\u6700\u591A 5 \u6761\u641C\u7D22\u7ED3\u679C\uFF0C\u6BCF\u6761\u5305\u542B title\u3001link\u3001snippet\u3002\n\u56DE\u7B54\u65F6\u4F7F\u7528 Markdown \u94FE\u63A5\u683C\u5F0F\uFF1A`[Title](URL)`\u3002\n';
+var SKILL_default = '---\r\nname: web-search\r\ndescription: \u641C\u7D22\u4E92\u8054\u7F51\u83B7\u53D6\u6700\u65B0\u4FE1\u606F\u3001\u65B0\u95FB\u6216\u6587\u6863\u3002\u5F53\u7528\u6237\u8BE2\u95EE vault \u4E2D\u6CA1\u6709\u7684\u5B9E\u65F6\u4FE1\u606F\u65F6\u4F7F\u7528\u3002\r\ntriggers:\r\n  keywords: ["\u641C\u7D22", "\u641C\u4E00\u4E0B", "search", "google", "\u6700\u65B0", "\u65B0\u95FB"]\r\ntools: ["web_search"]\r\n---\r\n\r\n# Web Search\r\n\r\n\u4F7F\u7528 DuckDuckGo \u641C\u7D22\u4E92\u8054\u7F51\u3002\r\n\r\n## \u4F7F\u7528\u65B9\u5F0F\r\n\r\n\u63D0\u4F9B\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u53EF\u9009\u65F6\u95F4\u8303\u56F4\u8FC7\u6EE4\u3002\r\n\r\n## \u53C2\u6570\r\n\r\n- `query`\uFF08\u5FC5\u586B\uFF09\uFF1A\u641C\u7D22\u5173\u952E\u8BCD\r\n- `time_range`\uFF08\u53EF\u9009\uFF09\uFF1A\u65F6\u95F4\u8303\u56F4 \u2014 d(\u5929), w(\u5468), m(\u6708), y(\u5E74)\r\n\r\n## \u8F93\u51FA\u683C\u5F0F\r\n\r\n\u8FD4\u56DE\u6700\u591A 5 \u6761\u641C\u7D22\u7ED3\u679C\uFF0C\u6BCF\u6761\u5305\u542B title\u3001link\u3001snippet\u3002\r\n\u56DE\u7B54\u65F6\u4F7F\u7528 Markdown \u94FE\u63A5\u683C\u5F0F\uFF1A`[Title](URL)`\u3002\r\n';
 
 // src/skills/builtin/web-clipper/SKILL.md
-var SKILL_default2 = '---\nname: web-clipper\ndescription: \u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault\u3002\u652F\u6301 YouTube\u3001Bilibili\u3001\u5FAE\u4FE1\u516C\u4F17\u53F7\u548C\u666E\u901A\u7F51\u9875\u3002\ntriggers:\n  commands: ["/save"]\n  keywords: ["\u4FDD\u5B58", "\u526A\u85CF", "save", "clip", "\u7F51\u9875", "webpage"]\ntools: ["save_webpage"]\n---\n\n# Web Clipper\n\n\u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault \u7684\u5B8C\u6574\u6D41\u7A0B\u3002\n\n## \u652F\u6301\u7684\u5185\u5BB9\u7C7B\u578B\n\n- **YouTube \u89C6\u9891**\uFF1A\u63D0\u53D6\u8F6C\u5F55\u6587\u672C\uFF0CAI \u751F\u6210\u6458\u8981\n- **Bilibili \u89C6\u9891**\uFF1A\u63D0\u53D6\u5B57\u5E55\uFF0CAI \u751F\u6210\u6458\u8981\n- **\u5FAE\u4FE1\u516C\u4F17\u53F7\u6587\u7AE0**\uFF1A\u7279\u6B8A DOM \u5904\u7406\uFF0C\u63D0\u53D6\u6B63\u6587\n- **\u666E\u901A\u7F51\u9875**\uFF1AReadability \u63D0\u53D6\u6B63\u6587\uFF0C\u8F6C\u4E3A Markdown\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n1. \u68C0\u6D4B URL \u7C7B\u578B\uFF08\u89C6\u9891 / \u7F51\u9875\uFF09\n2. \u89C6\u9891\u8DEF\u5F84\uFF1A\u63D0\u53D6\u8F6C\u5F55 \u2192 AI \u6458\u8981 \u2192 \u751F\u6210\u7B14\u8BB0\n3. \u7F51\u9875\u8DEF\u5F84\uFF1AHTTP \u8BF7\u6C42 \u2192 HTML \u89E3\u6790 \u2192 Readability \u63D0\u53D6 \u2192 Markdown \u8F6C\u6362\n4. \u751F\u6210 YAML frontmatter\uFF08created, source, author, tags\uFF09\n5. \u4FDD\u5B58\u5230\u914D\u7F6E\u7684\u5B58\u50A8\u76EE\u5F55\n\n## \u8F93\u51FA\u683C\u5F0F\n\n```markdown\n---\ncreated: 2026-04-17T12:00:00.000Z\nsource: https://example.com/article\nauthor: Author Name\ntags: clipping\n---\n\n# Article Title\n\n[\u6B63\u6587\u5185\u5BB9]\n```\n';
+var SKILL_default2 = '---\r\nname: web-clipper\r\ndescription: \u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault\u3002\u652F\u6301 YouTube\u3001Bilibili\u3001\u5FAE\u4FE1\u516C\u4F17\u53F7\u548C\u666E\u901A\u7F51\u9875\u3002\r\ntriggers:\r\n  commands: ["/save"]\r\n  keywords: ["\u4FDD\u5B58", "\u526A\u85CF", "save", "clip", "\u7F51\u9875", "webpage"]\r\ntools: ["save_webpage"]\r\n---\r\n\r\n# Web Clipper\r\n\r\n\u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault \u7684\u5B8C\u6574\u6D41\u7A0B\u3002\r\n\r\n## \u652F\u6301\u7684\u5185\u5BB9\u7C7B\u578B\r\n\r\n- **YouTube \u89C6\u9891**\uFF1A\u63D0\u53D6\u8F6C\u5F55\u6587\u672C\uFF0CAI \u751F\u6210\u6458\u8981\r\n- **Bilibili \u89C6\u9891**\uFF1A\u63D0\u53D6\u5B57\u5E55\uFF0CAI \u751F\u6210\u6458\u8981\r\n- **\u5FAE\u4FE1\u516C\u4F17\u53F7\u6587\u7AE0**\uFF1A\u7279\u6B8A DOM \u5904\u7406\uFF0C\u63D0\u53D6\u6B63\u6587\r\n- **\u666E\u901A\u7F51\u9875**\uFF1AReadability \u63D0\u53D6\u6B63\u6587\uFF0C\u8F6C\u4E3A Markdown\r\n\r\n## \u5DE5\u4F5C\u6D41\u7A0B\r\n\r\n1. \u68C0\u6D4B URL \u7C7B\u578B\uFF08\u89C6\u9891 / \u7F51\u9875\uFF09\r\n2. \u89C6\u9891\u8DEF\u5F84\uFF1A\u63D0\u53D6\u8F6C\u5F55 \u2192 AI \u6458\u8981 \u2192 \u751F\u6210\u7B14\u8BB0\r\n3. \u7F51\u9875\u8DEF\u5F84\uFF1AHTTP \u8BF7\u6C42 \u2192 HTML \u89E3\u6790 \u2192 Readability \u63D0\u53D6 \u2192 Markdown \u8F6C\u6362\r\n4. \u751F\u6210 YAML frontmatter\uFF08created, source, author, tags\uFF09\r\n5. \u4FDD\u5B58\u5230\u914D\u7F6E\u7684\u5B58\u50A8\u76EE\u5F55\r\n\r\n## \u8F93\u51FA\u683C\u5F0F\r\n\r\n```markdown\r\n---\r\ncreated: 2026-04-17T12:00:00.000Z\r\nsource: https://example.com/article\r\nauthor: Author Name\r\ntags: clipping\r\n---\r\n\r\n# Article Title\r\n\r\n[\u6B63\u6587\u5185\u5BB9]\r\n```\r\n';
 
 // src/skills/builtin/knowledge/SKILL.md
-var SKILL_default3 = '---\nname: knowledge\ndescription: \u4ECE\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\uFF0C\u6216\u5C06\u9AD8\u8D28\u91CF\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\u5F53\u7528\u6237\u7684\u95EE\u9898\u53EF\u80FD\u4E0E\u5DF2\u79EF\u7D2F\u7684\u77E5\u8BC6\u76F8\u5173\u65F6\u4F7F\u7528\u3002\ntriggers:\n  commands: ["/wiki:query"]\n  keywords: ["\u77E5\u8BC6\u5E93", "\u77E5\u8BC6", "knowledge", "wiki"]\ntools: ["query_knowledge", "file_back_knowledge"]\n---\n\n# Knowledge Wiki\n\n\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u7684\u68C0\u7D22\u548C\u5F52\u6863\u3002\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n1. \u4F7F\u7528 `query_knowledge` \u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\n2. \u5982\u679C\u77E5\u8BC6\u5E93\u4E2D\u6CA1\u6709\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5E38\u56DE\u7B54\u5373\u53EF\uFF0C\u4E0D\u8981\u5F3A\u884C\u5F15\u7528\n3. \u77E5\u8BC6\u5E93\u68C0\u7D22\u4E0D\u8DB3\u65F6\uFF0C\u53EF\u4EE5\u7528 `search_vault` \u641C\u7D22\u6574\u4E2A vault \u8865\u5145\n\n## \u5F15\u7528\u89C4\u5219\n\n\u5982\u679C\u56DE\u7B54\u5F15\u7528\u4E86\u77E5\u8BC6\u5E93\u4E2D\u7684\u6587\u7AE0\uFF0C\u5FC5\u987B\u5728\u56DE\u7B54\u672B\u5C3E\u6DFB\u52A0\u5F15\u7528\u6765\u6E90\uFF1A\n\n```\n---\n\u{1F4DA} \u5F15\u7528\u6765\u6E90\uFF1A\n- [[\u6587\u7AE0\u8DEF\u5F84|\u6587\u7AE0\u6807\u9898]]\n```\n\n## \u56DE\u586B\u89C4\u5219\n\n\u5F53\u56DE\u7B54\u7EFC\u5408\u4E86\u591A\u4E2A\u77E5\u8BC6\u6765\u6E90\u3001\u4EA7\u51FA\u6709\u4EF7\u503C\u7684\u65B0\u6D1E\u5BDF\u6216\u5BF9\u6BD4\u5206\u6790\u65F6\uFF0C\n\u4F7F\u7528 `file_back_knowledge` \u5DE5\u5177\u5C06\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\n\n- \u4E0D\u8981\u5BF9\u7B80\u5355\u7684\u4E8B\u5B9E\u67E5\u8BE2\u505A\u56DE\u586B\uFF0C\u53EA\u56DE\u586B\u6709\u7EFC\u5408\u4EF7\u503C\u7684\u5185\u5BB9\n- \u7528\u6237\u70B9\u8D5E\uFF08\u{1F44D}\uFF09\u65F6\u65E0\u8BBA\u5224\u65AD\u5982\u4F55\u90FD\u6267\u884C\u56DE\u586B\n- \u7528\u6237\u70B9\u8E29\uFF08\u{1F44E}\uFF09\u65F6\u4E0D\u56DE\u586B\n';
+var SKILL_default3 = '---\r\nname: knowledge\r\ndescription: \u4ECE\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\uFF0C\u6216\u5C06\u9AD8\u8D28\u91CF\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\u5F53\u7528\u6237\u7684\u95EE\u9898\u53EF\u80FD\u4E0E\u5DF2\u79EF\u7D2F\u7684\u77E5\u8BC6\u76F8\u5173\u65F6\u4F7F\u7528\u3002\r\ntriggers:\r\n  commands: ["/wiki:query"]\r\n  keywords: ["\u77E5\u8BC6\u5E93", "\u77E5\u8BC6", "knowledge", "wiki"]\r\ntools: ["query_knowledge", "file_back_knowledge"]\r\n---\r\n\r\n# Knowledge Wiki\r\n\r\n\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u7684\u68C0\u7D22\u548C\u5F52\u6863\u3002\r\n\r\n## \u5DE5\u4F5C\u6D41\u7A0B\r\n\r\n1. \u4F7F\u7528 `query_knowledge` \u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\r\n2. \u5982\u679C\u77E5\u8BC6\u5E93\u4E2D\u6CA1\u6709\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5E38\u56DE\u7B54\u5373\u53EF\uFF0C\u4E0D\u8981\u5F3A\u884C\u5F15\u7528\r\n3. \u77E5\u8BC6\u5E93\u68C0\u7D22\u4E0D\u8DB3\u65F6\uFF0C\u53EF\u4EE5\u7528 `search_vault` \u641C\u7D22\u6574\u4E2A vault \u8865\u5145\r\n\r\n## \u5F15\u7528\u89C4\u5219\r\n\r\n\u5982\u679C\u56DE\u7B54\u5F15\u7528\u4E86\u77E5\u8BC6\u5E93\u4E2D\u7684\u6587\u7AE0\uFF0C\u5FC5\u987B\u5728\u56DE\u7B54\u672B\u5C3E\u6DFB\u52A0\u5F15\u7528\u6765\u6E90\uFF1A\r\n\r\n```\r\n---\r\n\u{1F4DA} \u5F15\u7528\u6765\u6E90\uFF1A\r\n- [[\u6587\u7AE0\u8DEF\u5F84|\u6587\u7AE0\u6807\u9898]]\r\n```\r\n\r\n## \u56DE\u586B\u89C4\u5219\r\n\r\n\u5F53\u56DE\u7B54\u7EFC\u5408\u4E86\u591A\u4E2A\u77E5\u8BC6\u6765\u6E90\u3001\u4EA7\u51FA\u6709\u4EF7\u503C\u7684\u65B0\u6D1E\u5BDF\u6216\u5BF9\u6BD4\u5206\u6790\u65F6\uFF0C\r\n\u4F7F\u7528 `file_back_knowledge` \u5DE5\u5177\u5C06\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\r\n\r\n- \u4E0D\u8981\u5BF9\u7B80\u5355\u7684\u4E8B\u5B9E\u67E5\u8BE2\u505A\u56DE\u586B\uFF0C\u53EA\u56DE\u586B\u6709\u7EFC\u5408\u4EF7\u503C\u7684\u5185\u5BB9\r\n- \u7528\u6237\u70B9\u8D5E\uFF08\u{1F44D}\uFF09\u65F6\u65E0\u8BBA\u5224\u65AD\u5982\u4F55\u90FD\u6267\u884C\u56DE\u586B\r\n- \u7528\u6237\u70B9\u8E29\uFF08\u{1F44E}\uFF09\u65F6\u4E0D\u56DE\u586B\r\n';
 
 // src/skills/builtin/plugin-ctrl/SKILL.md
-var SKILL_default4 = '---\nname: plugin-ctrl\ndescription: \u53D1\u73B0\u548C\u4F7F\u7528 Obsidian \u63D2\u4EF6\u3002\u9700\u8981\u63D2\u4EF6\u80FD\u529B\u65F6\u5148\u901A\u8FC7\u6B64 skill \u67E5\u627E\u5408\u9002\u63D2\u4EF6\u3002\ntriggers:\n  keywords: ["\u63D2\u4EF6", "plugin", "plugins"]\ntools: ["list_plugins", "get_plugin_commands", "get_plugin_settings", "execute_plugin_command"]\n---\n\n# Plugin Control \u2014 \u63D2\u4EF6\u7F16\u6392\u5668\n\n\u67E5\u8BE2\u548C\u63A7\u5236 Obsidian \u63D2\u4EF6\u3002\u81EA\u52A8\u4E3A\u5DF2\u5B89\u88C5\u63D2\u4EF6\u751F\u6210\u4F7F\u7528 Skill\u3002\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n\u5F53\u7528\u6237\u7684\u9700\u6C42\u53EF\u80FD\u7531\u67D0\u4E2A\u63D2\u4EF6\u5B8C\u6210\u65F6\uFF1A\n\n1. \u67E5\u770B skill \u6458\u8981\u5217\u8868\uFF0C\u662F\u5426\u5DF2\u6709\u5339\u914D\u7684 `plugin-*` skill\n2. \u5982\u679C\u6709 \u2192 \u76F4\u63A5\u8C03\u7528\u8BE5\u63D2\u4EF6 skill\uFF08\u5982 `use_skill("plugin-obsidian-tasks")`\uFF09\n3. \u5982\u679C\u6CA1\u6709 \u2192 \u4F7F\u7528 `list_plugins` \u67E5\u770B\u5DF2\u5B89\u88C5\u63D2\u4EF6\n4. \u627E\u5230\u5019\u9009\u63D2\u4EF6\u540E\uFF0C\u7528 `get_plugin_commands` \u4E86\u89E3\u5176\u80FD\u529B\n5. \u6839\u636E\u547D\u4EE4\u548C\u8BBE\u7F6E\u4FE1\u606F\uFF0C\u76F4\u63A5\u64CD\u4F5C\u5B8C\u6210\u4EFB\u52A1\n\n## \u53EF\u7528\u5DE5\u5177\n\n- `list_plugins` \u2014 \u5217\u51FA\u6240\u6709\u5DF2\u5B89\u88C5\u63D2\u4EF6\u53CA\u5176\u542F\u7528\u72B6\u6001\u548C skill \u72B6\u6001\n- `get_plugin_commands` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u53EF\u7528\u547D\u4EE4\n- `get_plugin_settings` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u8BBE\u7F6E\n- `execute_plugin_command` \u2014 \u6267\u884C\u6307\u5B9A\u63D2\u4EF6\u547D\u4EE4\n\n## \u539F\u5219\n\n- \u4F18\u5148\u4F7F\u7528\u5DF2\u6709 skill \u7684\u63D2\u4EF6\uFF08instructions \u66F4\u5B8C\u6574\uFF09\n- \u6CA1\u6709 skill \u7684\u63D2\u4EF6\uFF0C\u9000\u56DE\u5230\u547D\u4EE4\u7EA7\u64CD\u4F5C\n- \u53EA\u6709\u5728\u6CA1\u6709\u5408\u9002\u63D2\u4EF6\u65F6\uFF0C\u624D\u7528\u7EAF vault \u64CD\u4F5C\u521B\u5EFA\u666E\u901A Markdown\n';
+var SKILL_default4 = '---\r\nname: plugin-ctrl\r\ndescription: \u53D1\u73B0\u548C\u4F7F\u7528 Obsidian \u63D2\u4EF6\u3002\u9700\u8981\u63D2\u4EF6\u80FD\u529B\u65F6\u5148\u901A\u8FC7\u6B64 skill \u67E5\u627E\u5408\u9002\u63D2\u4EF6\u3002\r\ntriggers:\r\n  keywords: ["\u63D2\u4EF6", "plugin", "plugins"]\r\ntools: ["list_plugins", "get_plugin_commands", "get_plugin_settings", "execute_plugin_command"]\r\n---\r\n\r\n# Plugin Control \u2014 \u63D2\u4EF6\u7F16\u6392\u5668\r\n\r\n\u67E5\u8BE2\u548C\u63A7\u5236 Obsidian \u63D2\u4EF6\u3002\u81EA\u52A8\u4E3A\u5DF2\u5B89\u88C5\u63D2\u4EF6\u751F\u6210\u4F7F\u7528 Skill\u3002\r\n\r\n## \u5DE5\u4F5C\u6D41\u7A0B\r\n\r\n\u5F53\u7528\u6237\u7684\u9700\u6C42\u53EF\u80FD\u7531\u67D0\u4E2A\u63D2\u4EF6\u5B8C\u6210\u65F6\uFF1A\r\n\r\n1. \u67E5\u770B skill \u6458\u8981\u5217\u8868\uFF0C\u662F\u5426\u5DF2\u6709\u5339\u914D\u7684 `plugin-*` skill\r\n2. \u5982\u679C\u6709 \u2192 \u76F4\u63A5\u8C03\u7528\u8BE5\u63D2\u4EF6 skill\uFF08\u5982 `use_skill("plugin-obsidian-tasks")`\uFF09\r\n3. \u5982\u679C\u6CA1\u6709 \u2192 \u4F7F\u7528 `list_plugins` \u67E5\u770B\u5DF2\u5B89\u88C5\u63D2\u4EF6\r\n4. \u627E\u5230\u5019\u9009\u63D2\u4EF6\u540E\uFF0C\u7528 `get_plugin_commands` \u4E86\u89E3\u5176\u80FD\u529B\r\n5. \u6839\u636E\u547D\u4EE4\u548C\u8BBE\u7F6E\u4FE1\u606F\uFF0C\u76F4\u63A5\u64CD\u4F5C\u5B8C\u6210\u4EFB\u52A1\r\n\r\n## \u53EF\u7528\u5DE5\u5177\r\n\r\n- `list_plugins` \u2014 \u5217\u51FA\u6240\u6709\u5DF2\u5B89\u88C5\u63D2\u4EF6\u53CA\u5176\u542F\u7528\u72B6\u6001\u548C skill \u72B6\u6001\r\n- `get_plugin_commands` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u53EF\u7528\u547D\u4EE4\r\n- `get_plugin_settings` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u8BBE\u7F6E\r\n- `execute_plugin_command` \u2014 \u6267\u884C\u6307\u5B9A\u63D2\u4EF6\u547D\u4EE4\r\n\r\n## \u539F\u5219\r\n\r\n- \u4F18\u5148\u4F7F\u7528\u5DF2\u6709 skill \u7684\u63D2\u4EF6\uFF08instructions \u66F4\u5B8C\u6574\uFF09\r\n- \u6CA1\u6709 skill \u7684\u63D2\u4EF6\uFF0C\u9000\u56DE\u5230\u547D\u4EE4\u7EA7\u64CD\u4F5C\r\n- \u53EA\u6709\u5728\u6CA1\u6709\u5408\u9002\u63D2\u4EF6\u65F6\uFF0C\u624D\u7528\u7EAF vault \u64CD\u4F5C\u521B\u5EFA\u666E\u901A Markdown\r\n';
 
 // src/skills/builtin/obsidian-markdown/SKILL.md
 var SKILL_default5 = '---\r\nname: obsidian-markdown\r\ndescription: Create and edit Obsidian Flavored Markdown with wikilinks, embeds, callouts, properties, tags, and note frontmatter.\r\ntriggers:\r\n  keywords: ["wikilink", "wikilinks", "callout", "frontmatter", "properties", "embed", "embeds", "markdown", "tags"]\r\ntools: ["read_note", "create_note", "update_note", "append_to_note", "search_vault", "list_notes", "open_file"]\r\n---\r\n\r\n# Obsidian Flavored Markdown\r\n\r\nUse this workflow when creating or editing Markdown notes that should render well in Obsidian.\r\n\r\n## Workflow\r\n\r\n1. Read the target note first when editing existing content.\r\n2. Put YAML properties at the top of the note when metadata is needed.\r\n3. Use wikilinks for vault notes and Markdown links for external URLs.\r\n4. Use embeds for notes, headings, blocks, images, PDFs, audio, and video.\r\n5. Use callouts for highlighted blocks.\r\n6. Open the file when the user wants to inspect the rendered result in Obsidian.\r\n\r\n## Wikilinks\r\n\r\n```markdown\r\n[[Note Name]]\r\n[[Note Name|Display Text]]\r\n[[Note Name#Heading]]\r\n[[Note Name#^block-id]]\r\n[[#Heading in same note]]\r\n```\r\n\r\nDefine a paragraph block ID by appending it to the paragraph:\r\n\r\n```markdown\r\nThis paragraph can be linked to. ^my-block-id\r\n```\r\n\r\nFor lists and quotes, place the block ID on a separate line after the block.\r\n\r\n## Embeds\r\n\r\n```markdown\r\n![[Note Name]]\r\n![[Note Name#Heading]]\r\n![[Note Name#^block-id]]\r\n![[image.png]]\r\n![[image.png|300]]\r\n![[image.png|640x480]]\r\n![[document.pdf#page=3]]\r\n```\r\n\r\nUse external Markdown image syntax only for external URLs:\r\n\r\n```markdown\r\n![Alt text](https://example.com/image.png)\r\n![Alt text|300](https://example.com/image.png)\r\n```\r\n\r\n## Callouts\r\n\r\n```markdown\r\n> [!note]\r\n> Basic callout.\r\n\r\n> [!warning] Custom Title\r\n> Callout with a custom title.\r\n\r\n> [!faq]- Collapsed by default\r\n> Foldable callout content.\r\n```\r\n\r\nCommon types: `note`, `abstract`, `summary`, `tldr`, `info`, `todo`, `tip`, `hint`, `important`, `success`, `check`, `done`, `question`, `help`, `faq`, `warning`, `caution`, `attention`, `failure`, `fail`, `missing`, `danger`, `error`, `bug`, `example`, `quote`, `cite`.\r\n\r\nNested callouts are valid:\r\n\r\n```markdown\r\n> [!question] Outer callout\r\n> > [!note] Inner callout\r\n> > Nested content\r\n```\r\n\r\n## Properties\r\n\r\n```yaml\r\n---\r\ntitle: My Note\r\ndate: 2024-01-15\r\ntags:\r\n  - project\r\n  - active\r\naliases:\r\n  - Alternative Name\r\ncssclasses:\r\n  - custom-class\r\nstatus: in-progress\r\nrating: 4.5\r\ncompleted: false\r\ndue: 2024-02-01T14:30:00\r\n---\r\n```\r\n\r\nDefault properties:\r\n\r\n- `tags`: searchable note tags\r\n- `aliases`: alternative names used by link suggestions\r\n- `cssclasses`: CSS classes applied by Obsidian\r\n\r\nProperty values may be text, numbers, checkboxes, dates, date-times, lists, or links. Quote wikilinks in YAML values, for example `related: "[[Other Note]]"`.\r\n\r\n## Tags\r\n\r\n```markdown\r\n#tag\r\n#nested/tag\r\n#tag-with-dashes\r\n#tag_with_underscores\r\n```\r\n\r\nTags can contain letters, numbers except as the first character, underscores, hyphens, and forward slashes.\r\n\r\n## Obsidian Extensions\r\n\r\n```markdown\r\n==Highlighted text==\r\n\r\n%%hidden inline comment%%\r\n\r\n%%\r\nHidden block comment.\r\n%%\r\n```\r\n\r\nMath and Mermaid diagrams are supported:\r\n\r\n````markdown\r\nInline math: $e^{i\\pi} + 1 = 0$\r\n\r\n$$\r\n\\frac{a}{b} = c\r\n$$\r\n\r\n```mermaid\r\ngraph TD\r\n    A[Start] --> B{Decision}\r\n```\r\n````\r\n\r\n## Link Choice\r\n\r\nUse `[[wikilinks]]` for notes inside the vault because Obsidian tracks renames. Use `[text](url)` only for external URLs.\r\n';
@@ -20195,7 +21443,7 @@ var SKILL_default6 = '---\r\nname: json-canvas\r\ndescription: Create and edit J
 var SKILL_default7 = '---\r\nname: obsidian-bases\r\ndescription: Create and edit Obsidian Bases (.base files) with views, filters, formulas, properties, and summaries.\r\ntriggers:\r\n  keywords: ["bases", ".base", "table view", "card view", "cards view", "list view", "filter", "filters", "formula", "formulas", "database"]\r\ntools: ["read_file", "create_file", "update_file", "search_vault", "open_file", "validate_base_yaml"]\r\n---\r\n\r\n# Obsidian Bases\r\n\r\nUse this workflow when creating or editing `.base` files. Base files are YAML documents that define database-like views over notes.\r\n\r\n## Workflow\r\n\r\n1. Read the existing `.base` file when editing.\r\n2. Define global `filters` to scope which notes appear.\r\n3. Add `formulas` only when a computed property is needed.\r\n4. Configure `properties` display names when the raw property names are not user-friendly.\r\n5. Add one or more `views` with `type`, `name`, and `order`.\r\n6. Run `validate_base_yaml` before writing.\r\n7. Use `create_file` or `update_file` to write the exact `.base` path.\r\n8. Use `open_file` when the user wants to inspect the rendered base.\r\n\r\n## Schema\r\n\r\n```yaml\r\nfilters:\r\n  and: []\r\n\r\nformulas:\r\n  formula_name: \'expression\'\r\n\r\nproperties:\r\n  property_name:\r\n    displayName: "Display Name"\r\n  formula.formula_name:\r\n    displayName: "Formula Display Name"\r\n\r\nsummaries:\r\n  custom_summary_name: \'values.mean().round(3)\'\r\n\r\nviews:\r\n  - type: table\r\n    name: "View Name"\r\n    limit: 10\r\n    order:\r\n      - file.name\r\n      - property_name\r\n      - formula.formula_name\r\n```\r\n\r\nValid view types: `table`, `cards`, `list`, `map`.\r\n\r\n## Filters\r\n\r\nFilters can be a string:\r\n\r\n```yaml\r\nfilters: \'status == "done"\'\r\n```\r\n\r\nOr a recursive filter object:\r\n\r\n```yaml\r\nfilters:\r\n  and:\r\n    - \'status == "done"\'\r\n    - \'priority > 3\'\r\n```\r\n\r\nCommon file predicates:\r\n\r\n```yaml\r\nfilters:\r\n  or:\r\n    - file.hasTag("book")\r\n    - file.hasTag("article")\r\n```\r\n\r\n## Formulas\r\n\r\nUse single quotes around formulas that contain double quotes:\r\n\r\n```yaml\r\nformulas:\r\n  days_until_due: \'if(due, (date(due) - today()).days, "")\'\r\n  is_overdue: \'if(due, date(due) < today() && status != "done", false)\'\r\n```\r\n\r\nDuration arithmetic returns a Duration, not a number. Access a field first:\r\n\r\n```yaml\r\nformulas:\r\n  days_old: \'(now() - file.ctime).days\'\r\n```\r\n\r\n## Example\r\n\r\n```yaml\r\nfilters:\r\n  and:\r\n    - file.hasTag("task")\r\n    - \'file.ext == "md"\'\r\n\r\nformulas:\r\n  days_until_due: \'if(due, (date(due) - today()).days, "")\'\r\n\r\nproperties:\r\n  formula.days_until_due:\r\n    displayName: "Days Until Due"\r\n\r\nviews:\r\n  - type: table\r\n    name: "Active Tasks"\r\n    filters:\r\n      and:\r\n        - \'status != "done"\'\r\n    order:\r\n      - file.name\r\n      - status\r\n      - due\r\n      - formula.days_until_due\r\n```\r\n\r\n## YAML Quoting Rules\r\n\r\n- Quote strings containing `:`, `{`, `}`, `[`, `]`, `,`, `&`, `*`, `#`, `?`, `|`, `<`, `>`, `=`, `!`, `%`, `@`, or backticks.\r\n- Wrap formulas containing double quotes in single quotes.\r\n- Every `formula.name` reference in `views`, `properties`, or summaries must have a matching `formulas.name` definition.\r\n';
 
 // src/skills/builtin/plugin-ctrl/plugin-watcher.ts
-var import_obsidian23 = require("obsidian");
+var import_obsidian25 = require("obsidian");
 var POLL_INTERVAL_MS = 1e4;
 var GENERATE_DELAY_MS = 1e3;
 var MAX_RETRIES = 3;
@@ -20265,14 +21513,14 @@ var PluginWatcher = class {
     if (candidates.length === 0)
       return;
     console.log(`[PluginWatcher] Generating skills for ${candidates.length} plugins`);
-    new import_obsidian23.Notice(`Generating skills for ${candidates.length} plugins...`);
+    new import_obsidian25.Notice(`Generating skills for ${candidates.length} plugins...`);
     for (let i = 0; i < candidates.length; i++) {
       await this.generateAndRegister(candidates[i]);
       if (i < candidates.length - 1) {
         await this.delay(GENERATE_DELAY_MS);
       }
     }
-    new import_obsidian23.Notice(`Plugin skill generation finished (${candidates.length})`);
+    new import_obsidian25.Notice(`Plugin skill generation finished (${candidates.length})`);
   }
   async checkChanges() {
     if (!this.settings.autoGeneratePluginSkills)
@@ -20285,7 +21533,7 @@ var PluginWatcher = class {
       } else {
         const info = await this.generator.collectPluginInfo(id);
         if (!this.generator.shouldSkipPlugin(info)) {
-          new import_obsidian23.Notice(`Generating skill for ${info.name}...`);
+          new import_obsidian25.Notice(`Generating skill for ${info.name}...`);
           await this.generateAndRegister(id);
         }
       }
@@ -20340,7 +21588,7 @@ var PluginWatcher = class {
 };
 
 // src/skills/builtin/plugin-ctrl/skill-generator.ts
-var import_obsidian24 = require("obsidian");
+var import_obsidian26 = require("obsidian");
 var UI_KEYWORDS = [
   "open",
   "show",
@@ -20563,7 +21811,7 @@ var PluginSkillGenerator = class {
         return this.communityPluginsCache[pluginId] || "";
       }
       const url = "https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json";
-      const response = await (0, import_obsidian24.requestUrl)({ url });
+      const response = await (0, import_obsidian26.requestUrl)({ url });
       if (response.status !== 200)
         return "";
       const plugins = JSON.parse(response.text);
@@ -20596,7 +21844,7 @@ var PluginSkillGenerator = class {
   /** 抓取纯文本内容（用于 GitHub raw README） */
   async fetchRawText(url) {
     try {
-      const response = await (0, import_obsidian24.requestUrl)({ url });
+      const response = await (0, import_obsidian26.requestUrl)({ url });
       if (response.status !== 200)
         return "";
       return response.text;
@@ -20611,7 +21859,7 @@ var PluginSkillGenerator = class {
       const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
       let html = "";
       for (let attempt = 0; attempt < 3; attempt++) {
-        const response = await (0, import_obsidian24.requestUrl)({ url });
+        const response = await (0, import_obsidian26.requestUrl)({ url });
         console.log(`[SkillGenerator] web search for "${pluginName}": attempt=${attempt + 1}, status=${response.status}, html=${response.text.length} chars`);
         if (response.status === 200 && response.text.length > 2e4) {
           html = response.text;
@@ -20719,6 +21967,33 @@ var PluginSkillGenerator = class {
     tools.add("search_vault");
     return [...tools];
   }
+  buildPreconditionsSection() {
+    const bullets = getPluginCommandPreconditions().map((line) => `- ${line}`).join("\n");
+    return [
+      "## Preconditions",
+      bullets,
+      "",
+      "Use `open_file(path)` before `execute_plugin_command(commandId)` whenever a command depends on the active note, editor focus, or current selection."
+    ].join("\n");
+  }
+  ensurePreconditionsSection(body) {
+    if (/^##\s+Preconditions\b/m.test(body)) {
+      return body;
+    }
+    const titleMatch = body.match(/^#[^\n]*\n*/);
+    if (!titleMatch) {
+      return `${this.buildPreconditionsSection()}
+
+${body}`;
+    }
+    const titleBlock = titleMatch[0].trimEnd();
+    const remainder = body.slice(titleMatch[0].length).trimStart();
+    return `${titleBlock}
+
+${this.buildPreconditionsSection()}
+
+${remainder}`;
+  }
   // ---------- Prompt（只让 LLM 生成 body） ----------
   buildPrompt(info) {
     const aiCmds = info.commands.filter((c) => c.aiUsable);
@@ -20789,15 +22064,21 @@ ${webSection}
 
 ${body}`;
     }
+    body = this.ensurePreconditionsSection(body);
     const bodyWithoutTitle = body.replace(/^#[^\n]*\n*/, "").trim();
     if (bodyWithoutTitle.length < 50) {
       const firstCmd = info.commands[0]?.id || `${info.id}:command`;
-      body = `# ${info.name}
-
-## \u64CD\u4F5C\u6307\u5357
-1. \u6267\u884C\u63D2\u4EF6\u547D\u4EE4\uFF1Aexecute_plugin_command("${firstCmd}")
-2. \u641C\u7D22\u76F8\u5173\u7B14\u8BB0\uFF1Asearch_vault("${info.name}")
-3. \u8BFB\u53D6\u7B14\u8BB0\u5185\u5BB9\uFF1Aread_note(path) \u83B7\u53D6\u6587\u4EF6\u5185\u5BB9\u540E\u5206\u6790`;
+      body = [
+        `# ${info.name}`,
+        "",
+        this.buildPreconditionsSection(),
+        "",
+        "## \u64CD\u4F5C\u6307\u5357",
+        `1. \u641C\u7D22\u76F8\u5173\u7B14\u8BB0\uFF1Asearch_vault("${info.name}")`,
+        "2. \u6253\u5F00\u76EE\u6807\u7B14\u8BB0\uFF1Aopen_file(path)",
+        `3. \u6267\u884C\u63D2\u4EF6\u547D\u4EE4\uFF1Aexecute_plugin_command("${firstCmd}")`,
+        "4. \u8BFB\u53D6\u6216\u8865\u5145\u540E\u7EED\u5185\u5BB9\uFF1Aread_note(path) \u6216 append_to_note(path, content)"
+      ].join("\n");
       console.warn(`[SkillGenerator] Body too short for ${info.id}, using fallback template`);
     }
     const warnings = this.validateBody(body);
@@ -20935,7 +22216,7 @@ var InboxAutosaveCoordinator = class {
 };
 
 // main.ts
-var ObsidianCliPlugin = class extends import_obsidian25.Plugin {
+var ObsidianCliPlugin = class extends import_obsidian27.Plugin {
   settings;
   modelService;
   knowledgeRuntime = null;
@@ -20945,10 +22226,10 @@ var ObsidianCliPlugin = class extends import_obsidian25.Plugin {
   pluginWatcher = null;
   inboxAutosave = null;
   // Debounce with trailing edge (default/false) for inactivity trigger
-  onEditorChangeDebounced = (0, import_obsidian25.debounce)(this.runGuardianCheck.bind(this), 3e3);
+  onEditorChangeDebounced = (0, import_obsidian27.debounce)(this.runGuardianCheck.bind(this), 3e3);
   async onload() {
     await this.loadSettings();
-    new import_obsidian25.Notice("Obsidian Shell: Plugin Loaded (v2)");
+    new import_obsidian27.Notice("Obsidian Shell: Plugin Loaded (v2)");
     this.toolRegistry = new ToolRegistry(this.app, this.settings);
     this.skillRegistry = new SkillRegistry(this.toolRegistry);
     this.modelService = new ModelService(this.app, this.settings, this.toolRegistry, this.skillRegistry);
@@ -20956,7 +22237,7 @@ var ObsidianCliPlugin = class extends import_obsidian25.Plugin {
       app: this.app,
       getInboxPath: () => this.settings.wechatInboxPath,
       saveUrl: async (url) => this.toolRegistry.execute("save_webpage", { url }),
-      notify: (message) => new import_obsidian25.Notice(message)
+      notify: (message) => new import_obsidian27.Notice(message)
     });
     registerVaultTools(this.toolRegistry);
     registerTools(this.toolRegistry);
@@ -21030,7 +22311,7 @@ var ObsidianCliPlugin = class extends import_obsidian25.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (file instanceof import_obsidian25.TFile && file.extension === "md") {
+        if (file instanceof import_obsidian27.TFile && file.extension === "md") {
           void this.inboxAutosave?.handleFileModify(file);
         }
       })
@@ -21068,9 +22349,9 @@ var ObsidianCliPlugin = class extends import_obsidian25.Plugin {
     }
   }
   activateGuardianModal() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian25.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian27.MarkdownView);
     if (!view) {
-      new import_obsidian25.Notice("Please open a Markdown file first.");
+      new import_obsidian27.Notice("Please open a Markdown file first.");
       return;
     }
     new GuardianModal(this.app, (instruction) => {
@@ -21152,7 +22433,7 @@ var ObsidianCliPlugin = class extends import_obsidian25.Plugin {
       return;
     rawUrlMatches.sort((a, b) => b.index - a.index);
     for (const m of rawUrlMatches) {
-      new import_obsidian25.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
+      new import_obsidian27.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
       const result = await this.toolRegistry.execute("save_webpage", { url: m.url });
       if (result.success) {
         const finalPath = result.path;
@@ -21160,7 +22441,7 @@ var ObsidianCliPlugin = class extends import_obsidian25.Plugin {
         newContent = newContent.substring(0, m.index) + linkText + newContent.substring(m.index + m.length);
         modified = true;
       } else {
-        new import_obsidian25.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
+        new import_obsidian27.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
       }
     }
     if (modified) {
@@ -21218,7 +22499,13 @@ Instructions:
 4. Output JSON: {"type": "completion", "suggestion": "MARKDOWN_FORMATTED_TEXT"}
 5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
       }
-      const response = await requestGuardianResponse(this.modelService, prompt, systemPromptOverride);
+      const obsidianContext = await new ObsidianContextService(this.app).collect();
+      const response = await requestGuardianResponse(this.modelService, {
+        prompt,
+        systemPromptOverride,
+        obsidianContext,
+        userProfile: this.modelService.getUserProfile()
+      });
       let data;
       const braceStart = response.indexOf("{");
       if (braceStart === -1) {

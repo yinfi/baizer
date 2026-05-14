@@ -10,6 +10,7 @@ import { KnowledgeWatcher } from './watcher';
 import { QueryKnowledgeExecutor } from './query';
 import { FileBackExecutor } from './file-back';
 import { MetadataIndex } from './metadata-index';
+import { KnowledgeStatusService } from './status-service';
 import {
   DEFAULT_WIKI_FOLDER,
   LEGACY_REGISTRY_PATH,
@@ -24,10 +25,8 @@ import {
   ensureSourceId,
   getFilesByKnowledgeStatus,
   getUnregisteredFiles,
-  getSummaryFrontmatter,
 } from './frontmatter';
 import { parseOntologySchema, extractFrontmatter, computeSchemaHash, buildDiscoveryPrompt, parseDiscoveryResponse, buildOntologyFile } from './ontology';
-import { computeContentHash } from './compiler';
 
 /**
  * Knowledge Wiki 生命周期管理器
@@ -41,10 +40,12 @@ export class KnowledgeRuntime {
   private fileBackExecutor: FileBackExecutor;
   private metadataIndex: MetadataIndex;
   private modelService: ModelService;
+  private statusService: KnowledgeStatusService;
 
   /** 暴露给 SkillRegistry 注册 knowledge 工具 */
   getQueryExecutor(): QueryKnowledgeExecutor { return this.queryExecutor; }
   getFileBackExecutor(): FileBackExecutor { return this.fileBackExecutor; }
+  getStatusService(): KnowledgeStatusService { return this.statusService; }
   private autoCompiling = false;
 
   constructor(
@@ -64,6 +65,10 @@ export class KnowledgeRuntime {
     this.metadataIndex = new MetadataIndex(app, wikiFolder);
     this.indexer = new WikiIndexer(app, this.metadataIndex, wikiFolder);
     this.linter = new KnowledgeLinter(app, wikiFolder);
+    this.statusService = new KnowledgeStatusService(app, {
+      watchedFolders: settings.knowledgeSourceFolders || [],
+      wikiFolder,
+    });
 
     this.watcher = new KnowledgeWatcher(
       app,
@@ -176,6 +181,12 @@ export class KnowledgeRuntime {
    * 快速路径：先比较 ontology hash，没变则只检查 mtime 近期变化的文件
    */
   private async detectStaleFiles(wikiFolder: string): Promise<number> {
+    const staleFiles = await this.statusService.getStaleFiles();
+    for (const file of staleFiles) {
+      await setKnowledgeStatus(this.app, file, 'pending');
+    }
+    return staleFiles.length;
+
     const doneFiles = getFilesByKnowledgeStatus(this.app, 'done');
     if (doneFiles.length === 0) return 0;
 
@@ -402,7 +413,12 @@ export class KnowledgeRuntime {
   }
 
   updateSettings(settings: PluginSettings): void {
+    this.settings = settings;
     this.watcher.updateWatchedFolders(settings.knowledgeSourceFolders || []);
+    this.statusService.updateConfig({
+      watchedFolders: settings.knowledgeSourceFolders || [],
+      wikiFolder: settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER,
+    });
   }
 
   /**

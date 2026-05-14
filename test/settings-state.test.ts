@@ -139,6 +139,18 @@ async function runTests() {
       label: 'Connection failed.',
     });
   });
+
+  await test('exposes an explicit vault write scope default for permission controls', () => {
+    const settings = cloneSettings();
+
+    expect({
+      vaultWriteScope: (settings as any).vaultWriteScope,
+      vaultWriteAllowedFolders: (settings as any).vaultWriteAllowedFolders,
+    }).toEqual({
+      vaultWriteScope: 'all-vault',
+      vaultWriteAllowedFolders: [],
+    });
+  });
 }
 
 runTests();

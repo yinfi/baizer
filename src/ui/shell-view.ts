@@ -14,6 +14,7 @@ import { CommandDropdown } from './components/command-dropdown';
 import { ContextChips } from './components/context-chips';
 import { InputToolbar } from './components/input-toolbar';
 import { HistoryMenu } from './components/history-menu';
+import { KnowledgeStatusPanel } from './components/knowledge-status-panel';
 import { ThinkingRenderer } from './renderers/thinking-renderer';
 import { ToolRenderer } from './renderers/tool-renderer';
 import { MessageRenderer } from './renderers/message-renderer';
@@ -55,6 +56,8 @@ export class ShellView extends ItemView {
     private conversationController: ConversationController;
     private historyMenu: HistoryMenu | null = null;
     private historyMenuContainerEl: HTMLElement | null = null;
+    private knowledgeStatusPanel: KnowledgeStatusPanel | null = null;
+    private knowledgeStatusContainerEl: HTMLElement | null = null;
 
     // Heartbeat monitoring
     private heartbeatInterval: number | null = null;
@@ -209,6 +212,22 @@ export class ShellView extends ItemView {
             onClose: () => this.hideHistoryMenu(),
         });
         this.historyMenu.hide();
+        this.knowledgeStatusContainerEl = container.createDiv({ cls: 'shell-knowledge-status-host' });
+        this.knowledgeStatusPanel = new KnowledgeStatusPanel(this.knowledgeStatusContainerEl, {
+            app: this.app,
+            plugin: this.plugin,
+        });
+        void this.refreshKnowledgeStatusPanel();
+        this.registerEvent(
+            this.app.workspace.on('file-open', () => {
+                void this.refreshKnowledgeStatusPanel();
+            })
+        );
+        this.registerEvent(
+            this.app.metadataCache.on('changed', () => {
+                void this.refreshKnowledgeStatusPanel();
+            })
+        );
 
         const historyBtn = headerButtons.createEl('button', {
             cls: 'clickable-icon shell-history-btn',
@@ -411,11 +430,13 @@ export class ShellView extends ItemView {
                     source: 'skill' as const,
                 }));
         } else {
+            const scopeSuggestions = this.buildContextScopeSuggestions(query);
             const files = this.app.vault.getFiles();
-            suggestions = files
+            const fileSuggestions = files
                 .filter(f => f.path.toLowerCase().includes(query.toLowerCase()))
                 .slice(0, 10)
                 .map(f => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]`, source: 'file' as const }));
+            suggestions = [...scopeSuggestions, ...fileSuggestions];
         }
 
         this.inputController.setSuggestions(type, suggestions);
@@ -456,9 +477,71 @@ export class ShellView extends ItemView {
 
         this.inputEl.value = selection.text;
         this.inputEl.selectionStart = this.inputEl.selectionEnd = selection.cursor;
+        if (selection.contextItem) {
+            this.contextManager.addContext(selection.contextItem);
+            this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
+        }
 
         this.hideSuggestions();
         this.inputEl.focus();
+    }
+
+    private buildContextScopeSuggestions(query: string) {
+        const normalized = query.toLowerCase();
+        const suggestions = [
+            {
+                label: '@current',
+                desc: 'Add the current note',
+                value: '@current',
+                source: 'scope' as const,
+                kind: 'scope' as const,
+                scope: 'current' as const,
+            },
+            {
+                label: '@backlinks',
+                desc: 'Add notes linking to the current note',
+                value: '@backlinks',
+                source: 'scope' as const,
+                kind: 'scope' as const,
+                scope: 'backlinks' as const,
+            },
+            {
+                label: '@recent',
+                desc: 'Add recently opened notes',
+                value: '@recent',
+                source: 'scope' as const,
+                kind: 'scope' as const,
+                scope: 'recent' as const,
+            },
+        ];
+
+        if (normalized.startsWith('tag:')) {
+            const tag = query.slice(4).trim();
+            if (tag) {
+                suggestions.unshift({
+                    label: `@tag:${tag}`,
+                    desc: `Add notes tagged ${tag}`,
+                    value: `@tag:${tag}`,
+                    source: 'scope' as const,
+                    kind: 'scope' as const,
+                    scope: 'tag' as const,
+                    tag,
+                });
+            }
+        } else if ('tag:'.includes(normalized) || normalized.includes('tag')) {
+            suggestions.push({
+                label: '@tag:',
+                desc: 'Add notes matching a tag',
+                value: '@tag:',
+                source: 'scope' as const,
+                kind: 'scope' as const,
+                scope: 'tag' as const,
+            });
+        }
+
+        return suggestions
+            .filter(item => item.label.toLowerCase().includes(`@${normalized}`) || item.desc.toLowerCase().includes(normalized))
+            .slice(0, 10);
     }
 
     private selectSuggestionAt(index: number) {
@@ -489,6 +572,7 @@ export class ShellView extends ItemView {
             // Let's clear for now.
             this.contextManager.clearContexts();
             this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
+            await this.refreshKnowledgeStatusPanel();
         } catch (error) {
             logger.error('Command processing failed', error, 'ShellView.processCommand');
             this.appendMessage({
@@ -656,8 +740,9 @@ export class ShellView extends ItemView {
                         this.chatController.cancelApproval(message.approval);
                     }
                 },
-                onFeedbackUp: (message) => {
-                    void this.chatController.processCommand(`/file-back ${message.id}`, [], '');
+                onFeedbackUp: async (message) => {
+                    await this.chatController.archiveMessage(message.id);
+                    await this.refreshKnowledgeStatusPanel();
                 },
                 onReviewCodeBlock: (content) => this.reviewCodeBlock(content),
                 onInternalLinkClick: (href) => {
@@ -682,9 +767,20 @@ export class ShellView extends ItemView {
 
         const originalContent = await this.app.vault.read(activeFile);
         new DiffModal(this.app, originalContent, newContent, async () => {
-            await this.app.vault.modify(activeFile, newContent);
-            new Notice('Changes applied.');
+            await this.chatController.applyPreviewedChange({
+                action: 'review_code_block',
+                target: activeFile.path,
+                previousContent: originalContent,
+                apply: async () => {
+                    await this.app.vault.modify(activeFile, newContent);
+                    new Notice('Changes applied.');
+                },
+            });
         }).open();
+    }
+
+    private async refreshKnowledgeStatusPanel() {
+        await this.knowledgeStatusPanel?.refresh();
     }
 
     async onClose() {

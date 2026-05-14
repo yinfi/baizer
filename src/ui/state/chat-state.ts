@@ -1,4 +1,5 @@
 import { ChatMessage, ToolRunState } from '../types';
+import { cloneChangePreview } from '../diff/change-preview';
 
 export class ChatState {
     private messages: ChatMessage[] = [];
@@ -86,6 +87,7 @@ export class ChatState {
                 ? {
                     ...message.approval,
                     args: { ...message.approval.args },
+                    preview: cloneChangePreview(message.approval.preview),
                 }
                 : undefined,
             metadata: message.metadata ? { ...message.metadata } : undefined,

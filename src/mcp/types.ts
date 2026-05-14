@@ -67,6 +67,12 @@ export const DEFAULT_PROVIDERS: Record<string, ProviderConfig> = {
 /** 内置 provider key，不可被用户删除 */
 export const BUILTIN_PROVIDER_KEYS = Object.keys(DEFAULT_PROVIDERS);
 
+export type VaultWriteScope =
+    | 'read-only'
+    | 'current-note'
+    | 'configured-folders'
+    | 'all-vault';
+
 export interface PluginSettings {
     // --- 🤖 Core Connection ---
     activeProvider: string;
@@ -82,6 +88,8 @@ export interface PluginSettings {
     privacyMode: boolean;
 
     // --- ⚡ Permissions ---
+    vaultWriteScope: VaultWriteScope;
+    vaultWriteAllowedFolders: string[];
     allowFileCreation: boolean;
     allowFileModification: boolean;
     allowPluginControl: boolean;
@@ -127,6 +135,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     privacyMode: false,
 
     // Permissions
+    vaultWriteScope: 'all-vault',
+    vaultWriteAllowedFolders: [],
     allowFileCreation: true,
     allowFileModification: false,
     allowPluginControl: false,

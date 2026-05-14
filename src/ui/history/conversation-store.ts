@@ -1,5 +1,6 @@
 import { App } from 'obsidian';
 import { ConversationSnapshot } from '../types';
+import { cloneChangePreview } from '../diff/change-preview';
 
 export const CONVERSATION_STORE_DIR = '.obsidian/obsidian-cli';
 export const CONVERSATION_STORE_PATH = `${CONVERSATION_STORE_DIR}/conversations.json`;
@@ -139,6 +140,7 @@ export class ConversationStore {
                     ? {
                         ...message.approval,
                         args: { ...message.approval.args },
+                        preview: cloneChangePreview(message.approval.preview),
                     }
                     : undefined,
                 metadata: message.metadata ? { ...message.metadata } : undefined,

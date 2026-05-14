@@ -18,6 +18,9 @@ export class ItemView {}
 export class WorkspaceLeaf {}
 export class MarkdownView {}
 export class Vault {}
+export function debounce<T extends (...args: any[]) => any>(fn: T): T {
+  return ((...args: Parameters<T>) => fn(...args)) as T;
+}
 export const MarkdownRenderer = {
   render: async (_app: any, markdown: string, el: any) => {
     if (el && typeof el.setText === 'function') {

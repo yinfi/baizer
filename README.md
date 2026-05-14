@@ -8,8 +8,10 @@ Obsidian CLI is an AI-powered Obsidian plugin that turns your vault into a light
 
 - Shell chat inside Obsidian with file, web, knowledge, and plugin workflows
 - Guardian inline writing help with Ghost Text and gutter state
+- Editor-first rewrite and review flows with diff previews before mutation
 - Skill-based orchestration on top of atomic tools
 - Local memory and knowledge compilation stored in the vault
+- Visible knowledge status for the active note, plus archive-to-wiki actions from chat
 - Approval flow for destructive or privileged actions
 - Multi-provider support with Gemini and OpenAI-compatible backends
 
@@ -43,6 +45,12 @@ Obsidian CLI is an AI-powered Obsidian plugin that turns your vault into a light
 - `src/ui/ghost-text.ts`: inline completion decorations
 - `src/ui/guardian-gutter.ts`: editor gutter state
 
+## Interaction Model
+
+- `editor-first`: selection rewrites and code-block review flows can be applied from the editor surface without routing everything through shell chat
+- `knowledge-visible`: the active shell session shows whether the current note is unregistered, pending, stale, failed, or already compiled into the knowledge wiki
+- `preview-before-mutation`: file writes, plugin commands, and local rewrite applies go through explicit previews or approval cards before they mutate vault state
+
 ## Supported Providers
 
 - Google Gemini
@@ -73,12 +81,14 @@ Command suggestions in the shell are now driven by local commands plus registere
 
 ## Permissions And Approvals
 
+- `vaultWriteScope`: high-level write boundary for AI writes (`read-only`, `current-note`, `configured-folders`, `all-vault`)
+- `vaultWriteAllowedFolders`: folder allowlist used when the write scope is `configured-folders`
 - `allowFileCreation`: gates note creation
 - `allowFileModification`: gates note updates, append, rename, delete
 - `allowPluginControl`: gates plugin inspection and command execution
 - `confirmExecutions`: turns write and plugin actions into approval requests
 
-When confirmation is enabled, the shell renders an approval card. Approved actions replay the original tool call with an explicit approval flag.
+When confirmation is enabled, the shell renders an approval card. Approved actions replay the original tool call with an explicit approval flag. Editor-side direct writes reuse the same preview-first pattern and now write operation records into the local audit log.
 
 ## Development
 

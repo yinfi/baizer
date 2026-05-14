@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, TextComponent } from 'obsidian';
-import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, PluginSettings, ProviderConfig } from './mcp/types';
+import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 
 export type SettingsSectionId =
@@ -767,8 +767,40 @@ export class SettingTab extends PluginSettingTab {
 
     private renderPermissionsSection(containerEl: HTMLElement): void {
         new Setting(containerEl)
+            .setName('Vault Write Scope')
+            .setDesc('Choose how broadly AI can write inside your vault.')
+            .addDropdown(drop => drop
+                .addOption('read-only', 'Read Only')
+                .addOption('current-note', 'Current Note')
+                .addOption('configured-folders', 'Configured Folders')
+                .addOption('all-vault', 'All Vault')
+                .setValue(this.plugin.settings.vaultWriteScope)
+                .onChange(async (value: VaultWriteScope) => {
+                    this.plugin.settings.vaultWriteScope = value;
+                    await this.persistSettings();
+                    this.display();
+                }));
+
+        if (this.plugin.settings.vaultWriteScope === 'configured-folders') {
+            new Setting(containerEl)
+                .setName('Writable Folders')
+                .setDesc('One vault folder per line. AI can create or modify files only inside these folders.')
+                .setClass('ocli-full-width-textarea')
+                .addTextArea(text => text
+                    .setPlaceholder('Projects/\nInbox/')
+                    .setValue(this.plugin.settings.vaultWriteAllowedFolders.join('\n'))
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.vaultWriteAllowedFolders = value
+                            .split(/\r?\n/)
+                            .map(item => item.trim())
+                            .filter(Boolean);
+                        await this.persistSettings();
+                    }));
+        }
+
+        new Setting(containerEl)
             .setName('Allow File Creation')
-            .setDesc('Let AI create new notes (`/new`).')
+            .setDesc('Allow note and file creation after the selected write scope is satisfied.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.allowFileCreation)
                 .onChange(async (value: boolean) => {
@@ -778,7 +810,7 @@ export class SettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Allow File Modification')
-            .setDesc('Let AI modify notes other than the one you are editing.')
+            .setDesc('Allow note and file modification after the selected write scope is satisfied.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.allowFileModification)
                 .onChange(async (value: boolean) => {

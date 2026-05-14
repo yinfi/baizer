@@ -30,6 +30,7 @@ import obsidianBasesSkillMd from './src/skills/builtin/obsidian-bases/SKILL.md';
 import { PluginWatcher } from './src/skills/builtin/plugin-ctrl/plugin-watcher';
 import { PluginSkillGenerator } from './src/skills/builtin/plugin-ctrl/skill-generator';
 import { InboxAutosaveCoordinator } from './src/services/inbox-autosave';
+import { ObsidianContextService } from './src/services/obsidian-context-service';
 
 export default class ObsidianCliPlugin extends Plugin {
     settings: PluginSettings;
@@ -379,7 +380,13 @@ Instructions:
 5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
             }
 
-            const response = await requestGuardianResponse(this.modelService, prompt, systemPromptOverride);
+            const obsidianContext = await new ObsidianContextService(this.app).collect();
+            const response = await requestGuardianResponse(this.modelService, {
+                prompt,
+                systemPromptOverride,
+                obsidianContext,
+                userProfile: this.modelService.getUserProfile(),
+            });
 
             // 提取第一个完整 JSON 对象（平衡括号计数，避免贪婪 regex 抓到多余内容）
             let data: any;

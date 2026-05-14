@@ -5,6 +5,13 @@ import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import { pluginSkillFilePath } from '../../skill-files';
 
+export function getPluginCommandPreconditions(): string[] {
+  return [
+    'Open the target note before execution.',
+    'Confirm the relevant editor pane or selection is focused before execution.',
+  ];
+}
+
 const listPlugins: Tool = {
   name: 'list_plugins',
   description: 'List all installed plugins and their status, including whether they have an AI skill.',
@@ -80,6 +87,16 @@ const executePluginCommand: Tool = {
           commandId: args.commandId,
         },
         message: `Approval required to execute plugin command: ${args.commandId}`,
+        preview: {
+          kind: 'plugin-command',
+          target: args.commandId,
+          summary: 'Execute plugin command',
+          commandId: args.commandId,
+          preconditions: getPluginCommandPreconditions(),
+          risk: 'medium',
+          supportsPartialApply: false,
+          undoable: false,
+        },
       };
     }
 

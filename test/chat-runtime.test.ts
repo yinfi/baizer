@@ -33,6 +33,19 @@ async function test(name: string, fn: () => Promise<void>) {
 async function runTests() {
   console.log('=== ChatRuntime Tests ===');
   const { createChatRuntime } = await import('../src/runtime/runtime-factory');
+  const createObsidianContext = (overrides: Record<string, any> = {}) => ({
+    activeNote: { path: 'Projects/Native AI.md', title: 'Native AI' },
+    selection: { text: 'Bad sentence.', from: 1, to: 1 },
+    activeHeading: '## Draft',
+    frontmatter: {},
+    tags: ['#native-ai'],
+    outgoingLinks: ['[[Roadmap]]'],
+    backlinks: [],
+    recentNotes: [],
+    explicitScopes: [],
+    contextItems: [],
+    ...overrides,
+  });
 
   await test('prepareTurn builds a prompt with memory, context, selection, and user request', async () => {
     const runtime = createChatRuntime({
@@ -130,6 +143,70 @@ async function runTests() {
     expect(prepared.prompt.includes('[File Operation Contract]')).toBe(true);
     expect(prepared.prompt.includes('must call an appropriate vault write tool')).toBe(true);
     expect(prepared.prompt.includes('Do not provide copy-paste instructions')).toBe(true);
+  });
+
+  await test('prepareTurn injects generation-plan metadata for rewrite flows', async () => {
+    const runtime = createChatRuntime({
+      provider: {} as any,
+      memoryManager: null,
+      toolRegistry: {
+        getAllDefinitions: () => [],
+        execute: async () => ({}),
+      } as any,
+      skillRegistry: {
+        resolveByIntent: () => null,
+        getSkillSummaryText: () => '',
+        activateSkill: () => null,
+      } as any,
+    });
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: '把这段话改写得更清晰',
+      contextItems: [{ type: 'file', data: 'Projects/Native AI.md', content: '## Draft\nBad sentence.' }],
+      selection: 'Bad sentence.',
+      source: 'slash-edit',
+      obsidianContext: createObsidianContext(),
+      userProfile: {
+        name: 'Ada',
+        profession: 'Engineer',
+        expertise: [],
+        preferences: {
+          language: 'zh-CN',
+          responseStyle: 'detailed',
+          topics: [],
+        },
+        workflows: [],
+        context: {
+          currentProjects: [],
+          goals: [],
+          challenges: [],
+        },
+        metadata: {
+          createdAt: 1,
+          updatedAt: 1,
+          totalInteractions: 1,
+          lastProfileUpdate: 1,
+        },
+      },
+    } as any);
+
+    expect((prepared as any).generationPlan).toEqual({
+      source: 'slash-edit',
+      mode: 'rewrite',
+      targetShape: 'replacement',
+      previewRequired: true,
+      mustPreserveVoice: true,
+      mustUseObsidianMarkdown: true,
+      qualityChecklist: [
+        'Return only the revised replacement text.',
+        'Preserve markdown structure, links, and task syntax.',
+        'Improve clarity or structure beyond surface-level word swaps.',
+      ],
+    });
+    expect(prepared.prompt.includes('[Generation Plan]')).toBe(true);
+    expect(prepared.prompt.includes('Mode: rewrite')).toBe(true);
+    expect(prepared.prompt.includes('Target Shape: replacement')).toBe(true);
+    expect(prepared.prompt.includes('Return only the revised replacement text.')).toBe(true);
   });
 
   await test('query resolves use_skill and tool calls through the runtime loop', async () => {
@@ -363,6 +440,46 @@ async function runTests() {
         content: '{"nodes":[],"edges":[]}',
       },
     }]);
+  });
+
+  await test('query blocks rewrite results that fail the generation quality check', async () => {
+    const runtime = createChatRuntime({
+      provider: {
+        startChat: () => ({
+          sendMessage: async () => ({
+            text: 'Bad sentence.',
+          }),
+        }),
+      } as any,
+      memoryManager: null,
+      toolRegistry: {
+        getAllDefinitions: () => [],
+        execute: async () => ({}),
+      } as any,
+      skillRegistry: {
+        resolveByIntent: () => null,
+        getSkillSummaryText: () => '',
+        activateSkill: () => null,
+      } as any,
+    });
+
+    const result = await runtime.query({
+      prompt: 'prepared prompt',
+      tools: [],
+      selection: 'Bad sentence.',
+      generationPlan: {
+        source: 'slash-edit',
+        mode: 'rewrite',
+        targetShape: 'replacement',
+        previewRequired: true,
+        mustPreserveVoice: true,
+        mustUseObsidianMarkdown: true,
+        qualityChecklist: [],
+      },
+    } as any);
+
+    expect(result).toContain('Generation quality check failed');
+    expect(result).toContain('Generated text is too close to the original text.');
   });
 }
 

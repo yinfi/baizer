@@ -15,6 +15,8 @@ import {
   isFileWriteToolName,
   isSuccessfulWriteToolResult,
 } from '../utils/file-operation-contract';
+import { evaluateGenerationQuality } from '../services/generation-quality';
+import { formatGenerationPlanBlock, GenerationStrategyService } from '../services/generation-strategy-service';
 import { PreparedChatTurn, ChatRuntime, ChatTurnRequest } from './runtime-types';
 
 interface ChatRuntimeDeps {
@@ -37,6 +39,8 @@ interface FileWriteState {
 }
 
 export class DefaultChatRuntime implements ChatRuntime {
+  private readonly generationStrategyService = new GenerationStrategyService();
+
   constructor(private deps: ChatRuntimeDeps) { }
 
   getTools(): ToolDefinition[] {
@@ -51,8 +55,28 @@ export class DefaultChatRuntime implements ChatRuntime {
     }
 
     const activeSkill = this.resolveRequestedSkill(request);
+    const obsidianContext = request.source
+      ? this.createFallbackObsidianContext(request)
+      : undefined;
+    const generationPlan = request.source && obsidianContext
+      ? this.generationStrategyService.resolvePlan({
+          userMessage: request.userMessage,
+          source: request.source,
+          context: obsidianContext,
+          profile: request.userProfile,
+        })
+      : undefined;
+    const writingProfile = obsidianContext
+      ? this.generationStrategyService.buildWritingProfile(
+          obsidianContext,
+          request.userProfile,
+        )
+      : undefined;
 
     let prompt = '';
+    if (request.systemPromptOverride) {
+      prompt += `[System Prompt Override]\n${request.systemPromptOverride}\n\n`;
+    }
     if (memoryContext) {
       prompt += `${memoryContext}\n\n`;
     }
@@ -64,6 +88,9 @@ export class DefaultChatRuntime implements ChatRuntime {
     }
     if (request.selection) {
       prompt += `[Selected Text: ${request.selection}]\n`;
+    }
+    if (generationPlan) {
+      prompt += formatGenerationPlanBlock(generationPlan, writingProfile);
     }
     if (isFileWriteRequest(request.userMessage)) {
       prompt += '[File Operation Contract]\n';
@@ -77,6 +104,10 @@ export class DefaultChatRuntime implements ChatRuntime {
       activeSkillName: activeSkill?.skill.name,
       allowedToolNames: activeSkill?.tools.map(tool => tool.name),
       requiresFileWrite: isFileWriteRequest(request.userMessage),
+      selection: request.selection,
+      generationPlan,
+      writingProfile,
+      systemPromptOverride: request.systemPromptOverride,
     };
   }
 
@@ -119,14 +150,15 @@ export class DefaultChatRuntime implements ChatRuntime {
     }
 
     const finalText = this.resolveFinalText(turn, fileWriteState, result.text);
+    const qualityCheckedText = this.applyGenerationQuality(turn, finalText);
 
     if (this.deps.memoryManager) {
       const userRequest = this.extractUserRequest(turn.prompt);
       await this.deps.memoryManager.recordMessage('user', userRequest);
-      await this.deps.memoryManager.recordMessage('model', finalText);
+      await this.deps.memoryManager.recordMessage('model', qualityCheckedText);
     }
 
-    return finalText;
+    return qualityCheckedText;
   }
 
   async *queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
@@ -188,6 +220,7 @@ export class DefaultChatRuntime implements ChatRuntime {
 
     if (!approvalMessage) {
       fullResponseText = this.resolveFinalText(turn, fileWriteState, fullResponseText);
+      fullResponseText = this.applyGenerationQuality(turn, fullResponseText);
     }
 
     if (this.deps.memoryManager) {
@@ -241,12 +274,45 @@ export class DefaultChatRuntime implements ChatRuntime {
     return buildFileWriteFailureMessage(state.attempted, state.lastError);
   }
 
+  private applyGenerationQuality(turn: PreparedChatTurn, modelText: string): string {
+    if (!turn.generationPlan) return modelText;
+    const evaluation = evaluateGenerationQuality({
+      originalText: turn.selection,
+      generatedText: modelText,
+      plan: turn.generationPlan,
+    });
+    if (evaluation.ok) return modelText;
+    return `Generation quality check failed:\n- ${evaluation.reasons.join('\n- ')}`;
+  }
+
   private formatContextItems(contextItems: ChatContextItem[]): string {
     if (!contextItems?.length) return '';
     return contextItems.map(item => {
       if (item.type === 'image') return `[Image: ${item.summary || 'Attached Image'}]`;
       return `[Context (${item.type}): ${item.data}]\n${item.content || ''}`;
     }).join('\n\n');
+  }
+  private createFallbackObsidianContext(request: ChatTurnRequest) {
+    if (request.obsidianContext) {
+      return request.obsidianContext;
+    }
+
+    const activeFileContext = request.contextItems.find((item) => item.type === 'file');
+    const path = activeFileContext?.data || '';
+    const title = path.split('/').pop()?.replace(/\.[^.]+$/, '') || 'Current Note';
+
+    return {
+      activeNote: path ? { path, title } : null,
+      selection: request.selection ? { text: request.selection } : null,
+      activeHeading: null,
+      frontmatter: {},
+      tags: [],
+      outgoingLinks: [],
+      backlinks: [],
+      recentNotes: [],
+      explicitScopes: [],
+      contextItems: request.contextItems as any,
+    };
   }
 
   private buildSkillModeTools(activeSkill?: { tools: ToolDefinition[] } | null): ToolDefinition[] {

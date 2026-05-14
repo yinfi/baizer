@@ -201,6 +201,7 @@ async function runTests() {
   await test('executeApprovedAction replays the target tool with approved flag', async () => {
     const service: any = Object.create(ModelService.prototype);
     const calls: any[] = [];
+    const auditCalls: any[] = [];
 
     service.toolRegistry = {
       execute: async (name: string, args: any) => {
@@ -208,6 +209,13 @@ async function runTests() {
         return { success: true, message: 'approved execution' };
       },
     };
+    service.operationAuditLog = {
+      record: async (entry: any) => {
+        auditCalls.push(entry);
+      },
+    };
+    service.settings = { activeProvider: 'openai' };
+    service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
 
     const result = await service.executeApprovedAction('create_note', {
       filename: 'approved.md',
@@ -223,6 +231,14 @@ async function runTests() {
         approved: true,
       },
     }]);
+    expect(auditCalls).toEqual([{
+      action: 'create_note',
+      target: 'approved.md',
+      provider: 'openai',
+      model: 'gpt-4o',
+      approvalSource: 'user-click',
+      undoable: true,
+    }]);
   });
 
   await test('chat delegates prepared turn execution to ChatRuntime', async () => {
@@ -232,6 +248,9 @@ async function runTests() {
       userMessage: 'hello',
       contextItems: [{ type: 'file', data: 'note.md', content: 'content' }],
       selection: 'selected text',
+      source: 'shell',
+      obsidianContext: { activeNote: { path: 'note.md', title: 'note' } },
+      userProfile: { preferences: { responseStyle: 'balanced' } },
     };
 
     service.hasValidConfig = () => true;
@@ -252,6 +271,9 @@ async function runTests() {
       request.userMessage,
       request.contextItems,
       request.selection,
+      request.source,
+      request.obsidianContext,
+      request.userProfile,
     );
 
     expect(result).toEqual('runtime response');
@@ -267,6 +289,9 @@ async function runTests() {
       userMessage: 'hello stream',
       contextItems: [{ type: 'file', data: 'note.md', content: 'content' }],
       selection: 'selected text',
+      source: 'selection-menu',
+      obsidianContext: { activeNote: { path: 'note.md', title: 'note' } },
+      userProfile: { preferences: { responseStyle: 'balanced' } },
     };
     const signal = new AbortController().signal;
     const calls: any[] = [];
@@ -290,6 +315,9 @@ async function runTests() {
       request.userMessage,
       request.contextItems,
       request.selection,
+      request.source,
+      request.obsidianContext,
+      request.userProfile,
       signal,
     )) {
       events.push(event);
@@ -307,6 +335,54 @@ async function runTests() {
       {
         type: 'queryStream',
         prepared: { prompt: 'prepared stream', tools: [] },
+        receivedSignal: signal,
+      },
+    ]);
+  });
+
+  await test('chatStream preserves the legacy 4-argument shell signature', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const signal = new AbortController().signal;
+    const calls: any[] = [];
+
+    service.hasValidConfig = () => true;
+    service.getActiveProviderConfig = () => ({ label: 'Test Provider' });
+    service.createChatRuntime = () => ({
+      prepareTurn: async (input: any) => {
+        calls.push({ type: 'prepareTurn', input });
+        return { prompt: 'prepared stream', tools: [] };
+      },
+      queryStream: async function* (_prepared: any, receivedSignal?: AbortSignal) {
+        calls.push({ type: 'queryStream', receivedSignal });
+        yield { type: 'done', text: 'ok' as const };
+      },
+    });
+
+    const events: any[] = [];
+    for await (const event of service.chatStream(
+      'legacy stream',
+      [],
+      '',
+      signal,
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([{ type: 'done', text: 'ok' }]);
+    expect(calls).toEqual([
+      {
+        type: 'prepareTurn',
+        input: {
+          userMessage: 'legacy stream',
+          contextItems: [],
+          selection: '',
+          source: 'shell',
+          obsidianContext: undefined,
+          userProfile: null,
+        },
+      },
+      {
+        type: 'queryStream',
         receivedSignal: signal,
       },
     ]);
@@ -331,6 +407,54 @@ async function runTests() {
       supportsToolCalling: true,
       supportsCustomBaseUrl: false,
     });
+  });
+
+  await test('generate prefixes guardian prompts with generation-plan metadata while staying stateless', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const calls: any[] = [];
+
+    service.hasValidConfig = () => true;
+    service.getActiveProviderConfig = () => ({ label: 'Test Provider' });
+    service.provider = {
+      generateContent: async (prompt: string, systemPrompt?: string) => {
+        calls.push({ prompt, systemPrompt });
+        return { text: '{"type":"none"}' };
+      },
+    };
+    service.memoryManager = {
+      getProfile: () => ({
+        preferences: {
+          responseStyle: 'balanced',
+        },
+      }),
+    };
+
+    const result = await service.generate(
+      'guardian prompt',
+      'Return ONLY JSON.',
+      'guardian',
+      {
+        activeNote: { path: 'Daily/2026-05-13.md', title: '2026-05-13' },
+        selection: null,
+        activeHeading: '## Draft',
+        frontmatter: {},
+        tags: [],
+        outgoingLinks: [],
+        backlinks: [],
+        recentNotes: [],
+        explicitScopes: [],
+        contextItems: [],
+      },
+    );
+
+    expect(result).toEqual('{"type":"none"}');
+    expect(calls).toEqual([{
+      prompt: calls[0].prompt,
+      systemPrompt: 'Return ONLY JSON.',
+    }]);
+    expect(calls[0].prompt.includes('[Generation Plan]')).toEqual(true);
+    expect(calls[0].prompt.includes('Source: guardian')).toEqual(true);
+    expect(calls[0].prompt.includes('Mode: co-write')).toEqual(true);
   });
 }
 

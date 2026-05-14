@@ -26,6 +26,10 @@ function expect(actual: any) {
       if (typeof actual !== 'string' || !actual.includes(expected))
         throw new Error(`Expected string to contain "${expected}"`);
     },
+    notToContain: (expected: string) => {
+      if (typeof actual === 'string' && actual.includes(expected))
+        throw new Error(`Expected string not to contain "${expected}"`);
+    },
     toInclude: (expected: any) => {
       if (!Array.isArray(actual) || !actual.includes(expected))
         throw new Error(`Expected ${JSON.stringify(actual)} to include ${JSON.stringify(expected)}`);
@@ -168,6 +172,26 @@ async function runTests() {
     const keywords = parseKeywords(skillMd);
     expect(keywords).notToInclude('/tasks');
     expect(keywords).notToInclude('/edit-task');
+  });
+
+  await test('generateSkillMd documents plugin workflow preconditions before command execution', async () => {
+    const skillMd = await generator.generateSkillMd({
+      id: 'obsidian-tasks-plugin',
+      name: 'Tasks',
+      description: 'Task management for Obsidian',
+      version: '7.14.0',
+      commands: [
+        { id: 'obsidian-tasks-plugin:edit-task', name: 'Tasks: Edit task', aiUsable: true },
+      ],
+      settingsKeys: ['globalFilter'],
+      syntaxHints: [],
+      webContext: '',
+    });
+
+    expect(skillMd).toContain('## Preconditions');
+    expect(skillMd).toContain('Open the target note before execution.');
+    expect(skillMd).toContain('Confirm the relevant editor pane or selection is focused before execution.');
+    expect(skillMd).notToContain('execute_plugin_command(commandId, path)');
   });
 }
 

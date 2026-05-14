@@ -38,13 +38,17 @@ function createFile(path: string) {
 async function runTests() {
   console.log('=== Vault Permission Tests ===');
   const { ToolRegistry } = await import('../src/skills/tool-registry');
-  const { registerVaultTools } = await import('../src/skills/builtin/vault-ops');
+  const { canWriteToVaultTarget, registerVaultTools } = await import('../src/skills/builtin/vault-ops');
 
   const created: string[] = [];
   const modified: string[] = [];
   const files = new Map<string, any>([
     ['existing.md', createFile('existing.md')],
+    ['Projects/A.md', createFile('Projects/A.md')],
+    ['Projects/B.md', createFile('Projects/B.md')],
+    ['Allowed/Scoped.md', createFile('Allowed/Scoped.md')],
   ]);
+  let activeFilePath = 'Projects/A.md';
 
   const mockApp = {
     vault: {
@@ -70,8 +74,36 @@ async function runTests() {
     },
     workspace: {
       getLeaf: () => ({ openFile: async () => { } }),
+      getActiveFile: () => files.get(activeFilePath) || null,
     },
   } as unknown as App;
+
+  await test('canWriteToVaultTarget respects current-note and configured folder scopes', async () => {
+    expect(canWriteToVaultTarget({
+      scope: 'current-note',
+      target: 'Projects/A.md',
+      activeNote: 'Projects/A.md',
+      configuredFolders: [],
+    })).toBe(true);
+    expect(canWriteToVaultTarget({
+      scope: 'current-note',
+      target: 'Projects/B.md',
+      activeNote: 'Projects/A.md',
+      configuredFolders: [],
+    })).toBe(false);
+    expect(canWriteToVaultTarget({
+      scope: 'configured-folders',
+      target: 'Allowed/Scoped.md',
+      activeNote: 'Projects/A.md',
+      configuredFolders: ['Allowed'],
+    })).toBe(true);
+    expect(canWriteToVaultTarget({
+      scope: 'configured-folders',
+      target: 'Projects/B.md',
+      activeNote: 'Projects/A.md',
+      configuredFolders: ['Allowed'],
+    })).toBe(false);
+  });
 
   await test('create_note respects allowFileCreation', async () => {
     created.length = 0;
@@ -136,6 +168,15 @@ async function runTests() {
         content: '# Approval',
       },
       message: 'Approval required to create note: approval-note.md',
+      preview: {
+        kind: 'note-create',
+        target: 'approval-note.md',
+        summary: 'Create note',
+        newContent: '# Approval',
+        risk: 'medium',
+        supportsPartialApply: false,
+        undoable: true,
+      },
     });
     expect(created.length).toBe(0);
   });
@@ -160,6 +201,60 @@ async function runTests() {
       message: '✅ Note created: approved-note.md',
     });
     expect(created).toEqual(['approved-note.md']);
+  });
+
+  await test('update_note blocks writes outside the active note when scope is current-note', async () => {
+    modified.length = 0;
+    activeFilePath = 'Projects/A.md';
+    const registry = new ToolRegistry(mockApp, {
+      ...DEFAULT_SETTINGS,
+      allowFileModification: true,
+      confirmExecutions: false,
+      vaultWriteScope: 'current-note',
+    } as any);
+    registerVaultTools(registry);
+
+    const result = await registry.execute('update_note', {
+      path: 'Projects/B.md',
+      content: 'updated',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Write not allowed for path: Projects/B.md',
+    });
+    expect(modified.length).toBe(0);
+  });
+
+  await test('create_file allows writes inside configured folders only', async () => {
+    created.length = 0;
+    const registry = new ToolRegistry(mockApp, {
+      ...DEFAULT_SETTINGS,
+      allowFileCreation: true,
+      confirmExecutions: false,
+      vaultWriteScope: 'configured-folders',
+      vaultWriteAllowedFolders: ['Allowed'],
+    } as any);
+    registerVaultTools(registry);
+
+    const allowed = await registry.execute('create_file', {
+      path: 'Allowed/new.canvas',
+      content: '{}',
+    });
+    const blocked = await registry.execute('create_file', {
+      path: 'Blocked/new.canvas',
+      content: '{}',
+    });
+
+    expect(allowed).toEqual({
+      success: true,
+      path: 'Allowed/new.canvas',
+      message: 'File created: Allowed/new.canvas',
+    });
+    expect(blocked).toEqual({
+      success: false,
+      error: 'Write not allowed for path: Blocked/new.canvas',
+    });
   });
 }
 
