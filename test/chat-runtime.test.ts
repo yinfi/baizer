@@ -284,6 +284,49 @@ async function runTests() {
     expect(Array.isArray(chatInputs[1])).toBe(true);
   });
 
+  await test('query preserves provider tool call ids when returning tool results', async () => {
+    const chatInputs: any[] = [];
+    const runtime = createChatRuntime({
+      provider: {
+        startChat: () => ({
+          sendMessage: async (input: any) => {
+            chatInputs.push(input);
+            if (typeof input === 'string') {
+              return {
+                text: '',
+                functionCalls: [
+                  { id: 'call_tasks', name: 'read_note', args: { path: 'tasks.md' } },
+                  { id: 'call_home', name: 'read_note', args: { path: 'home.md' } },
+                ],
+              };
+            }
+            return { text: 'done' };
+          },
+        }),
+      } as any,
+      memoryManager: null,
+      toolRegistry: {
+        getAllDefinitions: () => [{ name: 'read_note', description: 'Read note', parameters: {} }],
+        execute: async (name: string, args: any) => ({ name, args, ok: true }),
+      } as any,
+      skillRegistry: {
+        resolveByIntent: () => null,
+        getSkillSummaryText: () => '',
+        activateSkill: () => null,
+      } as any,
+    });
+
+    const result = await runtime.query({
+      prompt: 'prepared prompt',
+      tools: [{ name: 'read_note', description: 'Read note', parameters: {} }],
+    });
+
+    const toolResultIds = chatInputs[1].map((input: any) => input.id).join(',');
+
+    expect(result).toBe('done');
+    expect(toolResultIds).toBe('call_tasks,call_home');
+  });
+
   await test('query blocks tool calls outside the active skill scope after use_skill', async () => {
     const executedCalls: any[] = [];
     const toolResponses: any[] = [];
