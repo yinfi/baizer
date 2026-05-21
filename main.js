@@ -4070,6 +4070,7 @@ var OpenAIProvider = class {
     };
     if (message.tool_calls) {
       result.functionCalls = message.tool_calls.map((tc) => ({
+        id: tc.id,
         name: tc.function.name,
         args: JSON.parse(tc.function.arguments)
       }));
@@ -4200,9 +4201,11 @@ var OpenAIChatSession = class {
     } else {
       const lastMsg = this.history[this.history.length - 1];
       if (lastMsg?.role === "assistant" && lastMsg.tool_calls) {
+        const usedCallIds = /* @__PURE__ */ new Set();
         text.forEach((t) => {
-          const call = lastMsg.tool_calls.find((tc) => tc.function.name === t.name);
+          const call = this.findToolCall(lastMsg.tool_calls, t, usedCallIds);
           if (call) {
+            usedCallIds.add(call.id);
             this.history.push({
               role: "tool",
               tool_call_id: call.id,
@@ -4224,9 +4227,11 @@ var OpenAIChatSession = class {
     } else {
       const lastMsg = this.history[this.history.length - 1];
       if (lastMsg?.role === "assistant" && lastMsg.tool_calls) {
+        const usedCallIds = /* @__PURE__ */ new Set();
         text.forEach((t) => {
-          const call = lastMsg.tool_calls.find((tc) => tc.function.name === t.name);
+          const call = this.findToolCall(lastMsg.tool_calls, t, usedCallIds);
           if (call) {
+            usedCallIds.add(call.id);
             this.history.push({
               role: "tool",
               tool_call_id: call.id,
@@ -4283,6 +4288,14 @@ var OpenAIChatSession = class {
     if (lastMsg?.role === "assistant" && lastMsg.tool_calls?.length) {
       this.history.pop();
     }
+  }
+  findToolCall(toolCalls, result, usedCallIds) {
+    if (result.id) {
+      const directMatch = toolCalls.find((tc) => tc.id === result.id && !usedCallIds.has(tc.id));
+      if (directMatch)
+        return directMatch;
+    }
+    return toolCalls.find((tc) => tc.function.name === result.name && !usedCallIds.has(tc.id));
   }
 };
 
@@ -4636,6 +4649,7 @@ ${activeSkill.instructions}
           return approvalMessage;
         }
         toolResults.push({
+          id: call.id,
           name: call.name,
           response
         });
@@ -4666,7 +4680,7 @@ ${activeSkill.instructions}
       for await (const event of chat.sendMessageStream(input, signal)) {
         this.throwIfAborted(signal);
         if (event.type === "tool_call") {
-          pendingCalls.push({ name: event.name, args: event.args });
+          pendingCalls.push({ id: event.id, name: event.name, args: event.args });
           yield event;
         } else if (event.type === "text_delta") {
           fullResponseText += event.content;
@@ -4691,7 +4705,7 @@ ${activeSkill.instructions}
           fullResponseText = "";
           break;
         }
-        toolResults.push({ name: call.name, response: toolResult });
+        toolResults.push({ id: call.id, name: call.name, response: toolResult });
       }
       if (approvalMessage)
         break;
@@ -8562,7 +8576,7 @@ var ContextChips = class {
     this.containerEl.empty();
     contexts.forEach((ctx) => {
       const chip = this.containerEl.createDiv({
-        cls: `context-chip context-chip-${ctx.type}`,
+        cls: `context-chip context-chip-${ctx.type}${ctx.type === "scope" && ctx.scope ? ` context-chip-scope-${ctx.scope}` : ""}`,
         title: ctx.data
       });
       const iconEl = chip.createSpan({ cls: "chip-icon" });
@@ -8578,16 +8592,76 @@ var ContextChips = class {
         this.handlers.onRemove(ctx.id);
       });
       if (ctx.type === "file") {
-        chip.addEventListener("click", () => {
-          this.handlers.onOpenFile?.(ctx.data);
+        chip.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.toggleFileActions(chip, ctx);
         });
       }
     });
   }
+  toggleFileActions(parent, ctx) {
+    const existing = parent.querySelector?.(".context-chip-action-row");
+    if (existing) {
+      existing.remove();
+      this.removeClass(parent, "is-action-open");
+      return;
+    }
+    this.addClass(parent, "is-action-open");
+    const row = parent.createDiv({ cls: "context-chip-action-row" });
+    this.createAction(row, "Open file", "external-link", () => {
+      this.handlers.onOpenFile?.(ctx.data);
+    });
+    this.createAction(row, "Compile note", "refresh-cw", () => {
+      void this.handlers.onCompileFile?.(ctx.data);
+    });
+    this.createAction(row, "Add backlinks", "network", () => {
+      this.handlers.onAddRelatedContext?.(ctx.data);
+    });
+    this.createAction(row, "Open wiki summary", "external-link", () => {
+      this.handlers.onOpenSummary?.(ctx.data);
+    });
+    this.createAction(row, "Run knowledge lint", "scan-line", () => {
+      this.handlers.onRunLint?.(ctx.data);
+    });
+    this.createAction(row, "Copy note path", "copy", () => {
+      this.handlers.onCopyPath?.(ctx.data);
+    });
+    this.createAction(row, "Settings", "settings", () => {
+      this.handlers.onOpenSettings?.();
+    });
+  }
+  createAction(container, label, icon, handler) {
+    const button = container.createEl("button", {
+      cls: "context-chip-icon-action",
+      attr: { type: "button", "aria-label": label, title: label }
+    });
+    this.setIconFn(button, icon);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      handler();
+    });
+  }
+  addClass(el, className) {
+    if (typeof el.addClass === "function") {
+      el.addClass(className);
+      return;
+    }
+    el.classList.add(className);
+  }
+  removeClass(el, className) {
+    if (typeof el.removeClass === "function") {
+      el.removeClass(className);
+      return;
+    }
+    el.classList.remove(className);
+  }
 };
 function getContextChipLabel(ctx) {
   if (ctx.type === "scope") {
-    return ctx.data;
+    if (ctx.scope === "tag" && ctx.tag) {
+      return `tag:${ctx.tag}`;
+    }
+    return stripLeadingAt(ctx.data);
   }
   if (ctx.type === "file") {
     return basename(ctx.data);
@@ -8613,6 +8687,9 @@ function getContextIconName(type) {
 function basename(path) {
   const normalized = path.replace(/\\/g, "/");
   return normalized.split("/").pop() || path;
+}
+function stripLeadingAt(value) {
+  return value.replace(/^@/, "");
 }
 
 // src/ui/controllers/context-controller.ts
@@ -8710,11 +8787,13 @@ var InputController = class {
     if (!item || !this.suggestionType)
       return null;
     const textBeforeCursor = value.substring(0, cursor);
-    const lastWord = textBeforeCursor.split(/\s+/).pop() || "";
-    const replaceStart = textBeforeCursor.substring(0, textBeforeCursor.length - lastWord.length);
+    const activeToken = this.findActiveToken(textBeforeCursor);
+    const replaceStart = textBeforeCursor.substring(0, activeToken.start);
     let newTextBefore = "";
     let newText = "";
-    if (item.kind === "scope") {
+    const shouldCreateContext = this.shouldCreateContextItem(item);
+    const shouldKeepText = item.kind === "scope" && item.scope === "tag" && !item.tag;
+    if (shouldCreateContext) {
       const prefix = replaceStart.endsWith(" ") ? replaceStart.slice(0, -1) : replaceStart;
       const suffix = value.substring(cursor).startsWith(" ") ? value.substring(cursor + 1) : value.substring(cursor);
       const separator = prefix && suffix ? " " : "";
@@ -8724,21 +8803,54 @@ var InputController = class {
       const replacement = this.suggestionType === "command" ? item.label : item.value || item.label;
       newTextBefore = replaceStart + replacement + " ";
       newText = newTextBefore + value.substring(cursor);
+      if (shouldKeepText) {
+        newTextBefore = replaceStart + replacement;
+        newText = newTextBefore + value.substring(cursor);
+      }
     }
-    const contextItem = item.kind === "scope" && item.scope ? {
-      id: item.scope === "tag" && item.tag ? `scope:tag:${item.tag}` : `scope:${item.scope}`,
-      type: "scope",
-      data: item.label,
-      summary: item.desc,
-      scope: item.scope,
-      tag: item.tag
-    } : void 0;
+    let contextItem;
+    if (item.kind === "scope" && item.scope && shouldCreateContext) {
+      contextItem = {
+        id: item.scope === "tag" && item.tag ? `scope:tag:${item.tag}` : `scope:${item.scope}`,
+        type: "scope",
+        data: item.label,
+        summary: item.desc,
+        scope: item.scope,
+        tag: item.tag
+      };
+    } else if (this.suggestionType === "file" && item.source === "file" && shouldCreateContext) {
+      const path = this.extractFilePath(item);
+      contextItem = {
+        id: `file:${path}`,
+        type: "file",
+        data: path,
+        summary: item.label
+      };
+    }
     this.hide();
     return {
       text: newText,
       cursor: newTextBefore.length,
       contextItem
     };
+  }
+  extractFilePath(item) {
+    const value = item.value || item.desc || item.label;
+    const wikiLink = value.match(/^\[\[(.*)\]\]$/);
+    return wikiLink?.[1] || item.desc || value;
+  }
+  shouldCreateContextItem(item) {
+    if (item.kind === "scope") {
+      return item.scope !== "tag" || !!item.tag;
+    }
+    return this.suggestionType === "file" && item.source === "file";
+  }
+  findActiveToken(textBeforeCursor) {
+    const match = textBeforeCursor.match(/\S+\s*$/);
+    if (!match || match.index === void 0) {
+      return { start: textBeforeCursor.length };
+    }
+    return { start: match.index };
   }
   getSuggestions() {
     return this.suggestions;
@@ -9218,7 +9330,9 @@ var KnowledgeStatusPanel = class {
     this.setIconFn = options.setIcon ?? import_obsidian14.setIcon;
   }
   setIconFn;
+  refreshSeq = 0;
   async refresh() {
+    const seq2 = ++this.refreshSeq;
     this.container.empty();
     this.container.addClass?.("shell-knowledge-status-panel") ?? this.container.classList.add("shell-knowledge-status-panel");
     const activeFile = this.options.app.workspace.getActiveFile?.();
@@ -9233,6 +9347,9 @@ var KnowledgeStatusPanel = class {
       return;
     }
     const status = await statusService.getNoteStatus(activeFile.path);
+    if (seq2 !== this.refreshSeq) {
+      return;
+    }
     if (!status) {
       this.renderEmpty("Knowledge status is unavailable for this note.");
       return;
@@ -9250,8 +9367,11 @@ var KnowledgeStatusPanel = class {
   renderStatus(activeFile, status, runtime) {
     const strip = this.container.createDiv({
       cls: `shell-knowledge-status-strip is-${status.state}`,
-      title: this.buildSummary(status),
-      attr: { role: "button", tabindex: "0", "aria-label": `Current note: ${activeFile.basename}` }
+      attr: {
+        role: "button",
+        tabindex: "0",
+        "aria-label": `Current note: ${activeFile.basename}. ${this.buildSummary(status)}`
+      }
     });
     const icon = strip.createDiv({ cls: "shell-knowledge-status-file-icon" });
     this.setIconFn(icon, "file-text");
@@ -9280,12 +9400,12 @@ var KnowledgeStatusPanel = class {
     });
   }
   toggleMoreMenu(parent, activeFile, status) {
-    const existing = parent.querySelector?.(".shell-knowledge-status-menu");
+    const existing = parent.querySelector?.(".shell-knowledge-status-action-row");
     if (existing) {
       existing.remove();
       return;
     }
-    const menu = parent.createDiv({ cls: "shell-knowledge-status-menu" });
+    const menu = parent.createDiv({ cls: "shell-knowledge-status-action-row" });
     this.createMenuItem(menu, "Compile note", "refresh-cw", async () => {
       const result = await (this.options.plugin?.knowledgeRuntime ?? null)?.compileByPath?.(activeFile.path);
       if (result) {
@@ -9317,12 +9437,10 @@ var KnowledgeStatusPanel = class {
   }
   createMenuItem(container, label, icon, handler) {
     const item = container.createEl("button", {
-      cls: "shell-knowledge-status-menu-item",
-      attr: { type: "button" }
+      cls: "shell-knowledge-status-icon-action",
+      attr: { type: "button", "aria-label": label, title: label }
     });
-    const iconEl = item.createSpan({ cls: "shell-knowledge-status-menu-icon" });
-    this.setIconFn(iconEl, icon);
-    item.createSpan({ cls: "shell-knowledge-status-menu-label", text: label });
+    this.setIconFn(item, icon);
     item.addEventListener("click", () => {
       void handler();
     });
@@ -10797,6 +10915,9 @@ var ShellView = class extends import_obsidian17.ItemView {
     this.registerEvent(
       this.app.workspace.on("file-open", () => {
         this.excludedCurrentNotePath = null;
+        const contextContainer = this.getContextChipsContainer();
+        if (contextContainer)
+          this.renderContextChips(contextContainer);
         void this.refreshKnowledgeStatusPanel();
       })
     );
@@ -10897,7 +11018,13 @@ var ShellView = class extends import_obsidian17.ItemView {
     } else {
       const scopeSuggestions = this.buildContextScopeSuggestions(query);
       const files = this.app.vault.getFiles();
-      const fileSuggestions = files.filter((f) => f.path.toLowerCase().includes(query.toLowerCase())).slice(0, 10).map((f) => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]`, source: "file" }));
+      const fileSuggestions = files.filter((f) => f.path.toLowerCase().includes(query.toLowerCase())).slice(0, 10).map((f) => ({
+        label: f.basename,
+        desc: f.path,
+        value: f.path,
+        source: "file",
+        kind: "file"
+      }));
       suggestions = [...scopeSuggestions, ...fileSuggestions];
     }
     this.inputController.setSuggestions(type, suggestions);
@@ -11310,11 +11437,20 @@ ${lines.join("\n")}${suffix}`;
     if (!container)
       return;
     container.empty();
-    if (this.shouldIncludeCurrentNoteContext()) {
-      this.renderImplicitCurrentContext(container);
+    if (this.shouldIncludeCurrentNoteContext() && this.knowledgeStatusPanel) {
+      this.knowledgeStatusContainerEl = container.createDiv({ cls: "shell-knowledge-status-host" });
+      this.knowledgeStatusPanel = new KnowledgeStatusPanel(this.knowledgeStatusContainerEl, {
+        app: this.app,
+        plugin: this.plugin,
+        onAddRelatedContext: () => this.addBacklinksScopeContext(),
+        onExcludeCurrentContext: (path) => this.excludeCurrentNoteContext(path),
+        onOpenKnowledgeSettings: () => this.openPluginSettings()
+      });
+      void this.refreshKnowledgeStatusPanel();
     }
     const explicitContainer = container.createDiv({ cls: "shell-explicit-context-chips" });
-    const explicitContexts = this.contextManager.getContexts().filter((ctx) => !(ctx.type === "scope" && ctx.scope === "current"));
+    const activePath = this.app.workspace?.getActiveFile?.()?.path;
+    const explicitContexts = this.contextManager.getContexts().filter((ctx) => !(ctx.type === "scope" && ctx.scope === "current")).filter((ctx) => !(ctx.type === "file" && ctx.data === activePath));
     new ContextChips(explicitContainer, {
       onRemove: (id) => {
         this.contextManager.removeContext(id);
@@ -11322,31 +11458,38 @@ ${lines.join("\n")}${suffix}`;
       },
       onOpenFile: (path) => {
         void this.app.workspace.openLinkText(path, "", false);
-      }
+      },
+      onCompileFile: async (path) => {
+        const result = await this.plugin?.knowledgeRuntime?.compileByPath?.(path);
+        if (result) {
+          new import_obsidian17.Notice(`Knowledge compile: ${result.success} success, ${result.failed} failed`);
+        }
+        await this.refreshKnowledgeStatusPanel();
+      },
+      onAddRelatedContext: () => this.addBacklinksScopeContext(),
+      onOpenSummary: (path) => {
+        void this.openKnowledgeSummaryForPath(path);
+      },
+      onRunLint: () => {
+        this.app.commands?.executeCommandById?.("obsidian-cli:knowledge-lint");
+      },
+      onCopyPath: (path) => {
+        void globalThis.navigator?.clipboard?.writeText?.(path);
+        new import_obsidian17.Notice("Copied note path.");
+      },
+      onOpenSettings: () => this.openPluginSettings()
     }).update(explicitContexts);
-  }
-  renderImplicitCurrentContext(container) {
-    const activeFile = this.app.workspace?.getActiveFile?.();
-    const label = activeFile?.basename ? `Current: ${activeFile.basename}` : "Current note";
-    const title = activeFile?.path ? `Current note included by default: ${activeFile.path}` : "Current note is included by default";
-    const chip = container.createDiv({
-      cls: "context-chip context-chip-current is-implicit",
-      title
-    });
-    const iconEl = chip.createSpan({ cls: "chip-icon" });
-    (0, import_obsidian17.setIcon)(iconEl, "file-text");
-    chip.createSpan({ cls: "chip-label", text: label });
   }
   getContextChipsContainer() {
     return this.outputContainer?.parentElement?.querySelector(".shell-context-chips");
   }
   createShellScaffold(container) {
-    const inputContainer = container.createDiv({ cls: "shell-input-container" });
-    this.createInputUtilityActions(inputContainer);
+    const inputShell = container.createDiv({ cls: "shell-input-shell" });
+    this.createInputUtilityActions(inputShell);
+    const inputContainer = inputShell.createDiv({ cls: "shell-input-container" });
     const contextBar = inputContainer.createDiv({ cls: "shell-input-context-bar" });
     const contextContainer = contextBar.createDiv({ cls: "shell-context-chips" });
-    this.renderContextChips(contextContainer);
-    this.knowledgeStatusContainerEl = contextBar.createDiv({ cls: "shell-knowledge-status-host" });
+    this.knowledgeStatusContainerEl = contextContainer.createDiv({ cls: "shell-knowledge-status-host" });
     this.knowledgeStatusPanel = new KnowledgeStatusPanel(this.knowledgeStatusContainerEl, {
       app: this.app,
       plugin: this.plugin,
@@ -11354,6 +11497,7 @@ ${lines.join("\n")}${suffix}`;
       onExcludeCurrentContext: (path) => this.excludeCurrentNoteContext(path),
       onOpenKnowledgeSettings: () => this.openPluginSettings()
     });
+    this.renderContextChips(contextContainer);
     return inputContainer;
   }
   createInputUtilityActions(container) {
@@ -11413,6 +11557,15 @@ ${tool.name}: ${tool.description}
     if (contextContainer)
       this.renderContextChips(contextContainer);
     new import_obsidian17.Notice("Added @backlinks context.");
+  }
+  async openKnowledgeSummaryForPath(path) {
+    const status = await this.plugin?.knowledgeRuntime?.getStatusService?.()?.getNoteStatus?.(path);
+    const summaryPath = status?.summaryPath;
+    if (summaryPath && typeof this.app.workspace?.openLinkText === "function") {
+      await this.app.workspace.openLinkText(summaryPath, "", false);
+      return;
+    }
+    this.app.commands?.executeCommandById?.("obsidian-cli:knowledge-open-index");
   }
   excludeCurrentNoteContext(path) {
     this.excludedCurrentNotePath = path;

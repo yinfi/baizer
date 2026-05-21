@@ -205,7 +205,8 @@ async function runTests() {
     const text = collectText(container).join(' | ');
     const strip = container.querySelector('.shell-knowledge-status-strip');
     expect(strip?.hasClass('is-failed')).toBe(true);
-    expect(strip?.attributes.title).toContain('Failed: quota exceeded');
+    expect(strip?.attributes.title).toBe(undefined);
+    expect(strip?.attributes['aria-label']).toContain('Failed: quota exceeded');
     expect(text.includes('https://generativelanguage.googleapis.com')).toBe(false);
     expect(text.includes('Backlinks')).toBe(false);
     expect(text.includes('Pending 2')).toBe(false);
@@ -253,7 +254,69 @@ async function runTests() {
     expect(!!container.querySelector('.shell-knowledge-status-dot')).toBe(false);
   });
 
-  await test('renders minimal pill and opens actions in a popover', async () => {
+  await test('ignores stale overlapping refreshes so current note pill is not duplicated', async () => {
+    const firstFile = createFile('Work/First.md');
+    const secondFile = createFile('Work/Second.md');
+    let activeFile = firstFile;
+    let resolveFirst!: (value: any) => void;
+    let resolveSecond!: (value: any) => void;
+    const container = new FakeElement();
+    const panel = new KnowledgeStatusPanel(container as any, {
+      app: {
+        workspace: {
+          getActiveFile: () => activeFile,
+        },
+        commands: {
+          executeCommandById: () => {},
+        },
+      } as unknown as App,
+      plugin: {
+        knowledgeRuntime: {
+          getStatusService: () => ({
+            getNoteStatus: async (path: string) => {
+              if (path === firstFile.path) {
+                return new Promise((resolve) => {
+                  resolveFirst = resolve;
+                });
+              }
+              return new Promise((resolve) => {
+                resolveSecond = resolve;
+              });
+            },
+          }),
+        },
+      },
+    });
+
+    const firstRefresh = panel.refresh();
+    activeFile = secondFile;
+    const secondRefresh = panel.refresh();
+
+    resolveSecond({
+      path: secondFile.path,
+      state: 'done',
+      summaryPath: 'Knowledge Wiki/Second.md',
+      compiledAt: '2026-05-15T08:00:00Z',
+      error: null,
+    });
+    await secondRefresh;
+    expect(container.querySelectorAll('.shell-knowledge-status-strip').length).toBe(1);
+    expect(container.querySelector('.shell-knowledge-status-title')?.textContent).toBe('Second');
+
+    resolveFirst({
+      path: firstFile.path,
+      state: 'done',
+      summaryPath: 'Knowledge Wiki/First.md',
+      compiledAt: '2026-05-15T08:00:00Z',
+      error: null,
+    });
+    await firstRefresh;
+
+    expect(container.querySelectorAll('.shell-knowledge-status-strip').length).toBe(1);
+    expect(container.querySelector('.shell-knowledge-status-title')?.textContent).toBe('Second');
+  });
+
+  await test('renders minimal pill and opens a horizontal icon action row', async () => {
     const activeFile = createFile('Research/Daily Research.md');
     const callbacks: string[] = [];
     const commandCalls: string[] = [];
@@ -300,16 +363,25 @@ async function runTests() {
     expect(actions.length).toBe(0);
 
     container.querySelector('.shell-knowledge-status-strip')?.click();
-    expect(!!container.querySelector('.shell-knowledge-status-menu')).toBe(true);
+    expect(container.querySelector('.shell-knowledge-status-menu')).toBe(null);
+    expect(!!container.querySelector('.shell-knowledge-status-action-row')).toBe(true);
 
-    const menuActions = container.querySelectorAll('.shell-knowledge-status-menu-item');
-    expect(menuActions.map(action => collectText(action).join(''))).toEqual([
+    const menuActions = container.querySelectorAll('.shell-knowledge-status-icon-action');
+    expect(menuActions.map(action => action.attributes.title)).toEqual([
       'Compile note',
       'Add backlinks',
       'Open wiki summary',
       'Run knowledge lint',
       'Copy note path',
       'Settings',
+    ]);
+    expect(menuActions.map(action => collectText(action).join(''))).toEqual([
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
     ]);
 
     menuActions[0].click();
