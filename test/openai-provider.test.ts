@@ -97,6 +97,51 @@ async function runTests() {
     }
   });
 
+  await test('streaming duplicate tool names bind results to distinct provider tool call ids', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    const bodies: any[] = [];
+    (globalThis as any).fetch = async (_url: string, init: any) => {
+      bodies.push(JSON.parse(init.body));
+      if (bodies.length === 1) {
+        return streamResponse([
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_tasks","type":"function","function":{"name":"read_note","arguments":"{\\"path\\":\\"tasks.md\\"}"}},{"index":1,"id":"call_home","type":"function","function":{"name":"read_note","arguments":"{\\"path\\":\\"home.md\\"}"}}]}}]}',
+          'data: [DONE]',
+        ]);
+      }
+      return streamResponse([
+        'data: {"choices":[{"delta":{"content":"Done."}}]}',
+        'data: [DONE]',
+      ]);
+    };
+
+    try {
+      const provider = new OpenAIProvider();
+      provider.configure({
+        apiKey: 'test-key',
+        baseUrl: 'https://api.openai.test/v1',
+        modelName: 'gpt-test',
+      });
+      const chat = provider.startChat([
+        { name: 'read_note', description: 'Read note', parameters: {} },
+      ]);
+
+      await collect(chat.sendMessageStream('merge tasks into home'));
+      await collect(chat.sendMessageStream([
+        { name: 'read_note', response: { content: '# Tasks' } },
+        { name: 'read_note', response: { content: '# Home' } },
+      ]));
+
+      const toolCallIds = bodies[1].messages
+        .filter((message: any) => message.role === 'tool')
+        .map((message: any) => message.tool_call_id)
+        .join(',');
+
+      expect(toolCallIds).toBe('call_tasks,call_home');
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
   await test('streamed reasoning content is sent back on the next user turn', async () => {
     const originalFetch = (globalThis as any).fetch;
     const bodies: any[] = [];

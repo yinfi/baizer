@@ -34,11 +34,13 @@ export interface ToolDefinition {
 }
 
 export interface ToolCall {
+    id?: string;
     name: string;
     args: any;
 }
 
 export interface ToolResult {
+    id?: string;
     name: string;
     response: any;
 }

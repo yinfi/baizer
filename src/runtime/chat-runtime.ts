@@ -157,6 +157,7 @@ export class DefaultChatRuntime implements ChatRuntime {
         }
 
         toolResults.push({
+          id: call.id,
           name: call.name,
           response,
         });
@@ -192,12 +193,12 @@ export class DefaultChatRuntime implements ChatRuntime {
 
     while (loopCount <= maxLoops) {
       this.throwIfAborted(signal);
-      const pendingCalls: { name: string; args: any }[] = [];
+      const pendingCalls: { id?: string; name: string; args: any }[] = [];
 
       for await (const event of chat.sendMessageStream(input, signal)) {
         this.throwIfAborted(signal);
         if (event.type === 'tool_call') {
-          pendingCalls.push({ name: event.name, args: event.args });
+          pendingCalls.push({ id: event.id, name: event.name, args: event.args });
           yield event;
         } else if (event.type === 'text_delta') {
           fullResponseText += event.content;
@@ -212,7 +213,7 @@ export class DefaultChatRuntime implements ChatRuntime {
       loopCount++;
       if (loopCount > maxLoops) break;
 
-      const toolResults: { name: string; response: any }[] = [];
+      const toolResults: { id?: string; name: string; response: any }[] = [];
       for (const call of pendingCalls) {
         this.throwIfAborted(signal);
         const toolResult = await this.executeToolCall(call.name, call.args, skillScope);
@@ -225,7 +226,7 @@ export class DefaultChatRuntime implements ChatRuntime {
           break;
         }
 
-        toolResults.push({ name: call.name, response: toolResult });
+        toolResults.push({ id: call.id, name: call.name, response: toolResult });
       }
 
       if (approvalMessage) break;

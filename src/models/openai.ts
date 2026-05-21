@@ -151,6 +151,7 @@ export class OpenAIProvider implements IModelProvider {
 
         if (message.tool_calls) {
             result.functionCalls = message.tool_calls.map((tc: any) => ({
+                id: tc.id,
                 name: tc.function.name,
                 args: JSON.parse(tc.function.arguments)
             }));
@@ -297,9 +298,11 @@ class OpenAIChatSession implements IChatSession {
             // 将 tool results 追加到 history，匹配上一条 assistant message 中的 tool_call_id
             const lastMsg = this.history[this.history.length - 1];
             if (lastMsg?.role === 'assistant' && lastMsg.tool_calls) {
+                const usedCallIds = new Set<string>();
                 text.forEach(t => {
-                    const call = lastMsg.tool_calls.find((tc: any) => tc.function.name === t.name);
+                    const call = this.findToolCall(lastMsg.tool_calls, t, usedCallIds);
                     if (call) {
+                        usedCallIds.add(call.id);
                         this.history.push({
                             role: 'tool',
                             tool_call_id: call.id,
@@ -327,9 +330,11 @@ class OpenAIChatSession implements IChatSession {
         } else {
             const lastMsg = this.history[this.history.length - 1];
             if (lastMsg?.role === 'assistant' && lastMsg.tool_calls) {
+                const usedCallIds = new Set<string>();
                 text.forEach(t => {
-                    const call = lastMsg.tool_calls.find((tc: any) => tc.function.name === t.name);
+                    const call = this.findToolCall(lastMsg.tool_calls, t, usedCallIds);
                     if (call) {
+                        usedCallIds.add(call.id);
                         this.history.push({
                             role: 'tool',
                             tool_call_id: call.id,
@@ -393,5 +398,14 @@ class OpenAIChatSession implements IChatSession {
         if (lastMsg?.role === 'assistant' && lastMsg.tool_calls?.length) {
             this.history.pop();
         }
+    }
+
+    private findToolCall(toolCalls: any[], result: ToolResult, usedCallIds: Set<string>): any | undefined {
+        if (result.id) {
+            const directMatch = toolCalls.find((tc: any) => tc.id === result.id && !usedCallIds.has(tc.id));
+            if (directMatch) return directMatch;
+        }
+
+        return toolCalls.find((tc: any) => tc.function.name === result.name && !usedCallIds.has(tc.id));
     }
 }
