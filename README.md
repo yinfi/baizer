@@ -10,7 +10,7 @@ Obsidian CLI is an AI-powered Obsidian plugin that turns your vault into a light
 - Guardian inline writing help with Ghost Text and gutter state
 - Editor-first rewrite and review flows with diff previews before mutation
 - Skill-based orchestration on top of atomic tools
-- Local memory and knowledge compilation stored in the vault
+- Local Hindsight-inspired memory with retained facts, experiences, observations, and query-aware recall
 - Visible knowledge status for the active note, plus archive-to-wiki actions from chat
 - Approval flow for destructive or privileged actions
 - Multi-provider support with Gemini and OpenAI-compatible backends
@@ -50,6 +50,10 @@ Obsidian CLI is an AI-powered Obsidian plugin that turns your vault into a light
 - `editor-first`: selection rewrites and code-block review flows can be applied from the editor surface without routing everything through shell chat
 - `knowledge-visible`: the active shell session shows whether the current note is unregistered, pending, stale, failed, or already compiled into the knowledge wiki
 - `preview-before-mutation`: file writes, plugin commands, and local rewrite applies go through explicit previews or approval cards before they mutate vault state
+
+### Memory Model
+
+Obsidian CLI keeps memory local in `.obsidian/obsidian-cli-memory/`. The memory layer retains durable user facts, prior interaction outcomes, and synthesized observations. Each model turn recalls only memories relevant to the current request, under a prompt budget, instead of injecting the entire history.
 
 ## Supported Providers
 
