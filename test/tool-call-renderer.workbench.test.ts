@@ -123,9 +123,9 @@ async function runTests() {
   const { ToolRenderer, getToolStatus, getToolSummary } = await import('../src/ui/renderers/tool-renderer');
 
   await test('summarizes common tool families before raw JSON details', () => {
-    expect(getToolSummary('read_file', { path: 'Notes/a.md' })).toBe('Read: Notes/a.md');
-    expect(getToolSummary('write_file', { path: 'Notes/a.md' })).toBe('Write: Notes/a.md');
-    expect(getToolSummary('edit_file', { path: 'Notes/a.md' })).toBe('Edit: Notes/a.md');
+    expect(getToolSummary('read_file', { path: 'Notes/a.md' })).toBe('Read: a.md');
+    expect(getToolSummary('write_file', { path: 'Notes/a.md' })).toBe('Write: a.md');
+    expect(getToolSummary('edit_file', { path: 'Notes/a.md' })).toBe('Edit: a.md');
     expect(getToolSummary('web_search', { query: 'Obsidian plugins' })).toBe('Search: Obsidian plugins');
     expect(getToolSummary('query_knowledge', { query: 'AI notes' })).toBe('Knowledge: AI notes');
     expect(getToolSummary('plugin-obsidian-tasks', { command: 'list' })).toBe('Plugin: plugin-obsidian-tasks');
@@ -155,7 +155,7 @@ async function runTests() {
     expect(header.attributes.role).toBe('button');
     expect(header.attributes.tabindex).toBe('0');
     expect(header.attributes['aria-expanded']).toBe('false');
-    expect(label.textContent).toBe('Read: Notes/a.md');
+    expect(label.textContent).toBe('Read: a.md');
     expect(status.textContent).toBe('Running');
     expect(detail.textContent).toContain('"path": "Notes/a.md"');
 

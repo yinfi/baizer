@@ -258,14 +258,16 @@ async function runTests() {
     ]);
 
     expect(container.attributes.role).toBe('tablist');
-    expect(container.children.length).toBe(3);
+    expect(container.children.length).toBe(4);
     expect(container.children[0].attributes.role).toBe('tab');
     expect(container.children[0].attributes['aria-selected']).toBe('true');
-    expect(container.children[1].attributes['aria-selected']).toBe('false');
+    expect(container.children[1].className).toBe('ocli-tab-active-title');
+    expect(container.children[1].textContent).toBe('First');
+    expect(container.children[2].attributes['aria-selected']).toBe('false');
 
-    container.children[1].click();
-    container.children[1].contextmenu();
     container.children[2].click();
+    container.children[2].contextmenu();
+    container.children[3].click();
 
     expect(clicked).toEqual(['tab-2']);
     expect(closed).toEqual(['tab-2']);

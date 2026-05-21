@@ -29,6 +29,7 @@ class FakeElement {
   children: FakeElement[] = [];
   className = '';
   textContent = '';
+  parentElement: FakeElement | null = null;
   attributes: Record<string, string> = {};
   listeners: Record<string, Function[]> = {};
 
@@ -50,11 +51,13 @@ class FakeElement {
         child.attributes[name] = String(value);
       }
     }
+    child.parentElement = this;
     this.children.push(child);
     return child;
   }
 
   appendChild(child: FakeElement) {
+    child.parentElement = this;
     this.children.push(child);
     return child;
   }
@@ -373,7 +376,24 @@ async function runTests() {
     expect(refreshCount).toBe(2);
   });
 
-  await test('ShellView renders utility actions in the input top bar', async () => {
+  await test('ShellView renders search and settings actions in the header', async () => {
+    const { ShellView } = await import('../src/ui/shell-view');
+
+    const view = new ShellView({} as any, {
+      getSkillCommands: () => [],
+      getAvailableTools: () => [],
+    } as any);
+
+    const header = new FakeElement();
+    (view as any).createHeaderActions(header as any);
+
+    expect(header.querySelector('.shell-header-buttons')?.querySelector('.shell-history-btn')?.attributes['aria-label']).toBe('Search history');
+    expect(header.querySelector('.shell-settings-btn')?.attributes['aria-label']).toBe('Settings');
+    expect(header.querySelector('.shell-clear-btn')).toBe(null);
+    expect(header.querySelector('.shell-tools-btn')).toBe(null);
+  });
+
+  await test('ShellView mounts suggestions beside the composer instead of inside the clipped input container', async () => {
     const { ShellView } = await import('../src/ui/shell-view');
 
     const view = new ShellView({} as any, {
@@ -382,15 +402,11 @@ async function runTests() {
     } as any);
 
     const inputShell = new FakeElement();
-    const inputContainer = new FakeElement();
-    inputShell.children.push(inputContainer);
-    (view as any).createInputUtilityActions(inputShell as any);
+    const inputContainer = inputShell.createDiv({ cls: 'shell-input-container' });
+    const suggestions = (view as any).createSuggestionContainer(inputContainer as any) as FakeElement;
 
-    expect(inputShell.querySelector('.shell-input-top-actions')?.querySelector('.shell-history-btn')?.attributes['aria-label']).toBe('Conversation history');
-    expect(inputContainer.querySelector('.shell-input-top-actions')).toBe(null);
-    expect(inputShell.querySelector('.shell-clear-btn')?.attributes['aria-label']).toBe('Clear chat');
-    expect(inputShell.querySelector('.shell-tools-btn')?.attributes['aria-label']).toBe('Tools');
-    expect(inputShell.querySelector('.shell-settings-btn')?.attributes['aria-label']).toBe('Settings');
+    expect(inputShell.contains(suggestions)).toBe(true);
+    expect(inputContainer.contains(suggestions)).toBe(false);
   });
 
   await test('ShellView mounts current note status as the first context chip', async () => {
@@ -427,7 +443,7 @@ async function runTests() {
     expect(contextChips?.contains(statusHost as any)).toBe(true);
     expect(contextChips?.children[0]?.hasClass('shell-knowledge-status-host')).toBe(true);
     expect(inputContainer?.querySelector('.shell-input-top-actions')).toBe(null);
-    expect(root.querySelector('.shell-input-shell')?.querySelector('.shell-input-top-actions')?.querySelector('.shell-history-btn')?.attributes['aria-label']).toBe('Conversation history');
+    expect(root.querySelector('.shell-input-shell')?.querySelector('.shell-input-top-actions')).toBe(null);
   });
 
   await test('ShellView helper actions add related context and prepare edit input', async () => {

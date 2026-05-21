@@ -59,6 +59,11 @@ export class ThinkingRenderer {
     if (label) label.textContent = `Thought for ${duration}`;
     if (timer) timer.textContent = duration;
 
+    const header = this.currentThinkingBlock.querySelector('.ocli-thinking-header') as HTMLElement;
+    if (header) {
+      this.setAttribute(header, 'aria-expanded', 'true');
+    }
+
     this.currentThinkingBlock = null;
   }
 

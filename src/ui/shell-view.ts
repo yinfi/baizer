@@ -127,7 +127,7 @@ export class ShellView extends ItemView {
             target.closest('.shell-context-chips') ||
             target.closest('.shell-model-select-container') ||
             target.closest('.shell-action-buttons') ||
-            target.closest('.shell-input-top-actions') ||
+            target.closest('.shell-header-buttons') ||
             target.closest('.ocli-history-menu') ||
             target.closest('.shell-history-btn')
         ) return;
@@ -210,6 +210,7 @@ export class ShellView extends ItemView {
         headerCopy.createEl('h1', { text: 'Shell', cls: 'shell-title' });
         headerCopy.createDiv({ cls: 'shell-header-state', text: 'Ready - current note scoped' });
         this.tabBarContainerEl = headerTitle.createDiv({ cls: 'shell-tab-bar-container' });
+        this.createHeaderActions(header);
 
         this.historyMenuContainerEl = header.createDiv({ cls: 'ocli-history-menu' });
         this.historyMenu = new HistoryMenu(this.historyMenuContainerEl, {
@@ -264,7 +265,7 @@ export class ShellView extends ItemView {
         );
 
         // Suggestion Popup
-        this.suggestionContainer = inputContainer.createDiv({ cls: 'shell-suggestions' });
+        this.suggestionContainer = this.createSuggestionContainer(inputContainer);
         this.commandDropdown = new CommandDropdown(this.suggestionContainer, {
             onNavigate: (dir) => this.navigateSuggestions(dir),
             onSelect: (_item, index) => this.selectSuggestionAt(index),
@@ -599,8 +600,16 @@ export class ShellView extends ItemView {
         const summary = this.streamTimeline.createDiv({ cls: 'shell-think-summary' });
         summary.createSpan({ cls: 'think-toggle', text: '\u25BC' });
         summary.createSpan({ cls: 'think-summary-text', text: 'Thinking in progress...' });
+        summary.setAttribute('role', 'button');
+        summary.setAttribute('tabindex', '0');
+        summary.setAttribute('aria-expanded', 'true');
         summary.addEventListener('click', () => {
-            this.streamTimeline?.toggleClass('is-collapsed', !this.streamTimeline.hasClass('is-collapsed'));
+            this.toggleStreamTimeline();
+        });
+        summary.addEventListener('keydown', (event: KeyboardEvent) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            this.toggleStreamTimeline();
         });
 
         this.streamContent = this.streamContainer.createDiv({ cls: 'shell-response-content' });
@@ -610,6 +619,14 @@ export class ShellView extends ItemView {
 
     private getStreamNodeCount() {
         return (this.thinkingRenderer?.getNodeCount() || 0) + (this.toolRenderer?.getNodeCount() || 0);
+    }
+
+    private toggleStreamTimeline() {
+        if (!this.streamTimeline) return;
+        const nextCollapsed = !this.streamTimeline.hasClass('is-collapsed');
+        this.streamTimeline.toggleClass('is-collapsed', nextCollapsed);
+        const summary = this.streamTimeline.querySelector('.shell-think-summary') as HTMLElement;
+        summary?.setAttribute('aria-expanded', String(!nextCollapsed));
     }
 
     private handleTextDelta(content: string) {
@@ -661,6 +678,8 @@ export class ShellView extends ItemView {
             const summaryText = this.streamTimeline.querySelector('.think-summary-text') as HTMLElement;
             if (summaryText) summaryText.textContent = `Thought through ${this.streamNodeCount} steps`;
             this.streamTimeline.addClass('is-collapsed');
+            const summary = this.streamTimeline.querySelector('.shell-think-summary') as HTMLElement;
+            summary?.setAttribute('aria-expanded', 'false');
         } else if (this.streamTimeline && this.streamNodeCount === 0) {
             this.streamTimeline.style.display = 'none';
         }
@@ -917,7 +936,6 @@ export class ShellView extends ItemView {
 
     private createShellScaffold(container: HTMLElement) {
         const inputShell = container.createDiv({ cls: 'shell-input-shell' });
-        this.createInputUtilityActions(inputShell);
         const inputContainer = inputShell.createDiv({ cls: 'shell-input-container' });
 
         const contextBar = inputContainer.createDiv({ cls: 'shell-input-context-bar' });
@@ -935,24 +953,23 @@ export class ShellView extends ItemView {
         return inputContainer;
     }
 
-    private createInputUtilityActions(container: HTMLElement) {
-        const actions = container.createDiv({ cls: 'shell-input-top-actions' });
-        this.createInputUtilityButton(actions, 'Conversation history', 'history', 'shell-history-btn', (event) => {
+    private createSuggestionContainer(inputContainer: HTMLElement) {
+        const host = inputContainer.parentElement || inputContainer;
+        return host.createDiv({ cls: 'shell-suggestions' });
+    }
+
+    private createHeaderActions(container: HTMLElement) {
+        const actions = container.createDiv({ cls: 'shell-header-buttons' });
+        this.createHeaderActionButton(actions, 'Search history', 'search', 'shell-history-btn', (event) => {
             event.stopPropagation();
             void this.toggleHistoryMenu();
         });
-        this.createInputUtilityButton(actions, 'Clear chat', 'trash-2', 'shell-clear-btn', () => {
-            this.clearChat();
-        });
-        this.createInputUtilityButton(actions, 'Tools', 'wrench', 'shell-tools-btn', () => {
-            this.showAvailableTools();
-        });
-        this.createInputUtilityButton(actions, 'Settings', 'settings', 'shell-settings-btn', () => {
+        this.createHeaderActionButton(actions, 'Settings', 'settings', 'shell-settings-btn', () => {
             this.openPluginSettings();
         });
     }
 
-    private createInputUtilityButton(
+    private createHeaderActionButton(
         container: HTMLElement,
         label: string,
         icon: string,
@@ -960,7 +977,7 @@ export class ShellView extends ItemView {
         handler: (event: MouseEvent) => void | Promise<void>,
     ) {
         const button = container.createEl('button', {
-            cls: `clickable-icon shell-input-top-action ${cls}`,
+            cls: `clickable-icon shell-header-action ${cls}`,
             attr: { type: 'button', 'aria-label': label, title: label },
         });
         setIcon(button, icon);

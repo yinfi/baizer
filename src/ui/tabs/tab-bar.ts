@@ -60,6 +60,17 @@ export class TabBar {
 
         badge.addEventListener('click', () => this.callbacks.onTabClick(item.id));
 
+        if (item.isActive) {
+            const title = this.containerEl.createDiv({
+                cls: 'ocli-tab-active-title',
+                text: item.title,
+            });
+            title.setAttribute('role', 'button');
+            title.setAttribute('aria-label', item.title);
+            title.setAttribute('title', item.title);
+            title.addEventListener('click', () => this.callbacks.onTabClick(item.id));
+        }
+
         if (item.canClose) {
             badge.addEventListener('contextmenu', (event) => {
                 event.preventDefault();
