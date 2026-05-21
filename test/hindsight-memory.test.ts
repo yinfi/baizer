@@ -182,6 +182,39 @@ async function runTests() {
     expect(memories.filter((memory) => memory.source.kind === 'summary-migration').length).toBe(1);
     expect(memories.some((memory) => memory.text.includes('Product engineer'))).toBe(true);
   });
+
+  await test('consolidator creates observations with evidence ids', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemories([
+      makeMemory({
+        id: 'mem_local',
+        type: 'world',
+        text: 'User prefers local-first implementations.',
+        normalizedText: 'user prefers local-first implementations.',
+        entities: ['local-first'],
+        tags: ['preference'],
+      }),
+      makeMemory({
+        id: 'mem_tests',
+        type: 'experience',
+        text: 'User confirmed a TDD implementation plan for memory.',
+        normalizedText: 'user confirmed a tdd implementation plan for memory.',
+        entities: ['tdd', 'memory'],
+        tags: ['plan'],
+      }),
+    ]);
+
+    const { HindsightConsolidator } = await import('../src/memory/hindsight-consolidator');
+    const consolidator = new HindsightConsolidator(store);
+    const created = await consolidator.consolidate({ now: 7000 });
+
+    expect(created.length).toBe(1);
+    expect(created[0].type).toBe('observation');
+    expect(created[0].evidenceIds).toEqual(['mem_local', 'mem_tests']);
+    expect(created[0].text).toContain('local-first');
+  });
 }
 
 runTests().catch((error) => {
