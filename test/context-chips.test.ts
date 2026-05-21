@@ -27,6 +27,7 @@ async function test(name: string, fn: () => Promise<void> | void) {
 
 class FakeElement {
   children: FakeElement[] = [];
+  parentElement: FakeElement | null = null;
   className = '';
   textContent = '';
   attributes: Record<string, string> = {};
@@ -50,6 +51,7 @@ class FakeElement {
         child.attributes[name] = String(value);
       }
     }
+    child.parentElement = this;
     this.children.push(child);
     return child;
   }
@@ -66,6 +68,24 @@ class FakeElement {
   addEventListener(type: string, handler: Function) {
     if (!this.listeners[type]) this.listeners[type] = [];
     this.listeners[type].push(handler);
+  }
+
+  addClass(name: string) {
+    const classes = new Set(this.className.split(' ').filter(Boolean));
+    classes.add(name);
+    this.className = Array.from(classes).join(' ');
+  }
+
+  removeClass(name: string) {
+    const classes = new Set(this.className.split(' ').filter(Boolean));
+    classes.delete(name);
+    this.className = Array.from(classes).join(' ');
+  }
+
+  remove() {
+    if (!this.parentElement) return;
+    this.parentElement.children = this.parentElement.children.filter(child => child !== this);
+    this.parentElement = null;
   }
 
   click() {
@@ -85,6 +105,12 @@ class FakeElement {
     return this.findFirstByClass(className);
   }
 
+  querySelectorAll(selector: string): FakeElement[] {
+    if (!selector.startsWith('.')) return [];
+    const className = selector.slice(1);
+    return this.findAllByClass(className);
+  }
+
   private findFirstByClass(className: string): FakeElement | null {
     for (const child of this.children) {
       if (child.hasClass(className)) return child;
@@ -92,6 +118,15 @@ class FakeElement {
       if (nested) return nested;
     }
     return null;
+  }
+
+  private findAllByClass(className: string): FakeElement[] {
+    const matches: FakeElement[] = [];
+    for (const child of this.children) {
+      if (child.hasClass(className)) matches.push(child);
+      matches.push(...child.findAllByClass(className));
+    }
+    return matches;
   }
 }
 
@@ -102,7 +137,9 @@ async function runTests() {
   await test('derives filename-first labels and icon names for context types', () => {
     expect(getContextChipLabel({ id: '1', type: 'file', data: 'Folder/Note.md' })).toBe('Note.md');
     expect(getContextChipLabel({ id: '2', type: 'url', data: 'https://example.com/a', summary: 'Example' })).toBe('Example');
-    expect(getContextChipLabel({ id: '3', type: 'scope', data: '@current', summary: 'Current note', scope: 'current' } as any)).toBe('@current');
+    expect(getContextChipLabel({ id: '3', type: 'scope', data: '@current', summary: 'Current note', scope: 'current' } as any)).toBe('current');
+    expect(getContextChipLabel({ id: '4', type: 'scope', data: '@backlinks', summary: 'Backlinks', scope: 'backlinks' } as any)).toBe('backlinks');
+    expect(getContextChipLabel({ id: '5', type: 'scope', data: '@tag:project', summary: 'Project tag', scope: 'tag', tag: 'project' } as any)).toBe('tag:project');
     expect(getContextIconName('file')).toBe('file-text');
     expect(getContextIconName('image')).toBe('image');
     expect(getContextIconName('url')).toBe('link');
@@ -110,14 +147,26 @@ async function runTests() {
     expect(getContextIconName('scope' as any)).toBe('at-sign');
   });
 
-  await test('renders chips with title, remove action, and open-file action', () => {
+  await test('renders chips with title, remove action, and file action popover', () => {
     const removed: string[] = [];
     const opened: string[] = [];
+    const compiled: string[] = [];
+    const related: string[] = [];
+    const summary: string[] = [];
+    const lint: string[] = [];
+    const copied: string[] = [];
+    const settings: string[] = [];
     const icons: string[] = [];
     const container = new FakeElement();
     const chips = new ContextChips(container as any, {
       onRemove: id => removed.push(id),
       onOpenFile: path => opened.push(path),
+      onCompileFile: path => compiled.push(path),
+      onAddRelatedContext: path => related.push(path),
+      onOpenSummary: path => summary.push(path),
+      onRunLint: path => lint.push(path),
+      onCopyPath: path => copied.push(path),
+      onOpenSettings: () => settings.push('settings'),
       setIcon: (el, icon) => {
         icons.push(icon);
         el.setAttribute('data-icon', icon);
@@ -135,13 +184,42 @@ async function runTests() {
     expect(container.children.length).toBe(5);
     expect(container.children[0].attributes.title).toBe('Folder/Note.md');
     expect(container.children[0].querySelector('.chip-label')?.textContent).toBe('Note.md');
-    expect(container.children[4].querySelector('.chip-label')?.textContent).toBe('@backlinks');
+    expect(container.children[4].querySelector('.chip-label')?.textContent).toBe('backlinks');
+    expect(container.children[0].hasClass('context-chip-file')).toBe(true);
+    expect(container.children[4].hasClass('context-chip-scope')).toBe(true);
     expect(icons).toEqual(['file-text', 'image', 'link', 'youtube', 'at-sign']);
 
     container.children[0].click();
+    expect(container.children[0].hasClass('is-action-open')).toBe(true);
+    container.children[0].click();
+    expect(container.children[0].hasClass('is-action-open')).toBe(false);
+    container.children[0].click();
+    const fileActions = container.children[0].querySelectorAll('.context-chip-icon-action');
+    expect(fileActions.map(action => action.attributes.title)).toEqual([
+      'Open file',
+      'Compile note',
+      'Add backlinks',
+      'Open wiki summary',
+      'Run knowledge lint',
+      'Copy note path',
+      'Settings',
+    ]);
+    fileActions[0].click();
+    fileActions[1].click();
+    fileActions[2].click();
+    fileActions[3].click();
+    fileActions[4].click();
+    fileActions[5].click();
+    fileActions[6].click();
     container.children[0].querySelector('.chip-remove')?.click();
 
     expect(opened).toEqual(['Folder/Note.md']);
+    expect(compiled).toEqual(['Folder/Note.md']);
+    expect(related).toEqual(['Folder/Note.md']);
+    expect(summary).toEqual(['Folder/Note.md']);
+    expect(lint).toEqual(['Folder/Note.md']);
+    expect(copied).toEqual(['Folder/Note.md']);
+    expect(settings).toEqual(['settings']);
     expect(removed).toEqual(['file-1']);
   });
 }

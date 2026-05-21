@@ -252,6 +252,8 @@ export class ShellView extends ItemView {
         this.registerEvent(
             this.app.workspace.on('file-open', () => {
                 this.excludedCurrentNotePath = null;
+                const contextContainer = this.getContextChipsContainer();
+                if (contextContainer) this.renderContextChips(contextContainer);
                 void this.refreshKnowledgeStatusPanel();
             })
         );
@@ -380,7 +382,13 @@ export class ShellView extends ItemView {
             const fileSuggestions = files
                 .filter(f => f.path.toLowerCase().includes(query.toLowerCase()))
                 .slice(0, 10)
-                .map(f => ({ label: f.basename, desc: f.path, value: `[[${f.path}]]`, source: 'file' as const }));
+                .map(f => ({
+                    label: f.basename,
+                    desc: f.path,
+                    value: f.path,
+                    source: 'file' as const,
+                    kind: 'file' as const,
+                }));
             suggestions = [...scopeSuggestions, ...fileSuggestions];
         }
 
@@ -854,13 +862,24 @@ export class ShellView extends ItemView {
     private renderContextChips(container: HTMLElement) {
         if (!container) return;
         container.empty();
-        if (this.shouldIncludeCurrentNoteContext()) {
-            this.renderImplicitCurrentContext(container);
+
+        if (this.shouldIncludeCurrentNoteContext() && this.knowledgeStatusPanel) {
+            this.knowledgeStatusContainerEl = container.createDiv({ cls: 'shell-knowledge-status-host' });
+            this.knowledgeStatusPanel = new KnowledgeStatusPanel(this.knowledgeStatusContainerEl, {
+                app: this.app,
+                plugin: this.plugin,
+                onAddRelatedContext: () => this.addBacklinksScopeContext(),
+                onExcludeCurrentContext: (path) => this.excludeCurrentNoteContext(path),
+                onOpenKnowledgeSettings: () => this.openPluginSettings(),
+            });
+            void this.refreshKnowledgeStatusPanel();
         }
 
         const explicitContainer = container.createDiv({ cls: 'shell-explicit-context-chips' });
+        const activePath = this.app.workspace?.getActiveFile?.()?.path;
         const explicitContexts = this.contextManager.getContexts()
-            .filter((ctx) => !(ctx.type === 'scope' && ctx.scope === 'current'));
+            .filter((ctx) => !(ctx.type === 'scope' && ctx.scope === 'current'))
+            .filter((ctx) => !(ctx.type === 'file' && ctx.data === activePath));
 
         new ContextChips(explicitContainer, {
             onRemove: (id) => {
@@ -870,22 +889,26 @@ export class ShellView extends ItemView {
             onOpenFile: (path) => {
                 void this.app.workspace.openLinkText(path, '', false);
             },
+            onCompileFile: async (path) => {
+                const result = await this.plugin?.knowledgeRuntime?.compileByPath?.(path);
+                if (result) {
+                    new Notice(`Knowledge compile: ${result.success} success, ${result.failed} failed`);
+                }
+                await this.refreshKnowledgeStatusPanel();
+            },
+            onAddRelatedContext: () => this.addBacklinksScopeContext(),
+            onOpenSummary: (path) => {
+                void this.openKnowledgeSummaryForPath(path);
+            },
+            onRunLint: () => {
+                (this.app as any).commands?.executeCommandById?.('obsidian-cli:knowledge-lint');
+            },
+            onCopyPath: (path) => {
+                void globalThis.navigator?.clipboard?.writeText?.(path);
+                new Notice('Copied note path.');
+            },
+            onOpenSettings: () => this.openPluginSettings(),
         }).update(explicitContexts);
-    }
-
-    private renderImplicitCurrentContext(container: HTMLElement) {
-        const activeFile = this.app.workspace?.getActiveFile?.();
-        const label = activeFile?.basename ? `Current: ${activeFile.basename}` : 'Current note';
-        const title = activeFile?.path
-            ? `Current note included by default: ${activeFile.path}`
-            : 'Current note is included by default';
-        const chip = container.createDiv({
-            cls: 'context-chip context-chip-current is-implicit',
-            title,
-        });
-        const iconEl = chip.createSpan({ cls: 'chip-icon' });
-        setIcon(iconEl, 'file-text');
-        chip.createSpan({ cls: 'chip-label', text: label });
     }
 
     private getContextChipsContainer() {
@@ -893,13 +916,13 @@ export class ShellView extends ItemView {
     }
 
     private createShellScaffold(container: HTMLElement) {
-        const inputContainer = container.createDiv({ cls: 'shell-input-container' });
-        this.createInputUtilityActions(inputContainer);
+        const inputShell = container.createDiv({ cls: 'shell-input-shell' });
+        this.createInputUtilityActions(inputShell);
+        const inputContainer = inputShell.createDiv({ cls: 'shell-input-container' });
 
         const contextBar = inputContainer.createDiv({ cls: 'shell-input-context-bar' });
         const contextContainer = contextBar.createDiv({ cls: 'shell-context-chips' });
-        this.renderContextChips(contextContainer);
-        this.knowledgeStatusContainerEl = contextBar.createDiv({ cls: 'shell-knowledge-status-host' });
+        this.knowledgeStatusContainerEl = contextContainer.createDiv({ cls: 'shell-knowledge-status-host' });
         this.knowledgeStatusPanel = new KnowledgeStatusPanel(this.knowledgeStatusContainerEl, {
             app: this.app,
             plugin: this.plugin,
@@ -907,6 +930,7 @@ export class ShellView extends ItemView {
             onExcludeCurrentContext: (path) => this.excludeCurrentNoteContext(path),
             onOpenKnowledgeSettings: () => this.openPluginSettings(),
         });
+        this.renderContextChips(contextContainer);
 
         return inputContainer;
     }
@@ -973,6 +997,16 @@ export class ShellView extends ItemView {
         const contextContainer = this.getContextChipsContainer();
         if (contextContainer) this.renderContextChips(contextContainer);
         new Notice('Added @backlinks context.');
+    }
+
+    private async openKnowledgeSummaryForPath(path: string) {
+        const status = await this.plugin?.knowledgeRuntime?.getStatusService?.()?.getNoteStatus?.(path);
+        const summaryPath = status?.summaryPath;
+        if (summaryPath && typeof (this.app.workspace as any)?.openLinkText === 'function') {
+            await (this.app.workspace as any).openLinkText(summaryPath, '', false);
+            return;
+        }
+        (this.app as any).commands?.executeCommandById?.('obsidian-cli:knowledge-open-index');
     }
 
     private excludeCurrentNoteContext(path: string) {

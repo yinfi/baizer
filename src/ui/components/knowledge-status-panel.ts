@@ -13,6 +13,7 @@ interface KnowledgeStatusPanelOptions {
 
 export class KnowledgeStatusPanel {
   private readonly setIconFn: (el: HTMLElement, icon: string) => void;
+  private refreshSeq = 0;
 
   constructor(
     private readonly container: HTMLElement,
@@ -22,6 +23,7 @@ export class KnowledgeStatusPanel {
   }
 
   async refresh() {
+    const seq = ++this.refreshSeq;
     this.container.empty();
     (this.container as any).addClass?.('shell-knowledge-status-panel') ?? this.container.classList.add('shell-knowledge-status-panel');
 
@@ -39,6 +41,9 @@ export class KnowledgeStatusPanel {
     }
 
     const status = await statusService.getNoteStatus(activeFile.path);
+    if (seq !== this.refreshSeq) {
+      return;
+    }
     if (!status) {
       this.renderEmpty('Knowledge status is unavailable for this note.');
       return;
@@ -63,8 +68,11 @@ export class KnowledgeStatusPanel {
   ) {
     const strip = (this.container as any).createDiv({
       cls: `shell-knowledge-status-strip is-${status.state}`,
-      title: this.buildSummary(status),
-      attr: { role: 'button', tabindex: '0', 'aria-label': `Current note: ${activeFile.basename}` },
+      attr: {
+        role: 'button',
+        tabindex: '0',
+        'aria-label': `Current note: ${activeFile.basename}. ${this.buildSummary(status)}`,
+      },
     }) as HTMLElement;
 
     const icon = (strip as any).createDiv({ cls: 'shell-knowledge-status-file-icon' }) as HTMLElement;
@@ -96,13 +104,13 @@ export class KnowledgeStatusPanel {
   }
 
   private toggleMoreMenu(parent: HTMLElement, activeFile: TFile, status: KnowledgeNoteStatus) {
-    const existing = parent.querySelector?.('.shell-knowledge-status-menu');
+    const existing = parent.querySelector?.('.shell-knowledge-status-action-row');
     if (existing) {
       existing.remove();
       return;
     }
 
-    const menu = (parent as any).createDiv({ cls: 'shell-knowledge-status-menu' }) as HTMLElement;
+    const menu = (parent as any).createDiv({ cls: 'shell-knowledge-status-action-row' }) as HTMLElement;
     this.createMenuItem(menu, 'Compile note', 'refresh-cw', async () => {
       const result = await (this.options.plugin?.knowledgeRuntime ?? null)?.compileByPath?.(activeFile.path);
       if (result) {
@@ -140,12 +148,10 @@ export class KnowledgeStatusPanel {
     handler: () => void | Promise<void>,
   ) {
     const item = (container as any).createEl('button', {
-      cls: 'shell-knowledge-status-menu-item',
-      attr: { type: 'button' },
+      cls: 'shell-knowledge-status-icon-action',
+      attr: { type: 'button', 'aria-label': label, title: label },
     }) as HTMLElement;
-    const iconEl = (item as any).createSpan({ cls: 'shell-knowledge-status-menu-icon' }) as HTMLElement;
-    this.setIconFn(iconEl, icon);
-    (item as any).createSpan({ cls: 'shell-knowledge-status-menu-label', text: label });
+    this.setIconFn(item, icon);
     item.addEventListener('click', () => {
       void handler();
     });

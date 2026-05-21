@@ -7,7 +7,7 @@ export interface SuggestionItem {
   desc?: string;
   value?: string;
   source?: 'local' | 'skill' | 'file' | 'scope';
-  kind?: 'scope';
+  kind?: 'scope' | 'file';
   scope?: ContextItem['scope'];
   tag?: string;
 }
@@ -75,12 +75,15 @@ export class InputController {
     if (!item || !this.suggestionType) return null;
 
     const textBeforeCursor = value.substring(0, cursor);
-    const lastWord = textBeforeCursor.split(/\s+/).pop() || '';
-    const replaceStart = textBeforeCursor.substring(0, textBeforeCursor.length - lastWord.length);
+    const activeToken = this.findActiveToken(textBeforeCursor);
+    const replaceStart = textBeforeCursor.substring(0, activeToken.start);
     let newTextBefore = '';
     let newText = '';
 
-    if (item.kind === 'scope') {
+    const shouldCreateContext = this.shouldCreateContextItem(item);
+    const shouldKeepText = item.kind === 'scope' && item.scope === 'tag' && !item.tag;
+
+    if (shouldCreateContext) {
       const prefix = replaceStart.endsWith(' ') ? replaceStart.slice(0, -1) : replaceStart;
       const suffix = value.substring(cursor).startsWith(' ')
         ? value.substring(cursor + 1)
@@ -92,18 +95,32 @@ export class InputController {
       const replacement = this.suggestionType === 'command' ? item.label : (item.value || item.label);
       newTextBefore = replaceStart + replacement + ' ';
       newText = newTextBefore + value.substring(cursor);
+      if (shouldKeepText) {
+        newTextBefore = replaceStart + replacement;
+        newText = newTextBefore + value.substring(cursor);
+      }
     }
 
-    const contextItem = item.kind === 'scope' && item.scope
-      ? {
+    let contextItem: ContextItem | undefined;
+
+    if (item.kind === 'scope' && item.scope && shouldCreateContext) {
+      contextItem = {
           id: item.scope === 'tag' && item.tag ? `scope:tag:${item.tag}` : `scope:${item.scope}`,
           type: 'scope' as const,
           data: item.label,
           summary: item.desc,
           scope: item.scope,
           tag: item.tag,
-        }
-      : undefined;
+        };
+    } else if (this.suggestionType === 'file' && item.source === 'file' && shouldCreateContext) {
+      const path = this.extractFilePath(item);
+      contextItem = {
+        id: `file:${path}`,
+        type: 'file' as const,
+        data: path,
+        summary: item.label,
+      };
+    }
 
     this.hide();
     return {
@@ -111,6 +128,27 @@ export class InputController {
       cursor: newTextBefore.length,
       contextItem,
     };
+  }
+
+  private extractFilePath(item: SuggestionItem) {
+    const value = item.value || item.desc || item.label;
+    const wikiLink = value.match(/^\[\[(.*)\]\]$/);
+    return wikiLink?.[1] || item.desc || value;
+  }
+
+  private shouldCreateContextItem(item: SuggestionItem) {
+    if (item.kind === 'scope') {
+      return item.scope !== 'tag' || !!item.tag;
+    }
+    return this.suggestionType === 'file' && item.source === 'file';
+  }
+
+  private findActiveToken(textBeforeCursor: string) {
+    const match = textBeforeCursor.match(/\S+\s*$/);
+    if (!match || match.index === undefined) {
+      return { start: textBeforeCursor.length };
+    }
+    return { start: match.index };
   }
 
   getSuggestions() {

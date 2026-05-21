@@ -433,6 +433,12 @@
 }
 
 /* 3. Input Area (Fixed Bottom) */
+.shell-input-shell {
+    position: relative;
+    margin-top: auto;
+    flex-shrink: 0;
+}
+
 .shell-input-container {
     position: relative;
     display: flex;
@@ -447,8 +453,6 @@
     font-size: var(--font-ui-small);
     border-radius: var(--radius-s);
     outline: none;
-    margin-top: auto;
-    flex-shrink: 0;
 }
 
 .shell-input-container:focus-within {
@@ -883,10 +887,11 @@ textarea.shell-input::placeholder {
 .shell-context-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--size-4-1);
-    margin-bottom: var(--size-4-1);
+    gap: 5px;
+    margin-bottom: 0;
     min-height: 0;
     padding: 0 1px;
+    align-items: center;
 }
 
 .shell-explicit-context-chips {
@@ -894,29 +899,42 @@ textarea.shell-input::placeholder {
 }
 
 .context-chip {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: var(--size-2-1);
+    gap: 5px;
     background-color: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
-    border-radius: var(--radius-s);
+    border-radius: 999px;
     font-size: var(--font-smallest);
-    padding: var(--size-2-1) var(--size-4-1);
+    line-height: 1;
+    min-height: 26px;
+    height: 26px;
+    padding: 0 7px;
     color: var(--text-normal);
-    max-width: 200px;
+    max-width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: pointer;
     transition: all 0.1s ease-in-out;
+    position: relative;
 }
 
 .context-chip:hover {
     background-color: var(--background-modifier-hover);
 }
 
+.context-chip.is-action-open {
+    overflow: visible;
+    z-index: 25;
+}
+
 .chip-icon {
-    font-size: var(--font-ui-small);
+    width: 16px;
+    height: 16px;
+    display: grid;
+    place-items: center;
+    font-size: var(--font-smallest);
     flex-shrink: 0;
 }
 
@@ -927,20 +945,23 @@ textarea.shell-input::placeholder {
 }
 
 .chip-remove {
-    height: 100%;
-    display: flex;
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    display: grid;
     align-items: center;
+    place-items: center;
     color: var(--text-muted);
     cursor: pointer;
     font-weight: var(--font-bold);
-    padding: 0 var(--size-2-1);
-    margin-right: calc(var(--size-2-1) * -1);
+    padding: 0;
+    margin-right: -3px;
+    border-radius: 999px;
 }
 
 .chip-remove:hover {
     color: var(--text-normal);
     background-color: var(--background-modifier-hover);
-    border-radius: 0 var(--radius-s) var(--radius-s) 0;
 }
 
 .chip-label {
@@ -948,17 +969,6 @@ textarea.shell-input::placeholder {
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 150px;
-}
-
-.chip-remove {
-    cursor: pointer;
-    color: var(--text-muted);
-    font-weight: bold;
-    margin-left: 2px;
-}
-
-.chip-remove:hover {
-    color: var(--text-error);
 }
 
 /* Apply Edit Button */
@@ -1423,8 +1433,9 @@ textarea.shell-input::placeholder {
 }
 
 .shell-knowledge-status-host {
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     min-width: 0;
+    order: -1;
 }
 
 .shell-knowledge-status-panel {
@@ -1450,38 +1461,79 @@ textarea.shell-input::placeholder {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-height: 28px;
+    min-height: 26px;
+    height: 26px;
     max-width: 180px;
-    padding: 3px 8px 3px 5px;
+    padding: 0 7px 0 5px;
     cursor: pointer;
     transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
 }
 
+.shell-knowledge-status-strip::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--text-muted);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 10%, transparent);
+}
+
 .shell-knowledge-status-strip.is-done {
-    border-color: color-mix(in srgb, var(--color-green) 34%, var(--ocli-border));
-    background: color-mix(in srgb, var(--color-green) 8%, var(--ocli-surface));
+    color: var(--text-normal);
+    border-color: var(--ocli-border);
+    background: var(--ocli-surface-muted);
+}
+
+.shell-knowledge-status-strip.is-done::before {
+    background: var(--color-green);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-green) 14%, transparent);
 }
 
 .shell-knowledge-status-strip.is-unregistered {
-    border-color: color-mix(in srgb, var(--text-muted) 28%, var(--ocli-border));
-    background: color-mix(in srgb, var(--text-muted) 8%, var(--ocli-surface));
+    color: var(--text-muted);
+    border-color: var(--ocli-border);
+    background: var(--ocli-surface-muted);
+}
+
+.shell-knowledge-status-strip.is-unregistered::before {
+    background: var(--text-muted);
 }
 
 .shell-knowledge-status-strip.is-stale,
 .shell-knowledge-status-strip.is-pending {
-    border-color: color-mix(in srgb, var(--color-yellow) 38%, var(--ocli-border));
-    background: color-mix(in srgb, var(--color-yellow) 10%, var(--ocli-surface));
+    color: var(--text-normal);
+    border-color: var(--ocli-border);
+    background: var(--ocli-surface-muted);
+}
+
+.shell-knowledge-status-strip.is-stale::before,
+.shell-knowledge-status-strip.is-pending::before {
+    background: var(--color-yellow);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-yellow) 14%, transparent);
 }
 
 .shell-knowledge-status-strip.is-processing {
-    border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--ocli-border));
-    background: color-mix(in srgb, var(--interactive-accent) 10%, var(--ocli-surface));
+    color: var(--text-normal);
+    border-color: var(--ocli-border);
+    background: var(--ocli-surface-muted);
     animation: shell-knowledge-pulse 1.5s ease-in-out infinite;
 }
 
+.shell-knowledge-status-strip.is-processing::before {
+    background: var(--interactive-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+
 .shell-knowledge-status-strip.is-failed {
-    border-color: color-mix(in srgb, var(--text-error) 46%, var(--ocli-border));
-    background: color-mix(in srgb, var(--text-error) 10%, var(--ocli-surface));
+    color: var(--text-normal);
+    border-color: var(--ocli-border);
+    background: var(--ocli-surface-muted);
+}
+
+.shell-knowledge-status-strip.is-failed::before {
+    background: var(--text-error);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-error) 14%, transparent);
 }
 
 .shell-knowledge-status-strip:hover,
@@ -1492,13 +1544,13 @@ textarea.shell-input::placeholder {
 
 .shell-knowledge-status-file-icon {
     flex: 0 0 auto;
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
     border-radius: 999px;
     display: grid;
     place-items: center;
-    color: var(--text-accent);
-    background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+    color: currentColor;
+    background: transparent;
 }
 
 .shell-knowledge-status-meta {
@@ -1507,7 +1559,7 @@ textarea.shell-input::placeholder {
 }
 
 .shell-knowledge-status-title {
-    color: var(--text-normal);
+    color: currentColor;
     font-size: var(--font-smallest);
     font-weight: 700;
     white-space: nowrap;
@@ -1594,16 +1646,7 @@ textarea.shell-input::placeholder {
 }
 
 .shell-knowledge-status-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 8px;
-    z-index: 30;
-    width: min(220px, calc(100vw - 32px));
-    padding: 6px;
-    border: 1px solid var(--ocli-border);
-    border-radius: var(--ocli-radius-m);
-    background: var(--ocli-surface-strong);
-    box-shadow: var(--ocli-shadow);
+    display: none;
 }
 
 @keyframes shell-knowledge-pulse {
@@ -1616,41 +1659,44 @@ textarea.shell-input::placeholder {
 }
 
 .shell-knowledge-status-menu-item {
-    display: flex;
+    display: none;
+}
+
+.shell-knowledge-status-action-row {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 30;
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    width: 100%;
-    min-height: 34px;
-    padding: 0 9px;
+    gap: 4px;
+    max-width: min(220px, calc(100vw - 32px));
+    padding: 4px;
+    border: 1px solid var(--ocli-border);
+    border-radius: 999px;
+    background: var(--ocli-surface-strong);
+    box-shadow: var(--ocli-shadow);
+}
+
+.shell-knowledge-status-icon-action {
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    padding: 0;
+    display: grid;
+    place-items: center;
     border: none;
-    border-radius: var(--ocli-radius-s);
+    border-radius: 999px;
     background: transparent;
-    color: var(--text-normal);
-    font-size: var(--font-ui-small);
-    text-align: left;
+    color: var(--text-muted);
     cursor: pointer;
 }
 
-.shell-knowledge-status-menu-item:hover,
-.shell-knowledge-status-menu-item:focus-visible {
+.shell-knowledge-status-icon-action:hover,
+.shell-knowledge-status-icon-action:focus-visible {
+    color: var(--text-normal);
     background: var(--background-modifier-hover);
     outline: none;
-}
-
-.shell-knowledge-status-menu-icon {
-    flex: 0 0 auto;
-    width: 16px;
-    height: 16px;
-    display: grid;
-    place-items: center;
-    color: var(--text-muted);
-}
-
-.shell-knowledge-status-menu-label {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .shell-tab-bar-container {
@@ -1741,8 +1787,8 @@ textarea.shell-input::placeholder {
 }
 
 .shell-input-container {
-    gap: 8px;
-    padding: 9px;
+    gap: 6px;
+    padding: 8px;
     border: 1px solid var(--ocli-border);
     border-radius: var(--ocli-radius-l);
     background: var(--ocli-surface);
@@ -1751,16 +1797,16 @@ textarea.shell-input::placeholder {
 
 .shell-input-top-actions {
     position: absolute;
-    top: 8px;
-    right: 8px;
-    z-index: 2;
+    top: -38px;
+    right: 0;
+    z-index: 4;
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 2px;
-    border: 1px solid color-mix(in srgb, var(--ocli-border) 80%, transparent);
+    padding: 1px;
+    border: 1px solid color-mix(in srgb, var(--ocli-border) 54%, transparent);
     border-radius: var(--ocli-radius-s);
-    background: color-mix(in srgb, var(--ocli-surface) 86%, transparent);
+    background: color-mix(in srgb, var(--ocli-surface) 62%, transparent);
     backdrop-filter: blur(8px);
 }
 
@@ -1787,7 +1833,8 @@ textarea.shell-input::placeholder {
     align-items: center;
     gap: 6px;
     min-width: 0;
-    padding-right: 116px;
+    padding-right: 0;
+    min-height: 28px;
 }
 
 .shell-input-container:focus-within {
@@ -1796,10 +1843,10 @@ textarea.shell-input::placeholder {
 }
 
 textarea.shell-input {
-    min-height: 58px;
+    min-height: 44px;
     max-height: 160px;
     line-height: var(--line-height-normal);
-    padding-top: 20px;
+    padding-top: 4px;
 }
 
 .shell-model-select {
@@ -1908,6 +1955,8 @@ textarea.shell-input {
 .context-chip {
     border-radius: 999px;
     background: var(--ocli-surface-muted);
+    border-color: var(--ocli-border);
+    color: var(--text-normal);
 }
 
 .context-chip-current {
@@ -1922,9 +1971,75 @@ textarea.shell-input {
 }
 
 .context-chip-scope {
+    color: var(--text-normal);
+    background: var(--ocli-surface-muted);
+    border-color: var(--ocli-border);
+}
+
+.context-chip-scope .chip-icon {
+    color: var(--text-muted);
+}
+
+.context-chip-scope-recent .chip-icon {
+    color: var(--interactive-accent);
+}
+
+.context-chip-scope-backlinks .chip-icon {
     color: var(--color-green);
-    background: color-mix(in srgb, var(--color-green) 10%, transparent);
-    border-color: color-mix(in srgb, var(--color-green) 22%, transparent);
+}
+
+.context-chip-scope-tag .chip-icon {
+    color: var(--color-yellow);
+}
+
+.context-chip-file .chip-icon {
+    color: var(--text-accent);
+}
+
+.context-chip-file::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--text-muted);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 10%, transparent);
+}
+
+.context-chip-action-row {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 30;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--ocli-border);
+    border-radius: 999px;
+    background: var(--ocli-surface-strong);
+    box-shadow: var(--ocli-shadow);
+}
+
+.context-chip-icon-action {
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.context-chip-icon-action:hover,
+.context-chip-icon-action:focus-visible {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+    outline: none;
 }
 
 .shell-approval-card {

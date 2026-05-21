@@ -80,6 +80,52 @@ async function runTests() {
       },
     });
   });
+
+  await test('InputController returns a file context item instead of inserting a wiki link', () => {
+    const controller = new InputController();
+    controller.setSuggestions('file', [
+      {
+        label: '核心看板',
+        desc: 'Projects/核心看板.md',
+        value: '[[Projects/核心看板.md]]',
+        source: 'file',
+      } as any,
+    ]);
+
+    const result = controller.selectSuggestion('use @kanban today', 12);
+
+    expect(result).toEqual({
+      text: 'use today',
+      cursor: 4,
+      contextItem: {
+        id: 'file:Projects/核心看板.md',
+        type: 'file',
+        data: 'Projects/核心看板.md',
+        summary: '核心看板',
+      },
+    });
+  });
+
+  await test('InputController leaves incomplete tag scope text in place', () => {
+    const controller = new InputController();
+    controller.setSuggestions('file', [
+      {
+        label: '@tag:',
+        desc: 'Add notes matching a tag',
+        value: '@tag:',
+        source: 'scope',
+        kind: 'scope',
+        scope: 'tag',
+      } as any,
+    ]);
+
+    const result = controller.selectSuggestion('@tag:', 5);
+
+    expect(result).toEqual({
+      text: '@tag:',
+      cursor: 5,
+    });
+  });
 }
 
 runTests().catch((e) => {

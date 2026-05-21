@@ -4,6 +4,12 @@ import { ContextItem } from '../../services/context-manager';
 interface ContextChipsHandlers {
   onRemove: (id: string) => void;
   onOpenFile?: (path: string) => void;
+  onCompileFile?: (path: string) => void | Promise<void>;
+  onAddRelatedContext?: (path: string) => void;
+  onOpenSummary?: (path: string) => void;
+  onRunLint?: (path: string) => void;
+  onCopyPath?: (path: string) => void;
+  onOpenSettings?: () => void;
   setIcon?: (el: HTMLElement, icon: string) => void;
 }
 
@@ -23,7 +29,7 @@ export class ContextChips {
 
     contexts.forEach((ctx) => {
       const chip = this.containerEl.createDiv({
-        cls: `context-chip context-chip-${ctx.type}`,
+        cls: `context-chip context-chip-${ctx.type}${ctx.type === 'scope' && ctx.scope ? ` context-chip-scope-${ctx.scope}` : ''}`,
         title: ctx.data,
       });
       const iconEl = chip.createSpan({ cls: 'chip-icon' });
@@ -41,17 +47,82 @@ export class ContextChips {
       });
 
       if (ctx.type === 'file') {
-        chip.addEventListener('click', () => {
-          this.handlers.onOpenFile?.(ctx.data);
+        chip.addEventListener('click', (event) => {
+          event.stopPropagation();
+          this.toggleFileActions(chip, ctx);
         });
       }
     });
+  }
+
+  private toggleFileActions(parent: HTMLElement, ctx: ContextItem) {
+    const existing = parent.querySelector?.('.context-chip-action-row');
+    if (existing) {
+      existing.remove();
+      this.removeClass(parent, 'is-action-open');
+      return;
+    }
+
+    this.addClass(parent, 'is-action-open');
+    const row = parent.createDiv({ cls: 'context-chip-action-row' });
+    this.createAction(row, 'Open file', 'external-link', () => {
+      this.handlers.onOpenFile?.(ctx.data);
+    });
+    this.createAction(row, 'Compile note', 'refresh-cw', () => {
+      void this.handlers.onCompileFile?.(ctx.data);
+    });
+    this.createAction(row, 'Add backlinks', 'network', () => {
+      this.handlers.onAddRelatedContext?.(ctx.data);
+    });
+    this.createAction(row, 'Open wiki summary', 'external-link', () => {
+      this.handlers.onOpenSummary?.(ctx.data);
+    });
+    this.createAction(row, 'Run knowledge lint', 'scan-line', () => {
+      this.handlers.onRunLint?.(ctx.data);
+    });
+    this.createAction(row, 'Copy note path', 'copy', () => {
+      this.handlers.onCopyPath?.(ctx.data);
+    });
+    this.createAction(row, 'Settings', 'settings', () => {
+      this.handlers.onOpenSettings?.();
+    });
+  }
+
+  private createAction(container: HTMLElement, label: string, icon: string, handler: () => void) {
+    const button = container.createEl('button', {
+      cls: 'context-chip-icon-action',
+      attr: { type: 'button', 'aria-label': label, title: label },
+    });
+    this.setIconFn(button, icon);
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handler();
+    });
+  }
+
+  private addClass(el: HTMLElement, className: string) {
+    if (typeof (el as any).addClass === 'function') {
+      (el as any).addClass(className);
+      return;
+    }
+    el.classList.add(className);
+  }
+
+  private removeClass(el: HTMLElement, className: string) {
+    if (typeof (el as any).removeClass === 'function') {
+      (el as any).removeClass(className);
+      return;
+    }
+    el.classList.remove(className);
   }
 }
 
 export function getContextChipLabel(ctx: ContextItem) {
   if (ctx.type === 'scope') {
-    return ctx.data;
+    if (ctx.scope === 'tag' && ctx.tag) {
+      return `tag:${ctx.tag}`;
+    }
+    return stripLeadingAt(ctx.data);
   }
 
   if (ctx.type === 'file') {
@@ -81,4 +152,8 @@ export function getContextIconName(type: ContextItem['type']) {
 function basename(path: string) {
   const normalized = path.replace(/\\/g, '/');
   return normalized.split('/').pop() || path;
+}
+
+function stripLeadingAt(value: string) {
+  return value.replace(/^@/, '');
 }

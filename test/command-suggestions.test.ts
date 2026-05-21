@@ -186,14 +186,16 @@ async function runTests() {
       {
         label: 'Backlog',
         desc: 'Projects/Backlog.md',
-        value: '[[Projects/Backlog.md]]',
+        value: 'Projects/Backlog.md',
         source: 'file',
+        kind: 'file',
       },
       {
         label: 'Background',
         desc: 'Notes/Background.md',
-        value: '[[Notes/Background.md]]',
+        value: 'Notes/Background.md',
         source: 'file',
+        kind: 'file',
       },
     ]);
   });
@@ -243,8 +245,9 @@ async function runTests() {
       {
         label: 'Current Project',
         desc: 'Projects/Current Project.md',
-        value: '[[Projects/Current Project.md]]',
+        value: 'Projects/Current Project.md',
         source: 'file',
+        kind: 'file',
       },
     ]);
   });
@@ -277,7 +280,7 @@ async function runTests() {
     expect((view as any).shouldIncludeCurrentNoteContext()).toBe(true);
   });
 
-  await test('ShellView renders implicit current note separately from explicit chips', async () => {
+  await test('ShellView keeps current note in the status host and renders only explicit context chips', async () => {
     const { ShellView } = await import('../src/ui/shell-view');
 
     const view = new ShellView({} as any, {
@@ -301,9 +304,73 @@ async function runTests() {
     const container = new FakeElement();
     (view as any).renderContextChips(container as any);
 
-    expect(container.querySelector('.context-chip-current')?.querySelector('.chip-label')?.textContent).toBe('Current: Center');
-    expect(container.querySelector('.context-chip-current')?.querySelector('.chip-remove')).toBe(null);
-    expect(container.querySelector('.context-chip-scope')?.querySelector('.chip-label')?.textContent).toBe('@backlinks');
+    expect(container.querySelector('.context-chip-current')).toBe(null);
+    expect(container.querySelector('.context-chip-scope')?.querySelector('.chip-label')?.textContent).toBe('backlinks');
+  });
+
+  await test('ShellView does not duplicate active file when it is explicitly selected', async () => {
+    const { ShellView } = await import('../src/ui/shell-view');
+
+    const view = new ShellView({} as any, {
+      getSkillCommands: () => [],
+    } as any);
+
+    (view as any).app = {
+      workspace: {
+        getActiveFile: () => ({ basename: '任务看板', path: '任务看板.md' }),
+        openLinkText: () => {},
+      },
+    };
+    (view as any).knowledgeStatusPanel = {};
+    (view as any).refreshKnowledgeStatusPanel = async () => {};
+    (view as any).contextManager.addContext({
+      id: 'file:任务看板.md',
+      type: 'file',
+      data: '任务看板.md',
+      summary: '任务看板',
+    });
+
+    const container = new FakeElement();
+    (view as any).renderContextChips(container as any);
+
+    expect(container.querySelector('.shell-knowledge-status-host')?.hasClass('shell-knowledge-status-host')).toBe(true);
+    expect(container.querySelector('.context-chip-file')).toBe(null);
+  });
+
+  await test('ShellView rerenders current note chip when active file changes', async () => {
+    const { ShellView } = await import('../src/ui/shell-view');
+
+    let activeFile = { basename: 'Home', path: 'Home.md' };
+    let refreshCount = 0;
+    const view = new ShellView({} as any, {
+      getSkillCommands: () => [],
+    } as any);
+
+    (view as any).app = {
+      workspace: {
+        getActiveFile: () => activeFile,
+        openLinkText: () => {},
+      },
+    };
+    (view as any).knowledgeStatusPanel = {};
+    (view as any).refreshKnowledgeStatusPanel = async () => {
+      refreshCount += 1;
+    };
+
+    const container = new FakeElement();
+    (view as any).renderContextChips(container as any);
+    expect(container.children[0]?.hasClass('shell-knowledge-status-host')).toBe(true);
+
+    (view as any).excludeCurrentNoteContext(activeFile.path);
+    expect((view as any).shouldIncludeCurrentNoteContext()).toBe(false);
+
+    activeFile = { basename: 'Next', path: 'Next.md' };
+    (view as any).excludedCurrentNotePath = null;
+    (view as any).renderContextChips(container as any);
+
+    expect((view as any).shouldIncludeCurrentNoteContext()).toBe(true);
+    expect(container.children[0]?.hasClass('shell-knowledge-status-host')).toBe(true);
+    expect(refreshCount).toBe(2);
   });
 
   await test('ShellView renders utility actions in the input top bar', async () => {
@@ -314,16 +381,19 @@ async function runTests() {
       getAvailableTools: () => [],
     } as any);
 
+    const inputShell = new FakeElement();
     const inputContainer = new FakeElement();
-    (view as any).createInputUtilityActions(inputContainer as any);
+    inputShell.children.push(inputContainer);
+    (view as any).createInputUtilityActions(inputShell as any);
 
-    expect(inputContainer.querySelector('.shell-input-top-actions')?.querySelector('.shell-history-btn')?.attributes['aria-label']).toBe('Conversation history');
-    expect(inputContainer.querySelector('.shell-clear-btn')?.attributes['aria-label']).toBe('Clear chat');
-    expect(inputContainer.querySelector('.shell-tools-btn')?.attributes['aria-label']).toBe('Tools');
-    expect(inputContainer.querySelector('.shell-settings-btn')?.attributes['aria-label']).toBe('Settings');
+    expect(inputShell.querySelector('.shell-input-top-actions')?.querySelector('.shell-history-btn')?.attributes['aria-label']).toBe('Conversation history');
+    expect(inputContainer.querySelector('.shell-input-top-actions')).toBe(null);
+    expect(inputShell.querySelector('.shell-clear-btn')?.attributes['aria-label']).toBe('Clear chat');
+    expect(inputShell.querySelector('.shell-tools-btn')?.attributes['aria-label']).toBe('Tools');
+    expect(inputShell.querySelector('.shell-settings-btn')?.attributes['aria-label']).toBe('Settings');
   });
 
-  await test('ShellView mounts knowledge status inside the input context area', async () => {
+  await test('ShellView mounts current note status as the first context chip', async () => {
     const { ShellView } = await import('../src/ui/shell-view');
 
     const view = new ShellView({} as any, {
@@ -336,7 +406,7 @@ async function runTests() {
     (view as any).app = {
       workspace: {
         on: () => ({}),
-        getActiveFile: () => null,
+        getActiveFile: () => ({ basename: 'Home', path: 'Home.md' }),
       },
       metadataCache: {
         on: () => ({}),
@@ -350,8 +420,14 @@ async function runTests() {
 
     const inputContextBar = root.querySelector('.shell-input-context-bar');
     const statusHost = root.querySelector('.shell-knowledge-status-host');
+    const contextChips = root.querySelector('.shell-context-chips');
+    const inputContainer = root.querySelector('.shell-input-container');
 
     expect(inputContextBar?.contains(statusHost as any)).toBe(true);
+    expect(contextChips?.contains(statusHost as any)).toBe(true);
+    expect(contextChips?.children[0]?.hasClass('shell-knowledge-status-host')).toBe(true);
+    expect(inputContainer?.querySelector('.shell-input-top-actions')).toBe(null);
+    expect(root.querySelector('.shell-input-shell')?.querySelector('.shell-input-top-actions')?.querySelector('.shell-history-btn')?.attributes['aria-label']).toBe('Conversation history');
   });
 
   await test('ShellView helper actions add related context and prepare edit input', async () => {
