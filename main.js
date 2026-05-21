@@ -9541,6 +9541,10 @@ var ThinkingRenderer = class {
       label.textContent = `Thought for ${duration}`;
     if (timer)
       timer.textContent = duration;
+    const header = this.currentThinkingBlock.querySelector(".ocli-thinking-header");
+    if (header) {
+      this.setAttribute(header, "aria-expanded", "true");
+    }
     this.currentThinkingBlock = null;
   }
   getNodeCount() {
@@ -9609,16 +9613,16 @@ function getToolSummary(name, input = {}) {
     return `Plugin: ${name}`;
   }
   if (lowerName.includes("read") && path) {
-    return `Read: ${path}`;
+    return `Read: ${basename2(path)}`;
   }
   if ((lowerName.includes("write") || lowerName.includes("create") || lowerName.includes("save")) && path) {
-    return `Write: ${path}`;
+    return `Write: ${basename2(path)}`;
   }
   if ((lowerName.includes("edit") || lowerName.includes("modify") || lowerName.includes("update")) && path) {
-    return `Edit: ${path}`;
+    return `Edit: ${basename2(path)}`;
   }
   if (lowerName.includes("delete") && path) {
-    return `Delete: ${path}`;
+    return `Delete: ${basename2(path)}`;
   }
   if (lowerName.includes("search") && query) {
     return `Search: ${truncate(query)}`;
@@ -9784,6 +9788,9 @@ function firstString(input, keys) {
 }
 function truncate(value) {
   return value.length > 80 ? `${value.substring(0, 77)}...` : value;
+}
+function basename2(path) {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 function safeStringify(value) {
   if (typeof value === "string")
@@ -10073,10 +10080,15 @@ var MessageRenderer = class {
       } else if (message.role === "user") {
         this.setText(entry, message.content);
       } else {
-        if (this.isCancelledSystemMessage(message.content)) {
+        const status = this.parseSystemStatus(message.content);
+        if (status) {
+          this.renderSystemStatus(entry, status);
+        } else if (this.isCancelledSystemMessage(message.content)) {
           entry.addClass?.("shell-system-cancelled") ?? entry.classList.add("shell-system-cancelled");
+          this.setText(entry, `[System] ${message.content}`);
+        } else {
+          this.setText(entry, `[System] ${message.content}`);
         }
-        this.setText(entry, `[System] ${message.content}`);
       }
     } catch (error) {
       this.options.onRenderError?.(error);
@@ -10154,6 +10166,37 @@ var MessageRenderer = class {
   isCancelledSystemMessage(content) {
     return /^Cancelled:/i.test(content.trim());
   }
+  parseSystemStatus(content) {
+    const updated = content.trim().match(/^(?:✅\s*)?Updated:\s*(.+)$/i);
+    if (!updated)
+      return null;
+    return {
+      kind: "updated",
+      label: "Updated",
+      target: updated[1].trim()
+    };
+  }
+  renderSystemStatus(entry, status) {
+    entry.addClass?.("shell-system-status") ?? entry.classList.add("shell-system-status");
+    entry.addClass?.(`shell-system-status-${status.kind}`) ?? entry.classList.add(`shell-system-status-${status.kind}`);
+    const icon = entry.createSpan({ cls: "shell-system-status-icon", text: "\u2713" });
+    this.setAttribute(icon, "aria-hidden", "true");
+    const main = entry.createSpan({ cls: "shell-system-status-main" });
+    main.createSpan({ cls: "shell-system-status-action", text: status.label });
+    main.createSpan({
+      cls: "shell-system-status-target",
+      text: this.basename(status.target),
+      title: status.target
+    });
+  }
+  basename(path) {
+    return path.split(/[\\/]/).filter(Boolean).pop() || path;
+  }
+  setAttribute(el, name, value) {
+    if (typeof el.setAttribute === "function") {
+      el.setAttribute(name, value);
+    }
+  }
 };
 
 // src/ui/tabs/tab-bar.ts
@@ -10196,6 +10239,16 @@ var TabBar = class {
       badge.setAttribute("data-provider", item.providerId);
     }
     badge.addEventListener("click", () => this.callbacks.onTabClick(item.id));
+    if (item.isActive) {
+      const title = this.containerEl.createDiv({
+        cls: "ocli-tab-active-title",
+        text: item.title
+      });
+      title.setAttribute("role", "button");
+      title.setAttribute("aria-label", item.title);
+      title.setAttribute("title", item.title);
+      title.addEventListener("click", () => this.callbacks.onTabClick(item.id));
+    }
     if (item.canClose) {
       badge.addEventListener("contextmenu", (event) => {
         event.preventDefault();
@@ -10852,7 +10905,7 @@ var ShellView = class extends import_obsidian17.ItemView {
     if (window.getSelection()?.toString())
       return;
     const target = e.target;
-    if (target.closest(".shell-suggestions") || target.closest(".shell-context-chips") || target.closest(".shell-model-select-container") || target.closest(".shell-action-buttons") || target.closest(".shell-input-top-actions") || target.closest(".ocli-history-menu") || target.closest(".shell-history-btn"))
+    if (target.closest(".shell-suggestions") || target.closest(".shell-context-chips") || target.closest(".shell-model-select-container") || target.closest(".shell-action-buttons") || target.closest(".shell-header-buttons") || target.closest(".ocli-history-menu") || target.closest(".shell-history-btn"))
       return;
     this.hideHistoryMenu();
     this.inputEl.focus();
@@ -10880,6 +10933,7 @@ var ShellView = class extends import_obsidian17.ItemView {
     headerCopy.createEl("h1", { text: "Shell", cls: "shell-title" });
     headerCopy.createDiv({ cls: "shell-header-state", text: "Ready - current note scoped" });
     this.tabBarContainerEl = headerTitle.createDiv({ cls: "shell-tab-bar-container" });
+    this.createHeaderActions(header);
     this.historyMenuContainerEl = header.createDiv({ cls: "ocli-history-menu" });
     this.historyMenu = new HistoryMenu(this.historyMenuContainerEl, {
       onOpen: (id) => this.openConversationFromHistory(id),
@@ -10926,7 +10980,7 @@ var ShellView = class extends import_obsidian17.ItemView {
         void this.refreshKnowledgeStatusPanel();
       })
     );
-    this.suggestionContainer = inputContainer.createDiv({ cls: "shell-suggestions" });
+    this.suggestionContainer = this.createSuggestionContainer(inputContainer);
     this.commandDropdown = new CommandDropdown(this.suggestionContainer, {
       onNavigate: (dir) => this.navigateSuggestions(dir),
       onSelect: (_item, index) => this.selectSuggestionAt(index),
@@ -11204,8 +11258,17 @@ var ShellView = class extends import_obsidian17.ItemView {
     const summary = this.streamTimeline.createDiv({ cls: "shell-think-summary" });
     summary.createSpan({ cls: "think-toggle", text: "\u25BC" });
     summary.createSpan({ cls: "think-summary-text", text: "Thinking in progress..." });
+    summary.setAttribute("role", "button");
+    summary.setAttribute("tabindex", "0");
+    summary.setAttribute("aria-expanded", "true");
     summary.addEventListener("click", () => {
-      this.streamTimeline?.toggleClass("is-collapsed", !this.streamTimeline.hasClass("is-collapsed"));
+      this.toggleStreamTimeline();
+    });
+    summary.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ")
+        return;
+      event.preventDefault();
+      this.toggleStreamTimeline();
     });
     this.streamContent = this.streamContainer.createDiv({ cls: "shell-response-content" });
     this.streamAccumulatedText = "";
@@ -11213,6 +11276,14 @@ var ShellView = class extends import_obsidian17.ItemView {
   }
   getStreamNodeCount() {
     return (this.thinkingRenderer?.getNodeCount() || 0) + (this.toolRenderer?.getNodeCount() || 0);
+  }
+  toggleStreamTimeline() {
+    if (!this.streamTimeline)
+      return;
+    const nextCollapsed = !this.streamTimeline.hasClass("is-collapsed");
+    this.streamTimeline.toggleClass("is-collapsed", nextCollapsed);
+    const summary = this.streamTimeline.querySelector(".shell-think-summary");
+    summary?.setAttribute("aria-expanded", String(!nextCollapsed));
   }
   handleTextDelta(content) {
     this.streamAccumulatedText += content;
@@ -11258,6 +11329,8 @@ var ShellView = class extends import_obsidian17.ItemView {
       if (summaryText)
         summaryText.textContent = `Thought through ${this.streamNodeCount} steps`;
       this.streamTimeline.addClass("is-collapsed");
+      const summary = this.streamTimeline.querySelector(".shell-think-summary");
+      summary?.setAttribute("aria-expanded", "false");
     } else if (this.streamTimeline && this.streamNodeCount === 0) {
       this.streamTimeline.style.display = "none";
     }
@@ -11485,7 +11558,6 @@ ${lines.join("\n")}${suffix}`;
   }
   createShellScaffold(container) {
     const inputShell = container.createDiv({ cls: "shell-input-shell" });
-    this.createInputUtilityActions(inputShell);
     const inputContainer = inputShell.createDiv({ cls: "shell-input-container" });
     const contextBar = inputContainer.createDiv({ cls: "shell-input-context-bar" });
     const contextContainer = contextBar.createDiv({ cls: "shell-context-chips" });
@@ -11500,25 +11572,23 @@ ${lines.join("\n")}${suffix}`;
     this.renderContextChips(contextContainer);
     return inputContainer;
   }
-  createInputUtilityActions(container) {
-    const actions = container.createDiv({ cls: "shell-input-top-actions" });
-    this.createInputUtilityButton(actions, "Conversation history", "history", "shell-history-btn", (event) => {
+  createSuggestionContainer(inputContainer) {
+    const host = inputContainer.parentElement || inputContainer;
+    return host.createDiv({ cls: "shell-suggestions" });
+  }
+  createHeaderActions(container) {
+    const actions = container.createDiv({ cls: "shell-header-buttons" });
+    this.createHeaderActionButton(actions, "Search history", "search", "shell-history-btn", (event) => {
       event.stopPropagation();
       void this.toggleHistoryMenu();
     });
-    this.createInputUtilityButton(actions, "Clear chat", "trash-2", "shell-clear-btn", () => {
-      this.clearChat();
-    });
-    this.createInputUtilityButton(actions, "Tools", "wrench", "shell-tools-btn", () => {
-      this.showAvailableTools();
-    });
-    this.createInputUtilityButton(actions, "Settings", "settings", "shell-settings-btn", () => {
+    this.createHeaderActionButton(actions, "Settings", "settings", "shell-settings-btn", () => {
       this.openPluginSettings();
     });
   }
-  createInputUtilityButton(container, label, icon, cls, handler) {
+  createHeaderActionButton(container, label, icon, cls, handler) {
     const button = container.createEl("button", {
-      cls: `clickable-icon shell-input-top-action ${cls}`,
+      cls: `clickable-icon shell-header-action ${cls}`,
       attr: { type: "button", "aria-label": label, title: label }
     });
     (0, import_obsidian17.setIcon)(button, icon);
@@ -13923,7 +13993,7 @@ var USER_SKILLS_DIR = ".obsidian/obsidian-cli/skills";
 function joinPath(...segments) {
   return segments.filter(Boolean).join("/").replace(/\/{2,}/g, "/");
 }
-function basename2(path) {
+function basename3(path) {
   const parts = path.split("/");
   return parts[parts.length - 1] || "";
 }
@@ -13950,7 +14020,7 @@ async function listSkillFilePaths(adapter, dirPath = USER_SKILLS_DIR) {
   const listed = await adapter.list(dirPath);
   const paths = /* @__PURE__ */ new Set();
   for (const filePath of listed.files) {
-    if (basename2(filePath) === SKILL_FILE_NAME) {
+    if (basename3(filePath) === SKILL_FILE_NAME) {
       paths.add(filePath);
     }
   }

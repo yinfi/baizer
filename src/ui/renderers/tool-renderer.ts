@@ -17,19 +17,19 @@ export function getToolSummary(name: string, input: Record<string, unknown> = {}
   }
 
   if (lowerName.includes('read') && path) {
-    return `Read: ${path}`;
+    return `Read: ${basename(path)}`;
   }
 
   if ((lowerName.includes('write') || lowerName.includes('create') || lowerName.includes('save')) && path) {
-    return `Write: ${path}`;
+    return `Write: ${basename(path)}`;
   }
 
   if ((lowerName.includes('edit') || lowerName.includes('modify') || lowerName.includes('update')) && path) {
-    return `Edit: ${path}`;
+    return `Edit: ${basename(path)}`;
   }
 
   if (lowerName.includes('delete') && path) {
-    return `Delete: ${path}`;
+    return `Delete: ${basename(path)}`;
   }
 
   if (lowerName.includes('search') && query) {
@@ -220,6 +220,10 @@ function firstString(input: Record<string, unknown>, keys: string[]) {
 
 function truncate(value: string) {
   return value.length > 80 ? `${value.substring(0, 77)}...` : value;
+}
+
+function basename(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 
 function safeStringify(value: unknown) {

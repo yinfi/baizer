@@ -159,9 +159,12 @@ async function runTests() {
 
     const block = timeline.querySelector('.ocli-thinking-block')!;
     const label = timeline.querySelector('.ocli-thinking-label')!;
+    const header = timeline.querySelector('.ocli-thinking-header')!;
 
     expect(block.hasClass('is-thinking')).toBe(false);
     expect(block.hasClass('is-complete')).toBe(true);
+    expect(block.hasClass('is-collapsed')).toBe(false);
+    expect(header.attributes['aria-expanded']).toBe('true');
     expect(label.textContent).toBe('Thought for 2s');
   });
 
@@ -175,6 +178,9 @@ async function runTests() {
     renderer.finalizeCurrentThinking();
     const firstBlock = timeline.querySelector('.ocli-thinking-block')!;
     const firstHeader = timeline.querySelector('.ocli-thinking-header')!;
+
+    expect(firstBlock.hasClass('is-collapsed')).toBe(false);
+    expect(firstHeader.attributes['aria-expanded']).toBe('true');
 
     firstHeader.click();
     expect(firstBlock.hasClass('is-collapsed')).toBe(true);

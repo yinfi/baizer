@@ -31,6 +31,12 @@ interface RenderAiContentOptions {
   postProcess?: boolean;
 }
 
+interface ParsedSystemStatus {
+  kind: 'updated';
+  label: string;
+  target: string;
+}
+
 export class MessageRenderer {
   private readonly renderMarkdown: MarkdownRender;
   private readonly codeBlockRenderer: CodeBlockRenderer;
@@ -78,10 +84,15 @@ export class MessageRenderer {
       } else if (message.role === 'user') {
         this.setText(entry, message.content);
       } else {
-        if (this.isCancelledSystemMessage(message.content)) {
+        const status = this.parseSystemStatus(message.content);
+        if (status) {
+          this.renderSystemStatus(entry, status);
+        } else if (this.isCancelledSystemMessage(message.content)) {
           (entry as any).addClass?.('shell-system-cancelled') ?? entry.classList.add('shell-system-cancelled');
+          this.setText(entry, `[System] ${message.content}`);
+        } else {
+          this.setText(entry, `[System] ${message.content}`);
         }
-        this.setText(entry, `[System] ${message.content}`);
       }
     } catch (error) {
       this.options.onRenderError?.(error);
@@ -176,5 +187,42 @@ export class MessageRenderer {
 
   private isCancelledSystemMessage(content: string) {
     return /^Cancelled:/i.test(content.trim());
+  }
+
+  private parseSystemStatus(content: string): ParsedSystemStatus | null {
+    const updated = content.trim().match(/^(?:✅\s*)?Updated:\s*(.+)$/i);
+    if (!updated) return null;
+
+    return {
+      kind: 'updated',
+      label: 'Updated',
+      target: updated[1].trim(),
+    };
+  }
+
+  private renderSystemStatus(entry: HTMLElement, status: ParsedSystemStatus) {
+    (entry as any).addClass?.('shell-system-status') ?? entry.classList.add('shell-system-status');
+    (entry as any).addClass?.(`shell-system-status-${status.kind}`) ?? entry.classList.add(`shell-system-status-${status.kind}`);
+
+    const icon = (entry as any).createSpan({ cls: 'shell-system-status-icon', text: '✓' }) as HTMLElement;
+    this.setAttribute(icon, 'aria-hidden', 'true');
+
+    const main = (entry as any).createSpan({ cls: 'shell-system-status-main' }) as HTMLElement;
+    (main as any).createSpan({ cls: 'shell-system-status-action', text: status.label });
+    (main as any).createSpan({
+      cls: 'shell-system-status-target',
+      text: this.basename(status.target),
+      title: status.target,
+    });
+  }
+
+  private basename(path: string) {
+    return path.split(/[\\/]/).filter(Boolean).pop() || path;
+  }
+
+  private setAttribute(el: HTMLElement, name: string, value: string) {
+    if (typeof (el as any).setAttribute === 'function') {
+      (el as any).setAttribute(name, value);
+    }
   }
 }

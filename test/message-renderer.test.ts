@@ -203,6 +203,28 @@ async function runTests() {
     expect(container.children[0].textContent).toBe('[System] Cancelled: AI开发指南.md');
   });
 
+  await test('renders updated system messages as compact status rows', async () => {
+    const container = new FakeElement();
+    const renderer = new MessageRenderer({ app: {}, component: {} });
+
+    await renderer.renderMessage(container as any, {
+      id: 's-update',
+      role: 'system',
+      content: '✅ Updated: Study/财经理论入门课程/01_course_materials/02_supply_demand_price.md',
+      timestamp: 2,
+    });
+
+    const entry = container.children[0];
+    const action = entry.querySelector('.shell-system-status-action');
+    const target = entry.querySelector('.shell-system-status-target');
+
+    expect(entry.className).toContain('shell-system-status');
+    expect(!!entry.querySelector('.shell-system-status-icon')).toBe(true);
+    expect(action?.textContent).toBe('Updated');
+    expect(target?.textContent).toBe('02_supply_demand_price.md');
+    expect(target?.getAttribute('title')).toBe('Study/财经理论入门课程/01_course_materials/02_supply_demand_price.md');
+  });
+
   await test('renders assistant markdown and creates an action toolbar', async () => {
     const container = new FakeElement();
     const rendered: string[] = [];

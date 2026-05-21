@@ -2,6 +2,11 @@ import { FakeElement } from './ui-fakes';
 
 function expect(actual: any) {
   return {
+    toBe: (expected: any) => {
+      if (actual !== expected) {
+        throw new Error(`Expected ${expected} but got ${actual}`);
+      }
+    },
     toContain: (expected: string) => {
       if (typeof actual !== 'string' || !actual.includes(expected)) {
         throw new Error(`Expected "${actual}" to contain "${expected}"`);
@@ -22,7 +27,13 @@ async function test(name: string, fn: () => Promise<void> | void) {
 
 async function runTests() {
   console.log('=== Tool Renderer Tests ===');
-  const { ToolRenderer } = await import('../src/ui/renderers/tool-renderer');
+  const { ToolRenderer, getToolSummary } = await import('../src/ui/renderers/tool-renderer');
+
+  await test('tool summaries show file basenames for path-heavy operations', () => {
+    expect(getToolSummary('edit_file', {
+      path: 'Study/财经理论入门课程/01_course_materials/02_supply_demand_price.md',
+    })).toBe('Edit: 02_supply_demand_price.md');
+  });
 
   await test('tool renderer appends tool results onto the matching node', () => {
     const timeline = new FakeElement();

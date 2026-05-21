@@ -3035,3 +3035,377 @@ textarea.shell-input {
         padding-top: 0;
     }
 }
+
+/* ==========================================================================
+   Obsidian Shell - Chat-first Sidebar Polish
+   ========================================================================== */
+
+.ocli-shell-view .shell-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    column-gap: 10px;
+    row-gap: 8px;
+    position: relative;
+    margin-bottom: 0;
+}
+
+.ocli-shell-view .shell-header-title {
+    min-width: 0;
+    display: contents;
+}
+
+.ocli-shell-view .shell-header-identity {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.ocli-shell-view .shell-tab-bar-container {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding: 0;
+    overflow-x: auto;
+}
+
+.ocli-shell-view .shell-header-buttons {
+    grid-column: 2;
+    grid-row: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding-top: 4px;
+}
+
+.ocli-shell-view .shell-header-action {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    border: 1px solid var(--ocli-border);
+    border-radius: var(--ocli-radius-s);
+    background: var(--ocli-surface);
+    color: var(--text-muted);
+    box-shadow: none;
+}
+
+.ocli-shell-view .shell-header-action:hover,
+.ocli-shell-view .shell-header-action:focus-visible {
+    color: var(--text-normal);
+    border-color: var(--background-modifier-border-hover);
+    background: var(--background-modifier-hover);
+    outline: none;
+}
+
+.ocli-shell-view .shell-input-top-actions {
+    display: none;
+}
+
+.ocli-shell-view .ocli-tab-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    min-height: 28px;
+}
+
+.ocli-shell-view .ocli-tab-badge {
+    min-width: 31px;
+    height: 26px;
+    padding: 0 8px;
+    border-radius: var(--ocli-radius-s);
+}
+
+.ocli-shell-view .ocli-tab-active-title {
+    min-width: 0;
+    max-width: 240px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: var(--ocli-radius-s);
+    background: color-mix(in srgb, var(--ocli-surface-muted) 42%, transparent);
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.ocli-shell-view .ocli-tab-new {
+    width: 28px;
+    min-width: 28px;
+    padding: 0;
+}
+
+.ocli-shell-view .shell-output-area {
+    gap: 12px;
+    padding: 2px 1px;
+}
+
+.ocli-shell-view .shell-entry.ai {
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-normal);
+}
+
+.ocli-shell-view .shell-entry.ai:not(.shell-stream-container) {
+    line-height: var(--line-height-normal);
+}
+
+.ocli-shell-view .shell-entry.user {
+    border-radius: 15px 15px 6px 15px;
+}
+
+.ocli-shell-view .shell-entry.system.shell-system-status {
+    align-self: stretch;
+    max-width: none;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    margin: 0;
+    padding: 0 2px 0 31px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    font-style: normal;
+    line-height: 1.35;
+}
+
+.ocli-shell-view .shell-system-status-icon {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    display: grid;
+    place-items: center;
+    border-radius: 5px;
+    color: color-mix(in srgb, var(--color-green) 84%, var(--text-normal));
+    background: color-mix(in srgb, var(--color-green) 14%, transparent);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.ocli-shell-view .shell-system-status-main {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.ocli-shell-view .shell-system-status-action {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-weight: 650;
+}
+
+.ocli-shell-view .shell-system-status-target {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-faint);
+}
+
+.ocli-shell-view .shell-think-timeline {
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 0 8px;
+    padding: 0;
+    border-left: none;
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+}
+
+.ocli-shell-view .shell-think-summary,
+.ocli-shell-view .ocli-thinking-header,
+.ocli-shell-view .ocli-tool-header {
+    min-height: 24px;
+    width: fit-content;
+    max-width: 100%;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border: 1px solid color-mix(in srgb, var(--ocli-border) 54%, transparent);
+    border-radius: var(--ocli-radius-s);
+    background: color-mix(in srgb, var(--ocli-surface-muted) 42%, transparent);
+    color: var(--text-muted);
+}
+
+.ocli-shell-view .shell-think-summary:hover,
+.ocli-shell-view .ocli-thinking-header:hover,
+.ocli-shell-view .ocli-thinking-header:focus-visible,
+.ocli-shell-view .ocli-tool-header:hover,
+.ocli-shell-view .ocli-tool-header:focus-visible {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+    outline: none;
+}
+
+.ocli-shell-view .think-node {
+    padding: 4px 0 0;
+    margin: 4px 0 0;
+}
+
+.ocli-shell-view .think-node::before {
+    display: none;
+}
+
+.ocli-shell-view .think-node-label,
+.ocli-shell-view .ocli-thinking-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ocli-shell-view .think-node-detail,
+.ocli-shell-view .ocli-thinking-content,
+.ocli-shell-view .ocli-tool-detail {
+    margin-top: 6px;
+    border: 1px solid var(--ocli-border);
+    border-radius: var(--ocli-radius-s);
+    background: var(--ocli-surface-muted);
+}
+
+.ocli-shell-view .shell-stream-container {
+    display: block;
+}
+
+.ocli-shell-view .shell-response-content {
+    min-height: 1em;
+    color: var(--text-normal);
+    line-height: var(--line-height-normal);
+}
+
+.ocli-shell-view .shell-input-container {
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--ocli-border);
+    border-radius: 10px;
+    background: var(--ocli-surface);
+    box-shadow: var(--ocli-shadow);
+}
+
+.ocli-shell-view .shell-input-shell {
+    position: relative;
+    overflow: visible;
+    z-index: 5;
+}
+
+.ocli-shell-view .shell-suggestions {
+    bottom: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    z-index: 50;
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid var(--ocli-border);
+    border-radius: var(--ocli-radius-m);
+    background: var(--ocli-surface-strong);
+    box-shadow: var(--ocli-shadow);
+}
+
+.ocli-shell-view .shell-input-context-bar {
+    min-height: 32px;
+    padding: 8px 9px 2px;
+}
+
+.ocli-shell-view .shell-input-wrapper {
+    display: block;
+    padding: 0;
+}
+
+.ocli-shell-view textarea.shell-input {
+    min-height: 58px;
+    max-height: 160px;
+    padding: 8px 10px;
+    line-height: var(--line-height-normal);
+}
+
+.ocli-shell-view .shell-input-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 47px;
+    padding: 7px;
+    border-top: 1px solid var(--ocli-border);
+}
+
+.ocli-shell-view .shell-model-select-container {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(78px, 92px) minmax(0, 1fr);
+    gap: 6px;
+    overflow: hidden;
+}
+
+.ocli-shell-view .shell-provider-select,
+.ocli-shell-view .shell-main-model-select {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    flex: none;
+}
+
+.ocli-shell-view .shell-model-select {
+    height: 28px;
+    border-radius: var(--ocli-radius-s);
+    background: var(--ocli-surface-muted);
+    color: var(--text-muted);
+}
+
+.ocli-shell-view .shell-action-buttons {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.ocli-shell-view .shell-action-btn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    box-shadow: none;
+}
+
+.ocli-shell-view .shell-image-btn {
+    color: var(--text-muted);
+    background: var(--ocli-surface-muted);
+}
+
+.ocli-shell-view .shell-run-btn {
+    color: var(--background-primary);
+    background: var(--text-normal);
+    border-color: var(--text-normal);
+}
+
+.ocli-shell-view .shell-run-btn:hover {
+    color: var(--background-primary);
+    background: color-mix(in srgb, var(--text-normal) 88%, var(--interactive-accent));
+}
+
+.ocli-shell-view .shell-run-btn.is-stop {
+    color: var(--text-error);
+    background: color-mix(in srgb, var(--text-error) 12%, var(--ocli-surface-muted));
+    border-color: color-mix(in srgb, var(--text-error) 36%, var(--ocli-border));
+}
+
+@media (max-width: 380px) {
+    .ocli-shell-view .shell-model-select-container {
+        grid-template-columns: minmax(68px, 84px) minmax(0, 1fr);
+    }
+
+    .ocli-shell-view .ocli-tab-active-title {
+        max-width: 150px;
+    }
+}
