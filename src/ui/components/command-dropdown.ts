@@ -1,3 +1,4 @@
+import { setIcon } from 'obsidian';
 import { SuggestionItem, SuggestionType } from '../controllers/input-controller';
 
 interface CommandDropdownUpdate {
@@ -41,10 +42,13 @@ export class CommandDropdown {
         cls: `suggestion-item${index === this.selectedIndex ? ' is-selected' : ''}`,
         attr: { role: 'option', 'aria-selected': String(index === this.selectedIndex) },
       });
-      el.createSpan({ cls: 'suggestion-icon', text: this.getIcon() });
-      el.createSpan({ cls: 'suggestion-text', text: item.label });
-      if (item.desc) {
-        el.createSpan({ cls: 'suggestion-desc', text: item.desc });
+      const icon = el.createSpan({ cls: 'suggestion-icon' });
+      setIcon(icon, this.getIconName(item));
+      const copy = el.createDiv({ cls: 'suggestion-copy' });
+      copy.createSpan({ cls: 'suggestion-title', text: this.getTitle(item) });
+      copy.createSpan({ cls: 'suggestion-value', text: this.getInsertValue(item) });
+      if (item.desc && item.desc !== this.getTitle(item)) {
+        copy.createSpan({ cls: 'suggestion-desc', text: item.desc });
       }
       el.createSpan({ cls: 'suggestion-source', text: item.source || this.getDefaultSource() });
       el.addEventListener('click', () => this.handlers.onSelect(item, index));
@@ -88,10 +92,38 @@ export class CommandDropdown {
     this.items = [];
   }
 
-  private getIcon() {
-    if (this.type === 'file') return '@';
-    if (this.type === 'skill') return '$';
-    return '/';
+  private getIconName(item: SuggestionItem) {
+    if (item.source === 'scope') {
+      if (item.scope === 'backlinks') return 'network';
+      if (item.scope === 'recent') return 'clock';
+      if (item.scope === 'tag') return 'tag';
+      return 'file-text';
+    }
+    if (this.type === 'file') return 'file-text';
+    if (this.type === 'skill') return 'sparkles';
+    if (item.label.includes('compile')) return 'refresh-cw';
+    if (item.label.includes('clear')) return 'eraser';
+    if (item.label.includes('help')) return 'circle-help';
+    if (item.label.includes('open')) return 'folder-open';
+    if (item.label.includes('edit')) return 'pencil';
+    return 'terminal';
+  }
+
+  private getTitle(item: SuggestionItem) {
+    if (item.source === 'scope') {
+      if (item.scope === 'backlinks') return 'Backlinks';
+      if (item.scope === 'recent') return 'Recent notes';
+      if (item.scope === 'tag') return item.tag ? `Tag: ${item.tag}` : 'Tag';
+      return 'Current note';
+    }
+    if (this.type === 'command' && item.desc) return item.desc;
+    return item.label.replace(/^[@/$]/, '');
+  }
+
+  private getInsertValue(item: SuggestionItem) {
+    if (item.kind === 'scope') return item.value || item.label;
+    if (this.type === 'command') return item.label;
+    return item.value || item.label;
   }
 
   private getDefaultSource() {

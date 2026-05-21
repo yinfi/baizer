@@ -193,6 +193,49 @@ async function runTests() {
     expect(result.recentNotes).toEqual([]);
     expect(result.contextItems).toEqual([]);
   });
+
+  await test('collect can skip current note and selection while preserving scope metadata', async () => {
+    const activeFile = createFile('Projects/Native AI.md');
+    let readCount = 0;
+    const app = {
+      workspace: {
+        getActiveFile: () => activeFile,
+        getMostRecentLeaf: () => ({
+          view: {
+            editor: {
+              getSelection: () => 'selected text',
+              getCursor: () => ({ line: 0, ch: 0 }),
+            },
+          },
+        }),
+        getLastOpenFiles: () => [activeFile.path],
+      },
+      vault: {
+        read: async () => {
+          readCount += 1;
+          return '# Native AI';
+        },
+        getAbstractFileByPath: () => null,
+      },
+      metadataCache: {
+        getFileCache: () => ({}),
+        getBacklinksForFile: () => new Map(),
+      },
+    } as any;
+
+    const service = new ObsidianContextService(app);
+    const result = await service.collect({
+      includeCurrent: false,
+      includeBacklinks: false,
+      explicitScopes: [],
+    });
+
+    expect(readCount).toBe(0);
+    expect(result.activeNote?.path).toBe(activeFile.path);
+    expect(result.selection).toBe(null);
+    expect(result.contextItems).toEqual([]);
+    expect(result.explicitScopes).toEqual([]);
+  });
 }
 
 runTests().catch((e) => {

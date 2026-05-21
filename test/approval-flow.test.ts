@@ -30,6 +30,11 @@ function expect(actual: any) {
         throw new Error(`Expected "${actual}" to contain "${expected}"`);
       }
     },
+    toBeUndefined: () => {
+      if (actual !== undefined) {
+        throw new Error(`Expected undefined but got ${actual}`);
+      }
+    },
   };
 }
 
@@ -47,6 +52,7 @@ class FakeElement {
   children: FakeElement[] = [];
   className = '';
   textContent = '';
+  attributes: Record<string, string> = {};
   listeners: Record<string, Function[]> = {};
   disabled = false;
 
@@ -62,12 +68,22 @@ class FakeElement {
     const child = new FakeElement();
     child.className = attr?.cls || '';
     child.textContent = attr?.text || '';
+    if (attr?.title) child.attributes.title = attr.title;
+    if (attr?.attr) {
+      for (const [name, value] of Object.entries(attr.attr)) {
+        child.attributes[name] = String(value);
+      }
+    }
     this.children.push(child);
     return child;
   }
 
   setText(text: string) {
     this.textContent = text;
+  }
+
+  setAttribute(name: string, value: string) {
+    this.attributes[name] = value;
   }
 
   addEventListener(type: string, handler: Function) {
@@ -297,6 +313,7 @@ async function runTests() {
     const container = new FakeElement();
     let approved = 0;
     let cancelled = 0;
+    let approveResolves: (() => void) | null = null;
 
     renderApprovalCard(
       container as any,
@@ -315,24 +332,102 @@ async function runTests() {
         },
       },
       {
-        onApprove: async () => { approved += 1; },
+        onApprove: async () => {
+          approved += 1;
+          await new Promise<void>((resolve) => { approveResolves = resolve; });
+        },
         onCancel: () => { cancelled += 1; },
       },
     );
 
-    const card = container.children[0];
-    const actions = card.children.find((child: any) => child.className === 'shell-approval-actions');
-    const approveButton = actions.children[0];
-    const cancelButton = actions.children[1];
+    const approveButton = container.querySelector('.shell-approval-confirm');
+    const cancelButton = container.querySelector('.shell-approval-cancel');
 
-    approveButton.click();
-    cancelButton.click();
+    approveButton?.click();
+    approveButton?.click();
+    cancelButton?.click();
 
     expect(approved).toBe(1);
-    expect(cancelled).toBe(1);
+    expect(cancelled).toBe(0);
+    expect(approveButton?.disabled).toBe(true);
+    expect(cancelButton?.disabled).toBe(true);
+    if (approveResolves) approveResolves();
   });
 
-  await test('renderApprovalCard shows old and proposed content for note replacement previews', async () => {
+  await test('renderApprovalCard renders compact icon actions with hover labels', async () => {
+    const container = new FakeElement();
+    const calls: string[] = [];
+
+    renderApprovalCard(
+      container as any,
+      {
+        action: 'create_note',
+        target: 'Clippings/example.md',
+        args: { filename: 'Clippings/example.md' },
+        message: 'Approval required to create note: Clippings/example.md',
+        preview: {
+          kind: 'note-create',
+          target: 'Clippings/example.md',
+          summary: 'Create note',
+          risk: 'medium',
+          supportsPartialApply: false,
+          undoable: true,
+        },
+      },
+      {
+        onApprove: () => { calls.push('approve'); },
+        onCancel: () => { calls.push('cancel'); },
+        onFocusPreview: () => { calls.push('focus'); },
+      },
+    );
+
+    const buttons = container.querySelectorAll('.shell-approval-icon-btn');
+    expect(buttons.length).toBe(3);
+    expect(buttons.map(button => button.textContent)).toEqual(['', '', '']);
+    expect(buttons.map(button => button.attributes.title)).toEqual(['Show editor preview', 'Cancel', 'Approve create']);
+    expect(buttons.map(button => button.attributes['aria-label'])).toEqual(['Show editor preview', 'Cancel', 'Approve create']);
+    expect(buttons.map(button => button.attributes['data-icon'])).toEqual(['locate-fixed', 'x', 'check']);
+    buttons[0].click();
+    expect(calls).toEqual(['focus']);
+  });
+
+  await test('renderApprovalCard exposes risk target action and concrete approve label', async () => {
+    const container = new FakeElement();
+
+    renderApprovalCard(
+      container as any,
+      {
+        action: 'delete_note',
+        target: 'Docs/current.md',
+        args: { path: 'Docs/current.md' },
+        message: 'Approval required to delete note: Docs/current.md',
+        preview: {
+          kind: 'note-delete',
+          target: 'Docs/current.md',
+          summary: 'Delete note',
+          oldContent: '# Current',
+          risk: 'high',
+          preconditions: ['The target file must still exist.'],
+          supportsPartialApply: false,
+          undoable: false,
+        },
+      },
+      {
+        onApprove: () => { },
+        onCancel: () => { },
+      },
+    );
+
+    expect(!!container.querySelector('.is-high-risk')).toBe(true);
+    expect(container.querySelector('.shell-approval-risk')?.textContent).toContain('High risk');
+    expect(container.querySelector('.shell-approval-action-value')?.textContent).toBe('delete_note');
+    expect(container.querySelector('.shell-approval-target-value')?.textContent).toBe('Docs/current.md');
+    expect(container.querySelector('.shell-approval-precondition')?.textContent).toContain('target file');
+    expect(container.querySelector('.shell-change-preview-precondition')?.textContent).toBeUndefined();
+    expect(container.querySelector('.shell-approval-confirm')?.attributes.title).toBe('Approve delete');
+  });
+
+  await test('renderApprovalCard shows compact diff preview instead of full side-by-side content', async () => {
     const container = new FakeElement();
 
     renderApprovalCard(
@@ -359,8 +454,50 @@ async function runTests() {
       },
     );
 
-    expect(container.querySelector('.shell-change-preview-old-content')?.textContent).toContain('# Old title');
-    expect(container.querySelector('.shell-change-preview-new-content')?.textContent).toContain('# New title');
+    expect(container.querySelector('.shell-approval-title')?.textContent).toBe('需要审批：修改当前笔记');
+    expect(container.querySelector('.shell-change-preview-diff-count')?.textContent).toContain('changed lines');
+    expect(!!container.querySelector('.shell-change-preview-diff-line-removed')).toBe(true);
+    expect(!!container.querySelector('.shell-change-preview-diff-line-added')).toBe(true);
+    expect(container.querySelector('.shell-change-preview-old-content')?.textContent).toBeUndefined();
+    expect(container.querySelector('.shell-change-preview-new-content')?.textContent).toBeUndefined();
+  });
+
+  await test('renderApprovalCard keeps every changed diff row available for scrolling', async () => {
+    const container = new FakeElement();
+    const oldContent = Array.from({ length: 24 }, (_, index) => `old line ${index + 1}`).join('\n');
+    const newContent = Array.from({ length: 24 }, (_, index) => `new line ${index + 1}`).join('\n');
+
+    renderApprovalCard(
+      container as any,
+      {
+        action: 'update_note',
+        target: 'Docs/large.md',
+        args: { path: 'Docs/large.md', content: newContent },
+        message: 'Approval required to update note: Docs/large.md',
+        preview: {
+          kind: 'note-replace',
+          target: 'Docs/large.md',
+          summary: 'Replace note content',
+          oldContent,
+          newContent,
+          risk: 'medium',
+          supportsPartialApply: false,
+          undoable: true,
+        },
+      },
+      {
+        onApprove: () => { },
+        onCancel: () => { },
+      },
+    );
+
+    const removedRows = container.querySelectorAll('.shell-change-preview-diff-line-removed');
+    const addedRows = container.querySelectorAll('.shell-change-preview-diff-line-added');
+    expect(removedRows.length).toBe(24);
+    expect(addedRows.length).toBe(24);
+    expect(removedRows[23].textContent).toContain('old line 24');
+    expect(addedRows[23].textContent).toContain('new line 24');
+    expect(container.querySelector('.shell-change-preview-diff-line-more')?.textContent).toBeUndefined();
   });
 
   await test('applyPreviewedChange records direct-write audit entries after applying the change', async () => {

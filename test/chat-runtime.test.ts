@@ -145,6 +145,37 @@ async function runTests() {
     expect(prepared.prompt.includes('Do not provide copy-paste instructions')).toBe(true);
   });
 
+  await test('prepareTurn constrains assistant-visible slash commands to registered commands', async () => {
+    const runtime = createChatRuntime({
+      provider: {} as any,
+      memoryManager: null,
+      toolRegistry: {
+        getAllDefinitions: () => [],
+        execute: async () => ({}),
+      } as any,
+      skillRegistry: {
+        resolveByIntent: () => null,
+        getSkillSummaryText: () => '',
+        listCommandEntries: () => [
+          { command: '/save', skillName: 'web-clipper', description: 'Save webpage to vault' },
+          { command: '/wiki:query', skillName: 'knowledge', description: 'Query the knowledge wiki' },
+        ],
+        activateSkill: () => null,
+      } as any,
+    });
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: 'Say hello and suggest next actions',
+      contextItems: [],
+    });
+
+    expect(prepared.prompt).toContain('[Slash Command Contract]');
+    expect(prepared.prompt).toContain('`/clear`');
+    expect(prepared.prompt).toContain('`/save`');
+    expect(prepared.prompt).toContain('Do not mention or recommend slash commands that are not listed here');
+    expect(prepared.prompt).toContain('Do not invent generic commands like `/do` or `/ask`');
+  });
+
   await test('prepareTurn injects generation-plan metadata for rewrite flows', async () => {
     const runtime = createChatRuntime({
       provider: {} as any,

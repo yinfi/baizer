@@ -1,6 +1,8 @@
 import { DEFAULT_SETTINGS, PluginSettings } from '../src/mcp/types';
 import {
   getConnectionTestStatusPresentation,
+  getProviderCardMeta,
+  getProviderListSummary,
   getProviderDeletionState,
   getSettingsSectionStatuses,
 } from '../src/settings';
@@ -137,6 +139,42 @@ async function runTests() {
     })).toEqual({
       tone: 'danger',
       label: 'Connection failed.',
+    });
+  });
+
+  await test('builds provider list summary counts for the connection workspace', () => {
+    const settings = cloneSettings();
+    settings.providers.gemini.apiKey = 'gm-key';
+    settings.providers.deepseek.apiKey = 'ds-key';
+    settings.providers.openai.apiKey = '';
+    settings.providers.qwen.apiKey = '';
+
+    expect(getProviderListSummary(settings)).toEqual({
+      total: 4,
+      configured: 2,
+      missingKey: 2,
+      label: '4 providers / 2 configured / 2 missing key',
+    });
+  });
+
+  await test('builds provider card metadata for active and missing-key providers', () => {
+    const settings = cloneSettings();
+    settings.activeProvider = 'openai';
+    settings.providers.openai.apiKey = '';
+    settings.providers.openai.model = 'gpt-4o';
+
+    expect(getProviderCardMeta(settings, 'openai')).toEqual({
+      id: 'openai',
+      label: 'OpenAI',
+      protocolLabel: 'OpenAI-compatible',
+      endpointSummary: 'api.openai.com/v1',
+      modelSummary: 'Model: gpt-4o',
+      statusLabel: 'No API key',
+      statusTone: 'warning',
+      isActive: true,
+      compactMeta: 'Model: gpt-4o',
+      protocolGlyph: '◎',
+      statusGlyph: '!',
     });
   });
 

@@ -31,3 +31,8 @@ export const MarkdownRenderer = {
   },
 };
 export async function requestUrl(_options: any): Promise<any> { return { text: '' }; }
+export function setIcon(el: any, icon: string) {
+  if (el?.setAttribute) {
+    el.setAttribute('data-icon', icon);
+  }
+}

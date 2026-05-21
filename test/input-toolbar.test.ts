@@ -95,6 +95,12 @@ class FakeElement {
     return this.findFirstByClass(className);
   }
 
+  querySelectorAll(selector: string): FakeElement[] {
+    if (!selector.startsWith('.')) return [];
+    const className = selector.slice(1);
+    return this.findAllByClass(className);
+  }
+
   private findFirstByClass(className: string): FakeElement | null {
     for (const child of this.children) {
       if (child.hasClass(className)) return child;
@@ -102,6 +108,15 @@ class FakeElement {
       if (nested) return nested;
     }
     return null;
+  }
+
+  private findAllByClass(className: string): FakeElement[] {
+    const matches: FakeElement[] = [];
+    for (const child of this.children) {
+      if (child.hasClass(className)) matches.push(child);
+      matches.push(...child.findAllByClass(className));
+    }
+    return matches;
   }
 }
 
@@ -185,7 +200,7 @@ async function runTests() {
     expect(modelChanges).toEqual(['gemini-2.5-flash']);
   });
 
-  await test('disables image and stop buttons when unsupported', () => {
+  await test('disables image and send button when unsupported or empty', () => {
     const root = new FakeElement();
     const toolbar = new InputToolbar(root as any, {
       onProviderChange: () => { },
@@ -193,10 +208,58 @@ async function runTests() {
       onModelChange: () => { },
     });
 
-    toolbar.updateCapabilities({ supportsImageInput: false, supportsCancellation: false });
+    toolbar.updateCapabilities({ supportsImageInput: false, isResponding: false, canSend: false });
 
     expect((root.querySelector('.shell-image-btn') as any).disabled).toBe(true);
-    expect((root.querySelector('.shell-stop-btn') as any).disabled).toBe(true);
+    expect((root.querySelector('.shell-run-btn') as any).disabled).toBe(true);
+  });
+
+  await test('renders action controls as icon buttons with stable accessible names', () => {
+    const root = new FakeElement();
+    new InputToolbar(root as any, {
+      onProviderChange: () => { },
+      onUnavailableProvider: () => { },
+      onModelChange: () => { },
+    });
+
+    const imageButton = root.querySelector('.shell-image-btn') as any as FakeElement;
+    const runButton = root.querySelector('.shell-run-btn') as any as FakeElement;
+
+    expect(imageButton.textContent).toBe('');
+    expect(runButton.textContent).toBe('');
+    expect(imageButton.attributes['aria-label']).toBe('Add image context');
+    expect(imageButton.attributes.title).toBe('Add image context');
+    expect(runButton.attributes['aria-label']).toBe('Send message');
+    expect(runButton.attributes.title).toBe('Send message');
+    expect(root.querySelectorAll('.shell-run-btn').length).toBe(1);
+    expect(root.querySelector('.shell-stop-btn')).toBe(null);
+    expect(root.querySelector('.shell-send-btn')).toBe(null);
+  });
+
+  await test('toggles the single run button between send and stop states', () => {
+    const events: string[] = [];
+    const root = new FakeElement();
+    const toolbar = new InputToolbar(root as any, {
+      onProviderChange: () => { },
+      onUnavailableProvider: () => { },
+      onModelChange: () => { },
+      onSend: () => events.push('send'),
+      onStop: () => events.push('stop'),
+    });
+
+    toolbar.updateCapabilities({ supportsImageInput: true, isResponding: false, canSend: true });
+    const runButton = root.querySelector('.shell-run-btn') as any as FakeElement;
+    expect(runButton.attributes['aria-label']).toBe('Send message');
+    expect(runButton.attributes['data-icon']).toBe('send-horizontal');
+    runButton.click();
+
+    toolbar.updateCapabilities({ supportsImageInput: true, isResponding: true, canSend: true });
+    expect(root.querySelectorAll('.shell-run-btn').length).toBe(1);
+    expect(runButton.attributes['aria-label']).toBe('Stop response');
+    expect(runButton.attributes['data-icon']).toBe('square');
+    runButton.click();
+
+    expect(events).toEqual(['send', 'stop']);
   });
 }
 

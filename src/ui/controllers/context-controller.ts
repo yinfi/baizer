@@ -9,19 +9,30 @@ interface ContextControllerDeps {
   obsidianContextService?: ObsidianContextService;
 }
 
+interface CollectCommandContextOptions {
+  includeCurrent?: boolean;
+}
+
 export class ContextController {
   constructor(private deps: ContextControllerDeps) { }
 
-  async collectCommandContext(): Promise<{ contextItems: ContextItem[]; selection: string }> {
-    const explicitScopes = this.deps.contextManager.getContexts()
+  async collectCommandContext(options: CollectCommandContextOptions = {}): Promise<{ contextItems: ContextItem[]; selection: string }> {
+    const includeCurrent = options.includeCurrent !== false;
+    const selectedScopes = this.deps.contextManager.getContexts()
       .filter((ctx) => ctx.type === 'scope' && ctx.scope)
       .map((ctx) => ctx.scope === 'tag' && ctx.tag ? `tag:${ctx.tag}` : ctx.scope!)
+      .filter((scope, index, items) => items.indexOf(scope) === index);
+    const explicitScopes = [
+      ...(includeCurrent ? ['current'] : []),
+      ...selectedScopes,
+    ]
       .filter((scope, index, items) => items.indexOf(scope) === index);
     const contextItems = await this.deps.contextManager.resolveContexts();
     const obsidianContextService = this.deps.obsidianContextService
       ?? new ObsidianContextService(this.deps.app);
     const snapshot = await obsidianContextService.collect({
       includeBacklinks: explicitScopes.includes('backlinks'),
+      includeCurrent,
       explicitScopes,
     });
 

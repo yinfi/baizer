@@ -32,6 +32,27 @@ export interface ProviderDeletionState {
     label: string;
 }
 
+export interface ProviderListSummary {
+    total: number;
+    configured: number;
+    missingKey: number;
+    label: string;
+}
+
+export interface ProviderCardMeta {
+    id: string;
+    label: string;
+    protocolLabel: string;
+    endpointSummary: string;
+    modelSummary: string;
+    statusLabel: string;
+    statusTone: SettingsBadgeTone;
+    isActive: boolean;
+    compactMeta: string;
+    protocolGlyph: string;
+    statusGlyph: string;
+}
+
 interface SettingsSectionMeta {
     id: SettingsSectionId;
     title: string;
@@ -160,6 +181,47 @@ export function getProviderDeletionState(settings: PluginSettings): ProviderDele
     };
 }
 
+export function getProviderListSummary(settings: PluginSettings): ProviderListSummary {
+    const providers = Object.values(settings.providers || {});
+    const total = providers.length;
+    const configured = providers.filter(provider => !!provider.apiKey?.trim()).length;
+    const missingKey = total - configured;
+
+    return {
+        total,
+        configured,
+        missingKey,
+        label: `${total} providers / ${configured} configured / ${missingKey} missing key`,
+    };
+}
+
+export function getProviderCardMeta(settings: PluginSettings, providerId: string): ProviderCardMeta {
+    const config = settings.providers[providerId];
+    if (!config) {
+        throw new Error(`Unknown provider: ${providerId}`);
+    }
+
+    const protocolLabel = config.type === 'gemini' ? 'Gemini API' : 'OpenAI-compatible';
+    const hasApiKey = !!config.apiKey?.trim();
+    const rawEndpoint = config.baseUrl?.trim() || 'Default provider endpoint';
+    const endpointSummary = rawEndpoint.replace(/^https?:\/\//, '');
+    const modelSummary = config.model?.trim() ? `Model: ${config.model.trim()}` : 'Model: Not selected';
+
+    return {
+        id: providerId,
+        label: config.label,
+        protocolLabel,
+        endpointSummary,
+        modelSummary,
+        statusLabel: hasApiKey ? 'Key configured' : 'No API key',
+        statusTone: hasApiKey ? 'success' : 'warning',
+        isActive: settings.activeProvider === providerId,
+        compactMeta: config.model?.trim() ? `Model: ${config.model.trim()}` : 'Model: Not selected',
+        protocolGlyph: config.type === 'gemini' ? '◈' : '◎',
+        statusGlyph: hasApiKey ? '●' : '!',
+    };
+}
+
 export function getConnectionTestStatusPresentation(
     status: ConnectionTestStatus
 ): SettingsSectionStatus | undefined {
@@ -280,11 +342,8 @@ export class SettingTab extends PluginSettingTab {
 
         const root = containerEl.createDiv({ cls: 'ocli-settings-page' });
         this.renderHeader(root);
-        this.renderSummary(root);
-
-        const layout = root.createDiv({ cls: 'ocli-settings-layout' });
-        this.renderSidebar(layout.createDiv({ cls: 'ocli-settings-sidebar' }), visibleSections);
-        this.renderMain(layout.createDiv({ cls: 'ocli-settings-main' }), visibleSections, token);
+        this.renderSidebar(root, visibleSections);
+        this.renderMain(root.createDiv({ cls: 'ocli-settings-main' }), visibleSections, token);
     }
 
     private renderHeader(containerEl: HTMLElement): void {
@@ -311,57 +370,11 @@ export class SettingTab extends PluginSettingTab {
         });
     }
 
-    private renderSummary(containerEl: HTMLElement): void {
-        const summary = containerEl.createDiv({ cls: 'ocli-settings-summary' });
-        const activeConfig = this.getActiveConfig();
-        const statuses = getSettingsSectionStatuses(this.plugin.settings);
-        const providerBadge = statuses.connection;
-
-        this.renderSummaryCard(
-            summary,
-            'Active Provider',
-            activeConfig?.label || 'Not configured',
-            providerBadge?.label || 'Ready',
-            providerBadge?.tone || 'success'
-        );
-
-        this.renderSummaryCard(
-            summary,
-            'Current Model',
-            activeConfig?.model || 'Not selected',
-            activeConfig?.type === 'gemini' ? 'Gemini API' : 'OpenAI-compatible',
-            'accent'
-        );
-
-        const safetyTone: SettingsBadgeTone = statuses.permissions?.tone || (this.plugin.settings.confirmExecutions ? 'success' : 'warning');
-        const safetyValue = this.plugin.settings.allowPluginControl
-            ? 'Plugin control enabled'
-            : this.plugin.settings.confirmExecutions
-                ? 'Confirm before writes'
-                : 'Direct execution';
-        const safetyDetail = this.plugin.settings.allowPluginControl ? 'High-risk actions unlocked' : 'Approval flow active';
-        this.renderSummaryCard(summary, 'Safety', safetyValue, safetyDetail, safetyTone);
-    }
-
-    private renderSummaryCard(
-        containerEl: HTMLElement,
-        label: string,
-        value: string,
-        detail: string,
-        tone: SettingsBadgeTone
-    ): void {
-        const card = containerEl.createDiv({ cls: 'ocli-settings-summary-card' });
-        card.createDiv({ cls: 'ocli-settings-summary-label', text: label });
-        card.createDiv({ cls: 'ocli-settings-summary-value', text: value });
-        const footer = card.createDiv({ cls: 'ocli-settings-summary-footer' });
-        footer.createSpan({ cls: `ocli-settings-badge is-${tone}`, text: detail });
-    }
-
     private renderSidebar(containerEl: HTMLElement, visibleSections: SettingsSectionId[]): void {
         const nav = containerEl.createDiv({ cls: 'ocli-settings-nav' });
         const navHeader = nav.createDiv({ cls: 'ocli-settings-nav-header' });
         navHeader.createDiv({ cls: 'ocli-settings-nav-title', text: 'Sections' });
-        navHeader.createDiv({ cls: 'ocli-settings-nav-kicker', text: 'Jump between groups' });
+        navHeader.createDiv({ cls: 'ocli-settings-nav-kicker', text: 'Switch between groups' });
 
         if (!visibleSections.length) {
             nav.createDiv({ cls: 'ocli-settings-empty-nav', text: 'No matching sections.' });
@@ -463,89 +476,15 @@ export class SettingTab extends PluginSettingTab {
             return;
         }
 
-        const badgeStatus = !activeConfig.apiKey.trim()
-            ? `No API key configured for ${activeConfig.label}.`
-            : `Using ${activeConfig.type === 'gemini' ? 'Gemini API' : 'OpenAI-compatible API'}.`;
-        containerEl.createDiv({
-            cls: `ocli-settings-inline-note ${activeConfig.apiKey.trim() ? 'is-success' : 'is-warning'}`,
-            text: badgeStatus,
-        });
+        const workspace = containerEl.createDiv({ cls: 'ocli-settings-workspace' });
+        const listPanel = workspace.createDiv({ cls: 'ocli-settings-workspace-panel is-list' });
+        const detailPanel = workspace.createDiv({ cls: 'ocli-settings-workspace-panel is-detail' });
 
-        new Setting(containerEl)
-            .setName('AI Provider')
-            .setDesc('Select the provider configuration to use.')
-            .addDropdown(drop => {
-                Object.entries(settings.providers).forEach(([id, config]) => {
-                    const configured = !!config.apiKey.trim();
-                    drop.addOption(id, configured ? config.label : `${config.label} !`);
-                });
-                drop.setValue(settings.activeProvider);
-                drop.onChange(async (value: string) => {
-                    this.resetConnectionTestStatus();
-                    await this.plugin.modelService.switchProvider(value, () => this.persistSettings());
-                    this.revealApiKey = false;
-                    this.activeSectionId = 'connection';
-                    this.display();
-                });
-            });
-
-        new Setting(containerEl)
-            .setName('API Key')
-            .setDesc(`Enter your ${activeConfig.label} API key.`)
-            .addText(text => this.configureSecretInput(text, activeConfig))
-            .addButton(btn => btn
-                .setButtonText(this.revealApiKey ? 'Hide' : 'Reveal')
-                .onClick(() => {
-                    this.revealApiKey = !this.revealApiKey;
-                    this.display();
-                }))
-            .addButton(btn => btn
-                .setButtonText('Clear')
-                .onClick(async () => {
-                    activeConfig.apiKey = '';
-                    this.revealApiKey = false;
-                    this.resetConnectionTestStatus();
-                    await this.persistSettings();
-                    this.display();
-                }));
-
-        if (this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl) {
-            new Setting(containerEl)
-                .setName('Base URL')
-                .setDesc('Override the API endpoint for compatible providers.')
-                .addText(text => text
-                    .setPlaceholder('https://api.openai.com/v1')
-                    .setValue(activeConfig.baseUrl)
-                    .onChange(async (value: string) => {
-                        activeConfig.baseUrl = value;
-                        this.resetConnectionTestStatus();
-                        await this.persistSettings();
-                    }));
-        }
-
-        new Setting(containerEl)
-            .setName('Model')
-            .setDesc('Choose the model loaded from the active provider.')
-            .addDropdown(drop => {
-                if (activeConfig.model) {
-                    drop.addOption(activeConfig.model, `${activeConfig.model} (Current)`);
-                } else {
-                    drop.addOption('__empty__', 'Select a model');
-                }
-
-                drop.setValue(activeConfig.model || '__empty__');
-                void this.loadDynamicModelOptions(drop, token);
-
-                drop.onChange(async (value: string) => {
-                    if (value === '__loading__' || value === '__failed__' || value === '__empty__') return;
-                    this.resetConnectionTestStatus();
-                    await this.plugin.modelService.switchModel(value, () => this.persistSettings());
-                    this.display();
-                });
-            });
-
-        const actions = containerEl.createDiv({ cls: 'ocli-settings-actions' });
-        this.createActionButton(actions, '+ Add Provider', async () => {
+        const listHeader = listPanel.createDiv({ cls: 'ocli-settings-workspace-header' });
+        const listCopy = listHeader.createDiv({ cls: 'ocli-settings-workspace-copy' });
+        listCopy.createDiv({ cls: 'ocli-settings-workspace-title', text: 'Providers' });
+        listCopy.createDiv({ cls: 'ocli-settings-workspace-subtitle', text: 'Select a provider' });
+        this.createActionButton(listHeader, '+ Add', async () => {
             new AddProviderModal(this.app, async (label, baseUrl) => {
                 const key = `custom-${Date.now()}`;
                 settings.providers[key] = {
@@ -564,18 +503,200 @@ export class SettingTab extends PluginSettingTab {
             }).open();
         }, 'accent');
 
-        const deletion = getProviderDeletionState(settings);
-        this.createActionButton(actions, deletion.label, async () => {
-            if (!deletion.canDelete) return;
-            delete settings.providers[settings.activeProvider];
-            settings.activeProvider = 'gemini';
-            this.revealApiKey = false;
-            this.resetConnectionTestStatus();
-            await this.persistSettings();
-            new Notice('Provider deleted');
-            this.display();
-        }, 'danger', !deletion.canDelete);
+        const providerList = listPanel.createDiv({ cls: 'ocli-settings-provider-list' });
+        Object.keys(settings.providers).forEach(providerId => {
+            const meta = getProviderCardMeta(settings, providerId);
+            const card = providerList.createDiv({
+                cls: `ocli-settings-provider-card${meta.isActive ? ' is-active' : ''}`,
+            });
+            card.tabIndex = 0;
+            card.setAttribute('role', 'button');
+            card.setAttribute('aria-pressed', meta.isActive ? 'true' : 'false');
 
+            const cardHeader = card.createDiv({ cls: 'ocli-settings-provider-card-header' });
+            const cardIdentity = cardHeader.createDiv({ cls: 'ocli-settings-provider-card-identity' });
+            cardIdentity.createDiv({ cls: 'ocli-settings-provider-card-title', text: meta.label });
+            cardIdentity.createSpan({
+                cls: 'ocli-settings-provider-card-icon is-protocol',
+                text: meta.protocolGlyph,
+                attr: { 'aria-label': meta.protocolLabel, title: meta.protocolLabel },
+            });
+
+            const cardStatus = cardHeader.createDiv({ cls: 'ocli-settings-provider-card-statuses' });
+            if (meta.isActive) {
+                cardStatus.createSpan({
+                    cls: 'ocli-settings-provider-card-icon is-active',
+                    text: '✓',
+                    attr: { 'aria-label': 'Active provider', title: 'Active provider' },
+                });
+            }
+            cardStatus.createSpan({
+                cls: `ocli-settings-provider-card-icon is-${meta.statusTone}`,
+                text: meta.statusGlyph,
+                attr: { 'aria-label': meta.statusLabel, title: meta.statusLabel },
+            });
+
+            card.createDiv({ cls: 'ocli-settings-provider-card-meta', text: meta.compactMeta });
+
+            const activateProvider = async () => {
+                if (providerId === settings.activeProvider) return;
+                this.resetConnectionTestStatus();
+                await this.plugin.modelService.switchProvider(providerId, () => this.persistSettings());
+                this.revealApiKey = false;
+                this.activeSectionId = 'connection';
+                this.display();
+            };
+
+            card.addEventListener('click', () => {
+                void activateProvider();
+            });
+            card.addEventListener('keydown', (event: KeyboardEvent) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    void activateProvider();
+                }
+            });
+        });
+
+        const listSummary = getProviderListSummary(settings);
+        listPanel.createDiv({ cls: 'ocli-settings-provider-summary', text: listSummary.label });
+
+        const detailHeader = detailPanel.createDiv({ cls: 'ocli-settings-workspace-header is-detail' });
+        const detailCopy = detailHeader.createDiv({ cls: 'ocli-settings-workspace-copy' });
+        detailCopy.createDiv({ cls: 'ocli-settings-workspace-title', text: 'Provider Detail' });
+        detailCopy.createDiv({ cls: 'ocli-settings-workspace-subtitle', text: 'Fill the selected provider configuration.' });
+
+        const detailBody = detailPanel.createDiv({ cls: 'ocli-settings-detail-body' });
+        this.renderConnectionField(detailBody, 'Provider Name', (valueEl) => {
+            const input = valueEl.createEl('input', {
+                cls: 'ocli-settings-detail-input',
+                attr: {
+                    type: 'text',
+                    value: activeConfig.label,
+                    'aria-label': 'Provider name',
+                },
+            }) as HTMLInputElement;
+            input.addEventListener('change', async () => {
+                activeConfig.label = input.value.trim() || activeConfig.label;
+                await this.persistSettings();
+                this.display();
+            });
+        });
+
+        this.renderConnectionField(detailBody, 'Protocol', (valueEl) => {
+            const select = valueEl.createEl('select', {
+                cls: 'ocli-settings-detail-input',
+                attr: { 'aria-label': 'Provider protocol' },
+            }) as HTMLSelectElement;
+            select.createEl('option', { value: 'gemini', text: 'Gemini API' });
+            select.createEl('option', { value: 'openai-compatible', text: 'OpenAI-compatible' });
+            select.value = activeConfig.type;
+            select.addEventListener('change', async () => {
+                activeConfig.type = select.value as ProviderConfig['type'];
+                if (activeConfig.type === 'gemini') {
+                    activeConfig.baseUrl = '';
+                }
+                this.resetConnectionTestStatus();
+                await this.plugin.modelService.updateSettings(this.plugin.settings);
+                await this.persistSettings();
+                this.display();
+            });
+        });
+
+        const deletion = getProviderDeletionState(settings);
+
+        this.renderConnectionField(detailBody, 'API Endpoint', (valueEl) => {
+            const input = valueEl.createEl('input', {
+                cls: 'ocli-settings-detail-input',
+                attr: {
+                    type: 'text',
+                    placeholder: 'https://api.openai.com/v1',
+                    value: activeConfig.baseUrl,
+                    'aria-label': 'API endpoint',
+                    disabled: this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl ? undefined : 'true',
+                },
+            }) as HTMLInputElement;
+            if (!this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl) {
+                input.value = activeConfig.baseUrl || 'Default Gemini endpoint';
+            }
+            input.addEventListener('change', async () => {
+                activeConfig.baseUrl = input.value;
+                this.resetConnectionTestStatus();
+                await this.persistSettings();
+            });
+        });
+
+        this.renderConnectionField(detailBody, 'API Key', (valueEl) => {
+            const keyRow = valueEl.createDiv({ cls: 'ocli-settings-detail-secret' });
+            const input = keyRow.createEl('input', {
+                cls: 'ocli-settings-detail-input',
+                attr: {
+                    type: this.revealApiKey ? 'text' : 'password',
+                    placeholder: 'sk-...',
+                    value: activeConfig.apiKey,
+                    autocomplete: 'off',
+                    spellcheck: 'false',
+                    'aria-label': 'API key',
+                },
+            }) as HTMLInputElement;
+            input.addEventListener('change', async () => {
+                activeConfig.apiKey = input.value;
+                this.resetConnectionTestStatus();
+                await this.persistSettings();
+            });
+
+            const secretActions = keyRow.createDiv({ cls: 'ocli-settings-detail-secret-actions' });
+            this.createActionButton(secretActions, this.revealApiKey ? 'Hide' : 'Reveal', async () => {
+                this.revealApiKey = !this.revealApiKey;
+                this.display();
+            });
+            this.createActionButton(secretActions, 'Clear', async () => {
+                activeConfig.apiKey = '';
+                this.revealApiKey = false;
+                this.resetConnectionTestStatus();
+                await this.persistSettings();
+                this.display();
+            }, 'danger');
+        });
+
+        this.renderConnectionField(detailBody, 'Model', (valueEl) => {
+            const select = valueEl.createEl('select', {
+                cls: 'ocli-settings-detail-input',
+                attr: { 'aria-label': 'Model' },
+            }) as HTMLSelectElement;
+            if (activeConfig.model) {
+                select.createEl('option', { value: activeConfig.model, text: activeConfig.model });
+            } else {
+                select.createEl('option', { value: '__empty__', text: 'Select a model' });
+            }
+
+            this.loadDynamicModelSelect(select, token).catch(() => undefined);
+            select.value = activeConfig.model || '__empty__';
+            select.addEventListener('change', async () => {
+                const value = select.value;
+                if (value === '__loading__' || value === '__failed__' || value === '__empty__') return;
+                this.resetConnectionTestStatus();
+                await this.plugin.modelService.switchModel(value, () => this.persistSettings());
+                this.display();
+            });
+        });
+
+        const connectionStatus = getConnectionTestStatusPresentation(this.connectionTestStatus)
+            || {
+                tone: activeConfig.apiKey.trim() ? 'muted' : 'warning',
+                label: activeConfig.apiKey.trim()
+                    ? 'Run a connection test after updating credentials.'
+                    : `No API key configured for ${activeConfig.label}.`,
+            };
+
+        this.renderConnectionField(detailBody, 'Connection Status', (valueEl) => {
+            valueEl.createDiv({
+                cls: `ocli-settings-inline-note is-${connectionStatus.tone} ocli-settings-inline-note-compact`,
+                text: connectionStatus.label,
+            });
+        });
+
+        const actions = detailPanel.createDiv({ cls: 'ocli-settings-actions ocli-settings-detail-actions' });
         this.createActionButton(actions, this.connectionTestStatus.state === 'testing' ? 'Testing...' : 'Test Connection', async () => {
             const label = activeConfig.label || 'AI provider';
             if (!activeConfig.apiKey.trim()) {
@@ -608,35 +729,75 @@ export class SettingTab extends PluginSettingTab {
             this.display();
         }, 'primary', this.connectionTestStatus.state === 'testing');
 
-        const connectionStatus = getConnectionTestStatusPresentation(this.connectionTestStatus);
-        if (!deletion.canDelete) {
-            containerEl.createDiv({ cls: 'ocli-settings-inline-hint', text: deletion.helperText });
-        }
-        if (connectionStatus) {
-            containerEl.createDiv({
-                cls: `ocli-settings-inline-note is-${connectionStatus.tone}`,
-                text: connectionStatus.label,
-            });
-        }
-    }
-
-    private configureSecretInput(text: TextComponent, config: ProviderConfig): TextComponent {
-        text.setPlaceholder('sk-...');
-        text.setValue(config.apiKey);
-        text.onChange(async (value: string) => {
-            config.apiKey = value;
+        this.createActionButton(actions, deletion.label, async () => {
+            if (!deletion.canDelete) return;
+            delete settings.providers[settings.activeProvider];
+            settings.activeProvider = 'gemini';
+            this.revealApiKey = false;
             this.resetConnectionTestStatus();
             await this.persistSettings();
+            new Notice('Provider deleted');
+            this.display();
+        }, 'danger', !deletion.canDelete);
+
+        detailPanel.createDiv({ cls: 'ocli-settings-inline-hint', text: deletion.helperText });
+        detailPanel.createDiv({
+            cls: 'ocli-settings-inline-hint ocli-settings-inline-hint-strong',
+            text: 'Available models are loaded from the selected provider API.',
         });
+    }
 
-        if ((text as any).inputEl) {
-            const inputEl = (text as any).inputEl as HTMLInputElement;
-            inputEl.type = this.revealApiKey ? 'text' : 'password';
-            inputEl.autocomplete = 'off';
-            inputEl.spellcheck = false;
+    private renderConnectionField(
+        containerEl: HTMLElement,
+        label: string,
+        renderValue: (valueEl: HTMLElement) => void
+    ): void {
+        const row = containerEl.createDiv({ cls: 'ocli-settings-detail-row' });
+        row.createDiv({ cls: 'ocli-settings-detail-label', text: label });
+        const value = row.createDiv({ cls: 'ocli-settings-detail-value' });
+        renderValue(value);
+    }
+
+    private async loadDynamicModelSelect(select: HTMLSelectElement, token: number, forceRefresh: boolean = false): Promise<void> {
+        const config = this.getActiveConfig();
+        const currentModel = config?.model || '';
+
+        select.innerHTML = '';
+        select.createEl('option', { value: '__loading__', text: 'Loading models...' });
+        select.value = '__loading__';
+        select.disabled = true;
+
+        try {
+            const models = await this.plugin.modelService.getAvailableModels(forceRefresh);
+            if (token !== this.renderToken) return;
+
+            select.innerHTML = '';
+            const options: ModelOption[] = models.length > 0
+                ? models
+                : [{ value: currentModel, label: `${currentModel} (Current)` }];
+
+            options.forEach(option => select.createEl('option', { value: option.value, text: option.label }));
+
+            if (currentModel && !options.some(option => option.value === currentModel)) {
+                select.createEl('option', { value: currentModel, text: `${currentModel} (Current)` });
+            }
+
+            select.value = currentModel || options[0]?.value || '';
+            select.disabled = false;
+        } catch {
+            if (token !== this.renderToken) return;
+
+            select.innerHTML = '';
+            if (currentModel) {
+                select.createEl('option', { value: currentModel, text: `${currentModel} (Current)` });
+                select.value = currentModel;
+                select.disabled = false;
+            } else {
+                select.createEl('option', { value: '__failed__', text: 'Model list unavailable' });
+                select.value = '__failed__';
+                select.disabled = true;
+            }
         }
-
-        return text;
     }
 
     private renderRuntimeSection(containerEl: HTMLElement): void {

@@ -38,6 +38,21 @@ interface FileWriteState {
   lastError: string;
 }
 
+const LOCAL_SLASH_COMMANDS = [
+  { command: '/clear', description: 'Clear session history' },
+  { command: '/profile', description: 'View user profile' },
+  { command: '/file-back <message-id>', description: 'Archive a previous AI answer to the knowledge wiki' },
+  { command: '/forget [field]', description: 'Forget user memory' },
+  { command: '/new <title>', description: 'Create a new note' },
+  { command: '/edit <instruction>', description: 'AI edit the selected text' },
+  { command: '/open <file>', description: 'Open a file' },
+  { command: '/tools', description: 'List available tools' },
+  { command: '/wiki:compile [path]', description: 'Compile notes into the knowledge wiki' },
+  { command: '/wiki:index', description: 'Open the knowledge wiki index' },
+  { command: '/wiki:lint', description: 'Run the knowledge wiki health check' },
+  { command: '/help', description: 'Show the command list' },
+];
+
 export class DefaultChatRuntime implements ChatRuntime {
   private readonly generationStrategyService = new GenerationStrategyService();
 
@@ -82,6 +97,7 @@ export class DefaultChatRuntime implements ChatRuntime {
     }
     prompt += `[Current Time: ${new Date().toLocaleString()} (${new Date().toLocaleDateString(undefined, { weekday: 'long' })})]\n`;
     prompt += `[Context: ${this.formatContextItems(request.contextItems)}]\n`;
+    prompt += `${this.buildSlashCommandContract()}\n`;
     if (activeSkill) {
       prompt += `[Active Skill: ${activeSkill.skill.name}]\n`;
       prompt += `[Skill Instructions]\n${activeSkill.instructions}\n`;
@@ -292,6 +308,36 @@ export class DefaultChatRuntime implements ChatRuntime {
       return `[Context (${item.type}): ${item.data}]\n${item.content || ''}`;
     }).join('\n\n');
   }
+
+  private buildSlashCommandContract(): string {
+    const skillCommands = typeof (this.deps.skillRegistry as any).listCommandEntries === 'function'
+      ? (this.deps.skillRegistry as any).listCommandEntries()
+      : [];
+    const commands = [
+      ...LOCAL_SLASH_COMMANDS,
+      ...skillCommands.map((entry: any) => ({
+        command: entry.command,
+        description: entry.description || `Run ${entry.skillName || 'skill'} workflow`,
+      })),
+    ];
+    const unique = new Map<string, string>();
+    for (const entry of commands) {
+      if (!entry.command || unique.has(entry.command)) continue;
+      unique.set(entry.command, entry.description);
+    }
+    const commandList = Array.from(unique.entries())
+      .map(([command, description]) => `- \`${command}\`: ${description}`)
+      .join('\n');
+
+    return `[Slash Command Contract]
+Only these slash commands exist in this shell:
+${commandList}
+Do not mention or recommend slash commands that are not listed here.
+Do not invent generic commands like \`/do\` or \`/ask\`.
+If no listed command fits, suggest a plain-language request instead.
+`;
+  }
+
   private createFallbackObsidianContext(request: ChatTurnRequest) {
     if (request.obsidianContext) {
       return request.obsidianContext;

@@ -1,17 +1,25 @@
-import { App, Notice, TFile } from 'obsidian';
+import { App, Notice, TFile, setIcon } from 'obsidian';
 import { PLUGIN_ID } from '../../mcp/types';
 import { KnowledgeNoteStatus } from '../../knowledge/status-service';
 
 interface KnowledgeStatusPanelOptions {
   app: App;
   plugin?: any;
+  onAddRelatedContext?: (path: string) => void;
+  onExcludeCurrentContext?: (path: string) => void;
+  onOpenKnowledgeSettings?: () => void;
+  setIcon?: (el: HTMLElement, icon: string) => void;
 }
 
 export class KnowledgeStatusPanel {
+  private readonly setIconFn: (el: HTMLElement, icon: string) => void;
+
   constructor(
     private readonly container: HTMLElement,
     private readonly options: KnowledgeStatusPanelOptions,
-  ) {}
+  ) {
+    this.setIconFn = options.setIcon ?? setIcon;
+  }
 
   async refresh() {
     this.container.empty();
@@ -53,39 +61,92 @@ export class KnowledgeStatusPanel {
     status: KnowledgeNoteStatus,
     runtime: any,
   ) {
-    const header = (this.container as any).createDiv({ cls: 'shell-knowledge-status-header' }) as HTMLElement;
-    header.createDiv({ cls: 'shell-knowledge-status-title', text: activeFile.basename });
-    header.createDiv({ cls: `shell-knowledge-status-badge is-${status.state}`, text: status.state });
+    const strip = (this.container as any).createDiv({
+      cls: `shell-knowledge-status-strip is-${status.state}`,
+      title: this.buildSummary(status),
+      attr: { role: 'button', tabindex: '0', 'aria-label': `Current note: ${activeFile.basename}` },
+    }) as HTMLElement;
 
-    const meta = (this.container as any).createDiv({ cls: 'shell-knowledge-status-meta' }) as HTMLElement;
-    meta.createDiv({
-      cls: 'shell-knowledge-status-details',
-      text: this.buildSummary(status),
+    const icon = (strip as any).createDiv({ cls: 'shell-knowledge-status-file-icon' }) as HTMLElement;
+    this.setIconFn(icon, 'file-text');
+    (strip as any).createSpan({ cls: 'shell-knowledge-status-title', text: activeFile.basename });
+
+    const exclude = (strip as any).createEl('button', {
+      cls: 'shell-knowledge-status-exclude clickable-icon',
+      attr: {
+        type: 'button',
+        'aria-label': 'Exclude current note from context',
+        title: 'Exclude current note from context',
+      },
+    }) as HTMLElement;
+    this.setIconFn(exclude, 'x');
+    exclude.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.options.onExcludeCurrentContext?.(activeFile.path);
     });
 
-    const actions = (this.container as any).createDiv({ cls: 'shell-knowledge-status-actions' }) as HTMLElement;
-    this.createAction(actions, 'Compile Current Note', async () => {
-      const result = await runtime?.compileByPath?.(activeFile.path);
+    strip.addEventListener('click', () => {
+      this.toggleMoreMenu(strip, activeFile, status);
+    });
+    strip.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      this.toggleMoreMenu(strip, activeFile, status);
+    });
+  }
+
+  private toggleMoreMenu(parent: HTMLElement, activeFile: TFile, status: KnowledgeNoteStatus) {
+    const existing = parent.querySelector?.('.shell-knowledge-status-menu');
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const menu = (parent as any).createDiv({ cls: 'shell-knowledge-status-menu' }) as HTMLElement;
+    this.createMenuItem(menu, 'Compile note', 'refresh-cw', async () => {
+      const result = await (this.options.plugin?.knowledgeRuntime ?? null)?.compileByPath?.(activeFile.path);
       if (result) {
         new Notice(`Knowledge compile: ${result.success} success, ${result.failed} failed`);
       }
       await this.refresh();
     });
-    this.createAction(actions, 'Open Knowledge Index', () => {
+    this.createMenuItem(menu, 'Add backlinks', 'network', () => {
+      this.options.onAddRelatedContext?.(activeFile.path);
+    });
+    this.createMenuItem(menu, 'Open wiki summary', 'external-link', () => {
+      const summaryPath = status.summaryPath;
+      if (summaryPath && typeof (this.options.app.workspace as any)?.openLinkText === 'function') {
+        void (this.options.app.workspace as any).openLinkText(summaryPath, '', false);
+        return;
+      }
       (this.options.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
     });
-    this.createAction(actions, 'Run Knowledge Lint', () => {
+    this.createMenuItem(menu, 'Run knowledge lint', 'scan-line', () => {
       (this.options.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
+    });
+    this.createMenuItem(menu, 'Copy note path', 'copy', () => {
+      void globalThis.navigator?.clipboard?.writeText?.(activeFile.path);
+      new Notice('Copied note path.');
+    });
+    this.createMenuItem(menu, 'Settings', 'settings', () => {
+      this.options.onOpenKnowledgeSettings?.();
     });
   }
 
-  private createAction(container: HTMLElement, label: string, handler: () => void | Promise<void>) {
-    const button = (container as any).createEl('button', {
-      cls: 'shell-knowledge-status-action',
-      text: label,
+  private createMenuItem(
+    container: HTMLElement,
+    label: string,
+    icon: string,
+    handler: () => void | Promise<void>,
+  ) {
+    const item = (container as any).createEl('button', {
+      cls: 'shell-knowledge-status-menu-item',
       attr: { type: 'button' },
     }) as HTMLElement;
-    button.addEventListener('click', () => {
+    const iconEl = (item as any).createSpan({ cls: 'shell-knowledge-status-menu-icon' }) as HTMLElement;
+    this.setIconFn(iconEl, icon);
+    (item as any).createSpan({ cls: 'shell-knowledge-status-menu-label', text: label });
+    item.addEventListener('click', () => {
       void handler();
     });
   }
@@ -102,8 +163,8 @@ export class KnowledgeStatusPanel {
         return 'Compiling now.';
       case 'done':
         return status.compiledAt
-          ? `Compiled ${status.compiledAt}`
-          : 'Compiled successfully.';
+          ? `\u5df2\u540c\u6b65 \u00b7 Compiled ${status.compiledAt}`
+          : '\u5df2\u540c\u6b65 \u00b7 Compiled successfully.';
       case 'unregistered':
       default:
         return 'Not added to the knowledge wiki.';

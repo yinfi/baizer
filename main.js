@@ -2104,7 +2104,7 @@ __export(main_exports, {
   default: () => ObsidianCliPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian27 = require("obsidian");
+var import_obsidian30 = require("obsidian");
 
 // src/services/model-service.ts
 var import_obsidian5 = require("obsidian");
@@ -4238,10 +4238,13 @@ var OpenAIChatSession = class {
       }
     }
     let fullText = "";
+    let reasoningContent = "";
     const toolCalls = [];
     for await (const event of this.provider.chatCompletionStream(this.history, this.tools, signal)) {
       if (event.type === "text_delta") {
         fullText += event.content;
+      } else if (event.type === "thinking") {
+        reasoningContent += event.content;
       } else if (event.type === "tool_call") {
         toolCalls.push({
           id: event.id || `call_${Date.now()}_${toolCalls.length}`,
@@ -4254,6 +4257,9 @@ var OpenAIChatSession = class {
       }
     }
     const assistantMsg = { role: "assistant", content: fullText || null };
+    if (reasoningContent) {
+      assistantMsg.reasoning_content = reasoningContent;
+    }
     if (toolCalls.length > 0) {
       assistantMsg.tool_calls = toolCalls;
     }
@@ -4515,6 +4521,20 @@ var GenerationStrategyService = class {
 };
 
 // src/runtime/chat-runtime.ts
+var LOCAL_SLASH_COMMANDS = [
+  { command: "/clear", description: "Clear session history" },
+  { command: "/profile", description: "View user profile" },
+  { command: "/file-back <message-id>", description: "Archive a previous AI answer to the knowledge wiki" },
+  { command: "/forget [field]", description: "Forget user memory" },
+  { command: "/new <title>", description: "Create a new note" },
+  { command: "/edit <instruction>", description: "AI edit the selected text" },
+  { command: "/open <file>", description: "Open a file" },
+  { command: "/tools", description: "List available tools" },
+  { command: "/wiki:compile [path]", description: "Compile notes into the knowledge wiki" },
+  { command: "/wiki:index", description: "Open the knowledge wiki index" },
+  { command: "/wiki:lint", description: "Run the knowledge wiki health check" },
+  { command: "/help", description: "Show the command list" }
+];
 var DefaultChatRuntime = class {
   constructor(deps) {
     this.deps = deps;
@@ -4556,6 +4576,8 @@ ${request.systemPromptOverride}
     prompt += `[Current Time: ${(/* @__PURE__ */ new Date()).toLocaleString()} (${(/* @__PURE__ */ new Date()).toLocaleDateString(void 0, { weekday: "long" })})]
 `;
     prompt += `[Context: ${this.formatContextItems(request.contextItems)}]
+`;
+    prompt += `${this.buildSlashCommandContract()}
 `;
     if (activeSkill) {
       prompt += `[Active Skill: ${activeSkill.skill.name}]
@@ -4744,6 +4766,30 @@ ${activeSkill.instructions}
       return `[Context (${item.type}): ${item.data}]
 ${item.content || ""}`;
     }).join("\n\n");
+  }
+  buildSlashCommandContract() {
+    const skillCommands = typeof this.deps.skillRegistry.listCommandEntries === "function" ? this.deps.skillRegistry.listCommandEntries() : [];
+    const commands = [
+      ...LOCAL_SLASH_COMMANDS,
+      ...skillCommands.map((entry) => ({
+        command: entry.command,
+        description: entry.description || `Run ${entry.skillName || "skill"} workflow`
+      }))
+    ];
+    const unique = /* @__PURE__ */ new Map();
+    for (const entry of commands) {
+      if (!entry.command || unique.has(entry.command))
+        continue;
+      unique.set(entry.command, entry.description);
+    }
+    const commandList = Array.from(unique.entries()).map(([command, description]) => `- \`${command}\`: ${description}`).join("\n");
+    return `[Slash Command Contract]
+Only these slash commands exist in this shell:
+${commandList}
+Do not mention or recommend slash commands that are not listed here.
+Do not invent generic commands like \`/do\` or \`/ask\`.
+If no listed command fits, suggest a plain-language request instead.
+`;
   }
   createFallbackObsidianContext(request) {
     if (request.obsidianContext) {
@@ -6324,6 +6370,42 @@ function getProviderDeletionState(settings) {
     label: "Delete Provider"
   };
 }
+function getProviderListSummary(settings) {
+  const providers = Object.values(settings.providers || {});
+  const total = providers.length;
+  const configured = providers.filter((provider) => !!provider.apiKey?.trim()).length;
+  const missingKey = total - configured;
+  return {
+    total,
+    configured,
+    missingKey,
+    label: `${total} providers / ${configured} configured / ${missingKey} missing key`
+  };
+}
+function getProviderCardMeta(settings, providerId) {
+  const config = settings.providers[providerId];
+  if (!config) {
+    throw new Error(`Unknown provider: ${providerId}`);
+  }
+  const protocolLabel = config.type === "gemini" ? "Gemini API" : "OpenAI-compatible";
+  const hasApiKey = !!config.apiKey?.trim();
+  const rawEndpoint = config.baseUrl?.trim() || "Default provider endpoint";
+  const endpointSummary = rawEndpoint.replace(/^https?:\/\//, "");
+  const modelSummary = config.model?.trim() ? `Model: ${config.model.trim()}` : "Model: Not selected";
+  return {
+    id: providerId,
+    label: config.label,
+    protocolLabel,
+    endpointSummary,
+    modelSummary,
+    statusLabel: hasApiKey ? "Key configured" : "No API key",
+    statusTone: hasApiKey ? "success" : "warning",
+    isActive: settings.activeProvider === providerId,
+    compactMeta: config.model?.trim() ? `Model: ${config.model.trim()}` : "Model: Not selected",
+    protocolGlyph: config.type === "gemini" ? "\u25C8" : "\u25CE",
+    statusGlyph: hasApiKey ? "\u25CF" : "!"
+  };
+}
 function getConnectionTestStatusPresentation(status) {
   if (!status.message.trim() || status.state === "idle") {
     return void 0;
@@ -6416,10 +6498,8 @@ var SettingTab = class extends import_obsidian6.PluginSettingTab {
     this.ensureActiveSection(visibleSections);
     const root = containerEl.createDiv({ cls: "ocli-settings-page" });
     this.renderHeader(root);
-    this.renderSummary(root);
-    const layout = root.createDiv({ cls: "ocli-settings-layout" });
-    this.renderSidebar(layout.createDiv({ cls: "ocli-settings-sidebar" }), visibleSections);
-    this.renderMain(layout.createDiv({ cls: "ocli-settings-main" }), visibleSections, token);
+    this.renderSidebar(root, visibleSections);
+    this.renderMain(root.createDiv({ cls: "ocli-settings-main" }), visibleSections, token);
   }
   renderHeader(containerEl) {
     const hero = containerEl.createDiv({ cls: "ocli-settings-hero" });
@@ -6443,42 +6523,11 @@ var SettingTab = class extends import_obsidian6.PluginSettingTab {
       this.display();
     });
   }
-  renderSummary(containerEl) {
-    const summary = containerEl.createDiv({ cls: "ocli-settings-summary" });
-    const activeConfig = this.getActiveConfig();
-    const statuses = getSettingsSectionStatuses(this.plugin.settings);
-    const providerBadge = statuses.connection;
-    this.renderSummaryCard(
-      summary,
-      "Active Provider",
-      activeConfig?.label || "Not configured",
-      providerBadge?.label || "Ready",
-      providerBadge?.tone || "success"
-    );
-    this.renderSummaryCard(
-      summary,
-      "Current Model",
-      activeConfig?.model || "Not selected",
-      activeConfig?.type === "gemini" ? "Gemini API" : "OpenAI-compatible",
-      "accent"
-    );
-    const safetyTone = statuses.permissions?.tone || (this.plugin.settings.confirmExecutions ? "success" : "warning");
-    const safetyValue = this.plugin.settings.allowPluginControl ? "Plugin control enabled" : this.plugin.settings.confirmExecutions ? "Confirm before writes" : "Direct execution";
-    const safetyDetail = this.plugin.settings.allowPluginControl ? "High-risk actions unlocked" : "Approval flow active";
-    this.renderSummaryCard(summary, "Safety", safetyValue, safetyDetail, safetyTone);
-  }
-  renderSummaryCard(containerEl, label, value, detail, tone) {
-    const card = containerEl.createDiv({ cls: "ocli-settings-summary-card" });
-    card.createDiv({ cls: "ocli-settings-summary-label", text: label });
-    card.createDiv({ cls: "ocli-settings-summary-value", text: value });
-    const footer = card.createDiv({ cls: "ocli-settings-summary-footer" });
-    footer.createSpan({ cls: `ocli-settings-badge is-${tone}`, text: detail });
-  }
   renderSidebar(containerEl, visibleSections) {
     const nav = containerEl.createDiv({ cls: "ocli-settings-nav" });
     const navHeader = nav.createDiv({ cls: "ocli-settings-nav-header" });
     navHeader.createDiv({ cls: "ocli-settings-nav-title", text: "Sections" });
-    navHeader.createDiv({ cls: "ocli-settings-nav-kicker", text: "Jump between groups" });
+    navHeader.createDiv({ cls: "ocli-settings-nav-kicker", text: "Switch between groups" });
     if (!visibleSections.length) {
       nav.createDiv({ cls: "ocli-settings-empty-nav", text: "No matching sections." });
       return;
@@ -6566,60 +6615,14 @@ var SettingTab = class extends import_obsidian6.PluginSettingTab {
       containerEl.createDiv({ cls: "ocli-settings-inline-note is-warning", text: "No active provider found." });
       return;
     }
-    const badgeStatus = !activeConfig.apiKey.trim() ? `No API key configured for ${activeConfig.label}.` : `Using ${activeConfig.type === "gemini" ? "Gemini API" : "OpenAI-compatible API"}.`;
-    containerEl.createDiv({
-      cls: `ocli-settings-inline-note ${activeConfig.apiKey.trim() ? "is-success" : "is-warning"}`,
-      text: badgeStatus
-    });
-    new import_obsidian6.Setting(containerEl).setName("AI Provider").setDesc("Select the provider configuration to use.").addDropdown((drop) => {
-      Object.entries(settings.providers).forEach(([id, config]) => {
-        const configured = !!config.apiKey.trim();
-        drop.addOption(id, configured ? config.label : `${config.label} !`);
-      });
-      drop.setValue(settings.activeProvider);
-      drop.onChange(async (value) => {
-        this.resetConnectionTestStatus();
-        await this.plugin.modelService.switchProvider(value, () => this.persistSettings());
-        this.revealApiKey = false;
-        this.activeSectionId = "connection";
-        this.display();
-      });
-    });
-    new import_obsidian6.Setting(containerEl).setName("API Key").setDesc(`Enter your ${activeConfig.label} API key.`).addText((text) => this.configureSecretInput(text, activeConfig)).addButton((btn) => btn.setButtonText(this.revealApiKey ? "Hide" : "Reveal").onClick(() => {
-      this.revealApiKey = !this.revealApiKey;
-      this.display();
-    })).addButton((btn) => btn.setButtonText("Clear").onClick(async () => {
-      activeConfig.apiKey = "";
-      this.revealApiKey = false;
-      this.resetConnectionTestStatus();
-      await this.persistSettings();
-      this.display();
-    }));
-    if (this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl) {
-      new import_obsidian6.Setting(containerEl).setName("Base URL").setDesc("Override the API endpoint for compatible providers.").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(activeConfig.baseUrl).onChange(async (value) => {
-        activeConfig.baseUrl = value;
-        this.resetConnectionTestStatus();
-        await this.persistSettings();
-      }));
-    }
-    new import_obsidian6.Setting(containerEl).setName("Model").setDesc("Choose the model loaded from the active provider.").addDropdown((drop) => {
-      if (activeConfig.model) {
-        drop.addOption(activeConfig.model, `${activeConfig.model} (Current)`);
-      } else {
-        drop.addOption("__empty__", "Select a model");
-      }
-      drop.setValue(activeConfig.model || "__empty__");
-      void this.loadDynamicModelOptions(drop, token);
-      drop.onChange(async (value) => {
-        if (value === "__loading__" || value === "__failed__" || value === "__empty__")
-          return;
-        this.resetConnectionTestStatus();
-        await this.plugin.modelService.switchModel(value, () => this.persistSettings());
-        this.display();
-      });
-    });
-    const actions = containerEl.createDiv({ cls: "ocli-settings-actions" });
-    this.createActionButton(actions, "+ Add Provider", async () => {
+    const workspace = containerEl.createDiv({ cls: "ocli-settings-workspace" });
+    const listPanel = workspace.createDiv({ cls: "ocli-settings-workspace-panel is-list" });
+    const detailPanel = workspace.createDiv({ cls: "ocli-settings-workspace-panel is-detail" });
+    const listHeader = listPanel.createDiv({ cls: "ocli-settings-workspace-header" });
+    const listCopy = listHeader.createDiv({ cls: "ocli-settings-workspace-copy" });
+    listCopy.createDiv({ cls: "ocli-settings-workspace-title", text: "Providers" });
+    listCopy.createDiv({ cls: "ocli-settings-workspace-subtitle", text: "Select a provider" });
+    this.createActionButton(listHeader, "+ Add", async () => {
       new AddProviderModal(this.app, async (label, baseUrl) => {
         const key = `custom-${Date.now()}`;
         settings.providers[key] = {
@@ -6637,18 +6640,181 @@ var SettingTab = class extends import_obsidian6.PluginSettingTab {
         this.display();
       }).open();
     }, "accent");
+    const providerList = listPanel.createDiv({ cls: "ocli-settings-provider-list" });
+    Object.keys(settings.providers).forEach((providerId) => {
+      const meta = getProviderCardMeta(settings, providerId);
+      const card = providerList.createDiv({
+        cls: `ocli-settings-provider-card${meta.isActive ? " is-active" : ""}`
+      });
+      card.tabIndex = 0;
+      card.setAttribute("role", "button");
+      card.setAttribute("aria-pressed", meta.isActive ? "true" : "false");
+      const cardHeader = card.createDiv({ cls: "ocli-settings-provider-card-header" });
+      const cardIdentity = cardHeader.createDiv({ cls: "ocli-settings-provider-card-identity" });
+      cardIdentity.createDiv({ cls: "ocli-settings-provider-card-title", text: meta.label });
+      cardIdentity.createSpan({
+        cls: "ocli-settings-provider-card-icon is-protocol",
+        text: meta.protocolGlyph,
+        attr: { "aria-label": meta.protocolLabel, title: meta.protocolLabel }
+      });
+      const cardStatus = cardHeader.createDiv({ cls: "ocli-settings-provider-card-statuses" });
+      if (meta.isActive) {
+        cardStatus.createSpan({
+          cls: "ocli-settings-provider-card-icon is-active",
+          text: "\u2713",
+          attr: { "aria-label": "Active provider", title: "Active provider" }
+        });
+      }
+      cardStatus.createSpan({
+        cls: `ocli-settings-provider-card-icon is-${meta.statusTone}`,
+        text: meta.statusGlyph,
+        attr: { "aria-label": meta.statusLabel, title: meta.statusLabel }
+      });
+      card.createDiv({ cls: "ocli-settings-provider-card-meta", text: meta.compactMeta });
+      const activateProvider = async () => {
+        if (providerId === settings.activeProvider)
+          return;
+        this.resetConnectionTestStatus();
+        await this.plugin.modelService.switchProvider(providerId, () => this.persistSettings());
+        this.revealApiKey = false;
+        this.activeSectionId = "connection";
+        this.display();
+      };
+      card.addEventListener("click", () => {
+        void activateProvider();
+      });
+      card.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          void activateProvider();
+        }
+      });
+    });
+    const listSummary = getProviderListSummary(settings);
+    listPanel.createDiv({ cls: "ocli-settings-provider-summary", text: listSummary.label });
+    const detailHeader = detailPanel.createDiv({ cls: "ocli-settings-workspace-header is-detail" });
+    const detailCopy = detailHeader.createDiv({ cls: "ocli-settings-workspace-copy" });
+    detailCopy.createDiv({ cls: "ocli-settings-workspace-title", text: "Provider Detail" });
+    detailCopy.createDiv({ cls: "ocli-settings-workspace-subtitle", text: "Fill the selected provider configuration." });
+    const detailBody = detailPanel.createDiv({ cls: "ocli-settings-detail-body" });
+    this.renderConnectionField(detailBody, "Provider Name", (valueEl) => {
+      const input = valueEl.createEl("input", {
+        cls: "ocli-settings-detail-input",
+        attr: {
+          type: "text",
+          value: activeConfig.label,
+          "aria-label": "Provider name"
+        }
+      });
+      input.addEventListener("change", async () => {
+        activeConfig.label = input.value.trim() || activeConfig.label;
+        await this.persistSettings();
+        this.display();
+      });
+    });
+    this.renderConnectionField(detailBody, "Protocol", (valueEl) => {
+      const select = valueEl.createEl("select", {
+        cls: "ocli-settings-detail-input",
+        attr: { "aria-label": "Provider protocol" }
+      });
+      select.createEl("option", { value: "gemini", text: "Gemini API" });
+      select.createEl("option", { value: "openai-compatible", text: "OpenAI-compatible" });
+      select.value = activeConfig.type;
+      select.addEventListener("change", async () => {
+        activeConfig.type = select.value;
+        if (activeConfig.type === "gemini") {
+          activeConfig.baseUrl = "";
+        }
+        this.resetConnectionTestStatus();
+        await this.plugin.modelService.updateSettings(this.plugin.settings);
+        await this.persistSettings();
+        this.display();
+      });
+    });
     const deletion = getProviderDeletionState(settings);
-    this.createActionButton(actions, deletion.label, async () => {
-      if (!deletion.canDelete)
-        return;
-      delete settings.providers[settings.activeProvider];
-      settings.activeProvider = "gemini";
-      this.revealApiKey = false;
-      this.resetConnectionTestStatus();
-      await this.persistSettings();
-      new import_obsidian6.Notice("Provider deleted");
-      this.display();
-    }, "danger", !deletion.canDelete);
+    this.renderConnectionField(detailBody, "API Endpoint", (valueEl) => {
+      const input = valueEl.createEl("input", {
+        cls: "ocli-settings-detail-input",
+        attr: {
+          type: "text",
+          placeholder: "https://api.openai.com/v1",
+          value: activeConfig.baseUrl,
+          "aria-label": "API endpoint",
+          disabled: this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl ? void 0 : "true"
+        }
+      });
+      if (!this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl) {
+        input.value = activeConfig.baseUrl || "Default Gemini endpoint";
+      }
+      input.addEventListener("change", async () => {
+        activeConfig.baseUrl = input.value;
+        this.resetConnectionTestStatus();
+        await this.persistSettings();
+      });
+    });
+    this.renderConnectionField(detailBody, "API Key", (valueEl) => {
+      const keyRow = valueEl.createDiv({ cls: "ocli-settings-detail-secret" });
+      const input = keyRow.createEl("input", {
+        cls: "ocli-settings-detail-input",
+        attr: {
+          type: this.revealApiKey ? "text" : "password",
+          placeholder: "sk-...",
+          value: activeConfig.apiKey,
+          autocomplete: "off",
+          spellcheck: "false",
+          "aria-label": "API key"
+        }
+      });
+      input.addEventListener("change", async () => {
+        activeConfig.apiKey = input.value;
+        this.resetConnectionTestStatus();
+        await this.persistSettings();
+      });
+      const secretActions = keyRow.createDiv({ cls: "ocli-settings-detail-secret-actions" });
+      this.createActionButton(secretActions, this.revealApiKey ? "Hide" : "Reveal", async () => {
+        this.revealApiKey = !this.revealApiKey;
+        this.display();
+      });
+      this.createActionButton(secretActions, "Clear", async () => {
+        activeConfig.apiKey = "";
+        this.revealApiKey = false;
+        this.resetConnectionTestStatus();
+        await this.persistSettings();
+        this.display();
+      }, "danger");
+    });
+    this.renderConnectionField(detailBody, "Model", (valueEl) => {
+      const select = valueEl.createEl("select", {
+        cls: "ocli-settings-detail-input",
+        attr: { "aria-label": "Model" }
+      });
+      if (activeConfig.model) {
+        select.createEl("option", { value: activeConfig.model, text: activeConfig.model });
+      } else {
+        select.createEl("option", { value: "__empty__", text: "Select a model" });
+      }
+      this.loadDynamicModelSelect(select, token).catch(() => void 0);
+      select.value = activeConfig.model || "__empty__";
+      select.addEventListener("change", async () => {
+        const value = select.value;
+        if (value === "__loading__" || value === "__failed__" || value === "__empty__")
+          return;
+        this.resetConnectionTestStatus();
+        await this.plugin.modelService.switchModel(value, () => this.persistSettings());
+        this.display();
+      });
+    });
+    const connectionStatus = getConnectionTestStatusPresentation(this.connectionTestStatus) || {
+      tone: activeConfig.apiKey.trim() ? "muted" : "warning",
+      label: activeConfig.apiKey.trim() ? "Run a connection test after updating credentials." : `No API key configured for ${activeConfig.label}.`
+    };
+    this.renderConnectionField(detailBody, "Connection Status", (valueEl) => {
+      valueEl.createDiv({
+        cls: `ocli-settings-inline-note is-${connectionStatus.tone} ocli-settings-inline-note-compact`,
+        text: connectionStatus.label
+      });
+    });
+    const actions = detailPanel.createDiv({ cls: "ocli-settings-actions ocli-settings-detail-actions" });
     this.createActionButton(actions, this.connectionTestStatus.state === "testing" ? "Testing..." : "Test Connection", async () => {
       const label = activeConfig.label || "AI provider";
       if (!activeConfig.apiKey.trim()) {
@@ -6676,32 +6842,62 @@ var SettingTab = class extends import_obsidian6.PluginSettingTab {
       }
       this.display();
     }, "primary", this.connectionTestStatus.state === "testing");
-    const connectionStatus = getConnectionTestStatusPresentation(this.connectionTestStatus);
-    if (!deletion.canDelete) {
-      containerEl.createDiv({ cls: "ocli-settings-inline-hint", text: deletion.helperText });
-    }
-    if (connectionStatus) {
-      containerEl.createDiv({
-        cls: `ocli-settings-inline-note is-${connectionStatus.tone}`,
-        text: connectionStatus.label
-      });
-    }
-  }
-  configureSecretInput(text, config) {
-    text.setPlaceholder("sk-...");
-    text.setValue(config.apiKey);
-    text.onChange(async (value) => {
-      config.apiKey = value;
+    this.createActionButton(actions, deletion.label, async () => {
+      if (!deletion.canDelete)
+        return;
+      delete settings.providers[settings.activeProvider];
+      settings.activeProvider = "gemini";
+      this.revealApiKey = false;
       this.resetConnectionTestStatus();
       await this.persistSettings();
+      new import_obsidian6.Notice("Provider deleted");
+      this.display();
+    }, "danger", !deletion.canDelete);
+    detailPanel.createDiv({ cls: "ocli-settings-inline-hint", text: deletion.helperText });
+    detailPanel.createDiv({
+      cls: "ocli-settings-inline-hint ocli-settings-inline-hint-strong",
+      text: "Available models are loaded from the selected provider API."
     });
-    if (text.inputEl) {
-      const inputEl = text.inputEl;
-      inputEl.type = this.revealApiKey ? "text" : "password";
-      inputEl.autocomplete = "off";
-      inputEl.spellcheck = false;
+  }
+  renderConnectionField(containerEl, label, renderValue) {
+    const row = containerEl.createDiv({ cls: "ocli-settings-detail-row" });
+    row.createDiv({ cls: "ocli-settings-detail-label", text: label });
+    const value = row.createDiv({ cls: "ocli-settings-detail-value" });
+    renderValue(value);
+  }
+  async loadDynamicModelSelect(select, token, forceRefresh = false) {
+    const config = this.getActiveConfig();
+    const currentModel = config?.model || "";
+    select.innerHTML = "";
+    select.createEl("option", { value: "__loading__", text: "Loading models..." });
+    select.value = "__loading__";
+    select.disabled = true;
+    try {
+      const models = await this.plugin.modelService.getAvailableModels(forceRefresh);
+      if (token !== this.renderToken)
+        return;
+      select.innerHTML = "";
+      const options = models.length > 0 ? models : [{ value: currentModel, label: `${currentModel} (Current)` }];
+      options.forEach((option) => select.createEl("option", { value: option.value, text: option.label }));
+      if (currentModel && !options.some((option) => option.value === currentModel)) {
+        select.createEl("option", { value: currentModel, text: `${currentModel} (Current)` });
+      }
+      select.value = currentModel || options[0]?.value || "";
+      select.disabled = false;
+    } catch {
+      if (token !== this.renderToken)
+        return;
+      select.innerHTML = "";
+      if (currentModel) {
+        select.createEl("option", { value: currentModel, text: `${currentModel} (Current)` });
+        select.value = currentModel;
+        select.disabled = false;
+      } else {
+        select.createEl("option", { value: "__failed__", text: "Model list unavailable" });
+        select.value = "__failed__";
+        select.disabled = true;
+      }
     }
-    return text;
   }
   renderRuntimeSection(containerEl) {
     new import_obsidian6.Setting(containerEl).setName("Context Window Limit").setDesc("Limit token usage. Higher values allow reading larger files but cost more.").addSlider((slider) => slider.setLimits(1e4, 1e6, 1e4).setValue(this.plugin.settings.contextWindow).setDynamicTooltip().onChange(async (value) => {
@@ -6896,7 +7092,7 @@ var AddProviderModal = class extends import_obsidian6.Modal {
 };
 
 // src/ui/shell-view.ts
-var import_obsidian14 = require("obsidian");
+var import_obsidian17 = require("obsidian");
 
 // src/ui/chat-controller.ts
 var import_obsidian7 = require("obsidian");
@@ -8050,19 +8246,25 @@ var DiffModal = class extends import_obsidian10.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.addClass("ocli-diff-modal");
-    contentEl.createEl("h2", { text: "Review Changes" });
-    const diffContainer = contentEl.createDiv({ cls: "diff-container" });
-    this.renderDiff(diffContainer);
+    const header = contentEl.createDiv({ cls: "ocli-diff-modal-header" });
+    const copy = header.createDiv({ cls: "ocli-diff-modal-copy" });
+    copy.createEl("h2", { text: "Review Changes" });
+    copy.createDiv({ cls: "ocli-diff-modal-subtitle", text: "Compare current content with the proposed replacement before applying." });
+    const diffContainer = contentEl.createDiv({ cls: "diff-container ocli-diff-split" });
+    this.renderPane(diffContainer, "Current", this.original, "ocli-diff-pane-old");
+    this.renderPane(diffContainer, "Proposed", this.modified, "ocli-diff-pane-new");
     const buttonContainer = contentEl.createDiv({ cls: "diff-actions" });
-    buttonContainer.style.display = "flex";
-    buttonContainer.style.justifyContent = "flex-end";
-    buttonContainer.style.gap = "10px";
-    buttonContainer.style.marginTop = "20px";
     new import_obsidian10.ButtonComponent(buttonContainer).setButtonText("Cancel").onClick(() => this.close());
     new import_obsidian10.ButtonComponent(buttonContainer).setButtonText("Apply Changes").setCta().onClick(() => {
       this.onApply();
       this.close();
     });
+  }
+  renderPane(container, label, content, toneClass) {
+    const pane = container.createDiv({ cls: `ocli-diff-pane ${toneClass}` });
+    pane.createDiv({ cls: "ocli-diff-pane-title", text: label });
+    const pre = pane.createEl("pre", { cls: "ocli-diff-pane-code" });
+    pre.setText(content);
   }
   renderDiff(container) {
     container.style.maxHeight = "60vh";
@@ -8172,6 +8374,7 @@ var ObsidianContextService = class {
   async collect(options = {}) {
     const explicitScopes = [...options.explicitScopes ?? []];
     const activeFile = this.app.workspace.getActiveFile?.();
+    const includeCurrent = options.includeCurrent !== false;
     if (!activeFile) {
       return {
         activeNote: null,
@@ -8186,26 +8389,27 @@ var ObsidianContextService = class {
         contextItems: []
       };
     }
-    const content = await this.app.vault.read(activeFile);
-    const editor = this.app.workspace.getMostRecentLeaf?.()?.view?.editor;
-    const selectionText = this.normalizeSelection(editor?.getSelection?.());
-    const selectionLine = this.normalizeLine(editor?.getCursor?.("from")?.line);
     const cache = this.app.metadataCache.getFileCache?.(activeFile) ?? {};
     const tags = this.extractTags(cache);
     const outgoingLinks = this.extractOutgoingLinks(cache);
-    const activeHeading = this.findActiveHeading(content, selectionLine);
-    const activeSection = this.extractActiveSection(content, activeHeading);
+    const content = includeCurrent ? await this.app.vault.read(activeFile) : "";
+    const editor = includeCurrent ? this.app.workspace.getMostRecentLeaf?.()?.view?.editor : null;
+    const selectionText = includeCurrent ? this.normalizeSelection(editor?.getSelection?.()) : null;
+    const selectionLine = includeCurrent ? this.normalizeLine(editor?.getCursor?.("from")?.line) : null;
+    const activeHeading = includeCurrent ? this.findActiveHeading(content, selectionLine) : null;
+    const activeSection = includeCurrent ? this.extractActiveSection(content, activeHeading) : "";
     const backlinks = await this.collectBacklinks(activeFile, options.includeBacklinks === true);
     const recentNotes = this.collectRecentNotes(activeFile.path);
-    const contextItems = [
-      {
+    const contextItems = [];
+    if (includeCurrent) {
+      contextItems.push({
         id: `active-note:${activeFile.path}`,
         type: "file",
         data: activeFile.path,
         summary: `Active note: ${this.toTitle(activeFile)}`,
         content: budgetTextBlock(activeSection, this.options.maxSectionChars)
-      }
-    ];
+      });
+    }
     if (selectionText) {
       contextItems.push({
         id: `selection:${activeFile.path}`,
@@ -8416,12 +8620,18 @@ var ContextController = class {
   constructor(deps) {
     this.deps = deps;
   }
-  async collectCommandContext() {
-    const explicitScopes = this.deps.contextManager.getContexts().filter((ctx) => ctx.type === "scope" && ctx.scope).map((ctx) => ctx.scope === "tag" && ctx.tag ? `tag:${ctx.tag}` : ctx.scope).filter((scope, index, items) => items.indexOf(scope) === index);
+  async collectCommandContext(options = {}) {
+    const includeCurrent = options.includeCurrent !== false;
+    const selectedScopes = this.deps.contextManager.getContexts().filter((ctx) => ctx.type === "scope" && ctx.scope).map((ctx) => ctx.scope === "tag" && ctx.tag ? `tag:${ctx.tag}` : ctx.scope).filter((scope, index, items) => items.indexOf(scope) === index);
+    const explicitScopes = [
+      ...includeCurrent ? ["current"] : [],
+      ...selectedScopes
+    ].filter((scope, index, items) => items.indexOf(scope) === index);
     const contextItems = await this.deps.contextManager.resolveContexts();
     const obsidianContextService = this.deps.obsidianContextService ?? new ObsidianContextService(this.deps.app);
     const snapshot = await obsidianContextService.collect({
       includeBacklinks: explicitScopes.includes("backlinks"),
+      includeCurrent,
       explicitScopes
     });
     return {
@@ -8575,6 +8785,7 @@ var StreamController = class {
 };
 
 // src/ui/components/command-dropdown.ts
+var import_obsidian12 = require("obsidian");
 var CommandDropdown = class {
   constructor(containerEl, handlers) {
     this.containerEl = containerEl;
@@ -8599,10 +8810,13 @@ var CommandDropdown = class {
         cls: `suggestion-item${index === this.selectedIndex ? " is-selected" : ""}`,
         attr: { role: "option", "aria-selected": String(index === this.selectedIndex) }
       });
-      el.createSpan({ cls: "suggestion-icon", text: this.getIcon() });
-      el.createSpan({ cls: "suggestion-text", text: item.label });
-      if (item.desc) {
-        el.createSpan({ cls: "suggestion-desc", text: item.desc });
+      const icon = el.createSpan({ cls: "suggestion-icon" });
+      (0, import_obsidian12.setIcon)(icon, this.getIconName(item));
+      const copy = el.createDiv({ cls: "suggestion-copy" });
+      copy.createSpan({ cls: "suggestion-title", text: this.getTitle(item) });
+      copy.createSpan({ cls: "suggestion-value", text: this.getInsertValue(item) });
+      if (item.desc && item.desc !== this.getTitle(item)) {
+        copy.createSpan({ cls: "suggestion-desc", text: item.desc });
       }
       el.createSpan({ cls: "suggestion-source", text: item.source || this.getDefaultSource() });
       el.addEventListener("click", () => this.handlers.onSelect(item, index));
@@ -8640,12 +8854,52 @@ var CommandDropdown = class {
     this.containerEl.empty();
     this.items = [];
   }
-  getIcon() {
+  getIconName(item) {
+    if (item.source === "scope") {
+      if (item.scope === "backlinks")
+        return "network";
+      if (item.scope === "recent")
+        return "clock";
+      if (item.scope === "tag")
+        return "tag";
+      return "file-text";
+    }
     if (this.type === "file")
-      return "@";
+      return "file-text";
     if (this.type === "skill")
-      return "$";
-    return "/";
+      return "sparkles";
+    if (item.label.includes("compile"))
+      return "refresh-cw";
+    if (item.label.includes("clear"))
+      return "eraser";
+    if (item.label.includes("help"))
+      return "circle-help";
+    if (item.label.includes("open"))
+      return "folder-open";
+    if (item.label.includes("edit"))
+      return "pencil";
+    return "terminal";
+  }
+  getTitle(item) {
+    if (item.source === "scope") {
+      if (item.scope === "backlinks")
+        return "Backlinks";
+      if (item.scope === "recent")
+        return "Recent notes";
+      if (item.scope === "tag")
+        return item.tag ? `Tag: ${item.tag}` : "Tag";
+      return "Current note";
+    }
+    if (this.type === "command" && item.desc)
+      return item.desc;
+    return item.label.replace(/^[@/$]/, "");
+  }
+  getInsertValue(item) {
+    if (item.kind === "scope")
+      return item.value || item.label;
+    if (this.type === "command")
+      return item.label;
+    return item.value || item.label;
   }
   getDefaultSource() {
     if (this.type === "file")
@@ -8662,6 +8916,7 @@ var CommandDropdown = class {
 };
 
 // src/ui/components/input-toolbar.ts
+var import_obsidian13 = require("obsidian");
 var InputToolbar = class {
   constructor(containerEl, handlers) {
     this.containerEl = containerEl;
@@ -8678,41 +8933,38 @@ var InputToolbar = class {
     });
     const actions = this.containerEl.createDiv({ cls: "shell-action-buttons" });
     this.imageButtonEl = actions.createEl("button", {
-      cls: "clickable-icon shell-image-btn",
-      text: "Image",
+      cls: "clickable-icon shell-action-btn shell-image-btn",
       attr: { "aria-label": "Add image context", title: "Add image context" }
     });
-    this.stopButtonEl = actions.createEl("button", {
-      cls: "clickable-icon shell-stop-btn",
-      text: "Stop",
-      attr: { "aria-label": "Stop response", title: "Stop response" }
-    });
-    this.sendButtonEl = actions.createEl("button", {
-      cls: "clickable-icon shell-send-btn",
-      text: "Send",
+    (0, import_obsidian13.setIcon)(this.imageButtonEl, "image");
+    this.runButtonEl = actions.createEl("button", {
+      cls: "clickable-icon shell-action-btn shell-run-btn",
       attr: { "aria-label": "Send message", title: "Send message" }
     });
+    (0, import_obsidian13.setIcon)(this.runButtonEl, "send-horizontal");
     this.providerSelectEl.addEventListener("change", () => this.handleProviderChange());
     this.modelSelectEl.addEventListener("change", () => this.handleModelChange());
     this.imageButtonEl.addEventListener("click", () => {
       if (!this.imageButtonEl.disabled)
         void this.handlers.onImage?.();
     });
-    this.stopButtonEl.addEventListener("click", () => {
-      if (!this.stopButtonEl.disabled)
+    this.runButtonEl.addEventListener("click", () => {
+      if (this.runButtonEl.disabled)
+        return;
+      if (this.isResponding) {
         void this.handlers.onStop?.();
-    });
-    this.sendButtonEl.addEventListener("click", () => {
+        return;
+      }
       void this.handlers.onSend?.();
     });
   }
   providerSelectEl;
   modelSelectEl;
   imageButtonEl;
-  sendButtonEl;
-  stopButtonEl;
+  runButtonEl;
   providers = /* @__PURE__ */ new Map();
   activeProviderId = "";
+  isResponding = false;
   updateProviders(providers, activeProviderId) {
     this.providers = new Map(providers.map((provider) => [provider.id, provider]));
     this.activeProviderId = activeProviderId;
@@ -8760,8 +9012,17 @@ var InputToolbar = class {
     this.modelSelectEl.disabled = false;
   }
   updateCapabilities(capabilities) {
+    const isResponding = capabilities.isResponding ?? capabilities.supportsCancellation ?? false;
+    const canStop = capabilities.supportsCancellation ?? isResponding;
+    this.isResponding = isResponding;
     this.imageButtonEl.disabled = !capabilities.supportsImageInput;
-    this.stopButtonEl.disabled = !capabilities.supportsCancellation;
+    this.runButtonEl.disabled = isResponding ? !canStop : capabilities.canSend === false;
+    const label = isResponding ? "Stop response" : "Send message";
+    this.runButtonEl.setAttribute("aria-label", label);
+    this.runButtonEl.setAttribute("title", label);
+    (0, import_obsidian13.setIcon)(this.runButtonEl, isResponding ? "square" : "send-horizontal");
+    this.runButtonEl.toggleClass?.("is-stop", isResponding);
+    this.runButtonEl.toggleClass?.("is-send", !isResponding);
   }
   getProviderSelectEl() {
     return this.providerSelectEl;
@@ -8949,17 +9210,19 @@ var HistoryMenu = class {
 };
 
 // src/ui/components/knowledge-status-panel.ts
-var import_obsidian12 = require("obsidian");
+var import_obsidian14 = require("obsidian");
 var KnowledgeStatusPanel = class {
   constructor(container, options) {
     this.container = container;
     this.options = options;
+    this.setIconFn = options.setIcon ?? import_obsidian14.setIcon;
   }
+  setIconFn;
   async refresh() {
     this.container.empty();
     this.container.addClass?.("shell-knowledge-status-panel") ?? this.container.classList.add("shell-knowledge-status-panel");
     const activeFile = this.options.app.workspace.getActiveFile?.();
-    if (!(activeFile instanceof import_obsidian12.TFile)) {
+    if (!(activeFile instanceof import_obsidian14.TFile)) {
       this.renderEmpty("Open a note to view knowledge status.");
       return;
     }
@@ -8985,36 +9248,82 @@ var KnowledgeStatusPanel = class {
     }
   }
   renderStatus(activeFile, status, runtime) {
-    const header = this.container.createDiv({ cls: "shell-knowledge-status-header" });
-    header.createDiv({ cls: "shell-knowledge-status-title", text: activeFile.basename });
-    header.createDiv({ cls: `shell-knowledge-status-badge is-${status.state}`, text: status.state });
-    const meta = this.container.createDiv({ cls: "shell-knowledge-status-meta" });
-    meta.createDiv({
-      cls: "shell-knowledge-status-details",
-      text: this.buildSummary(status)
+    const strip = this.container.createDiv({
+      cls: `shell-knowledge-status-strip is-${status.state}`,
+      title: this.buildSummary(status),
+      attr: { role: "button", tabindex: "0", "aria-label": `Current note: ${activeFile.basename}` }
     });
-    const actions = this.container.createDiv({ cls: "shell-knowledge-status-actions" });
-    this.createAction(actions, "Compile Current Note", async () => {
-      const result = await runtime?.compileByPath?.(activeFile.path);
+    const icon = strip.createDiv({ cls: "shell-knowledge-status-file-icon" });
+    this.setIconFn(icon, "file-text");
+    strip.createSpan({ cls: "shell-knowledge-status-title", text: activeFile.basename });
+    const exclude = strip.createEl("button", {
+      cls: "shell-knowledge-status-exclude clickable-icon",
+      attr: {
+        type: "button",
+        "aria-label": "Exclude current note from context",
+        title: "Exclude current note from context"
+      }
+    });
+    this.setIconFn(exclude, "x");
+    exclude.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.options.onExcludeCurrentContext?.(activeFile.path);
+    });
+    strip.addEventListener("click", () => {
+      this.toggleMoreMenu(strip, activeFile, status);
+    });
+    strip.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ")
+        return;
+      event.preventDefault();
+      this.toggleMoreMenu(strip, activeFile, status);
+    });
+  }
+  toggleMoreMenu(parent, activeFile, status) {
+    const existing = parent.querySelector?.(".shell-knowledge-status-menu");
+    if (existing) {
+      existing.remove();
+      return;
+    }
+    const menu = parent.createDiv({ cls: "shell-knowledge-status-menu" });
+    this.createMenuItem(menu, "Compile note", "refresh-cw", async () => {
+      const result = await (this.options.plugin?.knowledgeRuntime ?? null)?.compileByPath?.(activeFile.path);
       if (result) {
-        new import_obsidian12.Notice(`Knowledge compile: ${result.success} success, ${result.failed} failed`);
+        new import_obsidian14.Notice(`Knowledge compile: ${result.success} success, ${result.failed} failed`);
       }
       await this.refresh();
     });
-    this.createAction(actions, "Open Knowledge Index", () => {
+    this.createMenuItem(menu, "Add backlinks", "network", () => {
+      this.options.onAddRelatedContext?.(activeFile.path);
+    });
+    this.createMenuItem(menu, "Open wiki summary", "external-link", () => {
+      const summaryPath = status.summaryPath;
+      if (summaryPath && typeof this.options.app.workspace?.openLinkText === "function") {
+        void this.options.app.workspace.openLinkText(summaryPath, "", false);
+        return;
+      }
       this.options.app.commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
     });
-    this.createAction(actions, "Run Knowledge Lint", () => {
+    this.createMenuItem(menu, "Run knowledge lint", "scan-line", () => {
       this.options.app.commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
     });
+    this.createMenuItem(menu, "Copy note path", "copy", () => {
+      void globalThis.navigator?.clipboard?.writeText?.(activeFile.path);
+      new import_obsidian14.Notice("Copied note path.");
+    });
+    this.createMenuItem(menu, "Settings", "settings", () => {
+      this.options.onOpenKnowledgeSettings?.();
+    });
   }
-  createAction(container, label, handler) {
-    const button = container.createEl("button", {
-      cls: "shell-knowledge-status-action",
-      text: label,
+  createMenuItem(container, label, icon, handler) {
+    const item = container.createEl("button", {
+      cls: "shell-knowledge-status-menu-item",
       attr: { type: "button" }
     });
-    button.addEventListener("click", () => {
+    const iconEl = item.createSpan({ cls: "shell-knowledge-status-menu-icon" });
+    this.setIconFn(iconEl, icon);
+    item.createSpan({ cls: "shell-knowledge-status-menu-label", text: label });
+    item.addEventListener("click", () => {
       void handler();
     });
   }
@@ -9029,7 +9338,7 @@ var KnowledgeStatusPanel = class {
       case "processing":
         return "Compiling now.";
       case "done":
-        return status.compiledAt ? `Compiled ${status.compiledAt}` : "Compiled successfully.";
+        return status.compiledAt ? `\u5DF2\u540C\u6B65 \xB7 Compiled ${status.compiledAt}` : "\u5DF2\u540C\u6B65 \xB7 Compiled successfully.";
       case "unregistered":
       default:
         return "Not added to the knowledge wiki.";
@@ -9072,20 +9381,21 @@ var ThinkingRenderer = class {
     if (!this.currentThinkingBlock) {
       this.currentStartedAt = this.now();
       this.currentThinkingBlock = this.timeline.createDiv({ cls: "ocli-thinking-block is-thinking" });
-      const header = this.currentThinkingBlock.createDiv({ cls: "ocli-thinking-header" });
+      const block = this.currentThinkingBlock;
+      const header = block.createDiv({ cls: "ocli-thinking-header" });
       header.createSpan({ cls: "ocli-thinking-caret", text: ">" });
       header.createSpan({ cls: "ocli-thinking-label", text: "Thinking" });
       header.createSpan({ cls: "ocli-thinking-timer", text: "0s" });
       this.setAttribute(header, "role", "button");
       this.setAttribute(header, "tabindex", "0");
       this.setAttribute(header, "aria-expanded", "true");
-      this.currentThinkingBlock.createDiv({ cls: "ocli-thinking-content" });
-      header.addEventListener("click", () => this.toggleCollapsed());
+      block.createDiv({ cls: "ocli-thinking-content" });
+      header.addEventListener("click", () => this.toggleCollapsed(block));
       header.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" && event.key !== " ")
           return;
         event.preventDefault();
-        this.toggleCollapsed();
+        this.toggleCollapsed(block);
       });
       this.nodeCount++;
     }
@@ -9118,12 +9428,10 @@ var ThinkingRenderer = class {
   getNodeCount() {
     return this.nodeCount;
   }
-  toggleCollapsed() {
-    if (!this.currentThinkingBlock)
-      return;
-    const header = this.currentThinkingBlock.querySelector(".ocli-thinking-header");
-    const nextCollapsed = !this.hasClass(this.currentThinkingBlock, "is-collapsed");
-    this.toggleClass(this.currentThinkingBlock, "is-collapsed", nextCollapsed);
+  toggleCollapsed(block) {
+    const header = block.querySelector(".ocli-thinking-header");
+    const nextCollapsed = !this.hasClass(block, "is-collapsed");
+    this.toggleClass(block, "is-collapsed", nextCollapsed);
     if (header) {
       this.setAttribute(header, "aria-expanded", String(!nextCollapsed));
     }
@@ -9370,65 +9678,183 @@ function safeStringify(value) {
 }
 
 // src/ui/renderers/message-renderer.ts
-var import_obsidian13 = require("obsidian");
+var import_obsidian16 = require("obsidian");
 
 // src/ui/components/change-preview-card.ts
 function renderChangePreviewCard(container, preview) {
   const card = container.createDiv({ cls: "shell-change-preview-card" });
   card.createDiv({ cls: "shell-change-preview-summary", text: preview.summary });
   card.createDiv({ cls: "shell-change-preview-target", text: preview.target });
-  if (preview.preconditions?.length) {
-    const conditions = card.createDiv({ cls: "shell-change-preview-preconditions" });
-    for (const condition of preview.preconditions) {
-      conditions.createDiv({ cls: "shell-change-preview-precondition", text: condition });
-    }
-  }
   if (preview.oldContent !== void 0 || preview.newContent !== void 0) {
-    const content = card.createDiv({ cls: "shell-change-preview-content" });
-    if (preview.oldContent !== void 0) {
-      const oldBlock = content.createDiv({ cls: "shell-change-preview-block shell-change-preview-old" });
-      oldBlock.createDiv({ cls: "shell-change-preview-label", text: "Current content" });
-      oldBlock.createEl("pre", {
-        cls: "shell-change-preview-old-content shell-change-preview-code",
-        text: preview.oldContent
-      });
-    }
-    if (preview.newContent !== void 0) {
-      const newBlock = content.createDiv({ cls: "shell-change-preview-block shell-change-preview-new" });
-      newBlock.createDiv({ cls: "shell-change-preview-label", text: "Proposed content" });
-      newBlock.createEl("pre", {
-        cls: "shell-change-preview-new-content shell-change-preview-code",
-        text: preview.newContent
-      });
-    }
+    renderCompactDiff(card, preview.oldContent ?? "", preview.newContent ?? "");
   }
   return card;
 }
+function renderCompactDiff(card, oldContent, newContent) {
+  const diff = buildCompactDiff(oldContent, newContent);
+  const diffEl = card.createDiv({ cls: "shell-change-preview-diff" });
+  const header = diffEl.createDiv({ cls: "shell-change-preview-diff-header" });
+  header.createDiv({ cls: "shell-change-preview-diff-title", text: "Preview diff" });
+  header.createDiv({
+    cls: "shell-change-preview-diff-count",
+    text: `${diff.changedLines} changed ${diff.changedLines === 1 ? "line" : "lines"}`
+  });
+  const lines = diffEl.createDiv({ cls: "shell-change-preview-diff-lines" });
+  for (const row of diff.rows) {
+    lines.createDiv({
+      cls: `shell-change-preview-diff-line shell-change-preview-diff-line-${row.type}`,
+      text: `${row.type === "added" ? "+ " : row.type === "removed" ? "- " : "  "}${row.text}`
+    });
+  }
+  if (diff.truncated) {
+    lines.createDiv({ cls: "shell-change-preview-diff-line shell-change-preview-diff-line-more", text: "..." });
+  }
+}
+function buildCompactDiff(oldContent, newContent) {
+  const oldLines = oldContent.split(/\r?\n/);
+  const newLines = newContent.split(/\r?\n/);
+  const max = Math.max(oldLines.length, newLines.length);
+  const rows = [];
+  let changedLines = 0;
+  for (let index = 0; index < max; index += 1) {
+    const oldLine = oldLines[index];
+    const newLine = newLines[index];
+    if (oldLine === newLine) {
+      continue;
+    }
+    if (oldLine !== void 0) {
+      changedLines += 1;
+      rows.push({ type: "removed", text: oldLine });
+    }
+    if (newLine !== void 0) {
+      changedLines += 1;
+      rows.push({ type: "added", text: newLine });
+    }
+  }
+  if (!rows.length) {
+    rows.push({ type: "context", text: oldLines[0] || newLines[0] || "" });
+  }
+  return { rows, changedLines, truncated: false };
+}
 
 // src/ui/approval-card.ts
+var import_obsidian15 = require("obsidian");
 function renderApprovalCard(container, request, handlers) {
-  const card = container.createDiv({ cls: "shell-approval-card" });
-  card.createDiv({ cls: "shell-approval-title", text: "Approval Required" });
-  card.createDiv({ cls: "shell-approval-message", text: request.message });
+  const risk = request.preview?.risk ?? inferRisk(request);
+  const setIconFn = handlers.setIcon ?? import_obsidian15.setIcon;
+  const card = container.createDiv({ cls: `shell-approval-card is-${risk}-risk` });
+  const header = card.createDiv({ cls: "shell-approval-header" });
+  header.createDiv({ cls: "shell-approval-icon", text: risk === "high" ? "!" : "i" });
+  const copy = header.createDiv({ cls: "shell-approval-copy" });
+  copy.createDiv({ cls: "shell-approval-title", text: getApprovalTitle(request) });
+  copy.createDiv({ cls: "shell-approval-message", text: request.message });
+  copy.createDiv({ cls: "shell-approval-risk", text: `${capitalize(risk)} risk` });
+  const facts = card.createDiv({ cls: "shell-approval-facts" });
+  renderFact(facts, "Action", request.action, "shell-approval-action-value");
+  renderFact(facts, "Target", request.target, "shell-approval-target-value");
+  if (request.preview?.preconditions?.length) {
+    const preconditions = card.createDiv({ cls: "shell-approval-preconditions" });
+    for (const condition of request.preview.preconditions) {
+      preconditions.createDiv({ cls: "shell-approval-precondition", text: condition });
+    }
+  }
   if (request.preview) {
     renderChangePreviewCard(card, request.preview);
   }
   const actions = card.createDiv({ cls: "shell-approval-actions" });
-  const approveButton = actions.createEl("button", {
-    cls: "shell-approval-btn shell-approval-confirm",
-    text: "Approve"
-  });
-  const cancelButton = actions.createEl("button", {
-    cls: "shell-approval-btn shell-approval-cancel",
-    text: "Cancel"
-  });
-  approveButton.addEventListener("click", () => {
-    void handlers.onApprove();
-  });
-  cancelButton.addEventListener("click", () => {
+  let pending = false;
+  const buttons = [];
+  const setPending = () => {
+    pending = true;
+    addClass(card, "is-pending");
+    for (const button of buttons) {
+      button.disabled = true;
+      button.setAttribute("aria-disabled", "true");
+    }
+  };
+  if (handlers.onFocusPreview) {
+    buttons.push(createIconButton(actions, "shell-approval-focus-preview", "locate-fixed", "Show editor preview", setIconFn, () => {
+      if (pending)
+        return;
+      void handlers.onFocusPreview?.();
+    }));
+  }
+  const cancelButton = createIconButton(actions, "shell-approval-cancel", "x", "Cancel", setIconFn, () => {
+    if (pending)
+      return;
+    setPending();
     void handlers.onCancel();
   });
+  const approveButton = createIconButton(
+    actions,
+    `shell-approval-confirm${risk === "high" ? " is-danger" : ""}`,
+    "check",
+    getApproveLabel(request),
+    setIconFn,
+    () => {
+      if (pending)
+        return;
+      setPending();
+      void handlers.onApprove();
+    }
+  );
+  buttons.push(cancelButton, approveButton);
   return card;
+}
+function addClass(el, className) {
+  if (typeof el.addClass === "function") {
+    el.addClass(className);
+    return;
+  }
+  if (el.classList?.add) {
+    el.classList.add(className);
+    return;
+  }
+  el.className = `${el.className || ""} ${className}`.trim();
+}
+function createIconButton(container, className, icon, label, setIconFn, onClick) {
+  const button = container.createEl("button", {
+    cls: `shell-approval-btn shell-approval-icon-btn ${className}`,
+    attr: { type: "button", title: label, "aria-label": label }
+  });
+  setIconFn(button, icon);
+  button.addEventListener("click", onClick);
+  return button;
+}
+function renderFact(container, label, value, valueClass) {
+  const row = container.createDiv({ cls: "shell-approval-fact" });
+  row.createDiv({ cls: "shell-approval-fact-label", text: label });
+  row.createDiv({ cls: `shell-approval-fact-value ${valueClass}`, text: value });
+}
+function inferRisk(request) {
+  return /delete|remove|overwrite|plugin/i.test(`${request.action} ${request.message}`) ? "high" : "medium";
+}
+function getApproveLabel(request) {
+  const action = request.action.toLowerCase();
+  if (action.includes("delete") || action.includes("remove"))
+    return "Approve delete";
+  if (action.includes("create"))
+    return "Approve create";
+  if (action.includes("edit") || action.includes("modify") || action.includes("update") || action.includes("replace")) {
+    return "Approve edit";
+  }
+  return "Approve action";
+}
+function getApprovalTitle(request) {
+  const action = request.action.toLowerCase();
+  if (action.includes("delete") || action.includes("remove"))
+    return "\u9700\u8981\u5BA1\u6279\uFF1A\u5220\u9664\u5185\u5BB9";
+  if (action.includes("create"))
+    return "\u9700\u8981\u5BA1\u6279\uFF1A\u521B\u5EFA\u5185\u5BB9";
+  if (action.includes("edit") || action.includes("modify") || action.includes("update") || action.includes("replace")) {
+    return "\u9700\u8981\u5BA1\u6279\uFF1A\u4FEE\u6539\u5F53\u524D\u7B14\u8BB0";
+  }
+  if (action.includes("plugin"))
+    return "\u9700\u8981\u5BA1\u6279\uFF1A\u6267\u884C\u63D2\u4EF6\u64CD\u4F5C";
+  return "\u9700\u8981\u5BA1\u6279\uFF1A\u786E\u8BA4\u64CD\u4F5C";
+}
+function capitalize(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 // src/ui/renderers/code-block-renderer.ts
@@ -9487,7 +9913,7 @@ var CodeBlockRenderer = class {
 var MessageRenderer = class {
   constructor(options) {
     this.options = options;
-    this.renderMarkdown = options.renderMarkdown ?? import_obsidian13.MarkdownRenderer.render.bind(import_obsidian13.MarkdownRenderer);
+    this.renderMarkdown = options.renderMarkdown ?? import_obsidian16.MarkdownRenderer.render.bind(import_obsidian16.MarkdownRenderer);
     this.codeBlockRenderer = new CodeBlockRenderer({
       onReviewCodeBlock: options.onReviewCodeBlock,
       onInternalLinkClick: options.onInternalLinkClick
@@ -9499,9 +9925,29 @@ var MessageRenderer = class {
     const entry = container.createDiv({ cls: `shell-entry ${message.role}` });
     try {
       if (message.approval) {
-        renderApprovalCard(entry, message.approval, {
-          onApprove: () => this.options.onApprove?.(message),
-          onCancel: () => this.options.onCancel?.(message)
+        entry.addClass?.("shell-approval-entry") ?? entry.classList.add("shell-approval-entry");
+        entry.createDiv({ cls: "shell-approval-avatar", text: "AI" });
+        const approvalBody = entry.createDiv({ cls: "shell-approval-message-body" });
+        const removeApprovalEntry = () => {
+          if (typeof entry.remove === "function") {
+            entry.remove();
+            return;
+          }
+          const parent = entry.parentElement;
+          if (parent?.children) {
+            parent.children = Array.from(parent.children).filter((child) => child !== entry);
+          }
+        };
+        renderApprovalCard(approvalBody, message.approval, {
+          onApprove: () => {
+            removeApprovalEntry();
+            return this.options.onApprove?.(message);
+          },
+          onCancel: () => {
+            removeApprovalEntry();
+            return this.options.onCancel?.(message);
+          },
+          onFocusPreview: () => this.options.onFocusApprovalPreview?.(message)
         });
       } else if (message.role === "ai") {
         await this.renderAiContent(entry, message.content);
@@ -9509,6 +9955,9 @@ var MessageRenderer = class {
       } else if (message.role === "user") {
         this.setText(entry, message.content);
       } else {
+        if (this.isCancelledSystemMessage(message.content)) {
+          entry.addClass?.("shell-system-cancelled") ?? entry.classList.add("shell-system-cancelled");
+        }
         this.setText(entry, `[System] ${message.content}`);
       }
     } catch (error) {
@@ -9583,6 +10032,9 @@ var MessageRenderer = class {
     } else {
       entry.textContent = text;
     }
+  }
+  isCancelledSystemMessage(content) {
+    return /^Cancelled:/i.test(content.trim());
   }
 };
 
@@ -10034,8 +10486,129 @@ var ConversationStore = class {
   }
 };
 
+// src/ui/ghost-text.ts
+var import_view = require("@codemirror/view");
+var import_state = require("@codemirror/state");
+var import_state2 = require("@codemirror/state");
+var import_state3 = require("@codemirror/state");
+var setGhostText = import_state.StateEffect.define();
+var GhostTextWidget = class extends import_view.WidgetType {
+  constructor(text) {
+    super();
+    this.text = text;
+  }
+  toDOM() {
+    const span = document.createElement("span");
+    span.className = "guardian-ghost-text";
+    span.textContent = this.text;
+    span.setAttribute("aria-label", "Press Tab to accept suggestion");
+    return span;
+  }
+  ignoreEvent() {
+    return false;
+  }
+};
+var ghostTextField = import_state.StateField.define({
+  create() {
+    return import_view.Decoration.none;
+  },
+  update(decorations, tr) {
+    for (let effect of tr.effects) {
+      if (effect.is(setGhostText)) {
+        if (effect.value) {
+          const { text, line, ch } = effect.value;
+          if (line < 1 || line > tr.state.doc.lines) {
+            continue;
+          }
+          const lineBlock = tr.state.doc.line(line);
+          const pos = Math.min(lineBlock.from + ch, lineBlock.to);
+          const widget = import_view.Decoration.widget({
+            widget: new GhostTextWidget(text || ""),
+            side: 1
+          });
+          return import_view.Decoration.set([widget.range(pos)]);
+        } else {
+          return import_view.Decoration.none;
+        }
+      }
+    }
+    if (tr.docChanged) {
+      return import_view.Decoration.none;
+    }
+    return decorations.map(tr.changes);
+  },
+  provide: (f) => import_view.EditorView.decorations.from(f)
+});
+var ghostTextStateField = import_state.StateField.define({
+  create() {
+    return null;
+  },
+  update(value, tr) {
+    for (let effect of tr.effects) {
+      if (effect.is(setGhostText)) {
+        return effect.value;
+      }
+    }
+    if (tr.docChanged)
+      return null;
+    return value;
+  }
+});
+function acceptGhostTextReal(view) {
+  const suggestion = view.state.field(ghostTextStateField);
+  if (!suggestion)
+    return false;
+  const { text, replaceRange, line, ch } = suggestion;
+  let from = replaceRange ? replaceRange.from : 0;
+  let to = replaceRange ? replaceRange.to : 0;
+  if (!replaceRange) {
+    const lineBlock = view.state.doc.line(line);
+    from = Math.min(lineBlock.from + ch, lineBlock.to);
+    to = from;
+  }
+  view.dispatch({
+    changes: { from, to, insert: text },
+    selection: import_state2.EditorSelection.cursor(from + text.length),
+    effects: setGhostText.of(null)
+  });
+  return true;
+}
+var ghostTextKeymap = import_state3.Prec.highest(import_view.keymap.of([
+  {
+    key: "Tab",
+    run: (view) => {
+      return acceptGhostTextReal(view);
+    }
+  },
+  {
+    key: "Escape",
+    run: (view) => {
+      const suggestion = view.state.field(ghostTextStateField);
+      if (suggestion) {
+        view.dispatch({
+          effects: setGhostText.of(null)
+        });
+        return true;
+      }
+      return false;
+    }
+  }
+]));
+function ghostTextExtension() {
+  return [
+    ghostTextField,
+    ghostTextStateField,
+    ghostTextKeymap
+  ];
+}
+function showGhostText(view, text, line, ch, replaceRange) {
+  view.dispatch({
+    effects: setGhostText.of({ text, line, ch, replaceRange })
+  });
+}
+
 // src/ui/shell-view.ts
-var ShellView = class extends import_obsidian14.ItemView {
+var ShellView = class extends import_obsidian17.ItemView {
   constructor(leaf, modelService, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -10104,6 +10677,7 @@ var ShellView = class extends import_obsidian14.ItemView {
   historyMenuContainerEl = null;
   knowledgeStatusPanel = null;
   knowledgeStatusContainerEl = null;
+  excludedCurrentNotePath = null;
   // Heartbeat monitoring
   heartbeatInterval = null;
   lastActivityTime = Date.now();
@@ -10160,7 +10734,7 @@ var ShellView = class extends import_obsidian14.ItemView {
     if (window.getSelection()?.toString())
       return;
     const target = e.target;
-    if (target.closest(".shell-suggestions") || target.closest(".shell-context-chips") || target.closest(".shell-model-select-container") || target.closest(".shell-action-buttons") || target.closest(".ocli-history-menu") || target.closest(".shell-history-btn"))
+    if (target.closest(".shell-suggestions") || target.closest(".shell-context-chips") || target.closest(".shell-model-select-container") || target.closest(".shell-action-buttons") || target.closest(".shell-input-top-actions") || target.closest(".ocli-history-menu") || target.closest(".shell-history-btn"))
       return;
     this.hideHistoryMenu();
     this.inputEl.focus();
@@ -10182,9 +10756,12 @@ var ShellView = class extends import_obsidian14.ItemView {
     const container = contentEl.createDiv({ cls: "ocli-shell-view" });
     const header = container.createDiv({ cls: "shell-header" });
     const headerTitle = header.createDiv({ cls: "shell-header-title" });
-    headerTitle.createEl("h1", { text: "Obsidian Shell", cls: "shell-title" });
+    const headerIdentity = headerTitle.createDiv({ cls: "shell-header-identity" });
+    headerIdentity.createDiv({ cls: "shell-brand-mark", text: "CLI" });
+    const headerCopy = headerIdentity.createDiv({ cls: "shell-header-copy" });
+    headerCopy.createEl("h1", { text: "Shell", cls: "shell-title" });
+    headerCopy.createDiv({ cls: "shell-header-state", text: "Ready - current note scoped" });
     this.tabBarContainerEl = headerTitle.createDiv({ cls: "shell-tab-bar-container" });
-    const headerButtons = header.createDiv({ cls: "shell-header-buttons" });
     this.historyMenuContainerEl = header.createDiv({ cls: "ocli-history-menu" });
     this.historyMenu = new HistoryMenu(this.historyMenuContainerEl, {
       onOpen: (id) => this.openConversationFromHistory(id),
@@ -10193,71 +10770,6 @@ var ShellView = class extends import_obsidian14.ItemView {
       onClose: () => this.hideHistoryMenu()
     });
     this.historyMenu.hide();
-    this.knowledgeStatusContainerEl = container.createDiv({ cls: "shell-knowledge-status-host" });
-    this.knowledgeStatusPanel = new KnowledgeStatusPanel(this.knowledgeStatusContainerEl, {
-      app: this.app,
-      plugin: this.plugin
-    });
-    void this.refreshKnowledgeStatusPanel();
-    this.registerEvent(
-      this.app.workspace.on("file-open", () => {
-        void this.refreshKnowledgeStatusPanel();
-      })
-    );
-    this.registerEvent(
-      this.app.metadataCache.on("changed", () => {
-        void this.refreshKnowledgeStatusPanel();
-      })
-    );
-    const historyBtn = headerButtons.createEl("button", {
-      cls: "clickable-icon shell-history-btn",
-      attr: { "aria-label": "Conversation history" }
-    });
-    historyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v5l3 3"></path><path d="M3.05 11a9 9 0 1 1 .5 4"></path><path d="M3 4v7h7"></path></svg>';
-    historyBtn.addEventListener("click", (event) => {
-      event.stopPropagation();
-      void this.toggleHistoryMenu();
-    });
-    const clearBtn = headerButtons.createEl("button", {
-      cls: "clickable-icon",
-      attr: { "aria-label": "Clear Chat" }
-    });
-    clearBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
-    clearBtn.addEventListener("click", () => {
-      this.clearChat();
-    });
-    const toolsBtn = headerButtons.createEl("button", {
-      cls: "clickable-icon",
-      attr: { "aria-label": "Tools" }
-    });
-    toolsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>';
-    toolsBtn.addEventListener("click", async () => {
-      const tools = this.modelService.getAvailableTools();
-      if (tools && tools.length > 0) {
-        let toolsList = "Available Tools:\n";
-        tools.forEach((tool) => {
-          toolsList += `
-${tool.name}: ${tool.description}
-`;
-          if (tool.input_schema && tool.input_schema.properties) {
-            toolsList += `  Parameters: ${Object.keys(tool.input_schema.properties).join(", ")}
-`;
-          }
-        });
-        new import_obsidian14.Notice(toolsList, 8e3);
-      } else {
-        new import_obsidian14.Notice("No tools available or tools not loaded yet.");
-      }
-    });
-    const settingsBtn = headerButtons.createEl("button", {
-      cls: "clickable-icon",
-      attr: { "aria-label": "Settings" }
-    });
-    settingsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 .6 1v.51a2 2 0 0 1-.6 1l-.15.15a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-.6-1v-.5a2 2 0 0 1 .6-1l.15-.15a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
-    settingsBtn.addEventListener("click", () => {
-      this.app.setting.open();
-      this.app.setting.openTabById("obsidian-cli");
-    });
     this.outputContainer = container.createDiv({ cls: "shell-output-area" });
     this.tabBar = new TabBar(this.tabBarContainerEl, {
       onTabClick: (id) => {
@@ -10280,9 +10792,19 @@ ${tool.name}: ${tool.description}
     }
     this.updateTabBar();
     this.renderActiveTabMessages();
-    const inputContainer = container.createDiv({ cls: "shell-input-container" });
-    const contextContainer = inputContainer.createDiv({ cls: "shell-context-chips" });
-    this.renderContextChips(contextContainer);
+    const inputContainer = this.createShellScaffold(container);
+    void this.refreshKnowledgeStatusPanel();
+    this.registerEvent(
+      this.app.workspace.on("file-open", () => {
+        this.excludedCurrentNotePath = null;
+        void this.refreshKnowledgeStatusPanel();
+      })
+    );
+    this.registerEvent(
+      this.app.metadataCache.on("changed", () => {
+        void this.refreshKnowledgeStatusPanel();
+      })
+    );
     this.suggestionContainer = inputContainer.createDiv({ cls: "shell-suggestions" });
     this.commandDropdown = new CommandDropdown(this.suggestionContainer, {
       onNavigate: (dir) => this.navigateSuggestions(dir),
@@ -10293,7 +10815,7 @@ ${tool.name}: ${tool.description}
     this.inputEl = inputWrapper.createEl("textarea", {
       cls: "shell-input",
       attr: {
-        placeholder: "Ask AI... (/ for commands, @ for files)",
+        placeholder: "Ask AI... (/ commands, @ context)",
         spellcheck: "false",
         autocomplete: "off",
         rows: "1"
@@ -10339,6 +10861,7 @@ ${tool.name}: ${tool.description}
   }
   // ==================== Suggestion Logic ====================
   handleInput() {
+    this.updateInputToolbarCapabilities();
     const trigger = detectSuggestionTrigger(this.inputEl.value, this.inputEl.selectionStart);
     if (trigger) {
       this.showSuggestions(trigger.type, trigger.query);
@@ -10409,8 +10932,12 @@ ${tool.name}: ${tool.description}
     this.inputEl.value = selection.text;
     this.inputEl.selectionStart = this.inputEl.selectionEnd = selection.cursor;
     if (selection.contextItem) {
+      if (selection.contextItem.type === "scope" && selection.contextItem.scope === "current") {
+        this.excludedCurrentNotePath = null;
+      }
       this.contextManager.addContext(selection.contextItem);
       this.renderContextChips(this.outputContainer.parentElement?.querySelector(".shell-context-chips"));
+      void this.refreshKnowledgeStatusPanel();
     }
     this.hideSuggestions();
     this.inputEl.focus();
@@ -10466,7 +10993,7 @@ ${tool.name}: ${tool.description}
         scope: "tag"
       });
     }
-    return suggestions.filter((item) => item.label.toLowerCase().includes(`@${normalized}`) || item.desc.toLowerCase().includes(normalized)).slice(0, 10);
+    return suggestions.filter((item) => item.label.toLowerCase().includes(`@${normalized}`)).slice(0, 10);
   }
   selectSuggestionAt(index) {
     while (this.inputController.getSelectedIndex() !== index) {
@@ -10482,7 +11009,9 @@ ${tool.name}: ${tool.description}
   async processCommand(query) {
     try {
       this.ensureActiveTabSession();
-      const { contextItems, selection } = await this.contextController.collectCommandContext();
+      const { contextItems, selection } = await this.contextController.collectCommandContext({
+        includeCurrent: this.shouldIncludeCurrentNoteContext()
+      });
       this.currentSelection = selection;
       this.updateActivity();
       await this.chatController.processCommand(query, contextItems, this.currentSelection);
@@ -10637,6 +11166,11 @@ ${tool.name}: ${tool.description}
             this.chatController.cancelApproval(message.approval);
           }
         },
+        onFocusApprovalPreview: async (message) => {
+          if (message.approval) {
+            await this.showApprovalPreviewInEditor(message.approval);
+          }
+        },
         onFeedbackUp: async (message) => {
           await this.chatController.archiveMessage(message.id);
           await this.refreshKnowledgeStatusPanel();
@@ -10656,7 +11190,7 @@ ${tool.name}: ${tool.description}
   async reviewCodeBlock(newContent) {
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) {
-      new import_obsidian14.Notice("No active file to apply changes to.");
+      new import_obsidian17.Notice("No active file to apply changes to.");
       return;
     }
     const originalContent = await this.app.vault.read(activeFile);
@@ -10667,13 +11201,56 @@ ${tool.name}: ${tool.description}
         previousContent: originalContent,
         apply: async () => {
           await this.app.vault.modify(activeFile, newContent);
-          new import_obsidian14.Notice("Changes applied.");
+          new import_obsidian17.Notice("Changes applied.");
         }
       });
     }).open();
   }
   async refreshKnowledgeStatusPanel() {
+    if (!this.shouldIncludeCurrentNoteContext()) {
+      this.knowledgeStatusContainerEl?.empty();
+      return;
+    }
     await this.knowledgeStatusPanel?.refresh();
+  }
+  shouldIncludeCurrentNoteContext() {
+    const activePath = this.app.workspace?.getActiveFile?.()?.path;
+    return !!activePath && this.excludedCurrentNotePath !== activePath;
+  }
+  async showApprovalPreviewInEditor(approval) {
+    const previewText = approval.preview?.newContent ?? approval.args?.content;
+    if (!previewText || typeof previewText !== "string") {
+      new import_obsidian17.Notice("No editor preview is available for this approval.");
+      return;
+    }
+    const target = approval.target || approval.args?.path || approval.args?.filename;
+    if (target) {
+      await this.openApprovalTarget(target);
+    }
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian17.MarkdownView);
+    const editor = activeView?.editor;
+    const cmView = editor?.cm;
+    if (!cmView) {
+      new import_obsidian17.Notice("Open the target note in source mode to show the preview.");
+      return;
+    }
+    const line = Math.max(1, editor?.getCursor?.()?.line + 1 || 1);
+    const ch = Math.max(0, editor?.getCursor?.()?.ch || 0);
+    showGhostText(cmView, this.buildApprovalGhostPreview(previewText), line, ch);
+    new import_obsidian17.Notice("Preview shown in the editor. Hover approval icons for actions.");
+  }
+  async openApprovalTarget(path) {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!file)
+      return;
+    const leaf = this.app.workspace.getLeaf(false);
+    await leaf?.openFile?.(file);
+  }
+  buildApprovalGhostPreview(content) {
+    const lines = content.split(/\r?\n/).slice(0, 12);
+    const suffix = content.split(/\r?\n/).length > lines.length ? "\n..." : "";
+    return `
+${lines.join("\n")}${suffix}`;
   }
   async onClose() {
     await this.persistAllTabs();
@@ -10730,7 +11307,15 @@ ${tool.name}: ${tool.description}
   }
   // ==================== Context Handling ====================
   renderContextChips(container) {
-    new ContextChips(container, {
+    if (!container)
+      return;
+    container.empty();
+    if (this.shouldIncludeCurrentNoteContext()) {
+      this.renderImplicitCurrentContext(container);
+    }
+    const explicitContainer = container.createDiv({ cls: "shell-explicit-context-chips" });
+    const explicitContexts = this.contextManager.getContexts().filter((ctx) => !(ctx.type === "scope" && ctx.scope === "current"));
+    new ContextChips(explicitContainer, {
       onRemove: (id) => {
         this.contextManager.removeContext(id);
         this.renderContextChips(container);
@@ -10738,7 +11323,118 @@ ${tool.name}: ${tool.description}
       onOpenFile: (path) => {
         void this.app.workspace.openLinkText(path, "", false);
       }
-    }).update(this.contextManager.getContexts());
+    }).update(explicitContexts);
+  }
+  renderImplicitCurrentContext(container) {
+    const activeFile = this.app.workspace?.getActiveFile?.();
+    const label = activeFile?.basename ? `Current: ${activeFile.basename}` : "Current note";
+    const title = activeFile?.path ? `Current note included by default: ${activeFile.path}` : "Current note is included by default";
+    const chip = container.createDiv({
+      cls: "context-chip context-chip-current is-implicit",
+      title
+    });
+    const iconEl = chip.createSpan({ cls: "chip-icon" });
+    (0, import_obsidian17.setIcon)(iconEl, "file-text");
+    chip.createSpan({ cls: "chip-label", text: label });
+  }
+  getContextChipsContainer() {
+    return this.outputContainer?.parentElement?.querySelector(".shell-context-chips");
+  }
+  createShellScaffold(container) {
+    const inputContainer = container.createDiv({ cls: "shell-input-container" });
+    this.createInputUtilityActions(inputContainer);
+    const contextBar = inputContainer.createDiv({ cls: "shell-input-context-bar" });
+    const contextContainer = contextBar.createDiv({ cls: "shell-context-chips" });
+    this.renderContextChips(contextContainer);
+    this.knowledgeStatusContainerEl = contextBar.createDiv({ cls: "shell-knowledge-status-host" });
+    this.knowledgeStatusPanel = new KnowledgeStatusPanel(this.knowledgeStatusContainerEl, {
+      app: this.app,
+      plugin: this.plugin,
+      onAddRelatedContext: () => this.addBacklinksScopeContext(),
+      onExcludeCurrentContext: (path) => this.excludeCurrentNoteContext(path),
+      onOpenKnowledgeSettings: () => this.openPluginSettings()
+    });
+    return inputContainer;
+  }
+  createInputUtilityActions(container) {
+    const actions = container.createDiv({ cls: "shell-input-top-actions" });
+    this.createInputUtilityButton(actions, "Conversation history", "history", "shell-history-btn", (event) => {
+      event.stopPropagation();
+      void this.toggleHistoryMenu();
+    });
+    this.createInputUtilityButton(actions, "Clear chat", "trash-2", "shell-clear-btn", () => {
+      this.clearChat();
+    });
+    this.createInputUtilityButton(actions, "Tools", "wrench", "shell-tools-btn", () => {
+      this.showAvailableTools();
+    });
+    this.createInputUtilityButton(actions, "Settings", "settings", "shell-settings-btn", () => {
+      this.openPluginSettings();
+    });
+  }
+  createInputUtilityButton(container, label, icon, cls, handler) {
+    const button = container.createEl("button", {
+      cls: `clickable-icon shell-input-top-action ${cls}`,
+      attr: { type: "button", "aria-label": label, title: label }
+    });
+    (0, import_obsidian17.setIcon)(button, icon);
+    button.addEventListener("click", (event) => {
+      void handler(event);
+    });
+    return button;
+  }
+  showAvailableTools() {
+    const tools = this.modelService.getAvailableTools();
+    if (tools && tools.length > 0) {
+      let toolsList = "Available Tools:\n";
+      tools.forEach((tool) => {
+        toolsList += `
+${tool.name}: ${tool.description}
+`;
+        if (tool.input_schema && tool.input_schema.properties) {
+          toolsList += `  Parameters: ${Object.keys(tool.input_schema.properties).join(", ")}
+`;
+        }
+      });
+      new import_obsidian17.Notice(toolsList, 8e3);
+      return;
+    }
+    new import_obsidian17.Notice("No tools available or tools not loaded yet.");
+  }
+  addBacklinksScopeContext() {
+    this.contextManager.addContext({
+      id: "scope:backlinks",
+      type: "scope",
+      data: "@backlinks",
+      summary: "Add notes linking to the current note",
+      scope: "backlinks"
+    });
+    const contextContainer = this.getContextChipsContainer();
+    if (contextContainer)
+      this.renderContextChips(contextContainer);
+    new import_obsidian17.Notice("Added @backlinks context.");
+  }
+  excludeCurrentNoteContext(path) {
+    this.excludedCurrentNotePath = path;
+    const contextContainer = this.getContextChipsContainer();
+    if (contextContainer)
+      this.renderContextChips(contextContainer);
+    if (this.knowledgeStatusContainerEl)
+      this.knowledgeStatusContainerEl.empty();
+  }
+  prepareSelectionEdit() {
+    if (!this.inputEl)
+      return;
+    if (!this.inputEl.value.trim().startsWith("/edit")) {
+      this.inputEl.value = "/edit ";
+    }
+    this.inputEl.focus();
+    this.inputEl.selectionStart = this.inputEl.selectionEnd = this.inputEl.value.length;
+    this.adjustHeight();
+  }
+  openPluginSettings() {
+    this.app.setting.open();
+    this.app.setting.openTabById("obsidian-cli");
   }
   async handlePaste(e) {
     const items = e.clipboardData?.items;
@@ -10748,7 +11444,7 @@ ${tool.name}: ${tool.description}
       const item = items[i];
       if (item.type.indexOf("image") !== -1) {
         if (!this.modelService.getProviderCapabilities().supportsImageInput) {
-          new import_obsidian14.Notice("The active provider does not support image context.");
+          new import_obsidian17.Notice("The active provider does not support image context.");
           return;
         }
         e.preventDefault();
@@ -10786,7 +11482,7 @@ ${tool.name}: ${tool.description}
   handleDrop(e) {
     e.preventDefault();
     if (!this.modelService.getProviderCapabilities().supportsImageInput) {
-      new import_obsidian14.Notice("The active provider does not support image context.");
+      new import_obsidian17.Notice("The active provider does not support image context.");
       return;
     }
     if (e.dataTransfer?.files) {
@@ -10870,9 +11566,12 @@ ${tool.name}: ${tool.description}
     }
   }
   updateInputToolbarCapabilities() {
+    const isResponding = this.tabManager.getActiveTab()?.isStreaming ?? this.isResponding;
     this.inputToolbar?.updateCapabilities({
       supportsImageInput: this.modelService.getProviderCapabilities().supportsImageInput,
-      supportsCancellation: this.tabManager.getActiveTab()?.isStreaming ?? this.isResponding
+      supportsCancellation: isResponding,
+      isResponding,
+      canSend: !!this.inputEl?.value.trim()
     });
   }
   async handleProviderChange(id) {
@@ -10891,12 +11590,12 @@ ${tool.name}: ${tool.description}
         currentNote: this.getCurrentNotePath()
       });
     }
-    new import_obsidian14.Notice(`Switched to ${config.label}`);
+    new import_obsidian17.Notice(`Switched to ${config.label}`);
   }
   handleUnavailableProvider(id) {
     const plugin = this.getPluginInstance();
     const config = plugin?.settings?.providers?.[id];
-    new import_obsidian14.Notice(`${config?.label || id} API Key is not configured. Please configure it in settings.`);
+    new import_obsidian17.Notice(`${config?.label || id} API Key is not configured. Please configure it in settings.`);
     this.app.setting.open();
     this.app.setting.openTabById("obsidian-cli");
     this.refreshInputToolbarProviders();
@@ -10912,7 +11611,7 @@ ${tool.name}: ${tool.description}
         currentNote: this.getCurrentNotePath()
       });
     }
-    new import_obsidian14.Notice(`Switched to ${modelId}`);
+    new import_obsidian17.Notice(`Switched to ${modelId}`);
   }
   async populateModelOptions(selectEl, forceRefresh = false) {
     const settings = this.getPluginInstance()?.settings;
@@ -11001,7 +11700,7 @@ ${tool.name}: ${tool.description}
     const settings = this.getPluginInstance()?.settings;
     const config = settings?.providers?.[settings?.activeProvider];
     const label = config?.label || "AI";
-    this.inputEl.setAttr("placeholder", `Ask ${label}... (/ for commands, @ for files)`);
+    this.inputEl.setAttr("placeholder", `Ask ${label}... (/ commands, @ context)`);
   }
   async updateModelSelector(forceRefresh = false) {
     this.refreshInputToolbarProviders();
@@ -11029,7 +11728,7 @@ ${tool.name}: ${tool.description}
       content: "Chat cleared.",
       timestamp: Date.now()
     });
-    new import_obsidian14.Notice("Chat cleared");
+    new import_obsidian17.Notice("Chat cleared");
   }
   async createAndShowTab() {
     await this.persistActiveTab();
@@ -11177,7 +11876,7 @@ ${tool.name}: ${tool.description}
     const history = await this.conversationController.listHistory();
     const snapshot = history.find((item) => item.id === id);
     if (!snapshot) {
-      new import_obsidian14.Notice("Saved conversation not found.");
+      new import_obsidian17.Notice("Saved conversation not found.");
       this.hideHistoryMenu();
       return;
     }
@@ -11193,7 +11892,7 @@ ${tool.name}: ${tool.description}
   async deleteConversationFromHistory(id) {
     await this.conversationController.deleteConversation(id);
     await this.refreshHistoryMenu();
-    new import_obsidian14.Notice("Conversation deleted.");
+    new import_obsidian17.Notice("Conversation deleted.");
   }
   async persistAllTabs() {
     for (const tab of this.tabManager.getAllTabs()) {
@@ -11263,14 +11962,14 @@ ${tool.name}: ${tool.description}
     const history = await this.conversationController.listHistory();
     const snapshot = history.find((item) => item.id === id);
     if (!snapshot) {
-      new import_obsidian14.Notice("Saved conversation not found.");
+      new import_obsidian17.Notice("Saved conversation not found.");
       await this.refreshHistoryMenu();
       return;
     }
     const nextPinned = !snapshot.pinnedAt;
     const updated = await this.conversationController.togglePinned(id, nextPinned);
     if (!updated) {
-      new import_obsidian14.Notice("Unable to update conversation pin.");
+      new import_obsidian17.Notice("Unable to update conversation pin.");
       await this.refreshHistoryMenu();
       return;
     }
@@ -11278,7 +11977,7 @@ ${tool.name}: ${tool.description}
       pinnedAt: updated.pinnedAt
     });
     await this.refreshHistoryMenu();
-    new import_obsidian14.Notice(updated.pinnedAt ? "Conversation pinned." : "Conversation unpinned.");
+    new import_obsidian17.Notice(updated.pinnedAt ? "Conversation pinned." : "Conversation unpinned.");
   }
   stopActiveResponse() {
     if (!this.chatController?.cancelActiveStream()) {
@@ -11331,12 +12030,12 @@ ${tool.name}: ${tool.description}
 };
 
 // src/ui/guardian-gutter.ts
-var import_view = require("@codemirror/view");
-var import_state = require("@codemirror/state");
-var setGuardianMode = import_state.StateEffect.define();
-var setGuardianLineState = import_state.StateEffect.define();
+var import_view2 = require("@codemirror/view");
+var import_state4 = require("@codemirror/state");
+var setGuardianMode = import_state4.StateEffect.define();
+var setGuardianLineState = import_state4.StateEffect.define();
 var globalGuardianEnabled = true;
-var guardianModeField = import_state.StateField.define({
+var guardianModeField = import_state4.StateField.define({
   create() {
     return globalGuardianEnabled;
   },
@@ -11350,7 +12049,7 @@ var guardianModeField = import_state.StateField.define({
     return value;
   }
 });
-var guardianLineStateField = import_state.StateField.define({
+var guardianLineStateField = import_state4.StateField.define({
   create() {
     return null;
   },
@@ -11366,7 +12065,7 @@ var guardianLineStateField = import_state.StateField.define({
     return value;
   }
 });
-var GuardianDotMarker = class extends import_view.GutterMarker {
+var GuardianDotMarker = class extends import_view2.GutterMarker {
   constructor(state, view) {
     super();
     this.state = state;
@@ -11400,9 +12099,9 @@ var GuardianDotMarker = class extends import_view.GutterMarker {
     return dot;
   }
 };
-var guardianMarkerField = import_state.StateField.define({
+var guardianMarkerField = import_state4.StateField.define({
   create() {
-    return import_state.RangeSet.empty;
+    return import_state4.RangeSet.empty;
   },
   update(markers, tr) {
     const isEnabled = tr.state.field(guardianModeField);
@@ -11416,7 +12115,7 @@ var guardianMarkerField = import_state.StateField.define({
     const selection = tr.state.selection.main;
     const lineBlock = tr.state.doc.lineAt(selection.head);
     const marker = new GuardianDotMarker(effectiveState, null);
-    return import_state.RangeSet.of([marker.range(lineBlock.from)]);
+    return import_state4.RangeSet.of([marker.range(lineBlock.from)]);
   }
 });
 function guardianGutterExtension() {
@@ -11424,7 +12123,7 @@ function guardianGutterExtension() {
     guardianModeField,
     guardianLineStateField,
     guardianMarkerField,
-    (0, import_view.gutter)({
+    (0, import_view2.gutter)({
       class: "guardian-gutter",
       markers: (view) => view.state.field(guardianMarkerField),
       domEventHandlers: {
@@ -11450,130 +12149,9 @@ function updateGuardianState(view, line, state) {
   });
 }
 
-// src/ui/ghost-text.ts
-var import_view2 = require("@codemirror/view");
-var import_state2 = require("@codemirror/state");
-var import_state3 = require("@codemirror/state");
-var import_state4 = require("@codemirror/state");
-var setGhostText = import_state2.StateEffect.define();
-var GhostTextWidget = class extends import_view2.WidgetType {
-  constructor(text) {
-    super();
-    this.text = text;
-  }
-  toDOM() {
-    const span = document.createElement("span");
-    span.className = "guardian-ghost-text";
-    span.textContent = this.text;
-    span.setAttribute("aria-label", "Press Tab to accept suggestion");
-    return span;
-  }
-  ignoreEvent() {
-    return false;
-  }
-};
-var ghostTextField = import_state2.StateField.define({
-  create() {
-    return import_view2.Decoration.none;
-  },
-  update(decorations, tr) {
-    for (let effect of tr.effects) {
-      if (effect.is(setGhostText)) {
-        if (effect.value) {
-          const { text, line, ch } = effect.value;
-          if (line < 1 || line > tr.state.doc.lines) {
-            continue;
-          }
-          const lineBlock = tr.state.doc.line(line);
-          const pos = Math.min(lineBlock.from + ch, lineBlock.to);
-          const widget = import_view2.Decoration.widget({
-            widget: new GhostTextWidget(text || ""),
-            side: 1
-          });
-          return import_view2.Decoration.set([widget.range(pos)]);
-        } else {
-          return import_view2.Decoration.none;
-        }
-      }
-    }
-    if (tr.docChanged) {
-      return import_view2.Decoration.none;
-    }
-    return decorations.map(tr.changes);
-  },
-  provide: (f) => import_view2.EditorView.decorations.from(f)
-});
-var ghostTextStateField = import_state2.StateField.define({
-  create() {
-    return null;
-  },
-  update(value, tr) {
-    for (let effect of tr.effects) {
-      if (effect.is(setGhostText)) {
-        return effect.value;
-      }
-    }
-    if (tr.docChanged)
-      return null;
-    return value;
-  }
-});
-function acceptGhostTextReal(view) {
-  const suggestion = view.state.field(ghostTextStateField);
-  if (!suggestion)
-    return false;
-  const { text, replaceRange, line, ch } = suggestion;
-  let from = replaceRange ? replaceRange.from : 0;
-  let to = replaceRange ? replaceRange.to : 0;
-  if (!replaceRange) {
-    const lineBlock = view.state.doc.line(line);
-    from = Math.min(lineBlock.from + ch, lineBlock.to);
-    to = from;
-  }
-  view.dispatch({
-    changes: { from, to, insert: text },
-    selection: import_state3.EditorSelection.cursor(from + text.length),
-    effects: setGhostText.of(null)
-  });
-  return true;
-}
-var ghostTextKeymap = import_state4.Prec.highest(import_view2.keymap.of([
-  {
-    key: "Tab",
-    run: (view) => {
-      return acceptGhostTextReal(view);
-    }
-  },
-  {
-    key: "Escape",
-    run: (view) => {
-      const suggestion = view.state.field(ghostTextStateField);
-      if (suggestion) {
-        view.dispatch({
-          effects: setGhostText.of(null)
-        });
-        return true;
-      }
-      return false;
-    }
-  }
-]));
-function ghostTextExtension() {
-  return [
-    ghostTextField,
-    ghostTextStateField,
-    ghostTextKeymap
-  ];
-}
-function showGhostText(view, text, line, ch, replaceRange) {
-  view.dispatch({
-    effects: setGhostText.of({ text, line, ch, replaceRange })
-  });
-}
-
 // src/ui/guardian-modal.ts
-var import_obsidian15 = require("obsidian");
-var GuardianModal = class extends import_obsidian15.Modal {
+var import_obsidian18 = require("obsidian");
+var GuardianModal = class extends import_obsidian18.Modal {
   result;
   onSubmit;
   constructor(app, onSubmit) {
@@ -11583,20 +12161,20 @@ var GuardianModal = class extends import_obsidian15.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h2", { text: "Guardian Manual Trigger" });
-    new import_obsidian15.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
+    new import_obsidian18.Setting(contentEl).setName("Instruction").setDesc("What should I do with the current context?").addText((text) => text.setPlaceholder("e.g. Translate to English, Summarize, Fix grammar...").setValue("").onChange((value) => {
       this.result = value;
     }).inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         this.submit();
       }
     }));
-    new import_obsidian15.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
+    new import_obsidian18.Setting(contentEl).addButton((btn) => btn.setButtonText("Submit").setCta().onClick(() => {
       this.submit();
     }));
   }
   submit() {
     if (!this.result) {
-      new import_obsidian15.Notice("Please enter an instruction.");
+      new import_obsidian18.Notice("Please enter an instruction.");
       return;
     }
     this.close();
@@ -11620,7 +12198,7 @@ async function requestGuardianResponse(modelService, input) {
 }
 
 // src/ui/selection-menu.ts
-var import_obsidian16 = require("obsidian");
+var import_obsidian19 = require("obsidian");
 var import_view3 = require("@codemirror/view");
 var import_state5 = require("@codemirror/state");
 var pluginContextMap = /* @__PURE__ */ new WeakMap();
@@ -11707,7 +12285,7 @@ var selectionMenuField = import_state5.StateField.define({
               messages.forEach((msg) => {
                 const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
                 if (msg.role === "ai") {
-                  import_obsidian16.MarkdownRenderer.render(context.app, msg.content, msgEl, "", new import_obsidian16.Component());
+                  import_obsidian19.MarkdownRenderer.render(context.app, msg.content, msgEl, "", new import_obsidian19.Component());
                 } else {
                   msgEl.setText(msg.content);
                 }
@@ -11761,14 +12339,14 @@ ${selectionText}`
           copyBtn.onclick = () => {
             const selectionText = view.state.doc.sliceString(state.from, state.to);
             navigator.clipboard.writeText(selectionText);
-            new import_obsidian16.Notice("Selection copied");
+            new import_obsidian19.Notice("Selection copied");
           };
           const replaceBtn = actions.createEl("button", { text: "Replace with Last Response" });
           replaceBtn.onclick = () => {
             const selectionText = view.state.doc.sliceString(state.from, state.to);
             const preview = state.controller.buildSelectionRewritePreview(selectionText);
             if (!preview) {
-              new import_obsidian16.Notice("No AI response to replace with.");
+              new import_obsidian19.Notice("No AI response to replace with.");
               return;
             }
             new DiffModal(context.app, preview.oldContent || "", preview.newContent || "", async () => {
@@ -11807,10 +12385,10 @@ function selectionMenuExtension(app, modelService) {
 }
 
 // src/knowledge/runtime.ts
-var import_obsidian21 = require("obsidian");
+var import_obsidian24 = require("obsidian");
 
 // src/knowledge/indexer.ts
-var import_obsidian17 = require("obsidian");
+var import_obsidian20 = require("obsidian");
 function buildBaseFileContent(articlesFolder) {
   return `# Knowledge Wiki \u7D22\u5F15 - \u7531\u63D2\u4EF6\u81EA\u52A8\u751F\u6210
 # \u8BF7\u52FF\u624B\u52A8\u7F16\u8F91\u6B64\u6587\u4EF6
@@ -11866,7 +12444,7 @@ var WikiIndexer = class {
     const internalPlugins = this.app.internalPlugins;
     const basesPlugin = internalPlugins?.plugins?.["bases"];
     if (!basesPlugin || !basesPlugin.enabled) {
-      new import_obsidian17.Notice(
+      new import_obsidian20.Notice(
         "Knowledge Wiki \u9700\u8981\u542F\u7528 Bases \u6838\u5FC3\u63D2\u4EF6\u624D\u80FD\u6B63\u5E38\u663E\u793A\u7D22\u5F15\u89C6\u56FE\u3002\n\u8BF7\u5728 \u8BBE\u7F6E \u2192 \u6838\u5FC3\u63D2\u4EF6 \u4E2D\u542F\u7528 Bases\u3002",
         8e3
       );
@@ -11876,7 +12454,7 @@ var WikiIndexer = class {
   async migrateLegacyIndex() {
     const oldIndexPath = `${this.wikiFolder}/${WIKI_INDEX_FILENAME}`;
     const oldIndex = this.app.vault.getAbstractFileByPath(oldIndexPath);
-    if (oldIndex && oldIndex instanceof import_obsidian17.TFile) {
+    if (oldIndex && oldIndex instanceof import_obsidian20.TFile) {
       const content = await this.app.vault.read(oldIndex);
       if (content.includes("knowledge_generated: true")) {
         await this.app.vault.trash(oldIndex, true);
@@ -11902,7 +12480,7 @@ var WikiIndexer = class {
     const articlesFolder = `${this.wikiFolder}/Articles`;
     const content = buildBaseFileContent(articlesFolder);
     const existing = this.app.vault.getAbstractFileByPath(basePath);
-    if (existing && existing instanceof import_obsidian17.TFile) {
+    if (existing && existing instanceof import_obsidian20.TFile) {
       await this.app.vault.modify(existing, content);
     } else {
       await this.app.vault.create(basePath, content);
@@ -11919,7 +12497,7 @@ var WikiIndexer = class {
 };
 
 // src/knowledge/linter.ts
-var import_obsidian18 = require("obsidian");
+var import_obsidian21 = require("obsidian");
 function checkMissingSummaries(doneFiles, existingFiles) {
   return doneFiles.map((f) => ({
     ...f,
@@ -12067,7 +12645,7 @@ var KnowledgeLinter = class {
       }
     }
     const existing = this.app.vault.getAbstractFileByPath(reportPath);
-    if (existing && existing instanceof import_obsidian18.TFile) {
+    if (existing && existing instanceof import_obsidian21.TFile) {
       await this.app.vault.modify(existing, reportContent);
     } else {
       await this.app.vault.create(reportPath, reportContent);
@@ -12077,7 +12655,7 @@ var KnowledgeLinter = class {
 };
 
 // src/knowledge/watcher.ts
-var import_obsidian19 = require("obsidian");
+var import_obsidian22 = require("obsidian");
 function isInWatchedFolder(filePath, watchedFolders) {
   return watchedFolders.some((folder) => {
     const normalized = folder.endsWith("/") ? folder : folder + "/";
@@ -12138,7 +12716,7 @@ var KnowledgeWatcher = class {
     const key = file.path;
     if (this.debouncedHandlers.has(key))
       return;
-    const handler = (0, import_obsidian19.debounce)(async () => {
+    const handler = (0, import_obsidian22.debounce)(async () => {
       const status = getKnowledgeStatus(this.app, file);
       if (status === "done") {
         this.writingPaths.add(file.path);
@@ -12478,7 +13056,7 @@ var MetadataIndex = class {
 };
 
 // src/knowledge/status-service.ts
-var import_obsidian20 = require("obsidian");
+var import_obsidian23 = require("obsidian");
 var KnowledgeStatusService = class {
   constructor(app, config = {}) {
     this.app = app;
@@ -12574,10 +13152,10 @@ var KnowledgeStatusService = class {
   resolveNote(noteOrPath) {
     if (!noteOrPath)
       return null;
-    if (noteOrPath instanceof import_obsidian20.TFile)
+    if (noteOrPath instanceof import_obsidian23.TFile)
       return noteOrPath;
     const file = this.app.vault.getAbstractFileByPath(noteOrPath);
-    return file instanceof import_obsidian20.TFile ? file : null;
+    return file instanceof import_obsidian23.TFile ? file : null;
   }
   isWikiFile(path) {
     return path.startsWith(`${this.config.wikiFolder}/`);
@@ -12593,7 +13171,7 @@ var KnowledgeStatusService = class {
   async getCurrentSchemaHash() {
     const schemaPath = `${this.config.wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`;
     const file = this.app.vault.getAbstractFileByPath(schemaPath);
-    if (!(file instanceof import_obsidian20.TFile))
+    if (!(file instanceof import_obsidian23.TFile))
       return void 0;
     try {
       const content = await this.app.vault.read(file);
@@ -12647,7 +13225,7 @@ var KnowledgeRuntime = class {
       settings.knowledgeSourceFolders || [],
       wikiFolder
     );
-    const debouncedAutoCompile = (0, import_obsidian21.debounce)(async () => {
+    const debouncedAutoCompile = (0, import_obsidian24.debounce)(async () => {
       if (!this.settings.knowledgeAutoCompile)
         return;
       if (this.autoCompiling)
@@ -12660,7 +13238,7 @@ var KnowledgeRuntime = class {
         const result = await this.compiler.compileAllPending(maxBatch, void 0, ontology?.schema, ontology?.hash);
         if (result.success > 0) {
           await this.indexer.rebuildIndex();
-          new import_obsidian21.Notice(`Auto-compiled: ${result.success} notes`);
+          new import_obsidian24.Notice(`Auto-compiled: ${result.success} notes`);
         }
         if (result.failed > 0) {
           console.warn(`[KnowledgeRuntime] Auto-compile: ${result.failed} failed`);
@@ -12761,7 +13339,7 @@ var KnowledgeRuntime = class {
       `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`
     );
     let currentSchemaHash;
-    if (schemaFile && schemaFile instanceof import_obsidian21.TFile) {
+    if (schemaFile && schemaFile instanceof import_obsidian24.TFile) {
       const schemaContent = await this.app.vault.read(schemaFile);
       currentSchemaHash = computeSchemaHash(schemaContent);
     }
@@ -12809,7 +13387,7 @@ var KnowledgeRuntime = class {
         if (record.status !== "done" && record.status !== "failed")
           continue;
         const file = this.app.vault.getAbstractFileByPath(record.path);
-        if (!file || !(file instanceof import_obsidian21.TFile))
+        if (!file || !(file instanceof import_obsidian24.TFile))
           continue;
         const existing = getKnowledgeStatus(this.app, file);
         if (existing)
@@ -12825,7 +13403,7 @@ var KnowledgeRuntime = class {
       await adapter.remove(LEGACY_REGISTRY_PATH);
       if (migrated > 0) {
         console.log(`[KnowledgeRuntime] Migrated ${migrated} records from registry to frontmatter`);
-        new import_obsidian21.Notice(`Knowledge Wiki: migrated ${migrated} records to frontmatter`);
+        new import_obsidian24.Notice(`Knowledge Wiki: migrated ${migrated} records to frontmatter`);
       }
     } catch (e) {
       console.error(`[KnowledgeRuntime] Registry migration error:`, e);
@@ -12838,10 +13416,10 @@ var KnowledgeRuntime = class {
       callback: async () => {
         const file = this.app.workspace.getActiveFile();
         if (!file) {
-          new import_obsidian21.Notice("Please open a note first.");
+          new import_obsidian24.Notice("Please open a note first.");
           return;
         }
-        new import_obsidian21.Notice(`Compiling: ${file.path}...`);
+        new import_obsidian24.Notice(`Compiling: ${file.path}...`);
         const status = getKnowledgeStatus(this.app, file);
         if (status === "done" || status === "failed") {
           await setKnowledgeStatus(this.app, file, "pending");
@@ -12853,9 +13431,9 @@ var KnowledgeRuntime = class {
         const result = await this.compiler.compileNote(file, ontology?.schema, ontology?.hash);
         if (result) {
           await this.indexer.rebuildIndex();
-          new import_obsidian21.Notice(`Compiled: ${result}`);
+          new import_obsidian24.Notice(`Compiled: ${result}`);
         } else {
-          new import_obsidian21.Notice(`Compilation failed`);
+          new import_obsidian24.Notice(`Compilation failed`);
         }
       }
     });
@@ -12863,14 +13441,14 @@ var KnowledgeRuntime = class {
       id: "knowledge-compile-all",
       name: "Knowledge: Compile all pending",
       callback: async () => {
-        new import_obsidian21.Notice("Compiling all pending notes...");
+        new import_obsidian24.Notice("Compiling all pending notes...");
         const maxBatch = this.settings.knowledgeMaxCompileBatch || 50;
         const ontology = await this.loadOntologySchema();
         const result = await this.compiler.compileAllPending(maxBatch, void 0, ontology?.schema, ontology?.hash);
         if (result.success > 0) {
           await this.indexer.rebuildIndex();
         }
-        new import_obsidian21.Notice(`Compiled: ${result.success} success, ${result.failed} failed`);
+        new import_obsidian24.Notice(`Compiled: ${result.success} success, ${result.failed} failed`);
       }
     });
     plugin.addCommand({
@@ -12880,10 +13458,10 @@ var KnowledgeRuntime = class {
         const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
         const basePath = `${wikiFolder}/${WIKI_INDEX_BASE_FILENAME}`;
         const file = this.app.vault.getAbstractFileByPath(basePath);
-        if (file && file instanceof import_obsidian21.TFile) {
+        if (file && file instanceof import_obsidian24.TFile) {
           await this.app.workspace.getLeaf(false).openFile(file);
         } else {
-          new import_obsidian21.Notice("Knowledge index not found. Compile some notes first.");
+          new import_obsidian24.Notice("Knowledge index not found. Compile some notes first.");
         }
       }
     });
@@ -12891,11 +13469,11 @@ var KnowledgeRuntime = class {
       id: "knowledge-lint",
       name: "Knowledge: Run knowledge lint",
       callback: async () => {
-        new import_obsidian21.Notice("Running knowledge lint...");
+        new import_obsidian24.Notice("Running knowledge lint...");
         const reportPath = await this.linter.generateReport();
-        new import_obsidian21.Notice(`Health report generated: ${reportPath}`);
+        new import_obsidian24.Notice(`Health report generated: ${reportPath}`);
         const file = this.app.vault.getAbstractFileByPath(reportPath);
-        if (file && file instanceof import_obsidian21.TFile) {
+        if (file && file instanceof import_obsidian24.TFile) {
           await this.app.workspace.getLeaf(false).openFile(file);
         }
       }
@@ -12904,14 +13482,14 @@ var KnowledgeRuntime = class {
   registerEvents(plugin) {
     plugin.registerEvent(
       this.app.vault.on("create", (file) => {
-        if (file instanceof import_obsidian21.TFile && file.extension === "md") {
+        if (file instanceof import_obsidian24.TFile && file.extension === "md") {
           this.watcher.onFileCreate(file);
         }
       })
     );
     plugin.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (file instanceof import_obsidian21.TFile && file.extension === "md") {
+        if (file instanceof import_obsidian24.TFile && file.extension === "md") {
           this.watcher.onFileModify(file);
         }
       })
@@ -12923,7 +13501,7 @@ var KnowledgeRuntime = class {
     );
     plugin.registerEvent(
       this.app.vault.on("delete", (file) => {
-        if (file instanceof import_obsidian21.TFile) {
+        if (file instanceof import_obsidian24.TFile) {
           this.metadataIndex.onFileDeleted(file.path);
         }
       })
@@ -12971,7 +13549,7 @@ var KnowledgeRuntime = class {
     const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
     const schemaPath = `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`;
     const file = this.app.vault.getAbstractFileByPath(schemaPath);
-    if (!file || !(file instanceof import_obsidian21.TFile))
+    if (!file || !(file instanceof import_obsidian24.TFile))
       return null;
     try {
       const rawContent = await this.app.vault.read(file);
@@ -13077,7 +13655,7 @@ var KnowledgeRuntime = class {
       throw new Error(`\u8DEF\u5F84\u4E0D\u5B58\u5728: ${path}`);
     const ontology = await this.loadOntologySchema();
     let registered = 0;
-    if (abstractFile instanceof import_obsidian21.TFile) {
+    if (abstractFile instanceof import_obsidian24.TFile) {
       const status = getKnowledgeStatus(this.app, abstractFile);
       if (!status) {
         await ensureSourceId(this.app, abstractFile);
@@ -13687,7 +14265,7 @@ ${lines.join("\n")}`;
 };
 
 // src/skills/builtin/vault-ops.ts
-var import_obsidian22 = require("obsidian");
+var import_obsidian25 = require("obsidian");
 var MAX_FILE_READ_CHARS = 2e4;
 function normalizeScopePath(path) {
   return path.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
@@ -13816,7 +14394,7 @@ var updateNote = {
       return { success: false, error: "File modification is disabled" };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.path);
-    if (!file || !(file instanceof import_obsidian22.TFile))
+    if (!file || !(file instanceof import_obsidian25.TFile))
       return { success: false, error: "File not found" };
     if (ctx.settings.confirmExecutions && !args.approved) {
       const oldContent = await ctx.app.vault.read(file);
@@ -13858,7 +14436,7 @@ var appendToNote = {
       return { success: false, error: "File modification is disabled" };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.path);
-    if (!file || !(file instanceof import_obsidian22.TFile))
+    if (!file || !(file instanceof import_obsidian25.TFile))
       return { success: false, error: "File not found" };
     if (ctx.settings.confirmExecutions && !args.approved) {
       const existing2 = await ctx.app.vault.read(file);
@@ -14231,9 +14809,9 @@ function registerVaultTools(registry) {
 }
 
 // src/skills/builtin/web-search/executor.ts
-var import_obsidian23 = require("obsidian");
+var import_obsidian26 = require("obsidian");
 var defaultDeps2 = {
-  requestUrl: (options) => (0, import_obsidian23.requestUrl)(options),
+  requestUrl: (options) => (0, import_obsidian26.requestUrl)(options),
   wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 };
 function createWebSearchTool(deps = defaultDeps2) {
@@ -14321,9 +14899,9 @@ function resolveSavedNotePath(filename, preferredFolder, exists) {
 }
 
 // src/services/video-transcription.ts
-var import_obsidian24 = require("obsidian");
+var import_obsidian27 = require("obsidian");
 var defaultDeps3 = {
-  requestUrl: (options) => (0, import_obsidian24.requestUrl)(options),
+  requestUrl: (options) => (0, import_obsidian27.requestUrl)(options),
   fetchImpl: (input, init) => fetch(input, init),
   createGeminiModel: (provider) => {
     const genAI = new GoogleGenerativeAI(provider.apiKey);
@@ -21483,7 +22061,7 @@ var SKILL_default6 = '---\r\nname: json-canvas\r\ndescription: Create and edit J
 var SKILL_default7 = '---\r\nname: obsidian-bases\r\ndescription: Create and edit Obsidian Bases (.base files) with views, filters, formulas, properties, and summaries.\r\ntriggers:\r\n  keywords: ["bases", ".base", "table view", "card view", "cards view", "list view", "filter", "filters", "formula", "formulas", "database"]\r\ntools: ["read_file", "create_file", "update_file", "search_vault", "open_file", "validate_base_yaml"]\r\n---\r\n\r\n# Obsidian Bases\r\n\r\nUse this workflow when creating or editing `.base` files. Base files are YAML documents that define database-like views over notes.\r\n\r\n## Workflow\r\n\r\n1. Read the existing `.base` file when editing.\r\n2. Define global `filters` to scope which notes appear.\r\n3. Add `formulas` only when a computed property is needed.\r\n4. Configure `properties` display names when the raw property names are not user-friendly.\r\n5. Add one or more `views` with `type`, `name`, and `order`.\r\n6. Run `validate_base_yaml` before writing.\r\n7. Use `create_file` or `update_file` to write the exact `.base` path.\r\n8. Use `open_file` when the user wants to inspect the rendered base.\r\n\r\n## Schema\r\n\r\n```yaml\r\nfilters:\r\n  and: []\r\n\r\nformulas:\r\n  formula_name: \'expression\'\r\n\r\nproperties:\r\n  property_name:\r\n    displayName: "Display Name"\r\n  formula.formula_name:\r\n    displayName: "Formula Display Name"\r\n\r\nsummaries:\r\n  custom_summary_name: \'values.mean().round(3)\'\r\n\r\nviews:\r\n  - type: table\r\n    name: "View Name"\r\n    limit: 10\r\n    order:\r\n      - file.name\r\n      - property_name\r\n      - formula.formula_name\r\n```\r\n\r\nValid view types: `table`, `cards`, `list`, `map`.\r\n\r\n## Filters\r\n\r\nFilters can be a string:\r\n\r\n```yaml\r\nfilters: \'status == "done"\'\r\n```\r\n\r\nOr a recursive filter object:\r\n\r\n```yaml\r\nfilters:\r\n  and:\r\n    - \'status == "done"\'\r\n    - \'priority > 3\'\r\n```\r\n\r\nCommon file predicates:\r\n\r\n```yaml\r\nfilters:\r\n  or:\r\n    - file.hasTag("book")\r\n    - file.hasTag("article")\r\n```\r\n\r\n## Formulas\r\n\r\nUse single quotes around formulas that contain double quotes:\r\n\r\n```yaml\r\nformulas:\r\n  days_until_due: \'if(due, (date(due) - today()).days, "")\'\r\n  is_overdue: \'if(due, date(due) < today() && status != "done", false)\'\r\n```\r\n\r\nDuration arithmetic returns a Duration, not a number. Access a field first:\r\n\r\n```yaml\r\nformulas:\r\n  days_old: \'(now() - file.ctime).days\'\r\n```\r\n\r\n## Example\r\n\r\n```yaml\r\nfilters:\r\n  and:\r\n    - file.hasTag("task")\r\n    - \'file.ext == "md"\'\r\n\r\nformulas:\r\n  days_until_due: \'if(due, (date(due) - today()).days, "")\'\r\n\r\nproperties:\r\n  formula.days_until_due:\r\n    displayName: "Days Until Due"\r\n\r\nviews:\r\n  - type: table\r\n    name: "Active Tasks"\r\n    filters:\r\n      and:\r\n        - \'status != "done"\'\r\n    order:\r\n      - file.name\r\n      - status\r\n      - due\r\n      - formula.days_until_due\r\n```\r\n\r\n## YAML Quoting Rules\r\n\r\n- Quote strings containing `:`, `{`, `}`, `[`, `]`, `,`, `&`, `*`, `#`, `?`, `|`, `<`, `>`, `=`, `!`, `%`, `@`, or backticks.\r\n- Wrap formulas containing double quotes in single quotes.\r\n- Every `formula.name` reference in `views`, `properties`, or summaries must have a matching `formulas.name` definition.\r\n';
 
 // src/skills/builtin/plugin-ctrl/plugin-watcher.ts
-var import_obsidian25 = require("obsidian");
+var import_obsidian28 = require("obsidian");
 var POLL_INTERVAL_MS = 1e4;
 var GENERATE_DELAY_MS = 1e3;
 var MAX_RETRIES = 3;
@@ -21553,14 +22131,14 @@ var PluginWatcher = class {
     if (candidates.length === 0)
       return;
     console.log(`[PluginWatcher] Generating skills for ${candidates.length} plugins`);
-    new import_obsidian25.Notice(`Generating skills for ${candidates.length} plugins...`);
+    new import_obsidian28.Notice(`Generating skills for ${candidates.length} plugins...`);
     for (let i = 0; i < candidates.length; i++) {
       await this.generateAndRegister(candidates[i]);
       if (i < candidates.length - 1) {
         await this.delay(GENERATE_DELAY_MS);
       }
     }
-    new import_obsidian25.Notice(`Plugin skill generation finished (${candidates.length})`);
+    new import_obsidian28.Notice(`Plugin skill generation finished (${candidates.length})`);
   }
   async checkChanges() {
     if (!this.settings.autoGeneratePluginSkills)
@@ -21573,7 +22151,7 @@ var PluginWatcher = class {
       } else {
         const info = await this.generator.collectPluginInfo(id);
         if (!this.generator.shouldSkipPlugin(info)) {
-          new import_obsidian25.Notice(`Generating skill for ${info.name}...`);
+          new import_obsidian28.Notice(`Generating skill for ${info.name}...`);
           await this.generateAndRegister(id);
         }
       }
@@ -21628,7 +22206,7 @@ var PluginWatcher = class {
 };
 
 // src/skills/builtin/plugin-ctrl/skill-generator.ts
-var import_obsidian26 = require("obsidian");
+var import_obsidian29 = require("obsidian");
 var UI_KEYWORDS = [
   "open",
   "show",
@@ -21851,7 +22429,7 @@ var PluginSkillGenerator = class {
         return this.communityPluginsCache[pluginId] || "";
       }
       const url = "https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json";
-      const response = await (0, import_obsidian26.requestUrl)({ url });
+      const response = await (0, import_obsidian29.requestUrl)({ url });
       if (response.status !== 200)
         return "";
       const plugins = JSON.parse(response.text);
@@ -21884,7 +22462,7 @@ var PluginSkillGenerator = class {
   /** 抓取纯文本内容（用于 GitHub raw README） */
   async fetchRawText(url) {
     try {
-      const response = await (0, import_obsidian26.requestUrl)({ url });
+      const response = await (0, import_obsidian29.requestUrl)({ url });
       if (response.status !== 200)
         return "";
       return response.text;
@@ -21899,7 +22477,7 @@ var PluginSkillGenerator = class {
       const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
       let html = "";
       for (let attempt = 0; attempt < 3; attempt++) {
-        const response = await (0, import_obsidian26.requestUrl)({ url });
+        const response = await (0, import_obsidian29.requestUrl)({ url });
         console.log(`[SkillGenerator] web search for "${pluginName}": attempt=${attempt + 1}, status=${response.status}, html=${response.text.length} chars`);
         if (response.status === 200 && response.text.length > 2e4) {
           html = response.text;
@@ -22256,7 +22834,7 @@ var InboxAutosaveCoordinator = class {
 };
 
 // main.ts
-var ObsidianCliPlugin = class extends import_obsidian27.Plugin {
+var ObsidianCliPlugin = class extends import_obsidian30.Plugin {
   settings;
   modelService;
   knowledgeRuntime = null;
@@ -22266,10 +22844,10 @@ var ObsidianCliPlugin = class extends import_obsidian27.Plugin {
   pluginWatcher = null;
   inboxAutosave = null;
   // Debounce with trailing edge (default/false) for inactivity trigger
-  onEditorChangeDebounced = (0, import_obsidian27.debounce)(this.runGuardianCheck.bind(this), 3e3);
+  onEditorChangeDebounced = (0, import_obsidian30.debounce)(this.runGuardianCheck.bind(this), 3e3);
   async onload() {
     await this.loadSettings();
-    new import_obsidian27.Notice("Obsidian Shell: Plugin Loaded (v2)");
+    new import_obsidian30.Notice("Obsidian Shell: Plugin Loaded (v2)");
     this.toolRegistry = new ToolRegistry(this.app, this.settings);
     this.skillRegistry = new SkillRegistry(this.toolRegistry);
     this.modelService = new ModelService(this.app, this.settings, this.toolRegistry, this.skillRegistry);
@@ -22277,7 +22855,7 @@ var ObsidianCliPlugin = class extends import_obsidian27.Plugin {
       app: this.app,
       getInboxPath: () => this.settings.wechatInboxPath,
       saveUrl: async (url) => this.toolRegistry.execute("save_webpage", { url }),
-      notify: (message) => new import_obsidian27.Notice(message)
+      notify: (message) => new import_obsidian30.Notice(message)
     });
     registerVaultTools(this.toolRegistry);
     registerTools(this.toolRegistry);
@@ -22351,7 +22929,7 @@ var ObsidianCliPlugin = class extends import_obsidian27.Plugin {
     );
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
-        if (file instanceof import_obsidian27.TFile && file.extension === "md") {
+        if (file instanceof import_obsidian30.TFile && file.extension === "md") {
           void this.inboxAutosave?.handleFileModify(file);
         }
       })
@@ -22389,9 +22967,9 @@ var ObsidianCliPlugin = class extends import_obsidian27.Plugin {
     }
   }
   activateGuardianModal() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian27.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian30.MarkdownView);
     if (!view) {
-      new import_obsidian27.Notice("Please open a Markdown file first.");
+      new import_obsidian30.Notice("Please open a Markdown file first.");
       return;
     }
     new GuardianModal(this.app, (instruction) => {
@@ -22473,7 +23051,7 @@ var ObsidianCliPlugin = class extends import_obsidian27.Plugin {
       return;
     rawUrlMatches.sort((a, b) => b.index - a.index);
     for (const m of rawUrlMatches) {
-      new import_obsidian27.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
+      new import_obsidian30.Notice(`\u{1F4E5} Auto-saving: ${m.url}`);
       const result = await this.toolRegistry.execute("save_webpage", { url: m.url });
       if (result.success) {
         const finalPath = result.path;
@@ -22481,7 +23059,7 @@ var ObsidianCliPlugin = class extends import_obsidian27.Plugin {
         newContent = newContent.substring(0, m.index) + linkText + newContent.substring(m.index + m.length);
         modified = true;
       } else {
-        new import_obsidian27.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
+        new import_obsidian30.Notice(`\u274C Failed to save ${m.url}: ${result.error}`);
       }
     }
     if (modified) {

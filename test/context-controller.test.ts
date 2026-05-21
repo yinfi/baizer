@@ -70,7 +70,78 @@ async function runTests() {
 
     expect(collectCalls).toEqual([{
       includeBacklinks: true,
+      includeCurrent: true,
       explicitScopes: ['current', 'backlinks'],
+    }]);
+  });
+
+  await test('collectCommandContext includes current note by default without a visible current chip', async () => {
+    const collectCalls: any[] = [];
+    const controller = new ContextController({
+      app: {} as any,
+      contextManager: {
+        getContexts: () => [
+          { id: 'scope:backlinks', type: 'scope', data: '@backlinks', summary: 'Backlinks', scope: 'backlinks' },
+        ],
+        resolveContexts: async () => [],
+      } as any,
+      obsidianContextService: {
+        collect: async (options: any) => {
+          collectCalls.push(options);
+          return {
+            selection: null,
+            contextItems: [
+              { id: 'active-note:active.md', type: 'file', data: 'active.md', content: 'current content' },
+            ],
+          };
+        },
+      } as any,
+    });
+
+    expect(await controller.collectCommandContext()).toEqual({
+      contextItems: [
+        { id: 'active-note:active.md', type: 'file', data: 'active.md', content: 'current content' },
+      ],
+      selection: '',
+    });
+
+    expect(collectCalls).toEqual([{
+      includeBacklinks: true,
+      includeCurrent: true,
+      explicitScopes: ['current', 'backlinks'],
+    }]);
+  });
+
+  await test('collectCommandContext excludes current note when requested by the shell', async () => {
+    const collectCalls: any[] = [];
+    const controller = new ContextController({
+      app: {} as any,
+      contextManager: {
+        getContexts: () => [
+          { id: 'scope:backlinks', type: 'scope', data: '@backlinks', summary: 'Backlinks', scope: 'backlinks' },
+        ],
+        resolveContexts: async () => [],
+      } as any,
+      obsidianContextService: {
+        collect: async (options: any) => {
+          collectCalls.push(options);
+          return {
+            selection: null,
+            contextItems: [],
+          };
+        },
+      } as any,
+    });
+
+    expect(await controller.collectCommandContext({ includeCurrent: false })).toEqual({
+      contextItems: [],
+      selection: '',
+    });
+
+    expect(collectCalls).toEqual([{
+      includeBacklinks: true,
+      includeCurrent: false,
+      explicitScopes: ['backlinks'],
     }]);
   });
 }

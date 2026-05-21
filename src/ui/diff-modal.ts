@@ -14,16 +14,16 @@ export class DiffModal extends Modal {
         const { contentEl } = this;
         contentEl.addClass('ocli-diff-modal');
 
-        contentEl.createEl('h2', { text: 'Review Changes' });
+        const header = contentEl.createDiv({ cls: 'ocli-diff-modal-header' });
+        const copy = header.createDiv({ cls: 'ocli-diff-modal-copy' });
+        copy.createEl('h2', { text: 'Review Changes' });
+        copy.createDiv({ cls: 'ocli-diff-modal-subtitle', text: 'Compare current content with the proposed replacement before applying.' });
 
-        const diffContainer = contentEl.createDiv({ cls: 'diff-container' });
-        this.renderDiff(diffContainer);
+        const diffContainer = contentEl.createDiv({ cls: 'diff-container ocli-diff-split' });
+        this.renderPane(diffContainer, 'Current', this.original, 'ocli-diff-pane-old');
+        this.renderPane(diffContainer, 'Proposed', this.modified, 'ocli-diff-pane-new');
 
         const buttonContainer = contentEl.createDiv({ cls: 'diff-actions' });
-        buttonContainer.style.display = 'flex';
-        buttonContainer.style.justifyContent = 'flex-end';
-        buttonContainer.style.gap = '10px';
-        buttonContainer.style.marginTop = '20px';
 
         new ButtonComponent(buttonContainer)
             .setButtonText('Cancel')
@@ -36,6 +36,13 @@ export class DiffModal extends Modal {
                 this.onApply();
                 this.close();
             });
+    }
+
+    private renderPane(container: HTMLElement, label: string, content: string, toneClass: string) {
+        const pane = container.createDiv({ cls: `ocli-diff-pane ${toneClass}` });
+        pane.createDiv({ cls: 'ocli-diff-pane-title', text: label });
+        const pre = pane.createEl('pre', { cls: 'ocli-diff-pane-code' });
+        pre.setText(content);
     }
 
     renderDiff(container: HTMLElement) {

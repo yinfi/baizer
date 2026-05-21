@@ -17,6 +17,7 @@ interface MessageRendererOptions {
   renderMarkdown?: MarkdownRender;
   onApprove?: (message: ChatMessage) => void | Promise<void>;
   onCancel?: (message: ChatMessage) => void | Promise<void>;
+  onFocusApprovalPreview?: (message: ChatMessage) => void | Promise<void>;
   onCopy?: (content: string, message: ChatMessage) => void | Promise<void>;
   onFeedbackUp?: (message: ChatMessage) => void | Promise<void>;
   onFeedbackDown?: (message: ChatMessage) => void | Promise<void>;
@@ -47,9 +48,29 @@ export class MessageRenderer {
 
     try {
       if (message.approval) {
-        renderApprovalCard(entry, message.approval, {
-          onApprove: () => this.options.onApprove?.(message),
-          onCancel: () => this.options.onCancel?.(message),
+        (entry as any).addClass?.('shell-approval-entry') ?? entry.classList.add('shell-approval-entry');
+        (entry as any).createDiv({ cls: 'shell-approval-avatar', text: 'AI' });
+        const approvalBody = (entry as any).createDiv({ cls: 'shell-approval-message-body' }) as HTMLElement;
+        const removeApprovalEntry = () => {
+          if (typeof (entry as any).remove === 'function') {
+            (entry as any).remove();
+            return;
+          }
+          const parent = (entry as any).parentElement;
+          if (parent?.children) {
+            parent.children = Array.from(parent.children).filter((child) => child !== entry);
+          }
+        };
+        renderApprovalCard(approvalBody, message.approval, {
+          onApprove: () => {
+            removeApprovalEntry();
+            return this.options.onApprove?.(message);
+          },
+          onCancel: () => {
+            removeApprovalEntry();
+            return this.options.onCancel?.(message);
+          },
+          onFocusPreview: () => this.options.onFocusApprovalPreview?.(message),
         });
       } else if (message.role === 'ai') {
         await this.renderAiContent(entry, message.content);
@@ -57,6 +78,9 @@ export class MessageRenderer {
       } else if (message.role === 'user') {
         this.setText(entry, message.content);
       } else {
+        if (this.isCancelledSystemMessage(message.content)) {
+          (entry as any).addClass?.('shell-system-cancelled') ?? entry.classList.add('shell-system-cancelled');
+        }
         this.setText(entry, `[System] ${message.content}`);
       }
     } catch (error) {
@@ -148,5 +172,9 @@ export class MessageRenderer {
     } else {
       entry.textContent = text;
     }
+  }
+
+  private isCancelledSystemMessage(content: string) {
+    return /^Cancelled:/i.test(content.trim());
   }
 }

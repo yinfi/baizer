@@ -4,6 +4,7 @@ import { budgetTextBlock } from './context-budget';
 
 export interface ObsidianContextCollectOptions {
   includeBacklinks?: boolean;
+  includeCurrent?: boolean;
   explicitScopes?: string[];
 }
 
@@ -49,6 +50,7 @@ export class ObsidianContextService {
   ): Promise<ObsidianContextSnapshot> {
     const explicitScopes = [...(options.explicitScopes ?? [])];
     const activeFile = this.app.workspace.getActiveFile?.();
+    const includeCurrent = options.includeCurrent !== false;
 
     if (!activeFile) {
       return {
@@ -65,27 +67,29 @@ export class ObsidianContextService {
       };
     }
 
-    const content = await this.app.vault.read(activeFile);
-    const editor = this.app.workspace.getMostRecentLeaf?.()?.view?.editor;
-    const selectionText = this.normalizeSelection(editor?.getSelection?.());
-    const selectionLine = this.normalizeLine(editor?.getCursor?.('from')?.line);
     const cache = this.app.metadataCache.getFileCache?.(activeFile) ?? {};
     const tags = this.extractTags(cache);
     const outgoingLinks = this.extractOutgoingLinks(cache);
-    const activeHeading = this.findActiveHeading(content, selectionLine);
-    const activeSection = this.extractActiveSection(content, activeHeading);
+    const content = includeCurrent ? await this.app.vault.read(activeFile) : '';
+    const editor = includeCurrent ? this.app.workspace.getMostRecentLeaf?.()?.view?.editor : null;
+    const selectionText = includeCurrent ? this.normalizeSelection(editor?.getSelection?.()) : null;
+    const selectionLine = includeCurrent ? this.normalizeLine(editor?.getCursor?.('from')?.line) : null;
+    const activeHeading = includeCurrent ? this.findActiveHeading(content, selectionLine) : null;
+    const activeSection = includeCurrent ? this.extractActiveSection(content, activeHeading) : '';
     const backlinks = await this.collectBacklinks(activeFile, options.includeBacklinks === true);
     const recentNotes = this.collectRecentNotes(activeFile.path);
 
-    const contextItems: ContextItem[] = [
-      {
+    const contextItems: ContextItem[] = [];
+
+    if (includeCurrent) {
+      contextItems.push({
         id: `active-note:${activeFile.path}`,
         type: 'file',
         data: activeFile.path,
         summary: `Active note: ${this.toTitle(activeFile)}`,
         content: budgetTextBlock(activeSection, this.options.maxSectionChars),
-      },
-    ];
+      });
+    }
 
     if (selectionText) {
       contextItems.push({
