@@ -153,6 +153,35 @@ async function runTests() {
     expect(result.promptBlock.length <= 90).toBe(true);
     expect(result.records.length).toBe(1);
   });
+
+  await test('migration converts legacy profile and summaries exactly once', async () => {
+    const profilePath = '.obsidian/obsidian-cli-memory/user-profile.json';
+    const summariesPath = '.obsidian/obsidian-cli-memory/session-summaries.json';
+    const { app } = createApp({
+      [profilePath]: JSON.stringify({
+        profession: 'Product engineer',
+        expertise: ['Obsidian plugins'],
+        preferences: { responseStyle: 'concise', language: 'zh-CN', topics: [] },
+        context: { currentProjects: ['Obsidian CLI memory'], goals: ['local-first recall'], challenges: [] },
+        workflows: [],
+        metadata: { totalInteractions: 4, createdAt: 1, updatedAt: 2, lastProfileUpdate: 2 },
+      }),
+      [summariesPath]: JSON.stringify([
+        { timestamp: 10, messageCount: 2, summary: 'Discussed Hindsight-lite memory.' },
+      ]),
+    });
+    const store = new HindsightStore(app);
+    await store.ready();
+
+    const { migrateLegacyMemory } = await import('../src/memory/hindsight-migration');
+    await migrateLegacyMemory(app, store, 5000);
+    await migrateLegacyMemory(app, store, 6000);
+
+    const memories = await store.listMemories();
+    expect(memories.filter((memory) => memory.source.kind === 'profile-migration').length).toBe(5);
+    expect(memories.filter((memory) => memory.source.kind === 'summary-migration').length).toBe(1);
+    expect(memories.some((memory) => memory.text.includes('Product engineer'))).toBe(true);
+  });
 }
 
 runTests().catch((error) => {
