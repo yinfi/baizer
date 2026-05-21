@@ -1,3 +1,5 @@
+import { setIcon } from 'obsidian';
+
 export interface ProviderSelectOption {
   id: string;
   label: string;
@@ -19,6 +21,8 @@ export interface ModelUpdate {
 export interface ToolbarCapabilities {
   supportsImageInput: boolean;
   supportsCancellation?: boolean;
+  isResponding?: boolean;
+  canSend?: boolean;
 }
 
 interface InputToolbarHandlers {
@@ -34,10 +38,10 @@ export class InputToolbar {
   private readonly providerSelectEl: HTMLSelectElement;
   private readonly modelSelectEl: HTMLSelectElement;
   private readonly imageButtonEl: HTMLButtonElement;
-  private readonly sendButtonEl: HTMLButtonElement;
-  private readonly stopButtonEl: HTMLButtonElement;
+  private readonly runButtonEl: HTMLButtonElement;
   private providers = new Map<string, ProviderSelectOption>();
   private activeProviderId = '';
+  private isResponding = false;
 
   constructor(
     private readonly containerEl: HTMLElement,
@@ -57,30 +61,27 @@ export class InputToolbar {
 
     const actions = this.containerEl.createDiv({ cls: 'shell-action-buttons' });
     this.imageButtonEl = actions.createEl('button', {
-      cls: 'clickable-icon shell-image-btn',
-      text: 'Image',
+      cls: 'clickable-icon shell-action-btn shell-image-btn',
       attr: { 'aria-label': 'Add image context', title: 'Add image context' },
     }) as HTMLButtonElement;
-    this.stopButtonEl = actions.createEl('button', {
-      cls: 'clickable-icon shell-stop-btn',
-      text: 'Stop',
-      attr: { 'aria-label': 'Stop response', title: 'Stop response' },
-    }) as HTMLButtonElement;
-    this.sendButtonEl = actions.createEl('button', {
-      cls: 'clickable-icon shell-send-btn',
-      text: 'Send',
+    setIcon(this.imageButtonEl, 'image');
+    this.runButtonEl = actions.createEl('button', {
+      cls: 'clickable-icon shell-action-btn shell-run-btn',
       attr: { 'aria-label': 'Send message', title: 'Send message' },
     }) as HTMLButtonElement;
+    setIcon(this.runButtonEl, 'send-horizontal');
 
     this.providerSelectEl.addEventListener('change', () => this.handleProviderChange());
     this.modelSelectEl.addEventListener('change', () => this.handleModelChange());
     this.imageButtonEl.addEventListener('click', () => {
       if (!this.imageButtonEl.disabled) void this.handlers.onImage?.();
     });
-    this.stopButtonEl.addEventListener('click', () => {
-      if (!this.stopButtonEl.disabled) void this.handlers.onStop?.();
-    });
-    this.sendButtonEl.addEventListener('click', () => {
+    this.runButtonEl.addEventListener('click', () => {
+      if (this.runButtonEl.disabled) return;
+      if (this.isResponding) {
+        void this.handlers.onStop?.();
+        return;
+      }
       void this.handlers.onSend?.();
     });
   }
@@ -140,8 +141,19 @@ export class InputToolbar {
   }
 
   updateCapabilities(capabilities: ToolbarCapabilities) {
+    const isResponding = capabilities.isResponding ?? capabilities.supportsCancellation ?? false;
+    const canStop = capabilities.supportsCancellation ?? isResponding;
+    this.isResponding = isResponding;
     this.imageButtonEl.disabled = !capabilities.supportsImageInput;
-    this.stopButtonEl.disabled = !capabilities.supportsCancellation;
+    this.runButtonEl.disabled = isResponding
+      ? !canStop
+      : capabilities.canSend === false;
+    const label = isResponding ? 'Stop response' : 'Send message';
+    this.runButtonEl.setAttribute('aria-label', label);
+    this.runButtonEl.setAttribute('title', label);
+    setIcon(this.runButtonEl, isResponding ? 'square' : 'send-horizontal');
+    (this.runButtonEl as any).toggleClass?.('is-stop', isResponding);
+    (this.runButtonEl as any).toggleClass?.('is-send', !isResponding);
   }
 
   getProviderSelectEl() {

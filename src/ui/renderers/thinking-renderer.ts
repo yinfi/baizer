@@ -16,8 +16,9 @@ export class ThinkingRenderer {
     if (!this.currentThinkingBlock) {
       this.currentStartedAt = this.now();
       this.currentThinkingBlock = (this.timeline as any).createDiv({ cls: 'ocli-thinking-block is-thinking' });
+      const block = this.currentThinkingBlock;
 
-      const header = (this.currentThinkingBlock as any).createDiv({ cls: 'ocli-thinking-header' }) as HTMLElement;
+      const header = (block as any).createDiv({ cls: 'ocli-thinking-header' }) as HTMLElement;
       (header as any).createSpan({ cls: 'ocli-thinking-caret', text: '>' });
       (header as any).createSpan({ cls: 'ocli-thinking-label', text: 'Thinking' });
       (header as any).createSpan({ cls: 'ocli-thinking-timer', text: '0s' });
@@ -25,12 +26,12 @@ export class ThinkingRenderer {
       this.setAttribute(header, 'tabindex', '0');
       this.setAttribute(header, 'aria-expanded', 'true');
 
-      (this.currentThinkingBlock as any).createDiv({ cls: 'ocli-thinking-content' });
-      header.addEventListener('click', () => this.toggleCollapsed());
+      (block as any).createDiv({ cls: 'ocli-thinking-content' });
+      header.addEventListener('click', () => this.toggleCollapsed(block));
       header.addEventListener('keydown', (event: KeyboardEvent) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
-        this.toggleCollapsed();
+        this.toggleCollapsed(block);
       });
       this.nodeCount++;
     }
@@ -65,12 +66,10 @@ export class ThinkingRenderer {
     return this.nodeCount;
   }
 
-  private toggleCollapsed() {
-    if (!this.currentThinkingBlock) return;
-
-    const header = this.currentThinkingBlock.querySelector('.ocli-thinking-header') as HTMLElement;
-    const nextCollapsed = !this.hasClass(this.currentThinkingBlock, 'is-collapsed');
-    this.toggleClass(this.currentThinkingBlock, 'is-collapsed', nextCollapsed);
+  private toggleCollapsed(block: HTMLElement) {
+    const header = block.querySelector('.ocli-thinking-header') as HTMLElement;
+    const nextCollapsed = !this.hasClass(block, 'is-collapsed');
+    this.toggleClass(block, 'is-collapsed', nextCollapsed);
     if (header) {
       this.setAttribute(header, 'aria-expanded', String(!nextCollapsed));
     }

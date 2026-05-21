@@ -164,6 +164,26 @@ async function runTests() {
     expect(block.hasClass('is-complete')).toBe(true);
     expect(label.textContent).toBe('Thought for 2s');
   });
+
+  await test('completed thinking blocks remain individually expandable', () => {
+    let now = 1000;
+    const timeline = new FakeElement();
+    const renderer = new ThinkingRenderer(timeline as any, { now: () => now });
+
+    renderer.appendThinking('first detail');
+    now = 2500;
+    renderer.finalizeCurrentThinking();
+    const firstBlock = timeline.querySelector('.ocli-thinking-block')!;
+    const firstHeader = timeline.querySelector('.ocli-thinking-header')!;
+
+    firstHeader.click();
+    expect(firstBlock.hasClass('is-collapsed')).toBe(true);
+    expect(firstHeader.attributes['aria-expanded']).toBe('false');
+
+    firstHeader.click();
+    expect(firstBlock.hasClass('is-collapsed')).toBe(false);
+    expect(firstHeader.attributes['aria-expanded']).toBe('true');
+  });
 }
 
 runTests().catch((e) => {

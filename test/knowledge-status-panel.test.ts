@@ -7,6 +7,13 @@ function expect(actual: any) {
         throw new Error(`Expected ${expected} but got ${actual}`);
       }
     },
+    toEqual: (expected: any) => {
+      const actualStr = JSON.stringify(actual);
+      const expectedStr = JSON.stringify(expected);
+      if (actualStr !== expectedStr) {
+        throw new Error(`Expected ${expectedStr} but got ${actualStr}`);
+      }
+    },
     toContain: (expected: string) => {
       if (typeof actual !== 'string' || !actual.includes(expected)) {
         throw new Error(`Expected "${actual}" to contain "${expected}"`);
@@ -84,6 +91,10 @@ class FakeElement {
     this.textContent = text;
   }
 
+  setAttribute(name: string, value: string) {
+    this.attributes[name] = value;
+  }
+
   addClass(name: string) {
     this.classList.add(name);
   }
@@ -95,7 +106,7 @@ class FakeElement {
 
   click() {
     for (const handler of this.listeners.click || []) {
-      handler({ preventDefault: () => {} });
+      handler({ preventDefault: () => {}, stopPropagation: () => {} });
     }
   }
 
@@ -192,12 +203,167 @@ async function runTests() {
     await panel.refresh();
 
     const text = collectText(container).join(' | ');
-    expect(container.querySelector('.shell-knowledge-status-badge')?.textContent).toBe('failed');
-    expect(text).toContain('Failed: quota exceeded');
+    const strip = container.querySelector('.shell-knowledge-status-strip');
+    expect(strip?.hasClass('is-failed')).toBe(true);
+    expect(strip?.attributes.title).toContain('Failed: quota exceeded');
     expect(text.includes('https://generativelanguage.googleapis.com')).toBe(false);
     expect(text.includes('Backlinks')).toBe(false);
     expect(text.includes('Pending 2')).toBe(false);
     expect(text.includes('Knowledge Wiki/Windows.md')).toBe(false);
+  });
+
+  await test('renders done status as a color-coded pill without visible status text', async () => {
+    const activeFile = createFile('Research/Daily Research.md');
+    const container = new FakeElement();
+    const panel = new KnowledgeStatusPanel(container as any, {
+      app: {
+        workspace: {
+          getActiveFile: () => activeFile,
+        },
+        commands: {
+          executeCommandById: () => {},
+        },
+      } as unknown as App,
+      plugin: {
+        knowledgeRuntime: {
+          getStatusService: () => ({
+            getNoteStatus: async () => ({
+              path: activeFile.path,
+              state: 'done',
+              summaryPath: 'Knowledge Wiki/Daily Research.md',
+              compiledAt: '2026-05-15T08:00:00Z',
+              error: null,
+            }),
+          }),
+          compileByPath: async () => ({ success: 1, failed: 0 }),
+        },
+      },
+    });
+
+    await panel.refresh();
+
+    const text = collectText(container).join(' | ');
+    expect(container.querySelector('.shell-knowledge-status-badge')?.textContent).toBe(undefined);
+    expect(container.querySelector('.shell-knowledge-status-strip')?.hasClass('is-done')).toBe(true);
+    expect(text.includes('fresh')).toBe(false);
+    expect(text.includes('done')).toBe(false);
+    expect(text.includes('\u5df2\u540c\u6b65')).toBe(false);
+    expect(text.includes('Compiled')).toBe(false);
+    expect(text).toContain('Daily Research');
+    expect(!!container.querySelector('.shell-knowledge-status-dot')).toBe(false);
+  });
+
+  await test('renders minimal pill and opens actions in a popover', async () => {
+    const activeFile = createFile('Research/Daily Research.md');
+    const callbacks: string[] = [];
+    const commandCalls: string[] = [];
+    const container = new FakeElement();
+    const panel = new KnowledgeStatusPanel(container as any, {
+      app: {
+        workspace: {
+          getActiveFile: () => activeFile,
+        },
+        commands: {
+          executeCommandById: (id: string) => {
+            commandCalls.push(id);
+          },
+        },
+      } as unknown as App,
+      plugin: {
+        knowledgeRuntime: {
+          getStatusService: () => ({
+            getNoteStatus: async () => ({
+              path: activeFile.path,
+              state: 'done',
+              summaryPath: 'Knowledge Wiki/Daily Research.md',
+              compiledAt: '2026-05-15T08:00:00Z',
+              error: null,
+            }),
+          }),
+          compileByPath: async () => {
+            callbacks.push('compile-runtime');
+            return { success: 1, failed: 0 };
+          },
+        },
+      },
+      onAddRelatedContext: () => callbacks.push('related'),
+      onOpenKnowledgeSettings: () => callbacks.push('settings'),
+      setIcon: (el, icon) => {
+        el.setAttribute('data-icon', icon);
+      },
+    });
+
+    await panel.refresh();
+
+    expect(container.querySelector('.shell-knowledge-status-title')?.textContent).toBe('Daily Research');
+    const actions = container.querySelectorAll('.shell-knowledge-status-action');
+    expect(actions.length).toBe(0);
+
+    container.querySelector('.shell-knowledge-status-strip')?.click();
+    expect(!!container.querySelector('.shell-knowledge-status-menu')).toBe(true);
+
+    const menuActions = container.querySelectorAll('.shell-knowledge-status-menu-item');
+    expect(menuActions.map(action => collectText(action).join(''))).toEqual([
+      'Compile note',
+      'Add backlinks',
+      'Open wiki summary',
+      'Run knowledge lint',
+      'Copy note path',
+      'Settings',
+    ]);
+
+    menuActions[0].click();
+    menuActions[1].click();
+    menuActions[2].click();
+    menuActions[3].click();
+    menuActions[5].click();
+
+    expect(commandCalls).toEqual([
+      'obsidian-cli:knowledge-open-index',
+      'obsidian-cli:knowledge-lint',
+    ]);
+    expect(callbacks).toEqual(['compile-runtime', 'related', 'settings']);
+  });
+
+  await test('hover close excludes current note from context', async () => {
+    const activeFile = createFile('Research/Daily Research.md');
+    const callbacks: string[] = [];
+    const container = new FakeElement();
+    const panel = new KnowledgeStatusPanel(container as any, {
+      app: {
+        workspace: {
+          getActiveFile: () => activeFile,
+        },
+        commands: {
+          executeCommandById: () => {},
+        },
+      } as unknown as App,
+      plugin: {
+        knowledgeRuntime: {
+          getStatusService: () => ({
+            getNoteStatus: async () => ({
+              path: activeFile.path,
+              state: 'unregistered',
+              summaryPath: null,
+              compiledAt: null,
+              error: null,
+            }),
+          }),
+        },
+      },
+      onExcludeCurrentContext: () => callbacks.push('exclude'),
+      setIcon: (el, icon) => {
+        el.setAttribute('data-icon', icon);
+      },
+    } as any);
+
+    await panel.refresh();
+
+    const exclude = container.querySelector('.shell-knowledge-status-exclude')!;
+    expect(exclude.attributes['aria-label']).toBe('Exclude current note from context');
+    exclude.click();
+
+    expect(callbacks).toEqual(['exclude']);
   });
 }
 

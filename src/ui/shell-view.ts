@@ -1,4 +1,5 @@
-import { ItemView, WorkspaceLeaf, Notice } from 'obsidian';
+import { ItemView, WorkspaceLeaf, Notice, MarkdownView, setIcon } from 'obsidian';
+import { EditorView } from '@codemirror/view';
 import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
 import { ChatController } from './chat-controller';
@@ -24,6 +25,7 @@ import { TabManager } from './tabs/tab-manager';
 import { TabData, TabId } from './tabs/types';
 import { ConversationController } from './history/conversation-controller';
 import { ConversationStore } from './history/conversation-store';
+import { showGhostText } from './ghost-text';
 
 export { VIEW_TYPE_SHELL };
 
@@ -58,6 +60,7 @@ export class ShellView extends ItemView {
     private historyMenuContainerEl: HTMLElement | null = null;
     private knowledgeStatusPanel: KnowledgeStatusPanel | null = null;
     private knowledgeStatusContainerEl: HTMLElement | null = null;
+    private excludedCurrentNotePath: string | null = null;
 
     // Heartbeat monitoring
     private heartbeatInterval: number | null = null;
@@ -124,6 +127,7 @@ export class ShellView extends ItemView {
             target.closest('.shell-context-chips') ||
             target.closest('.shell-model-select-container') ||
             target.closest('.shell-action-buttons') ||
+            target.closest('.shell-input-top-actions') ||
             target.closest('.ocli-history-menu') ||
             target.closest('.shell-history-btn')
         ) return;
@@ -200,10 +204,13 @@ export class ShellView extends ItemView {
         // 1. Header
         const header = container.createDiv({ cls: 'shell-header' });
         const headerTitle = header.createDiv({ cls: 'shell-header-title' });
-        headerTitle.createEl('h1', { text: 'Obsidian Shell', cls: 'shell-title' });
+        const headerIdentity = headerTitle.createDiv({ cls: 'shell-header-identity' });
+        headerIdentity.createDiv({ cls: 'shell-brand-mark', text: 'CLI' });
+        const headerCopy = headerIdentity.createDiv({ cls: 'shell-header-copy' });
+        headerCopy.createEl('h1', { text: 'Shell', cls: 'shell-title' });
+        headerCopy.createDiv({ cls: 'shell-header-state', text: 'Ready - current note scoped' });
         this.tabBarContainerEl = headerTitle.createDiv({ cls: 'shell-tab-bar-container' });
 
-        const headerButtons = header.createDiv({ cls: 'shell-header-buttons' });
         this.historyMenuContainerEl = header.createDiv({ cls: 'ocli-history-menu' });
         this.historyMenu = new HistoryMenu(this.historyMenuContainerEl, {
             onOpen: (id) => this.openConversationFromHistory(id),
@@ -212,77 +219,6 @@ export class ShellView extends ItemView {
             onClose: () => this.hideHistoryMenu(),
         });
         this.historyMenu.hide();
-        this.knowledgeStatusContainerEl = container.createDiv({ cls: 'shell-knowledge-status-host' });
-        this.knowledgeStatusPanel = new KnowledgeStatusPanel(this.knowledgeStatusContainerEl, {
-            app: this.app,
-            plugin: this.plugin,
-        });
-        void this.refreshKnowledgeStatusPanel();
-        this.registerEvent(
-            this.app.workspace.on('file-open', () => {
-                void this.refreshKnowledgeStatusPanel();
-            })
-        );
-        this.registerEvent(
-            this.app.metadataCache.on('changed', () => {
-                void this.refreshKnowledgeStatusPanel();
-            })
-        );
-
-        const historyBtn = headerButtons.createEl('button', {
-            cls: 'clickable-icon shell-history-btn',
-            attr: { 'aria-label': 'Conversation history' }
-        });
-        historyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v5l3 3"></path><path d="M3.05 11a9 9 0 1 1 .5 4"></path><path d="M3 4v7h7"></path></svg>';
-        historyBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            void this.toggleHistoryMenu();
-        });
-
-        // Clear button
-        const clearBtn = headerButtons.createEl('button', {
-            cls: 'clickable-icon',
-            attr: { 'aria-label': 'Clear Chat' }
-        });
-        clearBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
-        clearBtn.addEventListener('click', () => {
-            this.clearChat();
-        });
-
-        // Tools button
-        const toolsBtn = headerButtons.createEl('button', {
-            cls: 'clickable-icon',
-            attr: { 'aria-label': 'Tools' }
-        });
-        toolsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>';
-        toolsBtn.addEventListener('click', async () => {
-            const tools = this.modelService.getAvailableTools();
-            if (tools && tools.length > 0) {
-                let toolsList = 'Available Tools:\n';
-                tools.forEach(tool => {
-                    toolsList += `\n${tool.name}: ${tool.description}\n`;
-                    if (tool.input_schema && tool.input_schema.properties) {
-                        toolsList += `  Parameters: ${Object.keys(tool.input_schema.properties).join(', ')}\n`;
-                    }
-                });
-                new Notice(toolsList, 8000);
-            } else {
-                new Notice('No tools available or tools not loaded yet.');
-            }
-        });
-
-        // Settings button
-        const settingsBtn = headerButtons.createEl('button', {
-            cls: 'clickable-icon',
-            attr: { 'aria-label': 'Settings' }
-        });
-        settingsBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 .6 1v.51a2 2 0 0 1-.6 1l-.15.15a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-.6-1v-.5a2 2 0 0 1 .6-1l.15-.15a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
-        settingsBtn.addEventListener('click', () => {
-            // @ts-ignore - app setting tab activation
-            this.app.setting.open();
-            // @ts-ignore - activate plugin settings tab
-            this.app.setting.openTabById('obsidian-cli');
-        });
 
         // 2. Output Area (Scrollable)
         this.outputContainer = container.createDiv({ cls: 'shell-output-area' });
@@ -311,11 +247,19 @@ export class ShellView extends ItemView {
         this.renderActiveTabMessages();
 
         // 3. Input Area (Fixed at bottom)
-        const inputContainer = container.createDiv({ cls: 'shell-input-container' });
-
-        // Context Chips Container
-        const contextContainer = inputContainer.createDiv({ cls: 'shell-context-chips' });
-        this.renderContextChips(contextContainer);
+        const inputContainer = this.createShellScaffold(container);
+        void this.refreshKnowledgeStatusPanel();
+        this.registerEvent(
+            this.app.workspace.on('file-open', () => {
+                this.excludedCurrentNotePath = null;
+                void this.refreshKnowledgeStatusPanel();
+            })
+        );
+        this.registerEvent(
+            this.app.metadataCache.on('changed', () => {
+                void this.refreshKnowledgeStatusPanel();
+            })
+        );
 
         // Suggestion Popup
         this.suggestionContainer = inputContainer.createDiv({ cls: 'shell-suggestions' });
@@ -331,7 +275,7 @@ export class ShellView extends ItemView {
         this.inputEl = inputWrapper.createEl('textarea', {
             cls: 'shell-input',
             attr: {
-                placeholder: 'Ask AI... (/ for commands, @ for files)',
+                placeholder: 'Ask AI... (/ commands, @ context)',
                 spellcheck: 'false',
                 autocomplete: 'off',
                 rows: '1'
@@ -391,6 +335,7 @@ export class ShellView extends ItemView {
     // ==================== Suggestion Logic ====================
 
     handleInput() {
+        this.updateInputToolbarCapabilities();
         const trigger = detectSuggestionTrigger(this.inputEl.value, this.inputEl.selectionStart);
         if (trigger) {
             this.showSuggestions(trigger.type, trigger.query);
@@ -478,8 +423,12 @@ export class ShellView extends ItemView {
         this.inputEl.value = selection.text;
         this.inputEl.selectionStart = this.inputEl.selectionEnd = selection.cursor;
         if (selection.contextItem) {
+            if (selection.contextItem.type === 'scope' && selection.contextItem.scope === 'current') {
+                this.excludedCurrentNotePath = null;
+            }
             this.contextManager.addContext(selection.contextItem);
             this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
+            void this.refreshKnowledgeStatusPanel();
         }
 
         this.hideSuggestions();
@@ -540,7 +489,7 @@ export class ShellView extends ItemView {
         }
 
         return suggestions
-            .filter(item => item.label.toLowerCase().includes(`@${normalized}`) || item.desc.toLowerCase().includes(normalized))
+            .filter(item => item.label.toLowerCase().includes(`@${normalized}`))
             .slice(0, 10);
     }
 
@@ -561,7 +510,9 @@ export class ShellView extends ItemView {
     async processCommand(query: string) {
         try {
             this.ensureActiveTabSession();
-            const { contextItems, selection } = await this.contextController.collectCommandContext();
+            const { contextItems, selection } = await this.contextController.collectCommandContext({
+                includeCurrent: this.shouldIncludeCurrentNoteContext(),
+            });
             this.currentSelection = selection;
 
             this.updateActivity();
@@ -740,6 +691,11 @@ export class ShellView extends ItemView {
                         this.chatController.cancelApproval(message.approval);
                     }
                 },
+                onFocusApprovalPreview: async (message) => {
+                    if (message.approval) {
+                        await this.showApprovalPreviewInEditor(message.approval);
+                    }
+                },
                 onFeedbackUp: async (message) => {
                     await this.chatController.archiveMessage(message.id);
                     await this.refreshKnowledgeStatusPanel();
@@ -780,7 +736,55 @@ export class ShellView extends ItemView {
     }
 
     private async refreshKnowledgeStatusPanel() {
+        if (!this.shouldIncludeCurrentNoteContext()) {
+            this.knowledgeStatusContainerEl?.empty();
+            return;
+        }
         await this.knowledgeStatusPanel?.refresh();
+    }
+
+    private shouldIncludeCurrentNoteContext() {
+        const activePath = this.app.workspace?.getActiveFile?.()?.path;
+        return !!activePath && this.excludedCurrentNotePath !== activePath;
+    }
+
+    private async showApprovalPreviewInEditor(approval: import('./approval-card').ApprovalRequest) {
+        const previewText = approval.preview?.newContent ?? approval.args?.content;
+        if (!previewText || typeof previewText !== 'string') {
+            new Notice('No editor preview is available for this approval.');
+            return;
+        }
+
+        const target = approval.target || approval.args?.path || approval.args?.filename;
+        if (target) {
+            await this.openApprovalTarget(target);
+        }
+
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        const editor = activeView?.editor as any;
+        const cmView = editor?.cm as EditorView | undefined;
+        if (!cmView) {
+            new Notice('Open the target note in source mode to show the preview.');
+            return;
+        }
+
+        const line = Math.max(1, editor?.getCursor?.()?.line + 1 || 1);
+        const ch = Math.max(0, editor?.getCursor?.()?.ch || 0);
+        showGhostText(cmView, this.buildApprovalGhostPreview(previewText), line, ch);
+        new Notice('Preview shown in the editor. Hover approval icons for actions.');
+    }
+
+    private async openApprovalTarget(path: string) {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!file) return;
+        const leaf = this.app.workspace.getLeaf(false);
+        await leaf?.openFile?.(file as any);
+    }
+
+    private buildApprovalGhostPreview(content: string) {
+        const lines = content.split(/\r?\n/).slice(0, 12);
+        const suffix = content.split(/\r?\n/).length > lines.length ? '\n...' : '';
+        return `\n${lines.join('\n')}${suffix}`;
     }
 
     async onClose() {
@@ -848,7 +852,17 @@ export class ShellView extends ItemView {
     // ==================== Context Handling ====================
 
     private renderContextChips(container: HTMLElement) {
-        new ContextChips(container, {
+        if (!container) return;
+        container.empty();
+        if (this.shouldIncludeCurrentNoteContext()) {
+            this.renderImplicitCurrentContext(container);
+        }
+
+        const explicitContainer = container.createDiv({ cls: 'shell-explicit-context-chips' });
+        const explicitContexts = this.contextManager.getContexts()
+            .filter((ctx) => !(ctx.type === 'scope' && ctx.scope === 'current'));
+
+        new ContextChips(explicitContainer, {
             onRemove: (id) => {
                 this.contextManager.removeContext(id);
                 this.renderContextChips(container);
@@ -856,7 +870,133 @@ export class ShellView extends ItemView {
             onOpenFile: (path) => {
                 void this.app.workspace.openLinkText(path, '', false);
             },
-        }).update(this.contextManager.getContexts());
+        }).update(explicitContexts);
+    }
+
+    private renderImplicitCurrentContext(container: HTMLElement) {
+        const activeFile = this.app.workspace?.getActiveFile?.();
+        const label = activeFile?.basename ? `Current: ${activeFile.basename}` : 'Current note';
+        const title = activeFile?.path
+            ? `Current note included by default: ${activeFile.path}`
+            : 'Current note is included by default';
+        const chip = container.createDiv({
+            cls: 'context-chip context-chip-current is-implicit',
+            title,
+        });
+        const iconEl = chip.createSpan({ cls: 'chip-icon' });
+        setIcon(iconEl, 'file-text');
+        chip.createSpan({ cls: 'chip-label', text: label });
+    }
+
+    private getContextChipsContainer() {
+        return this.outputContainer?.parentElement?.querySelector('.shell-context-chips') as HTMLElement | null;
+    }
+
+    private createShellScaffold(container: HTMLElement) {
+        const inputContainer = container.createDiv({ cls: 'shell-input-container' });
+        this.createInputUtilityActions(inputContainer);
+
+        const contextBar = inputContainer.createDiv({ cls: 'shell-input-context-bar' });
+        const contextContainer = contextBar.createDiv({ cls: 'shell-context-chips' });
+        this.renderContextChips(contextContainer);
+        this.knowledgeStatusContainerEl = contextBar.createDiv({ cls: 'shell-knowledge-status-host' });
+        this.knowledgeStatusPanel = new KnowledgeStatusPanel(this.knowledgeStatusContainerEl, {
+            app: this.app,
+            plugin: this.plugin,
+            onAddRelatedContext: () => this.addBacklinksScopeContext(),
+            onExcludeCurrentContext: (path) => this.excludeCurrentNoteContext(path),
+            onOpenKnowledgeSettings: () => this.openPluginSettings(),
+        });
+
+        return inputContainer;
+    }
+
+    private createInputUtilityActions(container: HTMLElement) {
+        const actions = container.createDiv({ cls: 'shell-input-top-actions' });
+        this.createInputUtilityButton(actions, 'Conversation history', 'history', 'shell-history-btn', (event) => {
+            event.stopPropagation();
+            void this.toggleHistoryMenu();
+        });
+        this.createInputUtilityButton(actions, 'Clear chat', 'trash-2', 'shell-clear-btn', () => {
+            this.clearChat();
+        });
+        this.createInputUtilityButton(actions, 'Tools', 'wrench', 'shell-tools-btn', () => {
+            this.showAvailableTools();
+        });
+        this.createInputUtilityButton(actions, 'Settings', 'settings', 'shell-settings-btn', () => {
+            this.openPluginSettings();
+        });
+    }
+
+    private createInputUtilityButton(
+        container: HTMLElement,
+        label: string,
+        icon: string,
+        cls: string,
+        handler: (event: MouseEvent) => void | Promise<void>,
+    ) {
+        const button = container.createEl('button', {
+            cls: `clickable-icon shell-input-top-action ${cls}`,
+            attr: { type: 'button', 'aria-label': label, title: label },
+        });
+        setIcon(button, icon);
+        button.addEventListener('click', (event) => {
+            void handler(event);
+        });
+        return button;
+    }
+
+    private showAvailableTools() {
+        const tools = this.modelService.getAvailableTools();
+        if (tools && tools.length > 0) {
+            let toolsList = 'Available Tools:\n';
+            tools.forEach(tool => {
+                toolsList += `\n${tool.name}: ${tool.description}\n`;
+                if (tool.input_schema && tool.input_schema.properties) {
+                    toolsList += `  Parameters: ${Object.keys(tool.input_schema.properties).join(', ')}\n`;
+                }
+            });
+            new Notice(toolsList, 8000);
+            return;
+        }
+        new Notice('No tools available or tools not loaded yet.');
+    }
+
+    private addBacklinksScopeContext() {
+        this.contextManager.addContext({
+            id: 'scope:backlinks',
+            type: 'scope',
+            data: '@backlinks',
+            summary: 'Add notes linking to the current note',
+            scope: 'backlinks',
+        });
+        const contextContainer = this.getContextChipsContainer();
+        if (contextContainer) this.renderContextChips(contextContainer);
+        new Notice('Added @backlinks context.');
+    }
+
+    private excludeCurrentNoteContext(path: string) {
+        this.excludedCurrentNotePath = path;
+        const contextContainer = this.getContextChipsContainer();
+        if (contextContainer) this.renderContextChips(contextContainer);
+        if (this.knowledgeStatusContainerEl) this.knowledgeStatusContainerEl.empty();
+    }
+
+    private prepareSelectionEdit() {
+        if (!this.inputEl) return;
+        if (!this.inputEl.value.trim().startsWith('/edit')) {
+            this.inputEl.value = '/edit ';
+        }
+        this.inputEl.focus();
+        this.inputEl.selectionStart = this.inputEl.selectionEnd = this.inputEl.value.length;
+        this.adjustHeight();
+    }
+
+    private openPluginSettings() {
+        // @ts-ignore - app setting tab activation
+        this.app.setting.open();
+        // @ts-ignore - activate plugin settings tab
+        this.app.setting.openTabById('obsidian-cli');
     }
 
     private async handlePaste(e: ClipboardEvent) {
@@ -998,9 +1138,12 @@ export class ShellView extends ItemView {
     }
 
     private updateInputToolbarCapabilities() {
+        const isResponding = this.tabManager.getActiveTab()?.isStreaming ?? this.isResponding;
         this.inputToolbar?.updateCapabilities({
             supportsImageInput: this.modelService.getProviderCapabilities().supportsImageInput,
-            supportsCancellation: this.tabManager.getActiveTab()?.isStreaming ?? this.isResponding,
+            supportsCancellation: isResponding,
+            isResponding,
+            canSend: !!this.inputEl?.value.trim(),
         });
     }
 
@@ -1144,7 +1287,7 @@ export class ShellView extends ItemView {
         const settings = this.getPluginInstance()?.settings;
         const config = settings?.providers?.[settings?.activeProvider];
         const label = config?.label || 'AI';
-        this.inputEl.setAttr('placeholder', `Ask ${label}... (/ for commands, @ for files)`);
+        this.inputEl.setAttr('placeholder', `Ask ${label}... (/ commands, @ context)`);
     }
 
     public async updateModelSelector(forceRefresh: boolean = false) {

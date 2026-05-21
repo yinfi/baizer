@@ -342,11 +342,14 @@ class OpenAIChatSession implements IChatSession {
         }
 
         let fullText = '';
+        let reasoningContent = '';
         const toolCalls: any[] = [];
 
         for await (const event of this.provider.chatCompletionStream(this.history, this.tools, signal)) {
             if (event.type === 'text_delta') {
                 fullText += event.content;
+            } else if (event.type === 'thinking') {
+                reasoningContent += event.content;
             } else if (event.type === 'tool_call') {
                 toolCalls.push({
                     id: event.id || `call_${Date.now()}_${toolCalls.length}`,
@@ -360,6 +363,9 @@ class OpenAIChatSession implements IChatSession {
         }
 
         const assistantMsg: any = { role: 'assistant', content: fullText || null };
+        if (reasoningContent) {
+            assistantMsg.reasoning_content = reasoningContent;
+        }
         if (toolCalls.length > 0) {
             assistantMsg.tool_calls = toolCalls;
         }

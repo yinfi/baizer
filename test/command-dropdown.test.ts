@@ -128,6 +128,45 @@ async function runTests() {
     expect(container.children[1].querySelector('.suggestion-source')?.textContent).toBe('skill');
   });
 
+  await test('renders semantic titles and insert values without repeated trigger glyphs', () => {
+    const container = new FakeElement();
+    const dropdown = new CommandDropdown(container as any, {
+      onSelect: () => { },
+      onNavigate: () => { },
+      onCancel: () => { },
+    });
+
+    dropdown.update({
+      type: 'file',
+      items: [
+        {
+          label: '@backlinks',
+          desc: 'Add notes linking to the current note',
+          value: '@backlinks',
+          source: 'scope',
+          kind: 'scope',
+          scope: 'backlinks',
+        } as any,
+      ],
+      selectedIndex: 0,
+    });
+
+    expect(container.children[0].querySelector('.suggestion-icon')?.textContent).toBe('');
+    expect(container.children[0].querySelector('.suggestion-title')?.textContent).toBe('Backlinks');
+    expect(container.children[0].querySelector('.suggestion-value')?.textContent).toBe('@backlinks');
+    expect(container.children[0].querySelector('.suggestion-text')?.textContent).toBe(undefined);
+
+    dropdown.update({
+      type: 'command',
+      items: [{ label: '/wiki:compile', desc: 'Compile current note', source: 'skill' }],
+      selectedIndex: 0,
+    });
+
+    expect(container.children[0].querySelector('.suggestion-title')?.textContent).toBe('Compile current note');
+    expect(container.children[0].querySelector('.suggestion-value')?.textContent).toBe('/wiki:compile');
+    expect(container.children[0].querySelector('.suggestion-desc')?.textContent).toBe(undefined);
+  });
+
   await test('renders file suggestions and click selection', () => {
     const selected: any[] = [];
     const container = new FakeElement();
@@ -144,7 +183,9 @@ async function runTests() {
     });
     container.children[0].click();
 
-    expect(container.children[0].querySelector('.suggestion-icon')?.textContent).toBe('@');
+    expect(container.children[0].querySelector('.suggestion-icon')?.textContent).toBe('');
+    expect(container.children[0].querySelector('.suggestion-title')?.textContent).toBe('Daily');
+    expect(container.children[0].querySelector('.suggestion-value')?.textContent).toBe('[[Journal/Daily.md]]');
     expect(container.children[0].querySelector('.suggestion-source')?.textContent).toBe('file');
     expect(selected).toEqual([{ label: 'Daily', index: 0 }]);
   });

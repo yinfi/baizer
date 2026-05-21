@@ -188,6 +188,21 @@ async function runTests() {
     expect(container.children[1].textContent).toBe('[System] ready');
   });
 
+  await test('renders cancelled system messages as low-emphasis status chips', async () => {
+    const container = new FakeElement();
+    const renderer = new MessageRenderer({ app: {}, component: {} });
+
+    await renderer.renderMessage(container as any, {
+      id: 'cancel-1',
+      role: 'system',
+      content: 'Cancelled: AI开发指南.md',
+      timestamp: 2,
+    });
+
+    expect(container.children[0].className).toContain('shell-system-cancelled');
+    expect(container.children[0].textContent).toBe('[System] Cancelled: AI开发指南.md');
+  });
+
   await test('renders assistant markdown and creates an action toolbar', async () => {
     const container = new FakeElement();
     const rendered: string[] = [];
@@ -250,6 +265,7 @@ async function runTests() {
       component: {},
       onApprove: async () => { calls.push('approve'); },
       onCancel: () => { calls.push('cancel'); },
+      onFocusApprovalPreview: () => { calls.push('focus'); },
     });
 
     await renderer.renderMessage(container as any, {
@@ -274,12 +290,20 @@ async function runTests() {
       },
     });
 
-    const buttons = container.querySelectorAll('.shell-approval-btn');
+    const approveButton = container.querySelector('.shell-approval-confirm');
+    const cancelButton = container.querySelector('.shell-approval-cancel');
+    const focusButton = container.querySelector('.shell-approval-focus-preview');
+    const approvalEntry = container.querySelector('.shell-approval-entry');
+    const approvalAvatar = container.querySelector('.shell-approval-avatar');
     const previewTarget = container.querySelector('.shell-change-preview-target');
-    buttons[0].click();
-    buttons[1].click();
+    focusButton?.click();
+    approveButton?.click();
+    cancelButton?.click();
 
-    expect(calls).toEqual(['approve', 'cancel']);
+    expect(calls).toEqual(['focus', 'approve']);
+    expect(!!container.querySelector('.shell-approval-card')).toBe(false);
+    expect(!!approvalEntry).toBe(true);
+    expect(approvalAvatar?.textContent).toBe('AI');
     expect(previewTarget?.textContent).toBe('Clippings/example.md');
   });
 
