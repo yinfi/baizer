@@ -44,6 +44,7 @@ const tests = [
   'test/context-manager.test.ts',
   'test/settings-state.test.ts',
   'test/memory-manager.test.ts',
+  'test/hindsight-memory.test.ts',
   'test/save-path.test.ts',
   'test/skill-files.test.ts',
   'test/gemini-thought-signatures.test.ts',
