@@ -99,6 +99,60 @@ async function runTests() {
     expect(memories.length).toBe(1);
     expect(memories[0].text).toBe('Second value');
   });
+
+  await test('retriever ranks entity and keyword matches above unrelated records', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemories([
+      makeMemory({
+        id: 'mem_obsidian',
+        type: 'world',
+        text: 'User is working on the Obsidian CLI memory layer.',
+        normalizedText: 'user is working on the obsidian cli memory layer.',
+        entities: ['obsidian-cli', 'memory'],
+        tags: ['project'],
+        mentionedAt: 1000,
+      }),
+      makeMemory({
+        id: 'mem_food',
+        type: 'experience',
+        text: 'User discussed lunch plans.',
+        normalizedText: 'user discussed lunch plans.',
+        entities: ['lunch'],
+        tags: ['chat'],
+        mentionedAt: 2000,
+      }),
+    ]);
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    const result = await retriever.recall({
+      query: 'How should we improve Obsidian CLI memory?',
+      maxRecords: 2,
+      now: 3000,
+    });
+
+    expect(result.records[0].id).toBe('mem_obsidian');
+    expect(result.promptBlock).toContain('Obsidian CLI memory layer');
+  });
+
+  await test('retriever respects max character budget', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemories([
+      makeMemory({ id: 'mem_one', text: 'Short memory about local storage.', normalizedText: 'short memory about local storage.' }),
+      makeMemory({ id: 'mem_two', text: 'Another short memory about local recall.', normalizedText: 'another short memory about local recall.' }),
+    ]);
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    const result = await retriever.recall({ query: 'local memory', maxChars: 90, now: 3000 });
+
+    expect(result.promptBlock.length <= 90).toBe(true);
+    expect(result.records.length).toBe(1);
+  });
 }
 
 runTests().catch((error) => {
