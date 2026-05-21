@@ -34,6 +34,18 @@ async function runTests() {
   console.log('=== ModelService Tests ===');
   const { ModelService } = await import('../src/services/model-service');
 
+  await test('ModelService passes privacyMode into MemoryManager options', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.settings = {
+      ...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
+      privacyMode: true,
+    };
+
+    const options = service.buildMemoryOptions();
+
+    expect(options).toEqual({ privacyMode: true });
+  });
+
   await test('switchProvider flushes the active memory session before cleanup', async () => {
     const service: any = Object.create(ModelService.prototype);
     const order: string[] = [];
