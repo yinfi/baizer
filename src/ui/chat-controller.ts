@@ -629,39 +629,51 @@ export class ChatController {
         }
 
         const profile = this.api.getUserProfile();
-        if (!profile) {
+        const forgetHindsight = typeof (this.api as any).forgetMemory === 'function'
+            ? (forgetField: string) => (this.api as any).forgetMemory(forgetField)
+            : async (_forgetField: string) => undefined;
+
+        if (!profile && typeof (this.api as any).forgetMemory !== 'function') {
             this.addMessage('system', 'No user memory data available.');
             return;
         }
 
         if (f === 'all') {
-            await this.api.updateProfile({
+            if (profile) await this.api.updateProfile({
                 name: '', profession: '', expertise: [],
                 preferences: { language: 'zh-CN', responseStyle: 'balanced', topics: [] },
                 workflows: [],
                 context: { currentProjects: [], goals: [], challenges: [] }
             });
+            await forgetHindsight(f);
             this.addMessage('system', 'Cleared all remembered user data.');
         } else if (f === 'name') {
-            await this.api.updateProfile({ name: '' });
+            if (profile) await this.api.updateProfile({ name: '' });
+            await forgetHindsight(f);
             this.addMessage('system', '宸查仐蹇? name');
         } else if (f === 'profession') {
-            await this.api.updateProfile({ profession: '' });
+            if (profile) await this.api.updateProfile({ profession: '' });
+            await forgetHindsight(f);
             this.addMessage('system', '宸查仐蹇? profession');
         } else if (f === 'expertise') {
-            await this.api.updateProfile({ expertise: [] });
+            if (profile) await this.api.updateProfile({ expertise: [] });
+            await forgetHindsight(f);
             this.addMessage('system', '宸查仐蹇? expertise');
         } else if (f === 'preferences') {
-            await this.api.updateProfile({ preferences: { language: 'zh-CN', responseStyle: 'balanced', topics: [] } });
+            if (profile) await this.api.updateProfile({ preferences: { language: 'zh-CN', responseStyle: 'balanced', topics: [] } });
+            await forgetHindsight(f);
             this.addMessage('system', '宸查仐蹇? preferences');
         } else if (f === 'workflows') {
-            await this.api.updateProfile({ workflows: [] });
+            if (profile) await this.api.updateProfile({ workflows: [] });
+            await forgetHindsight(f);
             this.addMessage('system', '宸查仐蹇? workflows');
         } else if (f === 'projects') {
-            await this.api.updateProfile({ context: { ...profile.context, currentProjects: [] } });
+            if (profile) await this.api.updateProfile({ context: { ...profile.context, currentProjects: [] } });
+            await forgetHindsight(f);
             this.addMessage('system', '宸查仐蹇? projects');
         } else if (f === 'goals') {
-            await this.api.updateProfile({ context: { ...profile.context, goals: [] } });
+            if (profile) await this.api.updateProfile({ context: { ...profile.context, goals: [] } });
+            await forgetHindsight(f);
             this.addMessage('system', '宸查仐蹇? goals');
         } else {
             this.addMessage('system', `鏈煡瀛楁: ${f}\n鍙仐蹇樺瓧娈? name, profession, expertise, preferences, workflows, projects, goals, all`);
