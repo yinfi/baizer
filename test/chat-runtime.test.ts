@@ -78,6 +78,59 @@ async function runTests() {
     expect(prepared.prompt.includes('User Request: Explain this')).toBe(true);
   });
 
+  await test('runtime recalls relevant memory and retains completed turns', async () => {
+    const memoryCalls: any[] = [];
+    const providerInputs: any[] = [];
+    const runtime = createChatRuntime({
+      provider: {
+        startChat: () => ({
+          sendMessage: async (input: any) => {
+            providerInputs.push(input);
+            return { text: 'Done' };
+          },
+        }),
+      } as any,
+      memoryManager: {
+        ready: async () => undefined,
+        buildContext: () => '',
+        recallForPrompt: async (input: any) => {
+          memoryCalls.push({ type: 'recallForPrompt', input });
+          return '[Relevant Memory]\n- world: User prefers local-first memory.\n';
+        },
+        retainTurn: async (input: any) => {
+          memoryCalls.push({ type: 'retainTurn', input });
+        },
+        getOrCreateSession: () => {
+          throw new Error('provider chat session should be scoped to the runtime turn');
+        },
+        recordMessage: async () => undefined,
+      } as any,
+      toolRegistry: {
+        getAllDefinitions: () => [],
+        execute: async () => ({}),
+      } as any,
+      skillRegistry: {
+        resolveByIntent: () => null,
+        getSkillSummaryText: () => '',
+        activateSkill: () => null,
+      } as any,
+    });
+
+    const turn = await runtime.prepareTurn({
+      userMessage: 'Design memory for Obsidian CLI',
+      contextItems: [],
+      selection: '',
+      source: 'shell',
+    });
+    const response = await runtime.query(turn);
+
+    expect(turn.prompt).toContain('[Relevant Memory]');
+    expect(response).toBe('Done');
+    expect(providerInputs.length).toBe(1);
+    expect(memoryCalls[0].type).toBe('recallForPrompt');
+    expect(memoryCalls[memoryCalls.length - 1].type).toBe('retainTurn');
+  });
+
   await test('prepareTurn activates the matched intent skill and scopes turn tools', async () => {
     const runtime = createChatRuntime({
       provider: {} as any,

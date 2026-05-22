@@ -169,6 +169,51 @@ async function runTests() {
     expect(context).toContain('[User Profile]');
     expect(context).toContain('[Recent Context]');
   });
+
+  await test('recallForPrompt returns relevant hindsight memories', async () => {
+    const promptLog: string[] = [];
+    const { app } = createApp();
+    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer local-first memory for Obsidian CLI.',
+      assistantMessage: 'We will keep memory local.',
+      source: 'shell',
+      now: 1000,
+    });
+
+    const promptBlock = await (memory as any).recallForPrompt({
+      query: 'How should Obsidian CLI memory work?',
+      maxChars: 500,
+      now: 2000,
+    });
+
+    expect(promptBlock).toContain('[Relevant Memory]');
+    expect(promptBlock).toContain('local-first');
+  });
+
+  await test('privacy mode prevents retaining new turn memories', async () => {
+    const promptLog: string[] = [];
+    const { app } = createApp();
+    const memory = new MemoryManager(app, createModelProvider(promptLog), { privacyMode: true } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: 'Remember that my project is private.',
+      assistantMessage: 'Acknowledged.',
+      source: 'shell',
+      now: 1000,
+    });
+
+    const promptBlock = await (memory as any).recallForPrompt({
+      query: 'private project',
+      maxChars: 500,
+      now: 2000,
+    });
+
+    expect(promptBlock).toBe('');
+  });
 }
 
 runTests().catch((e) => {
