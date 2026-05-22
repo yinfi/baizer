@@ -148,6 +148,33 @@ async function runTests() {
     controller.cleanup();
   });
 
+  await test('/profile renders hindsight memory profile text when available', async () => {
+    const messages: any[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        getUserProfile: () => ({
+          profession: 'Engineer',
+          expertise: ['Obsidian'],
+          preferences: { responseStyle: 'balanced' },
+          context: { currentProjects: ['Memory'], goals: [] },
+        }),
+        updateProfile: async () => undefined,
+        getAvailableTools: () => [],
+        clearSession: async () => undefined,
+      } as any,
+      onMessageAdded: (message) => messages.push(message),
+    });
+
+    await controller.processCommand('/profile');
+
+    expect(messages[messages.length - 1].content).toContain('Engineer');
+    controller.cleanup();
+  });
+
   await test('processCommand normalizes legacy string context before calling api.chat', async () => {
     const chatCalls: any[] = [];
 
