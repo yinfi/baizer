@@ -18,6 +18,8 @@ interface MemoryManagerOptions {
     privacyMode?: boolean;
 }
 
+type ForgetMemoryField = 'name' | 'profession' | 'expertise' | 'preferences' | 'workflows' | 'projects' | 'goals' | 'all';
+
 export class MemoryManager {
     private chatSession: IChatSession | null = null;
     private userProfile: UserProfile;
@@ -126,6 +128,17 @@ export class MemoryManager {
         }
     }
 
+    async forgetMemory(field: string): Promise<void> {
+        await this.ready();
+        const normalizedField = field.trim().toLowerCase() as ForgetMemoryField;
+        if (normalizedField === 'all') {
+            await this.hindsightStore.clearMemories();
+            return;
+        }
+
+        await this.hindsightStore.deleteMemories((memory) => this.shouldForgetHindsightMemory(memory, normalizedField));
+    }
+
     private formatProfileForContext(): string {
         const p = this.userProfile;
         const parts: string[] = [];
@@ -162,7 +175,7 @@ export class MemoryManager {
 
     private buildTurnMemories(input: RetainTurnInput, now: number) {
         const records = [];
-        const userText = input.userMessage.trim();
+        const userText = this.sanitizeMemoryText(input.userMessage.trim());
         if (userText) {
             records.push(this.createMemoryRecord({
                 type: this.looksDurable(userText) ? 'world' : 'experience',
@@ -173,7 +186,7 @@ export class MemoryManager {
             }));
         }
 
-        const assistantText = input.assistantMessage.trim();
+        const assistantText = this.sanitizeMemoryText(input.assistantMessage.trim());
         if (assistantText) {
             records.push(this.createMemoryRecord({
                 type: 'experience',
@@ -186,6 +199,59 @@ export class MemoryManager {
         }
 
         return records;
+    }
+
+    private shouldForgetHindsightMemory(memory: any, field: ForgetMemoryField): boolean {
+        if (!['name', 'profession', 'expertise', 'preferences', 'workflows', 'projects', 'goals'].includes(field)) {
+            return false;
+        }
+
+        const text = memory.normalizedText || normalizeMemoryText(memory.text || '');
+        const tags = new Set((memory.tags || []).map((tag: string) => tag.toLowerCase()));
+
+        switch (field) {
+            case 'profession':
+                return tags.has('profession') || text.startsWith('user profession:') || text.includes('profession') || this.matchesProfessionMemory(text);
+            case 'expertise':
+                return tags.has('expertise') || text.startsWith('user expertise:') || text.includes('expertise') || this.matchesExpertiseMemory(text);
+            case 'preferences':
+                return tags.has('preference') || text.includes('preference') || text.includes('response style');
+            case 'workflows':
+                return tags.has('workflow') || text.includes('workflow');
+            case 'projects':
+                return tags.has('project') || text.startsWith('current project:') || text.includes('my project');
+            case 'goals':
+                return tags.has('goal') || text.startsWith('user goal:') || text.includes('my goal');
+            case 'name':
+                return tags.has('name') || text.startsWith('user name:') || text.includes('my name is') || this.matchesNameMemory(text);
+            default:
+                return false;
+        }
+    }
+
+    private matchesProfessionMemory(text: string): boolean {
+        return /\b(?:i am|i'm)\s+(?:an?\s+)?[^.?!\n]{0,80}\b(?:engineer|developer|designer|manager|researcher|writer|student|consultant|architect|analyst)\b/i.test(text)
+            || /我是[^。！？\n]{0,40}(?:工程师|开发|经理|设计师|研究员|学生|顾问|架构师|分析师)/i.test(text);
+    }
+
+    private matchesExpertiseMemory(text: string): boolean {
+        return /\b(?:expert in|skilled in|speciali[sz]e in)\b/i.test(text)
+            || /擅长/i.test(text);
+    }
+
+    private matchesNameMemory(text: string): boolean {
+        return /\b(?:my name is|i am named|i'm named|named|call me)\b/i.test(text)
+            || /(?:我叫|叫我|我的名字是)/i.test(text);
+    }
+
+    private sanitizeMemoryText(text: string): string {
+        if (!text) return '';
+
+        return text
+            .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
+            .replace(/\bsk-[A-Za-z0-9_-]{6,}\b/g, '[REDACTED]')
+            .replace(/\bgh[pousr]_[A-Za-z0-9_]{10,}\b/g, '[REDACTED]')
+            .replace(/\b(api\s*key|token|password|secret)\s*(?:is|=|:)\s*([^\s,;]+)/gi, '$1 is [REDACTED]');
     }
 
     private createMemoryRecord(input: {
@@ -228,9 +294,13 @@ export class MemoryManager {
 
     private tagsForText(text: string): string[] {
         const tags = [];
+        const normalizedText = normalizeMemoryText(text);
         if (/prefer|偏好|喜欢/i.test(text)) tags.push('preference');
         if (/project|项目/i.test(text)) tags.push('project');
         if (/goal|目标/i.test(text)) tags.push('goal');
+        if (this.matchesProfessionMemory(normalizedText)) tags.push('profession');
+        if (this.matchesExpertiseMemory(normalizedText)) tags.push('expertise');
+        if (this.matchesNameMemory(normalizedText)) tags.push('name');
         if (tags.length === 0) tags.push('chat');
         return tags;
     }

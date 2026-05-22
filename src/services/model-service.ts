@@ -375,6 +375,12 @@ export class ModelService {
         }
     }
 
+    async forgetMemory(field: string) {
+        if (this.memoryManager) {
+            await this.memoryManager.forgetMemory(field);
+        }
+    }
+
     async learnFromMessages(messages: string[]): Promise<any> {
         if (this.memoryManager) {
             return await this.memoryManager.learnFromRecentMessages(messages);
