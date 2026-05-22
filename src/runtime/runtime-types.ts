@@ -17,6 +17,8 @@ export interface ChatTurnRequest {
 export interface PreparedChatTurn {
   prompt: string;
   tools: ToolDefinition[];
+  userRequest?: string;
+  memoryContext?: string;
   activeSkillName?: string;
   allowedToolNames?: string[];
   requiresFileWrite?: boolean;
