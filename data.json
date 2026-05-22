@@ -37,6 +37,8 @@
   "guardianUIStyle": "hybrid",
   "ignoredFolders": "",
   "privacyMode": false,
+  "vaultWriteScope": "all-vault",
+  "vaultWriteAllowedFolders": [],
   "allowFileCreation": true,
   "allowFileModification": true,
   "allowPluginControl": true,
