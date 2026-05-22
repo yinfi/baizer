@@ -34,6 +34,7 @@ export class HindsightRetriever {
       .map((entry) => entry.record);
 
     const selected = this.applyBudget(ranked, maxRecords, maxChars);
+    await this.store.markMemoriesAccessed(selected.map((record) => record.id), now);
     return {
       records: selected,
       promptBlock: this.formatPromptBlock(selected, maxChars),

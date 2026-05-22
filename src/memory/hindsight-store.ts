@@ -70,6 +70,39 @@ export class HindsightStore {
     await this.writeMemories();
   }
 
+  async deleteMemories(predicate: (memory: MemoryRecord) => boolean): Promise<void> {
+    await this.ready();
+    const next = this.memories.filter((memory) => !predicate(memory));
+    if (next.length === this.memories.length) return;
+    this.memories = next;
+    await this.writeMemories();
+  }
+
+  async clearMemories(bankId: string = DEFAULT_MEMORY_BANK_ID): Promise<void> {
+    await this.deleteMemories((memory) => memory.bankId === bankId);
+  }
+
+  async markMemoriesAccessed(ids: string[], now: number = Date.now()): Promise<void> {
+    await this.ready();
+    const idSet = new Set(ids);
+    if (idSet.size === 0) return;
+
+    let changed = false;
+    this.memories = this.memories.map((memory) => {
+      if (!idSet.has(memory.id)) return memory;
+      changed = true;
+      return {
+        ...memory,
+        accessCount: memory.accessCount + 1,
+        lastAccessedAt: now,
+      };
+    });
+
+    if (changed) {
+      await this.writeMemories();
+    }
+  }
+
   async getMigrationState(): Promise<MigrationState> {
     await this.ready();
     return { ...this.migrationState };

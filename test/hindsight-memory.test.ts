@@ -137,6 +137,28 @@ async function runTests() {
     expect(result.promptBlock).toContain('Obsidian CLI memory layer');
   });
 
+  await test('retriever writes access metadata for selected memories', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemory(makeMemory({
+      id: 'mem_accessed',
+      text: 'User prefers access-aware memory ranking.',
+      normalizedText: 'user prefers access-aware memory ranking.',
+      entities: ['access-aware'],
+      tags: ['preference'],
+      mentionedAt: 1000,
+    }));
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    await retriever.recall({ query: 'access-aware memory', now: 3000 });
+
+    const memories = await store.listMemories();
+    expect(memories[0].accessCount).toBe(1);
+    expect(memories[0].lastAccessedAt).toBe(3000);
+  });
+
   await test('retriever respects max character budget', async () => {
     const { app } = createApp();
     const store = new HindsightStore(app);

@@ -14,6 +14,11 @@ function expect(actual: any) {
         throw new Error(`Expected string to contain "${expected}"`);
       }
     },
+    notToContain: (expected: string) => {
+      if (typeof actual === 'string' && actual.includes(expected)) {
+        throw new Error(`Expected string not to contain "${expected}"`);
+      }
+    },
     toEqual: (expected: any) => {
       const actualStr = JSON.stringify(actual);
       const expectedStr = JSON.stringify(expected);
@@ -213,6 +218,86 @@ async function runTests() {
     });
 
     expect(promptBlock).toBe('');
+  });
+
+  await test('forgetMemory all removes retained hindsight memories from recall and disk', async () => {
+    const promptLog: string[] = [];
+    const { app, writes } = createApp();
+    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: 'Remember that my project is LaunchPlan and I prefer weekly summaries.',
+      assistantMessage: 'I will remember the LaunchPlan preference.',
+      source: 'shell',
+      now: 1000,
+    });
+
+    await (memory as any).forgetMemory('all');
+
+    const promptBlock = await (memory as any).recallForPrompt({
+      query: 'LaunchPlan weekly summaries',
+      maxChars: 500,
+      now: 2000,
+    });
+
+    expect(promptBlock).toBe('');
+    expect(writes['.obsidian/obsidian-cli-memory/memories.json'] || '').notToContain('LaunchPlan');
+  });
+
+  await test('retainTurn redacts secrets before writing hindsight memories', async () => {
+    const promptLog: string[] = [];
+    const { app, writes } = createApp();
+    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: 'Remember that I prefer concise answers. My API key is sk-test-secret.',
+      assistantMessage: 'Use token ghp_secret1234567890 when calling the service.',
+      source: 'shell',
+      now: 1000,
+    });
+
+    const saved = writes['.obsidian/obsidian-cli-memory/memories.json'] || '';
+    expect(saved).toContain('[REDACTED]');
+    expect(saved).notToContain('sk-test-secret');
+    expect(saved).notToContain('ghp_secret1234567890');
+  });
+
+  await test('forgetMemory field deletes natural language profession name and expertise memories', async () => {
+    const cases = [
+      { field: 'profession', message: 'I am a frontend engineer named Alice.', query: 'frontend engineer Alice' },
+      { field: 'profession', message: "I'm a backend engineer working on Obsidian plugins.", query: 'backend engineer Obsidian' },
+      { field: 'profession', message: '我是产品经理，负责知识库体验。', query: '产品经理 知识库体验' },
+      { field: 'expertise', message: 'I am expert in TypeScript plugin architecture.', query: 'TypeScript plugin architecture' },
+      { field: 'expertise', message: '我擅长知识图谱整理和检索体验。', query: '知识图谱 检索体验' },
+      { field: 'name', message: 'I am named Riley in this workspace.', query: 'Riley workspace' },
+      { field: 'name', message: 'Please call me Morgan when answering.', query: 'Morgan answering' },
+    ];
+
+    for (const item of cases) {
+      const promptLog: string[] = [];
+      const { app } = createApp();
+      const memory = new MemoryManager(app, createModelProvider(promptLog));
+      await memory.ready();
+
+      await (memory as any).retainTurn({
+        userMessage: item.message,
+        assistantMessage: 'Acknowledged.',
+        source: 'shell',
+        now: 1000,
+      });
+
+      await (memory as any).forgetMemory(item.field);
+
+      const promptBlock = await (memory as any).recallForPrompt({
+        query: item.query,
+        maxChars: 500,
+        now: 2000,
+      });
+
+      expect(promptBlock).toBe('');
+    }
   });
 }
 

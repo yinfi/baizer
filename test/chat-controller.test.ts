@@ -175,6 +175,44 @@ async function runTests() {
     controller.cleanup();
   });
 
+  await test('/forget all clears profile and hindsight memories', async () => {
+    const messages: any[] = [];
+    const calls: any[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        getUserProfile: () => ({
+          name: 'User',
+          profession: 'Engineer',
+          expertise: ['Obsidian'],
+          preferences: { responseStyle: 'balanced' },
+          workflows: [],
+          context: { currentProjects: ['LaunchPlan'], goals: ['Ship memory'], challenges: [] },
+          metadata: { totalInteractions: 1, updatedAt: 1, lastProfileUpdate: 1 },
+        }),
+        updateProfile: async (updates: any) => {
+          calls.push({ type: 'updateProfile', updates });
+        },
+        forgetMemory: async (field: string) => {
+          calls.push({ type: 'forgetMemory', field });
+        },
+        getAvailableTools: () => [],
+        clearSession: async () => undefined,
+      } as any,
+      onMessageAdded: (message) => messages.push(message),
+    });
+
+    await controller.processCommand('/forget all');
+
+    expect(calls.map(call => call.type)).toEqual(['updateProfile', 'forgetMemory']);
+    expect(calls[1].field).toBe('all');
+    expect(messages[messages.length - 1].content).toContain('Cleared all remembered user data');
+    controller.cleanup();
+  });
+
   await test('processCommand normalizes legacy string context before calling api.chat', async () => {
     const chatCalls: any[] = [];
 
