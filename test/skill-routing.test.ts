@@ -80,6 +80,21 @@ Disabled instructions.`, {
 
     expect(matched).toBeNull();
   });
+
+  await test('resolveByIntent does not route generic file saves to web-clipper', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const toolRegistry = new ToolRegistry({} as any, JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
+    const registry = new SkillRegistry(toolRegistry);
+
+    const skillMd = await readFile('src/skills/builtin/web-clipper/SKILL.md', 'utf8');
+    registry.registerBuiltinFromMd(skillMd, {
+      execute: async () => ({ ok: true }),
+    });
+
+    const matched = registry.resolveByIntent('保存文件到工作区');
+
+    expect(matched).toBeNull();
+  });
 }
 
 runTests().catch((e) => {
