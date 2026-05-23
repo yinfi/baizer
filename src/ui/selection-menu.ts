@@ -1,247 +1,371 @@
 import { App, MarkdownRenderer, Component, Notice } from 'obsidian';
 import { EditorView, showTooltip } from '@codemirror/view';
-import { StateField, Extension, StateEffect } from '@codemirror/state';
+import { StateField, Extension, StateEffect, EditorState } from '@codemirror/state';
 import { ModelService } from '../services/model-service';
 import { ChatController } from './chat-controller';
 import { DiffModal } from './diff-modal';
 import { ChatMessage } from './types';
 
-// Define the states for our UI
+type AiMenuMode = 'selection' | 'trigger';
+
 type SelectionMenuState =
     | { type: 'hidden' }
-    | { type: 'button', from: number, to: number }
-    | { type: 'chat', from: number, to: number, controller: ChatController };
+    | { type: 'button'; mode: AiMenuMode; from: number; to: number }
+    | { type: 'chat'; mode: AiMenuMode; from: number; to: number; controller: ChatController };
 
-// 使用 WeakMap 存储插件上下文，避免内存泄漏
 const pluginContextMap = new WeakMap<EditorView, { app: App; modelService: ModelService }>();
 
-// We need a way to manually update the state (e.g. button click -> input)
 export const setSelectionMenuState = StateEffect.define<SelectionMenuState>();
+
+export function findAtTrigger(text: string, cursor: number): { from: number; to: number } | null {
+    if (cursor <= 0 || cursor > text.length) return null;
+
+    const triggerFrom = cursor - 1;
+    if (text[triggerFrom] !== '@') return null;
+    if (triggerFrom > 0 && !/\s/.test(text[triggerFrom - 1])) return null;
+
+    return { from: triggerFrom, to: cursor };
+}
 
 const selectionMenuField = StateField.define<SelectionMenuState>({
     create() { return { type: 'hidden' }; },
     update(state, tr) {
-        // 1. Handle explicit state changes (User interaction)
-        for (let effect of tr.effects) {
+        for (const effect of tr.effects) {
             if (effect.is(setSelectionMenuState)) {
+                cleanupPreviousController(state, effect.value);
                 return effect.value;
             }
         }
 
-        // 2. Handle selection changes
-        if (tr.selection) {
-            const selection = tr.newSelection.main;
-            if (selection.empty) {
-                return { type: 'hidden' };
-            }
+        if (!tr.selection && !tr.docChanged) return state;
 
-            // If we are in chat mode, do we cancel on selection change?
-            // Yes, strict behavior: selection change resets UI.
-            if (state.type !== 'hidden' && (selection.from !== state.from || selection.to !== state.to)) {
-                return { type: 'button', from: selection.from, to: selection.to };
-            }
-
-            if (state.type === 'hidden') {
-                return { type: 'button', from: selection.from, to: selection.to };
-            }
+        const selection = tr.newSelection.main;
+        if (!selection.empty) {
+            const next: SelectionMenuState = {
+                type: state.type === 'chat'
+                    && state.mode === 'selection'
+                    && state.from === selection.from
+                    && state.to === selection.to
+                    ? 'chat'
+                    : 'button',
+                mode: 'selection',
+                from: selection.from,
+                to: selection.to,
+                ...(state.type === 'chat'
+                    && state.mode === 'selection'
+                    && state.from === selection.from
+                    && state.to === selection.to
+                    ? { controller: state.controller }
+                    : {}),
+            } as SelectionMenuState;
+            cleanupPreviousController(state, next);
+            return next;
         }
 
-        return state;
-    },
-    provide: f => showTooltip.from(f, (state, view) => {
-        if (state.type === 'hidden') return null;
+        const trigger = findAtTriggerInState(tr.state, selection.from);
+        if (trigger) {
+            if (state.type !== 'hidden'
+                && state.mode === 'trigger'
+                && state.from === trigger.from
+                && state.to === trigger.to) {
+                return state;
+            }
+            const next: SelectionMenuState = {
+                type: 'button',
+                mode: 'trigger',
+                from: trigger.from,
+                to: trigger.to,
+            };
+            cleanupPreviousController(state, next);
+            return next;
+        }
 
-        const context = view ? pluginContextMap.get(view) : undefined;
-        if (!context) return null;
+        const next: SelectionMenuState = { type: 'hidden' };
+        cleanupPreviousController(state, next);
+        return next;
+    },
+    provide: field => showTooltip.from(field, (state) => {
+        if (state.type === 'hidden') return null;
 
         return {
             pos: state.from,
             above: true,
             strictSide: true,
-            create: () => {
-                const dom = document.createElement('div');
-                dom.className = 'guardian-selection-tooltip';
-
-                if (state.type === 'button') {
-                    const btn = document.createElement('button');
-                    btn.className = 'guardian-selection-btn';
-                    btn.textContent = 'Comment / AI';
-                    btn.onclick = () => {
-                        // Initialize ChatController
-                        const controller = new ChatController({
-                            app: context.app,
-                            api: context.modelService,
-                            onMessageAdded: (msg) => {
-                                // 重新渲染逻辑...
-                            },
-                            onStatusChanged: (isResponding) => {
-                                // 状态更新逻辑...
-                            }
-                        });
-
-                        view.dispatch({
-                            effects: setSelectionMenuState.of({
-                                type: 'chat',
-                                from: state.from,
-                                to: state.to,
-                                controller: controller
-                            })
-                        });
-                    };
-                    dom.appendChild(btn);
-                } else if (state.type === 'chat') {
-                    const container = document.createElement('div');
-                    container.className = 'guardian-chat-view';
-
-                    // 1. Header
-                    const header = container.createDiv({ cls: 'guardian-chat-header' });
-                    header.createSpan({ text: 'Gemini Context' });
-                    const closeBtn = header.createEl('button', { text: '×', cls: 'guardian-close-btn' });
-                    closeBtn.onclick = () => {
-                        view.dispatch({
-                            effects: setSelectionMenuState.of({ type: 'hidden' })
-                        });
-                    };
-
-                    // 2. Message List
-                    const messageList = container.createDiv({ cls: 'guardian-message-list' });
-
-                    const renderMessages = () => {
-                        messageList.empty();
-                        const messages = state.controller.getMessages();
-                        if (messages.length === 0) {
-                            const welcome = messageList.createDiv({ cls: 'guardian-message system' });
-                            welcome.setText('Ask about the selected text...');
-                        } else {
-                            messages.forEach(msg => {
-                                const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
-                                if (msg.role === 'ai') {
-                                    MarkdownRenderer.render(context.app, msg.content, msgEl, '', new Component());
-                                } else {
-                                    msgEl.setText(msg.content);
-                                }
-                            });
-                        }
-                        // Scroll to bottom
-                        setTimeout(() => messageList.scrollTop = messageList.scrollHeight, 0);
-                    };
-
-                    renderMessages();
-
-                    // Hook up callbacks to update UI
-                    state.controller['onMessageAdded'] = (msg: ChatMessage) => {
-                        renderMessages();
-                    };
-
-                    // Loading indicator
-                    const statusContainer = container.createDiv({ cls: 'guardian-status-bar' });
-                    statusContainer.style.display = 'none';
-                    statusContainer.setText('Thinking...');
-
-                    state.controller['onStatusChanged'] = (isResponding: boolean) => {
-                        statusContainer.style.display = isResponding ? 'block' : 'none';
-                    };
-
-
-                    // 3. Input Area
-                    const inputWrapper = container.createDiv({ cls: 'guardian-input-wrapper' });
-                    const textarea = inputWrapper.createEl('textarea', {
-                        cls: 'guardian-chat-input',
-                        attr: { placeholder: 'Type a message...' }
-                    });
-
-                    textarea.onkeydown = async (e) => {
-                        e.stopPropagation();
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            const text = textarea.value.trim();
-                            if (!text) return;
-
-                            textarea.value = '';
-
-                            // Context: The selected text
-                            const selectionText = view.state.doc.sliceString(state.from, state.to);
-                            const selectionContext = [{
-                                id: 'selection-menu-context',
-                                type: 'selection',
-                                data: 'Editor selection',
-                                summary: 'Editor selection',
-                                content: `Selected Text:\n${selectionText}`,
-                            }];
-
-                            await state.controller.processCommand(text, selectionContext, selectionText, 'selection-menu');
-                        }
-                        if (e.key === 'Escape') {
-                            e.preventDefault();
-                            view.dispatch({
-                                effects: setSelectionMenuState.of({ type: 'button', from: state.from, to: state.to })
-                            });
-                        }
-                    };
-
-                    // 4. Actions
-                    const actions = container.createDiv({ cls: 'guardian-chat-actions' });
-
-                    const copyBtn = actions.createEl('button', { text: 'Copy Selection' });
-                    copyBtn.onclick = () => {
-                        const selectionText = view.state.doc.sliceString(state.from, state.to);
-                        navigator.clipboard.writeText(selectionText);
-                        new Notice('Selection copied');
-                    };
-
-                    const replaceBtn = actions.createEl('button', { text: 'Replace with Last Response' });
-                    replaceBtn.onclick = () => {
-                        const selectionText = view.state.doc.sliceString(state.from, state.to);
-                        const preview = state.controller.buildSelectionRewritePreview(selectionText);
-                        if (!preview) {
-                            new Notice('No AI response to replace with.');
-                            return;
-                        }
-
-                        new DiffModal(context.app, preview.oldContent || '', preview.newContent || '', async () => {
-                            const activeFile = context.app.workspace.getActiveFile();
-                            await state.controller.applyPreviewedChange({
-                                action: 'selection_rewrite',
-                                target: activeFile?.path || 'current-selection',
-                                previousContent: preview.oldContent || selectionText,
-                                apply: () => {
-                                    view.dispatch({
-                                        changes: { from: state.from, to: state.to, insert: preview.newContent || '' },
-                                        effects: setSelectionMenuState.of({ type: 'hidden' })
-                                    });
-                                },
-                            });
-                        }).open();
-                    };
-
-                    dom.appendChild(container);
-
-                    // Focus input
-                    setTimeout(() => textarea.focus(), 50);
-                }
-
-                return { dom };
-            }
+            create: (view: EditorView) => createSelectionTooltip(view, state),
         };
-    })
+    }),
 });
 
 export function selectionMenuExtension(app: App, modelService: ModelService): Extension {
-    // 使用 WeakMap 存储 context，避免静态变量持有强引用
     return [
         selectionMenuField,
-        // 使用 EditorView.updateListener 来存储 context
         EditorView.updateListener.of((update) => {
-            if (update.view) {
-                pluginContextMap.set(update.view, { app, modelService });
-            }
-        })
+            pluginContextMap.set(update.view, { app, modelService });
+        }),
     ];
 }
 
-// Helper to reset state (e.g. after success)
 export function resetSelectionMenu(view: EditorView) {
     view.dispatch({
-        effects: setSelectionMenuState.of({ type: 'hidden' })
+        effects: setSelectionMenuState.of({ type: 'hidden' }),
     });
+}
+
+function findAtTriggerInState(state: EditorState, cursor: number): { from: number; to: number } | null {
+    if (cursor <= 0) return null;
+
+    const at = state.doc.sliceString(cursor - 1, cursor);
+    if (at !== '@') return null;
+
+    const before = cursor > 1 ? state.doc.sliceString(cursor - 2, cursor - 1) : '';
+    if (cursor > 1 && !/\s/.test(before)) return null;
+
+    return { from: cursor - 1, to: cursor };
+}
+
+function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
+    const context = pluginContextMap.get(view);
+    const dom = document.createElement('div');
+    dom.className = `guardian-selection-tooltip is-${state.type}`;
+    if (state.type === 'hidden' || !context) return { dom };
+
+    if (state.type === 'button') {
+        const btn = document.createElement('button');
+        btn.className = 'guardian-selection-btn';
+        btn.type = 'button';
+        btn.textContent = state.mode === 'selection' ? 'AI' : '@ AI';
+        btn.title = state.mode === 'selection' ? 'Ask AI about selection' : 'Ask AI to insert here';
+        btn.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const controller = new ChatController({
+                app: context.app,
+                api: context.modelService,
+            });
+            view.dispatch({
+                effects: setSelectionMenuState.of({
+                    type: 'chat',
+                    mode: state.mode,
+                    from: state.from,
+                    to: state.to,
+                    controller,
+                }),
+            });
+        };
+        dom.appendChild(btn);
+        return { dom };
+    }
+
+    dom.appendChild(createChatPanel(view, state, context));
+    return { dom };
+}
+
+function createChatPanel(
+    view: EditorView,
+    state: Extract<SelectionMenuState, { type: 'chat' }>,
+    context: { app: App; modelService: ModelService },
+) {
+    const container = document.createElement('div');
+    container.className = `guardian-chat-view is-${state.mode}`;
+
+    const header = container.createDiv({ cls: 'guardian-chat-header' });
+    header.createSpan({ text: state.mode === 'selection' ? 'Selection AI' : 'Inline AI' });
+    const closeBtn = header.createEl('button', {
+        text: 'x',
+        cls: 'guardian-close-btn',
+        attr: { type: 'button', title: 'Close' },
+    });
+    closeBtn.onclick = () => {
+        state.controller.cleanup();
+        view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
+    };
+
+    const messageList = container.createDiv({ cls: 'guardian-message-list' });
+    const renderMessages = () => {
+        messageList.empty();
+        const messages = state.controller.getMessages();
+        if (messages.length === 0) {
+            messageList.createDiv({
+                cls: 'guardian-message system',
+                text: state.mode === 'selection'
+                    ? 'Ask about the selected text.'
+                    : 'Ask AI what to insert here.',
+            });
+        } else {
+            for (const msg of messages) {
+                renderSelectionMessage(context.app, messageList, msg);
+            }
+        }
+        setTimeout(() => {
+            messageList.scrollTop = messageList.scrollHeight;
+        }, 0);
+    };
+
+    renderMessages();
+    (state.controller as any).onMessageAdded = () => renderMessages();
+
+    const statusContainer = container.createDiv({ cls: 'guardian-status-bar' });
+    statusContainer.style.display = 'none';
+    statusContainer.setText('Thinking...');
+    (state.controller as any).onStatusChanged = (isResponding: boolean) => {
+        statusContainer.style.display = isResponding ? 'block' : 'none';
+    };
+
+    const inputWrapper = container.createDiv({ cls: 'guardian-input-wrapper' });
+    const textarea = inputWrapper.createEl('textarea', {
+        cls: 'guardian-chat-input',
+        attr: {
+            placeholder: state.mode === 'selection' ? 'Ask about this selection...' : 'Ask what to insert...',
+            rows: '2',
+        },
+    });
+
+    textarea.onkeydown = async (event) => {
+        event.stopPropagation();
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            state.controller.cleanup();
+            view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
+            return;
+        }
+
+        if (event.key !== 'Enter' || event.shiftKey) return;
+        event.preventDefault();
+
+        const text = textarea.value.trim();
+        if (!text) return;
+        textarea.value = '';
+
+        const targetText = getTargetText(view, state);
+        await state.controller.processCommand(
+            text,
+            [buildContextItem(state.mode, targetText)],
+            targetText,
+            'selection-menu',
+        );
+    };
+
+    const actions = container.createDiv({ cls: 'guardian-chat-actions' });
+    const copyBtn = actions.createEl('button', {
+        text: state.mode === 'selection' ? 'Copy' : 'Copy line',
+        attr: { type: 'button' },
+    });
+    copyBtn.onclick = () => {
+        void navigator.clipboard.writeText(getTargetText(view, state));
+        new Notice('Copied.');
+    };
+
+    const applyBtn = actions.createEl('button', {
+        text: state.mode === 'selection' ? 'Replace' : 'Insert',
+        attr: { type: 'button' },
+    });
+    applyBtn.onclick = () => {
+        if (state.mode === 'selection') {
+            applySelectionReplacement(view, state, context);
+        } else {
+            void applyTriggerInsertion(view, state, context);
+        }
+    };
+
+    setTimeout(() => textarea.focus(), 50);
+    return container;
+}
+
+function renderSelectionMessage(app: App, messageList: HTMLElement, msg: ChatMessage) {
+    const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
+    if (msg.role === 'ai') {
+        void MarkdownRenderer.render(app, msg.content, msgEl, '', new Component());
+    } else {
+        msgEl.setText(msg.content);
+    }
+}
+
+function getTargetText(view: EditorView, state: Extract<SelectionMenuState, { type: 'chat' }>) {
+    if (state.mode === 'selection') {
+        return view.state.doc.sliceString(state.from, state.to);
+    }
+
+    const line = view.state.doc.lineAt(state.from);
+    const beforeTrigger = line.text.slice(0, Math.max(0, state.from - line.from)).trim();
+    return beforeTrigger || line.text.replace('@', '').trim();
+}
+
+function buildContextItem(mode: AiMenuMode, targetText: string) {
+    return {
+        id: mode === 'selection' ? 'selection-menu-context' : 'inline-at-context',
+        type: 'selection',
+        data: mode === 'selection' ? 'Editor selection' : 'Inline @ trigger',
+        summary: mode === 'selection' ? 'Editor selection' : 'Inline @ trigger',
+        content: mode === 'selection'
+            ? `Selected Text:\n${targetText}`
+            : `Line Context:\n${targetText}`,
+    };
+}
+
+function applySelectionReplacement(
+    view: EditorView,
+    state: Extract<SelectionMenuState, { type: 'chat' }>,
+    context: { app: App },
+) {
+    const selectionText = view.state.doc.sliceString(state.from, state.to);
+    const preview = state.controller.buildSelectionRewritePreview(selectionText);
+    if (!preview) {
+        new Notice('No AI response to replace with.');
+        return;
+    }
+
+    new DiffModal(context.app, preview.oldContent || '', preview.newContent || '', async () => {
+        const activeFile = context.app.workspace.getActiveFile();
+        await state.controller.applyPreviewedChange({
+            action: 'selection_rewrite',
+            target: activeFile?.path || 'current-selection',
+            previousContent: view.state.doc.toString(),
+            apply: () => {
+                view.dispatch({
+                    changes: {
+                        from: state.from,
+                        to: state.to,
+                        insert: preview.newContent || '',
+                    },
+                    effects: setSelectionMenuState.of({ type: 'hidden' }),
+                });
+            },
+        });
+    }).open();
+}
+
+async function applyTriggerInsertion(
+    view: EditorView,
+    state: Extract<SelectionMenuState, { type: 'chat' }>,
+    context: { app: App },
+) {
+    const response = getLastAiResponse(state.controller);
+    if (!response) {
+        new Notice('No AI response to insert.');
+        return;
+    }
+
+    const activeFile = context.app.workspace.getActiveFile();
+    await state.controller.applyPreviewedChange({
+        action: 'inline_ai_insert',
+        target: activeFile?.path || 'current-editor',
+        previousContent: view.state.doc.toString(),
+        apply: () => {
+            view.dispatch({
+                changes: { from: state.from, to: state.to, insert: response },
+                effects: setSelectionMenuState.of({ type: 'hidden' }),
+            });
+        },
+    });
+}
+
+function getLastAiResponse(controller: ChatController): string {
+    const message = [...controller.getMessages()].reverse().find(item => item.role === 'ai');
+    return message?.content || '';
+}
+
+function cleanupPreviousController(previous: SelectionMenuState, next: SelectionMenuState) {
+    if (previous.type !== 'chat') return;
+    if (next.type === 'chat' && next.controller === previous.controller) return;
+    previous.controller.cleanup();
 }

@@ -17,6 +17,7 @@ import {
 } from '../utils/file-operation-contract';
 import { evaluateGenerationQuality } from '../services/generation-quality';
 import { formatGenerationPlanBlock, GenerationStrategyService } from '../services/generation-strategy-service';
+import { WorkspaceEditService, isDirectApplyWorkspaceTool } from '../services/workspace-edit-service';
 import { PreparedChatTurn, ChatRuntime, ChatTurnRequest } from './runtime-types';
 
 interface ChatRuntimeDeps {
@@ -24,6 +25,7 @@ interface ChatRuntimeDeps {
   memoryManager: MemoryManager | null;
   toolRegistry: ToolRegistry;
   skillRegistry: SkillRegistry;
+  workspaceEditService?: Pick<WorkspaceEditService, 'executeWorkspaceTool'> | null;
 }
 
 interface ActiveSkillScope {
@@ -423,11 +425,11 @@ If no listed command fits, suggest a plain-language request instead.
       };
     }
 
-    return this.withTimeout(
-      this.deps.toolRegistry.execute(name, args),
-      30000,
-      `Tool ${name} execution timed out`,
-    );
+    const executor = this.deps.workspaceEditService && isDirectApplyWorkspaceTool(name)
+      ? this.deps.workspaceEditService.executeWorkspaceTool(name, args)
+      : this.deps.toolRegistry.execute(name, args);
+
+    return this.withTimeout(executor, 30000, `Tool ${name} execution timed out`);
   }
 
   private activateSkillRequest(args: any): {

@@ -20,6 +20,7 @@ import {
 } from './generation-strategy-service';
 import { ObsidianContextSnapshot } from './obsidian-context-service';
 import { OperationAuditLog } from './operation-audit-log';
+import { WorkspaceEditService } from './workspace-edit-service';
 
 export class ModelService {
     private provider: IModelProvider;
@@ -31,6 +32,7 @@ export class ModelService {
     private skillRegistry: SkillRegistry;
     private toolRegistry: ToolRegistry;
     private operationAuditLog: OperationAuditLog;
+    private workspaceEditService: WorkspaceEditService;
 
     constructor(
         private app: App,
@@ -41,6 +43,17 @@ export class ModelService {
         this.toolRegistry = toolRegistry;
         this.skillRegistry = skillRegistry;
         this.operationAuditLog = new OperationAuditLog(this.app);
+        this.workspaceEditService = new WorkspaceEditService(this.app, this.toolRegistry, {
+            onEditApplied: async ({ edit, previousContent }) => {
+                await this.recordOperationAudit({
+                    action: edit.action,
+                    target: edit.path,
+                    approvalSource: 'direct-write',
+                    previousContent,
+                    undoable: true,
+                });
+            },
+        });
         this.initializeProvider();
         this.setupErrorHandlers();
     }
@@ -430,6 +443,22 @@ export class ModelService {
         return result;
     }
 
+    async executeWorkspaceTool(action: string, args: Record<string, any>): Promise<any> {
+        return this.workspaceEditService.executeWorkspaceTool(action, args);
+    }
+
+    async undoWorkspaceEdit(editId: string) {
+        return this.workspaceEditService.undoWorkspaceEdit(editId);
+    }
+
+    async undoAllWorkspaceEdits() {
+        return this.workspaceEditService.undoAllWorkspaceEdits();
+    }
+
+    listWorkspaceEdits() {
+        return this.workspaceEditService.listWorkspaceEdits();
+    }
+
     async recordDirectWrite(input: {
         action: string;
         target: string;
@@ -451,6 +480,7 @@ export class ModelService {
             memoryManager: this.memoryManager,
             toolRegistry: this.toolRegistry,
             skillRegistry: this.skillRegistry,
+            workspaceEditService: this.workspaceEditService,
         });
     }
 

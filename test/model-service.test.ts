@@ -113,6 +113,47 @@ async function runTests() {
     expect(service.getSkillCommands()).toEqual(commands);
   });
 
+  await test('executeWorkspaceTool proxies to the shared workspace edit service', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const calls: any[] = [];
+    service.workspaceEditService = {
+      executeWorkspaceTool: async (action: string, args: Record<string, any>) => {
+        calls.push({ action, args });
+        return { success: true, workspaceEdit: { id: 'edit-1' } };
+      },
+    };
+
+    const result = await service.executeWorkspaceTool('update_file', {
+      path: 'Notes/source.md',
+      content: 'after',
+    });
+
+    expect(result).toEqual({ success: true, workspaceEdit: { id: 'edit-1' } });
+    expect(calls).toEqual([{
+      action: 'update_file',
+      args: {
+        path: 'Notes/source.md',
+        content: 'after',
+      },
+    }]);
+  });
+
+  await test('undoWorkspaceEdit proxies to the shared workspace edit service', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const calls: string[] = [];
+    service.workspaceEditService = {
+      undoWorkspaceEdit: async (editId: string) => {
+        calls.push(editId);
+        return { success: true, edit: { id: editId, status: 'undone' } };
+      },
+    };
+
+    const result = await service.undoWorkspaceEdit('edit-1');
+
+    expect(result).toEqual({ success: true, edit: { id: 'edit-1', status: 'undone' } });
+    expect(calls).toEqual(['edit-1']);
+  });
+
   await test('executeSlashSkillCommand dispatches to the resolved skill with normalized args', async () => {
     const service: any = Object.create(ModelService.prototype);
     const calls: any[] = [];
