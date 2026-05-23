@@ -299,6 +299,90 @@ async function runTests() {
     controller.cleanup();
   });
 
+  await test('streaming workspace edit result notifies the shell undo surface', async () => {
+    const { app } = createWorkspaceApp();
+    const edits: any[] = [];
+
+    const controller = new ChatController({
+      app,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'fallback',
+        chatStream: async function* () {
+          yield {
+            type: 'tool_result',
+            name: 'update_file',
+            result: {
+              success: true,
+              path: 'Notes/source.md',
+              workspaceEdit: {
+                id: 'edit-1',
+                action: 'update_file',
+                path: 'Notes/source.md',
+                kind: 'update',
+                appliedAt: 1,
+                status: 'applied',
+              },
+            },
+          };
+          yield { type: 'done', text: 'Done.' };
+        },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onStreamEvent: () => { },
+      onWorkspaceEdit: (edit) => edits.push(edit),
+    });
+
+    await controller.processCommand('Update this file');
+
+    expect(edits).toEqual([{
+      id: 'edit-1',
+      action: 'update_file',
+      path: 'Notes/source.md',
+      kind: 'update',
+      appliedAt: 1,
+      status: 'applied',
+    }]);
+
+    controller.cleanup();
+  });
+
+  await test('undoWorkspaceEdit delegates to the model service and reports success', async () => {
+    const calls: string[] = [];
+    const undone: any[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'fallback',
+        chatStream: async function* () { },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+        undoWorkspaceEdit: async (editId: string) => {
+          calls.push(editId);
+          return { success: true, edit: { id: editId, status: 'undone', path: 'Notes/source.md' } };
+        },
+      } as any,
+      onWorkspaceEditUndone: (edit) => undone.push(edit),
+    });
+
+    const result = await controller.undoWorkspaceEdit('edit-1');
+
+    expect(result).toEqual({ success: true, edit: { id: 'edit-1', status: 'undone', path: 'Notes/source.md' } });
+    expect(calls).toEqual(['edit-1']);
+    expect(undone).toEqual([{ id: 'edit-1', status: 'undone', path: 'Notes/source.md' }]);
+
+    controller.cleanup();
+  });
+
   await test('streaming failed write tool result suppresses false success text and shows a workspace warning', async () => {
     const messages: any[] = [];
     const streamEvents: any[] = [];

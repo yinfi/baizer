@@ -13,6 +13,7 @@ import {
 import { ApprovalRequest } from './approval-card';
 import { buildSelectionPreview } from './diff/change-preview';
 import { ChatMessage } from './types';
+import { WorkspaceEditSummary } from '../services/workspace-edit-service';
 
 export interface ChatControllerOptions {
     app: App;
@@ -20,6 +21,9 @@ export interface ChatControllerOptions {
     onMessageAdded?: (message: ChatMessage) => void;
     onStatusChanged?: (isResponding: boolean) => void;
     onStreamEvent?: (event: StreamEvent) => void;
+    onWorkspaceEdit?: (edit: WorkspaceEditSummary) => void;
+    onWorkspaceEditUndone?: (edit: WorkspaceEditSummary) => void;
+    onWorkspaceEditUndoFailed?: (message: string) => void;
 }
 
 export class ChatController {
@@ -30,6 +34,9 @@ export class ChatController {
     private onMessageAdded?: (message: ChatMessage) => void;
     private onStatusChanged?: (isResponding: boolean) => void;
     private onStreamEvent?: (event: StreamEvent) => void;
+    private onWorkspaceEdit?: (edit: WorkspaceEditSummary) => void;
+    private onWorkspaceEditUndone?: (edit: WorkspaceEditSummary) => void;
+    private onWorkspaceEditUndoFailed?: (message: string) => void;
     private activeStreamController: AbortController | null = null;
 
     // 鏂囦欢鎼滅储缂撳瓨
@@ -43,6 +50,9 @@ export class ChatController {
         this.onMessageAdded = options.onMessageAdded;
         this.onStatusChanged = options.onStatusChanged;
         this.onStreamEvent = options.onStreamEvent;
+        this.onWorkspaceEdit = options.onWorkspaceEdit;
+        this.onWorkspaceEditUndone = options.onWorkspaceEditUndone;
+        this.onWorkspaceEditUndoFailed = options.onWorkspaceEditUndoFailed;
 
         // 璁剧疆瀹氭椂鍣ㄦ竻鐞嗚繃鏈熺殑鏂囦欢鎼滅储缂撳瓨
         this.fileSearchCacheCleanupTimer = window.setInterval(() => {
@@ -129,6 +139,7 @@ export class ChatController {
 
                     if (event.type === 'tool_result') {
                         const args = this.shiftToolArgs(writeToolArgs, event.name);
+                        this.handleWorkspaceEditResult(event.result);
                         if (this.isFileWriteTool(event.name)) {
                             attemptedFileWrite = true;
                             if (this.isSuccessfulToolResult(event.result)) {
@@ -143,7 +154,9 @@ export class ChatController {
                             approvalRequest = nextApproval;
                             this.addApprovalMessage(nextApproval);
                         } else if (this.isFileWriteTool(event.name)) {
-                            await this.openFileFromToolResult(event.name, event.result, args);
+                            if (!event.result?.workspaceEdit) {
+                                await this.openFileFromToolResult(event.name, event.result, args);
+                            }
                             if (successfulFileWrite && bufferedTextEvents.length > 0) {
                                 for (const bufferedEvent of bufferedTextEvents) {
                                     this.onStreamEvent(bufferedEvent);
@@ -358,6 +371,62 @@ export class ChatController {
         return true;
     }
 
+    public async undoWorkspaceEdit(editId: string): Promise<any> {
+        const undo = (this.api as any).undoWorkspaceEdit;
+        if (typeof undo !== 'function') {
+            const message = 'Workspace edit undo is not available.';
+            this.onWorkspaceEditUndoFailed?.(message);
+            return { success: false, error: message };
+        }
+
+        try {
+            const result = await undo.call(this.api, editId);
+            if (result?.success && result?.edit) {
+                this.onWorkspaceEditUndone?.(result.edit);
+            } else {
+                this.onWorkspaceEditUndoFailed?.(result?.error || 'Unable to undo workspace edit.');
+            }
+            return result;
+        } catch (error: any) {
+            const message = error?.message || 'Unable to undo workspace edit.';
+            this.onWorkspaceEditUndoFailed?.(message);
+            return { success: false, error: message };
+        }
+    }
+
+    public async undoAllWorkspaceEdits(editIds?: string[]): Promise<any[]> {
+        if (editIds?.length) {
+            const results: any[] = [];
+            for (const editId of editIds) {
+                results.push(await this.undoWorkspaceEdit(editId));
+            }
+            return results;
+        }
+
+        const undoAll = (this.api as any).undoAllWorkspaceEdits;
+        if (typeof undoAll !== 'function') {
+            const message = 'Workspace edit undo is not available.';
+            this.onWorkspaceEditUndoFailed?.(message);
+            return [{ success: false, error: message }];
+        }
+
+        try {
+            const results = await undoAll.call(this.api);
+            for (const result of results || []) {
+                if (result?.success && result?.edit) {
+                    this.onWorkspaceEditUndone?.(result.edit);
+                } else if (result?.error) {
+                    this.onWorkspaceEditUndoFailed?.(result.error);
+                }
+            }
+            return results || [];
+        } catch (error: any) {
+            const message = error?.message || 'Unable to undo workspace edits.';
+            this.onWorkspaceEditUndoFailed?.(message);
+            return [{ success: false, error: message }];
+        }
+    }
+
     public buildSelectionRewritePreview(selectionText: string) {
         const lastAiMessage = [...this.messages].reverse().find(message => message.role === 'ai');
         if (!lastAiMessage) return null;
@@ -455,6 +524,11 @@ export class ChatController {
 
     private isSuccessfulToolResult(result: any): boolean {
         return isSuccessfulWriteToolResult(result);
+    }
+
+    private handleWorkspaceEditResult(result: any): void {
+        if (!result?.workspaceEdit) return;
+        this.onWorkspaceEdit?.(result.workspaceEdit);
     }
 
     private getResultPath(action: string, result: any, args: Record<string, any>): string {

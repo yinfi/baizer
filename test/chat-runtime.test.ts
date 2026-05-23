@@ -451,6 +451,100 @@ async function runTests() {
     }]);
   });
 
+  await test('query routes safe workspace write tools through WorkspaceEditService when available', async () => {
+    const chatInputs: any[] = [];
+    const registryCalls: any[] = [];
+    const workspaceCalls: any[] = [];
+    const runtime = createChatRuntime({
+      provider: {
+        startChat: () => ({
+          sendMessage: async (input: any) => {
+            chatInputs.push(input);
+            if (typeof input === 'string') {
+              return {
+                text: '',
+                functionCalls: [
+                  {
+                    id: 'call_update',
+                    name: 'update_file',
+                    args: {
+                      path: 'Notes/source.md',
+                      content: 'after',
+                    },
+                  },
+                ],
+              };
+            }
+            return { text: 'done' };
+          },
+        }),
+      } as any,
+      memoryManager: null,
+      toolRegistry: {
+        getAllDefinitions: () => [
+          { name: 'update_file', description: 'Update file', parameters: {} },
+        ],
+        execute: async (name: string, args: any) => {
+          registryCalls.push({ name, args });
+          return { success: true };
+        },
+      } as any,
+      skillRegistry: {
+        resolveByIntent: () => null,
+        getSkillSummaryText: () => '',
+        activateSkill: () => null,
+      } as any,
+      workspaceEditService: {
+        executeWorkspaceTool: async (name: string, args: any) => {
+          workspaceCalls.push({ name, args });
+          return {
+            success: true,
+            path: args.path,
+            workspaceEdit: {
+              id: 'edit-1',
+              action: name,
+              path: args.path,
+              kind: 'update',
+              appliedAt: 1,
+              status: 'applied',
+            },
+          };
+        },
+      } as any,
+    });
+
+    const result = await runtime.query({
+      prompt: 'prepared prompt',
+      tools: [{ name: 'update_file', description: 'Update file', parameters: {} }],
+    });
+
+    expect(result).toBe('done');
+    expect(registryCalls).toEqual([]);
+    expect(workspaceCalls).toEqual([{
+      name: 'update_file',
+      args: {
+        path: 'Notes/source.md',
+        content: 'after',
+      },
+    }]);
+    expect(chatInputs[1]).toEqual([{
+      id: 'call_update',
+      name: 'update_file',
+      response: {
+        success: true,
+        path: 'Notes/source.md',
+        workspaceEdit: {
+          id: 'edit-1',
+          action: 'update_file',
+          path: 'Notes/source.md',
+          kind: 'update',
+          appliedAt: 1,
+          status: 'applied',
+        },
+      },
+    }]);
+  });
+
   await test('query returns a workspace warning when the write tool fails and the model still claims success', async () => {
     const chatInputs: any[] = [];
     const executedCalls: any[] = [];

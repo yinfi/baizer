@@ -4533,6 +4533,170 @@ var GenerationStrategyService = class {
   }
 };
 
+// src/services/workspace-edit-service.ts
+var DIRECT_APPLY_WRITE_TOOLS = /* @__PURE__ */ new Set([
+  "create_file",
+  "update_file",
+  "create_note",
+  "update_note",
+  "append_to_note",
+  "save_webpage"
+]);
+function isDirectApplyWorkspaceTool(name) {
+  return DIRECT_APPLY_WRITE_TOOLS.has(name);
+}
+var WorkspaceEditService = class {
+  constructor(app, toolRegistry, options = {}) {
+    this.app = app;
+    this.toolRegistry = toolRegistry;
+    this.options = options;
+  }
+  records = /* @__PURE__ */ new Map();
+  async executeWorkspaceTool(action, args) {
+    if (!isDirectApplyWorkspaceTool(action)) {
+      return this.toolRegistry.execute(action, args);
+    }
+    const expectedPath = this.resolveExpectedPath(action, args);
+    const beforeSnapshot = expectedPath ? await this.readOptionalFile(expectedPath) : { exists: false, content: "" };
+    const approvedArgs = { ...args, approved: true };
+    const result = await this.toolRegistry.execute(action, approvedArgs);
+    if (!this.isSuccessfulToolResult(result))
+      return result;
+    const path = this.resolveResultPath(action, result, approvedArgs, expectedPath);
+    if (!path)
+      return result;
+    const afterSnapshot = await this.readOptionalFile(path);
+    const summary = {
+      id: this.createId(),
+      action,
+      path,
+      kind: beforeSnapshot.exists ? "update" : "create",
+      appliedAt: Date.now(),
+      status: "applied",
+      lineDelta: this.countLines(afterSnapshot.content) - this.countLines(beforeSnapshot.content)
+    };
+    this.records.set(summary.id, {
+      summary,
+      beforeExists: beforeSnapshot.exists,
+      beforeContent: beforeSnapshot.content,
+      beforeHash: this.hashContent(beforeSnapshot.content),
+      afterExists: afterSnapshot.exists,
+      afterContent: afterSnapshot.content,
+      afterHash: this.hashContent(afterSnapshot.content)
+    });
+    await this.notifyEditApplied(summary, beforeSnapshot.exists ? beforeSnapshot.content : void 0);
+    await this.openFile(path);
+    return { ...result, workspaceEdit: { ...summary } };
+  }
+  async undoWorkspaceEdit(editId) {
+    const record = this.records.get(editId);
+    if (!record) {
+      return { success: false, error: "Workspace edit not found" };
+    }
+    if (record.summary.status === "undone") {
+      return { success: false, error: "Workspace edit already undone" };
+    }
+    const file = this.app.vault.getAbstractFileByPath(record.summary.path);
+    if (!file) {
+      return { success: false, error: `File not found: ${record.summary.path}` };
+    }
+    const currentContent = await this.app.vault.read(file);
+    if (this.hashContent(currentContent) !== record.afterHash) {
+      return {
+        success: false,
+        error: `Cannot undo ${record.summary.path}; file changed since the AI edit.`
+      };
+    }
+    if (record.beforeExists) {
+      await this.app.vault.modify(file, record.beforeContent);
+      await this.openFile(record.summary.path);
+    } else {
+      await this.app.vault.trash(file, true);
+    }
+    record.summary = { ...record.summary, status: "undone" };
+    this.records.set(editId, record);
+    return { success: true, edit: { ...record.summary } };
+  }
+  async undoAllWorkspaceEdits() {
+    const active = Array.from(this.records.values()).filter((record) => record.summary.status === "applied").sort((a, b) => b.summary.appliedAt - a.summary.appliedAt);
+    const results = [];
+    for (const record of active) {
+      results.push(await this.undoWorkspaceEdit(record.summary.id));
+    }
+    return results;
+  }
+  listWorkspaceEdits() {
+    return Array.from(this.records.values()).map((record) => ({ ...record.summary }));
+  }
+  async readOptionalFile(path) {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!file)
+      return { exists: false, content: "" };
+    return {
+      exists: true,
+      content: await this.app.vault.read(file)
+    };
+  }
+  resolveExpectedPath(action, args) {
+    if (action === "create_note") {
+      const filename = args.filename || args.path || args.name || "";
+      if (!filename || typeof filename !== "string")
+        return "";
+      return filename.endsWith(".md") ? filename : `${filename}.md`;
+    }
+    if (typeof args.path === "string")
+      return args.path;
+    if (typeof args.filename === "string")
+      return args.filename;
+    return "";
+  }
+  resolveResultPath(action, result, args, fallbackPath) {
+    if (action === "create_note") {
+      return typeof result?.path === "string" ? result.path : typeof result?.target === "string" ? result.target : fallbackPath;
+    }
+    return getFileWriteResultPath(action, result, args) || fallbackPath;
+  }
+  async openFile(path) {
+    try {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!file)
+        return;
+      await this.app.workspace.getLeaf(false)?.openFile?.(file);
+    } catch {
+    }
+  }
+  async notifyEditApplied(summary, previousContent) {
+    if (!this.options.onEditApplied)
+      return;
+    try {
+      await this.options.onEditApplied({
+        edit: { ...summary },
+        previousContent
+      });
+    } catch {
+    }
+  }
+  isSuccessfulToolResult(result) {
+    return result?.success === true || result?.status === "success";
+  }
+  createId() {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+  countLines(content) {
+    if (!content)
+      return 0;
+    return content.split(/\r?\n/).length;
+  }
+  hashContent(content) {
+    let hash = 5381;
+    for (let i = 0; i < content.length; i++) {
+      hash = (hash << 5) + hash + content.charCodeAt(i);
+      hash = hash & 4294967295;
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  }
+};
+
 // src/runtime/chat-runtime.ts
 var LOCAL_SLASH_COMMANDS = [
   { command: "/clear", description: "Clear session history" },
@@ -4871,11 +5035,8 @@ ${skillSummary}` : "Get detailed instructions for a specific workflow.";
         error: `Tool "${name}" is not available for active skill "${skillScope.activeSkillName}"`
       };
     }
-    return this.withTimeout(
-      this.deps.toolRegistry.execute(name, args),
-      3e4,
-      `Tool ${name} execution timed out`
-    );
+    const executor5 = this.deps.workspaceEditService && isDirectApplyWorkspaceTool(name) ? this.deps.workspaceEditService.executeWorkspaceTool(name, args) : this.deps.toolRegistry.execute(name, args);
+    return this.withTimeout(executor5, 3e4, `Tool ${name} execution timed out`);
   }
   activateSkillRequest(args) {
     const skillName = args?.name;
@@ -5879,6 +6040,17 @@ var ModelService = class {
     this.toolRegistry = toolRegistry;
     this.skillRegistry = skillRegistry;
     this.operationAuditLog = new OperationAuditLog(this.app);
+    this.workspaceEditService = new WorkspaceEditService(this.app, this.toolRegistry, {
+      onEditApplied: async ({ edit, previousContent }) => {
+        await this.recordOperationAudit({
+          action: edit.action,
+          target: edit.path,
+          approvalSource: "direct-write",
+          previousContent,
+          undoable: true
+        });
+      }
+    });
     this.initializeProvider();
     this.setupErrorHandlers();
   }
@@ -5891,6 +6063,7 @@ var ModelService = class {
   skillRegistry;
   toolRegistry;
   operationAuditLog;
+  workspaceEditService;
   initializeProvider() {
     const config = this.getActiveProviderConfig();
     if (!config) {
@@ -6207,6 +6380,18 @@ var ModelService = class {
     });
     return result;
   }
+  async executeWorkspaceTool(action, args) {
+    return this.workspaceEditService.executeWorkspaceTool(action, args);
+  }
+  async undoWorkspaceEdit(editId) {
+    return this.workspaceEditService.undoWorkspaceEdit(editId);
+  }
+  async undoAllWorkspaceEdits() {
+    return this.workspaceEditService.undoAllWorkspaceEdits();
+  }
+  listWorkspaceEdits() {
+    return this.workspaceEditService.listWorkspaceEdits();
+  }
   async recordDirectWrite(input) {
     await this.recordOperationAudit({
       action: input.action,
@@ -6221,7 +6406,8 @@ var ModelService = class {
       provider: this.provider,
       memoryManager: this.memoryManager,
       toolRegistry: this.toolRegistry,
-      skillRegistry: this.skillRegistry
+      skillRegistry: this.skillRegistry,
+      workspaceEditService: this.workspaceEditService
     });
   }
   isAbortError(error) {
@@ -7142,6 +7328,9 @@ var ChatController = class {
   onMessageAdded;
   onStatusChanged;
   onStreamEvent;
+  onWorkspaceEdit;
+  onWorkspaceEditUndone;
+  onWorkspaceEditUndoFailed;
   activeStreamController = null;
   // 鏂囦欢鎼滅储缂撳瓨
   fileSearchCache = null;
@@ -7154,6 +7343,9 @@ var ChatController = class {
     this.onMessageAdded = options.onMessageAdded;
     this.onStatusChanged = options.onStatusChanged;
     this.onStreamEvent = options.onStreamEvent;
+    this.onWorkspaceEdit = options.onWorkspaceEdit;
+    this.onWorkspaceEditUndone = options.onWorkspaceEditUndone;
+    this.onWorkspaceEditUndoFailed = options.onWorkspaceEditUndoFailed;
     this.fileSearchCacheCleanupTimer = window.setInterval(() => {
       this.cleanupExpiredFileSearchCache();
     }, 6e4);
@@ -7219,6 +7411,7 @@ var ChatController = class {
           }
           if (event.type === "tool_result") {
             const args = this.shiftToolArgs(writeToolArgs, event.name);
+            this.handleWorkspaceEditResult(event.result);
             if (this.isFileWriteTool(event.name)) {
               attemptedFileWrite = true;
               if (this.isSuccessfulToolResult(event.result)) {
@@ -7234,7 +7427,9 @@ var ChatController = class {
               approvalRequest = nextApproval;
               this.addApprovalMessage(nextApproval);
             } else if (this.isFileWriteTool(event.name)) {
-              await this.openFileFromToolResult(event.name, event.result, args);
+              if (!event.result?.workspaceEdit) {
+                await this.openFileFromToolResult(event.name, event.result, args);
+              }
               if (successfulFileWrite && bufferedTextEvents.length > 0) {
                 for (const bufferedEvent of bufferedTextEvents) {
                   this.onStreamEvent(bufferedEvent);
@@ -7437,6 +7632,57 @@ ${JSON.stringify(result, null, 2)}
     this.activeStreamController.abort();
     return true;
   }
+  async undoWorkspaceEdit(editId) {
+    const undo = this.api.undoWorkspaceEdit;
+    if (typeof undo !== "function") {
+      const message = "Workspace edit undo is not available.";
+      this.onWorkspaceEditUndoFailed?.(message);
+      return { success: false, error: message };
+    }
+    try {
+      const result = await undo.call(this.api, editId);
+      if (result?.success && result?.edit) {
+        this.onWorkspaceEditUndone?.(result.edit);
+      } else {
+        this.onWorkspaceEditUndoFailed?.(result?.error || "Unable to undo workspace edit.");
+      }
+      return result;
+    } catch (error) {
+      const message = error?.message || "Unable to undo workspace edit.";
+      this.onWorkspaceEditUndoFailed?.(message);
+      return { success: false, error: message };
+    }
+  }
+  async undoAllWorkspaceEdits(editIds) {
+    if (editIds?.length) {
+      const results = [];
+      for (const editId of editIds) {
+        results.push(await this.undoWorkspaceEdit(editId));
+      }
+      return results;
+    }
+    const undoAll = this.api.undoAllWorkspaceEdits;
+    if (typeof undoAll !== "function") {
+      const message = "Workspace edit undo is not available.";
+      this.onWorkspaceEditUndoFailed?.(message);
+      return [{ success: false, error: message }];
+    }
+    try {
+      const results = await undoAll.call(this.api);
+      for (const result of results || []) {
+        if (result?.success && result?.edit) {
+          this.onWorkspaceEditUndone?.(result.edit);
+        } else if (result?.error) {
+          this.onWorkspaceEditUndoFailed?.(result.error);
+        }
+      }
+      return results || [];
+    } catch (error) {
+      const message = error?.message || "Unable to undo workspace edits.";
+      this.onWorkspaceEditUndoFailed?.(message);
+      return [{ success: false, error: message }];
+    }
+  }
   buildSelectionRewritePreview(selectionText) {
     const lastAiMessage = [...this.messages].reverse().find((message) => message.role === "ai");
     if (!lastAiMessage)
@@ -7515,6 +7761,11 @@ ${list}`);
   }
   isSuccessfulToolResult(result) {
     return isSuccessfulWriteToolResult(result);
+  }
+  handleWorkspaceEditResult(result) {
+    if (!result?.workspaceEdit)
+      return;
+    this.onWorkspaceEdit?.(result.workspaceEdit);
   }
   getResultPath(action, result, args) {
     return getFileWriteResultPath(action, result, args);
@@ -10279,6 +10530,7 @@ var ChatState = class {
   }
   messages = [];
   tools = /* @__PURE__ */ new Map();
+  workspaceEdits = /* @__PURE__ */ new Map();
   streaming = false;
   dirty = false;
   getTabId() {
@@ -10330,6 +10582,13 @@ var ChatState = class {
   getTools() {
     return Array.from(this.tools.values()).map((tool) => this.cloneTool(tool));
   }
+  upsertWorkspaceEdit(edit) {
+    this.workspaceEdits.set(edit.id, this.cloneWorkspaceEdit(edit));
+    this.markDirty();
+  }
+  getWorkspaceEdits() {
+    return Array.from(this.workspaceEdits.values()).map((edit) => this.cloneWorkspaceEdit(edit)).sort((a, b) => b.appliedAt - a.appliedAt);
+  }
   markClean() {
     this.dirty = false;
   }
@@ -10355,6 +10614,9 @@ var ChatState = class {
       ...tool,
       input: { ...tool.input }
     };
+  }
+  cloneWorkspaceEdit(edit) {
+    return { ...edit };
   }
 };
 
@@ -10848,6 +11110,7 @@ var ShellView = class extends import_obsidian17.ItemView {
   historyMenuContainerEl = null;
   knowledgeStatusPanel = null;
   knowledgeStatusContainerEl = null;
+  workspaceEditContainerEl = null;
   excludedCurrentNotePath = null;
   // Heartbeat monitoring
   heartbeatInterval = null;
@@ -10965,6 +11228,7 @@ var ShellView = class extends import_obsidian17.ItemView {
     this.updateTabBar();
     this.renderActiveTabMessages();
     const inputContainer = this.createShellScaffold(container);
+    this.renderWorkspaceEditBar();
     void this.refreshKnowledgeStatusPanel();
     this.registerEvent(
       this.app.workspace.on("file-open", () => {
@@ -11570,6 +11834,7 @@ ${lines.join("\n")}${suffix}`;
       onOpenKnowledgeSettings: () => this.openPluginSettings()
     });
     this.renderContextChips(contextContainer);
+    this.workspaceEditContainerEl = inputContainer.createDiv({ cls: "shell-workspace-edits-host" });
     return inputContainer;
   }
   createSuggestionContainer(inputContainer) {
@@ -11960,6 +12225,7 @@ ${tool.name}: ${tool.description}
     this.applyTabMetadata(tab);
     this.resetStreamState();
     this.renderActiveTabMessages();
+    this.renderWorkspaceEditBar();
     this.hideHistoryMenu();
     this.inputEl?.focus();
   }
@@ -11978,6 +12244,7 @@ ${tool.name}: ${tool.description}
     }
     this.resetStreamState();
     this.renderActiveTabMessages();
+    this.renderWorkspaceEditBar();
     this.hideHistoryMenu();
     this.inputEl?.focus();
   }
@@ -11998,6 +12265,7 @@ ${tool.name}: ${tool.description}
         await this.syncProviderStateForTab(activeTab);
         this.resetStreamState();
         this.renderActiveTabMessages();
+        this.renderWorkspaceEditBar();
       }
     }
   }
@@ -12033,7 +12301,10 @@ ${tool.name}: ${tool.description}
       api: this.modelService,
       onMessageAdded: (msg) => this.handleTabMessageAdded(id, msg),
       onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
-      onStreamEvent: (event) => this.handleTabStreamEvent(id, event)
+      onStreamEvent: (event) => this.handleTabStreamEvent(id, event),
+      onWorkspaceEdit: (edit) => this.handleTabWorkspaceEdit(id, edit),
+      onWorkspaceEditUndone: (edit) => this.handleTabWorkspaceEditUndone(id, edit),
+      onWorkspaceEditUndoFailed: (message) => this.handleWorkspaceEditUndoFailed(id, message)
     });
     const session = { chatController, contextManager, contextController };
     this.tabSessions.set(id, session);
@@ -12074,6 +12345,83 @@ ${tool.name}: ${tool.description}
     } else {
       this.tabManager.markAttention(tabId, true);
     }
+  }
+  handleTabWorkspaceEdit(tabId, edit) {
+    const tab = this.tabManager.getAllTabs().find((item) => item.id === tabId);
+    tab?.state.upsertWorkspaceEdit(edit);
+    if (this.tabManager.getActiveTab()?.id === tabId) {
+      this.renderWorkspaceEditBar();
+    } else {
+      this.tabManager.markAttention(tabId, true);
+    }
+  }
+  handleTabWorkspaceEditUndone(tabId, edit) {
+    const tab = this.tabManager.getAllTabs().find((item) => item.id === tabId);
+    tab?.state.upsertWorkspaceEdit(edit);
+    if (this.tabManager.getActiveTab()?.id === tabId) {
+      this.renderWorkspaceEditBar();
+    }
+    new import_obsidian17.Notice(`Reverted ${this.basename(edit.path)}.`);
+  }
+  handleWorkspaceEditUndoFailed(tabId, message) {
+    if (this.tabManager.getActiveTab()?.id === tabId) {
+      this.renderWorkspaceEditBar();
+    }
+    new import_obsidian17.Notice(message);
+  }
+  renderWorkspaceEditBar() {
+    if (!this.workspaceEditContainerEl)
+      return;
+    this.workspaceEditContainerEl.empty();
+    const activeTab = this.tabManager.getActiveTab();
+    const edits = activeTab?.state.getWorkspaceEdits().filter((edit) => edit.status === "applied") ?? [];
+    this.workspaceEditContainerEl.toggleClass("is-empty", edits.length === 0);
+    if (edits.length === 0)
+      return;
+    const bar = this.workspaceEditContainerEl.createDiv({ cls: "shell-workspace-edits" });
+    const label = bar.createDiv({ cls: "shell-workspace-edits-label", text: "\u5DF2\u4FEE\u6539\u6587\u4EF6" });
+    label.setAttribute("title", "Files changed by AI in this tab");
+    const list = bar.createDiv({ cls: "shell-workspace-edits-list" });
+    for (const edit of edits.slice(0, 4)) {
+      const item = list.createDiv({ cls: "shell-workspace-edit-item" });
+      item.createSpan({ cls: "shell-workspace-edit-name", text: this.basename(edit.path) });
+      const meta = item.createSpan({ cls: "shell-workspace-edit-meta", text: this.formatWorkspaceEditMeta(edit) });
+      meta.setAttribute("title", edit.path);
+      const undoButton = item.createEl("button", {
+        cls: "clickable-icon shell-workspace-edit-undo",
+        attr: {
+          type: "button",
+          title: `Undo ${edit.path}`,
+          "aria-label": `Undo ${edit.path}`
+        }
+      });
+      (0, import_obsidian17.setIcon)(undoButton, "undo-2");
+      undoButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void this.chatController.undoWorkspaceEdit(edit.id);
+      });
+    }
+    if (edits.length > 1) {
+      const undoAllButton = bar.createEl("button", {
+        cls: "shell-workspace-edit-undo-all",
+        attr: { type: "button", title: "Undo all AI edits in this tab" }
+      });
+      (0, import_obsidian17.setIcon)(undoAllButton, "rotate-ccw");
+      undoAllButton.createSpan({ text: "\u5168\u90E8\u64A4\u9500" });
+      undoAllButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void this.chatController.undoAllWorkspaceEdits(edits.map((edit) => edit.id));
+      });
+    }
+  }
+  formatWorkspaceEditMeta(edit) {
+    const delta = edit.lineDelta ?? 0;
+    if (delta === 0)
+      return edit.kind === "create" ? "new" : "updated";
+    return `${delta > 0 ? "+" : ""}${delta} lines`;
+  }
+  basename(path) {
+    return path.split(/[\\/]/).filter(Boolean).pop() || path;
   }
   updateTabBar() {
     this.tabBar?.update(this.tabManager.toTabBarItems());
@@ -12431,180 +12779,285 @@ var selectionMenuField = import_state5.StateField.define({
     return { type: "hidden" };
   },
   update(state, tr) {
-    for (let effect of tr.effects) {
+    for (const effect of tr.effects) {
       if (effect.is(setSelectionMenuState)) {
+        cleanupPreviousController(state, effect.value);
         return effect.value;
       }
     }
-    if (tr.selection) {
-      const selection = tr.newSelection.main;
-      if (selection.empty) {
-        return { type: "hidden" };
-      }
-      if (state.type !== "hidden" && (selection.from !== state.from || selection.to !== state.to)) {
-        return { type: "button", from: selection.from, to: selection.to };
-      }
-      if (state.type === "hidden") {
-        return { type: "button", from: selection.from, to: selection.to };
-      }
+    if (!tr.selection && !tr.docChanged)
+      return state;
+    const selection = tr.newSelection.main;
+    if (!selection.empty) {
+      const next2 = {
+        type: state.type === "chat" && state.mode === "selection" && state.from === selection.from && state.to === selection.to ? "chat" : "button",
+        mode: "selection",
+        from: selection.from,
+        to: selection.to,
+        ...state.type === "chat" && state.mode === "selection" && state.from === selection.from && state.to === selection.to ? { controller: state.controller } : {}
+      };
+      cleanupPreviousController(state, next2);
+      return next2;
     }
-    return state;
+    const trigger = findAtTriggerInState(tr.state, selection.from);
+    if (trigger) {
+      if (state.type !== "hidden" && state.mode === "trigger" && state.from === trigger.from && state.to === trigger.to) {
+        return state;
+      }
+      const next2 = {
+        type: "button",
+        mode: "trigger",
+        from: trigger.from,
+        to: trigger.to
+      };
+      cleanupPreviousController(state, next2);
+      return next2;
+    }
+    const next = { type: "hidden" };
+    cleanupPreviousController(state, next);
+    return next;
   },
-  provide: (f) => import_view3.showTooltip.from(f, (state, view) => {
+  provide: (field) => import_view3.showTooltip.from(field, (state) => {
     if (state.type === "hidden")
-      return null;
-    const context = view ? pluginContextMap.get(view) : void 0;
-    if (!context)
       return null;
     return {
       pos: state.from,
       above: true,
       strictSide: true,
-      create: () => {
-        const dom = document.createElement("div");
-        dom.className = "guardian-selection-tooltip";
-        if (state.type === "button") {
-          const btn = document.createElement("button");
-          btn.className = "guardian-selection-btn";
-          btn.textContent = "Comment / AI";
-          btn.onclick = () => {
-            const controller = new ChatController({
-              app: context.app,
-              api: context.modelService,
-              onMessageAdded: (msg) => {
-              },
-              onStatusChanged: (isResponding) => {
-              }
-            });
-            view.dispatch({
-              effects: setSelectionMenuState.of({
-                type: "chat",
-                from: state.from,
-                to: state.to,
-                controller
-              })
-            });
-          };
-          dom.appendChild(btn);
-        } else if (state.type === "chat") {
-          const container = document.createElement("div");
-          container.className = "guardian-chat-view";
-          const header = container.createDiv({ cls: "guardian-chat-header" });
-          header.createSpan({ text: "Gemini Context" });
-          const closeBtn = header.createEl("button", { text: "\xD7", cls: "guardian-close-btn" });
-          closeBtn.onclick = () => {
-            view.dispatch({
-              effects: setSelectionMenuState.of({ type: "hidden" })
-            });
-          };
-          const messageList = container.createDiv({ cls: "guardian-message-list" });
-          const renderMessages = () => {
-            messageList.empty();
-            const messages = state.controller.getMessages();
-            if (messages.length === 0) {
-              const welcome = messageList.createDiv({ cls: "guardian-message system" });
-              welcome.setText("Ask about the selected text...");
-            } else {
-              messages.forEach((msg) => {
-                const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
-                if (msg.role === "ai") {
-                  import_obsidian19.MarkdownRenderer.render(context.app, msg.content, msgEl, "", new import_obsidian19.Component());
-                } else {
-                  msgEl.setText(msg.content);
-                }
-              });
-            }
-            setTimeout(() => messageList.scrollTop = messageList.scrollHeight, 0);
-          };
-          renderMessages();
-          state.controller["onMessageAdded"] = (msg) => {
-            renderMessages();
-          };
-          const statusContainer = container.createDiv({ cls: "guardian-status-bar" });
-          statusContainer.style.display = "none";
-          statusContainer.setText("Thinking...");
-          state.controller["onStatusChanged"] = (isResponding) => {
-            statusContainer.style.display = isResponding ? "block" : "none";
-          };
-          const inputWrapper = container.createDiv({ cls: "guardian-input-wrapper" });
-          const textarea = inputWrapper.createEl("textarea", {
-            cls: "guardian-chat-input",
-            attr: { placeholder: "Type a message..." }
-          });
-          textarea.onkeydown = async (e) => {
-            e.stopPropagation();
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              const text = textarea.value.trim();
-              if (!text)
-                return;
-              textarea.value = "";
-              const selectionText = view.state.doc.sliceString(state.from, state.to);
-              const selectionContext = [{
-                id: "selection-menu-context",
-                type: "selection",
-                data: "Editor selection",
-                summary: "Editor selection",
-                content: `Selected Text:
-${selectionText}`
-              }];
-              await state.controller.processCommand(text, selectionContext, selectionText, "selection-menu");
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              view.dispatch({
-                effects: setSelectionMenuState.of({ type: "button", from: state.from, to: state.to })
-              });
-            }
-          };
-          const actions = container.createDiv({ cls: "guardian-chat-actions" });
-          const copyBtn = actions.createEl("button", { text: "Copy Selection" });
-          copyBtn.onclick = () => {
-            const selectionText = view.state.doc.sliceString(state.from, state.to);
-            navigator.clipboard.writeText(selectionText);
-            new import_obsidian19.Notice("Selection copied");
-          };
-          const replaceBtn = actions.createEl("button", { text: "Replace with Last Response" });
-          replaceBtn.onclick = () => {
-            const selectionText = view.state.doc.sliceString(state.from, state.to);
-            const preview = state.controller.buildSelectionRewritePreview(selectionText);
-            if (!preview) {
-              new import_obsidian19.Notice("No AI response to replace with.");
-              return;
-            }
-            new DiffModal(context.app, preview.oldContent || "", preview.newContent || "", async () => {
-              const activeFile = context.app.workspace.getActiveFile();
-              await state.controller.applyPreviewedChange({
-                action: "selection_rewrite",
-                target: activeFile?.path || "current-selection",
-                previousContent: preview.oldContent || selectionText,
-                apply: () => {
-                  view.dispatch({
-                    changes: { from: state.from, to: state.to, insert: preview.newContent || "" },
-                    effects: setSelectionMenuState.of({ type: "hidden" })
-                  });
-                }
-              });
-            }).open();
-          };
-          dom.appendChild(container);
-          setTimeout(() => textarea.focus(), 50);
-        }
-        return { dom };
-      }
+      create: (view) => createSelectionTooltip(view, state)
     };
   })
 });
 function selectionMenuExtension(app, modelService) {
   return [
     selectionMenuField,
-    // 使用 EditorView.updateListener 来存储 context
     import_view3.EditorView.updateListener.of((update) => {
-      if (update.view) {
-        pluginContextMap.set(update.view, { app, modelService });
-      }
+      pluginContextMap.set(update.view, { app, modelService });
     })
   ];
+}
+function findAtTriggerInState(state, cursor) {
+  if (cursor <= 0)
+    return null;
+  const at = state.doc.sliceString(cursor - 1, cursor);
+  if (at !== "@")
+    return null;
+  const before = cursor > 1 ? state.doc.sliceString(cursor - 2, cursor - 1) : "";
+  if (cursor > 1 && !/\s/.test(before))
+    return null;
+  return { from: cursor - 1, to: cursor };
+}
+function createSelectionTooltip(view, state) {
+  const context = pluginContextMap.get(view);
+  const dom = document.createElement("div");
+  dom.className = `guardian-selection-tooltip is-${state.type}`;
+  if (state.type === "hidden" || !context)
+    return { dom };
+  if (state.type === "button") {
+    const btn = document.createElement("button");
+    btn.className = "guardian-selection-btn";
+    btn.type = "button";
+    btn.textContent = state.mode === "selection" ? "AI" : "@ AI";
+    btn.title = state.mode === "selection" ? "Ask AI about selection" : "Ask AI to insert here";
+    btn.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const controller = new ChatController({
+        app: context.app,
+        api: context.modelService
+      });
+      view.dispatch({
+        effects: setSelectionMenuState.of({
+          type: "chat",
+          mode: state.mode,
+          from: state.from,
+          to: state.to,
+          controller
+        })
+      });
+    };
+    dom.appendChild(btn);
+    return { dom };
+  }
+  dom.appendChild(createChatPanel(view, state, context));
+  return { dom };
+}
+function createChatPanel(view, state, context) {
+  const container = document.createElement("div");
+  container.className = `guardian-chat-view is-${state.mode}`;
+  const header = container.createDiv({ cls: "guardian-chat-header" });
+  header.createSpan({ text: state.mode === "selection" ? "Selection AI" : "Inline AI" });
+  const closeBtn = header.createEl("button", {
+    text: "x",
+    cls: "guardian-close-btn",
+    attr: { type: "button", title: "Close" }
+  });
+  closeBtn.onclick = () => {
+    state.controller.cleanup();
+    view.dispatch({ effects: setSelectionMenuState.of({ type: "hidden" }) });
+  };
+  const messageList = container.createDiv({ cls: "guardian-message-list" });
+  const renderMessages = () => {
+    messageList.empty();
+    const messages = state.controller.getMessages();
+    if (messages.length === 0) {
+      messageList.createDiv({
+        cls: "guardian-message system",
+        text: state.mode === "selection" ? "Ask about the selected text." : "Ask AI what to insert here."
+      });
+    } else {
+      for (const msg of messages) {
+        renderSelectionMessage(context.app, messageList, msg);
+      }
+    }
+    setTimeout(() => {
+      messageList.scrollTop = messageList.scrollHeight;
+    }, 0);
+  };
+  renderMessages();
+  state.controller.onMessageAdded = () => renderMessages();
+  const statusContainer = container.createDiv({ cls: "guardian-status-bar" });
+  statusContainer.style.display = "none";
+  statusContainer.setText("Thinking...");
+  state.controller.onStatusChanged = (isResponding) => {
+    statusContainer.style.display = isResponding ? "block" : "none";
+  };
+  const inputWrapper = container.createDiv({ cls: "guardian-input-wrapper" });
+  const textarea = inputWrapper.createEl("textarea", {
+    cls: "guardian-chat-input",
+    attr: {
+      placeholder: state.mode === "selection" ? "Ask about this selection..." : "Ask what to insert...",
+      rows: "2"
+    }
+  });
+  textarea.onkeydown = async (event) => {
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      event.preventDefault();
+      state.controller.cleanup();
+      view.dispatch({ effects: setSelectionMenuState.of({ type: "hidden" }) });
+      return;
+    }
+    if (event.key !== "Enter" || event.shiftKey)
+      return;
+    event.preventDefault();
+    const text = textarea.value.trim();
+    if (!text)
+      return;
+    textarea.value = "";
+    const targetText = getTargetText(view, state);
+    await state.controller.processCommand(
+      text,
+      [buildContextItem(state.mode, targetText)],
+      targetText,
+      "selection-menu"
+    );
+  };
+  const actions = container.createDiv({ cls: "guardian-chat-actions" });
+  const copyBtn = actions.createEl("button", {
+    text: state.mode === "selection" ? "Copy" : "Copy line",
+    attr: { type: "button" }
+  });
+  copyBtn.onclick = () => {
+    void navigator.clipboard.writeText(getTargetText(view, state));
+    new import_obsidian19.Notice("Copied.");
+  };
+  const applyBtn = actions.createEl("button", {
+    text: state.mode === "selection" ? "Replace" : "Insert",
+    attr: { type: "button" }
+  });
+  applyBtn.onclick = () => {
+    if (state.mode === "selection") {
+      applySelectionReplacement(view, state, context);
+    } else {
+      void applyTriggerInsertion(view, state, context);
+    }
+  };
+  setTimeout(() => textarea.focus(), 50);
+  return container;
+}
+function renderSelectionMessage(app, messageList, msg) {
+  const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
+  if (msg.role === "ai") {
+    void import_obsidian19.MarkdownRenderer.render(app, msg.content, msgEl, "", new import_obsidian19.Component());
+  } else {
+    msgEl.setText(msg.content);
+  }
+}
+function getTargetText(view, state) {
+  if (state.mode === "selection") {
+    return view.state.doc.sliceString(state.from, state.to);
+  }
+  const line = view.state.doc.lineAt(state.from);
+  const beforeTrigger = line.text.slice(0, Math.max(0, state.from - line.from)).trim();
+  return beforeTrigger || line.text.replace("@", "").trim();
+}
+function buildContextItem(mode, targetText) {
+  return {
+    id: mode === "selection" ? "selection-menu-context" : "inline-at-context",
+    type: "selection",
+    data: mode === "selection" ? "Editor selection" : "Inline @ trigger",
+    summary: mode === "selection" ? "Editor selection" : "Inline @ trigger",
+    content: mode === "selection" ? `Selected Text:
+${targetText}` : `Line Context:
+${targetText}`
+  };
+}
+function applySelectionReplacement(view, state, context) {
+  const selectionText = view.state.doc.sliceString(state.from, state.to);
+  const preview = state.controller.buildSelectionRewritePreview(selectionText);
+  if (!preview) {
+    new import_obsidian19.Notice("No AI response to replace with.");
+    return;
+  }
+  new DiffModal(context.app, preview.oldContent || "", preview.newContent || "", async () => {
+    const activeFile = context.app.workspace.getActiveFile();
+    await state.controller.applyPreviewedChange({
+      action: "selection_rewrite",
+      target: activeFile?.path || "current-selection",
+      previousContent: view.state.doc.toString(),
+      apply: () => {
+        view.dispatch({
+          changes: {
+            from: state.from,
+            to: state.to,
+            insert: preview.newContent || ""
+          },
+          effects: setSelectionMenuState.of({ type: "hidden" })
+        });
+      }
+    });
+  }).open();
+}
+async function applyTriggerInsertion(view, state, context) {
+  const response = getLastAiResponse(state.controller);
+  if (!response) {
+    new import_obsidian19.Notice("No AI response to insert.");
+    return;
+  }
+  const activeFile = context.app.workspace.getActiveFile();
+  await state.controller.applyPreviewedChange({
+    action: "inline_ai_insert",
+    target: activeFile?.path || "current-editor",
+    previousContent: view.state.doc.toString(),
+    apply: () => {
+      view.dispatch({
+        changes: { from: state.from, to: state.to, insert: response },
+        effects: setSelectionMenuState.of({ type: "hidden" })
+      });
+    }
+  });
+}
+function getLastAiResponse(controller) {
+  const message = [...controller.getMessages()].reverse().find((item) => item.role === "ai");
+  return message?.content || "";
+}
+function cleanupPreviousController(previous, next) {
+  if (previous.type !== "chat")
+    return;
+  if (next.type === "chat" && next.controller === previous.controller)
+    return;
+  previous.controller.cleanup();
 }
 
 // src/knowledge/runtime.ts
@@ -22263,16 +22716,16 @@ function addFormulaReference(value, references) {
 }
 
 // src/skills/builtin/web-search/SKILL.md
-var SKILL_default = '---\nname: web-search\ndescription: \u641C\u7D22\u4E92\u8054\u7F51\u83B7\u53D6\u6700\u65B0\u4FE1\u606F\u3001\u65B0\u95FB\u6216\u6587\u6863\u3002\u5F53\u7528\u6237\u8BE2\u95EE vault \u4E2D\u6CA1\u6709\u7684\u5B9E\u65F6\u4FE1\u606F\u65F6\u4F7F\u7528\u3002\ntriggers:\n  keywords: ["\u641C\u7D22", "\u641C\u4E00\u4E0B", "search", "google", "\u6700\u65B0", "\u65B0\u95FB"]\ntools: ["web_search"]\n---\n\n# Web Search\n\n\u4F7F\u7528 DuckDuckGo \u641C\u7D22\u4E92\u8054\u7F51\u3002\n\n## \u4F7F\u7528\u65B9\u5F0F\n\n\u63D0\u4F9B\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u53EF\u9009\u65F6\u95F4\u8303\u56F4\u8FC7\u6EE4\u3002\n\n## \u53C2\u6570\n\n- `query`\uFF08\u5FC5\u586B\uFF09\uFF1A\u641C\u7D22\u5173\u952E\u8BCD\n- `time_range`\uFF08\u53EF\u9009\uFF09\uFF1A\u65F6\u95F4\u8303\u56F4 \u2014 d(\u5929), w(\u5468), m(\u6708), y(\u5E74)\n\n## \u8F93\u51FA\u683C\u5F0F\n\n\u8FD4\u56DE\u6700\u591A 5 \u6761\u641C\u7D22\u7ED3\u679C\uFF0C\u6BCF\u6761\u5305\u542B title\u3001link\u3001snippet\u3002\n\u56DE\u7B54\u65F6\u4F7F\u7528 Markdown \u94FE\u63A5\u683C\u5F0F\uFF1A`[Title](URL)`\u3002\n';
+var SKILL_default = '---\r\nname: web-search\r\ndescription: \u641C\u7D22\u4E92\u8054\u7F51\u83B7\u53D6\u6700\u65B0\u4FE1\u606F\u3001\u65B0\u95FB\u6216\u6587\u6863\u3002\u5F53\u7528\u6237\u8BE2\u95EE vault \u4E2D\u6CA1\u6709\u7684\u5B9E\u65F6\u4FE1\u606F\u65F6\u4F7F\u7528\u3002\r\ntriggers:\r\n  keywords: ["\u641C\u7D22", "\u641C\u4E00\u4E0B", "search", "google", "\u6700\u65B0", "\u65B0\u95FB"]\r\ntools: ["web_search"]\r\n---\r\n\r\n# Web Search\r\n\r\n\u4F7F\u7528 DuckDuckGo \u641C\u7D22\u4E92\u8054\u7F51\u3002\r\n\r\n## \u4F7F\u7528\u65B9\u5F0F\r\n\r\n\u63D0\u4F9B\u641C\u7D22\u5173\u952E\u8BCD\uFF0C\u53EF\u9009\u65F6\u95F4\u8303\u56F4\u8FC7\u6EE4\u3002\r\n\r\n## \u53C2\u6570\r\n\r\n- `query`\uFF08\u5FC5\u586B\uFF09\uFF1A\u641C\u7D22\u5173\u952E\u8BCD\r\n- `time_range`\uFF08\u53EF\u9009\uFF09\uFF1A\u65F6\u95F4\u8303\u56F4 \u2014 d(\u5929), w(\u5468), m(\u6708), y(\u5E74)\r\n\r\n## \u8F93\u51FA\u683C\u5F0F\r\n\r\n\u8FD4\u56DE\u6700\u591A 5 \u6761\u641C\u7D22\u7ED3\u679C\uFF0C\u6BCF\u6761\u5305\u542B title\u3001link\u3001snippet\u3002\r\n\u56DE\u7B54\u65F6\u4F7F\u7528 Markdown \u94FE\u63A5\u683C\u5F0F\uFF1A`[Title](URL)`\u3002\r\n';
 
 // src/skills/builtin/web-clipper/SKILL.md
-var SKILL_default2 = '---\nname: web-clipper\ndescription: \u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault\u3002\u652F\u6301 YouTube\u3001Bilibili\u3001\u5FAE\u4FE1\u516C\u4F17\u53F7\u548C\u666E\u901A\u7F51\u9875\u3002\ntriggers:\n  commands: ["/save"]\n  keywords: ["\u4FDD\u5B58", "\u526A\u85CF", "save", "clip", "\u7F51\u9875", "webpage"]\ntools: ["save_webpage"]\n---\n\n# Web Clipper\n\n\u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault \u7684\u5B8C\u6574\u6D41\u7A0B\u3002\n\n## \u652F\u6301\u7684\u5185\u5BB9\u7C7B\u578B\n\n- **YouTube \u89C6\u9891**\uFF1A\u63D0\u53D6\u8F6C\u5F55\u6587\u672C\uFF0CAI \u751F\u6210\u6458\u8981\n- **Bilibili \u89C6\u9891**\uFF1A\u63D0\u53D6\u5B57\u5E55\uFF0CAI \u751F\u6210\u6458\u8981\n- **\u5FAE\u4FE1\u516C\u4F17\u53F7\u6587\u7AE0**\uFF1A\u7279\u6B8A DOM \u5904\u7406\uFF0C\u63D0\u53D6\u6B63\u6587\n- **\u666E\u901A\u7F51\u9875**\uFF1AReadability \u63D0\u53D6\u6B63\u6587\uFF0C\u8F6C\u4E3A Markdown\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n1. \u68C0\u6D4B URL \u7C7B\u578B\uFF08\u89C6\u9891 / \u7F51\u9875\uFF09\n2. \u89C6\u9891\u8DEF\u5F84\uFF1A\u63D0\u53D6\u8F6C\u5F55 \u2192 AI \u6458\u8981 \u2192 \u751F\u6210\u7B14\u8BB0\n3. \u7F51\u9875\u8DEF\u5F84\uFF1AHTTP \u8BF7\u6C42 \u2192 HTML \u89E3\u6790 \u2192 Readability \u63D0\u53D6 \u2192 Markdown \u8F6C\u6362\n4. \u751F\u6210 YAML frontmatter\uFF08created, source, author, tags\uFF09\n5. \u4FDD\u5B58\u5230\u914D\u7F6E\u7684\u5B58\u50A8\u76EE\u5F55\n\n## \u8F93\u51FA\u683C\u5F0F\n\n```markdown\n---\ncreated: 2026-04-17T12:00:00.000Z\nsource: https://example.com/article\nauthor: Author Name\ntags: clipping\n---\n\n# Article Title\n\n[\u6B63\u6587\u5185\u5BB9]\n```\n';
+var SKILL_default2 = '---\r\nname: web-clipper\r\ndescription: \u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault\u3002\u652F\u6301 YouTube\u3001Bilibili\u3001\u5FAE\u4FE1\u516C\u4F17\u53F7\u548C\u666E\u901A\u7F51\u9875\u3002\r\ntriggers:\r\n  commands: ["/save"]\r\n  keywords: ["\u4FDD\u5B58", "\u526A\u85CF", "save", "clip", "\u7F51\u9875", "webpage"]\r\ntools: ["save_webpage"]\r\n---\r\n\r\n# Web Clipper\r\n\r\n\u4FDD\u5B58\u7F51\u9875\u6216\u89C6\u9891\u5230 vault \u7684\u5B8C\u6574\u6D41\u7A0B\u3002\r\n\r\n## \u652F\u6301\u7684\u5185\u5BB9\u7C7B\u578B\r\n\r\n- **YouTube \u89C6\u9891**\uFF1A\u63D0\u53D6\u8F6C\u5F55\u6587\u672C\uFF0CAI \u751F\u6210\u6458\u8981\r\n- **Bilibili \u89C6\u9891**\uFF1A\u63D0\u53D6\u5B57\u5E55\uFF0CAI \u751F\u6210\u6458\u8981\r\n- **\u5FAE\u4FE1\u516C\u4F17\u53F7\u6587\u7AE0**\uFF1A\u7279\u6B8A DOM \u5904\u7406\uFF0C\u63D0\u53D6\u6B63\u6587\r\n- **\u666E\u901A\u7F51\u9875**\uFF1AReadability \u63D0\u53D6\u6B63\u6587\uFF0C\u8F6C\u4E3A Markdown\r\n\r\n## \u5DE5\u4F5C\u6D41\u7A0B\r\n\r\n1. \u68C0\u6D4B URL \u7C7B\u578B\uFF08\u89C6\u9891 / \u7F51\u9875\uFF09\r\n2. \u89C6\u9891\u8DEF\u5F84\uFF1A\u63D0\u53D6\u8F6C\u5F55 \u2192 AI \u6458\u8981 \u2192 \u751F\u6210\u7B14\u8BB0\r\n3. \u7F51\u9875\u8DEF\u5F84\uFF1AHTTP \u8BF7\u6C42 \u2192 HTML \u89E3\u6790 \u2192 Readability \u63D0\u53D6 \u2192 Markdown \u8F6C\u6362\r\n4. \u751F\u6210 YAML frontmatter\uFF08created, source, author, tags\uFF09\r\n5. \u4FDD\u5B58\u5230\u914D\u7F6E\u7684\u5B58\u50A8\u76EE\u5F55\r\n\r\n## \u8F93\u51FA\u683C\u5F0F\r\n\r\n```markdown\r\n---\r\ncreated: 2026-04-17T12:00:00.000Z\r\nsource: https://example.com/article\r\nauthor: Author Name\r\ntags: clipping\r\n---\r\n\r\n# Article Title\r\n\r\n[\u6B63\u6587\u5185\u5BB9]\r\n```\r\n';
 
 // src/skills/builtin/knowledge/SKILL.md
-var SKILL_default3 = '---\nname: knowledge\ndescription: \u4ECE\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\uFF0C\u6216\u5C06\u9AD8\u8D28\u91CF\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\u5F53\u7528\u6237\u7684\u95EE\u9898\u53EF\u80FD\u4E0E\u5DF2\u79EF\u7D2F\u7684\u77E5\u8BC6\u76F8\u5173\u65F6\u4F7F\u7528\u3002\ntriggers:\n  commands: ["/wiki:query"]\n  keywords: ["\u77E5\u8BC6\u5E93", "\u77E5\u8BC6", "knowledge", "wiki"]\ntools: ["query_knowledge", "file_back_knowledge"]\n---\n\n# Knowledge Wiki\n\n\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u7684\u68C0\u7D22\u548C\u5F52\u6863\u3002\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n1. \u4F7F\u7528 `query_knowledge` \u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\n2. \u5982\u679C\u77E5\u8BC6\u5E93\u4E2D\u6CA1\u6709\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5E38\u56DE\u7B54\u5373\u53EF\uFF0C\u4E0D\u8981\u5F3A\u884C\u5F15\u7528\n3. \u77E5\u8BC6\u5E93\u68C0\u7D22\u4E0D\u8DB3\u65F6\uFF0C\u53EF\u4EE5\u7528 `search_vault` \u641C\u7D22\u6574\u4E2A vault \u8865\u5145\n\n## \u5F15\u7528\u89C4\u5219\n\n\u5982\u679C\u56DE\u7B54\u5F15\u7528\u4E86\u77E5\u8BC6\u5E93\u4E2D\u7684\u6587\u7AE0\uFF0C\u5FC5\u987B\u5728\u56DE\u7B54\u672B\u5C3E\u6DFB\u52A0\u5F15\u7528\u6765\u6E90\uFF1A\n\n```\n---\n\u{1F4DA} \u5F15\u7528\u6765\u6E90\uFF1A\n- [[\u6587\u7AE0\u8DEF\u5F84|\u6587\u7AE0\u6807\u9898]]\n```\n\n## \u56DE\u586B\u89C4\u5219\n\n\u5F53\u56DE\u7B54\u7EFC\u5408\u4E86\u591A\u4E2A\u77E5\u8BC6\u6765\u6E90\u3001\u4EA7\u51FA\u6709\u4EF7\u503C\u7684\u65B0\u6D1E\u5BDF\u6216\u5BF9\u6BD4\u5206\u6790\u65F6\uFF0C\n\u4F7F\u7528 `file_back_knowledge` \u5DE5\u5177\u5C06\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\n\n- \u4E0D\u8981\u5BF9\u7B80\u5355\u7684\u4E8B\u5B9E\u67E5\u8BE2\u505A\u56DE\u586B\uFF0C\u53EA\u56DE\u586B\u6709\u7EFC\u5408\u4EF7\u503C\u7684\u5185\u5BB9\n- \u7528\u6237\u70B9\u8D5E\uFF08\u{1F44D}\uFF09\u65F6\u65E0\u8BBA\u5224\u65AD\u5982\u4F55\u90FD\u6267\u884C\u56DE\u586B\n- \u7528\u6237\u70B9\u8E29\uFF08\u{1F44E}\uFF09\u65F6\u4E0D\u56DE\u586B\n';
+var SKILL_default3 = '---\r\nname: knowledge\r\ndescription: \u4ECE\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\uFF0C\u6216\u5C06\u9AD8\u8D28\u91CF\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\u5F53\u7528\u6237\u7684\u95EE\u9898\u53EF\u80FD\u4E0E\u5DF2\u79EF\u7D2F\u7684\u77E5\u8BC6\u76F8\u5173\u65F6\u4F7F\u7528\u3002\r\ntriggers:\r\n  commands: ["/wiki:query"]\r\n  keywords: ["\u77E5\u8BC6\u5E93", "\u77E5\u8BC6", "knowledge", "wiki"]\r\ntools: ["query_knowledge", "file_back_knowledge"]\r\n---\r\n\r\n# Knowledge Wiki\r\n\r\n\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u7684\u68C0\u7D22\u548C\u5F52\u6863\u3002\r\n\r\n## \u5DE5\u4F5C\u6D41\u7A0B\r\n\r\n1. \u4F7F\u7528 `query_knowledge` \u68C0\u7D22\u76F8\u5173\u77E5\u8BC6\r\n2. \u5982\u679C\u77E5\u8BC6\u5E93\u4E2D\u6CA1\u6709\u76F8\u5173\u5185\u5BB9\uFF0C\u6B63\u5E38\u56DE\u7B54\u5373\u53EF\uFF0C\u4E0D\u8981\u5F3A\u884C\u5F15\u7528\r\n3. \u77E5\u8BC6\u5E93\u68C0\u7D22\u4E0D\u8DB3\u65F6\uFF0C\u53EF\u4EE5\u7528 `search_vault` \u641C\u7D22\u6574\u4E2A vault \u8865\u5145\r\n\r\n## \u5F15\u7528\u89C4\u5219\r\n\r\n\u5982\u679C\u56DE\u7B54\u5F15\u7528\u4E86\u77E5\u8BC6\u5E93\u4E2D\u7684\u6587\u7AE0\uFF0C\u5FC5\u987B\u5728\u56DE\u7B54\u672B\u5C3E\u6DFB\u52A0\u5F15\u7528\u6765\u6E90\uFF1A\r\n\r\n```\r\n---\r\n\u{1F4DA} \u5F15\u7528\u6765\u6E90\uFF1A\r\n- [[\u6587\u7AE0\u8DEF\u5F84|\u6587\u7AE0\u6807\u9898]]\r\n```\r\n\r\n## \u56DE\u586B\u89C4\u5219\r\n\r\n\u5F53\u56DE\u7B54\u7EFC\u5408\u4E86\u591A\u4E2A\u77E5\u8BC6\u6765\u6E90\u3001\u4EA7\u51FA\u6709\u4EF7\u503C\u7684\u65B0\u6D1E\u5BDF\u6216\u5BF9\u6BD4\u5206\u6790\u65F6\uFF0C\r\n\u4F7F\u7528 `file_back_knowledge` \u5DE5\u5177\u5C06\u56DE\u7B54\u5F52\u6863\u5230\u77E5\u8BC6\u5E93\u3002\r\n\r\n- \u4E0D\u8981\u5BF9\u7B80\u5355\u7684\u4E8B\u5B9E\u67E5\u8BE2\u505A\u56DE\u586B\uFF0C\u53EA\u56DE\u586B\u6709\u7EFC\u5408\u4EF7\u503C\u7684\u5185\u5BB9\r\n- \u7528\u6237\u70B9\u8D5E\uFF08\u{1F44D}\uFF09\u65F6\u65E0\u8BBA\u5224\u65AD\u5982\u4F55\u90FD\u6267\u884C\u56DE\u586B\r\n- \u7528\u6237\u70B9\u8E29\uFF08\u{1F44E}\uFF09\u65F6\u4E0D\u56DE\u586B\r\n';
 
 // src/skills/builtin/plugin-ctrl/SKILL.md
-var SKILL_default4 = '---\nname: plugin-ctrl\ndescription: \u53D1\u73B0\u548C\u4F7F\u7528 Obsidian \u63D2\u4EF6\u3002\u9700\u8981\u63D2\u4EF6\u80FD\u529B\u65F6\u5148\u901A\u8FC7\u6B64 skill \u67E5\u627E\u5408\u9002\u63D2\u4EF6\u3002\ntriggers:\n  keywords: ["\u63D2\u4EF6", "plugin", "plugins"]\ntools: ["list_plugins", "get_plugin_commands", "get_plugin_settings", "execute_plugin_command"]\n---\n\n# Plugin Control \u2014 \u63D2\u4EF6\u7F16\u6392\u5668\n\n\u67E5\u8BE2\u548C\u63A7\u5236 Obsidian \u63D2\u4EF6\u3002\u81EA\u52A8\u4E3A\u5DF2\u5B89\u88C5\u63D2\u4EF6\u751F\u6210\u4F7F\u7528 Skill\u3002\n\n## \u5DE5\u4F5C\u6D41\u7A0B\n\n\u5F53\u7528\u6237\u7684\u9700\u6C42\u53EF\u80FD\u7531\u67D0\u4E2A\u63D2\u4EF6\u5B8C\u6210\u65F6\uFF1A\n\n1. \u67E5\u770B skill \u6458\u8981\u5217\u8868\uFF0C\u662F\u5426\u5DF2\u6709\u5339\u914D\u7684 `plugin-*` skill\n2. \u5982\u679C\u6709 \u2192 \u76F4\u63A5\u8C03\u7528\u8BE5\u63D2\u4EF6 skill\uFF08\u5982 `use_skill("plugin-obsidian-tasks")`\uFF09\n3. \u5982\u679C\u6CA1\u6709 \u2192 \u4F7F\u7528 `list_plugins` \u67E5\u770B\u5DF2\u5B89\u88C5\u63D2\u4EF6\n4. \u627E\u5230\u5019\u9009\u63D2\u4EF6\u540E\uFF0C\u7528 `get_plugin_commands` \u4E86\u89E3\u5176\u80FD\u529B\n5. \u6839\u636E\u547D\u4EE4\u548C\u8BBE\u7F6E\u4FE1\u606F\uFF0C\u76F4\u63A5\u64CD\u4F5C\u5B8C\u6210\u4EFB\u52A1\n\n## \u53EF\u7528\u5DE5\u5177\n\n- `list_plugins` \u2014 \u5217\u51FA\u6240\u6709\u5DF2\u5B89\u88C5\u63D2\u4EF6\u53CA\u5176\u542F\u7528\u72B6\u6001\u548C skill \u72B6\u6001\n- `get_plugin_commands` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u53EF\u7528\u547D\u4EE4\n- `get_plugin_settings` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u8BBE\u7F6E\n- `execute_plugin_command` \u2014 \u6267\u884C\u6307\u5B9A\u63D2\u4EF6\u547D\u4EE4\n\n## \u539F\u5219\n\n- \u4F18\u5148\u4F7F\u7528\u5DF2\u6709 skill \u7684\u63D2\u4EF6\uFF08instructions \u66F4\u5B8C\u6574\uFF09\n- \u6CA1\u6709 skill \u7684\u63D2\u4EF6\uFF0C\u9000\u56DE\u5230\u547D\u4EE4\u7EA7\u64CD\u4F5C\n- \u53EA\u6709\u5728\u6CA1\u6709\u5408\u9002\u63D2\u4EF6\u65F6\uFF0C\u624D\u7528\u7EAF vault \u64CD\u4F5C\u521B\u5EFA\u666E\u901A Markdown\n';
+var SKILL_default4 = '---\r\nname: plugin-ctrl\r\ndescription: \u53D1\u73B0\u548C\u4F7F\u7528 Obsidian \u63D2\u4EF6\u3002\u9700\u8981\u63D2\u4EF6\u80FD\u529B\u65F6\u5148\u901A\u8FC7\u6B64 skill \u67E5\u627E\u5408\u9002\u63D2\u4EF6\u3002\r\ntriggers:\r\n  keywords: ["\u63D2\u4EF6", "plugin", "plugins"]\r\ntools: ["list_plugins", "get_plugin_commands", "get_plugin_settings", "execute_plugin_command"]\r\n---\r\n\r\n# Plugin Control \u2014 \u63D2\u4EF6\u7F16\u6392\u5668\r\n\r\n\u67E5\u8BE2\u548C\u63A7\u5236 Obsidian \u63D2\u4EF6\u3002\u81EA\u52A8\u4E3A\u5DF2\u5B89\u88C5\u63D2\u4EF6\u751F\u6210\u4F7F\u7528 Skill\u3002\r\n\r\n## \u5DE5\u4F5C\u6D41\u7A0B\r\n\r\n\u5F53\u7528\u6237\u7684\u9700\u6C42\u53EF\u80FD\u7531\u67D0\u4E2A\u63D2\u4EF6\u5B8C\u6210\u65F6\uFF1A\r\n\r\n1. \u67E5\u770B skill \u6458\u8981\u5217\u8868\uFF0C\u662F\u5426\u5DF2\u6709\u5339\u914D\u7684 `plugin-*` skill\r\n2. \u5982\u679C\u6709 \u2192 \u76F4\u63A5\u8C03\u7528\u8BE5\u63D2\u4EF6 skill\uFF08\u5982 `use_skill("plugin-obsidian-tasks")`\uFF09\r\n3. \u5982\u679C\u6CA1\u6709 \u2192 \u4F7F\u7528 `list_plugins` \u67E5\u770B\u5DF2\u5B89\u88C5\u63D2\u4EF6\r\n4. \u627E\u5230\u5019\u9009\u63D2\u4EF6\u540E\uFF0C\u7528 `get_plugin_commands` \u4E86\u89E3\u5176\u80FD\u529B\r\n5. \u6839\u636E\u547D\u4EE4\u548C\u8BBE\u7F6E\u4FE1\u606F\uFF0C\u76F4\u63A5\u64CD\u4F5C\u5B8C\u6210\u4EFB\u52A1\r\n\r\n## \u53EF\u7528\u5DE5\u5177\r\n\r\n- `list_plugins` \u2014 \u5217\u51FA\u6240\u6709\u5DF2\u5B89\u88C5\u63D2\u4EF6\u53CA\u5176\u542F\u7528\u72B6\u6001\u548C skill \u72B6\u6001\r\n- `get_plugin_commands` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u53EF\u7528\u547D\u4EE4\r\n- `get_plugin_settings` \u2014 \u83B7\u53D6\u6307\u5B9A\u63D2\u4EF6\u7684\u8BBE\u7F6E\r\n- `execute_plugin_command` \u2014 \u6267\u884C\u6307\u5B9A\u63D2\u4EF6\u547D\u4EE4\r\n\r\n## \u539F\u5219\r\n\r\n- \u4F18\u5148\u4F7F\u7528\u5DF2\u6709 skill \u7684\u63D2\u4EF6\uFF08instructions \u66F4\u5B8C\u6574\uFF09\r\n- \u6CA1\u6709 skill \u7684\u63D2\u4EF6\uFF0C\u9000\u56DE\u5230\u547D\u4EE4\u7EA7\u64CD\u4F5C\r\n- \u53EA\u6709\u5728\u6CA1\u6709\u5408\u9002\u63D2\u4EF6\u65F6\uFF0C\u624D\u7528\u7EAF vault \u64CD\u4F5C\u521B\u5EFA\u666E\u901A Markdown\r\n';
 
 // src/skills/builtin/obsidian-markdown/SKILL.md
 var SKILL_default5 = '---\r\nname: obsidian-markdown\r\ndescription: Create and edit Obsidian Flavored Markdown with wikilinks, embeds, callouts, properties, tags, and note frontmatter.\r\ntriggers:\r\n  keywords: ["wikilink", "wikilinks", "callout", "frontmatter", "properties", "embed", "embeds", "markdown", "tags"]\r\ntools: ["read_note", "create_note", "update_note", "append_to_note", "search_vault", "list_notes", "open_file"]\r\n---\r\n\r\n# Obsidian Flavored Markdown\r\n\r\nUse this workflow when creating or editing Markdown notes that should render well in Obsidian.\r\n\r\n## Workflow\r\n\r\n1. Read the target note first when editing existing content.\r\n2. Put YAML properties at the top of the note when metadata is needed.\r\n3. Use wikilinks for vault notes and Markdown links for external URLs.\r\n4. Use embeds for notes, headings, blocks, images, PDFs, audio, and video.\r\n5. Use callouts for highlighted blocks.\r\n6. Open the file when the user wants to inspect the rendered result in Obsidian.\r\n\r\n## Wikilinks\r\n\r\n```markdown\r\n[[Note Name]]\r\n[[Note Name|Display Text]]\r\n[[Note Name#Heading]]\r\n[[Note Name#^block-id]]\r\n[[#Heading in same note]]\r\n```\r\n\r\nDefine a paragraph block ID by appending it to the paragraph:\r\n\r\n```markdown\r\nThis paragraph can be linked to. ^my-block-id\r\n```\r\n\r\nFor lists and quotes, place the block ID on a separate line after the block.\r\n\r\n## Embeds\r\n\r\n```markdown\r\n![[Note Name]]\r\n![[Note Name#Heading]]\r\n![[Note Name#^block-id]]\r\n![[image.png]]\r\n![[image.png|300]]\r\n![[image.png|640x480]]\r\n![[document.pdf#page=3]]\r\n```\r\n\r\nUse external Markdown image syntax only for external URLs:\r\n\r\n```markdown\r\n![Alt text](https://example.com/image.png)\r\n![Alt text|300](https://example.com/image.png)\r\n```\r\n\r\n## Callouts\r\n\r\n```markdown\r\n> [!note]\r\n> Basic callout.\r\n\r\n> [!warning] Custom Title\r\n> Callout with a custom title.\r\n\r\n> [!faq]- Collapsed by default\r\n> Foldable callout content.\r\n```\r\n\r\nCommon types: `note`, `abstract`, `summary`, `tldr`, `info`, `todo`, `tip`, `hint`, `important`, `success`, `check`, `done`, `question`, `help`, `faq`, `warning`, `caution`, `attention`, `failure`, `fail`, `missing`, `danger`, `error`, `bug`, `example`, `quote`, `cite`.\r\n\r\nNested callouts are valid:\r\n\r\n```markdown\r\n> [!question] Outer callout\r\n> > [!note] Inner callout\r\n> > Nested content\r\n```\r\n\r\n## Properties\r\n\r\n```yaml\r\n---\r\ntitle: My Note\r\ndate: 2024-01-15\r\ntags:\r\n  - project\r\n  - active\r\naliases:\r\n  - Alternative Name\r\ncssclasses:\r\n  - custom-class\r\nstatus: in-progress\r\nrating: 4.5\r\ncompleted: false\r\ndue: 2024-02-01T14:30:00\r\n---\r\n```\r\n\r\nDefault properties:\r\n\r\n- `tags`: searchable note tags\r\n- `aliases`: alternative names used by link suggestions\r\n- `cssclasses`: CSS classes applied by Obsidian\r\n\r\nProperty values may be text, numbers, checkboxes, dates, date-times, lists, or links. Quote wikilinks in YAML values, for example `related: "[[Other Note]]"`.\r\n\r\n## Tags\r\n\r\n```markdown\r\n#tag\r\n#nested/tag\r\n#tag-with-dashes\r\n#tag_with_underscores\r\n```\r\n\r\nTags can contain letters, numbers except as the first character, underscores, hyphens, and forward slashes.\r\n\r\n## Obsidian Extensions\r\n\r\n```markdown\r\n==Highlighted text==\r\n\r\n%%hidden inline comment%%\r\n\r\n%%\r\nHidden block comment.\r\n%%\r\n```\r\n\r\nMath and Mermaid diagrams are supported:\r\n\r\n````markdown\r\nInline math: $e^{i\\pi} + 1 = 0$\r\n\r\n$$\r\n\\frac{a}{b} = c\r\n$$\r\n\r\n```mermaid\r\ngraph TD\r\n    A[Start] --> B{Decision}\r\n```\r\n````\r\n\r\n## Link Choice\r\n\r\nUse `[[wikilinks]]` for notes inside the vault because Obsidian tracks renames. Use `[text](url)` only for external URLs.\r\n';
