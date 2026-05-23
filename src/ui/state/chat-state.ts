@@ -1,9 +1,11 @@
 import { ChatMessage, ToolRunState } from '../types';
 import { cloneChangePreview } from '../diff/change-preview';
+import { WorkspaceEditSummary } from '../../services/workspace-edit-service';
 
 export class ChatState {
     private messages: ChatMessage[] = [];
     private tools = new Map<string, ToolRunState>();
+    private workspaceEdits = new Map<string, WorkspaceEditSummary>();
     private streaming = false;
     private dirty = false;
 
@@ -68,6 +70,17 @@ export class ChatState {
         return Array.from(this.tools.values()).map(tool => this.cloneTool(tool));
     }
 
+    upsertWorkspaceEdit(edit: WorkspaceEditSummary): void {
+        this.workspaceEdits.set(edit.id, this.cloneWorkspaceEdit(edit));
+        this.markDirty();
+    }
+
+    getWorkspaceEdits(): WorkspaceEditSummary[] {
+        return Array.from(this.workspaceEdits.values())
+            .map(edit => this.cloneWorkspaceEdit(edit))
+            .sort((a, b) => b.appliedAt - a.appliedAt);
+    }
+
     markClean(): void {
         this.dirty = false;
     }
@@ -99,5 +112,9 @@ export class ChatState {
             ...tool,
             input: { ...tool.input },
         };
+    }
+
+    private cloneWorkspaceEdit(edit: WorkspaceEditSummary): WorkspaceEditSummary {
+        return { ...edit };
     }
 }

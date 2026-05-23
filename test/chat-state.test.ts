@@ -95,6 +95,39 @@ async function runTests() {
     }]);
   });
 
+  await test('tracks workspace edits and returns defensive copies', () => {
+    const state = new ChatState('tab-1');
+
+    state.upsertWorkspaceEdit({
+      id: 'edit-1',
+      action: 'update_file',
+      path: 'Notes/source.md',
+      kind: 'update',
+      appliedAt: 10,
+      status: 'applied',
+    });
+    state.upsertWorkspaceEdit({
+      id: 'edit-1',
+      action: 'update_file',
+      path: 'Notes/source.md',
+      kind: 'update',
+      appliedAt: 10,
+      status: 'undone',
+    });
+
+    const edits = state.getWorkspaceEdits();
+    edits[0].status = 'applied';
+
+    expect(state.getWorkspaceEdits()).toEqual([{
+      id: 'edit-1',
+      action: 'update_file',
+      path: 'Notes/source.md',
+      kind: 'update',
+      appliedAt: 10,
+      status: 'undone',
+    }]);
+  });
+
   await test('clones approval previews inside messages', () => {
     const state = new ChatState('tab-1');
 
