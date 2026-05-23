@@ -2435,6 +2435,148 @@ textarea.shell-input {
     }
 }
 
+.modal:has(.ocli-diff-modal) {
+    width: min(760px, calc(100vw - 56px));
+    max-width: min(760px, calc(100vw - 56px));
+}
+
+.ocli-diff-modal {
+    width: min(720px, calc(100vw - 72px)) !important;
+    height: auto !important;
+    max-height: calc(100vh - 96px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: var(--ocli-radius-l);
+}
+
+.ocli-diff-modal-header {
+    flex: 0 0 auto;
+    padding: 14px 16px 10px;
+}
+
+.ocli-diff-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 16px 0;
+}
+
+.ocli-diff-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+    padding: 2px 8px;
+    border: 1px solid var(--ocli-border);
+    border-radius: var(--ocli-radius-s);
+    background: var(--ocli-surface-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.ocli-diff-stat-label {
+    color: var(--text-muted);
+}
+
+.ocli-diff-stat-value {
+    color: var(--text-normal);
+    font-variant-numeric: tabular-nums;
+}
+
+.diff-container.ocli-diff-unified {
+    flex: 0 1 auto;
+    max-height: min(30vh, 260px);
+    margin: 12px 16px 0;
+    padding: 8px 0;
+    overflow: auto;
+    border: 1px solid var(--ocli-border);
+    border-radius: var(--ocli-radius-m);
+    background: var(--background-primary);
+    font-family: var(--font-monospace);
+    font-size: var(--font-smaller);
+    line-height: 1.45;
+}
+
+.ocli-diff-panes {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px 16px 0;
+    min-height: 0;
+}
+
+.ocli-diff-pane-code {
+    min-height: 84px !important;
+    max-height: min(24vh, 190px) !important;
+}
+
+.ocli-diff-empty {
+    min-height: 48px;
+    padding: 12px;
+    color: var(--text-faint);
+    font-size: var(--font-ui-small);
+}
+
+.diff-actions {
+    flex: 0 0 auto;
+    margin-top: 0;
+    padding: 12px 16px 14px;
+}
+
+.diff-line {
+    padding: 2px 10px;
+    overflow-wrap: anywhere;
+}
+
+.diff-added {
+    background-color: color-mix(in srgb, var(--color-green) 12%, transparent);
+    color: var(--text-success);
+}
+
+.diff-removed {
+    background-color: color-mix(in srgb, var(--text-error) 13%, transparent);
+    color: var(--text-error);
+    text-decoration: none;
+    opacity: 1;
+}
+
+.diff-unchanged {
+    color: var(--text-muted);
+}
+
+.guardian-selection-tooltip {
+    z-index: 1000;
+    max-width: min(340px, calc(100vw - 64px));
+}
+
+.guardian-chat-view {
+    width: min(340px, calc(100vw - 64px));
+    height: auto;
+    max-height: min(380px, 56vh);
+}
+
+.guardian-message-list {
+    min-height: 54px;
+    max-height: min(170px, 24vh);
+}
+
+.guardian-chat-input {
+    min-height: 38px;
+    max-height: 82px;
+}
+
+@media (max-width: 700px) {
+    .modal:has(.ocli-diff-modal),
+    .ocli-diff-modal {
+        width: calc(100vw - 32px) !important;
+        max-width: calc(100vw - 32px);
+    }
+
+    .ocli-diff-panes {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* ==========================================================================
    Obsidian Shell - Settings
    ========================================================================== */
@@ -3410,55 +3552,31 @@ textarea.shell-input {
     }
 }
 
-.ocli-shell-view .shell-workspace-edits-host {
-    display: block;
-    padding: 0 8px 6px;
+.ocli-shell-view .shell-entry.system.shell-workspace-edit-entry {
+    align-self: flex-start;
+    max-width: min(100%, 560px);
+    margin: 1px 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-normal);
 }
 
-.ocli-shell-view .shell-workspace-edits-host.is-empty {
-    display: none;
-}
-
-.ocli-shell-view .shell-workspace-edits {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 8px;
-    min-height: 34px;
-    padding: 5px 6px;
-    border: 1px solid color-mix(in srgb, var(--interactive-accent) 22%, var(--ocli-border));
-    border-radius: var(--ocli-radius-s);
-    background: color-mix(in srgb, var(--interactive-accent) 8%, var(--ocli-surface-muted));
-}
-
-.ocli-shell-view .shell-workspace-edits-label {
-    color: var(--text-muted);
-    font-size: var(--font-ui-smaller);
-    white-space: nowrap;
-}
-
-.ocli-shell-view .shell-workspace-edits-list {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    min-width: 0;
-    overflow-x: auto;
-}
-
-.ocli-shell-view .shell-workspace-edits-list::-webkit-scrollbar {
-    display: none;
-}
-
-.ocli-shell-view .shell-workspace-edit-item {
+.ocli-shell-view .shell-workspace-edit-row {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 8px;
     min-width: 0;
-    max-width: 190px;
-    padding: 2px 3px 2px 7px;
-    border-radius: var(--ocli-radius-s);
-    background: var(--background-primary);
-    border: 1px solid var(--ocli-border);
+    max-width: 100%;
+    min-height: 28px;
+    padding: 2px 0;
+    font-size: var(--font-ui-smaller);
+}
+
+.ocli-shell-view .shell-workspace-edit-bullet {
+    flex: 0 0 auto;
+    color: var(--text-faint);
 }
 
 .ocli-shell-view .shell-workspace-edit-name {
@@ -3467,13 +3585,11 @@ textarea.shell-input {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-normal);
-    font-size: var(--font-ui-smaller);
 }
 
 .ocli-shell-view .shell-workspace-edit-meta {
     flex: 0 0 auto;
     color: var(--text-faint);
-    font-size: var(--font-ui-smaller);
     white-space: nowrap;
 }
 
@@ -3492,22 +3608,6 @@ textarea.shell-input {
     background: var(--background-modifier-hover);
 }
 
-.ocli-shell-view .shell-workspace-edit-undo-all {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 24px;
-    padding: 0 7px;
-    border-radius: var(--ocli-radius-s);
-    border: 1px solid var(--ocli-border);
-    background: var(--background-primary);
-    color: var(--text-muted);
-    font-size: var(--font-ui-smaller);
-    white-space: nowrap;
-}
-
-.ocli-shell-view .shell-workspace-edit-undo-all:hover,
-.ocli-shell-view .shell-workspace-edit-undo-all:focus-visible {
-    color: var(--text-normal);
-    background: var(--background-modifier-hover);
+.ocli-shell-view .shell-workspace-edit-entry.is-undone .shell-workspace-edit-name {
+    color: var(--text-faint);
 }

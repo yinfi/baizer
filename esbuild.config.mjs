@@ -1,6 +1,17 @@
 import esbuild from "esbuild";
 import process from "process";
 import builtins from "builtin-modules";
+import { copyFile, mkdir } from "fs/promises";
+
+const outputDir = "dist";
+
+async function copyStaticAssets() {
+	await mkdir(outputDir, { recursive: true });
+	await Promise.all([
+		copyFile("manifest.json", `${outputDir}/manifest.json`),
+		copyFile("styles.css", `${outputDir}/styles.css`),
+	]);
+}
 
 const banner =
 `/*
@@ -10,6 +21,8 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = (process.argv[2] === "production");
+
+await mkdir(outputDir, { recursive: true });
 
 const context = await esbuild.context({
 	banner: {
@@ -37,13 +50,15 @@ const context = await esbuild.context({
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
-	outfile: "main.js",
+	outfile: `${outputDir}/main.js`,
 	loader: { '.md': 'text' },
 });
 
 if (prod) {
 	await context.rebuild();
+	await copyStaticAssets();
 	process.exit(0);
 } else {
+	await copyStaticAssets();
 	await context.watch();
 }

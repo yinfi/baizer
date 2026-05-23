@@ -178,6 +178,49 @@ async function runTests() {
       },
     }]);
   });
+
+  await test('clones workspace edit metadata inside messages', () => {
+    const state = new ChatState('tab-1');
+
+    state.addMessage({
+      id: 'workspace-edit-edit-1',
+      role: 'system',
+      content: '',
+      timestamp: 4,
+      metadata: {
+        workspaceEdit: {
+          id: 'edit-1',
+          action: 'update_file',
+          path: 'Notes/source.md',
+          kind: 'update',
+          appliedAt: 4,
+          status: 'applied',
+          lineDelta: 2,
+        },
+      },
+    } as any);
+
+    const messages = state.getMessages();
+    messages[0].metadata.workspaceEdit.status = 'undone';
+
+    expect(state.getMessages()).toEqual([{
+      id: 'workspace-edit-edit-1',
+      role: 'system',
+      content: '',
+      timestamp: 4,
+      metadata: {
+        workspaceEdit: {
+          id: 'edit-1',
+          action: 'update_file',
+          path: 'Notes/source.md',
+          kind: 'update',
+          appliedAt: 4,
+          status: 'applied',
+          lineDelta: 2,
+        },
+      },
+    }]);
+  });
 }
 
 runTests().catch((e) => {

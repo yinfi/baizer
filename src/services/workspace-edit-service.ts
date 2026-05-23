@@ -110,6 +110,12 @@ export class WorkspaceEditService {
     if (record.summary.status === 'undone') {
       return { success: false, error: 'Workspace edit already undone' };
     }
+    if (!this.isLatestAppliedEditForPath(record)) {
+      return {
+        success: false,
+        error: `Undo the latest AI edit to ${record.summary.path} first.`,
+      };
+    }
 
     const file = this.app.vault.getAbstractFileByPath(record.summary.path);
     if (!file) {
@@ -150,6 +156,15 @@ export class WorkspaceEditService {
 
   listWorkspaceEdits(): WorkspaceEditSummary[] {
     return Array.from(this.records.values()).map(record => ({ ...record.summary }));
+  }
+
+  private isLatestAppliedEditForPath(record: WorkspaceEditRecord): boolean {
+    const newer = Array.from(this.records.values()).some(candidate =>
+      candidate.summary.status === 'applied'
+      && candidate.summary.path === record.summary.path
+      && candidate.summary.appliedAt > record.summary.appliedAt
+    );
+    return !newer;
   }
 
   private async readOptionalFile(path: string): Promise<{ exists: boolean; content: string }> {

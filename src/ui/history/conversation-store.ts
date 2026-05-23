@@ -143,7 +143,14 @@ export class ConversationStore {
                         preview: cloneChangePreview(message.approval.preview),
                     }
                     : undefined,
-                metadata: message.metadata ? { ...message.metadata } : undefined,
+                metadata: message.metadata
+                    ? {
+                        ...message.metadata,
+                        workspaceEdit: message.metadata.workspaceEdit
+                            ? { ...message.metadata.workspaceEdit }
+                            : undefined,
+                    }
+                    : undefined,
             })),
         };
     }

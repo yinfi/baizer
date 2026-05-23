@@ -88,9 +88,9 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
         if (state.type === 'hidden') return null;
 
         return {
-            pos: state.from,
-            above: true,
-            strictSide: true,
+            pos: state.to,
+            above: false,
+            strictSide: false,
             create: (view: EditorView) => createSelectionTooltip(view, state),
         };
     }),
@@ -311,6 +311,10 @@ function applySelectionReplacement(
     const preview = state.controller.buildSelectionRewritePreview(selectionText);
     if (!preview) {
         new Notice('No AI response to replace with.');
+        return;
+    }
+    if (!preview.newContent || preview.newContent.length === 0) {
+        new Notice('No proposed replacement is available yet.');
         return;
     }
 
