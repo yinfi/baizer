@@ -68,7 +68,15 @@ export class DefaultChatRuntime implements ChatRuntime {
     let memoryContext = '';
     if (this.deps.memoryManager) {
       await this.deps.memoryManager.ready();
-      memoryContext = this.deps.memoryManager.buildContext();
+      if (typeof (this.deps.memoryManager as any).recallForPrompt === 'function') {
+        memoryContext = await (this.deps.memoryManager as any).recallForPrompt({
+          query: request.userMessage,
+          source: request.source,
+          maxChars: 2500,
+        });
+      } else {
+        memoryContext = this.deps.memoryManager.buildContext();
+      }
     }
 
     const activeSkill = this.resolveRequestedSkill(request);
@@ -119,6 +127,8 @@ export class DefaultChatRuntime implements ChatRuntime {
     return {
       prompt,
       tools: this.buildSkillModeTools(activeSkill),
+      userRequest: request.userMessage,
+      memoryContext,
       activeSkillName: activeSkill?.skill.name,
       allowedToolNames: activeSkill?.tools.map(tool => tool.name),
       requiresFileWrite: isFileWriteRequest(request.userMessage),
@@ -130,9 +140,7 @@ export class DefaultChatRuntime implements ChatRuntime {
   }
 
   async query(turn: PreparedChatTurn): Promise<string> {
-    const chat = this.deps.memoryManager
-      ? this.deps.memoryManager.getOrCreateSession(turn.tools)
-      : this.deps.provider.startChat(turn.tools);
+    const chat = this.deps.provider.startChat(turn.tools);
 
     let result = await chat.sendMessage(turn.prompt);
     let loopCount = 0;
@@ -150,11 +158,7 @@ export class DefaultChatRuntime implements ChatRuntime {
         this.recordFileWriteResult(fileWriteState, call.name, response);
         if (this.isApprovalResponse(response)) {
           const approvalMessage = response.message || this.formatApprovalMessage(response);
-          if (this.deps.memoryManager) {
-            const userRequest = this.extractUserRequest(turn.prompt);
-            await this.deps.memoryManager.recordMessage('user', userRequest);
-            await this.deps.memoryManager.recordMessage('model', approvalMessage);
-          }
+          await this.retainCompletedTurn(turn, approvalMessage);
           return approvalMessage;
         }
 
@@ -171,19 +175,13 @@ export class DefaultChatRuntime implements ChatRuntime {
     const finalText = this.resolveFinalText(turn, fileWriteState, result.text);
     const qualityCheckedText = this.applyGenerationQuality(turn, finalText);
 
-    if (this.deps.memoryManager) {
-      const userRequest = this.extractUserRequest(turn.prompt);
-      await this.deps.memoryManager.recordMessage('user', userRequest);
-      await this.deps.memoryManager.recordMessage('model', qualityCheckedText);
-    }
+    await this.retainCompletedTurn(turn, qualityCheckedText);
 
     return qualityCheckedText;
   }
 
   async *queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
-    const chat = this.deps.memoryManager
-      ? this.deps.memoryManager.getOrCreateSession(turn.tools)
-      : this.deps.provider.startChat(turn.tools);
+    const chat = this.deps.provider.startChat(turn.tools);
 
     let loopCount = 0;
     const maxLoops = 10;
@@ -242,11 +240,7 @@ export class DefaultChatRuntime implements ChatRuntime {
       fullResponseText = this.applyGenerationQuality(turn, fullResponseText);
     }
 
-    if (this.deps.memoryManager) {
-      const userRequest = this.extractUserRequest(turn.prompt);
-      await this.deps.memoryManager.recordMessage('user', userRequest);
-      await this.deps.memoryManager.recordMessage('model', approvalMessage || fullResponseText);
-    }
+    await this.retainCompletedTurn(turn, approvalMessage || fullResponseText);
 
     yield { type: 'done' as const, text: fullResponseText };
   }
@@ -485,6 +479,24 @@ If no listed command fits, suggest a plain-language request instead.
     const marker = 'User Request: ';
     const index = prompt.lastIndexOf(marker);
     return index >= 0 ? prompt.slice(index + marker.length) : prompt;
+  }
+
+  private async retainCompletedTurn(turn: PreparedChatTurn, assistantMessage: string): Promise<void> {
+    if (!this.deps.memoryManager) return;
+
+    const memoryManager = this.deps.memoryManager as any;
+    const userRequest = turn.userRequest || this.extractUserRequest(turn.prompt);
+    if (typeof memoryManager.retainTurn === 'function') {
+      await memoryManager.retainTurn({
+        userMessage: userRequest,
+        assistantMessage,
+        source: turn.generationPlan?.source || 'shell',
+      });
+      return;
+    }
+
+    await this.deps.memoryManager.recordMessage('user', userRequest);
+    await this.deps.memoryManager.recordMessage('model', assistantMessage);
   }
 
   private throwIfAborted(signal?: AbortSignal): void {
