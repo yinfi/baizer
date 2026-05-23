@@ -25,6 +25,16 @@ This split keeps provider-specific execution details out of UI controllers and m
    - `SkillRegistry.activateSkill(...)` for `use_skill`
 6. Results are recorded back into memory when enabled.
 
+## Memory Flow
+
+The runtime uses `MemoryManager` as a local Hindsight-lite facade.
+
+1. `prepareTurn(...)` calls query-aware memory recall with the current user request.
+2. Relevant memory records are formatted into `[Relevant Memory]`.
+3. The provider chat session is scoped to the current turn and tool set.
+4. After the turn completes, the runtime retains the user request and assistant outcome as structured memories.
+5. Every few retained turns, the memory layer consolidates raw records into observations with evidence IDs.
+
 ## Why This Boundary Exists
 
 - Keeps `ModelService` from becoming a God object

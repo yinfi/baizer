@@ -87,8 +87,14 @@ export class ModelService {
         });
 
         if (this.hasValidConfig()) {
-            this.memoryManager = new MemoryManager(this.app, this.provider);
+            this.memoryManager = new MemoryManager(this.app, this.provider, this.buildMemoryOptions());
         }
+    }
+
+    private buildMemoryOptions() {
+        return {
+            privacyMode: this.settings.privacyMode === true,
+        };
     }
 
     private hasValidConfig(): boolean {
@@ -379,6 +385,12 @@ export class ModelService {
     async updateProfile(updates: Partial<UserProfile>) {
         if (this.memoryManager) {
             await this.memoryManager.updateProfile(updates);
+        }
+    }
+
+    async forgetMemory(field: string) {
+        if (this.memoryManager) {
+            await this.memoryManager.forgetMemory(field);
         }
     }
 

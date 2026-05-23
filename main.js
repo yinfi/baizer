@@ -2267,12 +2267,358 @@ function budgetContextItems(items, options = {}) {
   return selected;
 }
 
+// src/memory/hindsight-types.ts
+var DEFAULT_MEMORY_BANK_ID = "default";
+function normalizeMemoryText(value) {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+function tokenizeMemoryText(value) {
+  return normalizeMemoryText(value).split(/[^a-z0-9\u4e00-\u9fff_.:/-]+/i).filter((token) => token.length >= 2);
+}
+function createMemoryId(input) {
+  const raw = `${input.bankId}|${input.type}|${input.sourceKind}|${normalizeMemoryText(input.text)}`;
+  let hash = 5381;
+  for (let index = 0; index < raw.length; index += 1) {
+    hash = (hash << 5) + hash + raw.charCodeAt(index);
+    hash |= 0;
+  }
+  return `mem_${Math.abs(hash).toString(36)}`;
+}
+function createDefaultMemoryBank(now = Date.now()) {
+  return {
+    id: DEFAULT_MEMORY_BANK_ID,
+    name: "Default Vault Memory",
+    mission: "Help Obsidian CLI personalize answers and remember durable user preferences, projects, decisions, and prior work.",
+    directives: [
+      "Prefer facts grounded in user messages or approved operations.",
+      "Do not store secrets, API keys, tokens, passwords, or long private note excerpts.",
+      "Prefer concise, reusable memories over raw transcript dumps."
+    ],
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+// src/memory/hindsight-consolidator.ts
+var HindsightConsolidator = class {
+  constructor(store) {
+    this.store = store;
+  }
+  async consolidate(options = {}) {
+    const bankId = options.bankId || DEFAULT_MEMORY_BANK_ID;
+    const now = options.now ?? Date.now();
+    const maxEvidence = options.maxEvidence ?? 8;
+    const memories = (await this.store.listMemories(bankId)).filter((memory) => memory.type !== "observation").sort((a, b) => b.mentionedAt - a.mentionedAt).slice(0, maxEvidence);
+    if (memories.length < 2)
+      return [];
+    const preference = memories.find((memory) => /prefer|preference|偏好|喜欢|local-first/i.test(memory.text));
+    const project = memories.find((memory) => /project|goal|plan|memory|项目|目标|计划/i.test(memory.text));
+    if (!preference && !project)
+      return [];
+    const evidenceIds = memories.map((memory) => memory.id);
+    const text = this.buildObservationText(preference, project);
+    const observation = {
+      id: createMemoryId({ bankId, type: "observation", text, sourceKind: "manual" }),
+      bankId,
+      type: "observation",
+      text,
+      normalizedText: normalizeMemoryText(text),
+      entities: [...new Set(memories.flatMap((memory) => memory.entities))].slice(0, 8),
+      tags: ["observation"],
+      source: { kind: "manual" },
+      confidence: 0.75,
+      createdAt: now,
+      updatedAt: now,
+      mentionedAt: now,
+      accessCount: 0,
+      evidenceIds
+    };
+    await this.store.upsertMemory(observation);
+    return [observation];
+  }
+  buildObservationText(preference, project) {
+    if (preference && project) {
+      return `${preference.text} This matters in current work: ${project.text}`;
+    }
+    if (preference)
+      return preference.text;
+    return project?.text || "User has recurring memory-related work patterns.";
+  }
+};
+
+// src/memory/hindsight-migration.ts
+var MEMORY_DIR2 = ".obsidian/obsidian-cli-memory";
+var PROFILE_PATH = `${MEMORY_DIR2}/user-profile.json`;
+var SUMMARIES_PATH = `${MEMORY_DIR2}/session-summaries.json`;
+async function migrateLegacyMemory(app, store, now = Date.now()) {
+  await store.ready();
+  const state = await store.getMigrationState();
+  const records = [];
+  const stateUpdate = {};
+  if (!state.legacyProfileMigrated) {
+    const profile = await readJson(app, PROFILE_PATH, null);
+    if (profile)
+      records.push(...profileToMemories(profile, now));
+    stateUpdate.legacyProfileMigrated = true;
+  }
+  if (!state.legacySummariesMigrated) {
+    const summaries = await readJson(app, SUMMARIES_PATH, []);
+    records.push(...summariesToMemories(summaries, now));
+    stateUpdate.legacySummariesMigrated = true;
+  }
+  if (records.length > 0) {
+    await store.upsertMemories(records);
+  }
+  if (Object.keys(stateUpdate).length > 0) {
+    await store.updateMigrationState(stateUpdate);
+  }
+}
+function profileToMemories(profile, now) {
+  const texts = [];
+  if (profile.profession)
+    texts.push(`User profession: ${profile.profession}`);
+  for (const expertise of arrayOf(profile.expertise))
+    texts.push(`User expertise: ${expertise}`);
+  if (profile.preferences?.responseStyle)
+    texts.push(`User response style preference: ${profile.preferences.responseStyle}`);
+  for (const project of arrayOf(profile.context?.currentProjects))
+    texts.push(`Current project: ${project}`);
+  for (const goal of arrayOf(profile.context?.goals))
+    texts.push(`User goal: ${goal}`);
+  return texts.map((text) => makeMemory(text, "world", "profile-migration", now, 0.8));
+}
+function summariesToMemories(summaries, now) {
+  return summaries.filter((summary) => typeof summary?.summary === "string" && summary.summary.trim()).map((summary) => makeMemory(
+    `Previous session: ${summary.summary.trim()}`,
+    "experience",
+    "summary-migration",
+    typeof summary.timestamp === "number" ? summary.timestamp : now,
+    0.65
+  ));
+}
+function makeMemory(text, type, sourceKind, timestamp2, confidence) {
+  return {
+    id: createMemoryId({ bankId: DEFAULT_MEMORY_BANK_ID, type, text, sourceKind }),
+    bankId: DEFAULT_MEMORY_BANK_ID,
+    type,
+    text,
+    normalizedText: normalizeMemoryText(text),
+    entities: extractSimpleEntities(text),
+    tags: [sourceKind],
+    source: { kind: sourceKind },
+    confidence,
+    createdAt: timestamp2,
+    updatedAt: timestamp2,
+    mentionedAt: timestamp2,
+    accessCount: 0
+  };
+}
+function arrayOf(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim().length > 0) : [];
+}
+function extractSimpleEntities(text) {
+  return text.split(/[,;，；]/).map((part) => part.replace(/^[^:]+:\s*/, "").trim()).filter((part) => part.length >= 2).slice(0, 5);
+}
+async function readJson(app, path, fallback) {
+  try {
+    const adapter = app.vault.adapter;
+    if (!await adapter.exists(path))
+      return fallback;
+    return JSON.parse(await adapter.read(path));
+  } catch {
+    return fallback;
+  }
+}
+
+// src/memory/hindsight-retriever.ts
+var TYPE_WEIGHT = {
+  observation: 1.25,
+  world: 1.1,
+  experience: 1
+};
+var HindsightRetriever = class {
+  constructor(store) {
+    this.store = store;
+  }
+  async recall(request) {
+    const bankId = request.bankId || DEFAULT_MEMORY_BANK_ID;
+    const now = request.now ?? Date.now();
+    const maxRecords = request.maxRecords ?? 6;
+    const maxChars = request.maxChars ?? 2500;
+    const includeTypes = new Set(request.includeTypes || ["observation", "world", "experience"]);
+    const queryTokens = new Set(tokenizeMemoryText(request.query));
+    const records = (await this.store.listMemories(bankId)).filter((record) => includeTypes.has(record.type));
+    const ranked = records.map((record) => ({ record, score: this.score(record, queryTokens, now) })).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score).map((entry) => entry.record);
+    const selected = this.applyBudget(ranked, maxRecords, maxChars);
+    return {
+      records: selected,
+      promptBlock: this.formatPromptBlock(selected, maxChars)
+    };
+  }
+  score(record, queryTokens, now) {
+    const memoryTokens = new Set(tokenizeMemoryText(record.text));
+    const entityTokens = new Set(record.entities.flatMap((entity) => tokenizeMemoryText(entity)));
+    let score = 0;
+    for (const token of queryTokens) {
+      if (memoryTokens.has(token))
+        score += 2;
+      if (entityTokens.has(token))
+        score += 3;
+      if (record.tags.some((tag) => tag.toLowerCase().includes(token)))
+        score += 1.5;
+    }
+    if (queryTokens.size === 0 && record.type !== "experience")
+      score += 0.5;
+    if (score === 0)
+      return 0;
+    const ageMs = Math.max(0, now - record.mentionedAt);
+    const recency = 1 / (1 + ageMs / (1e3 * 60 * 60 * 24 * 14));
+    const access = Math.min(record.accessCount, 10) * 0.05;
+    return score * TYPE_WEIGHT[record.type] + recency + access + record.confidence;
+  }
+  applyBudget(records, maxRecords, maxChars) {
+    const selected = [];
+    let used = "[Relevant Memory]\n".length;
+    for (const record of records) {
+      if (selected.length >= maxRecords)
+        break;
+      const line = this.formatLine(record);
+      if (selected.length > 0 && used + line.length > maxChars)
+        continue;
+      if (selected.length === 0 && used + line.length > maxChars) {
+        selected.push(record);
+        break;
+      }
+      selected.push(record);
+      used += line.length;
+      if (used >= maxChars)
+        break;
+    }
+    return selected;
+  }
+  formatPromptBlock(records, maxChars) {
+    if (records.length === 0)
+      return "";
+    const text = `[Relevant Memory]
+${records.map((record) => this.formatLine(record)).join("")}`;
+    return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 3))}...`;
+  }
+  formatLine(record) {
+    return `- ${record.type}: ${record.text} (confidence: ${record.confidence.toFixed(2)})
+`;
+  }
+};
+
+// src/memory/hindsight-store.ts
+var MEMORY_DIR3 = ".obsidian/obsidian-cli-memory";
+var BANKS_PATH = `${MEMORY_DIR3}/banks.json`;
+var MEMORIES_PATH = `${MEMORY_DIR3}/memories.json`;
+var MIGRATION_STATE_PATH = `${MEMORY_DIR3}/migration-state.json`;
+var HindsightStore = class {
+  constructor(app) {
+    this.app = app;
+    this.initPromise = this.initialize();
+  }
+  banks = [];
+  memories = [];
+  migrationState = {};
+  initPromise;
+  async ready() {
+    await this.initPromise;
+  }
+  async listBanks() {
+    await this.ready();
+    return this.banks.map((bank) => ({
+      ...bank,
+      directives: [...bank.directives]
+    }));
+  }
+  async listMemories(bankId = DEFAULT_MEMORY_BANK_ID) {
+    await this.ready();
+    return this.memories.filter((memory) => memory.bankId === bankId).map((memory) => this.cloneMemory(memory));
+  }
+  async upsertMemory(memory) {
+    await this.upsertMemories([memory]);
+  }
+  async upsertMemories(memories) {
+    await this.ready();
+    for (const memory of memories) {
+      const index = this.memories.findIndex((item) => item.id === memory.id);
+      const next = this.cloneMemory(memory);
+      if (index >= 0) {
+        this.memories[index] = next;
+      } else {
+        this.memories.push(next);
+      }
+    }
+    await this.writeMemories();
+  }
+  async getMigrationState() {
+    await this.ready();
+    return { ...this.migrationState };
+  }
+  async updateMigrationState(update) {
+    await this.ready();
+    this.migrationState = { ...this.migrationState, ...update };
+    await this.ensureMemoryDir();
+    await this.adapter().write(MIGRATION_STATE_PATH, JSON.stringify(this.migrationState, null, 2));
+  }
+  async initialize() {
+    await this.ensureMemoryDir();
+    this.banks = await this.readJson(BANKS_PATH, []);
+    this.memories = await this.readJson(MEMORIES_PATH, []);
+    this.migrationState = await this.readJson(MIGRATION_STATE_PATH, {});
+    if (!this.banks.some((bank) => bank.id === DEFAULT_MEMORY_BANK_ID)) {
+      this.banks.push(createDefaultMemoryBank());
+      await this.adapter().write(BANKS_PATH, JSON.stringify(this.banks, null, 2));
+    }
+  }
+  async writeMemories() {
+    await this.ensureMemoryDir();
+    const sorted = [...this.memories].sort((a, b) => b.mentionedAt - a.mentionedAt);
+    this.memories = sorted;
+    await this.adapter().write(MEMORIES_PATH, JSON.stringify(sorted, null, 2));
+  }
+  async readJson(path, fallback) {
+    try {
+      if (!await this.adapter().exists(path))
+        return fallback;
+      const raw = await this.adapter().read(path);
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  }
+  async ensureMemoryDir() {
+    if (!await this.adapter().exists(MEMORY_DIR3)) {
+      await this.adapter().mkdir(MEMORY_DIR3);
+    }
+  }
+  adapter() {
+    return this.app.vault.adapter;
+  }
+  cloneMemory(memory) {
+    return {
+      ...memory,
+      entities: [...memory.entities],
+      tags: [...memory.tags],
+      source: { ...memory.source },
+      supersedes: memory.supersedes ? [...memory.supersedes] : void 0,
+      evidenceIds: memory.evidenceIds ? [...memory.evidenceIds] : void 0
+    };
+  }
+};
+
 // src/memory/memory-manager.ts
 var MemoryManager = class {
-  constructor(app, model) {
+  constructor(app, model, options = {}) {
     this.app = app;
     this.model = model;
+    this.options = options;
     this.userProfile = { ...DEFAULT_USER_PROFILE };
+    this.hindsightStore = new HindsightStore(app);
+    this.hindsightRetriever = new HindsightRetriever(this.hindsightStore);
+    this.hindsightConsolidator = new HindsightConsolidator(this.hindsightStore);
     this.initPromise = this.initialize();
   }
   chatSession = null;
@@ -2283,6 +2629,10 @@ var MemoryManager = class {
   currentSessionMessages = 0;
   lastProfileUpdateTime = 0;
   initPromise;
+  hindsightStore;
+  hindsightRetriever;
+  hindsightConsolidator;
+  retainedUserTurns = 0;
   MAX_MEMORY_CHAT_HISTORY = 100;
   MEMORY_DIR = MEMORY_DIR;
   PROFILE_FILE = "user-profile.json";
@@ -2294,6 +2644,8 @@ var MemoryManager = class {
     await this.loadProfile();
     await this.loadSummaries();
     await this.loadChatHistory();
+    await this.hindsightStore.ready();
+    await migrateLegacyMemory(this.app, this.hindsightStore);
   }
   async ready() {
     await this.initPromise;
@@ -2324,6 +2676,32 @@ ${profileContext}
 [Recent Context]
 ${summaryContext}`;
   }
+  async recallForPrompt(input) {
+    await this.ready();
+    const includeTypes = input.source === "guardian" ? ["observation", "world"] : ["observation", "world", "experience"];
+    const result = await this.hindsightRetriever.recall({
+      query: input.query,
+      source: input.source,
+      maxChars: input.maxChars ?? 2500,
+      includeTypes: [...includeTypes],
+      now: input.now
+    });
+    return result.promptBlock;
+  }
+  async retainTurn(input) {
+    await this.ready();
+    if (this.options.privacyMode)
+      return;
+    const now = input.now ?? Date.now();
+    const records = this.buildTurnMemories(input, now);
+    if (records.length === 0)
+      return;
+    await this.hindsightStore.upsertMemories(records);
+    this.retainedUserTurns += 1;
+    if (this.retainedUserTurns % 5 === 0) {
+      await this.hindsightConsolidator.consolidate({ now });
+    }
+  }
   formatProfileForContext() {
     const p = this.userProfile;
     const parts = [];
@@ -2352,6 +2730,76 @@ ${summaryContext}`;
     return recent.map(
       (s, i) => `Session ${i + 1}: ${s.summary}`
     ).join("\n");
+  }
+  buildTurnMemories(input, now) {
+    const records = [];
+    const userText = input.userMessage.trim();
+    if (userText) {
+      records.push(this.createMemoryRecord({
+        type: this.looksDurable(userText) ? "world" : "experience",
+        text: this.memoryTextForUserMessage(userText),
+        sourceKind: "chat",
+        tags: this.tagsForText(userText),
+        now
+      }));
+    }
+    const assistantText = input.assistantMessage.trim();
+    if (assistantText) {
+      records.push(this.createMemoryRecord({
+        type: "experience",
+        text: `Assistant outcome: ${assistantText.slice(0, 400)}`,
+        sourceKind: "chat",
+        tags: ["assistant-outcome"],
+        now,
+        confidence: 0.55
+      }));
+    }
+    return records;
+  }
+  createMemoryRecord(input) {
+    return {
+      id: createMemoryId({
+        bankId: DEFAULT_MEMORY_BANK_ID,
+        type: input.type,
+        text: input.text,
+        sourceKind: input.sourceKind
+      }),
+      bankId: DEFAULT_MEMORY_BANK_ID,
+      type: input.type,
+      text: input.text,
+      normalizedText: normalizeMemoryText(input.text),
+      entities: this.extractEntities(input.text),
+      tags: input.tags,
+      source: { kind: input.sourceKind },
+      confidence: input.confidence ?? (input.type === "world" ? 0.75 : 0.6),
+      createdAt: input.now,
+      updatedAt: input.now,
+      mentionedAt: input.now,
+      accessCount: 0
+    };
+  }
+  looksDurable(text) {
+    return /\bI prefer\b|\bmy project\b|\bmy goal\b|\bremember\b|偏好|喜欢|目标|项目|我是|我正在/i.test(text);
+  }
+  memoryTextForUserMessage(text) {
+    return this.looksDurable(text) ? `User stated: ${text}` : `User asked: ${text}`;
+  }
+  tagsForText(text) {
+    const tags = [];
+    if (/prefer|偏好|喜欢/i.test(text))
+      tags.push("preference");
+    if (/project|项目/i.test(text))
+      tags.push("project");
+    if (/goal|目标/i.test(text))
+      tags.push("goal");
+    if (tags.length === 0)
+      tags.push("chat");
+    return tags;
+  }
+  extractEntities(text) {
+    const matches = text.match(/[A-Z][A-Za-z0-9_.-]*(?:\s+[A-Z][A-Za-z0-9_.-]*)*/g) || [];
+    const dotted = text.match(/[a-z0-9_.-]+\/[a-z0-9_.-]+|[a-z0-9_.-]+\.[a-z0-9_.-]+/gi) || [];
+    return [.../* @__PURE__ */ new Set([...matches, ...dotted])].map((entity) => entity.trim()).filter((entity) => entity.length >= 2).slice(0, 8);
   }
   async recordMessage(role, content) {
     await this.ready();
@@ -4724,7 +5172,15 @@ var DefaultChatRuntime = class {
     let memoryContext = "";
     if (this.deps.memoryManager) {
       await this.deps.memoryManager.ready();
-      memoryContext = this.deps.memoryManager.buildContext();
+      if (typeof this.deps.memoryManager.recallForPrompt === "function") {
+        memoryContext = await this.deps.memoryManager.recallForPrompt({
+          query: request.userMessage,
+          source: request.source,
+          maxChars: 2500
+        });
+      } else {
+        memoryContext = this.deps.memoryManager.buildContext();
+      }
     }
     const activeSkill = this.resolveRequestedSkill(request);
     const obsidianContext = request.source ? this.createFallbackObsidianContext(request) : void 0;
@@ -4779,6 +5235,8 @@ ${activeSkill.instructions}
     return {
       prompt,
       tools: this.buildSkillModeTools(activeSkill),
+      userRequest: request.userMessage,
+      memoryContext,
       activeSkillName: activeSkill?.skill.name,
       allowedToolNames: activeSkill?.tools.map((tool) => tool.name),
       requiresFileWrite: isFileWriteRequest(request.userMessage),
@@ -4789,7 +5247,7 @@ ${activeSkill.instructions}
     };
   }
   async query(turn) {
-    const chat = this.deps.memoryManager ? this.deps.memoryManager.getOrCreateSession(turn.tools) : this.deps.provider.startChat(turn.tools);
+    const chat = this.deps.provider.startChat(turn.tools);
     let result = await chat.sendMessage(turn.prompt);
     let loopCount = 0;
     const maxLoops = 10;
@@ -4805,11 +5263,7 @@ ${activeSkill.instructions}
         this.recordFileWriteResult(fileWriteState, call.name, response);
         if (this.isApprovalResponse(response)) {
           const approvalMessage = response.message || this.formatApprovalMessage(response);
-          if (this.deps.memoryManager) {
-            const userRequest = this.extractUserRequest(turn.prompt);
-            await this.deps.memoryManager.recordMessage("user", userRequest);
-            await this.deps.memoryManager.recordMessage("model", approvalMessage);
-          }
+          await this.retainCompletedTurn(turn, approvalMessage);
           return approvalMessage;
         }
         toolResults.push({
@@ -4822,15 +5276,11 @@ ${activeSkill.instructions}
     }
     const finalText = this.resolveFinalText(turn, fileWriteState, result.text);
     const qualityCheckedText = this.applyGenerationQuality(turn, finalText);
-    if (this.deps.memoryManager) {
-      const userRequest = this.extractUserRequest(turn.prompt);
-      await this.deps.memoryManager.recordMessage("user", userRequest);
-      await this.deps.memoryManager.recordMessage("model", qualityCheckedText);
-    }
+    await this.retainCompletedTurn(turn, qualityCheckedText);
     return qualityCheckedText;
   }
   async *queryStream(turn, signal) {
-    const chat = this.deps.memoryManager ? this.deps.memoryManager.getOrCreateSession(turn.tools) : this.deps.provider.startChat(turn.tools);
+    const chat = this.deps.provider.startChat(turn.tools);
     let loopCount = 0;
     const maxLoops = 10;
     let input = turn.prompt;
@@ -4880,11 +5330,7 @@ ${activeSkill.instructions}
       fullResponseText = this.resolveFinalText(turn, fileWriteState, fullResponseText);
       fullResponseText = this.applyGenerationQuality(turn, fullResponseText);
     }
-    if (this.deps.memoryManager) {
-      const userRequest = this.extractUserRequest(turn.prompt);
-      await this.deps.memoryManager.recordMessage("user", userRequest);
-      await this.deps.memoryManager.recordMessage("model", approvalMessage || fullResponseText);
-    }
+    await this.retainCompletedTurn(turn, approvalMessage || fullResponseText);
     yield { type: "done", text: fullResponseText };
   }
   isApprovalResponse(result) {
@@ -5077,6 +5523,22 @@ ${skillSummary}` : "Get detailed instructions for a specific workflow.";
     const marker = "User Request: ";
     const index = prompt.lastIndexOf(marker);
     return index >= 0 ? prompt.slice(index + marker.length) : prompt;
+  }
+  async retainCompletedTurn(turn, assistantMessage) {
+    if (!this.deps.memoryManager)
+      return;
+    const memoryManager = this.deps.memoryManager;
+    const userRequest = turn.userRequest || this.extractUserRequest(turn.prompt);
+    if (typeof memoryManager.retainTurn === "function") {
+      await memoryManager.retainTurn({
+        userMessage: userRequest,
+        assistantMessage,
+        source: turn.generationPlan?.source || "shell"
+      });
+      return;
+    }
+    await this.deps.memoryManager.recordMessage("user", userRequest);
+    await this.deps.memoryManager.recordMessage("model", assistantMessage);
   }
   throwIfAborted(signal) {
     if (signal?.aborted) {
@@ -6090,8 +6552,13 @@ var ModelService = class {
       contextWindow: this.settings.contextWindow
     });
     if (this.hasValidConfig()) {
-      this.memoryManager = new MemoryManager(this.app, this.provider);
+      this.memoryManager = new MemoryManager(this.app, this.provider, this.buildMemoryOptions());
     }
+  }
+  buildMemoryOptions() {
+    return {
+      privacyMode: this.settings.privacyMode === true
+    };
   }
   hasValidConfig() {
     const config = this.getActiveProviderConfig();
@@ -13158,8 +13625,21 @@ var WikiIndexer = class {
     const existing = this.app.vault.getAbstractFileByPath(basePath);
     if (existing && existing instanceof import_obsidian20.TFile) {
       await this.app.vault.modify(existing, content);
-    } else {
+      return;
+    }
+    const adapter = this.app.vault.adapter;
+    if (await adapter.exists(basePath)) {
+      await adapter.write(basePath, content);
+      return;
+    }
+    try {
       await this.app.vault.create(basePath, content);
+    } catch (e) {
+      if (String(e?.message ?? e).includes("File already exists")) {
+        await adapter.write(basePath, content);
+        return;
+      }
+      throw e;
     }
   }
   async ensureFolder(path) {

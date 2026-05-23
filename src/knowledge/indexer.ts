@@ -119,8 +119,23 @@ export class WikiIndexer {
     const existing = this.app.vault.getAbstractFileByPath(basePath);
     if (existing && existing instanceof TFile) {
       await this.app.vault.modify(existing, content);
-    } else {
+      return;
+    }
+
+    const adapter = this.app.vault.adapter;
+    if (await adapter.exists(basePath)) {
+      await adapter.write(basePath, content);
+      return;
+    }
+
+    try {
       await this.app.vault.create(basePath, content);
+    } catch (e: any) {
+      if (String(e?.message ?? e).includes('File already exists')) {
+        await adapter.write(basePath, content);
+        return;
+      }
+      throw e;
     }
   }
 
