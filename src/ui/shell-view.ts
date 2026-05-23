@@ -20,6 +20,7 @@ import { ThinkingRenderer } from './renderers/thinking-renderer';
 import { ToolRenderer } from './renderers/tool-renderer';
 import { MessageRenderer } from './renderers/message-renderer';
 import { ConversationSnapshot, ChatMessage } from './types';
+import { WorkspaceEditSummary } from '../services/workspace-edit-service';
 import { TabBar } from './tabs/tab-bar';
 import { TabManager } from './tabs/tab-manager';
 import { TabData, TabId } from './tabs/types';
@@ -60,6 +61,7 @@ export class ShellView extends ItemView {
     private historyMenuContainerEl: HTMLElement | null = null;
     private knowledgeStatusPanel: KnowledgeStatusPanel | null = null;
     private knowledgeStatusContainerEl: HTMLElement | null = null;
+    private workspaceEditContainerEl: HTMLElement | null = null;
     private excludedCurrentNotePath: string | null = null;
 
     // Heartbeat monitoring
@@ -249,6 +251,7 @@ export class ShellView extends ItemView {
 
         // 3. Input Area (Fixed at bottom)
         const inputContainer = this.createShellScaffold(container);
+        this.renderWorkspaceEditBar();
         void this.refreshKnowledgeStatusPanel();
         this.registerEvent(
             this.app.workspace.on('file-open', () => {
@@ -949,6 +952,7 @@ export class ShellView extends ItemView {
             onOpenKnowledgeSettings: () => this.openPluginSettings(),
         });
         this.renderContextChips(contextContainer);
+        this.workspaceEditContainerEl = inputContainer.createDiv({ cls: 'shell-workspace-edits-host' });
 
         return inputContainer;
     }
@@ -1379,6 +1383,7 @@ export class ShellView extends ItemView {
         this.applyTabMetadata(tab);
         this.resetStreamState();
         this.renderActiveTabMessages();
+        this.renderWorkspaceEditBar();
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
@@ -1399,6 +1404,7 @@ export class ShellView extends ItemView {
         }
         this.resetStreamState();
         this.renderActiveTabMessages();
+        this.renderWorkspaceEditBar();
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
@@ -1421,6 +1427,7 @@ export class ShellView extends ItemView {
                 await this.syncProviderStateForTab(activeTab);
                 this.resetStreamState();
                 this.renderActiveTabMessages();
+                this.renderWorkspaceEditBar();
             }
         }
     }
@@ -1462,6 +1469,9 @@ export class ShellView extends ItemView {
             onMessageAdded: (msg) => this.handleTabMessageAdded(id, msg),
             onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
             onStreamEvent: (event) => this.handleTabStreamEvent(id, event),
+            onWorkspaceEdit: (edit) => this.handleTabWorkspaceEdit(id, edit),
+            onWorkspaceEditUndone: (edit) => this.handleTabWorkspaceEditUndone(id, edit),
+            onWorkspaceEditUndoFailed: (message) => this.handleWorkspaceEditUndoFailed(id, message),
         });
 
         const session = { chatController, contextManager, contextController };
@@ -1508,6 +1518,94 @@ export class ShellView extends ItemView {
         } else {
             this.tabManager.markAttention(tabId, true);
         }
+    }
+
+    private handleTabWorkspaceEdit(tabId: TabId, edit: WorkspaceEditSummary) {
+        const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
+        tab?.state.upsertWorkspaceEdit(edit);
+
+        if (this.tabManager.getActiveTab()?.id === tabId) {
+            this.renderWorkspaceEditBar();
+        } else {
+            this.tabManager.markAttention(tabId, true);
+        }
+    }
+
+    private handleTabWorkspaceEditUndone(tabId: TabId, edit: WorkspaceEditSummary) {
+        const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
+        tab?.state.upsertWorkspaceEdit(edit);
+
+        if (this.tabManager.getActiveTab()?.id === tabId) {
+            this.renderWorkspaceEditBar();
+        }
+        new Notice(`Reverted ${this.basename(edit.path)}.`);
+    }
+
+    private handleWorkspaceEditUndoFailed(tabId: TabId, message: string) {
+        if (this.tabManager.getActiveTab()?.id === tabId) {
+            this.renderWorkspaceEditBar();
+        }
+        new Notice(message);
+    }
+
+    private renderWorkspaceEditBar() {
+        if (!this.workspaceEditContainerEl) return;
+        this.workspaceEditContainerEl.empty();
+
+        const activeTab = this.tabManager.getActiveTab();
+        const edits = activeTab?.state.getWorkspaceEdits()
+            .filter(edit => edit.status === 'applied') ?? [];
+
+        this.workspaceEditContainerEl.toggleClass('is-empty', edits.length === 0);
+        if (edits.length === 0) return;
+
+        const bar = this.workspaceEditContainerEl.createDiv({ cls: 'shell-workspace-edits' });
+        const label = bar.createDiv({ cls: 'shell-workspace-edits-label', text: '已修改文件' });
+        label.setAttribute('title', 'Files changed by AI in this tab');
+
+        const list = bar.createDiv({ cls: 'shell-workspace-edits-list' });
+        for (const edit of edits.slice(0, 4)) {
+            const item = list.createDiv({ cls: 'shell-workspace-edit-item' });
+            item.createSpan({ cls: 'shell-workspace-edit-name', text: this.basename(edit.path) });
+            const meta = item.createSpan({ cls: 'shell-workspace-edit-meta', text: this.formatWorkspaceEditMeta(edit) });
+            meta.setAttribute('title', edit.path);
+            const undoButton = item.createEl('button', {
+                cls: 'clickable-icon shell-workspace-edit-undo',
+                attr: {
+                    type: 'button',
+                    title: `Undo ${edit.path}`,
+                    'aria-label': `Undo ${edit.path}`,
+                },
+            });
+            setIcon(undoButton, 'undo-2');
+            undoButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                void this.chatController.undoWorkspaceEdit(edit.id);
+            });
+        }
+
+        if (edits.length > 1) {
+            const undoAllButton = bar.createEl('button', {
+                cls: 'shell-workspace-edit-undo-all',
+                attr: { type: 'button', title: 'Undo all AI edits in this tab' },
+            });
+            setIcon(undoAllButton, 'rotate-ccw');
+            undoAllButton.createSpan({ text: '全部撤销' });
+            undoAllButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                void this.chatController.undoAllWorkspaceEdits(edits.map(edit => edit.id));
+            });
+        }
+    }
+
+    private formatWorkspaceEditMeta(edit: WorkspaceEditSummary): string {
+        const delta = edit.lineDelta ?? 0;
+        if (delta === 0) return edit.kind === 'create' ? 'new' : 'updated';
+        return `${delta > 0 ? '+' : ''}${delta} lines`;
+    }
+
+    private basename(path: string): string {
+        return path.split(/[\\/]/).filter(Boolean).pop() || path;
     }
 
     private updateTabBar() {

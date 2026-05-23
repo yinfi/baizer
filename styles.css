@@ -3409,3 +3409,105 @@ textarea.shell-input {
         max-width: 150px;
     }
 }
+
+.ocli-shell-view .shell-workspace-edits-host {
+    display: block;
+    padding: 0 8px 6px;
+}
+
+.ocli-shell-view .shell-workspace-edits-host.is-empty {
+    display: none;
+}
+
+.ocli-shell-view .shell-workspace-edits {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 5px 6px;
+    border: 1px solid color-mix(in srgb, var(--interactive-accent) 22%, var(--ocli-border));
+    border-radius: var(--ocli-radius-s);
+    background: color-mix(in srgb, var(--interactive-accent) 8%, var(--ocli-surface-muted));
+}
+
+.ocli-shell-view .shell-workspace-edits-label {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    white-space: nowrap;
+}
+
+.ocli-shell-view .shell-workspace-edits-list {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    overflow-x: auto;
+}
+
+.ocli-shell-view .shell-workspace-edits-list::-webkit-scrollbar {
+    display: none;
+}
+
+.ocli-shell-view .shell-workspace-edit-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    max-width: 190px;
+    padding: 2px 3px 2px 7px;
+    border-radius: var(--ocli-radius-s);
+    background: var(--background-primary);
+    border: 1px solid var(--ocli-border);
+}
+
+.ocli-shell-view .shell-workspace-edit-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-normal);
+    font-size: var(--font-ui-smaller);
+}
+
+.ocli-shell-view .shell-workspace-edit-meta {
+    flex: 0 0 auto;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    white-space: nowrap;
+}
+
+.ocli-shell-view .shell-workspace-edit-undo {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    color: var(--text-muted);
+    border-radius: 5px;
+}
+
+.ocli-shell-view .shell-workspace-edit-undo:hover,
+.ocli-shell-view .shell-workspace-edit-undo:focus-visible {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+}
+
+.ocli-shell-view .shell-workspace-edit-undo-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 7px;
+    border-radius: var(--ocli-radius-s);
+    border: 1px solid var(--ocli-border);
+    background: var(--background-primary);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    white-space: nowrap;
+}
+
+.ocli-shell-view .shell-workspace-edit-undo-all:hover,
+.ocli-shell-view .shell-workspace-edit-undo-all:focus-visible {
+    color: var(--text-normal);
+    background: var(--background-modifier-hover);
+}
