@@ -1,5 +1,10 @@
 import { Modal, App, ButtonComponent } from 'obsidian';
 
+type DiffRow = {
+    type: 'added' | 'removed' | 'unchanged';
+    text: string;
+};
+
 export class DiffModal extends Modal {
     constructor(
         app: App,
@@ -19,9 +24,17 @@ export class DiffModal extends Modal {
         copy.createEl('h2', { text: 'Review Changes' });
         copy.createDiv({ cls: 'ocli-diff-modal-subtitle', text: 'Compare current content with the proposed replacement before applying.' });
 
-        const diffContainer = contentEl.createDiv({ cls: 'diff-container ocli-diff-split' });
-        this.renderPane(diffContainer, 'Current', this.original, 'ocli-diff-pane-old');
-        this.renderPane(diffContainer, 'Proposed', this.modified, 'ocli-diff-pane-new');
+        const summary = contentEl.createDiv({ cls: 'ocli-diff-summary' });
+        this.renderStat(summary, 'Current', this.countLines(this.original));
+        this.renderStat(summary, 'Proposed', this.countLines(this.modified));
+        this.renderStat(summary, 'Changed', this.countChangedLines());
+
+        const diffContainer = contentEl.createDiv({ cls: 'diff-container ocli-diff-unified' });
+        this.renderUnifiedDiff(diffContainer);
+
+        const paneContainer = contentEl.createDiv({ cls: 'ocli-diff-panes' });
+        this.renderPane(paneContainer, 'Current', this.original, 'ocli-diff-pane-old');
+        this.renderPane(paneContainer, 'Proposed', this.modified, 'ocli-diff-pane-new');
 
         const buttonContainer = contentEl.createDiv({ cls: 'diff-actions' });
 
@@ -38,107 +51,140 @@ export class DiffModal extends Modal {
             });
     }
 
+    private renderStat(container: HTMLElement, label: string, value: number) {
+        const stat = container.createDiv({ cls: 'ocli-diff-stat' });
+        stat.createSpan({ cls: 'ocli-diff-stat-label', text: label });
+        stat.createSpan({ cls: 'ocli-diff-stat-value', text: String(value) });
+    }
+
     private renderPane(container: HTMLElement, label: string, content: string, toneClass: string) {
         const pane = container.createDiv({ cls: `ocli-diff-pane ${toneClass}` });
         pane.createDiv({ cls: 'ocli-diff-pane-title', text: label });
+        if (content.length === 0) {
+            pane.createDiv({ cls: 'ocli-diff-empty', text: 'No content.' });
+            return;
+        }
         const pre = pane.createEl('pre', { cls: 'ocli-diff-pane-code' });
         pre.setText(content);
     }
 
-    renderDiff(container: HTMLElement) {
-        container.style.maxHeight = '60vh';
-        container.style.overflowY = 'auto';
-        container.style.fontFamily = 'monospace';
-        container.style.whiteSpace = 'pre-wrap';
-        container.style.backgroundColor = 'var(--background-primary)';
-        container.style.padding = '10px';
-        container.style.borderRadius = '4px';
-        container.style.border = '1px solid var(--background-modifier-border)';
-
-        const oldLines = this.original.split('\n');
-        const newLines = this.modified.split('\n');
-
-        // Very naive diff for now: just show side-by-side or stacked?
-        // Let's do a simple unified diff visualization
-
-        let i = 0;
-        let j = 0;
-
-        while (i < oldLines.length || j < newLines.length) {
-            const oldLine = oldLines[i];
-            const newLine = newLines[j];
-
-            if (oldLine === newLine) {
-                this.createLine(container, '  ' + (oldLine || ''), 'diff-unchanged');
-                i++;
-                j++;
-            } else {
-                // This is a very dumb diff, it doesn't try to resync.
-                // For a real diff, we need the 'diff' package or a proper LCS algorithm.
-                // Since we can't easily add dependencies, let's try a slightly smarter heuristic:
-                // If lines don't match, check if the next few lines match.
-
-                let matchFound = false;
-                // Look ahead in newLines
-                for (let k = 1; k < 5; k++) {
-                    if (j + k < newLines.length && oldLine === newLines[j + k]) {
-                        // Found a match later in newLines -> Insertion
-                        for (let m = 0; m < k; m++) {
-                            this.createLine(container, '+ ' + newLines[j + m], 'diff-added');
-                        }
-                        j += k;
-                        matchFound = true;
-                        break;
-                    }
-                }
-
-                if (!matchFound) {
-                    // Look ahead in oldLines
-                    for (let k = 1; k < 5; k++) {
-                        if (i + k < oldLines.length && oldLines[i + k] === newLine) {
-                            // Found a match later in oldLines -> Deletion
-                            for (let m = 0; m < k; m++) {
-                                this.createLine(container, '- ' + oldLines[i + m], 'diff-removed');
-                            }
-                            i += k;
-                            matchFound = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (!matchFound) {
-                    // Modification (Delete + Add)
-                    if (i < oldLines.length) {
-                        this.createLine(container, '- ' + oldLines[i], 'diff-removed');
-                        i++;
-                    }
-                    if (j < newLines.length) {
-                        this.createLine(container, '+ ' + newLines[j], 'diff-added');
-                        j++;
-                    }
-                }
-            }
+    private renderUnifiedDiff(container: HTMLElement) {
+        const rows = buildLineDiff(this.original, this.modified);
+        if (rows.length === 0) {
+            container.createDiv({ cls: 'ocli-diff-empty', text: 'No line-level changes.' });
+            return;
         }
+
+        for (const row of rows) {
+            const prefix = row.type === 'added' ? '+ ' : row.type === 'removed' ? '- ' : '  ';
+            const cls = row.type === 'added'
+                ? 'diff-added'
+                : row.type === 'removed'
+                    ? 'diff-removed'
+                    : 'diff-unchanged';
+            this.createLine(container, `${prefix}${row.text}`, cls);
+        }
+    }
+
+    private countChangedLines(): number {
+        return buildLineDiff(this.original, this.modified)
+            .filter(row => row.type !== 'unchanged')
+            .length;
+    }
+
+    private countLines(content: string): number {
+        if (!content) return 0;
+        return content.split(/\r?\n/).length;
     }
 
     createLine(container: HTMLElement, text: string, type: 'diff-unchanged' | 'diff-added' | 'diff-removed') {
         const div = container.createDiv({ cls: `diff-line ${type}` });
         div.setText(text);
-        if (type === 'diff-added') {
-            div.style.backgroundColor = 'rgba(0, 255, 0, 0.1)';
-            div.style.color = 'var(--text-success)';
-        } else if (type === 'diff-removed') {
-            div.style.backgroundColor = 'rgba(255, 0, 0, 0.1)';
-            div.style.color = 'var(--text-error)';
-            div.style.textDecoration = 'line-through';
-        } else {
-            div.style.color = 'var(--text-muted)';
-        }
     }
 
     onClose() {
         const { contentEl } = this;
         contentEl.empty();
     }
+}
+
+export function buildLineDiff(original: string, modified: string): DiffRow[] {
+    const oldLines = splitLines(original);
+    const newLines = splitLines(modified);
+    if (oldLines.length === 0 && newLines.length === 0) return [];
+
+    const table = buildLcsTable(oldLines, newLines);
+    const rows: DiffRow[] = [];
+    let i = 0;
+    let j = 0;
+
+    while (i < oldLines.length || j < newLines.length) {
+        if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
+            rows.push({ type: 'unchanged', text: oldLines[i] });
+            i++;
+            j++;
+            continue;
+        }
+
+        if (j < newLines.length && (i === oldLines.length || table[i][j + 1] >= table[i + 1][j])) {
+            rows.push({ type: 'added', text: newLines[j] });
+            j++;
+            continue;
+        }
+
+        if (i < oldLines.length) {
+            rows.push({ type: 'removed', text: oldLines[i] });
+            i++;
+        }
+    }
+
+    return compactContext(rows);
+}
+
+function splitLines(content: string): string[] {
+    if (content.length === 0) return [];
+    return content.split(/\r?\n/);
+}
+
+function buildLcsTable(oldLines: string[], newLines: string[]): number[][] {
+    const table = Array.from({ length: oldLines.length + 1 }, () => Array(newLines.length + 1).fill(0));
+
+    for (let i = oldLines.length - 1; i >= 0; i--) {
+        for (let j = newLines.length - 1; j >= 0; j--) {
+            table[i][j] = oldLines[i] === newLines[j]
+                ? table[i + 1][j + 1] + 1
+                : Math.max(table[i + 1][j], table[i][j + 1]);
+        }
+    }
+
+    return table;
+}
+
+function compactContext(rows: DiffRow[]): DiffRow[] {
+    const changedIndexes = rows
+        .map((row, index) => row.type !== 'unchanged' ? index : -1)
+        .filter(index => index >= 0);
+    if (changedIndexes.length === 0) return [];
+
+    const keep = new Set<number>();
+    for (const index of changedIndexes) {
+        const start = Math.max(0, index - 2);
+        const end = Math.min(rows.length - 1, index + 2);
+        for (let i = start; i <= end; i++) {
+            keep.add(i);
+        }
+    }
+
+    const compacted: DiffRow[] = [];
+    let lastKept = -1;
+    for (let i = 0; i < rows.length; i++) {
+        if (!keep.has(i)) continue;
+        if (lastKept >= 0 && i - lastKept > 1) {
+            compacted.push({ type: 'unchanged', text: '...' });
+        }
+        compacted.push(rows[i]);
+        lastKept = i;
+    }
+
+    return compacted;
 }

@@ -144,6 +144,34 @@ async function runTests() {
     expect(contents.get('Notes/source.md')).toBe('user changed this again');
   });
 
+  await test('undo requires the latest AI edit first when a file has stacked edits', async () => {
+    const { app, contents } = createMockApp();
+    const service = createService(app);
+
+    const first = await service.executeWorkspaceTool('update_file', {
+      path: 'Notes/source.md',
+      content: 'after 1',
+    });
+    await new Promise(resolve => setTimeout(resolve, 1));
+    const second = await service.executeWorkspaceTool('update_file', {
+      path: 'Notes/source.md',
+      content: 'after 2',
+    });
+
+    const staleUndo = await service.undoWorkspaceEdit(first.workspaceEdit.id);
+    expect(staleUndo.success).toBe(false);
+    expect(staleUndo.error).toContain('latest AI edit');
+    expect(contents.get('Notes/source.md')).toBe('after 2');
+
+    const latestUndo = await service.undoWorkspaceEdit(second.workspaceEdit.id);
+    expect(latestUndo.success).toBe(true);
+    expect(contents.get('Notes/source.md')).toBe('after 1');
+
+    const firstUndo = await service.undoWorkspaceEdit(first.workspaceEdit.id);
+    expect(firstUndo.success).toBe(true);
+    expect(contents.get('Notes/source.md')).toBe('before');
+  });
+
   await test('undoing a created file trashes the created file', async () => {
     const { app, files, contents, trashed } = createMockApp();
     const service = createService(app);

@@ -1,4 +1,5 @@
 import { ApprovalRequest } from './approval-card';
+import type { WorkspaceEditSummary } from '../services/workspace-edit-service';
 
 export type ShellMessageRole = 'user' | 'ai' | 'system';
 
@@ -14,6 +15,7 @@ export interface ChatMessage {
         modelId?: string;
         durationMs?: number;
         interrupted?: boolean;
+        workspaceEdit?: WorkspaceEditSummary;
     };
 }
 

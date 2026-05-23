@@ -1,4 +1,4 @@
-import { App, MarkdownRenderer } from 'obsidian';
+import { App, MarkdownRenderer, setIcon } from 'obsidian';
 import { renderApprovalCard } from '../approval-card';
 import { ChatMessage } from '../types';
 import { CodeBlockRenderer } from './code-block-renderer';
@@ -22,6 +22,7 @@ interface MessageRendererOptions {
   onFeedbackUp?: (message: ChatMessage) => void | Promise<void>;
   onFeedbackDown?: (message: ChatMessage) => void | Promise<void>;
   onReviewCodeBlock?: (content: string) => void | Promise<void>;
+  onUndoWorkspaceEdit?: (editId: string) => void | Promise<void>;
   onInternalLinkClick?: (href: string) => void;
   onScrollRequest?: () => void;
   onRenderError?: (error: unknown) => void;
@@ -53,7 +54,9 @@ export class MessageRenderer {
     const entry = (container as any).createDiv({ cls: `shell-entry ${message.role}` }) as HTMLElement;
 
     try {
-      if (message.approval) {
+      if (message.metadata?.workspaceEdit) {
+        this.renderWorkspaceEdit(entry, message);
+      } else if (message.approval) {
         (entry as any).addClass?.('shell-approval-entry') ?? entry.classList.add('shell-approval-entry');
         (entry as any).createDiv({ cls: 'shell-approval-avatar', text: 'AI' });
         const approvalBody = (entry as any).createDiv({ cls: 'shell-approval-message-body' }) as HTMLElement;
@@ -214,6 +217,54 @@ export class MessageRenderer {
       text: this.basename(status.target),
       title: status.target,
     });
+  }
+
+  private renderWorkspaceEdit(entry: HTMLElement, message: ChatMessage) {
+    const edit = message.metadata?.workspaceEdit;
+    if (!edit) return;
+
+    (entry as any).addClass?.('shell-workspace-edit-entry') ?? entry.classList.add('shell-workspace-edit-entry');
+    if (edit.status === 'undone') {
+      (entry as any).addClass?.('is-undone') ?? entry.classList.add('is-undone');
+    }
+
+    const row = (entry as any).createDiv({ cls: 'shell-workspace-edit-row' }) as HTMLElement;
+    (row as any).createSpan({ cls: 'shell-workspace-edit-bullet', text: '\u2022' });
+    (row as any).createSpan({
+      cls: 'shell-workspace-edit-name',
+      text: this.basename(edit.path),
+      title: edit.path,
+    });
+    (row as any).createSpan({
+      cls: 'shell-workspace-edit-meta',
+      text: this.formatWorkspaceEditMeta(edit),
+    });
+
+    if (edit.status !== 'applied') return;
+
+    const undoButton = (row as any).createEl('button', {
+      cls: 'clickable-icon shell-workspace-edit-undo',
+      attr: {
+        type: 'button',
+        title: `Undo ${edit.path}`,
+        'aria-label': `Undo ${edit.path}`,
+      },
+    }) as HTMLElement;
+    setIcon(undoButton, 'undo-2');
+    undoButton.addEventListener('click', (event) => {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      void this.options.onUndoWorkspaceEdit?.(edit.id);
+    });
+  }
+
+  private formatWorkspaceEditMeta(edit: NonNullable<ChatMessage['metadata']>['workspaceEdit']) {
+    if (!edit) return '';
+    if (edit.status === 'undone') return 'undone';
+
+    const delta = edit.lineDelta ?? 0;
+    if (delta === 0) return edit.kind === 'create' ? 'new' : 'updated';
+    return `${delta > 0 ? '+' : ''}${delta} lines`;
   }
 
   private basename(path: string) {

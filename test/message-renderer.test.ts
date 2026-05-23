@@ -225,6 +225,77 @@ async function runTests() {
     expect(target?.getAttribute('title')).toBe('Study/财经理论入门课程/01_course_materials/02_supply_demand_price.md');
   });
 
+  await test('renders workspace edit messages as one inline row with undo', async () => {
+    const container = new FakeElement();
+    const undone: string[] = [];
+    const renderer = new MessageRenderer({
+      app: {},
+      component: {},
+      onUndoWorkspaceEdit: (editId: string) => { undone.push(editId); },
+    } as any);
+
+    await renderer.renderMessage(container as any, {
+      id: 'workspace-edit-edit-1',
+      role: 'system',
+      content: '',
+      timestamp: 2,
+      metadata: {
+        workspaceEdit: {
+          id: 'edit-1',
+          action: 'update_file',
+          path: 'Notes/规范驱动开发（SDD）.md',
+          kind: 'update',
+          appliedAt: 2,
+          status: 'applied',
+          lineDelta: 28,
+        },
+      },
+    } as any);
+
+    const entry = container.children[0];
+    const name = entry.querySelector('.shell-workspace-edit-name');
+    const meta = entry.querySelector('.shell-workspace-edit-meta');
+    const undoButton = entry.querySelector('.shell-workspace-edit-undo');
+
+    expect(entry.className).toContain('shell-workspace-edit-entry');
+    expect(entry.querySelector('.shell-workspace-edit-bullet')?.textContent).toBe('\u2022');
+    expect(name?.textContent).toBe('规范驱动开发（SDD）.md');
+    expect(name?.getAttribute('title')).toBe('Notes/规范驱动开发（SDD）.md');
+    expect(meta?.textContent).toBe('+28 lines');
+    expect(undoButton?.getAttribute('data-icon')).toBe('undo-2');
+
+    undoButton?.click();
+    expect(undone).toEqual(['edit-1']);
+  });
+
+  await test('renders undone workspace edit rows without an active undo control', async () => {
+    const container = new FakeElement();
+    const renderer = new MessageRenderer({ app: {}, component: {} });
+
+    await renderer.renderMessage(container as any, {
+      id: 'workspace-edit-edit-1',
+      role: 'system',
+      content: '',
+      timestamp: 2,
+      metadata: {
+        workspaceEdit: {
+          id: 'edit-1',
+          action: 'update_file',
+          path: 'Notes/source.md',
+          kind: 'update',
+          appliedAt: 2,
+          status: 'undone',
+          lineDelta: 3,
+        },
+      },
+    } as any);
+
+    const entry = container.children[0];
+    expect(entry.className).toContain('is-undone');
+    expect(entry.querySelector('.shell-workspace-edit-meta')?.textContent).toBe('undone');
+    expect(!!entry.querySelector('.shell-workspace-edit-undo')).toBe(false);
+  });
+
   await test('renders assistant markdown and creates an action toolbar', async () => {
     const container = new FakeElement();
     const rendered: string[] = [];
