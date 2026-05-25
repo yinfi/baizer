@@ -10,6 +10,7 @@ const tests = [
   'test/pi-runtime-factory.test.ts',
   'test/pi-event-adapter.test.ts',
   'test/pi-tool-adapter.test.ts',
+  'test/pi-provider-bridge.test.ts',
   'test/generation-strategy-service.test.ts',
   'test/generation-quality.test.ts',
   'test/change-preview.test.ts',
