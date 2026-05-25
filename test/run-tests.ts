@@ -8,6 +8,7 @@ const tests = [
   'test/model-service.test.ts',
   'test/chat-runtime.test.ts',
   'test/pi-runtime-factory.test.ts',
+  'test/pi-approval-policy.test.ts',
   'test/pi-event-adapter.test.ts',
   'test/pi-tool-adapter.test.ts',
   'test/pi-provider-bridge.test.ts',
