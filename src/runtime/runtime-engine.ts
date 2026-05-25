@@ -1,4 +1,4 @@
-import { RuntimeEngine } from './runtime-types';
+import type { RuntimeEngine } from './runtime-types';
 
 let runtimeEngine: RuntimeEngine = 'legacy';
 

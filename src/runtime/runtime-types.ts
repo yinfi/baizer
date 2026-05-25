@@ -1,11 +1,11 @@
-import { ChatContextItem, IModelProvider, StreamEvent, ToolDefinition } from '../models/interfaces';
-import { MemoryManager } from '../memory/memory-manager';
-import { UserProfile } from '../memory/types';
-import { ObsidianContextSnapshot } from '../services/obsidian-context-service';
-import { GenerationPlan, GenerationSource, WritingProfile } from '../services/generation-strategy-service';
-import { SkillRegistry } from '../skills/skill-registry';
-import { ToolRegistry } from '../skills/tool-registry';
-import { WorkspaceEditService } from '../services/workspace-edit-service';
+import type { ChatContextItem, IModelProvider, StreamEvent, ToolDefinition } from '../models/interfaces';
+import type { MemoryManager } from '../memory/memory-manager';
+import type { UserProfile } from '../memory/types';
+import type { ObsidianContextSnapshot } from '../services/obsidian-context-service';
+import type { GenerationPlan, GenerationSource, WritingProfile } from '../services/generation-strategy-service';
+import type { SkillRegistry } from '../skills/skill-registry';
+import type { ToolRegistry } from '../skills/tool-registry';
+import type { WorkspaceEditService } from '../services/workspace-edit-service';
 
 export type RuntimeEngine = 'legacy' | 'pi';
 
