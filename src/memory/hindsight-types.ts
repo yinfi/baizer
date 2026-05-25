@@ -91,7 +91,7 @@ export function createDefaultMemoryBank(now: number = Date.now()): MemoryBank {
   return {
     id: DEFAULT_MEMORY_BANK_ID,
     name: 'Default Vault Memory',
-    mission: 'Help Obsidian CLI personalize answers and remember durable user preferences, projects, decisions, and prior work.',
+    mission: 'Help Baizer personalize answers and remember durable user preferences, projects, decisions, and prior work.',
     directives: [
       'Prefer facts grounded in user messages or approved operations.',
       'Do not store secrets, API keys, tokens, passwords, or long private note excerpts.',

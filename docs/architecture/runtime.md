@@ -28,6 +28,7 @@ This split keeps provider-specific execution details out of UI controllers and m
 ## Memory Flow
 
 The runtime uses `MemoryManager` as a local Hindsight-lite facade.
+The primary user-facing command is `/memory`. `/profile` and `/forget` are compatibility aliases and should not be suggested by the runtime slash command contract.
 
 1. `prepareTurn(...)` calls query-aware memory recall with the current user request.
 2. Relevant memory records are formatted into `[Relevant Memory]`.

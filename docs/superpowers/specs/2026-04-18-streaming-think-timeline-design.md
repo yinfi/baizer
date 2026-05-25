@@ -2,7 +2,7 @@
 
 ## 概述
 
-将 Obsidian Shell 的 AI 响应从一次性返回改为流式输出，同时将 thinking token 和 function call 步骤以可折叠的时间线形式展示。
+将 Baizer 的 AI 响应从一次性返回改为流式输出，同时将 thinking token 和 function call 步骤以可折叠的时间线形式展示。
 
 ## 需求
 

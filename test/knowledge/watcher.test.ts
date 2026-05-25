@@ -115,6 +115,71 @@ async function runTests() {
     expect(status?.state).toBe('stale');
   });
 
+  await test('KnowledgeRuntime does not read the previous plugin registry during startup', async () => {
+    const previousRegistryPath = ['.obsidian', ['obsidian', 'cli'].join('-'), 'knowledge-registry.json'].join('/');
+    const touchedPaths: string[] = [];
+    const folders = new Set<string>();
+    const files = new Map<string, string>();
+
+    const app = {
+      vault: {
+        adapter: {
+          exists: async (path: string) => {
+            touchedPaths.push(path);
+            if (path === previousRegistryPath) return true;
+            return files.has(path) || folders.has(path);
+          },
+          read: async (path: string) => {
+            if (path === previousRegistryPath) {
+              throw new Error('previous registry should not be read');
+            }
+            return files.get(path) ?? '';
+          },
+          write: async (path: string, content: string) => {
+            files.set(path, content);
+          },
+          remove: async (path: string) => {
+            touchedPaths.push(path);
+            files.delete(path);
+          },
+        },
+        getMarkdownFiles: () => [],
+        getFiles: () => [],
+        getAbstractFileByPath: (path: string) => folders.has(path) ? { path } : null,
+        read: async () => '',
+        trash: async () => {},
+        createFolder: async (path: string) => {
+          folders.add(path);
+        },
+        create: async (path: string, content: string) => {
+          files.set(path, content);
+        },
+      },
+      metadataCache: {
+        initialized: true,
+        getFileCache: () => null,
+      },
+      internalPlugins: {
+        plugins: {
+          bases: { enabled: true },
+        },
+      },
+    } as any;
+
+    const runtime = new KnowledgeRuntime(app, {
+      knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'],
+      knowledgeAutoCompile: false,
+      knowledgeMaxCompileBatch: 50,
+    } as any, {
+      generate: async () => '',
+    } as any);
+
+    await runtime.initialize();
+
+    expect(touchedPaths.includes(previousRegistryPath)).toBe(false);
+  });
+
   console.log('All watcher tests passed!');
 }
 

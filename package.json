@@ -1,7 +1,7 @@
 {
-  "name": "obsidian-cli",
+  "name": "baizer",
   "version": "1.0.0",
-  "description": "Obsidian CLI Plugin",
+  "description": "Baizer Obsidian plugin",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",

@@ -6,8 +6,8 @@ import {
   normalizeMemoryText,
 } from './hindsight-types';
 import { HindsightStore } from './hindsight-store';
+import { MEMORY_DIR } from '../mcp/types';
 
-const MEMORY_DIR = '.obsidian/obsidian-cli-memory';
 const PROFILE_PATH = `${MEMORY_DIR}/user-profile.json`;
 const SUMMARIES_PATH = `${MEMORY_DIR}/session-summaries.json`;
 
@@ -22,7 +22,7 @@ export async function migrateLegacyMemory(
   const stateUpdate: { legacyProfileMigrated?: boolean; legacySummariesMigrated?: boolean } = {};
 
   if (!state.legacyProfileMigrated) {
-    const profile = await readJson<any>(app, PROFILE_PATH, null);
+    const profile = await readJson<any | null>(app, PROFILE_PATH, null);
     if (profile) records.push(...profileToMemories(profile, now));
     stateUpdate.legacyProfileMigrated = true;
   }

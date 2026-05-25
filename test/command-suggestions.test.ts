@@ -138,6 +138,9 @@ async function runTests() {
       .sort();
 
     expect(labels.includes('/save')).toBe(false);
+    expect(labels.includes('/memory')).toBe(true);
+    expect(labels.includes('/profile')).toBe(false);
+    expect(labels.includes('/forget')).toBe(false);
     expect(labels.includes('/file-back')).toBe(true);
     expect(labels.includes('/help')).toBe(true);
   });
@@ -495,7 +498,7 @@ async function runTests() {
 
     (view as any).openPluginSettings();
 
-    expect(settingCalls).toEqual(['open', 'obsidian-cli']);
+    expect(settingCalls).toEqual(['open', 'baizer']);
   });
 }
 

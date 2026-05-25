@@ -42,9 +42,8 @@ interface FileWriteState {
 
 const LOCAL_SLASH_COMMANDS = [
   { command: '/clear', description: 'Clear session history' },
-  { command: '/profile', description: 'View user profile' },
+  { command: '/memory [overview|observations|search <query>|forget <field>]', description: 'View, search, or forget Hindsight memory' },
   { command: '/file-back <message-id>', description: 'Archive a previous AI answer to the knowledge wiki' },
-  { command: '/forget [field]', description: 'Forget user memory' },
   { command: '/new <title>', description: 'Create a new note' },
   { command: '/edit <instruction>', description: 'AI edit the selected text' },
   { command: '/open <file>', description: 'Open a file' },

@@ -146,11 +146,11 @@ async function runTests() {
 
     renderer.addToolCall('read_file', { path: 'Notes/a.md' });
 
-    const node = timeline.querySelector('.ocli-tool-call')!;
-    const header = timeline.querySelector('.ocli-tool-header')!;
-    const label = timeline.querySelector('.ocli-tool-label')!;
-    const status = timeline.querySelector('.ocli-tool-status')!;
-    const detail = timeline.querySelector('.ocli-tool-detail')!;
+    const node = timeline.querySelector('.baizer-tool-call')!;
+    const header = timeline.querySelector('.baizer-tool-header')!;
+    const label = timeline.querySelector('.baizer-tool-label')!;
+    const status = timeline.querySelector('.baizer-tool-status')!;
+    const detail = timeline.querySelector('.baizer-tool-detail')!;
 
     expect(header.attributes.role).toBe('button');
     expect(header.attributes.tabindex).toBe('0');
@@ -178,9 +178,9 @@ async function runTests() {
     renderer.addToolCall('web_search', { query: 'bad query' });
     renderer.updateToolResult('web_search', undefined, 'network failed');
 
-    const node = timeline.querySelector('.ocli-tool-call')!;
-    const status = timeline.querySelector('.ocli-tool-status')!;
-    const detail = timeline.querySelector('.ocli-tool-detail')!;
+    const node = timeline.querySelector('.baizer-tool-call')!;
+    const status = timeline.querySelector('.baizer-tool-status')!;
+    const detail = timeline.querySelector('.baizer-tool-detail')!;
 
     expect(node.hasClass('is-error')).toBe(true);
     expect(status.textContent).toBe('Error');

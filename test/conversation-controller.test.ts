@@ -83,7 +83,7 @@ async function runTests() {
     tab.state.addMessage({
       id: 'm1',
       role: 'user',
-      content: 'Discuss long term roadmap for team collaboration and knowledge workflows inside Obsidian Shell',
+      content: 'Discuss long term roadmap for team collaboration and knowledge workflows inside Baizer',
       timestamp: 10,
     });
     tab.state.addMessage({ id: 'm2', role: 'ai', content: 'draft', timestamp: 20 });
@@ -102,7 +102,7 @@ async function runTests() {
         {
           id: 'm1',
           role: 'user',
-          content: 'Discuss long term roadmap for team collaboration and knowledge workflows inside Obsidian Shell',
+          content: 'Discuss long term roadmap for team collaboration and knowledge workflows inside Baizer',
           timestamp: 10,
         },
         { id: 'm2', role: 'ai', content: 'draft', timestamp: 20 },

@@ -14,6 +14,7 @@ import { ApprovalRequest } from './approval-card';
 import { buildSelectionPreview } from './diff/change-preview';
 import { ChatMessage } from './types';
 import { WorkspaceEditSummary } from '../services/workspace-edit-service';
+import { PLUGIN_ID } from '../mcp/types';
 
 export interface ChatControllerOptions {
     app: App;
@@ -260,16 +261,11 @@ export class ChatController {
             case '/clear':
                 this.clearHistory();
                 break;
+            case '/memory':
+                await this.handleMemory(argStr);
+                break;
             case '/profile':
-                const profile = this.api.getUserProfile();
-                if (profile) {
-                    let text = '## User Profile\n\n';
-                    if (profile.name) text += `**Name**: ${profile.name}\n`;
-                    if (profile.profession) text += `**Profession**: ${profile.profession}\n`;
-                    this.addMessage('system', text);
-                } else {
-                    this.addMessage('system', 'No profile data available.');
-                }
+                await this.handleMemory(argStr || 'overview', '/profile');
                 break;
             case '/tools':
                 const tools = this.api.getAvailableTools();
@@ -284,13 +280,13 @@ export class ChatController {
                 await this.handleWikiCompile(argStr);
                 break;
             case '/wiki:index':
-                (this.app as any).commands.executeCommandById('obsidian-cli:knowledge-open-index');
+                (this.app as any).commands.executeCommandById(`${PLUGIN_ID}:knowledge-open-index`);
                 break;
             case '/wiki:lint':
-                (this.app as any).commands.executeCommandById('obsidian-cli:knowledge-lint');
+                (this.app as any).commands.executeCommandById(`${PLUGIN_ID}:knowledge-lint`);
                 break;
             case '/forget':
-                await this.handleForget(argStr);
+                await this.handleForget(argStr, '/forget');
                 break;
             case '/new':
                 await this.handleNewNote(argStr);
@@ -620,7 +616,7 @@ export class ChatController {
         const targetMsg = this.messages.find(m => m.id === msgId && m.role === 'ai');
         if (!targetMsg) return;
 
-        const toolRegistry = (this.app as any).plugins?.plugins?.['obsidian-cli']?.toolRegistry;
+        const toolRegistry = (this.app as any).plugins?.plugins?.[PLUGIN_ID]?.toolRegistry;
         if (toolRegistry?.execute) {
             try {
                 const result = await toolRegistry.execute('file_back_knowledge', this.buildFileBackArgs(targetMsg));
@@ -695,10 +691,137 @@ export class ChatController {
      * 鏂囦欢璺緞锛氱紪璇戞寚瀹氭枃浠?
      * 鐩綍璺緞锛氭壂鎻忕洰褰曚笅鎵€鏈?.md 娉ㄥ唽骞剁紪璇?
      */
-    private async handleForget(field: string) {
+    private async handleMemory(input: string, legacyCommand?: '/profile') {
+        const trimmed = input.trim();
+        const [rawMode = 'overview', ...rest] = trimmed ? trimmed.split(/\s+/) : ['overview'];
+        const mode = rawMode.toLowerCase();
+        const note = legacyCommand
+            ? `Compatibility note: \`${legacyCommand}\` is now \`/memory\`.\n\n`
+            : '';
+
+        if (mode === 'forget') {
+            await this.handleForget(rest.join(' '));
+            return;
+        }
+
+        if (mode === 'search') {
+            const query = rest.join(' ').trim();
+            if (!query) {
+                this.addMessage('system', 'Usage: `/memory search <query>`');
+                return;
+            }
+            await this.renderMemoryView({ mode: 'search', query, limit: 10 }, note);
+            return;
+        }
+
+        if (mode === 'observations') {
+            await this.renderMemoryView({ mode: 'observations', limit: 10 }, note);
+            return;
+        }
+
+        if (mode === 'overview' || mode === 'raw') {
+            await this.renderMemoryView({ mode: mode as 'overview' | 'raw', limit: 10 }, note);
+            return;
+        }
+
+        if (legacyCommand === '/profile') {
+            await this.renderMemoryView({ mode: 'overview', limit: 10 }, note);
+            return;
+        }
+
+        this.addMessage('system', 'Usage: `/memory [overview|observations|search <query>|forget <field|all>]`');
+    }
+
+    private async renderMemoryView(request: any, prefix: string = '') {
+        const getMemoryView = (this.api as any).getMemoryView;
+        if (typeof getMemoryView !== 'function') {
+            this.addMessage('system', this.formatLegacyProfile(prefix));
+            return;
+        }
+
+        const view = await getMemoryView.call(this.api, request);
+        if (!view) {
+            this.addMessage('system', `${prefix}No memory data available.`);
+            return;
+        }
+
+        this.addMessage('system', `${prefix}${this.formatMemoryView(view, request)}`);
+    }
+
+    private formatLegacyProfile(prefix: string): string {
+        const profile = this.api.getUserProfile();
+        if (!profile) return `${prefix}No profile data available.`;
+
+        let text = `${prefix}## User Profile\n\n`;
+        if (profile.name) text += `**Name**: ${profile.name}\n`;
+        if (profile.profession) text += `**Profession**: ${profile.profession}\n`;
+        if (profile.expertise?.length) text += `**Expertise**: ${profile.expertise.join(', ')}\n`;
+        if (profile.context?.currentProjects?.length) {
+            text += `**Projects**: ${profile.context.currentProjects.join(', ')}\n`;
+        }
+        return text.trim();
+    }
+
+    private formatMemoryView(view: any, request: any): string {
+        const stats = view.stats || {};
+        const lines = [
+            '## Hindsight Memory',
+            '',
+            `Privacy Mode: ${view.privacyMode ? 'On' : 'Off'}`,
+            `Total: ${stats.total ?? 0} | Facts: ${stats.world ?? 0} | Experiences: ${stats.experience ?? 0} | Observations: ${stats.observation ?? 0}`,
+        ];
+
+        if (request.mode === 'observations') {
+            this.appendMemoryRecords(lines, 'Observations', view.sections?.observations || [], true);
+            return lines.join('\n');
+        }
+
+        if (request.mode === 'search') {
+            lines.push('', `Search: ${request.query}`);
+            this.appendMemoryRecords(lines, 'Search Results', view.sections?.searchResults || [], true);
+            return lines.join('\n');
+        }
+
+        if (request.mode === 'raw') {
+            this.appendMemoryRecords(lines, 'Raw Memory', view.sections?.raw || [], true);
+            return lines.join('\n');
+        }
+
+        this.appendMemoryRecords(lines, 'Top Observations', view.sections?.observations || [], true);
+        this.appendMemoryRecords(lines, 'Facts', view.sections?.facts || [], false);
+        this.appendMemoryRecords(lines, 'Recent Experiences', view.sections?.recent || [], false);
+        return lines.join('\n');
+    }
+
+    private appendMemoryRecords(lines: string[], title: string, records: any[], showMeta: boolean) {
+        lines.push('', `### ${title}`);
+        if (!records || records.length === 0) {
+            lines.push('- No matching memories.');
+            return;
+        }
+
+        for (const record of records) {
+            const text = this.truncateMemoryText(record.text || '', 220);
+            const meta = showMeta
+                ? ` _(id: ${record.id}, type: ${record.type}, confidence: ${Number(record.confidence || 0).toFixed(2)})_`
+                : '';
+            lines.push(`- ${text}${meta}`);
+        }
+    }
+
+    private truncateMemoryText(text: string, max: number): string {
+        const normalized = text.replace(/\s+/g, ' ').trim();
+        return normalized.length <= max ? normalized : `${normalized.slice(0, max - 3)}...`;
+    }
+
+    private async handleForget(field: string, legacyCommand?: '/forget') {
         const f = field.trim().toLowerCase();
+        const compatibilityNote = legacyCommand === '/forget'
+            ? 'Compatibility note: `/forget` is now `/memory forget`.\n\n'
+            : '';
         if (!f) {
-            this.addMessage('system', '鐢ㄦ硶: `/forget <field>` 鎴?`/forget all`\n\n鍙仐蹇樺瓧娈? name, profession, expertise, preferences, workflows, projects, goals, all');
+            const command = legacyCommand === '/forget' ? '/forget' : '/memory forget';
+            this.addMessage('system', `${compatibilityNote}Usage: \`${command} <field>\` or \`${command} all\`\n\nForgettable fields: name, profession, expertise, preferences, workflows, projects, goals, all`);
             return;
         }
 
@@ -708,7 +831,7 @@ export class ChatController {
             : async (_forgetField: string) => undefined;
 
         if (!profile && typeof (this.api as any).forgetMemory !== 'function') {
-            this.addMessage('system', 'No user memory data available.');
+            this.addMessage('system', `${compatibilityNote}No user memory data available.`);
             return;
         }
 
@@ -719,38 +842,38 @@ export class ChatController {
                 workflows: [],
                 context: { currentProjects: [], goals: [], challenges: [] }
             });
-            await forgetHindsight(f);
-            this.addMessage('system', 'Cleared all remembered user data.');
+            const result = await forgetHindsight(f);
+            this.addMessage('system', `${compatibilityNote}${result?.message || 'Cleared all remembered user data.'}`);
         } else if (f === 'name') {
             if (profile) await this.api.updateProfile({ name: '' });
-            await forgetHindsight(f);
-            this.addMessage('system', '宸查仐蹇? name');
+            const result = await forgetHindsight(f);
+            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: name'}`);
         } else if (f === 'profession') {
             if (profile) await this.api.updateProfile({ profession: '' });
-            await forgetHindsight(f);
-            this.addMessage('system', '宸查仐蹇? profession');
+            const result = await forgetHindsight(f);
+            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: profession'}`);
         } else if (f === 'expertise') {
             if (profile) await this.api.updateProfile({ expertise: [] });
-            await forgetHindsight(f);
-            this.addMessage('system', '宸查仐蹇? expertise');
+            const result = await forgetHindsight(f);
+            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: expertise'}`);
         } else if (f === 'preferences') {
             if (profile) await this.api.updateProfile({ preferences: { language: 'zh-CN', responseStyle: 'balanced', topics: [] } });
-            await forgetHindsight(f);
-            this.addMessage('system', '宸查仐蹇? preferences');
+            const result = await forgetHindsight(f);
+            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: preferences'}`);
         } else if (f === 'workflows') {
             if (profile) await this.api.updateProfile({ workflows: [] });
-            await forgetHindsight(f);
-            this.addMessage('system', '宸查仐蹇? workflows');
+            const result = await forgetHindsight(f);
+            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: workflows'}`);
         } else if (f === 'projects') {
             if (profile) await this.api.updateProfile({ context: { ...profile.context, currentProjects: [] } });
-            await forgetHindsight(f);
-            this.addMessage('system', '宸查仐蹇? projects');
+            const result = await forgetHindsight(f);
+            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: projects'}`);
         } else if (f === 'goals') {
             if (profile) await this.api.updateProfile({ context: { ...profile.context, goals: [] } });
-            await forgetHindsight(f);
-            this.addMessage('system', '宸查仐蹇? goals');
+            const result = await forgetHindsight(f);
+            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: goals'}`);
         } else {
-            this.addMessage('system', `鏈煡瀛楁: ${f}\n鍙仐蹇樺瓧娈? name, profession, expertise, preferences, workflows, projects, goals, all`);
+            this.addMessage('system', `${compatibilityNote}Unknown field: ${f}\nForgettable fields: name, profession, expertise, preferences, workflows, projects, goals, all`);
         }
     }
 
@@ -830,9 +953,8 @@ export class ChatController {
     private showHelp() {
         const localCommands = [
             { command: '/clear', description: 'Clear session history' },
-            { command: '/profile', description: 'View user profile' },
+            { command: '/memory [overview|observations|search <query>|forget <field>]', description: 'View, search, and forget Hindsight memory' },
             { command: '/file-back <message-id>', description: 'Archive a previous AI answer to the knowledge wiki' },
-            { command: '/forget [field]', description: 'Forget user memory (name/profession/expertise/preferences/workflows/projects/goals/all)' },
             { command: '/new <title>', description: 'Create a new note' },
             { command: '/edit <instruction>', description: 'AI edit the selected text' },
             { command: '/open <file>', description: 'Open a file' },
@@ -868,8 +990,9 @@ export class ChatController {
 | Command | Description |
 |------|------|
 | \`/clear\` | Clear session history |
-| \`/profile\` | View the user profile |
-| \`/forget [field]\` | Forget saved user memory |
+| \`/memory\` | View Hindsight memory |
+| \`/memory search <query>\` | Search Hindsight memory |
+| \`/memory forget <field>\` | Forget saved memory |
 | \`/new <title>\` | Create a new note |
 | \`/edit <instruction>\` | AI edit the selected text |
 | \`/open <file>\` | Open a file |
@@ -886,7 +1009,7 @@ export class ChatController {
 
     private async handleWikiCompile(pathArg: string) {
         const path = pathArg.trim();
-        const plugin = (this.app as any).plugins?.plugins?.['obsidian-cli'];
+        const plugin = (this.app as any).plugins?.plugins?.[PLUGIN_ID];
         const runtime = plugin?.knowledgeRuntime;
 
         if (!runtime) {

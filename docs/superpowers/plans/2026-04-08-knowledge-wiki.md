@@ -218,7 +218,7 @@ export interface FileBackMetadata {
 
 // ===== Constants =====
 
-export const KNOWLEDGE_REGISTRY_PATH = '.obsidian/obsidian-cli/knowledge-registry.json';
+export const KNOWLEDGE_REGISTRY_PATH = '.obsidian/baizer/knowledge-registry.json';
 export const DEFAULT_WIKI_FOLDER = 'Knowledge Wiki';
 export const WIKI_ARTICLES_SUBFOLDER = 'Articles';
 export const WIKI_TOPICS_SUBFOLDER = 'Topics';
@@ -445,7 +445,7 @@ import {
 /**
  * 知识注册表管理器
  * 跟踪哪些笔记已进入知识管线及其当前状态
- * 存储位置：.obsidian/obsidian-cli/knowledge-registry.json
+ * 存储位置：.obsidian/baizer/knowledge-registry.json
  */
 export class KnowledgeRegistryManager {
   private registry: KnowledgeRegistry = { schema_version: 1, records: {} };

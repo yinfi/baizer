@@ -391,8 +391,8 @@ async function runTests() {
     menuActions[5].click();
 
     expect(commandCalls).toEqual([
-      'obsidian-cli:knowledge-open-index',
-      'obsidian-cli:knowledge-lint',
+      'baizer:knowledge-open-index',
+      'baizer:knowledge-lint',
     ]);
     expect(callbacks).toEqual(['compile-runtime', 'related', 'settings']);
   });

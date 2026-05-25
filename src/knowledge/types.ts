@@ -134,7 +134,6 @@ export interface OntologySchema {
 
 // ===== Constants =====
 
-export const LEGACY_REGISTRY_PATH = '.obsidian/obsidian-cli/knowledge-registry.json';
 export const DEFAULT_WIKI_FOLDER = 'Knowledge Wiki';
 export const WIKI_ARTICLES_SUBFOLDER = 'Articles';
 export const WIKI_TOPICS_SUBFOLDER = 'Topics';

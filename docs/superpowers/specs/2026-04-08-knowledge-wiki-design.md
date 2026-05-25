@@ -1,12 +1,12 @@
 # Knowledge Wiki 设计
 
 **Date:** 2026-04-08
-**Project:** `obsidian-cli`
+**Project:** `baizer`
 **Status:** Proposed design, pending spec review
 
 ## 目标
 
-为 Obsidian CLI 插件新增 LLM Wiki 功能：将指定文件夹中的笔记自动编译为结构化知识库，并在 Shell 问答和 Guardian 写作补全中消费这些知识，让 AI 输出融入用户个人积累，而非千篇一律的通用回答。
+为 Baizer 插件新增 LLM Wiki 功能：将指定文件夹中的笔记自动编译为结构化知识库，并在 Shell 问答和 Guardian 写作补全中消费这些知识，让 AI 输出融入用户个人积累，而非千篇一律的通用回答。
 
 ## 动机
 
@@ -98,7 +98,7 @@
 
 **职责：** 跟踪哪些笔记已进入知识管线及其当前状态。
 
-存储位置：`.obsidian/obsidian-cli/knowledge-registry.json`
+存储位置：`.obsidian/baizer/knowledge-registry.json`
 
 注册表记录结构：
 
