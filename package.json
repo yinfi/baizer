@@ -22,6 +22,7 @@
     "typescript": "^4.7.4"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.75.5",
     "@google/generative-ai": "^0.21.0",
     "@mozilla/readability": "^0.6.0",
     "yaml": "^2.8.3",
