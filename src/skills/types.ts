@@ -30,6 +30,9 @@ export interface ParameterDef {
   enum?: string[];
 }
 
+export type ToolExecutionMode = 'parallel' | 'sequential';
+export type ToolRisk = 'read' | 'write' | 'plugin-control' | 'network' | 'unknown';
+
 /**
  * 原子工具：无状态、可组合的最小操作单元
  * 不感知 Skill，不感知 AI，只做一件事
@@ -38,6 +41,9 @@ export interface Tool {
   name: string;
   description: string;
   parameters: ToolParameters;
+  executionMode?: ToolExecutionMode;
+  timeoutMs?: number;
+  risk?: ToolRisk;
   execute(args: any, ctx: ToolContext): Promise<any>;
 }
 
