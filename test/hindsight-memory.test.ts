@@ -205,7 +205,7 @@ async function runTests() {
     expect(memories.some((memory) => memory.text.includes('Product engineer'))).toBe(true);
   });
 
-  await test('migration ignores the previous plugin memory directory', async () => {
+  await test('migration imports the previous plugin memory directory', async () => {
     const previousMemoryDir = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
     const { app } = createApp({
       [`${previousMemoryDir}/user-profile.json`]: JSON.stringify({
@@ -217,6 +217,14 @@ async function runTests() {
       [`${previousMemoryDir}/session-summaries.json`]: JSON.stringify([
         { timestamp: 10, messageCount: 2, summary: 'Old summary.' },
       ]),
+      [`${previousMemoryDir}/memories.json`]: JSON.stringify([
+        makeMemory({
+          id: 'mem_previous_plugin',
+          text: 'Previous plugin memory fact.',
+          normalizedText: 'previous plugin memory fact.',
+          mentionedAt: 20,
+        }),
+      ]),
     });
     const store = new HindsightStore(app);
     await store.ready();
@@ -224,7 +232,10 @@ async function runTests() {
     const { migrateLegacyMemory } = await import('../src/memory/hindsight-migration');
     await migrateLegacyMemory(app, store, 5000);
 
-    expect(await store.listMemories()).toEqual([]);
+    const memories = await store.listMemories();
+    expect(memories.some((memory) => memory.text.includes('Previous plugin engineer'))).toBe(true);
+    expect(memories.some((memory) => memory.text.includes('Old summary.'))).toBe(true);
+    expect(memories.some((memory) => memory.id === 'mem_previous_plugin')).toBe(true);
   });
 
   await test('consolidator creates observations with evidence ids', async () => {

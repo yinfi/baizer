@@ -6,6 +6,7 @@ import {
   getProviderDeletionState,
   getMatchingSettingsSections,
   getSettingsSectionStatuses,
+  getSettingsFallbackCss,
 } from '../src/settings';
 
 function cloneSettings(): PluginSettings {
@@ -201,6 +202,24 @@ async function runTests() {
     }).toEqual({
       vaultWriteScope: 'all-vault',
       vaultWriteAllowedFolders: [],
+    });
+  });
+
+  await test('settings fallback CSS covers the Baizer configuration layout', () => {
+    const css = getSettingsFallbackCss();
+
+    expect({
+      hasRoot: css.includes('.baizer-settings-page'),
+      hasNav: css.includes('.baizer-settings-nav-list'),
+      hasCards: css.includes('.baizer-settings-section-card'),
+      hasWorkspace: css.includes('.baizer-settings-workspace'),
+      hasProviderCards: css.includes('.baizer-settings-provider-card'),
+    }).toEqual({
+      hasRoot: true,
+      hasNav: true,
+      hasCards: true,
+      hasWorkspace: true,
+      hasProviderCards: true,
     });
   });
 }

@@ -11,9 +11,14 @@ const BANKS_PATH = `${MEMORY_DIR}/banks.json`;
 const MEMORIES_PATH = `${MEMORY_DIR}/memories.json`;
 const MIGRATION_STATE_PATH = `${MEMORY_DIR}/migration-state.json`;
 
-interface MigrationState {
+export interface MigrationState {
   legacyProfileMigrated?: boolean;
   legacySummariesMigrated?: boolean;
+  previousProfileFileImported?: boolean;
+  previousSummariesFileImported?: boolean;
+  previousPluginProfileMigrated?: boolean;
+  previousPluginSummariesMigrated?: boolean;
+  previousPluginMemoriesMigrated?: boolean;
 }
 
 interface VaultAdapter {

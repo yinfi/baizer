@@ -18,7 +18,7 @@ import {
     RetainTurnInput,
 } from './hindsight-types';
 import { HindsightConsolidator } from './hindsight-consolidator';
-import { migrateLegacyMemory } from './hindsight-migration';
+import { importPreviousMemoryFiles, migrateLegacyMemory } from './hindsight-migration';
 import { HindsightRetriever } from './hindsight-retriever';
 import { HindsightStore } from './hindsight-store';
 
@@ -64,10 +64,11 @@ export class MemoryManager {
     }
 
     private async initialize() {
+        await this.hindsightStore.ready();
+        await importPreviousMemoryFiles(this.app, this.hindsightStore);
         await this.loadProfile();
         await this.loadSummaries();
         await this.loadChatHistory();
-        await this.hindsightStore.ready();
         await migrateLegacyMemory(this.app, this.hindsightStore);
     }
 

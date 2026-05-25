@@ -1,6 +1,7 @@
 import { execSync } from 'child_process';
 
 const tests = [
+  'test/brand.test.ts',
   'test/mcp-integration.test.ts',
   'test/skill-registry.test.ts',
   'test/obsidian-markdown-skill.test.ts',
