@@ -134,6 +134,71 @@ async function runTests() {
     ]]);
   });
 
+  await test('sends only the trailing Pi tool result batch to Baizer', async () => {
+    const session = createMockSession([
+      { type: 'text_delta', content: 'ok' },
+      { type: 'done', text: 'ok' },
+    ]);
+    const model = createPiBridgeModel();
+    const oldToolResult: ToolResultMessage = {
+      role: 'toolResult',
+      toolCallId: 'call_old',
+      toolName: 'read_note',
+      content: [{ type: 'text', text: '{"old":true}' }],
+      isError: false,
+      timestamp: 2,
+    };
+    const assistantMessage: any = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'old result processed' }],
+      api: 'baizer-bridge',
+      provider: 'baizer',
+      model: 'baizer-bridge',
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: 'stop',
+      timestamp: 3,
+    };
+    const newToolResult1: ToolResultMessage = {
+      role: 'toolResult',
+      toolCallId: 'call_new_1',
+      toolName: 'search_vault',
+      content: [{ type: 'text', text: '{"matches":["A.md"]}' }],
+      isError: false,
+      timestamp: 4,
+    };
+    const newToolResult2: ToolResultMessage = {
+      role: 'toolResult',
+      toolCallId: 'call_new_2',
+      toolName: 'read_note',
+      content: [{ type: 'text', text: '{"content":"A"}' }],
+      isError: false,
+      timestamp: 5,
+    };
+
+    const stream = createBaizerStreamFn(session)(model, {
+      messages: [
+        { role: 'user', content: 'start', timestamp: 1 },
+        oldToolResult,
+        assistantMessage,
+        newToolResult1,
+        newToolResult2,
+      ],
+    });
+    await collect(stream);
+
+    expect(session.inputs).toEqual([[
+      { id: 'call_new_1', name: 'search_vault', response: { matches: ['A.md'] } },
+      { id: 'call_new_2', name: 'read_note', response: { content: 'A' } },
+    ]]);
+  });
+
   await test('falls back to non-JSON tool result text as Baizer response', async () => {
     const session = createMockSession([
       { type: 'text_delta', content: 'ok' },

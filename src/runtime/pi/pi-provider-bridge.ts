@@ -255,14 +255,22 @@ export function getBaizerInput(context: Context): string | ToolResult[] {
   const lastMessage = messages[messages.length - 1];
 
   if (lastMessage?.role === 'toolResult') {
-    return messages
-      .filter((message): message is ToolResultMessage => message.role === 'toolResult')
-      .map(toolResultToBaizerInput);
+    return getTrailingToolResults(messages).map(toolResultToBaizerInput);
   }
 
   const lastUserMessage = [...messages].reverse().find(message => message.role === 'user');
   if (!lastUserMessage || lastUserMessage.role !== 'user') return '';
   return stringifyUserContent(lastUserMessage.content);
+}
+
+function getTrailingToolResults(messages: Context['messages']): ToolResultMessage[] {
+  const toolResults: ToolResultMessage[] = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role !== 'toolResult') break;
+    toolResults.unshift(message);
+  }
+  return toolResults;
 }
 
 function toolResultToBaizerInput(message: ToolResultMessage): ToolResult {
