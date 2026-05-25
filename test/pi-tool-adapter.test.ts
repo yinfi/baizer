@@ -191,6 +191,34 @@ async function runTests() {
       expect(e.message).toBe('Tool slow_tool execution timed out');
     }
   });
+
+  await test('does not execute tools when the signal is already aborted', async () => {
+    const workspaceCalls: any[] = [];
+    const controller = new AbortController();
+    controller.abort();
+    const piTools = adaptToolDefinitionsToPi({
+      definitions: [{ name: 'update_file', description: 'Update', parameters: { type: 'object', properties: {} } }],
+      toolRegistry: {
+        get: () => undefined,
+        execute: async () => ({ success: true }),
+      } as any,
+      workspaceEditService: {
+        executeWorkspaceTool: async (name: string, args: any) => {
+          workspaceCalls.push({ name, args });
+          return { success: true };
+        },
+      } as any,
+      skillScope: { allowedToolNames: null },
+    });
+
+    try {
+      await piTools[0].execute('call_1', { path: 'Notes/a.md', content: 'after' } as any, controller.signal);
+      throw new Error('Expected update_file to abort');
+    } catch (e: any) {
+      expect(e.name).toBe('AbortError');
+      expect(workspaceCalls).toEqual([]);
+    }
+  });
 }
 
 runTests().catch((e) => {

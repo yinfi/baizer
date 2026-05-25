@@ -39,8 +39,8 @@ export function adaptToolDefinitionsToPi(input: AdaptToolDefinitionsInput): Agen
       parameters: definition.parameters,
       executionMode: inferToolExecutionMode(definition.name, registeredTool),
       execute: async (_toolCallId: string, params: any, signal?: AbortSignal) => {
-        const response = await withTimeout(
-          executeBaizerTool(definition.name, params, input),
+        const response = await executeWithTimeout(
+          () => executeBaizerTool(definition.name, params, input),
           timeoutMs,
           `Tool ${definition.name} execution timed out`,
           signal,
@@ -110,8 +110,8 @@ function stringifyToolResponse(response: any): string {
   }
 }
 
-async function withTimeout<T>(
-  promise: Promise<T>,
+async function executeWithTimeout<T>(
+  operation: () => Promise<T>,
   timeoutMs: number,
   errorMessage: string,
   signal?: AbortSignal,
@@ -131,7 +131,7 @@ async function withTimeout<T>(
   });
 
   try {
-    return await Promise.race([promise, timeoutPromise]);
+    return await Promise.race([operation(), timeoutPromise]);
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
     if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
