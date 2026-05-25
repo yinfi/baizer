@@ -66,19 +66,19 @@ export class ToolRenderer {
 
   addToolCall(name: string, args: Record<string, unknown> = {}) {
     const id = `tool-${this.nodeCount + 1}`;
-    const node = (this.timeline as any).createDiv({ cls: 'ocli-tool-call think-node is-tool is-running' }) as HTMLElement;
+    const node = (this.timeline as any).createDiv({ cls: 'baizer-tool-call think-node is-tool is-running' }) as HTMLElement;
     node.dataset.toolName = name;
     node.dataset.toolRunId = id;
 
-    const header = (node as any).createDiv({ cls: 'ocli-tool-header think-node-header' }) as HTMLElement;
-    (header as any).createSpan({ cls: 'ocli-tool-icon think-node-icon', text: 'tool' });
-    (header as any).createSpan({ cls: 'ocli-tool-label think-node-label', text: getToolSummary(name, args) });
-    (header as any).createSpan({ cls: 'ocli-tool-status', text: 'Running' });
+    const header = (node as any).createDiv({ cls: 'baizer-tool-header think-node-header' }) as HTMLElement;
+    (header as any).createSpan({ cls: 'baizer-tool-icon think-node-icon', text: 'tool' });
+    (header as any).createSpan({ cls: 'baizer-tool-label think-node-label', text: getToolSummary(name, args) });
+    (header as any).createSpan({ cls: 'baizer-tool-status', text: 'Running' });
     this.setAttribute(header, 'role', 'button');
     this.setAttribute(header, 'tabindex', '0');
     this.setAttribute(header, 'aria-expanded', 'false');
 
-    const detail = (node as any).createDiv({ cls: 'ocli-tool-detail think-node-detail' }) as HTMLElement;
+    const detail = (node as any).createDiv({ cls: 'baizer-tool-detail think-node-detail' }) as HTMLElement;
     detail.textContent = `--- Input ---\n${safeStringify(args)}`;
 
     header.addEventListener('click', () => this.toggleExpanded(node, header));
@@ -104,10 +104,10 @@ export class ToolRenderer {
     const targetNode = this.findLatestNode(name);
     if (!targetNode) return;
 
-    const detail = targetNode.querySelector('.ocli-tool-detail') as HTMLElement
+    const detail = targetNode.querySelector('.baizer-tool-detail') as HTMLElement
       ?? targetNode.querySelector('.think-node-detail') as HTMLElement;
-    const statusCandidate = targetNode.querySelector('.ocli-tool-status') as HTMLElement;
-    const status = statusCandidate && this.hasClass(statusCandidate, 'ocli-tool-status')
+    const statusCandidate = targetNode.querySelector('.baizer-tool-status') as HTMLElement;
+    const status = statusCandidate && this.hasClass(statusCandidate, 'baizer-tool-status')
       ? statusCandidate
       : null;
     const resultText = error ? `Error: ${error}` : safeStringify(result);
@@ -155,7 +155,7 @@ export class ToolRenderer {
   }
 
   private getToolNodes() {
-    const newNodes = Array.from(this.timeline.querySelectorAll('.ocli-tool-call'));
+    const newNodes = Array.from(this.timeline.querySelectorAll('.baizer-tool-call'));
     if (newNodes.length > 0) return newNodes;
 
     return Array.from(this.timeline.querySelectorAll('.think-node'))

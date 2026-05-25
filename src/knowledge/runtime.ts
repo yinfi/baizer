@@ -13,7 +13,6 @@ import { MetadataIndex } from './metadata-index';
 import { KnowledgeStatusService } from './status-service';
 import {
   DEFAULT_WIKI_FOLDER,
-  LEGACY_REGISTRY_PATH,
   WIKI_INDEX_BASE_FILENAME,
   ONTOLOGY_SCHEMA_FILENAME,
   OntologySchema,
@@ -119,9 +118,6 @@ export class KnowledgeRuntime {
         await this.onMetadataReady();
       });
     }
-
-    // 迁移旧 registry（不依赖 metadataCache）
-    await this.migrateFromRegistry();
 
     // 迁移旧索引
     await this.indexer.migrateLegacyIndex();
@@ -235,42 +231,6 @@ export class KnowledgeRuntime {
     }
 
     return staleCount;
-  }
-
-  /** 一次性迁移：旧 registry JSON → frontmatter */
-  private async migrateFromRegistry(): Promise<void> {
-    const adapter = this.app.vault.adapter as any;
-    try {
-      if (!await adapter.exists(LEGACY_REGISTRY_PATH)) return;
-      const raw = await adapter.read(LEGACY_REGISTRY_PATH);
-      const registry = JSON.parse(raw);
-      const records = registry.records || {};
-      let migrated = 0;
-
-      for (const record of Object.values(records) as any[]) {
-        if (record.status !== 'done' && record.status !== 'failed') continue;
-        const file = this.app.vault.getAbstractFileByPath(record.path);
-        if (!file || !(file instanceof TFile)) continue;
-        const existing = getKnowledgeStatus(this.app, file);
-        if (existing) continue;
-
-        await setKnowledgeStatus(this.app, file, record.status, {
-          source_id: record.id,
-          compiled_at: record.updated_at,
-          summary: record.summary_path,
-          error: record.error,
-        });
-        migrated++;
-      }
-
-      await adapter.remove(LEGACY_REGISTRY_PATH);
-      if (migrated > 0) {
-        console.log(`[KnowledgeRuntime] Migrated ${migrated} records from registry to frontmatter`);
-        new Notice(`Knowledge Wiki: migrated ${migrated} records to frontmatter`);
-      }
-    } catch (e) {
-      console.error(`[KnowledgeRuntime] Registry migration error:`, e);
-    }
   }
 
   registerCommands(plugin: any): void {

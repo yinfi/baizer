@@ -143,11 +143,11 @@ async function runTests() {
     ]);
 
     expect(container.style.display).toBe('block');
-    expect(container.querySelectorAll('.ocli-history-item').length).toBe(2);
-    expect(container.querySelector('.ocli-history-title')?.textContent).toBe('Roadmap chat');
+    expect(container.querySelectorAll('.baizer-history-item').length).toBe(2);
+    expect(container.querySelector('.baizer-history-title')?.textContent).toBe('Roadmap chat');
 
-    container.querySelectorAll('.ocli-history-item')[0].click();
-    container.querySelectorAll('.ocli-history-item')[1].querySelector('.ocli-history-delete')?.click();
+    container.querySelectorAll('.baizer-history-item')[0].click();
+    container.querySelectorAll('.baizer-history-item')[1].querySelector('.baizer-history-delete')?.click();
 
     expect(opened).toEqual(['c-1']);
     expect(deleted).toEqual(['c-2']);
@@ -169,20 +169,20 @@ async function runTests() {
       { id: 'c-2', title: 'Daily note', updatedAt: 10, providerId: 'openai', modelId: 'gpt-4o', currentNote: 'Daily/2026-05-12.md' } as any,
     ]);
 
-    const search = container.querySelector('.ocli-history-search');
+    const search = container.querySelector('.baizer-history-search');
     if (!search) {
       throw new Error('Expected search input to exist');
     }
 
     search.input('daily');
 
-    expect(container.querySelectorAll('.ocli-history-item').length).toBe(1);
-    expect(container.querySelector('.ocli-history-title')?.textContent).toBe('Daily note');
+    expect(container.querySelectorAll('.baizer-history-item').length).toBe(1);
+    expect(container.querySelector('.baizer-history-title')?.textContent).toBe('Daily note');
 
     search.input('roadmap.md');
 
-    expect(container.querySelectorAll('.ocli-history-item').length).toBe(1);
-    expect(container.querySelector('.ocli-history-title')?.textContent).toBe('Roadmap chat');
+    expect(container.querySelectorAll('.baizer-history-item').length).toBe(1);
+    expect(container.querySelector('.baizer-history-title')?.textContent).toBe('Roadmap chat');
 
     search.keydown('Escape');
 
@@ -208,13 +208,13 @@ async function runTests() {
       { id: 'c-3', title: 'Old backlog', updatedAt: now - (8 * 24 * 60 * 60 * 1000), providerId: 'openai' } as any,
     ]);
 
-    expect(container.querySelectorAll('.ocli-history-group-title').map(item => item.textContent)).toEqual([
+    expect(container.querySelectorAll('.baizer-history-group-title').map(item => item.textContent)).toEqual([
       'Pinned',
       'Today',
       'Older',
     ]);
 
-    const pinButton = container.querySelector('.ocli-history-pin');
+    const pinButton = container.querySelector('.baizer-history-pin');
     if (!pinButton) {
       throw new Error('Expected pin button to exist');
     }
@@ -236,15 +236,15 @@ async function runTests() {
       { id: 'c-2', title: 'Daily note', updatedAt: 10, providerId: 'openai' },
     ]);
 
-    const search = container.querySelector('.ocli-history-search');
+    const search = container.querySelector('.baizer-history-search');
     if (!search) {
       throw new Error('Expected search input to exist');
     }
 
     search.input('missing');
 
-    expect(container.querySelectorAll('.ocli-history-item').length).toBe(0);
-    expect(container.querySelector('.ocli-history-empty')?.textContent).toBe('No matching conversations.');
+    expect(container.querySelectorAll('.baizer-history-item').length).toBe(0);
+    expect(container.querySelector('.baizer-history-empty')?.textContent).toBe('No matching conversations.');
   });
 
   await test('shows an empty state and can be hidden', () => {

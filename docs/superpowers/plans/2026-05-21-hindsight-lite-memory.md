@@ -6,7 +6,7 @@
 
 **Architecture:** Keep `MemoryManager` as the public facade used by `ModelService` and `ChatRuntime`, but move storage, retrieval, migration, and consolidation into focused Hindsight-lite modules. Runtime memory becomes query-aware: each turn recalls relevant `world`, `experience`, and `observation` records under a token budget, then retains the completed turn as structured local memories.
 
-**Tech Stack:** TypeScript, Obsidian Plugin API vault adapter storage, existing `IModelProvider`, existing custom `tsx` test harness, JSON files under `.obsidian/obsidian-cli-memory`.
+**Tech Stack:** TypeScript, Obsidian Plugin API vault adapter storage, existing `IModelProvider`, existing custom `tsx` test harness, JSON files under `.obsidian/baizer-memory`.
 
 ---
 
@@ -272,7 +272,7 @@ async function runTests() {
     expect(banks[0].id).toBe(DEFAULT_MEMORY_BANK_ID);
     expect(memories.length).toBe(1);
     expect(memories[0].normalizedText).toBe('user prefers local-first memory.');
-    expect(writes['.obsidian/obsidian-cli-memory/memories.json']).toContain('local-first');
+    expect(writes['.obsidian/baizer-memory/memories.json']).toContain('local-first');
   });
 
   await test('store treats duplicate ids as updates instead of duplicate rows', async () => {
@@ -318,7 +318,7 @@ export function createDefaultMemoryBank(now: number = Date.now()): MemoryBank {
   return {
     id: DEFAULT_MEMORY_BANK_ID,
     name: 'Default Vault Memory',
-    mission: 'Help Obsidian CLI personalize answers and remember durable user preferences, projects, decisions, and prior work.',
+    mission: 'Help Baizer personalize answers and remember durable user preferences, projects, decisions, and prior work.',
     directives: [
       'Prefer facts grounded in user messages or approved operations.',
       'Do not store secrets, API keys, tokens, passwords, or long private note excerpts.',
@@ -343,7 +343,7 @@ import {
   MemoryRecord,
 } from './hindsight-types';
 
-const MEMORY_DIR = '.obsidian/obsidian-cli-memory';
+const MEMORY_DIR = '.obsidian/baizer-memory';
 const BANKS_PATH = `${MEMORY_DIR}/banks.json`;
 const MEMORIES_PATH = `${MEMORY_DIR}/memories.json`;
 const MIGRATION_STATE_PATH = `${MEMORY_DIR}/migration-state.json`;
@@ -524,9 +524,9 @@ Append these tests inside `runTests()` in `test/hindsight-memory.test.ts`:
       makeMemory({
         id: 'mem_obsidian',
         type: 'world',
-        text: 'User is working on the Obsidian CLI memory layer.',
+        text: 'User is working on the Baizer memory layer.',
         normalizedText: 'user is working on the obsidian cli memory layer.',
-        entities: ['obsidian-cli', 'memory'],
+        entities: ['baizer', 'memory'],
         tags: ['project'],
         mentionedAt: 1000,
       }),
@@ -544,13 +544,13 @@ Append these tests inside `runTests()` in `test/hindsight-memory.test.ts`:
     const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
     const retriever = new HindsightRetriever(store);
     const result = await retriever.recall({
-      query: 'How should we improve Obsidian CLI memory?',
+      query: 'How should we improve Baizer memory?',
       maxRecords: 2,
       now: 3000,
     });
 
     expect(result.records[0].id).toBe('mem_obsidian');
-    expect(result.promptBlock).toContain('Obsidian CLI memory layer');
+    expect(result.promptBlock).toContain('Baizer memory layer');
   });
 
   await test('retriever respects max character budget', async () => {
@@ -717,14 +717,14 @@ Append this test inside `runTests()`:
 
 ```ts
   await test('migration converts legacy profile and summaries exactly once', async () => {
-    const profilePath = '.obsidian/obsidian-cli-memory/user-profile.json';
-    const summariesPath = '.obsidian/obsidian-cli-memory/session-summaries.json';
+    const profilePath = '.obsidian/baizer-memory/user-profile.json';
+    const summariesPath = '.obsidian/baizer-memory/session-summaries.json';
     const { app } = createApp({
       [profilePath]: JSON.stringify({
         profession: 'Product engineer',
         expertise: ['Obsidian plugins'],
         preferences: { responseStyle: 'concise', language: 'zh-CN', topics: [] },
-        context: { currentProjects: ['Obsidian CLI memory'], goals: ['local-first recall'], challenges: [] },
+        context: { currentProjects: ['Baizer memory'], goals: ['local-first recall'], challenges: [] },
         workflows: [],
         metadata: { totalInteractions: 4, createdAt: 1, updatedAt: 2, lastProfileUpdate: 2 },
       }),
@@ -774,7 +774,7 @@ import {
 } from './hindsight-types';
 import { HindsightStore } from './hindsight-store';
 
-const MEMORY_DIR = '.obsidian/obsidian-cli-memory';
+const MEMORY_DIR = '.obsidian/baizer-memory';
 const PROFILE_PATH = `${MEMORY_DIR}/user-profile.json`;
 const SUMMARIES_PATH = `${MEMORY_DIR}/session-summaries.json`;
 
@@ -1070,14 +1070,14 @@ In `test/memory-manager.test.ts`, add tests after the existing `buildContext app
     await memory.ready();
 
     await memory.retainTurn({
-      userMessage: 'I prefer local-first memory for Obsidian CLI.',
+      userMessage: 'I prefer local-first memory for Baizer.',
       assistantMessage: 'We will keep memory local.',
       source: 'shell',
       now: 1000,
     });
 
     const promptBlock = await memory.recallForPrompt({
-      query: 'How should Obsidian CLI memory work?',
+      query: 'How should Baizer memory work?',
       maxChars: 500,
       now: 2000,
     });
@@ -1387,7 +1387,7 @@ await test('runtime recalls relevant memory and retains completed turns', async 
   });
 
   const turn = await runtime.prepareTurn({
-    userMessage: 'Design memory for Obsidian CLI',
+    userMessage: 'Design memory for Baizer',
     contextItems: [],
     selection: '',
     source: 'shell',
@@ -1684,7 +1684,7 @@ Add this subsection under `## Interaction Model`:
 ```md
 ### Memory Model
 
-Obsidian CLI keeps memory local in `.obsidian/obsidian-cli-memory/`. The memory layer retains durable user facts, prior interaction outcomes, and synthesized observations. Each model turn recalls only memories relevant to the current request, under a prompt budget, instead of injecting the entire history.
+Baizer keeps memory local in `.obsidian/baizer-memory/`. The memory layer retains durable user facts, prior interaction outcomes, and synthesized observations. Each model turn recalls only memories relevant to the current request, under a prompt budget, instead of injecting the entire history.
 ```
 
 - [ ] **Step 2: Update runtime architecture doc**

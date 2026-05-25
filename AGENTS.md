@@ -4,9 +4,9 @@ This file provides guidance to coding agents working in this repository.
 
 ## Project Overview
 
-**Obsidian CLI** is an AI-powered Obsidian plugin that combines:
+**Baizer** is an AI-powered Obsidian plugin that combines:
 
-- A shell-style chat interface inside Obsidian
+- A workbench-style chat interface inside Obsidian
 - Guardian inline writing assistance
 - A skill-and-tool orchestration layer
 - A local knowledge wiki compiler

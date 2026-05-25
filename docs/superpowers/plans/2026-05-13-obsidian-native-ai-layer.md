@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 `obsidian-cli` 从 shell-first 的 AI 助手升级为 editor-first、knowledge-visible、preview-before-mutation 的 Obsidian 原生 AI 操作层。
+**Goal:** 把 `baizer` 从 shell-first 的 AI 助手升级为 editor-first、knowledge-visible、preview-before-mutation 的 Obsidian 原生 AI 操作层。
 
 **Architecture:** 保留现有 `ModelService -> ChatRuntime -> ToolRegistry / SkillRegistry -> KnowledgeRuntime` 执行链，在其上补三层产品抽象：`ObsidianContextService` 负责笔记语义上下文，`GenerationStrategyService` 负责任务解释与输出契约，`ChangePreview`/`OperationAuditLog` 负责可信写入链路。第一阶段不改动底层 provider、tool loop 和知识 frontmatter 基础格式，只在现有接口上增加可组合的服务和 UI。
 

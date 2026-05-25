@@ -87,7 +87,7 @@ async function runTests() {
     await store.save(snapshot('middle', 20));
 
     expect(adapter.folders.has('.obsidian')).toBe(true);
-    expect(adapter.folders.has('.obsidian/obsidian-cli')).toBe(true);
+    expect(adapter.folders.has('.obsidian/baizer')).toBe(true);
     expect((await store.list()).map(item => item.id)).toEqual(['new', 'middle', 'old']);
 
     const stored = JSON.parse(adapter.files.get(CONVERSATION_STORE_PATH) || '{}');
@@ -125,7 +125,7 @@ async function runTests() {
   await test('falls back to an empty list when the store file is corrupted', async () => {
     const adapter = new FakeAdapter();
     adapter.folders.add('.obsidian');
-    adapter.folders.add('.obsidian/obsidian-cli');
+    adapter.folders.add('.obsidian/baizer');
     adapter.files.set(CONVERSATION_STORE_PATH, '{bad json');
     const { store } = createStore(ConversationStore, adapter);
 

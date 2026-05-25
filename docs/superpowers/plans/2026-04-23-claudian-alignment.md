@@ -1,8 +1,8 @@
-# Obsidian CLI 对标 Claudian 改进计划
+# Baizer 对标 Claudian 改进计划
 
 > **For agentic workers:** REQUIRED: Use `superpowers:subagent-driven-development` (if subagents available) or `superpowers:executing-plans` to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让 `obsidian-cli` 从“可工作的多模型 Obsidian AI 插件”升级为“边界清晰、权限安全、可扩展的 agent runtime”。
+**Goal:** 让 `baizer` 从“可工作的多模型 Obsidian AI 插件”升级为“边界清晰、权限安全、可扩展的 agent runtime”。
 
 **Architecture:** 保留当前 `KnowledgeRuntime + ToolRegistry + SkillRegistry` 的产品方向，不照搬 `claudian` 的全部复杂度；优先补齐 Skill 路由、权限确认、测试体系和 runtime 分层，再逐步拆出 provider runtime 和 chat controller 边界。
 

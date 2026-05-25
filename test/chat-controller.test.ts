@@ -175,6 +175,55 @@ async function runTests() {
     controller.cleanup();
   });
 
+  await test('/memory overview renders Hindsight memory view', async () => {
+    const messages: any[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        getMemoryView: async () => ({
+          privacyMode: false,
+          stats: { total: 2, world: 1, experience: 1, observation: 0, lastUpdatedAt: 2000 },
+          sections: {
+            observations: [],
+            facts: [{
+              id: 'mem_fact',
+              type: 'world',
+              text: 'User stated: I prefer local-first memory.',
+              confidence: 0.75,
+              tags: ['preference'],
+            }],
+            recent: [{
+              id: 'mem_recent',
+              type: 'experience',
+              text: 'Assistant outcome: Acknowledged.',
+              confidence: 0.55,
+              tags: ['assistant-outcome'],
+            }],
+            searchResults: [],
+            raw: [],
+          },
+          legacyProfile: null,
+        }),
+        getUserProfile: () => null,
+        updateProfile: async () => undefined,
+        getAvailableTools: () => [],
+        clearSession: async () => undefined,
+      } as any,
+      onMessageAdded: (message) => messages.push(message),
+    });
+
+    await controller.processCommand('/memory overview');
+
+    const content = messages[messages.length - 1].content;
+    expect(content).toContain('Hindsight Memory');
+    expect(content).toContain('Total: 2');
+    expect(content).toContain('local-first memory');
+    controller.cleanup();
+  });
+
   await test('/forget all clears profile and hindsight memories', async () => {
     const messages: any[] = [];
     const calls: any[] = [];
@@ -210,6 +259,45 @@ async function runTests() {
     expect(calls.map(call => call.type)).toEqual(['updateProfile', 'forgetMemory']);
     expect(calls[1].field).toBe('all');
     expect(messages[messages.length - 1].content).toContain('Cleared all remembered user data');
+    controller.cleanup();
+  });
+
+  await test('/memory forget all clears profile and hindsight memories', async () => {
+    const messages: any[] = [];
+    const calls: any[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        getUserProfile: () => ({
+          name: 'User',
+          profession: 'Engineer',
+          expertise: ['Obsidian'],
+          preferences: { responseStyle: 'balanced' },
+          workflows: [],
+          context: { currentProjects: ['LaunchPlan'], goals: ['Ship memory'], challenges: [] },
+          metadata: { totalInteractions: 1, updatedAt: 1, lastProfileUpdate: 1 },
+        }),
+        updateProfile: async (updates: any) => {
+          calls.push({ type: 'updateProfile', updates });
+        },
+        forgetMemory: async (field: string) => {
+          calls.push({ type: 'forgetMemory', field });
+          return { success: true, deletedCount: 2, message: `forgot ${field}` };
+        },
+        getAvailableTools: () => [],
+        clearSession: async () => undefined,
+      } as any,
+      onMessageAdded: (message) => messages.push(message),
+    });
+
+    await controller.processCommand('/memory forget all');
+
+    expect(calls.map(call => call.type)).toEqual(['updateProfile', 'forgetMemory']);
+    expect(calls[1].field).toBe('all');
+    expect(messages[messages.length - 1].content).toContain('forgot all');
     controller.cleanup();
   });
 
@@ -275,6 +363,9 @@ async function runTests() {
 
     const help = messages[messages.length - 1].content;
     expect(help).toContain('## Shell Commands');
+    expect(help).toContain('`/memory [overview|observations|search <query>|forget <field>]`');
+    expect(help).notToContain('`/profile`');
+    expect(help).notToContain('`/forget [field]`');
     expect(help).toContain('`/file-back <message-id>`');
     expect(help).toContain('## Skill Commands');
     expect(help).toContain('`/save`');
@@ -638,7 +729,7 @@ async function runTests() {
       app: {
         plugins: {
           plugins: {
-            'obsidian-cli': {
+            baizer: {
               toolRegistry: {
                 execute: async (action: string, args: Record<string, any>) => {
                   executedTools.push({ action, args });

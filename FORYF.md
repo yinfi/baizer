@@ -41,7 +41,7 @@
 ---
 
 
-- 实现了 Obsidian Shell 的流式输出 + Think 时间线功能，涉及 7 个文件的改动：interfaces.ts（StreamEvent 类型）、gemini.ts/openai.ts（双 provider 流式）、model-service.ts（chatStream 编排）、chat-controller.ts（流式接入）、shell-view.ts（时间线 UI + debounced 渲染）、styles.css（时间线样式）
+- 实现了 Baizer 的流式输出 + Think 时间线功能，涉及 7 个文件的改动：interfaces.ts（StreamEvent 类型）、gemini.ts/openai.ts（双 provider 流式）、model-service.ts（chatStream 编排）、chat-controller.ts（流式接入）、shell-view.ts（时间线 UI + debounced 渲染）、styles.css（时间线样式）
 
 **2. 为什么要这么做？ (Why was it done?)**
 - 原来 AI 响应是一次性返回，用户需要等待完整响应。流式输出让文本逐字显示，thinking token 和 function call 步骤以可折叠时间线展示，大幅提升交互体验。
@@ -244,7 +244,7 @@
 
 **1. 刚刚做了什么？ (What was done?)**
 - SkillRegistry.loadUserSkills 接入 SkillLoader，从 vault 目录加载用户自定义 SKILL.md
-- main.ts 启动时扫描 .obsidian/obsidian-cli/skills/ 目录
+- main.ts 启动时扫描 .obsidian/baizer/skills/ 目录
 
 **2. 为什么要这么做？ (Why was it done?)**
 - Phase 4 目标：用户可以在 vault 中创建 SKILL.md 扩展 AI 能力
@@ -461,7 +461,7 @@
 **1. 刚刚做了什么？ (What was done?)**
 - 通过 /office-hours 完成了"本体模型驱动 Knowledge Wiki"的完整设计文档
 - 经过需求诊断（3 个 forcing questions）、前提挑战、市场搜索、独立第二意见、方案对比、对抗性审查
-- 设计文档存放在 `~/.gstack/projects/yinfi-obsidian-cli/Administrator-main-design-20260415-094500.md`
+- 设计文档存放在 `~/.gstack/projects/yinfi-baizer/Administrator-main-design-20260415-094500.md`
 
 **2. 为什么要这么做？ (Why was it done?)**
 - 现有 Knowledge Wiki 的 compiler 让 AI 自由提取，提取质量不可控不可预测

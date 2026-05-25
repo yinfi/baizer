@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Obsidian CLI** (also known as Gemini Shell) is an AI-powered Obsidian plugin that integrates Google Gemini AI into the note-taking workflow. It provides:
+**Baizer** is an AI-powered Obsidian plugin that integrates multi-provider AI into the note-taking workflow. It provides:
 
-- **Gemini Shell**: A terminal-like interface for natural language interaction with your vault
+- **Baizer Workbench**: A compact chat workspace for natural language interaction with your vault
 - **Guardian Mode**: An AI co-writer that provides inline suggestions via Ghost Text
 - **MCP-style Tools**: File operations, web search, webpage saving, and plugin orchestration
 - **Persistent Memory**: User profiling and session history stored locally
@@ -66,7 +66,7 @@ npm install
 
 ## Shell Commands
 
-Built-in commands in Gemini Shell:
+Built-in commands in Baizer:
 - `/clear` - Clear session history
 - `/profile` - View user profile
 - `/tools` - List available MCP tools
@@ -76,7 +76,7 @@ Built-in commands in Gemini Shell:
 
 ## Hotkeys
 
-- `Mod+J` - Open Gemini Shell
+- `Mod+J` - Open Baizer
 - `Mod+Shift+G` - Guardian manual trigger
 
 ## Supported Tools

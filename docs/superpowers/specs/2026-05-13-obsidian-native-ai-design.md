@@ -1,12 +1,12 @@
 # Obsidian 原生 AI 操作层设计方案
 
 **Date:** 2026-05-13
-**Project:** `obsidian-cli`
+**Project:** `baizer`
 **Status:** Proposed design, pending review
 
 ## 目标
 
-将 `obsidian-cli` 从“可在 Obsidian 中使用的 AI Shell”升级为“以笔记、编辑器、知识网络和插件工作流为中心的 Obsidian 原生 AI 操作层”。
+将 `baizer` 从“可在 Obsidian 中使用的 AI Shell”升级为“以笔记、编辑器、知识网络和插件工作流为中心的 Obsidian 原生 AI 操作层”。
 
 这个升级包含两条同等重要的目标：
 
@@ -201,7 +201,7 @@ AI 不只是“会操作 Obsidian 文件”，而是“理解这个 vault 的工
 
 ### 产品定位
 
-`obsidian-cli` 是 Obsidian 内的 AI 操作层。它帮助用户在笔记、知识网络和插件工作流中完成阅读、思考、编辑、整理、归档和执行，而不是把外部 Agent 终端照搬到 Obsidian 中。
+`baizer` 是 Obsidian 内的 AI 操作层。它帮助用户在笔记、知识网络和插件工作流中完成阅读、思考、编辑、整理、归档和执行，而不是把外部 Agent 终端照搬到 Obsidian 中。
 
 ### 用户入口模型
 
@@ -999,7 +999,7 @@ slash command 保留给高频显式操作：
 
 ## 结论
 
-本设计不把 `obsidian-cli` 推向 Claudian 那种 Agent 工作台，而是把它收敛成一个真正围绕 Obsidian 工作方式构建的 AI 操作层。
+本设计不把 `baizer` 推向 Claudian 那种 Agent 工作台，而是把它收敛成一个真正围绕 Obsidian 工作方式构建的 AI 操作层。
 
 关键判断有四个：
 

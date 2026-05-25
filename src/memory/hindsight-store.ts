@@ -5,8 +5,8 @@ import {
   MemoryBank,
   MemoryRecord,
 } from './hindsight-types';
+import { MEMORY_DIR } from '../mcp/types';
 
-const MEMORY_DIR = '.obsidian/obsidian-cli-memory';
 const BANKS_PATH = `${MEMORY_DIR}/banks.json`;
 const MEMORIES_PATH = `${MEMORY_DIR}/memories.json`;
 const MIGRATION_STATE_PATH = `${MEMORY_DIR}/migration-state.json`;

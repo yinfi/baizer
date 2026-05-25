@@ -4,6 +4,7 @@ import {
   getProviderCardMeta,
   getProviderListSummary,
   getProviderDeletionState,
+  getMatchingSettingsSections,
   getSettingsSectionStatuses,
 } from '../src/settings';
 
@@ -72,6 +73,19 @@ async function runTests() {
     settings.enableGuardian = true;
     statuses = getSettingsSectionStatuses(settings);
     expect(statuses.guardian).toEqual(undefined);
+  });
+
+  await test('settings search exposes the Memory section', () => {
+    expect(getMatchingSettingsSections('memory')).toEqual(['memory']);
+  });
+
+  await test('marks Memory as private when privacy mode is enabled', () => {
+    const settings = cloneSettings();
+    settings.privacyMode = true;
+
+    const statuses = getSettingsSectionStatuses(settings);
+
+    expect(statuses.memory).toEqual({ label: 'Private', tone: 'accent' });
   });
 
   await test('marks permissions as risky when plugin control is enabled', () => {

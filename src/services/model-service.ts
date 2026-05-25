@@ -1,7 +1,7 @@
 import { App, Notice } from 'obsidian';
 import { PluginSettings, ProviderConfig } from '../mcp/types';
 import { MemoryManager } from '../memory/memory-manager';
-import { UserProfile } from '../memory/types';
+import { MemoryMutationResult, MemoryView, MemoryViewRequest, UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
 import { IModelProvider, ModelOption, ToolDefinition, StreamEvent } from '../models/interfaces';
 import { GeminiProvider } from '../models/gemini';
@@ -382,16 +382,22 @@ export class ModelService {
         return this.memoryManager ? this.memoryManager.getProfile() : null;
     }
 
+    async getMemoryView(request: MemoryViewRequest = {}): Promise<MemoryView | null> {
+        return this.memoryManager ? await this.memoryManager.getMemoryView(request) : null;
+    }
+
     async updateProfile(updates: Partial<UserProfile>) {
         if (this.memoryManager) {
             await this.memoryManager.updateProfile(updates);
         }
     }
 
-    async forgetMemory(field: string) {
-        if (this.memoryManager) {
-            await this.memoryManager.forgetMemory(field);
-        }
+    async forgetMemory(field: string): Promise<MemoryMutationResult | null> {
+        return this.memoryManager ? await this.memoryManager.forgetMemory(field) : null;
+    }
+
+    async deleteMemoryById(id: string): Promise<MemoryMutationResult | null> {
+        return this.memoryManager ? await this.memoryManager.deleteMemoryById(id) : null;
     }
 
     async learnFromMessages(messages: string[]): Promise<any> {
