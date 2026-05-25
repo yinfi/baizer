@@ -7,6 +7,7 @@ const tests = [
   'test/skill-routing.test.ts',
   'test/model-service.test.ts',
   'test/chat-runtime.test.ts',
+  'test/pi-runtime-factory.test.ts',
   'test/generation-strategy-service.test.ts',
   'test/generation-quality.test.ts',
   'test/change-preview.test.ts',
