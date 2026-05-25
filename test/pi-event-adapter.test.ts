@@ -69,6 +69,23 @@ async function runTests() {
     })).toEqual({ success: true });
   });
 
+  await test('unwraps JSON text content when Baizer details are absent', () => {
+    expect(unwrapPiToolResult({
+      content: [{ type: 'text', text: '{"path":"note.md"}' }],
+    })).toEqual({ path: 'note.md' });
+  });
+
+  await test('unwraps non-JSON text content as a message object', () => {
+    expect(unwrapPiToolResult({
+      content: [{ type: 'text', text: 'plain error' }],
+    })).toEqual({ message: 'plain error' });
+  });
+
+  await test('returns the original result when content is empty', () => {
+    const result = { content: [] };
+    expect(unwrapPiToolResult(result)).toEqual(result);
+  });
+
   await test('maps tool execution end', () => {
     expect(mapPiEventToStreamEvent({
       type: 'tool_execution_end',
@@ -85,6 +102,39 @@ async function runTests() {
       type: 'tool_result',
       name: 'read_note',
       result: { path: 'note.md' },
+    });
+  });
+
+  await test('maps tool execution errors with details error first', () => {
+    expect(mapPiEventToStreamEvent({
+      type: 'tool_execution_end',
+      toolName: 'read_note',
+      result: {
+        content: [{ type: 'text', text: 'fallback error' }],
+        details: { error: 'details error' },
+      },
+      isError: true,
+    } as any)).toEqual({
+      type: 'tool_result',
+      name: 'read_note',
+      result: { message: 'fallback error' },
+      error: 'details error',
+    });
+  });
+
+  await test('maps tool execution errors from text content', () => {
+    expect(mapPiEventToStreamEvent({
+      type: 'tool_execution_end',
+      toolName: 'read_note',
+      result: {
+        content: [{ type: 'text', text: 'text error' }],
+      },
+      isError: true,
+    } as any)).toEqual({
+      type: 'tool_result',
+      name: 'read_note',
+      result: { message: 'text error' },
+      error: 'text error',
     });
   });
 
