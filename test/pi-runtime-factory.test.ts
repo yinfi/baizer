@@ -50,9 +50,12 @@ async function runTests() {
 
   await test('can create the Pi runtime through the internal engine flag', () => {
     setRuntimeEngineForTesting('pi');
-    const runtime = createChatRuntime(deps);
-    expect(runtime.constructor.name).toBe('PiChatRuntime');
-    resetRuntimeEngineForTesting();
+    try {
+      const runtime = createChatRuntime(deps);
+      expect(runtime.constructor.name).toBe('PiChatRuntime');
+    } finally {
+      resetRuntimeEngineForTesting();
+    }
   });
 }
 
