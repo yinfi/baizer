@@ -15,6 +15,7 @@ export interface WorkspaceEditSummary {
 }
 
 interface WorkspaceEditRecord {
+  order: number;
   summary: WorkspaceEditSummary;
   beforeExists: boolean;
   beforeContent: string;
@@ -52,6 +53,7 @@ export function isDirectApplyWorkspaceTool(name: string): boolean {
 
 export class WorkspaceEditService {
   private readonly records = new Map<string, WorkspaceEditRecord>();
+  private nextEditOrder = 0;
 
   constructor(
     private readonly app: App,
@@ -88,6 +90,7 @@ export class WorkspaceEditService {
     };
 
     this.records.set(summary.id, {
+      order: ++this.nextEditOrder,
       summary,
       beforeExists: beforeSnapshot.exists,
       beforeContent: beforeSnapshot.content,
@@ -145,7 +148,7 @@ export class WorkspaceEditService {
   async undoAllWorkspaceEdits(): Promise<WorkspaceEditResult[]> {
     const active = Array.from(this.records.values())
       .filter(record => record.summary.status === 'applied')
-      .sort((a, b) => b.summary.appliedAt - a.summary.appliedAt);
+      .sort((a, b) => b.order - a.order);
 
     const results: WorkspaceEditResult[] = [];
     for (const record of active) {
@@ -162,7 +165,7 @@ export class WorkspaceEditService {
     const newer = Array.from(this.records.values()).some(candidate =>
       candidate.summary.status === 'applied'
       && candidate.summary.path === record.summary.path
-      && candidate.summary.appliedAt > record.summary.appliedAt
+      && candidate.order > record.order
     );
     return !newer;
   }
