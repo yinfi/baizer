@@ -1,12 +1,8 @@
-import { MemoryManager } from '../memory/memory-manager';
 import {
   ChatContextItem,
-  IModelProvider,
   StreamEvent,
   ToolDefinition,
 } from '../models/interfaces';
-import { SkillRegistry } from '../skills/skill-registry';
-import { ToolRegistry } from '../skills/tool-registry';
 import {
   buildFileWriteFailureMessage,
   FILE_OPERATION_CONTRACT_TEXT,
@@ -17,16 +13,8 @@ import {
 } from '../utils/file-operation-contract';
 import { evaluateGenerationQuality } from '../services/generation-quality';
 import { formatGenerationPlanBlock, GenerationStrategyService } from '../services/generation-strategy-service';
-import { WorkspaceEditService, isDirectApplyWorkspaceTool } from '../services/workspace-edit-service';
-import { PreparedChatTurn, ChatRuntime, ChatTurnRequest } from './runtime-types';
-
-interface ChatRuntimeDeps {
-  provider: IModelProvider;
-  memoryManager: MemoryManager | null;
-  toolRegistry: ToolRegistry;
-  skillRegistry: SkillRegistry;
-  workspaceEditService?: Pick<WorkspaceEditService, 'executeWorkspaceTool'> | null;
-}
+import { isDirectApplyWorkspaceTool } from '../services/workspace-edit-service';
+import { PreparedChatTurn, ChatRuntime, ChatRuntimeDeps, ChatTurnRequest } from './runtime-types';
 
 interface ActiveSkillScope {
   activeSkillName?: string;
