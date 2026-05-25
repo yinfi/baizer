@@ -72,14 +72,94 @@ async function runTests() {
     expect(result.details.baizerResponse).toEqual({ success: true, path: 'Notes/a.md' });
   });
 
-  await test('blocks tools outside active skill scope', async () => {
+  await test('routes normal tools through ToolRegistry', async () => {
+    const registryCalls: any[] = [];
     const piTools = adaptToolDefinitionsToPi({
-      definitions: [{ name: 'search_vault', description: 'Search', parameters: { type: 'object', properties: {} } }],
+      definitions: [{ name: 'read_note', description: 'Read note', parameters: { type: 'object', properties: {} } }],
+      toolRegistry: {
+        get: () => undefined,
+        execute: async (name: string, args: any) => {
+          registryCalls.push({ name, args });
+          return { success: true, content: 'Note' };
+        },
+      } as any,
+      workspaceEditService: null,
+      skillScope: { allowedToolNames: null },
+    });
+
+    const result = await piTools[0].execute('call_1', { path: 'Notes/a.md' } as any);
+    expect(registryCalls).toEqual([{ name: 'read_note', args: { path: 'Notes/a.md' } }]);
+    expect(result.details.baizerResponse).toEqual({ success: true, content: 'Note' });
+  });
+
+  await test('terminates after approval-required tool responses', async () => {
+    const piTools = adaptToolDefinitionsToPi({
+      definitions: [{ name: 'create_file', description: 'Create file', parameters: { type: 'object', properties: {} } }],
+      toolRegistry: {
+        get: () => undefined,
+        execute: async () => ({
+          approval_required: true,
+          action: 'create_file',
+          target: 'Notes/a.md',
+        }),
+      } as any,
+      workspaceEditService: null,
+      skillScope: { allowedToolNames: null },
+    });
+
+    const result = await piTools[0].execute('call_1', { path: 'Notes/a.md' } as any);
+    expect(result.terminate).toBe(true);
+    expect(result.details.baizerResponse.approval_required).toBe(true);
+  });
+
+  await test('activates skills through the use_skill pseudo-tool', async () => {
+    const registryCalls: any[] = [];
+    const skillScope = { allowedToolNames: null as Set<string> | null };
+    const piTools = adaptToolDefinitionsToPi({
+      definitions: [{ name: 'use_skill', description: 'Use skill', parameters: { type: 'object', properties: {} } }],
+      toolRegistry: {
+        get: () => undefined,
+        execute: async (name: string, args: any) => {
+          registryCalls.push({ name, args });
+          return { success: true };
+        },
+      } as any,
+      skillRegistry: {
+        activateSkill: (name: string) => ({
+          skill: { name },
+          instructions: 'Search instructions',
+          tools: [{ name: 'web_search' }],
+        }),
+      } as any,
+      workspaceEditService: null,
+      skillScope,
+    });
+
+    const result = await piTools[0].execute('call_1', { name: 'web-search' } as any);
+    expect(registryCalls).toEqual([]);
+    expect(skillScope.allowedToolNames instanceof Set).toBe(true);
+    expect(Array.from(skillScope.allowedToolNames || [])).toEqual(['web_search']);
+    expect(result.details.baizerResponse).toEqual({
+      action_required: 'Use the returned instructions immediately with the available tools to complete the user request.',
+      instructions: 'Search instructions',
+      available_tools: ['web_search'],
+    });
+  });
+
+  await test('blocks tools outside active skill scope', async () => {
+    const workspaceCalls: any[] = [];
+    const piTools = adaptToolDefinitionsToPi({
+      definitions: [{ name: 'update_file', description: 'Update', parameters: { type: 'object', properties: {} } }],
       toolRegistry: {
         get: () => undefined,
         execute: async () => ({ success: true }),
       } as any,
-      workspaceEditService: null,
+      workspaceEditService: {
+        executeWorkspaceTool: async (name: string, args: any) => {
+          workspaceCalls.push({ name, args });
+          return { success: true };
+        },
+      } as any,
       skillScope: {
         activeSkillName: 'web-search',
         allowedToolNames: new Set(['web_search']),
@@ -87,9 +167,29 @@ async function runTests() {
     });
 
     const result = await piTools[0].execute('call_1', { query: 'obsidian' } as any);
+    expect(workspaceCalls).toEqual([]);
     expect(result.details.baizerResponse).toEqual({
-      error: 'Tool "search_vault" is not available for active skill "web-search"',
+      error: 'Tool "update_file" is not available for active skill "web-search"',
     });
+  });
+
+  await test('rejects tool execution after the registered timeout', async () => {
+    const piTools = adaptToolDefinitionsToPi({
+      definitions: [{ name: 'slow_tool', description: 'Slow', parameters: { type: 'object', properties: {} } }],
+      toolRegistry: {
+        get: () => ({ timeoutMs: 1 }),
+        execute: async () => new Promise(() => undefined),
+      } as any,
+      workspaceEditService: null,
+      skillScope: { allowedToolNames: null },
+    });
+
+    try {
+      await piTools[0].execute('call_1', {} as any);
+      throw new Error('Expected slow_tool to time out');
+    } catch (e: any) {
+      expect(e.message).toBe('Tool slow_tool execution timed out');
+    }
   });
 }
 
