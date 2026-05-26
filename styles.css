@@ -1,20 +1,20 @@
-﻿/* ==========================================================================
-   Obsidian Shell - Sidebar UI
+/* ==========================================================================
+   Baizer - Sidebar UI
    ========================================================================== */
 
 /* Fix Obsidian parent containers to enable flexbox layout */
-.workspace-leaf-content:has(.ocli-shell-view) {
+.workspace-leaf-content:has(.baizer-shell-view) {
     display: flex !important;
     flex-direction: column !important;
 }
 
-.workspace-leaf-content:has(.ocli-shell-view)>.view-content {
+.workspace-leaf-content:has(.baizer-shell-view)>.view-content {
     display: flex !important;
     flex-direction: column !important;
     flex: 1 !important;
 }
 
-.ocli-shell-view {
+.baizer-shell-view {
     display: flex !important;
     flex-direction: column !important;
     height: 100% !important;
@@ -69,14 +69,14 @@
     display: none;
 }
 
-.ocli-tab-badges {
+.baizer-tab-badges {
     display: flex;
     align-items: center;
     gap: 6px;
     min-height: 28px;
 }
 
-.ocli-tab-badge {
+.baizer-tab-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -94,33 +94,33 @@
     transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-.ocli-tab-badge:hover {
+.baizer-tab-badge:hover {
     background: var(--background-modifier-hover);
     color: var(--text-normal);
 }
 
-.ocli-tab-badge-active {
+.baizer-tab-badge-active {
     background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
     border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
     color: var(--text-normal);
 }
 
-.ocli-tab-badge-streaming {
+.baizer-tab-badge-streaming {
     border-color: color-mix(in srgb, var(--interactive-accent) 35%, var(--background-modifier-border));
     color: var(--text-accent);
 }
 
-.ocli-tab-badge-attention {
+.baizer-tab-badge-attention {
     border-color: color-mix(in srgb, var(--color-orange) 45%, var(--background-modifier-border));
     color: var(--color-orange);
 }
 
-.ocli-tab-new {
+.baizer-tab-new {
     background: transparent;
     border-style: dashed;
 }
 
-.ocli-history-menu {
+.baizer-history-menu {
     position: absolute;
     top: calc(100% + 6px);
     right: 0;
@@ -136,7 +136,7 @@
     box-shadow: var(--shadow-s);
 }
 
-.ocli-history-toolbar {
+.baizer-history-toolbar {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -144,7 +144,7 @@
     padding: 2px;
 }
 
-.ocli-history-search {
+.baizer-history-search {
     flex: 1 1 auto;
     min-width: 0;
     height: 30px;
@@ -156,25 +156,25 @@
     font-size: var(--font-ui-small);
 }
 
-.ocli-history-count {
+.baizer-history-count {
     flex-shrink: 0;
     color: var(--text-muted);
     font-size: var(--font-smallest);
 }
 
-.ocli-history-group {
+.baizer-history-group {
     display: flex;
     flex-direction: column;
     gap: 4px;
 }
 
-.ocli-history-group + .ocli-history-group {
+.baizer-history-group + .baizer-history-group {
     margin-top: 10px;
     padding-top: 10px;
     border-top: 1px solid var(--background-modifier-border);
 }
 
-.ocli-history-group-title {
+.baizer-history-group-title {
     padding: 0 6px;
     color: var(--text-faint);
     font-size: var(--font-smallest);
@@ -183,7 +183,7 @@
     text-transform: uppercase;
 }
 
-.ocli-history-item {
+.baizer-history-item {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
@@ -194,18 +194,18 @@
     cursor: pointer;
 }
 
-.ocli-history-item.is-active {
+.baizer-history-item.is-active {
     background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
     border: 1px solid color-mix(in srgb, var(--interactive-accent) 35%, var(--background-modifier-border));
 }
 
-.ocli-history-item:hover,
-.ocli-history-item:focus-visible {
+.baizer-history-item:hover,
+.baizer-history-item:focus-visible {
     background: var(--background-modifier-hover);
     outline: none;
 }
 
-.ocli-history-body {
+.baizer-history-body {
     flex: 1 1 auto;
     min-width: 0;
     display: flex;
@@ -213,7 +213,7 @@
     gap: 4px;
 }
 
-.ocli-history-title {
+.baizer-history-title {
     color: var(--text-normal);
     font-size: var(--font-ui-small);
     white-space: nowrap;
@@ -221,7 +221,7 @@
     text-overflow: ellipsis;
 }
 
-.ocli-history-meta {
+.baizer-history-meta {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
@@ -229,22 +229,22 @@
     font-size: var(--font-smallest);
 }
 
-.ocli-history-note {
+.baizer-history-note {
     max-width: 220px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.ocli-history-actions {
+.baizer-history-actions {
     display: flex;
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
 }
 
-.ocli-history-pin,
-.ocli-history-delete {
+.baizer-history-pin,
+.baizer-history-delete {
     flex-shrink: 0;
     align-self: center;
     color: var(--text-muted);
@@ -257,18 +257,18 @@
     font-size: var(--font-smallest);
 }
 
-.ocli-history-pin:hover,
-.ocli-history-pin:focus-visible {
+.baizer-history-pin:hover,
+.baizer-history-pin:focus-visible {
     color: var(--text-accent);
     border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
     outline: none;
 }
 
-.ocli-history-delete:hover {
+.baizer-history-delete:hover {
     color: var(--text-error);
 }
 
-.ocli-history-empty {
+.baizer-history-empty {
     padding: 10px;
     color: var(--text-muted);
     font-size: var(--font-ui-small);
@@ -988,7 +988,7 @@ textarea.shell-input::placeholder {
 }
 
 /* Diff Modal */
-.ocli-diff-modal {
+.baizer-diff-modal {
     width: 80vw;
     max-width: 1000px;
     height: 80vh;
@@ -1202,11 +1202,11 @@ textarea.shell-input::placeholder {
     display: none;
 }
 
-.ocli-thinking-block.is-collapsed .ocli-thinking-content {
+.baizer-thinking-block.is-collapsed .baizer-thinking-content {
     display: none;
 }
 
-.ocli-thinking-header {
+.baizer-thinking-header {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -1214,18 +1214,18 @@ textarea.shell-input::placeholder {
     user-select: none;
 }
 
-.ocli-thinking-header:hover,
-.ocli-thinking-header:focus-visible {
+.baizer-thinking-header:hover,
+.baizer-thinking-header:focus-visible {
     color: var(--text-normal);
     outline: none;
 }
 
-.ocli-thinking-caret {
+.baizer-thinking-caret {
     display: inline-block;
     transition: transform 0.15s ease;
 }
 
-.ocli-thinking-block.is-collapsed .ocli-thinking-caret {
+.baizer-thinking-block.is-collapsed .baizer-thinking-caret {
     transform: rotate(-90deg);
 }
 
@@ -1343,29 +1343,29 @@ textarea.shell-input::placeholder {
 }
 
 /* ==========================================================================
-   Obsidian Shell - Refined Sidebar System
+   Baizer - Refined Sidebar System
    ========================================================================== */
 
-.ocli-shell-view {
-    --ocli-surface: color-mix(in srgb, var(--background-primary) 92%, var(--background-secondary));
-    --ocli-surface-strong: var(--background-primary);
-    --ocli-surface-muted: color-mix(in srgb, var(--background-secondary) 82%, var(--background-primary));
-    --ocli-border: color-mix(in srgb, var(--background-modifier-border) 86%, transparent);
-    --ocli-border-strong: color-mix(in srgb, var(--background-modifier-border) 68%, var(--text-muted));
-    --ocli-shadow: 0 12px 30px rgba(31, 70, 110, 0.10);
-    --ocli-soft-shadow: 0 8px 22px rgba(31, 70, 110, 0.06);
-    --ocli-radius-l: 8px;
-    --ocli-radius-m: 8px;
-    --ocli-radius-s: 6px;
+.baizer-shell-view {
+    --baizer-surface: color-mix(in srgb, var(--background-primary) 92%, var(--background-secondary));
+    --baizer-surface-strong: var(--background-primary);
+    --baizer-surface-muted: color-mix(in srgb, var(--background-secondary) 82%, var(--background-primary));
+    --baizer-border: color-mix(in srgb, var(--background-modifier-border) 86%, transparent);
+    --baizer-border-strong: color-mix(in srgb, var(--background-modifier-border) 68%, var(--text-muted));
+    --baizer-shadow: 0 12px 30px rgba(31, 70, 110, 0.10);
+    --baizer-soft-shadow: 0 8px 22px rgba(31, 70, 110, 0.06);
+    --baizer-radius-l: 8px;
+    --baizer-radius-m: 8px;
+    --baizer-radius-s: 6px;
     gap: 12px;
     padding: 14px;
     background: linear-gradient(180deg, color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary)), var(--background-secondary));
     font-family: var(--font-interface);
 }
 
-.theme-dark .ocli-shell-view {
-    --ocli-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
-    --ocli-soft-shadow: 0 8px 22px rgba(0, 0, 0, 0.20);
+.theme-dark .baizer-shell-view {
+    --baizer-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+    --baizer-soft-shadow: 0 8px 22px rgba(0, 0, 0, 0.20);
 }
 
 .shell-header {
@@ -1383,7 +1383,7 @@ textarea.shell-input::placeholder {
     flex: 0 0 auto;
     width: 36px;
     height: 36px;
-    border-radius: var(--ocli-radius-m);
+    border-radius: var(--baizer-radius-m);
     display: grid;
     place-items: center;
     background: linear-gradient(135deg, var(--interactive-accent), var(--color-green));
@@ -1418,11 +1418,11 @@ textarea.shell-input::placeholder {
     width: 30px;
     height: 30px;
     min-width: 30px;
-    border: 1px solid var(--ocli-border);
-    border-radius: var(--ocli-radius-s);
-    background: var(--ocli-surface);
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface);
     color: var(--text-muted);
-    box-shadow: var(--ocli-soft-shadow);
+    box-shadow: var(--baizer-soft-shadow);
 }
 
 .shell-header-buttons .clickable-icon:hover,
@@ -1444,10 +1444,10 @@ textarea.shell-input::placeholder {
 
 .shell-knowledge-status-empty,
 .shell-knowledge-status-strip {
-    border: 1px solid var(--ocli-border);
+    border: 1px solid var(--baizer-border);
     border-radius: 999px;
-    background: var(--ocli-surface);
-    box-shadow: var(--ocli-soft-shadow);
+    background: var(--baizer-surface);
+    box-shadow: var(--baizer-soft-shadow);
 }
 
 .shell-knowledge-status-empty {
@@ -1481,8 +1481,8 @@ textarea.shell-input::placeholder {
 
 .shell-knowledge-status-strip.is-done {
     color: var(--text-normal);
-    border-color: var(--ocli-border);
-    background: var(--ocli-surface-muted);
+    border-color: var(--baizer-border);
+    background: var(--baizer-surface-muted);
 }
 
 .shell-knowledge-status-strip.is-done::before {
@@ -1492,8 +1492,8 @@ textarea.shell-input::placeholder {
 
 .shell-knowledge-status-strip.is-unregistered {
     color: var(--text-muted);
-    border-color: var(--ocli-border);
-    background: var(--ocli-surface-muted);
+    border-color: var(--baizer-border);
+    background: var(--baizer-surface-muted);
 }
 
 .shell-knowledge-status-strip.is-unregistered::before {
@@ -1503,8 +1503,8 @@ textarea.shell-input::placeholder {
 .shell-knowledge-status-strip.is-stale,
 .shell-knowledge-status-strip.is-pending {
     color: var(--text-normal);
-    border-color: var(--ocli-border);
-    background: var(--ocli-surface-muted);
+    border-color: var(--baizer-border);
+    background: var(--baizer-surface-muted);
 }
 
 .shell-knowledge-status-strip.is-stale::before,
@@ -1515,8 +1515,8 @@ textarea.shell-input::placeholder {
 
 .shell-knowledge-status-strip.is-processing {
     color: var(--text-normal);
-    border-color: var(--ocli-border);
-    background: var(--ocli-surface-muted);
+    border-color: var(--baizer-border);
+    background: var(--baizer-surface-muted);
     animation: shell-knowledge-pulse 1.5s ease-in-out infinite;
 }
 
@@ -1527,8 +1527,8 @@ textarea.shell-input::placeholder {
 
 .shell-knowledge-status-strip.is-failed {
     color: var(--text-normal);
-    border-color: var(--ocli-border);
-    background: var(--ocli-surface-muted);
+    border-color: var(--baizer-border);
+    background: var(--baizer-surface-muted);
 }
 
 .shell-knowledge-status-strip.is-failed::before {
@@ -1641,8 +1641,8 @@ textarea.shell-input::placeholder {
 
 .shell-knowledge-status-badge.is-unregistered {
     color: var(--text-muted);
-    background: var(--ocli-surface-muted);
-    border: 1px solid var(--ocli-border);
+    background: var(--baizer-surface-muted);
+    border: 1px solid var(--baizer-border);
 }
 
 .shell-knowledge-status-menu {
@@ -1651,7 +1651,7 @@ textarea.shell-input::placeholder {
 
 @keyframes shell-knowledge-pulse {
     0%, 100% {
-        box-shadow: var(--ocli-soft-shadow);
+        box-shadow: var(--baizer-soft-shadow);
     }
     50% {
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 14%, transparent);
@@ -1672,10 +1672,10 @@ textarea.shell-input::placeholder {
     gap: 4px;
     max-width: min(220px, calc(100vw - 32px));
     padding: 4px;
-    border: 1px solid var(--ocli-border);
+    border: 1px solid var(--baizer-border);
     border-radius: 999px;
-    background: var(--ocli-surface-strong);
-    box-shadow: var(--ocli-shadow);
+    background: var(--baizer-surface-strong);
+    box-shadow: var(--baizer-shadow);
 }
 
 .shell-knowledge-status-icon-action {
@@ -1703,9 +1703,9 @@ textarea.shell-input::placeholder {
     padding-bottom: 0;
 }
 
-.ocli-tab-badge {
-    border-radius: var(--ocli-radius-s);
-    background: var(--ocli-surface);
+.baizer-tab-badge {
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface);
 }
 
 .shell-output-area {
@@ -1729,19 +1729,19 @@ textarea.shell-input::placeholder {
 .shell-entry.ai {
     margin: 0;
     padding: 10px 12px;
-    border: 1px solid var(--ocli-border);
+    border: 1px solid var(--baizer-border);
     border-radius: 15px 15px 15px 6px;
-    background: var(--ocli-surface);
-    box-shadow: var(--ocli-soft-shadow);
+    background: var(--baizer-surface);
+    box-shadow: var(--baizer-soft-shadow);
 }
 
 .shell-entry.system {
     align-self: center;
     margin: 0;
     padding: 3px 9px;
-    border: 1px solid var(--ocli-border);
+    border: 1px solid var(--baizer-border);
     border-radius: 999px;
-    background: var(--ocli-surface);
+    background: var(--baizer-surface);
     color: var(--text-muted);
 }
 
@@ -1773,7 +1773,7 @@ textarea.shell-input::placeholder {
     width: 28px;
     height: 28px;
     margin-top: 6px;
-    border-radius: var(--ocli-radius-s);
+    border-radius: var(--baizer-radius-s);
     display: grid;
     place-items: center;
     color: var(--text-on-accent);
@@ -1789,10 +1789,10 @@ textarea.shell-input::placeholder {
 .shell-input-container {
     gap: 6px;
     padding: 8px;
-    border: 1px solid var(--ocli-border);
-    border-radius: var(--ocli-radius-l);
-    background: var(--ocli-surface);
-    box-shadow: var(--ocli-shadow);
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-l);
+    background: var(--baizer-surface);
+    box-shadow: var(--baizer-shadow);
 }
 
 .shell-input-top-actions {
@@ -1804,9 +1804,9 @@ textarea.shell-input::placeholder {
     align-items: center;
     gap: 4px;
     padding: 1px;
-    border: 1px solid color-mix(in srgb, var(--ocli-border) 54%, transparent);
-    border-radius: var(--ocli-radius-s);
-    background: color-mix(in srgb, var(--ocli-surface) 62%, transparent);
+    border: 1px solid color-mix(in srgb, var(--baizer-border) 54%, transparent);
+    border-radius: var(--baizer-radius-s);
+    background: color-mix(in srgb, var(--baizer-surface) 62%, transparent);
     backdrop-filter: blur(8px);
 }
 
@@ -1815,7 +1815,7 @@ textarea.shell-input::placeholder {
     height: 25px;
     min-width: 25px;
     border: none;
-    border-radius: calc(var(--ocli-radius-s) - 2px);
+    border-radius: calc(var(--baizer-radius-s) - 2px);
     background: transparent;
     color: var(--text-muted);
     box-shadow: none;
@@ -1838,8 +1838,8 @@ textarea.shell-input::placeholder {
 }
 
 .shell-input-container:focus-within {
-    border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--ocli-border));
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 16%, transparent), var(--ocli-shadow);
+    border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--baizer-border));
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 16%, transparent), var(--baizer-shadow);
 }
 
 textarea.shell-input {
@@ -1851,8 +1851,8 @@ textarea.shell-input {
 
 .shell-model-select {
     height: 30px;
-    border-radius: var(--ocli-radius-s);
-    background: var(--ocli-surface-muted);
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface-muted);
 }
 
 .shell-run-btn {
@@ -1868,22 +1868,22 @@ textarea.shell-input {
 
 .shell-run-btn.is-stop {
     color: var(--text-error);
-    background: color-mix(in srgb, var(--text-error) 12%, var(--ocli-surface-muted));
-    border-color: color-mix(in srgb, var(--text-error) 36%, var(--ocli-border));
+    background: color-mix(in srgb, var(--text-error) 12%, var(--baizer-surface-muted));
+    border-color: color-mix(in srgb, var(--text-error) 36%, var(--baizer-border));
 }
 
 .shell-run-btn.is-stop:hover {
     color: var(--text-error);
-    background: color-mix(in srgb, var(--text-error) 18%, var(--ocli-surface-muted));
+    background: color-mix(in srgb, var(--text-error) 18%, var(--baizer-surface-muted));
 }
 
 .shell-suggestions {
     left: 10px;
     right: 10px;
     max-height: 260px;
-    border-radius: var(--ocli-radius-m);
-    background: var(--ocli-surface-strong);
-    box-shadow: var(--ocli-shadow);
+    border-radius: var(--baizer-radius-m);
+    background: var(--baizer-surface-strong);
+    box-shadow: var(--baizer-shadow);
 }
 
 .suggestion-item {
@@ -1906,7 +1906,7 @@ textarea.shell-input {
     border-radius: 8px;
     display: grid;
     place-items: center;
-    background: var(--ocli-surface-muted);
+    background: var(--baizer-surface-muted);
     color: var(--text-accent);
     font-weight: 750;
 }
@@ -1945,17 +1945,17 @@ textarea.shell-input {
 .suggestion-source {
     justify-self: end;
     padding: 2px 7px;
-    border: 1px solid var(--ocli-border);
+    border: 1px solid var(--baizer-border);
     border-radius: 999px;
     color: var(--text-muted);
-    background: var(--ocli-surface);
+    background: var(--baizer-surface);
     font-size: var(--font-smallest);
 }
 
 .context-chip {
     border-radius: 999px;
-    background: var(--ocli-surface-muted);
-    border-color: var(--ocli-border);
+    background: var(--baizer-surface-muted);
+    border-color: var(--baizer-border);
     color: var(--text-normal);
 }
 
@@ -1972,8 +1972,8 @@ textarea.shell-input {
 
 .context-chip-scope {
     color: var(--text-normal);
-    background: var(--ocli-surface-muted);
-    border-color: var(--ocli-border);
+    background: var(--baizer-surface-muted);
+    border-color: var(--baizer-border);
 }
 
 .context-chip-scope .chip-icon {
@@ -2015,10 +2015,10 @@ textarea.shell-input {
     align-items: center;
     gap: 4px;
     padding: 4px;
-    border: 1px solid var(--ocli-border);
+    border: 1px solid var(--baizer-border);
     border-radius: 999px;
-    background: var(--ocli-surface-strong);
-    box-shadow: var(--ocli-shadow);
+    background: var(--baizer-surface-strong);
+    box-shadow: var(--baizer-shadow);
 }
 
 .context-chip-icon-action {
@@ -2049,15 +2049,15 @@ textarea.shell-input {
     gap: 8px;
     padding: 8px;
     overflow: hidden;
-    border-radius: var(--ocli-radius-l);
-    border: 1px solid color-mix(in srgb, var(--color-yellow) 22%, var(--ocli-border));
-    background: var(--ocli-surface-strong);
+    border-radius: var(--baizer-radius-l);
+    border: 1px solid color-mix(in srgb, var(--color-yellow) 22%, var(--baizer-border));
+    background: var(--baizer-surface-strong);
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.10);
 }
 
 .shell-approval-card.is-high-risk {
-    border-color: color-mix(in srgb, var(--text-error) 32%, var(--ocli-border));
-    background: var(--ocli-surface-strong);
+    border-color: color-mix(in srgb, var(--text-error) 32%, var(--baizer-border));
+    background: var(--baizer-surface-strong);
 }
 
 .shell-approval-header {
@@ -2073,7 +2073,7 @@ textarea.shell-input {
     flex: 0 0 auto;
     width: 26px;
     height: 26px;
-    border-radius: var(--ocli-radius-m);
+    border-radius: var(--baizer-radius-m);
     display: grid;
     place-items: center;
     color: #8b5e00;
@@ -2158,9 +2158,9 @@ textarea.shell-input {
     grid-column: 1 / -1;
     margin: 0 0 0 35px;
     padding: 8px;
-    border-radius: var(--ocli-radius-m);
-    border: 1px solid var(--ocli-border);
-    background: var(--ocli-surface);
+    border-radius: var(--baizer-radius-m);
+    border: 1px solid var(--baizer-border);
+    background: var(--baizer-surface);
 }
 
 .shell-change-preview-summary {
@@ -2180,16 +2180,16 @@ textarea.shell-input {
 }
 
 .shell-change-preview-code {
-    border-radius: var(--ocli-radius-s);
-    background: var(--ocli-surface-muted);
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface-muted);
 }
 
 .shell-change-preview-diff {
     margin-top: 7px;
-    border: 1px solid var(--ocli-border);
-    border-radius: var(--ocli-radius-s);
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-s);
     overflow: hidden;
-    background: var(--ocli-surface-muted);
+    background: var(--baizer-surface-muted);
 }
 
 .shell-change-preview-diff-header {
@@ -2199,7 +2199,7 @@ textarea.shell-input {
     gap: 8px;
     min-height: 26px;
     padding: 4px 8px;
-    border-bottom: 1px solid var(--ocli-border);
+    border-bottom: 1px solid var(--baizer-border);
     color: var(--text-muted);
     font-size: var(--font-smallest);
 }
@@ -2264,15 +2264,15 @@ textarea.shell-input {
     min-height: 30px;
     height: 30px;
     padding: 0;
-    border-radius: var(--ocli-radius-s);
+    border-radius: var(--baizer-radius-s);
     font-weight: 700;
 }
 
 .shell-approval-icon-btn {
     display: grid;
     place-items: center;
-    border: 1px solid var(--ocli-border);
-    background: var(--ocli-surface-muted);
+    border: 1px solid var(--baizer-border);
+    background: var(--baizer-surface-muted);
     color: var(--text-muted);
 }
 
@@ -2301,14 +2301,14 @@ textarea.shell-input {
     color: var(--text-on-accent);
 }
 
-.ocli-tool-header {
+.baizer-tool-header {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
 }
 
-.ocli-tool-status {
+.baizer-tool-status {
     padding: 2px 7px;
     border-radius: 999px;
     color: var(--color-green);
@@ -2316,65 +2316,65 @@ textarea.shell-input {
     font-size: var(--font-smallest);
 }
 
-.ocli-tool-call.is-error .ocli-tool-status {
+.baizer-tool-call.is-error .baizer-tool-status {
     color: var(--text-error);
     background: color-mix(in srgb, var(--text-error) 10%, transparent);
 }
 
 .think-node-detail,
-.ocli-tool-detail {
-    border: 1px solid var(--ocli-border);
-    border-radius: var(--ocli-radius-s);
-    background: var(--ocli-surface-muted);
+.baizer-tool-detail {
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface-muted);
 }
 
-.ocli-history-menu {
-    border-radius: var(--ocli-radius-m);
-    background: var(--ocli-surface-strong);
-    box-shadow: var(--ocli-shadow);
+.baizer-history-menu {
+    border-radius: var(--baizer-radius-m);
+    background: var(--baizer-surface-strong);
+    box-shadow: var(--baizer-shadow);
 }
 
-.ocli-history-search,
-.ocli-history-pin,
-.ocli-history-delete {
-    border-radius: var(--ocli-radius-s);
-    background: var(--ocli-surface-muted);
+.baizer-history-search,
+.baizer-history-pin,
+.baizer-history-delete {
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface-muted);
 }
 
-.ocli-history-item {
+.baizer-history-item {
     border: 1px solid transparent;
-    border-radius: var(--ocli-radius-s);
+    border-radius: var(--baizer-radius-s);
 }
 
-.ocli-history-item.is-active {
+.baizer-history-item.is-active {
     background: color-mix(in srgb, var(--interactive-accent) 11%, var(--background-primary));
 }
 
 .shell-code-block-header {
-    background: var(--ocli-surface-muted);
+    background: var(--baizer-surface-muted);
 }
 
-.ocli-diff-modal {
+.baizer-diff-modal {
     max-width: 1080px;
-    border-radius: var(--ocli-radius-l);
+    border-radius: var(--baizer-radius-l);
 }
 
-.ocli-diff-modal-header {
+.baizer-diff-modal-header {
     padding: 16px 18px 12px;
-    border-bottom: 1px solid var(--ocli-border);
+    border-bottom: 1px solid var(--baizer-border);
 }
 
-.ocli-diff-modal-header h2 {
+.baizer-diff-modal-header h2 {
     margin: 0;
 }
 
-.ocli-diff-modal-subtitle {
+.baizer-diff-modal-subtitle {
     margin-top: 6px;
     color: var(--text-muted);
     font-size: var(--font-ui-small);
 }
 
-.diff-container.ocli-diff-split {
+.diff-container.baizer-diff-split {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 12px;
@@ -2384,23 +2384,23 @@ textarea.shell-input {
     border: none;
 }
 
-.ocli-diff-pane {
+.baizer-diff-pane {
     min-width: 0;
-    border: 1px solid var(--ocli-border);
-    border-radius: var(--ocli-radius-m);
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-m);
     overflow: hidden;
-    background: var(--ocli-surface);
+    background: var(--baizer-surface);
 }
 
-.ocli-diff-pane-title {
+.baizer-diff-pane-title {
     padding: 8px 10px;
-    border-bottom: 1px solid var(--ocli-border);
+    border-bottom: 1px solid var(--baizer-border);
     color: var(--text-muted);
     font-size: var(--font-smallest);
-    background: var(--ocli-surface-muted);
+    background: var(--baizer-surface-muted);
 }
 
-.ocli-diff-pane-code {
+.baizer-diff-pane-code {
     min-height: 220px;
     max-height: 52vh;
     margin: 0;
@@ -2412,12 +2412,12 @@ textarea.shell-input {
     line-height: 1.5;
 }
 
-.ocli-diff-pane-old .ocli-diff-pane-code {
+.baizer-diff-pane-old .baizer-diff-pane-code {
     color: var(--text-error);
     background: color-mix(in srgb, var(--text-error) 7%, var(--background-primary));
 }
 
-.ocli-diff-pane-new .ocli-diff-pane-code {
+.baizer-diff-pane-new .baizer-diff-pane-code {
     color: var(--color-green);
     background: color-mix(in srgb, var(--color-green) 7%, var(--background-primary));
 }
@@ -2430,74 +2430,74 @@ textarea.shell-input {
 }
 
 @media (max-width: 700px) {
-    .diff-container.ocli-diff-split {
+    .diff-container.baizer-diff-split {
         grid-template-columns: 1fr;
     }
 }
 
-.modal:has(.ocli-diff-modal) {
+.modal:has(.baizer-diff-modal) {
     width: min(760px, calc(100vw - 56px));
     max-width: min(760px, calc(100vw - 56px));
 }
 
-.ocli-diff-modal {
+.baizer-diff-modal {
     width: min(720px, calc(100vw - 72px)) !important;
     height: auto !important;
     max-height: calc(100vh - 96px);
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border-radius: var(--ocli-radius-l);
+    border-radius: var(--baizer-radius-l);
 }
 
-.ocli-diff-modal-header {
+.baizer-diff-modal-header {
     flex: 0 0 auto;
     padding: 14px 16px 10px;
 }
 
-.ocli-diff-summary {
+.baizer-diff-summary {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     padding: 10px 16px 0;
 }
 
-.ocli-diff-stat {
+.baizer-diff-stat {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     min-height: 24px;
     padding: 2px 8px;
-    border: 1px solid var(--ocli-border);
-    border-radius: var(--ocli-radius-s);
-    background: var(--ocli-surface-muted);
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface-muted);
     font-size: var(--font-ui-smaller);
 }
 
-.ocli-diff-stat-label {
+.baizer-diff-stat-label {
     color: var(--text-muted);
 }
 
-.ocli-diff-stat-value {
+.baizer-diff-stat-value {
     color: var(--text-normal);
     font-variant-numeric: tabular-nums;
 }
 
-.diff-container.ocli-diff-unified {
+.diff-container.baizer-diff-unified {
     flex: 0 1 auto;
     max-height: min(30vh, 260px);
     margin: 12px 16px 0;
     padding: 8px 0;
     overflow: auto;
-    border: 1px solid var(--ocli-border);
-    border-radius: var(--ocli-radius-m);
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-m);
     background: var(--background-primary);
     font-family: var(--font-monospace);
     font-size: var(--font-smaller);
     line-height: 1.45;
 }
 
-.ocli-diff-panes {
+.baizer-diff-panes {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 10px;
@@ -2505,12 +2505,12 @@ textarea.shell-input {
     min-height: 0;
 }
 
-.ocli-diff-pane-code {
+.baizer-diff-pane-code {
     min-height: 84px !important;
     max-height: min(24vh, 190px) !important;
 }
 
-.ocli-diff-empty {
+.baizer-diff-empty {
     min-height: 48px;
     padding: 12px;
     color: var(--text-faint);
@@ -2566,22 +2566,22 @@ textarea.shell-input {
 }
 
 @media (max-width: 700px) {
-    .modal:has(.ocli-diff-modal),
-    .ocli-diff-modal {
+    .modal:has(.baizer-diff-modal),
+    .baizer-diff-modal {
         width: calc(100vw - 32px) !important;
         max-width: calc(100vw - 32px);
     }
 
-    .ocli-diff-panes {
+    .baizer-diff-panes {
         grid-template-columns: 1fr;
     }
 }
 
 /* ==========================================================================
-   Obsidian Shell - Settings
+   Baizer - Settings
    ========================================================================== */
 
-.ocli-settings-page {
+.baizer-settings-page {
     display: flex;
     flex-direction: column;
     gap: 18px;
@@ -2589,30 +2589,30 @@ textarea.shell-input {
     container-type: inline-size;
 }
 
-.ocli-settings-hero {
+.baizer-settings-hero {
     display: flex;
     flex-direction: column;
     gap: 8px;
 }
 
-.ocli-settings-title {
+.baizer-settings-title {
     margin: 0;
     font-size: var(--font-ui-large);
     font-weight: var(--font-semibold);
 }
 
-.ocli-settings-subtitle {
+.baizer-settings-subtitle {
     margin: 0;
     color: var(--text-muted);
     max-width: 76ch;
 }
 
-.ocli-settings-search-row {
+.baizer-settings-search-row {
     display: flex;
     align-items: center;
 }
 
-.ocli-settings-search {
+.baizer-settings-search {
     width: min(420px, 100%);
     height: 34px;
     padding: 0 12px;
@@ -2624,13 +2624,13 @@ textarea.shell-input {
     box-shadow: none;
 }
 
-.ocli-settings-search:focus {
+.baizer-settings-search:focus {
     outline: none;
     border-color: var(--interactive-accent);
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 40%, transparent);
 }
 
-.ocli-settings-nav {
+.baizer-settings-nav {
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -2638,26 +2638,26 @@ textarea.shell-input {
     min-width: 0;
 }
 
-.ocli-settings-nav-header {
+.baizer-settings-nav-header {
     display: flex;
     flex-direction: column;
     gap: 4px;
     padding: 0 2px;
 }
 
-.ocli-settings-nav-title {
+.baizer-settings-nav-title {
     color: var(--text-muted);
     font-size: var(--font-smallest);
     font-weight: var(--font-medium);
     text-transform: uppercase;
 }
 
-.ocli-settings-nav-kicker {
+.baizer-settings-nav-kicker {
     color: var(--text-faint);
     font-size: var(--font-smallest);
 }
 
-.ocli-settings-nav-list {
+.baizer-settings-nav-list {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
@@ -2665,7 +2665,7 @@ textarea.shell-input {
     min-width: 0;
 }
 
-.ocli-settings-nav-item {
+.baizer-settings-nav-item {
     display: block;
     flex: 0 0 auto;
     min-width: 148px;
@@ -2680,18 +2680,18 @@ textarea.shell-input {
     transition: border-color 140ms ease, background-color 140ms ease;
 }
 
-.ocli-settings-nav-item:hover {
+.baizer-settings-nav-item:hover {
     background: color-mix(in srgb, var(--background-modifier-hover) 72%, var(--background-secondary));
     border-color: var(--background-modifier-border-hover);
 }
 
-.ocli-settings-nav-item.is-active {
+.baizer-settings-nav-item.is-active {
     background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
     border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 14%, transparent);
 }
 
-.ocli-settings-nav-row {
+.baizer-settings-nav-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2699,23 +2699,23 @@ textarea.shell-input {
     padding: 10px 12px;
 }
 
-.ocli-settings-nav-copy {
+.baizer-settings-nav-copy {
     min-width: 0;
 }
 
-.ocli-settings-nav-label {
+.baizer-settings-nav-label {
     font-size: var(--font-ui-small);
     font-weight: var(--font-semibold);
 }
 
-.ocli-settings-main {
+.baizer-settings-main {
     min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 14px;
 }
 
-.ocli-settings-section-card {
+.baizer-settings-section-card {
     padding: 0;
     border: 1px solid color-mix(in srgb, var(--background-modifier-border) 90%, transparent);
     border-radius: 14px;
@@ -2723,7 +2723,7 @@ textarea.shell-input {
     overflow: hidden;
 }
 
-.ocli-settings-section-header {
+.baizer-settings-section-header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
@@ -2733,26 +2733,26 @@ textarea.shell-input {
     border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
 }
 
-.ocli-settings-section-copy {
+.baizer-settings-section-copy {
     min-width: 0;
 }
 
-.ocli-settings-section-title {
+.baizer-settings-section-title {
     margin: 0;
     font-size: var(--font-ui-large);
 }
 
-.ocli-settings-section-description {
+.baizer-settings-section-description {
     margin: 6px 0 0;
     color: var(--text-muted);
 }
 
-.ocli-settings-section-content {
+.baizer-settings-section-content {
     min-width: 0;
     padding: 16px 18px 18px;
 }
 
-.ocli-settings-badge {
+.baizer-settings-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2764,38 +2764,38 @@ textarea.shell-input {
     white-space: nowrap;
 }
 
-.ocli-settings-badge.is-warning {
+.baizer-settings-badge.is-warning {
     color: #8b5e00;
     background: color-mix(in srgb, var(--color-yellow) 18%, transparent);
 }
 
-.ocli-settings-badge.is-danger {
+.baizer-settings-badge.is-danger {
     color: var(--text-error);
     background: color-mix(in srgb, var(--text-error) 12%, transparent);
 }
 
-.ocli-settings-badge.is-muted {
+.baizer-settings-badge.is-muted {
     color: var(--text-muted);
     background: color-mix(in srgb, var(--background-modifier-border) 65%, transparent);
 }
 
-.ocli-settings-badge.is-accent {
+.baizer-settings-badge.is-accent {
     color: var(--text-accent);
     background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
 }
 
-.ocli-settings-badge.is-success {
+.baizer-settings-badge.is-success {
     color: var(--color-green);
     background: color-mix(in srgb, var(--color-green) 12%, transparent);
 }
 
-.ocli-settings-actions {
+.baizer-settings-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
 }
 
-.ocli-settings-action {
+.baizer-settings-action {
     min-height: 32px;
     padding: 0 12px;
     border: 1px solid var(--background-modifier-border);
@@ -2805,78 +2805,78 @@ textarea.shell-input {
     cursor: pointer;
 }
 
-.ocli-settings-action:hover {
+.baizer-settings-action:hover {
     background: var(--background-modifier-hover);
 }
 
-.ocli-settings-action:disabled {
+.baizer-settings-action:disabled {
     cursor: default;
     opacity: 0.45;
     transform: none;
 }
 
-.ocli-settings-action.is-primary {
+.baizer-settings-action.is-primary {
     border-color: color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border));
     background: color-mix(in srgb, var(--interactive-accent) 11%, var(--background-secondary));
     color: var(--text-accent);
 }
 
-.ocli-settings-action.is-accent {
+.baizer-settings-action.is-accent {
     border-style: dashed;
 }
 
-.ocli-settings-action.is-danger {
+.baizer-settings-action.is-danger {
     border-color: color-mix(in srgb, var(--text-error) 30%, var(--background-modifier-border));
     color: var(--text-error);
 }
 
-.ocli-settings-inline-note {
+.baizer-settings-inline-note {
     padding: 10px 12px;
     border-radius: 8px;
     font-size: var(--font-ui-small);
 }
 
-.ocli-settings-inline-note-compact {
+.baizer-settings-inline-note-compact {
     margin: 0;
 }
 
-.ocli-settings-inline-note.is-warning {
+.baizer-settings-inline-note.is-warning {
     color: #8b5e00;
     background: color-mix(in srgb, var(--color-yellow) 16%, transparent);
 }
 
-.ocli-settings-inline-note.is-success {
+.baizer-settings-inline-note.is-success {
     color: var(--color-green);
     background: color-mix(in srgb, var(--color-green) 10%, transparent);
 }
 
-.ocli-settings-inline-note.is-danger {
+.baizer-settings-inline-note.is-danger {
     color: var(--text-error);
     background: color-mix(in srgb, var(--text-error) 12%, transparent);
 }
 
-.ocli-settings-inline-note.is-accent {
+.baizer-settings-inline-note.is-accent {
     color: var(--text-accent);
     background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
 }
 
-.ocli-settings-inline-hint {
+.baizer-settings-inline-hint {
     color: var(--text-muted);
     font-size: var(--font-smallest);
 }
 
-.ocli-settings-inline-hint-strong {
+.baizer-settings-inline-hint-strong {
     color: var(--text-faint);
 }
 
-.ocli-settings-workspace {
+.baizer-settings-workspace {
     display: grid;
     grid-template-columns: minmax(0, 3fr) minmax(0, 7fr);
     gap: 16px;
     align-items: stretch;
 }
 
-.ocli-settings-workspace-panel {
+.baizer-settings-workspace-panel {
     display: flex;
     flex-direction: column;
     min-width: 0;
@@ -2886,7 +2886,7 @@ textarea.shell-input {
     overflow: hidden;
 }
 
-.ocli-settings-workspace-header {
+.baizer-settings-workspace-header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
@@ -2895,36 +2895,36 @@ textarea.shell-input {
     border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
 }
 
-.ocli-settings-workspace-header.is-detail {
+.baizer-settings-workspace-header.is-detail {
     padding-bottom: 14px;
 }
 
-.ocli-settings-workspace-copy {
+.baizer-settings-workspace-copy {
     min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 4px;
 }
 
-.ocli-settings-workspace-title {
+.baizer-settings-workspace-title {
     color: var(--text-normal);
     font-size: var(--font-ui-small);
     font-weight: var(--font-semibold);
 }
 
-.ocli-settings-workspace-subtitle {
+.baizer-settings-workspace-subtitle {
     color: var(--text-muted);
     font-size: var(--font-smallest);
 }
 
-.ocli-settings-provider-list {
+.baizer-settings-provider-list {
     display: flex;
     flex-direction: column;
     gap: 8px;
     padding: 12px;
 }
 
-.ocli-settings-provider-card {
+.baizer-settings-provider-card {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -2938,25 +2938,25 @@ textarea.shell-input {
     transition: border-color 140ms ease, background-color 140ms ease;
 }
 
-.ocli-settings-provider-card:hover {
+.baizer-settings-provider-card:hover {
     border-color: var(--background-modifier-border-hover);
     background: color-mix(in srgb, var(--background-modifier-hover) 40%, var(--background-primary));
 }
 
-.ocli-settings-provider-card.is-active {
+.baizer-settings-provider-card.is-active {
     border-color: color-mix(in srgb, var(--interactive-accent) 46%, var(--background-modifier-border));
     background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
 }
 
-.ocli-settings-provider-card-header {
+.baizer-settings-provider-card-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
 }
 
-.ocli-settings-provider-card-identity {
+.baizer-settings-provider-card-identity {
     min-width: 0;
     display: flex;
     flex-wrap: wrap;
@@ -2964,7 +2964,7 @@ textarea.shell-input {
     gap: 6px;
 }
 
-.ocli-settings-provider-card-statuses {
+.baizer-settings-provider-card-statuses {
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -2972,13 +2972,13 @@ textarea.shell-input {
     flex-shrink: 0;
 }
 
-.ocli-settings-provider-card-title {
+.baizer-settings-provider-card-title {
     font-size: 1.05em;
     font-weight: var(--font-semibold);
     line-height: 1.2;
 }
 
-.ocli-settings-provider-card-icon {
+.baizer-settings-provider-card-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2994,27 +2994,27 @@ textarea.shell-input {
     line-height: 1;
 }
 
-.ocli-settings-provider-card-icon.is-protocol {
+.baizer-settings-provider-card-icon.is-protocol {
     background: color-mix(in srgb, var(--background-modifier-border) 32%, transparent);
     color: var(--text-faint);
 }
 
-.ocli-settings-provider-card-icon.is-active {
+.baizer-settings-provider-card-icon.is-active {
     background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
     color: var(--text-accent);
 }
 
-.ocli-settings-provider-card-icon.is-success {
+.baizer-settings-provider-card-icon.is-success {
     background: color-mix(in srgb, var(--color-green) 14%, transparent);
     color: var(--color-green);
 }
 
-.ocli-settings-provider-card-icon.is-warning {
+.baizer-settings-provider-card-icon.is-warning {
     background: color-mix(in srgb, var(--color-yellow) 16%, transparent);
     color: #a87600;
 }
 
-.ocli-settings-provider-card-meta {
+.baizer-settings-provider-card-meta {
     display: block;
     color: var(--text-muted);
     font-size: var(--font-smallest);
@@ -3024,18 +3024,18 @@ textarea.shell-input {
     text-overflow: ellipsis;
 }
 
-.ocli-settings-provider-summary {
+.baizer-settings-provider-summary {
     padding: 0 12px 12px;
     color: var(--text-muted);
     font-size: var(--font-smallest);
 }
 
-.ocli-settings-detail-body {
+.baizer-settings-detail-body {
     display: flex;
     flex-direction: column;
 }
 
-.ocli-settings-detail-row {
+.baizer-settings-detail-row {
     display: grid;
     grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
     gap: 18px;
@@ -3044,22 +3044,22 @@ textarea.shell-input {
     border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
 }
 
-.ocli-settings-detail-row:last-child {
+.baizer-settings-detail-row:last-child {
     border-bottom: none;
 }
 
-.ocli-settings-detail-label {
+.baizer-settings-detail-label {
     padding-top: 6px;
     color: var(--text-normal);
     font-size: var(--font-ui-small);
     font-weight: var(--font-semibold);
 }
 
-.ocli-settings-detail-value {
+.baizer-settings-detail-value {
     min-width: 0;
 }
 
-.ocli-settings-detail-input {
+.baizer-settings-detail-input {
     display: block;
     width: 100%;
     min-height: 34px;
@@ -3072,39 +3072,39 @@ textarea.shell-input {
     box-shadow: none;
 }
 
-.ocli-settings-detail-input:focus {
+.baizer-settings-detail-input:focus {
     outline: none;
     border-color: var(--interactive-accent);
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
 }
 
-.ocli-settings-detail-input:disabled {
+.baizer-settings-detail-input:disabled {
     opacity: 0.75;
 }
 
-.ocli-settings-detail-secret {
+.baizer-settings-detail-secret {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
 }
 
-.ocli-settings-detail-secret .ocli-settings-detail-input {
+.baizer-settings-detail-secret .baizer-settings-detail-input {
     flex: 1 1 360px;
 }
 
-.ocli-settings-detail-secret-actions {
+.baizer-settings-detail-secret-actions {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
 }
 
-.ocli-settings-detail-actions {
+.baizer-settings-detail-actions {
     padding: 12px 14px 0;
 }
 
-.ocli-settings-empty-state,
-.ocli-settings-empty-nav {
+.baizer-settings-empty-state,
+.baizer-settings-empty-nav {
     padding: 20px;
     border: 1px dashed var(--background-modifier-border);
     border-radius: 12px;
@@ -3112,16 +3112,16 @@ textarea.shell-input {
     background: var(--background-secondary);
 }
 
-.ocli-settings-empty-state h3 {
+.baizer-settings-empty-state h3 {
     margin: 0 0 6px;
     color: var(--text-normal);
 }
 
-.ocli-settings-empty-state p {
+.baizer-settings-empty-state p {
     margin: 0;
 }
 
-.ocli-full-width-textarea textarea {
+.baizer-full-width-textarea textarea {
     width: 100%;
     min-height: 120px;
     resize: vertical;
@@ -3133,56 +3133,56 @@ textarea.shell-input {
 }
 
 @container (max-width: 1280px) {
-    .ocli-settings-nav-list {
+    .baizer-settings-nav-list {
         overflow-x: auto;
         flex-wrap: nowrap;
         padding-bottom: 4px;
     }
 
-    .ocli-settings-nav-item {
+    .baizer-settings-nav-item {
         min-width: 164px;
     }
 }
 
 @container (max-width: 840px) {
-    .ocli-settings-detail-row {
+    .baizer-settings-detail-row {
         grid-template-columns: 1fr;
         gap: 10px;
     }
 
-    .ocli-settings-detail-label {
+    .baizer-settings-detail-label {
         padding-top: 0;
     }
 }
 
 @media (max-width: 1280px) {
-    .ocli-settings-nav-list {
+    .baizer-settings-nav-list {
         overflow-x: auto;
         flex-wrap: nowrap;
         padding-bottom: 4px;
     }
 
-    .ocli-settings-nav-item {
+    .baizer-settings-nav-item {
         min-width: 164px;
     }
 }
 
 @media (max-width: 840px) {
-    .ocli-settings-detail-row {
+    .baizer-settings-detail-row {
         grid-template-columns: 1fr;
         gap: 10px;
     }
 
-    .ocli-settings-detail-label {
+    .baizer-settings-detail-label {
         padding-top: 0;
     }
 }
 
 /* ==========================================================================
-   Obsidian Shell - Chat-first Sidebar Polish
+   Baizer - Chat-first Sidebar Polish
    ========================================================================== */
 
-.ocli-shell-view .shell-header {
+.baizer-shell-view .shell-header {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
@@ -3192,24 +3192,24 @@ textarea.shell-input {
     margin-bottom: 0;
 }
 
-.ocli-shell-view .shell-header-title {
+.baizer-shell-view .shell-header-title {
     min-width: 0;
     display: contents;
 }
 
-.ocli-shell-view .shell-header-identity {
+.baizer-shell-view .shell-header-identity {
     grid-column: 1;
     grid-row: 1;
 }
 
-.ocli-shell-view .shell-tab-bar-container {
+.baizer-shell-view .shell-tab-bar-container {
     grid-column: 1 / -1;
     grid-row: 2;
     padding: 0;
     overflow-x: auto;
 }
 
-.ocli-shell-view .shell-header-buttons {
+.baizer-shell-view .shell-header-buttons {
     grid-column: 2;
     grid-row: 1;
     display: inline-flex;
@@ -3218,30 +3218,30 @@ textarea.shell-input {
     padding-top: 4px;
 }
 
-.ocli-shell-view .shell-header-action {
+.baizer-shell-view .shell-header-action {
     width: 28px;
     height: 28px;
     min-width: 28px;
-    border: 1px solid var(--ocli-border);
-    border-radius: var(--ocli-radius-s);
-    background: var(--ocli-surface);
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface);
     color: var(--text-muted);
     box-shadow: none;
 }
 
-.ocli-shell-view .shell-header-action:hover,
-.ocli-shell-view .shell-header-action:focus-visible {
+.baizer-shell-view .shell-header-action:hover,
+.baizer-shell-view .shell-header-action:focus-visible {
     color: var(--text-normal);
     border-color: var(--background-modifier-border-hover);
     background: var(--background-modifier-hover);
     outline: none;
 }
 
-.ocli-shell-view .shell-input-top-actions {
+.baizer-shell-view .shell-input-top-actions {
     display: none;
 }
 
-.ocli-shell-view .ocli-tab-badges {
+.baizer-shell-view .baizer-tab-badges {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -3249,14 +3249,14 @@ textarea.shell-input {
     min-height: 28px;
 }
 
-.ocli-shell-view .ocli-tab-badge {
+.baizer-shell-view .baizer-tab-badge {
     min-width: 31px;
     height: 26px;
     padding: 0 8px;
-    border-radius: var(--ocli-radius-s);
+    border-radius: var(--baizer-radius-s);
 }
 
-.ocli-shell-view .ocli-tab-active-title {
+.baizer-shell-view .baizer-tab-active-title {
     min-width: 0;
     max-width: 240px;
     height: 26px;
@@ -3264,8 +3264,8 @@ textarea.shell-input {
     align-items: center;
     padding: 0 10px;
     border: 1px solid transparent;
-    border-radius: var(--ocli-radius-s);
-    background: color-mix(in srgb, var(--ocli-surface-muted) 42%, transparent);
+    border-radius: var(--baizer-radius-s);
+    background: color-mix(in srgb, var(--baizer-surface-muted) 42%, transparent);
     color: var(--text-muted);
     font-size: var(--font-smallest);
     overflow: hidden;
@@ -3274,18 +3274,18 @@ textarea.shell-input {
     cursor: pointer;
 }
 
-.ocli-shell-view .ocli-tab-new {
+.baizer-shell-view .baizer-tab-new {
     width: 28px;
     min-width: 28px;
     padding: 0;
 }
 
-.ocli-shell-view .shell-output-area {
+.baizer-shell-view .shell-output-area {
     gap: 12px;
     padding: 2px 1px;
 }
 
-.ocli-shell-view .shell-entry.ai {
+.baizer-shell-view .shell-entry.ai {
     margin: 0;
     padding: 0;
     border: none;
@@ -3295,15 +3295,15 @@ textarea.shell-input {
     color: var(--text-normal);
 }
 
-.ocli-shell-view .shell-entry.ai:not(.shell-stream-container) {
+.baizer-shell-view .shell-entry.ai:not(.shell-stream-container) {
     line-height: var(--line-height-normal);
 }
 
-.ocli-shell-view .shell-entry.user {
+.baizer-shell-view .shell-entry.user {
     border-radius: 15px 15px 6px 15px;
 }
 
-.ocli-shell-view .shell-entry.system.shell-system-status {
+.baizer-shell-view .shell-entry.system.shell-system-status {
     align-self: stretch;
     max-width: none;
     display: flex;
@@ -3321,7 +3321,7 @@ textarea.shell-input {
     line-height: 1.35;
 }
 
-.ocli-shell-view .shell-system-status-icon {
+.baizer-shell-view .shell-system-status-icon {
     flex: 0 0 auto;
     width: 16px;
     height: 16px;
@@ -3334,20 +3334,20 @@ textarea.shell-input {
     font-weight: 700;
 }
 
-.ocli-shell-view .shell-system-status-main {
+.baizer-shell-view .shell-system-status-main {
     min-width: 0;
     display: inline-flex;
     align-items: center;
     gap: 5px;
 }
 
-.ocli-shell-view .shell-system-status-action {
+.baizer-shell-view .shell-system-status-action {
     flex: 0 0 auto;
     color: var(--text-muted);
     font-weight: 650;
 }
 
-.ocli-shell-view .shell-system-status-target {
+.baizer-shell-view .shell-system-status-target {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3355,7 +3355,7 @@ textarea.shell-input {
     color: var(--text-faint);
 }
 
-.ocli-shell-view .shell-think-timeline {
+.baizer-shell-view .shell-think-timeline {
     width: fit-content;
     max-width: 100%;
     margin: 0 0 8px;
@@ -3365,9 +3365,9 @@ textarea.shell-input {
     font-size: var(--font-smallest);
 }
 
-.ocli-shell-view .shell-think-summary,
-.ocli-shell-view .ocli-thinking-header,
-.ocli-shell-view .ocli-tool-header {
+.baizer-shell-view .shell-think-summary,
+.baizer-shell-view .baizer-thinking-header,
+.baizer-shell-view .baizer-tool-header {
     min-height: 24px;
     width: fit-content;
     max-width: 100%;
@@ -3375,115 +3375,115 @@ textarea.shell-input {
     align-items: center;
     gap: 6px;
     padding: 3px 8px;
-    border: 1px solid color-mix(in srgb, var(--ocli-border) 54%, transparent);
-    border-radius: var(--ocli-radius-s);
-    background: color-mix(in srgb, var(--ocli-surface-muted) 42%, transparent);
+    border: 1px solid color-mix(in srgb, var(--baizer-border) 54%, transparent);
+    border-radius: var(--baizer-radius-s);
+    background: color-mix(in srgb, var(--baizer-surface-muted) 42%, transparent);
     color: var(--text-muted);
 }
 
-.ocli-shell-view .shell-think-summary:hover,
-.ocli-shell-view .ocli-thinking-header:hover,
-.ocli-shell-view .ocli-thinking-header:focus-visible,
-.ocli-shell-view .ocli-tool-header:hover,
-.ocli-shell-view .ocli-tool-header:focus-visible {
+.baizer-shell-view .shell-think-summary:hover,
+.baizer-shell-view .baizer-thinking-header:hover,
+.baizer-shell-view .baizer-thinking-header:focus-visible,
+.baizer-shell-view .baizer-tool-header:hover,
+.baizer-shell-view .baizer-tool-header:focus-visible {
     color: var(--text-normal);
     background: var(--background-modifier-hover);
     outline: none;
 }
 
-.ocli-shell-view .think-node {
+.baizer-shell-view .think-node {
     padding: 4px 0 0;
     margin: 4px 0 0;
 }
 
-.ocli-shell-view .think-node::before {
+.baizer-shell-view .think-node::before {
     display: none;
 }
 
-.ocli-shell-view .think-node-label,
-.ocli-shell-view .ocli-thinking-label {
+.baizer-shell-view .think-node-label,
+.baizer-shell-view .baizer-thinking-label {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.ocli-shell-view .think-node-detail,
-.ocli-shell-view .ocli-thinking-content,
-.ocli-shell-view .ocli-tool-detail {
+.baizer-shell-view .think-node-detail,
+.baizer-shell-view .baizer-thinking-content,
+.baizer-shell-view .baizer-tool-detail {
     margin-top: 6px;
-    border: 1px solid var(--ocli-border);
-    border-radius: var(--ocli-radius-s);
-    background: var(--ocli-surface-muted);
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface-muted);
 }
 
-.ocli-shell-view .shell-stream-container {
+.baizer-shell-view .shell-stream-container {
     display: block;
 }
 
-.ocli-shell-view .shell-response-content {
+.baizer-shell-view .shell-response-content {
     min-height: 1em;
     color: var(--text-normal);
     line-height: var(--line-height-normal);
 }
 
-.ocli-shell-view .shell-input-container {
+.baizer-shell-view .shell-input-container {
     gap: 0;
     padding: 0;
     overflow: hidden;
-    border: 1px solid var(--ocli-border);
+    border: 1px solid var(--baizer-border);
     border-radius: 10px;
-    background: var(--ocli-surface);
-    box-shadow: var(--ocli-shadow);
+    background: var(--baizer-surface);
+    box-shadow: var(--baizer-shadow);
 }
 
-.ocli-shell-view .shell-input-shell {
+.baizer-shell-view .shell-input-shell {
     position: relative;
     overflow: visible;
     z-index: 5;
 }
 
-.ocli-shell-view .shell-suggestions {
+.baizer-shell-view .shell-suggestions {
     bottom: calc(100% + 8px);
     left: 0;
     right: 0;
     z-index: 50;
     max-height: 280px;
     overflow-y: auto;
-    border: 1px solid var(--ocli-border);
-    border-radius: var(--ocli-radius-m);
-    background: var(--ocli-surface-strong);
-    box-shadow: var(--ocli-shadow);
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-m);
+    background: var(--baizer-surface-strong);
+    box-shadow: var(--baizer-shadow);
 }
 
-.ocli-shell-view .shell-input-context-bar {
+.baizer-shell-view .shell-input-context-bar {
     min-height: 32px;
     padding: 8px 9px 2px;
 }
 
-.ocli-shell-view .shell-input-wrapper {
+.baizer-shell-view .shell-input-wrapper {
     display: block;
     padding: 0;
 }
 
-.ocli-shell-view textarea.shell-input {
+.baizer-shell-view textarea.shell-input {
     min-height: 58px;
     max-height: 160px;
     padding: 8px 10px;
     line-height: var(--line-height-normal);
 }
 
-.ocli-shell-view .shell-input-controls {
+.baizer-shell-view .shell-input-controls {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px;
     min-height: 47px;
     padding: 7px;
-    border-top: 1px solid var(--ocli-border);
+    border-top: 1px solid var(--baizer-border);
 }
 
-.ocli-shell-view .shell-model-select-container {
+.baizer-shell-view .shell-model-select-container {
     min-width: 0;
     display: grid;
     grid-template-columns: minmax(78px, 92px) minmax(0, 1fr);
@@ -3491,68 +3491,68 @@ textarea.shell-input {
     overflow: hidden;
 }
 
-.ocli-shell-view .shell-provider-select,
-.ocli-shell-view .shell-main-model-select {
+.baizer-shell-view .shell-provider-select,
+.baizer-shell-view .shell-main-model-select {
     width: 100%;
     max-width: none;
     min-width: 0;
     flex: none;
 }
 
-.ocli-shell-view .shell-model-select {
+.baizer-shell-view .shell-model-select {
     height: 28px;
-    border-radius: var(--ocli-radius-s);
-    background: var(--ocli-surface-muted);
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface-muted);
     color: var(--text-muted);
 }
 
-.ocli-shell-view .shell-action-buttons {
+.baizer-shell-view .shell-action-buttons {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     flex: 0 0 auto;
 }
 
-.ocli-shell-view .shell-action-btn {
+.baizer-shell-view .shell-action-btn {
     width: 32px;
     height: 32px;
     min-width: 32px;
     box-shadow: none;
 }
 
-.ocli-shell-view .shell-image-btn {
+.baizer-shell-view .shell-image-btn {
     color: var(--text-muted);
-    background: var(--ocli-surface-muted);
+    background: var(--baizer-surface-muted);
 }
 
-.ocli-shell-view .shell-run-btn {
+.baizer-shell-view .shell-run-btn {
     color: var(--background-primary);
     background: var(--text-normal);
     border-color: var(--text-normal);
 }
 
-.ocli-shell-view .shell-run-btn:hover {
+.baizer-shell-view .shell-run-btn:hover {
     color: var(--background-primary);
     background: color-mix(in srgb, var(--text-normal) 88%, var(--interactive-accent));
 }
 
-.ocli-shell-view .shell-run-btn.is-stop {
+.baizer-shell-view .shell-run-btn.is-stop {
     color: var(--text-error);
-    background: color-mix(in srgb, var(--text-error) 12%, var(--ocli-surface-muted));
-    border-color: color-mix(in srgb, var(--text-error) 36%, var(--ocli-border));
+    background: color-mix(in srgb, var(--text-error) 12%, var(--baizer-surface-muted));
+    border-color: color-mix(in srgb, var(--text-error) 36%, var(--baizer-border));
 }
 
 @media (max-width: 380px) {
-    .ocli-shell-view .shell-model-select-container {
+    .baizer-shell-view .shell-model-select-container {
         grid-template-columns: minmax(68px, 84px) minmax(0, 1fr);
     }
 
-    .ocli-shell-view .ocli-tab-active-title {
+    .baizer-shell-view .baizer-tab-active-title {
         max-width: 150px;
     }
 }
 
-.ocli-shell-view .shell-entry.system.shell-workspace-edit-entry {
+.baizer-shell-view .shell-entry.system.shell-workspace-edit-entry {
     align-self: flex-start;
     max-width: min(100%, 560px);
     margin: 1px 0;
@@ -3563,7 +3563,7 @@ textarea.shell-input {
     color: var(--text-normal);
 }
 
-.ocli-shell-view .shell-workspace-edit-row {
+.baizer-shell-view .shell-workspace-edit-row {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -3574,12 +3574,12 @@ textarea.shell-input {
     font-size: var(--font-ui-smaller);
 }
 
-.ocli-shell-view .shell-workspace-edit-bullet {
+.baizer-shell-view .shell-workspace-edit-bullet {
     flex: 0 0 auto;
     color: var(--text-faint);
 }
 
-.ocli-shell-view .shell-workspace-edit-name {
+.baizer-shell-view .shell-workspace-edit-name {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3587,13 +3587,13 @@ textarea.shell-input {
     color: var(--text-normal);
 }
 
-.ocli-shell-view .shell-workspace-edit-meta {
+.baizer-shell-view .shell-workspace-edit-meta {
     flex: 0 0 auto;
     color: var(--text-faint);
     white-space: nowrap;
 }
 
-.ocli-shell-view .shell-workspace-edit-undo {
+.baizer-shell-view .shell-workspace-edit-undo {
     flex: 0 0 auto;
     width: 22px;
     height: 22px;
@@ -3602,12 +3602,12 @@ textarea.shell-input {
     border-radius: 5px;
 }
 
-.ocli-shell-view .shell-workspace-edit-undo:hover,
-.ocli-shell-view .shell-workspace-edit-undo:focus-visible {
+.baizer-shell-view .shell-workspace-edit-undo:hover,
+.baizer-shell-view .shell-workspace-edit-undo:focus-visible {
     color: var(--text-normal);
     background: var(--background-modifier-hover);
 }
 
-.ocli-shell-view .shell-workspace-edit-entry.is-undone .shell-workspace-edit-name {
+.baizer-shell-view .shell-workspace-edit-entry.is-undone .shell-workspace-edit-name {
     color: var(--text-faint);
 }
