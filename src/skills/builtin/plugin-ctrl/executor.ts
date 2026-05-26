@@ -15,7 +15,7 @@ export function getPluginCommandPreconditions(): string[] {
 const listPlugins: Tool = {
   name: 'list_plugins',
   description: 'List all installed plugins and their status, including whether they have an AI skill.',
-  executionMode: 'parallel',
+  executionMode: 'sequential',
   risk: 'plugin-control',
   parameters: { type: 'object', properties: {} },
   async execute(args, ctx) {
@@ -34,7 +34,7 @@ const listPlugins: Tool = {
 const getPluginCommands: Tool = {
   name: 'get_plugin_commands',
   description: 'Get available commands for a specific plugin.',
-  executionMode: 'parallel',
+  executionMode: 'sequential',
   risk: 'plugin-control',
   parameters: {
     type: 'object',
@@ -55,7 +55,7 @@ const getPluginCommands: Tool = {
 const getPluginSettings: Tool = {
   name: 'get_plugin_settings',
   description: 'Get settings for a specific plugin.',
-  executionMode: 'parallel',
+  executionMode: 'sequential',
   risk: 'plugin-control',
   parameters: {
     type: 'object',
