@@ -31,6 +31,16 @@ async function runTests() {
     '../src/skills/builtin/json-canvas/executor'
   );
 
+  await test('classifies validate_json_canvas as a parallel read-only tool', async () => {
+    const toolRegistry = new ToolRegistry({} as any, DEFAULT_SETTINGS);
+    registerJsonCanvasTools(toolRegistry);
+
+    const tool = toolRegistry.get('validate_json_canvas');
+    expect(!!tool, 'validate_json_canvas should be registered');
+    expect(tool!.executionMode === 'parallel', 'validate_json_canvas should run in parallel');
+    expect(tool!.risk === 'read', 'validate_json_canvas should be read-only');
+  });
+
   await test('registers as a routable skill scoped to canvas file tools', async () => {
     const skillMd = readFileSync(
       join(process.cwd(), 'src/skills/builtin/json-canvas/SKILL.md'),
