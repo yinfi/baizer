@@ -128,7 +128,7 @@ If the spike fails because Pi's published package is not compatible with the plu
 - Pi transitive package version: `@earendil-works/pi-ai@0.75.5`
 - Runtime default: `legacy`
 - Pi runtime access: internal engine selector only
-- Bundle size after integration: `5,893,490` bytes
+- Bundle size after integration: `5,945,924` bytes
 
 ## Testing Strategy
 
