@@ -474,7 +474,7 @@ export class KnowledgeRuntime {
     if (status.kind === 'valid') {
       return { message: 'Ontology schema already exists.' };
     }
-    if (status.kind === 'empty' || status.kind === 'invalid' || status.kind === 'disabled') {
+    if (status.kind === 'invalid' || status.kind === 'disabled') {
       return { message: `Ontology preview unavailable: ${status.kind}.` };
     }
 
@@ -505,7 +505,7 @@ export class KnowledgeRuntime {
         console.log('[KnowledgeRuntime] Ontology schema already exists, skipping discovery');
         return status.path;
       }
-      if (status.kind === 'empty' || status.kind === 'invalid' || status.kind === 'disabled') {
+      if (status.kind === 'invalid' || status.kind === 'disabled') {
         console.log(`[KnowledgeRuntime] Ontology discovery skipped: ${status.kind}`);
         return null;
       }

@@ -174,7 +174,15 @@ export class OntologyService {
   async createSchemaFile(content: string): Promise<string> {
     const path = this.getSchemaPath();
     const existing = this.app.vault.getAbstractFileByPath(path);
-    if (existing) throw new Error(`Ontology schema already exists: ${path}`);
+    if (existing instanceof TFile) {
+      const existingContent = await this.app.vault.read(existing);
+      if (existingContent.trim().length === 0) {
+        await this.app.vault.modify(existing, content);
+        return path;
+      }
+      throw new Error(`Ontology schema already exists: ${path}`);
+    }
+    if (existing) throw new Error(`Ontology schema path is not a file: ${path}`);
 
     const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
     if (!this.app.vault.getAbstractFileByPath(wikiFolder) && typeof this.app.vault.createFolder === 'function') {
