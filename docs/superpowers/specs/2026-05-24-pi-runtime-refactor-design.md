@@ -120,6 +120,16 @@ Before wiring production behavior, run a spike:
 
 If the spike fails because Pi's published package is not compatible with the plugin environment, fall back to implementing a local Pi-inspired scheduler without the dependency.
 
+## Compatibility Spike Result
+
+- `npm run build`: passed
+- `npm test`: passed
+- Pi package version: `@earendil-works/pi-agent-core@0.75.5`
+- Pi transitive package version: `@earendil-works/pi-ai@0.75.5`
+- Runtime default: `legacy`
+- Pi runtime access: internal engine selector only
+- Bundle size after integration: `5,892,052` bytes
+
 ## Testing Strategy
 
 Existing behavior must remain protected by the current tests:
