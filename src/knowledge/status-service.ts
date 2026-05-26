@@ -198,8 +198,7 @@ export class KnowledgeStatusService {
 
     if (
       currentSchemaHash &&
-      summaryFrontmatter.schema_hash &&
-      summaryFrontmatter.schema_hash !== currentSchemaHash
+      (!summaryFrontmatter.schema_hash || summaryFrontmatter.schema_hash !== currentSchemaHash)
     ) {
       return true;
     }

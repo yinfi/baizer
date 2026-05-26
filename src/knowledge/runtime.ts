@@ -25,6 +25,7 @@ import {
   getFilesByKnowledgeStatus,
   getUnregisteredFiles,
 } from './frontmatter';
+import { OntologyService } from './ontology-service';
 import { parseOntologySchema, extractFrontmatter, computeSchemaHash, buildDiscoveryPrompt, parseDiscoveryResponse, buildOntologyFile } from './ontology';
 
 /**
@@ -40,6 +41,7 @@ export class KnowledgeRuntime {
   private metadataIndex: MetadataIndex;
   private modelService: ModelService;
   private statusService: KnowledgeStatusService;
+  private ontologyService: OntologyService;
 
   /** 暴露给 SkillRegistry 注册 knowledge 工具 */
   getQueryExecutor(): QueryKnowledgeExecutor { return this.queryExecutor; }
@@ -68,6 +70,7 @@ export class KnowledgeRuntime {
       watchedFolders: settings.knowledgeSourceFolders || [],
       wikiFolder,
     });
+    this.ontologyService = new OntologyService(app, settings);
 
     this.watcher = new KnowledgeWatcher(
       app,
@@ -374,6 +377,7 @@ export class KnowledgeRuntime {
 
   updateSettings(settings: PluginSettings): void {
     this.settings = settings;
+    this.ontologyService.updateSettings(settings);
     this.watcher.updateWatchedFolders(settings.knowledgeSourceFolders || []);
     this.statusService.updateConfig({
       watchedFolders: settings.knowledgeSourceFolders || [],
@@ -387,27 +391,8 @@ export class KnowledgeRuntime {
    * @returns { schema, hash } 或 null（schema 不存在时）
    */
   async loadOntologySchema(): Promise<{ schema: OntologySchema; hash: string } | null> {
-    const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
-    const schemaPath = `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`;
-    const file = this.app.vault.getAbstractFileByPath(schemaPath);
-    if (!file || !(file instanceof TFile)) return null;
-
-    try {
-      const rawContent = await this.app.vault.read(file);
+    return this.ontologyService.loadSchema();
       // 自行解析 frontmatter，不依赖 metadataCache（新文件 cache 可能未就绪）
-      const frontmatter = extractFrontmatter(rawContent);
-      const schema = parseOntologySchema(frontmatter);
-      if (!schema) {
-        console.warn('[KnowledgeRuntime] Ontology file exists but schema parse failed');
-        return null;
-      }
-
-      const hash = computeSchemaHash(rawContent);
-      return { schema, hash };
-    } catch (e) {
-      console.error('[KnowledgeRuntime] Failed to load ontology schema:', e);
-      return null;
-    }
   }
 
   /**
@@ -417,6 +402,35 @@ export class KnowledgeRuntime {
    * @returns schema 文件路径，或 null（文章不足/AI 失败时）
    */
   async discoverOntology(minArticles: number = 10): Promise<string | null> {
+    try {
+      const status = await this.ontologyService.getStatus();
+      if (status.kind === 'valid') {
+        console.log('[KnowledgeRuntime] Ontology schema already exists, skipping discovery');
+        return status.path;
+      }
+      if (status.kind === 'empty' || status.kind === 'invalid' || status.kind === 'disabled') {
+        console.log(`[KnowledgeRuntime] Ontology discovery skipped: ${status.kind}`);
+        return null;
+      }
+      if (this.settings.knowledgeOntologyUpdateMode !== 'auto') {
+        console.log(`[KnowledgeRuntime] Ontology discovery skipped in ${this.settings.knowledgeOntologyUpdateMode || 'suggest'} mode`);
+        return null;
+      }
+
+      const candidate = await this.ontologyService.generateDiscoveryCandidate((prompt) => this.modelService.generate(prompt));
+      if (!candidate.content) {
+        console.log(`[KnowledgeRuntime] Ontology discovery skipped: ${candidate.readiness.kind}${candidate.error ? ` (${candidate.error})` : ''}`);
+        return null;
+      }
+
+      const path = await this.ontologyService.createSchemaFile(candidate.content);
+      console.log(`[KnowledgeRuntime] Ontology schema created at ${path}`);
+      return path;
+    } catch (e: any) {
+      console.error('[KnowledgeRuntime] Ontology discovery failed:', e.message);
+      return null;
+    }
+
     const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
     const schemaPath = `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`;
 
