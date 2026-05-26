@@ -52,9 +52,11 @@ function createDeps(options: {
   streamFactory: (input: string | ToolResult[]) => StreamEvent[];
   toolResults?: Record<string, any>;
   workspaceResult?: any;
+  workspaceEditService?: any;
   sendMessageError?: string;
   memoryManager?: any;
   skillRegistry?: any;
+  toolDefinitions?: ToolDefinition[];
 }): ChatRuntimeDeps & { sessionInputs: (string | ToolResult[])[]; registryCalls: any[]; workspaceCalls: any[] } {
   const sessionInputs: (string | ToolResult[])[] = [];
   const registryCalls: any[] = [];
@@ -103,7 +105,7 @@ function createDeps(options: {
       tools: [{ name: 'web_search', description: 'Search web', parameters: { type: 'object', properties: {} } }],
     }),
   };
-  return {
+  const deps = {
     sessionInputs,
     registryCalls,
     workspaceCalls,
@@ -118,13 +120,17 @@ function createDeps(options: {
     } as any,
     toolRegistry: {
       get: () => undefined,
-      getAllDefinitions: () => [],
+      getAllDefinitions: () => options.toolDefinitions ?? [],
       execute: async (name: string, args: any) => {
         registryCalls.push({ name, args });
         return options.toolResults?.[name] ?? { success: true, content: 'A' };
       },
     } as any,
   };
+  if (options.workspaceEditService !== undefined) {
+    (deps as any).workspaceEditService = options.workspaceEditService;
+  }
+  return deps;
 }
 
 async function collect(stream: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> {
@@ -140,6 +146,11 @@ function wait(ms: number): Promise<void> {
 async function runTests() {
   console.log('=== Pi Chat Runtime Tests ===');
   const { PiChatRuntime } = await import('../src/runtime/pi/pi-chat-runtime');
+  const { createChatRuntime } = await import('../src/runtime/runtime-factory');
+  const {
+    resetRuntimeEngineForTesting,
+    setRuntimeEngineForTesting,
+  } = await import('../src/runtime/runtime-engine');
 
   await test('query consumes queryStream and returns the final done text', async () => {
     const deps = createDeps({
@@ -329,6 +340,50 @@ async function runTests() {
 
     const queryText = await runtime.query(createTurn({ requiresFileWrite: true }));
     expect(queryText).toContain('Unsafe vault path');
+  });
+
+  await test('factory-selected Pi runtime preserves write failure warnings', async () => {
+    setRuntimeEngineForTesting('pi');
+    try {
+      const deps = createDeps({
+        streamFactory: (input) => Array.isArray(input)
+          ? [
+              { type: 'text_delta', content: 'Created' },
+              { type: 'done', text: 'Created' },
+            ]
+          : [
+              {
+                type: 'tool_call',
+                id: 'call_1',
+                name: 'create_file',
+                args: {
+                  path: '../summary.canvas',
+                  content: '{"nodes":[],"edges":[]}',
+                },
+              },
+              { type: 'done', text: '' },
+            ],
+        toolDefinitions: [
+          { name: 'create_file', description: 'Create file', parameters: { type: 'object', properties: {} } },
+        ],
+        toolResults: {
+          create_file: { success: false, error: 'Unsafe vault path' },
+        },
+        workspaceEditService: null,
+      });
+      const runtime = createChatRuntime(deps);
+      const prepared = await runtime.prepareTurn({
+        userMessage: 'Create a canvas file',
+        contextItems: [],
+      });
+
+      const result = await runtime.query(prepared);
+
+      expect(result).toContain('No file was created or modified');
+      expect(result).toContain('Unsafe vault path');
+    } finally {
+      resetRuntimeEngineForTesting();
+    }
   });
 
   await test('retains completed Pi turns in memory', async () => {
