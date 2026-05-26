@@ -68,6 +68,8 @@ function getWriteScopeError(ctx: ToolContext, target: string): string | null {
 const readNote: Tool = {
   name: 'read_note',
   description: 'Read the content of a specific note in the vault.',
+  executionMode: 'parallel',
+  risk: 'read',
   parameters: {
     type: 'object',
     properties: {
@@ -86,6 +88,8 @@ const readNote: Tool = {
 const createNote: Tool = {
   name: 'create_note',
   description: 'Create a new note with the specified content.',
+  executionMode: 'sequential',
+  risk: 'write',
   parameters: {
     type: 'object',
     properties: {
@@ -137,6 +141,8 @@ const createNote: Tool = {
 const updateNote: Tool = {
   name: 'update_note',
   description: 'Update the content of an existing note. Replaces the entire content.',
+  executionMode: 'sequential',
+  risk: 'write',
   parameters: {
     type: 'object',
     properties: {
@@ -179,6 +185,8 @@ const updateNote: Tool = {
 const appendToNote: Tool = {
   name: 'append_to_note',
   description: 'Append content to the end of an existing note.',
+  executionMode: 'sequential',
+  risk: 'write',
   parameters: {
     type: 'object',
     properties: {
@@ -222,6 +230,8 @@ const appendToNote: Tool = {
 const deleteNote: Tool = {
   name: 'delete_note',
   description: 'Delete a note from the vault.',
+  executionMode: 'sequential',
+  risk: 'write',
   parameters: {
     type: 'object',
     properties: {
@@ -259,6 +269,8 @@ const deleteNote: Tool = {
 const renameNote: Tool = {
   name: 'rename_note',
   description: 'Rename or move a note.',
+  executionMode: 'sequential',
+  risk: 'write',
   parameters: {
     type: 'object',
     properties: {
@@ -302,6 +314,8 @@ const renameNote: Tool = {
 const listNotes: Tool = {
   name: 'list_notes',
   description: 'List notes in a specific folder or the entire vault.',
+  executionMode: 'parallel',
+  risk: 'read',
   parameters: {
     type: 'object',
     properties: {
@@ -329,6 +343,8 @@ const listNotes: Tool = {
 const searchVault: Tool = {
   name: 'search_vault',
   description: 'Search for files in the vault by name.',
+  executionMode: 'parallel',
+  risk: 'read',
   parameters: {
     type: 'object',
     properties: {
@@ -348,6 +364,8 @@ const searchVault: Tool = {
 const openFile: Tool = {
   name: 'open_file',
   description: 'Open a file in the Obsidian workspace.',
+  executionMode: 'sequential',
+  risk: 'unknown',
   parameters: {
     type: 'object',
     properties: {
@@ -385,6 +403,8 @@ const openFile: Tool = {
 const readFile: Tool = {
   name: 'read_file',
   description: 'Read the exact content of a text file in the vault, including .md, .canvas, .base, and .json files.',
+  executionMode: 'parallel',
+  risk: 'read',
   parameters: {
     type: 'object',
     properties: {
@@ -415,6 +435,8 @@ const readFile: Tool = {
 const createFile: Tool = {
   name: 'create_file',
   description: 'Create a new text file in the vault without changing its extension. Supports .md, .canvas, .base, and .json files.',
+  executionMode: 'sequential',
+  risk: 'write',
   parameters: {
     type: 'object',
     properties: {
@@ -467,6 +489,8 @@ const createFile: Tool = {
 const updateFile: Tool = {
   name: 'update_file',
   description: 'Replace the exact content of an existing text file in the vault. Supports .md, .canvas, .base, and .json files.',
+  executionMode: 'sequential',
+  risk: 'write',
   parameters: {
     type: 'object',
     properties: {
