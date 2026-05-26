@@ -11,7 +11,7 @@ export class TabBar {
         private readonly containerEl: HTMLElement,
         private readonly callbacks: TabBarCallbacks,
     ) {
-        this.addClass(this.containerEl, 'ocli-tab-badges');
+        this.addClass(this.containerEl, 'baizer-tab-badges');
         this.containerEl.setAttribute('role', 'tablist');
     }
 
@@ -24,7 +24,7 @@ export class TabBar {
         }
 
         const newButton = this.containerEl.createDiv({
-            cls: 'ocli-tab-badge ocli-tab-new',
+            cls: 'baizer-tab-badge baizer-tab-new',
             text: '+',
         });
         newButton.setAttribute('role', 'button');
@@ -34,20 +34,20 @@ export class TabBar {
 
     destroy(): void {
         this.containerEl.empty();
-        this.removeClass(this.containerEl, 'ocli-tab-badges');
+        this.removeClass(this.containerEl, 'baizer-tab-badges');
     }
 
     private renderBadge(item: TabBarItem): void {
         const stateClass = item.isActive
-            ? 'ocli-tab-badge-active'
+            ? 'baizer-tab-badge-active'
             : item.needsAttention
-                ? 'ocli-tab-badge-attention'
+                ? 'baizer-tab-badge-attention'
                 : item.isStreaming
-                    ? 'ocli-tab-badge-streaming'
-                    : 'ocli-tab-badge-idle';
+                    ? 'baizer-tab-badge-streaming'
+                    : 'baizer-tab-badge-idle';
 
         const badge = this.containerEl.createDiv({
-            cls: `ocli-tab-badge ${stateClass}`,
+            cls: `baizer-tab-badge ${stateClass}`,
             text: String(item.index),
         });
         badge.setAttribute('role', 'tab');
@@ -62,7 +62,7 @@ export class TabBar {
 
         if (item.isActive) {
             const title = this.containerEl.createDiv({
-                cls: 'ocli-tab-active-title',
+                cls: 'baizer-tab-active-title',
                 text: item.title,
             });
             title.setAttribute('role', 'button');

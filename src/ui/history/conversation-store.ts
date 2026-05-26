@@ -1,8 +1,9 @@
 import { App } from 'obsidian';
 import { ConversationSnapshot } from '../types';
 import { cloneChangePreview } from '../diff/change-preview';
+import { PLUGIN_DATA_DIR } from '../../mcp/types';
 
-export const CONVERSATION_STORE_DIR = '.obsidian/obsidian-cli';
+export const CONVERSATION_STORE_DIR = PLUGIN_DATA_DIR;
 export const CONVERSATION_STORE_PATH = `${CONVERSATION_STORE_DIR}/conversations.json`;
 
 interface ConversationFile {

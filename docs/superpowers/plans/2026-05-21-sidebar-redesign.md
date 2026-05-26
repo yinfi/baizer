@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the approved sidebar prototype so Obsidian CLI reads as a chat-first assistant with compact execution status, clearer header actions, and a calmer composer.
+**Goal:** Implement the approved sidebar prototype so Baizer reads as a chat-first assistant with compact execution status, clearer header actions, and a calmer composer.
 
 **Architecture:** Keep the existing UI boundaries: `ShellView` owns layout and event wiring, `MessageRenderer` owns persisted chat messages, `ThinkingRenderer` and `ToolRenderer` own live stream detail rows, `InputToolbar` owns provider/model/image/send controls, and `styles.css` owns the visual treatment. Avoid a new UI abstraction unless a helper is needed for repeated message/status formatting.
 
@@ -335,7 +335,7 @@ expect(getToolSummary('edit_file', { path: 'Study/a/b/02_supply_demand_price.md'
 
 - [ ] **Step 6: Style compact thought/tool rows**
 
-In `styles.css`, make `.shell-think-summary`, `.ocli-thinking-header`, and `.ocli-tool-header` look like compact rows instead of nested cards. Ensure `.ocli-thinking-content` and `.ocli-tool-detail` are hidden when collapsed.
+In `styles.css`, make `.shell-think-summary`, `.baizer-thinking-header`, and `.baizer-tool-header` look like compact rows instead of nested cards. Ensure `.baizer-thinking-content` and `.baizer-tool-detail` are hidden when collapsed.
 
 - [ ] **Step 7: Run focused tests**
 
@@ -409,7 +409,7 @@ Style it as:
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     padding: 7px;
-    border-top: 1px solid var(--ocli-border);
+    border-top: 1px solid var(--baizer-border);
 }
 ```
 

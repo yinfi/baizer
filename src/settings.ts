@@ -1,10 +1,12 @@
 import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, TextComponent } from 'obsidian';
-import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
+import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
+import { OntologyUpdateMode } from './knowledge/types';
 
 export type SettingsSectionId =
     | 'connection'
     | 'runtime'
+    | 'memory'
     | 'guardian'
     | 'permissions'
     | 'appearance'
@@ -60,6 +62,324 @@ interface SettingsSectionMeta {
     keywords: string[];
 }
 
+const SETTINGS_FALLBACK_STYLE_ID = 'baizer-settings-fallback-styles';
+
+export function getSettingsFallbackCss(): string {
+    return `
+.baizer-settings-page {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding-bottom: 24px;
+}
+.baizer-settings-hero {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.baizer-settings-title {
+    margin: 0;
+    font-size: var(--font-ui-large);
+    font-weight: var(--font-semibold);
+}
+.baizer-settings-subtitle {
+    margin: 0;
+    color: var(--text-muted);
+    max-width: 76ch;
+}
+.baizer-settings-search-row {
+    display: flex;
+}
+.baizer-settings-search {
+    width: min(420px, 100%);
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+}
+.baizer-settings-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.baizer-settings-nav-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 0 2px;
+}
+.baizer-settings-nav-title {
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    font-weight: var(--font-medium);
+    text-transform: uppercase;
+}
+.baizer-settings-nav-kicker {
+    color: var(--text-faint);
+    font-size: var(--font-smallest);
+}
+.baizer-settings-nav-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.baizer-settings-nav-item {
+    display: block;
+    flex: 0 0 auto;
+    min-width: 148px;
+    max-width: 100%;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--background-secondary) 88%, transparent);
+    color: var(--text-normal);
+    text-align: left;
+}
+.baizer-settings-nav-item.is-active {
+    background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
+    border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
+}
+.baizer-settings-nav-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+}
+.baizer-settings-nav-copy,
+.baizer-settings-main,
+.baizer-settings-section-copy,
+.baizer-settings-detail-value {
+    min-width: 0;
+}
+.baizer-settings-nav-label,
+.baizer-settings-section-title,
+.baizer-settings-workspace-title,
+.baizer-settings-provider-card-title,
+.baizer-settings-detail-label {
+    font-weight: var(--font-semibold);
+}
+.baizer-settings-main {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.baizer-settings-section-card {
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 90%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary));
+    overflow: hidden;
+}
+.baizer-settings-section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+}
+.baizer-settings-section-title {
+    margin: 0;
+    font-size: var(--font-ui-large);
+}
+.baizer-settings-section-description {
+    margin: 6px 0 0;
+    color: var(--text-muted);
+}
+.baizer-settings-section-content {
+    padding: 16px 18px 18px;
+}
+.baizer-settings-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    white-space: nowrap;
+}
+.baizer-settings-badge.is-warning,
+.baizer-settings-inline-note.is-warning {
+    color: #8b5e00;
+    background: color-mix(in srgb, var(--color-yellow) 16%, transparent);
+}
+.baizer-settings-badge.is-danger,
+.baizer-settings-inline-note.is-danger {
+    color: var(--text-error);
+    background: color-mix(in srgb, var(--text-error) 12%, transparent);
+}
+.baizer-settings-badge.is-muted {
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--background-modifier-border) 65%, transparent);
+}
+.baizer-settings-badge.is-accent,
+.baizer-settings-inline-note.is-accent {
+    color: var(--text-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+}
+.baizer-settings-badge.is-success,
+.baizer-settings-inline-note.is-success {
+    color: var(--color-green);
+    background: color-mix(in srgb, var(--color-green) 10%, transparent);
+}
+.baizer-settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.baizer-settings-action {
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+}
+.baizer-settings-inline-note,
+.baizer-settings-empty-state,
+.baizer-settings-empty-nav {
+    padding: 10px 12px;
+    border-radius: 8px;
+}
+.baizer-settings-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 7fr);
+    gap: 16px;
+    align-items: stretch;
+}
+.baizer-settings-workspace-panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--background-primary-alt) 96%, var(--background-secondary));
+    overflow: hidden;
+}
+.baizer-settings-workspace-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+}
+.baizer-settings-workspace-copy,
+.baizer-settings-provider-list,
+.baizer-settings-detail-body {
+    display: flex;
+    flex-direction: column;
+}
+.baizer-settings-workspace-copy {
+    gap: 4px;
+}
+.baizer-settings-workspace-subtitle,
+.baizer-settings-provider-card-meta,
+.baizer-settings-provider-summary,
+.baizer-settings-inline-hint {
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+}
+.baizer-settings-provider-list {
+    gap: 8px;
+    padding: 12px;
+}
+.baizer-settings-provider-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary));
+    color: var(--text-normal);
+    text-align: left;
+}
+.baizer-settings-provider-card.is-active {
+    border-color: color-mix(in srgb, var(--interactive-accent) 46%, var(--background-modifier-border));
+    background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
+}
+.baizer-settings-provider-card-header,
+.baizer-settings-provider-card-identity,
+.baizer-settings-provider-card-statuses,
+.baizer-settings-detail-secret,
+.baizer-settings-detail-secret-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.baizer-settings-provider-card-header {
+    justify-content: space-between;
+}
+.baizer-settings-provider-card-identity,
+.baizer-settings-provider-card-statuses,
+.baizer-settings-detail-secret {
+    flex-wrap: wrap;
+}
+.baizer-settings-provider-card-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--background-modifier-border) 45%, transparent);
+    color: var(--text-muted);
+    font-size: 11px;
+}
+.baizer-settings-provider-summary {
+    padding: 0 12px 12px;
+}
+.baizer-settings-detail-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+    padding: 10px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+}
+.baizer-settings-detail-input {
+    display: block;
+    width: 100%;
+    min-height: 34px;
+    padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--background-primary) 95%, var(--background-secondary));
+    color: var(--text-normal);
+}
+.baizer-settings-detail-secret .baizer-settings-detail-input {
+    flex: 1 1 360px;
+}
+.baizer-full-width-textarea textarea {
+    width: 100%;
+    min-height: 120px;
+    resize: vertical;
+}
+@media (max-width: 840px) {
+    .baizer-settings-workspace,
+    .baizer-settings-detail-row {
+        grid-template-columns: 1fr;
+    }
+}
+`;
+}
+
+function ensureSettingsFallbackStyles(): void {
+    const doc = typeof document === 'undefined' ? null : document;
+    if (!doc || doc.getElementById(SETTINGS_FALLBACK_STYLE_ID)) return;
+
+    const styleEl = doc.createElement('style');
+    styleEl.id = SETTINGS_FALLBACK_STYLE_ID;
+    styleEl.textContent = getSettingsFallbackCss();
+    doc.head?.appendChild(styleEl);
+}
+
 const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     {
         id: 'connection',
@@ -74,10 +394,16 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
         keywords: ['runtime', 'context window', 'token', 'system prompt', 'persona', 'prompt'],
     },
     {
+        id: 'memory',
+        title: 'Memory',
+        description: 'Local Hindsight memory, recall, retention, and deletion.',
+        keywords: ['memory', 'hindsight', 'recall', 'forget', 'profile', 'privacy', 'observation'],
+    },
+    {
         id: 'guardian',
         title: 'Guardian',
-        description: 'Inline assistance, trigger behavior, and privacy controls.',
-        keywords: ['guardian', 'auto mode', 'manual mode', 'privacy', 'ignored folders', 'sensitivity'],
+        description: 'Inline assistance, trigger behavior, and ignored folders.',
+        keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity'],
     },
     {
         id: 'permissions',
@@ -100,8 +426,8 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     {
         id: 'knowledge',
         title: 'Knowledge',
-        description: 'Knowledge compiler sources, output, and batching.',
-        keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch'],
+        description: 'Knowledge compiler sources, output, ontology schema, and batching.',
+        keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema'],
     },
     {
         id: 'plugin-skills',
@@ -113,6 +439,12 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
 
 function normalizeSearchQuery(query: string): string {
     return query.trim().toLowerCase();
+}
+
+function clampInteger(value: string, min: number, max: number, fallback: number): number {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
 }
 
 export function getMatchingSettingsSections(query: string): SettingsSectionId[] {
@@ -143,6 +475,10 @@ export function getSettingsSectionStatuses(
 
     if (!settings.enableGuardian) {
         statuses.guardian = { label: 'Off', tone: 'muted' };
+    }
+
+    if (settings.privacyMode) {
+        statuses.memory = { label: 'Private', tone: 'accent' };
     }
 
     if (settings.allowPluginControl || !settings.confirmExecutions) {
@@ -255,6 +591,11 @@ export class SettingTab extends PluginSettingTab {
     private searchQuery = '';
     private revealApiKey = false;
     private connectionTestStatus: ConnectionTestStatus = { state: 'idle', message: '' };
+    private memoryView: any = null;
+    private memorySearchQuery = '';
+    private memoryActiveTab: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = 'overview';
+    private memoryLoading = false;
+    private memoryError = '';
 
     constructor(app: App, plugin: IPlugin) {
         super(app, plugin);
@@ -335,28 +676,29 @@ export class SettingTab extends PluginSettingTab {
     display(): void {
         const token = ++this.renderToken;
         const { containerEl } = this;
+        ensureSettingsFallbackStyles();
         containerEl.empty();
 
         const visibleSections = this.getVisibleSections();
         this.ensureActiveSection(visibleSections);
 
-        const root = containerEl.createDiv({ cls: 'ocli-settings-page' });
+        const root = containerEl.createDiv({ cls: 'baizer-settings-page' });
         this.renderHeader(root);
         this.renderSidebar(root, visibleSections);
-        this.renderMain(root.createDiv({ cls: 'ocli-settings-main' }), visibleSections, token);
+        this.renderMain(root.createDiv({ cls: 'baizer-settings-main' }), visibleSections, token);
     }
 
     private renderHeader(containerEl: HTMLElement): void {
-        const hero = containerEl.createDiv({ cls: 'ocli-settings-hero' });
-        hero.createEl('h2', { text: 'Obsidian Shell Configuration', cls: 'ocli-settings-title' });
+        const hero = containerEl.createDiv({ cls: 'baizer-settings-hero' });
+        hero.createEl('h2', { text: `${PLUGIN_NAME} Configuration`, cls: 'baizer-settings-title' });
         hero.createEl('p', {
             text: 'A cleaner control center for provider setup, runtime behavior, and plugin capabilities.',
-            cls: 'ocli-settings-subtitle',
+            cls: 'baizer-settings-subtitle',
         });
 
-        const searchRow = hero.createDiv({ cls: 'ocli-settings-search-row' });
+        const searchRow = hero.createDiv({ cls: 'baizer-settings-search-row' });
         const searchInput = searchRow.createEl('input', {
-            cls: 'ocli-settings-search',
+            cls: 'baizer-settings-search',
             attr: {
                 type: 'search',
                 placeholder: 'Search settings',
@@ -371,33 +713,33 @@ export class SettingTab extends PluginSettingTab {
     }
 
     private renderSidebar(containerEl: HTMLElement, visibleSections: SettingsSectionId[]): void {
-        const nav = containerEl.createDiv({ cls: 'ocli-settings-nav' });
-        const navHeader = nav.createDiv({ cls: 'ocli-settings-nav-header' });
-        navHeader.createDiv({ cls: 'ocli-settings-nav-title', text: 'Sections' });
-        navHeader.createDiv({ cls: 'ocli-settings-nav-kicker', text: 'Switch between groups' });
+        const nav = containerEl.createDiv({ cls: 'baizer-settings-nav' });
+        const navHeader = nav.createDiv({ cls: 'baizer-settings-nav-header' });
+        navHeader.createDiv({ cls: 'baizer-settings-nav-title', text: 'Sections' });
+        navHeader.createDiv({ cls: 'baizer-settings-nav-kicker', text: 'Switch between groups' });
 
         if (!visibleSections.length) {
-            nav.createDiv({ cls: 'ocli-settings-empty-nav', text: 'No matching sections.' });
+            nav.createDiv({ cls: 'baizer-settings-empty-nav', text: 'No matching sections.' });
             return;
         }
 
-        const list = nav.createDiv({ cls: 'ocli-settings-nav-list' });
+        const list = nav.createDiv({ cls: 'baizer-settings-nav-list' });
         const statuses = getSettingsSectionStatuses(this.plugin.settings);
 
         visibleSections.forEach(sectionId => {
             const meta = getSectionMeta(sectionId);
             const button = list.createEl('button', {
-                cls: `ocli-settings-nav-item${sectionId === this.activeSectionId ? ' is-active' : ''}`,
+                cls: `baizer-settings-nav-item${sectionId === this.activeSectionId ? ' is-active' : ''}`,
                 attr: { type: 'button' },
             }) as HTMLButtonElement;
 
-            const row = button.createDiv({ cls: 'ocli-settings-nav-row' });
-            const copy = row.createDiv({ cls: 'ocli-settings-nav-copy' });
-            copy.createDiv({ cls: 'ocli-settings-nav-label', text: meta.title });
+            const row = button.createDiv({ cls: 'baizer-settings-nav-row' });
+            const copy = row.createDiv({ cls: 'baizer-settings-nav-copy' });
+            copy.createDiv({ cls: 'baizer-settings-nav-label', text: meta.title });
 
             const status = statuses[sectionId];
             if (status) {
-                row.createSpan({ cls: `ocli-settings-badge is-${status.tone}`, text: status.label });
+                row.createSpan({ cls: `baizer-settings-badge is-${status.tone}`, text: status.label });
             }
 
             button.addEventListener('click', () => {
@@ -412,7 +754,7 @@ export class SettingTab extends PluginSettingTab {
 
     private renderMain(containerEl: HTMLElement, visibleSections: SettingsSectionId[], token: number): void {
         if (!visibleSections.length) {
-            const empty = containerEl.createDiv({ cls: 'ocli-settings-empty-state' });
+            const empty = containerEl.createDiv({ cls: 'baizer-settings-empty-state' });
             empty.createEl('h3', { text: 'No matching settings' });
             empty.createEl('p', { text: 'Try searching by provider, prompt, permissions, or knowledge.' });
             return;
@@ -424,16 +766,16 @@ export class SettingTab extends PluginSettingTab {
         sectionsToRender.forEach(sectionId => {
             const meta = getSectionMeta(sectionId);
             const status = getSettingsSectionStatuses(this.plugin.settings)[sectionId];
-            const card = containerEl.createDiv({ cls: 'ocli-settings-section-card' });
-            const header = card.createDiv({ cls: 'ocli-settings-section-header' });
-            const headerCopy = header.createDiv({ cls: 'ocli-settings-section-copy' });
-            headerCopy.createEl(query ? 'h3' : 'h2', { text: meta.title, cls: 'ocli-settings-section-title' });
-            headerCopy.createEl('p', { text: meta.description, cls: 'ocli-settings-section-description' });
+            const card = containerEl.createDiv({ cls: 'baizer-settings-section-card' });
+            const header = card.createDiv({ cls: 'baizer-settings-section-header' });
+            const headerCopy = header.createDiv({ cls: 'baizer-settings-section-copy' });
+            headerCopy.createEl(query ? 'h3' : 'h2', { text: meta.title, cls: 'baizer-settings-section-title' });
+            headerCopy.createEl('p', { text: meta.description, cls: 'baizer-settings-section-description' });
             if (status) {
-                header.createSpan({ cls: `ocli-settings-badge is-${status.tone}`, text: status.label });
+                header.createSpan({ cls: `baizer-settings-badge is-${status.tone}`, text: status.label });
             }
 
-            const content = card.createDiv({ cls: 'ocli-settings-section-content' });
+            const content = card.createDiv({ cls: 'baizer-settings-section-content' });
             this.renderSectionContent(sectionId, content, token);
         });
     }
@@ -445,6 +787,9 @@ export class SettingTab extends PluginSettingTab {
                 return;
             case 'runtime':
                 this.renderRuntimeSection(containerEl);
+                return;
+            case 'memory':
+                this.renderMemorySection(containerEl);
                 return;
             case 'guardian':
                 this.renderGuardianSection(containerEl);
@@ -467,23 +812,243 @@ export class SettingTab extends PluginSettingTab {
         }
     }
 
+    private renderMemorySection(containerEl: HTMLElement): void {
+        const toolbar = containerEl.createDiv({ cls: 'baizer-memory-toolbar' });
+        new Setting(toolbar)
+            .setName('Privacy Mode')
+            .setDesc('When enabled, new conversation turns are not retained as Hindsight memory.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.privacyMode)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.privacyMode = value;
+                    await this.persistSettings();
+                    if (typeof this.plugin.modelService?.updateSettings === 'function') {
+                        await this.plugin.modelService.updateSettings(this.plugin.settings);
+                    }
+                    await this.refreshMemoryView();
+                }));
+
+        toolbar.createDiv({
+            cls: 'baizer-memory-path',
+            text: `Data folder: ${MEMORY_DIR}`,
+        });
+
+        const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
+        this.createActionButton(actions, this.memoryLoading ? 'Refreshing...' : 'Refresh', async () => {
+            await this.refreshMemoryView();
+        }, 'default', this.memoryLoading);
+
+        this.renderMemoryStats(containerEl);
+        this.renderMemorySearch(containerEl);
+        this.renderMemoryTabs(containerEl);
+        this.renderMemoryList(containerEl);
+        this.renderMemoryDangerZone(containerEl);
+
+        if (!this.memoryView && !this.memoryLoading) {
+            void this.refreshMemoryView();
+        }
+    }
+
+    private async refreshMemoryView(
+        mode: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = this.memoryActiveTab
+    ): Promise<void> {
+        if (typeof this.plugin.modelService?.getMemoryView !== 'function') {
+            this.memoryError = 'Memory service is not available.';
+            this.display();
+            return;
+        }
+
+        this.memoryLoading = true;
+        this.memoryError = '';
+        this.display();
+        try {
+            this.memoryView = await this.plugin.modelService.getMemoryView({
+                mode,
+                query: mode === 'search' ? this.memorySearchQuery : undefined,
+                limit: 25,
+            });
+        } catch (error: any) {
+            this.memoryError = error?.message || 'Failed to load memory.';
+        } finally {
+            this.memoryLoading = false;
+            this.display();
+        }
+    }
+
+    private getVisibleMemoryRecords(): any[] {
+        const sections = this.memoryView?.sections;
+        if (!sections) return [];
+        if (this.memoryActiveTab === 'observations') return sections.observations || [];
+        if (this.memoryActiveTab === 'facts') return sections.facts || [];
+        if (this.memoryActiveTab === 'recent') return sections.recent || [];
+        if (this.memoryActiveTab === 'search') return sections.searchResults || [];
+        return [
+            ...(sections.observations || []),
+            ...(sections.facts || []),
+        ].slice(0, 10);
+    }
+
+    private renderMemoryStats(containerEl: HTMLElement): void {
+        const stats = this.memoryView?.stats;
+        const row = containerEl.createDiv({ cls: 'baizer-memory-stats' });
+        this.createMemoryStat(row, 'Total', stats?.total ?? 0);
+        this.createMemoryStat(row, 'Facts', stats?.world ?? 0);
+        this.createMemoryStat(row, 'Experiences', stats?.experience ?? 0);
+        this.createMemoryStat(row, 'Observations', stats?.observation ?? 0);
+    }
+
+    private createMemoryStat(parent: HTMLElement, label: string, value: number): void {
+        const item = parent.createDiv({ cls: 'baizer-memory-stat' });
+        item.createDiv({ cls: 'baizer-memory-stat-value', text: String(value) });
+        item.createDiv({ cls: 'baizer-memory-stat-label', text: label });
+    }
+
+    private renderMemorySearch(containerEl: HTMLElement): void {
+        const row = containerEl.createDiv({ cls: 'baizer-memory-search' });
+        const input = row.createEl('input', {
+            cls: 'baizer-settings-search',
+            attr: { type: 'search', placeholder: 'Search memories' },
+        }) as HTMLInputElement;
+        input.value = this.memorySearchQuery;
+        input.addEventListener('input', () => {
+            this.memorySearchQuery = input.value;
+        });
+        this.createActionButton(row, 'Search', async () => {
+            this.memoryActiveTab = 'search';
+            await this.refreshMemoryView('search');
+        }, 'accent', !this.memorySearchQuery.trim());
+    }
+
+    private renderMemoryTabs(containerEl: HTMLElement): void {
+        const tabs = containerEl.createDiv({ cls: 'baizer-memory-tabs' });
+        const entries: Array<[typeof this.memoryActiveTab, string]> = [
+            ['overview', 'Overview'],
+            ['observations', 'Observations'],
+            ['facts', 'Facts'],
+            ['recent', 'Recent'],
+            ['search', 'Search Results'],
+        ];
+        for (const [id, label] of entries) {
+            const button = tabs.createEl('button', {
+                text: label,
+                cls: `baizer-memory-tab${this.memoryActiveTab === id ? ' is-active' : ''}`,
+                attr: { type: 'button' },
+            });
+            button.addEventListener('click', () => {
+                this.memoryActiveTab = id;
+                void this.refreshMemoryView(id);
+            });
+        }
+    }
+
+    private renderMemoryList(containerEl: HTMLElement): void {
+        if (this.memoryError) {
+            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-warning', text: this.memoryError });
+            return;
+        }
+
+        const list = containerEl.createDiv({ cls: 'baizer-memory-list' });
+        const records = this.getVisibleMemoryRecords();
+        if (records.length === 0) {
+            list.createDiv({
+                cls: 'baizer-settings-empty-state',
+                text: this.memoryLoading ? 'Loading memory...' : 'No memories to show.',
+            });
+            return;
+        }
+
+        for (const record of records) {
+            const row = list.createDiv({ cls: 'baizer-memory-row' });
+            const meta = row.createDiv({ cls: 'baizer-memory-row-meta' });
+            meta.createSpan({ cls: `baizer-memory-type is-${record.type}`, text: record.type });
+            meta.createSpan({ text: `confidence ${Number(record.confidence || 0).toFixed(2)}` });
+            meta.createSpan({ text: `updated ${new Date(record.updatedAt || record.mentionedAt).toLocaleString()}` });
+            row.createDiv({ cls: 'baizer-memory-row-text', text: this.truncateSettingMemoryText(record.text || '', 260) });
+            if (record.tags?.length) {
+                row.createDiv({ cls: 'baizer-memory-row-tags', text: `tags: ${record.tags.join(', ')}` });
+            }
+            this.createActionButton(row, 'Delete', async () => {
+                this.confirmDeleteMemoryRecord(record.id);
+            }, 'danger');
+        }
+    }
+
+    private renderMemoryDangerZone(containerEl: HTMLElement): void {
+        const zone = containerEl.createDiv({ cls: 'baizer-memory-danger' });
+        const copy = zone.createDiv({ cls: 'baizer-memory-danger-copy' });
+        copy.createDiv({ cls: 'baizer-settings-workspace-title', text: 'Danger Zone' });
+        copy.createDiv({ cls: 'baizer-settings-workspace-subtitle', text: 'Clear all remembered Hindsight memory.' });
+        this.createActionButton(zone, 'Clear Memory', async () => {
+            this.confirmClearAllMemory();
+        }, 'danger');
+    }
+
+    private truncateSettingMemoryText(text: string, max: number): string {
+        const normalized = text.replace(/\s+/g, ' ').trim();
+        return normalized.length <= max ? normalized : `${normalized.slice(0, max - 3)}...`;
+    }
+
+    private confirmDeleteMemoryRecord(id: string): void {
+        new MemoryConfirmModal(
+            this.app,
+            'Delete Memory',
+            'Delete this remembered Hindsight memory record?',
+            async () => {
+                await this.deleteMemoryRecord(id);
+            },
+        ).open();
+    }
+
+    private confirmClearAllMemory(): void {
+        new MemoryConfirmModal(
+            this.app,
+            'Clear Memory',
+            'Clear all remembered Hindsight memory and legacy profile fields?',
+            async () => {
+                await this.clearAllMemory();
+            },
+        ).open();
+    }
+
+    private async deleteMemoryRecord(id: string): Promise<void> {
+        if (typeof this.plugin.modelService?.deleteMemoryById !== 'function') {
+            new Notice('Memory deletion is not available.');
+            return;
+        }
+
+        const result = await this.plugin.modelService.deleteMemoryById(id);
+        new Notice(result?.message || `Deleted memory: ${id}`);
+        await this.refreshMemoryView();
+    }
+
+    private async clearAllMemory(): Promise<void> {
+        if (typeof this.plugin.modelService?.forgetMemory !== 'function') {
+            new Notice('Memory clearing is not available.');
+            return;
+        }
+
+        const result = await this.plugin.modelService.forgetMemory('all');
+        new Notice(result?.message || 'Cleared all remembered Hindsight memory.');
+        await this.refreshMemoryView();
+    }
+
     private renderConnectionSection(containerEl: HTMLElement, token: number): void {
         const settings = this.plugin.settings;
         const activeConfig = this.getActiveConfig();
 
         if (!activeConfig) {
-            containerEl.createDiv({ cls: 'ocli-settings-inline-note is-warning', text: 'No active provider found.' });
+            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-warning', text: 'No active provider found.' });
             return;
         }
 
-        const workspace = containerEl.createDiv({ cls: 'ocli-settings-workspace' });
-        const listPanel = workspace.createDiv({ cls: 'ocli-settings-workspace-panel is-list' });
-        const detailPanel = workspace.createDiv({ cls: 'ocli-settings-workspace-panel is-detail' });
+        const workspace = containerEl.createDiv({ cls: 'baizer-settings-workspace' });
+        const listPanel = workspace.createDiv({ cls: 'baizer-settings-workspace-panel is-list' });
+        const detailPanel = workspace.createDiv({ cls: 'baizer-settings-workspace-panel is-detail' });
 
-        const listHeader = listPanel.createDiv({ cls: 'ocli-settings-workspace-header' });
-        const listCopy = listHeader.createDiv({ cls: 'ocli-settings-workspace-copy' });
-        listCopy.createDiv({ cls: 'ocli-settings-workspace-title', text: 'Providers' });
-        listCopy.createDiv({ cls: 'ocli-settings-workspace-subtitle', text: 'Select a provider' });
+        const listHeader = listPanel.createDiv({ cls: 'baizer-settings-workspace-header' });
+        const listCopy = listHeader.createDiv({ cls: 'baizer-settings-workspace-copy' });
+        listCopy.createDiv({ cls: 'baizer-settings-workspace-title', text: 'Providers' });
+        listCopy.createDiv({ cls: 'baizer-settings-workspace-subtitle', text: 'Select a provider' });
         this.createActionButton(listHeader, '+ Add', async () => {
             new AddProviderModal(this.app, async (label, baseUrl) => {
                 const key = `custom-${Date.now()}`;
@@ -503,40 +1068,40 @@ export class SettingTab extends PluginSettingTab {
             }).open();
         }, 'accent');
 
-        const providerList = listPanel.createDiv({ cls: 'ocli-settings-provider-list' });
+        const providerList = listPanel.createDiv({ cls: 'baizer-settings-provider-list' });
         Object.keys(settings.providers).forEach(providerId => {
             const meta = getProviderCardMeta(settings, providerId);
             const card = providerList.createDiv({
-                cls: `ocli-settings-provider-card${meta.isActive ? ' is-active' : ''}`,
+                cls: `baizer-settings-provider-card${meta.isActive ? ' is-active' : ''}`,
             });
             card.tabIndex = 0;
             card.setAttribute('role', 'button');
             card.setAttribute('aria-pressed', meta.isActive ? 'true' : 'false');
 
-            const cardHeader = card.createDiv({ cls: 'ocli-settings-provider-card-header' });
-            const cardIdentity = cardHeader.createDiv({ cls: 'ocli-settings-provider-card-identity' });
-            cardIdentity.createDiv({ cls: 'ocli-settings-provider-card-title', text: meta.label });
+            const cardHeader = card.createDiv({ cls: 'baizer-settings-provider-card-header' });
+            const cardIdentity = cardHeader.createDiv({ cls: 'baizer-settings-provider-card-identity' });
+            cardIdentity.createDiv({ cls: 'baizer-settings-provider-card-title', text: meta.label });
             cardIdentity.createSpan({
-                cls: 'ocli-settings-provider-card-icon is-protocol',
+                cls: 'baizer-settings-provider-card-icon is-protocol',
                 text: meta.protocolGlyph,
                 attr: { 'aria-label': meta.protocolLabel, title: meta.protocolLabel },
             });
 
-            const cardStatus = cardHeader.createDiv({ cls: 'ocli-settings-provider-card-statuses' });
+            const cardStatus = cardHeader.createDiv({ cls: 'baizer-settings-provider-card-statuses' });
             if (meta.isActive) {
                 cardStatus.createSpan({
-                    cls: 'ocli-settings-provider-card-icon is-active',
+                    cls: 'baizer-settings-provider-card-icon is-active',
                     text: '✓',
                     attr: { 'aria-label': 'Active provider', title: 'Active provider' },
                 });
             }
             cardStatus.createSpan({
-                cls: `ocli-settings-provider-card-icon is-${meta.statusTone}`,
+                cls: `baizer-settings-provider-card-icon is-${meta.statusTone}`,
                 text: meta.statusGlyph,
                 attr: { 'aria-label': meta.statusLabel, title: meta.statusLabel },
             });
 
-            card.createDiv({ cls: 'ocli-settings-provider-card-meta', text: meta.compactMeta });
+            card.createDiv({ cls: 'baizer-settings-provider-card-meta', text: meta.compactMeta });
 
             const activateProvider = async () => {
                 if (providerId === settings.activeProvider) return;
@@ -559,17 +1124,17 @@ export class SettingTab extends PluginSettingTab {
         });
 
         const listSummary = getProviderListSummary(settings);
-        listPanel.createDiv({ cls: 'ocli-settings-provider-summary', text: listSummary.label });
+        listPanel.createDiv({ cls: 'baizer-settings-provider-summary', text: listSummary.label });
 
-        const detailHeader = detailPanel.createDiv({ cls: 'ocli-settings-workspace-header is-detail' });
-        const detailCopy = detailHeader.createDiv({ cls: 'ocli-settings-workspace-copy' });
-        detailCopy.createDiv({ cls: 'ocli-settings-workspace-title', text: 'Provider Detail' });
-        detailCopy.createDiv({ cls: 'ocli-settings-workspace-subtitle', text: 'Fill the selected provider configuration.' });
+        const detailHeader = detailPanel.createDiv({ cls: 'baizer-settings-workspace-header is-detail' });
+        const detailCopy = detailHeader.createDiv({ cls: 'baizer-settings-workspace-copy' });
+        detailCopy.createDiv({ cls: 'baizer-settings-workspace-title', text: 'Provider Detail' });
+        detailCopy.createDiv({ cls: 'baizer-settings-workspace-subtitle', text: 'Fill the selected provider configuration.' });
 
-        const detailBody = detailPanel.createDiv({ cls: 'ocli-settings-detail-body' });
+        const detailBody = detailPanel.createDiv({ cls: 'baizer-settings-detail-body' });
         this.renderConnectionField(detailBody, 'Provider Name', (valueEl) => {
             const input = valueEl.createEl('input', {
-                cls: 'ocli-settings-detail-input',
+                cls: 'baizer-settings-detail-input',
                 attr: {
                     type: 'text',
                     value: activeConfig.label,
@@ -585,7 +1150,7 @@ export class SettingTab extends PluginSettingTab {
 
         this.renderConnectionField(detailBody, 'Protocol', (valueEl) => {
             const select = valueEl.createEl('select', {
-                cls: 'ocli-settings-detail-input',
+                cls: 'baizer-settings-detail-input',
                 attr: { 'aria-label': 'Provider protocol' },
             }) as HTMLSelectElement;
             select.createEl('option', { value: 'gemini', text: 'Gemini API' });
@@ -607,7 +1172,7 @@ export class SettingTab extends PluginSettingTab {
 
         this.renderConnectionField(detailBody, 'API Endpoint', (valueEl) => {
             const input = valueEl.createEl('input', {
-                cls: 'ocli-settings-detail-input',
+                cls: 'baizer-settings-detail-input',
                 attr: {
                     type: 'text',
                     placeholder: 'https://api.openai.com/v1',
@@ -627,9 +1192,9 @@ export class SettingTab extends PluginSettingTab {
         });
 
         this.renderConnectionField(detailBody, 'API Key', (valueEl) => {
-            const keyRow = valueEl.createDiv({ cls: 'ocli-settings-detail-secret' });
+            const keyRow = valueEl.createDiv({ cls: 'baizer-settings-detail-secret' });
             const input = keyRow.createEl('input', {
-                cls: 'ocli-settings-detail-input',
+                cls: 'baizer-settings-detail-input',
                 attr: {
                     type: this.revealApiKey ? 'text' : 'password',
                     placeholder: 'sk-...',
@@ -645,7 +1210,7 @@ export class SettingTab extends PluginSettingTab {
                 await this.persistSettings();
             });
 
-            const secretActions = keyRow.createDiv({ cls: 'ocli-settings-detail-secret-actions' });
+            const secretActions = keyRow.createDiv({ cls: 'baizer-settings-detail-secret-actions' });
             this.createActionButton(secretActions, this.revealApiKey ? 'Hide' : 'Reveal', async () => {
                 this.revealApiKey = !this.revealApiKey;
                 this.display();
@@ -661,7 +1226,7 @@ export class SettingTab extends PluginSettingTab {
 
         this.renderConnectionField(detailBody, 'Model', (valueEl) => {
             const select = valueEl.createEl('select', {
-                cls: 'ocli-settings-detail-input',
+                cls: 'baizer-settings-detail-input',
                 attr: { 'aria-label': 'Model' },
             }) as HTMLSelectElement;
             if (activeConfig.model) {
@@ -691,12 +1256,12 @@ export class SettingTab extends PluginSettingTab {
 
         this.renderConnectionField(detailBody, 'Connection Status', (valueEl) => {
             valueEl.createDiv({
-                cls: `ocli-settings-inline-note is-${connectionStatus.tone} ocli-settings-inline-note-compact`,
+                cls: `baizer-settings-inline-note is-${connectionStatus.tone} baizer-settings-inline-note-compact`,
                 text: connectionStatus.label,
             });
         });
 
-        const actions = detailPanel.createDiv({ cls: 'ocli-settings-actions ocli-settings-detail-actions' });
+        const actions = detailPanel.createDiv({ cls: 'baizer-settings-actions baizer-settings-detail-actions' });
         this.createActionButton(actions, this.connectionTestStatus.state === 'testing' ? 'Testing...' : 'Test Connection', async () => {
             const label = activeConfig.label || 'AI provider';
             if (!activeConfig.apiKey.trim()) {
@@ -740,9 +1305,9 @@ export class SettingTab extends PluginSettingTab {
             this.display();
         }, 'danger', !deletion.canDelete);
 
-        detailPanel.createDiv({ cls: 'ocli-settings-inline-hint', text: deletion.helperText });
+        detailPanel.createDiv({ cls: 'baizer-settings-inline-hint', text: deletion.helperText });
         detailPanel.createDiv({
-            cls: 'ocli-settings-inline-hint ocli-settings-inline-hint-strong',
+            cls: 'baizer-settings-inline-hint baizer-settings-inline-hint-strong',
             text: 'Available models are loaded from the selected provider API.',
         });
     }
@@ -752,9 +1317,9 @@ export class SettingTab extends PluginSettingTab {
         label: string,
         renderValue: (valueEl: HTMLElement) => void
     ): void {
-        const row = containerEl.createDiv({ cls: 'ocli-settings-detail-row' });
-        row.createDiv({ cls: 'ocli-settings-detail-label', text: label });
-        const value = row.createDiv({ cls: 'ocli-settings-detail-value' });
+        const row = containerEl.createDiv({ cls: 'baizer-settings-detail-row' });
+        row.createDiv({ cls: 'baizer-settings-detail-label', text: label });
+        const value = row.createDiv({ cls: 'baizer-settings-detail-value' });
         renderValue(value);
     }
 
@@ -826,7 +1391,7 @@ export class SettingTab extends PluginSettingTab {
 
         if (this.plugin.settings.customizePrompt) {
             new Setting(containerEl)
-                .setClass('ocli-full-width-textarea')
+                .setClass('baizer-full-width-textarea')
                 .addTextArea(text => text
                     .setPlaceholder('You are a helpful assistant...')
                     .setValue(this.plugin.settings.systemPrompt)
@@ -835,7 +1400,7 @@ export class SettingTab extends PluginSettingTab {
                         await this.persistSettings();
                     }));
 
-            const actions = containerEl.createDiv({ cls: 'ocli-settings-actions' });
+            const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
             this.createActionButton(actions, 'Restore Default Prompt', async () => {
                 this.plugin.settings.systemPrompt = DEFAULT_SETTINGS.systemPrompt;
                 await this.persistSettings();
@@ -904,19 +1469,9 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Privacy Mode')
-            .setDesc('Anonymize names and emails before sending. Reduces accuracy.')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.privacyMode)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.privacyMode = value;
-                    await this.persistSettings();
-                }));
-
-        new Setting(containerEl)
             .setName('Ignored Folders')
             .setDesc('Path patterns to ignore, one per line.')
-            .setClass('ocli-full-width-textarea')
+            .setClass('baizer-full-width-textarea')
             .addTextArea(text => text
                 .setPlaceholder('Private/\nSecrets/\nTemplates/')
                 .setValue(this.plugin.settings.ignoredFolders)
@@ -946,7 +1501,7 @@ export class SettingTab extends PluginSettingTab {
             new Setting(containerEl)
                 .setName('Writable Folders')
                 .setDesc('One vault folder per line. AI can create or modify files only inside these folders.')
-                .setClass('ocli-full-width-textarea')
+                .setClass('baizer-full-width-textarea')
                 .addTextArea(text => text
                     .setPlaceholder('Projects/\nInbox/')
                     .setValue(this.plugin.settings.vaultWriteAllowedFolders.join('\n'))
@@ -1099,10 +1654,135 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
+        containerEl.createEl('h3', { text: 'Ontology Schema' });
+
+        new Setting(containerEl)
+            .setName('Enable Ontology Schema')
+            .setDesc('Use Knowledge Wiki/_ontology.md to add stable categories and entity extraction to future compiles.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.knowledgeOntologyEnabled !== false)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.knowledgeOntologyEnabled = value;
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Ontology Update Mode')
+            .setDesc('Manual never discovers automatically. Suggest reports readiness without writing. Auto creates a missing schema when thresholds are met.')
+            .addDropdown(drop => drop
+                .addOption('manual', 'Manual')
+                .addOption('suggest', 'Suggest (recommended)')
+                .addOption('auto', 'Auto create when missing')
+                .setValue(this.plugin.settings.knowledgeOntologyUpdateMode || 'suggest')
+                .onChange(async (value: OntologyUpdateMode) => {
+                    this.plugin.settings.knowledgeOntologyUpdateMode = value;
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Minimum Articles')
+            .setDesc('Minimum compiled wiki articles required before ontology discovery can run.')
+            .addText(text => text
+                .setPlaceholder('10')
+                .setValue(String(this.plugin.settings.knowledgeOntologyMinArticles ?? 10))
+                .onChange(async (value: string) => {
+                    this.plugin.settings.knowledgeOntologyMinArticles = clampInteger(value, 1, 500, 10);
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Minimum Topic Frequency')
+            .setDesc('A topic must appear this many times before it can influence ontology discovery.')
+            .addText(text => text
+                .setPlaceholder('3')
+                .setValue(String(this.plugin.settings.knowledgeOntologyMinTopicFrequency ?? 3))
+                .onChange(async (value: string) => {
+                    this.plugin.settings.knowledgeOntologyMinTopicFrequency = clampInteger(value, 1, 100, 3);
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Minimum Concept Frequency')
+            .setDesc('A concept must appear this many times before it can influence ontology discovery.')
+            .addText(text => text
+                .setPlaceholder('2')
+                .setValue(String(this.plugin.settings.knowledgeOntologyMinConceptFrequency ?? 2))
+                .onChange(async (value: string) => {
+                    this.plugin.settings.knowledgeOntologyMinConceptFrequency = clampInteger(value, 1, 100, 2);
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Auto Recompile Stale Articles')
+            .setDesc('Automatically recompile affected notes after ontology changes. Keep off if you want to review stale notes first.')
+            .addToggle(toggle => toggle
+                .setValue(!!this.plugin.settings.knowledgeOntologyAutoRecompileStale)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.knowledgeOntologyAutoRecompileStale = value;
+                    await this.persistSettings();
+                }));
+
+        const ontologyStatusEl = containerEl.createDiv({
+            cls: 'baizer-settings-inline-note',
+            text: 'Ontology status: loading...',
+        });
+        void this.refreshOntologyStatus(ontologyStatusEl);
+
+        new Setting(containerEl)
+            .setName('Ontology Actions')
+            .setDesc('Open, discover, preview, or mark affected notes pending without leaving settings.')
+            .addButton(btn => btn
+                .setButtonText('Open')
+                .onClick(async () => {
+                    const runtime = (this.plugin as any).knowledgeRuntime;
+                    if (!runtime?.openOntologyFile) {
+                        new Notice('Knowledge runtime is not available.');
+                        return;
+                    }
+                    await runtime.openOntologyFile();
+                    await this.refreshOntologyStatus(ontologyStatusEl);
+                }))
+            .addButton(btn => btn
+                .setButtonText('Discover')
+                .onClick(async () => {
+                    const runtime = (this.plugin as any).knowledgeRuntime;
+                    if (!runtime?.discoverOntology) {
+                        new Notice('Knowledge runtime is not available.');
+                        return;
+                    }
+                    const path = await runtime.discoverOntology();
+                    new Notice(path ? `Ontology schema created: ${path}` : 'Ontology schema was not created.');
+                    await this.refreshOntologyStatus(ontologyStatusEl);
+                }))
+            .addButton(btn => btn
+                .setButtonText('Preview')
+                .onClick(async () => {
+                    const runtime = (this.plugin as any).knowledgeRuntime;
+                    if (!runtime?.discoverOntologyPreview) {
+                        new Notice('Knowledge runtime is not available.');
+                        return;
+                    }
+                    const preview = await runtime.discoverOntologyPreview();
+                    if (preview.content) console.log('[Baizer] Ontology preview:\n', preview.content);
+                    new Notice(preview.message);
+                }))
+            .addButton(btn => btn
+                .setButtonText('Mark stale pending')
+                .onClick(async () => {
+                    const runtime = (this.plugin as any).knowledgeRuntime;
+                    if (!runtime?.markOntologyStaleFilesPending) {
+                        new Notice('Knowledge runtime is not available.');
+                        return;
+                    }
+                    const count = await runtime.markOntologyStaleFilesPending();
+                    new Notice(`Marked ${count} stale notes pending.`);
+                    await this.refreshOntologyStatus(ontologyStatusEl);
+                }));
+
         new Setting(containerEl)
             .setName('Source Folders')
             .setDesc('Folders to watch, one per line.')
-            .setClass('ocli-full-width-textarea')
+            .setClass('baizer-full-width-textarea')
             .addTextArea(text => text
                 .setPlaceholder('Clippings\nReading Notes')
                 .setValue((this.plugin.settings.knowledgeSourceFolders || []).join('\n'))
@@ -1113,6 +1793,33 @@ export class SettingTab extends PluginSettingTab {
                         .filter(entry => entry.length > 0);
                     await this.persistSettings();
                 }));
+    }
+
+    private async refreshOntologyStatus(statusEl: HTMLElement): Promise<void> {
+        const runtime = (this.plugin as any).knowledgeRuntime;
+        if (!runtime?.getOntologyStatus) {
+            statusEl.textContent = 'Ontology status: Knowledge runtime is not available.';
+            return;
+        }
+
+        try {
+            const status = await runtime.getOntologyStatus();
+            const readiness = runtime.getOntologyDiscoveryReadiness
+                ? await runtime.getOntologyDiscoveryReadiness()
+                : null;
+            const counts = runtime.getStatusService
+                ? await runtime.getStatusService().getGlobalCounts()
+                : null;
+            const parts = [
+                `Ontology status: ${status.kind}`,
+                `path: ${status.path}`,
+            ];
+            if (readiness) parts.push(`discovery: ${readiness.kind}`);
+            if (counts) parts.push(`stale notes: ${counts.stale}`);
+            statusEl.textContent = parts.join(' | ');
+        } catch (e: any) {
+            statusEl.textContent = `Ontology status unavailable: ${e.message}`;
+        }
     }
 
     private renderPluginSkillsSection(containerEl: HTMLElement): void {
@@ -1151,7 +1858,7 @@ export class SettingTab extends PluginSettingTab {
     ): HTMLButtonElement {
         const button = containerEl.createEl('button', {
             text: label,
-            cls: `ocli-settings-action is-${variant}`,
+            cls: `baizer-settings-action is-${variant}`,
             attr: { type: 'button' },
         }) as HTMLButtonElement;
         button.disabled = disabled;
@@ -1160,6 +1867,46 @@ export class SettingTab extends PluginSettingTab {
             void onClick();
         });
         return button;
+    }
+}
+
+class MemoryConfirmModal extends Modal {
+    constructor(
+        app: App,
+        private titleText: string,
+        private message: string,
+        private onConfirm: () => Promise<void>,
+    ) {
+        super(app);
+    }
+
+    onOpen(): void {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.createEl('h2', { text: this.titleText });
+        contentEl.createEl('p', { text: this.message });
+
+        const actions = contentEl.createDiv({ cls: 'baizer-memory-confirm-actions' });
+        const cancel = actions.createEl('button', {
+            text: 'Cancel',
+            cls: 'baizer-settings-action is-default',
+            attr: { type: 'button' },
+        });
+        cancel.addEventListener('click', () => this.close());
+
+        const confirm = actions.createEl('button', {
+            text: 'Confirm',
+            cls: 'baizer-settings-action is-danger',
+            attr: { type: 'button' },
+        });
+        confirm.addEventListener('click', () => {
+            this.close();
+            void this.onConfirm();
+        });
+    }
+
+    onClose(): void {
+        this.contentEl.empty();
     }
 }
 

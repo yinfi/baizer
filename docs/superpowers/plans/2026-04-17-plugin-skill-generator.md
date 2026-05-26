@@ -265,7 +265,7 @@ export interface PluginInfo {
   settings: Record<string, any>;
 }
 
-const SKILL_DIR = `.obsidian/obsidian-cli/skills`;
+const SKILL_DIR = `.obsidian/baizer/skills`;
 
 const SYSTEM_PROMPT = `你是一个 Obsidian 插件专家。根据提供的插件信息，生成一个 SKILL.md 文件。
 这个文件将指导 AI 助手如何使用该插件完成用户任务。
@@ -451,9 +451,9 @@ const mockGenerator = {
   generateSkillMd: async () => `---\nname: test\ndescription: test\n---\n# Test`,
   writeSkillFile: async (id: string) => {
     generatedPlugins.push(id);
-    return `.obsidian/obsidian-cli/skills/plugin-${id}/SKILL.md`;
+    return `.obsidian/baizer/skills/plugin-${id}/SKILL.md`;
   },
-  skillFilePath: (id: string) => `.obsidian/obsidian-cli/skills/plugin-${id}/SKILL.md`,
+  skillFilePath: (id: string) => `.obsidian/baizer/skills/plugin-${id}/SKILL.md`,
 };
 
 const enabledPlugins = new Set(['plugin-a', 'plugin-b']);
@@ -500,9 +500,9 @@ async function runTests() {
     settings,
   );
 
-  await test('getEnabledPluginIds excludes obsidian-cli', async () => {
+  await test('getEnabledPluginIds excludes baizer', async () => {
     const ids = watcher.getEnabledPluginIds();
-    expect(ids.includes('obsidian-cli')).toBe(false);
+    expect(ids.includes('baizer')).toBe(false);
   });
 
   await test('diffPlugins detects added plugins', async () => {
@@ -753,7 +753,7 @@ const listPlugins: Tool = {
     if (!ctx.settings.allowPluginControl) return { error: 'Permission denied' };
     const manifests = (ctx.app as any).plugins.manifests;
     const enabled = (ctx.app as any).plugins.enabledPlugins;
-    const SKILL_DIR = '.obsidian/obsidian-cli/skills';
+    const SKILL_DIR = '.obsidian/baizer/skills';
     const list = Object.values(manifests).map((m: any) => ({
       id: m.id, name: m.name, version: m.version,
       enabled: enabled.has(m.id), description: m.description,

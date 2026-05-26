@@ -1,7 +1,7 @@
 # Plugin Command Execution Recovery Design
 
 **Date:** 2026-04-06
-**Project:** `obsidian-cli`
+**Project:** `baizer`
 **Status:** Approved design, pending implementation plan
 
 ## Goal

@@ -1,6 +1,8 @@
 import { App } from 'obsidian';
 
-export const OPERATION_AUDIT_LOG_DIR = '.obsidian/obsidian-cli';
+import { PLUGIN_DATA_DIR } from '../mcp/types';
+
+export const OPERATION_AUDIT_LOG_DIR = PLUGIN_DATA_DIR;
 export const OPERATION_AUDIT_LOG_PATH = `${OPERATION_AUDIT_LOG_DIR}/operations.json`;
 
 export interface OperationRecord {

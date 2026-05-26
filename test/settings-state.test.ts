@@ -4,7 +4,9 @@ import {
   getProviderCardMeta,
   getProviderListSummary,
   getProviderDeletionState,
+  getMatchingSettingsSections,
   getSettingsSectionStatuses,
+  getSettingsFallbackCss,
 } from '../src/settings';
 
 function cloneSettings(): PluginSettings {
@@ -72,6 +74,23 @@ async function runTests() {
     settings.enableGuardian = true;
     statuses = getSettingsSectionStatuses(settings);
     expect(statuses.guardian).toEqual(undefined);
+  });
+
+  await test('settings search exposes the Memory section', () => {
+    expect(getMatchingSettingsSections('memory')).toEqual(['memory']);
+  });
+
+  await test('settings search exposes ontology controls under Knowledge', () => {
+    expect(getMatchingSettingsSections('ontology')).toEqual(['knowledge']);
+  });
+
+  await test('marks Memory as private when privacy mode is enabled', () => {
+    const settings = cloneSettings();
+    settings.privacyMode = true;
+
+    const statuses = getSettingsSectionStatuses(settings);
+
+    expect(statuses.memory).toEqual({ label: 'Private', tone: 'accent' });
   });
 
   await test('marks permissions as risky when plugin control is enabled', () => {
@@ -187,6 +206,44 @@ async function runTests() {
     }).toEqual({
       vaultWriteScope: 'all-vault',
       vaultWriteAllowedFolders: [],
+    });
+  });
+
+  await test('exposes ontology defaults for knowledge schema controls', () => {
+    const settings = cloneSettings();
+
+    expect({
+      knowledgeOntologyEnabled: (settings as any).knowledgeOntologyEnabled,
+      knowledgeOntologyUpdateMode: (settings as any).knowledgeOntologyUpdateMode,
+      knowledgeOntologyMinArticles: (settings as any).knowledgeOntologyMinArticles,
+      knowledgeOntologyMinTopicFrequency: (settings as any).knowledgeOntologyMinTopicFrequency,
+      knowledgeOntologyMinConceptFrequency: (settings as any).knowledgeOntologyMinConceptFrequency,
+      knowledgeOntologyAutoRecompileStale: (settings as any).knowledgeOntologyAutoRecompileStale,
+    }).toEqual({
+      knowledgeOntologyEnabled: true,
+      knowledgeOntologyUpdateMode: 'suggest',
+      knowledgeOntologyMinArticles: 10,
+      knowledgeOntologyMinTopicFrequency: 3,
+      knowledgeOntologyMinConceptFrequency: 2,
+      knowledgeOntologyAutoRecompileStale: false,
+    });
+  });
+
+  await test('settings fallback CSS covers the Baizer configuration layout', () => {
+    const css = getSettingsFallbackCss();
+
+    expect({
+      hasRoot: css.includes('.baizer-settings-page'),
+      hasNav: css.includes('.baizer-settings-nav-list'),
+      hasCards: css.includes('.baizer-settings-section-card'),
+      hasWorkspace: css.includes('.baizer-settings-workspace'),
+      hasProviderCards: css.includes('.baizer-settings-provider-card'),
+    }).toEqual({
+      hasRoot: true,
+      hasNav: true,
+      hasCards: true,
+      hasWorkspace: true,
+      hasProviderCards: true,
     });
   });
 }

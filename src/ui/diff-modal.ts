@@ -17,24 +17,24 @@ export class DiffModal extends Modal {
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.addClass('ocli-diff-modal');
+        contentEl.addClass('baizer-diff-modal');
 
-        const header = contentEl.createDiv({ cls: 'ocli-diff-modal-header' });
-        const copy = header.createDiv({ cls: 'ocli-diff-modal-copy' });
+        const header = contentEl.createDiv({ cls: 'baizer-diff-modal-header' });
+        const copy = header.createDiv({ cls: 'baizer-diff-modal-copy' });
         copy.createEl('h2', { text: 'Review Changes' });
-        copy.createDiv({ cls: 'ocli-diff-modal-subtitle', text: 'Compare current content with the proposed replacement before applying.' });
+        copy.createDiv({ cls: 'baizer-diff-modal-subtitle', text: 'Compare current content with the proposed replacement before applying.' });
 
-        const summary = contentEl.createDiv({ cls: 'ocli-diff-summary' });
+        const summary = contentEl.createDiv({ cls: 'baizer-diff-summary' });
         this.renderStat(summary, 'Current', this.countLines(this.original));
         this.renderStat(summary, 'Proposed', this.countLines(this.modified));
         this.renderStat(summary, 'Changed', this.countChangedLines());
 
-        const diffContainer = contentEl.createDiv({ cls: 'diff-container ocli-diff-unified' });
+        const diffContainer = contentEl.createDiv({ cls: 'diff-container baizer-diff-unified' });
         this.renderUnifiedDiff(diffContainer);
 
-        const paneContainer = contentEl.createDiv({ cls: 'ocli-diff-panes' });
-        this.renderPane(paneContainer, 'Current', this.original, 'ocli-diff-pane-old');
-        this.renderPane(paneContainer, 'Proposed', this.modified, 'ocli-diff-pane-new');
+        const paneContainer = contentEl.createDiv({ cls: 'baizer-diff-panes' });
+        this.renderPane(paneContainer, 'Current', this.original, 'baizer-diff-pane-old');
+        this.renderPane(paneContainer, 'Proposed', this.modified, 'baizer-diff-pane-new');
 
         const buttonContainer = contentEl.createDiv({ cls: 'diff-actions' });
 
@@ -52,26 +52,26 @@ export class DiffModal extends Modal {
     }
 
     private renderStat(container: HTMLElement, label: string, value: number) {
-        const stat = container.createDiv({ cls: 'ocli-diff-stat' });
-        stat.createSpan({ cls: 'ocli-diff-stat-label', text: label });
-        stat.createSpan({ cls: 'ocli-diff-stat-value', text: String(value) });
+        const stat = container.createDiv({ cls: 'baizer-diff-stat' });
+        stat.createSpan({ cls: 'baizer-diff-stat-label', text: label });
+        stat.createSpan({ cls: 'baizer-diff-stat-value', text: String(value) });
     }
 
     private renderPane(container: HTMLElement, label: string, content: string, toneClass: string) {
-        const pane = container.createDiv({ cls: `ocli-diff-pane ${toneClass}` });
-        pane.createDiv({ cls: 'ocli-diff-pane-title', text: label });
+        const pane = container.createDiv({ cls: `baizer-diff-pane ${toneClass}` });
+        pane.createDiv({ cls: 'baizer-diff-pane-title', text: label });
         if (content.length === 0) {
-            pane.createDiv({ cls: 'ocli-diff-empty', text: 'No content.' });
+            pane.createDiv({ cls: 'baizer-diff-empty', text: 'No content.' });
             return;
         }
-        const pre = pane.createEl('pre', { cls: 'ocli-diff-pane-code' });
+        const pre = pane.createEl('pre', { cls: 'baizer-diff-pane-code' });
         pre.setText(content);
     }
 
     private renderUnifiedDiff(container: HTMLElement) {
         const rows = buildLineDiff(this.original, this.modified);
         if (rows.length === 0) {
-            container.createDiv({ cls: 'ocli-diff-empty', text: 'No line-level changes.' });
+            container.createDiv({ cls: 'baizer-diff-empty', text: 'No line-level changes.' });
             return;
         }
 

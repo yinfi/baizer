@@ -17,6 +17,7 @@ export interface WorkspaceEditSummary {
 interface WorkspaceEditRecord {
   order: number;
   summary: WorkspaceEditSummary;
+  order: number;
   beforeExists: boolean;
   beforeContent: string;
   beforeHash: string;
@@ -92,6 +93,7 @@ export class WorkspaceEditService {
     this.records.set(summary.id, {
       order: ++this.nextEditOrder,
       summary,
+      order: ++this.nextEditOrder,
       beforeExists: beforeSnapshot.exists,
       beforeContent: beforeSnapshot.content,
       beforeHash: this.hashContent(beforeSnapshot.content),

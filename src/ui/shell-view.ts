@@ -5,7 +5,7 @@ import { logger } from '../utils/logger';
 import { ChatController } from './chat-controller';
 import { ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
-import { IPlugin, VIEW_TYPE_SHELL } from '../mcp/types';
+import { IPlugin, PLUGIN_ID, PLUGIN_NAME, VIEW_TYPE_SHELL } from '../mcp/types';
 import { StreamEvent } from '../models/interfaces';
 import { buildCommandSuggestions, CommandSuggestion } from './command-suggestions';
 import { ContextController } from './controllers/context-controller';
@@ -82,9 +82,8 @@ export class ShellView extends ItemView {
     private streamNodeCount = 0;
     private readonly localCommandSuggestions: CommandSuggestion[] = [
         { label: '/clear', desc: 'Clear session history' },
-        { label: '/profile', desc: 'View user profile' },
+        { label: '/memory', desc: 'View, search, and forget Hindsight memory' },
         { label: '/file-back', desc: 'Archive a previous AI answer to the knowledge wiki' },
-        { label: '/forget', desc: 'Forget user memory (name/profession/all...)' },
         { label: '/new', desc: 'Create new note' },
         { label: '/edit', desc: 'AI edit selected text' },
         { label: '/open', desc: 'Open file' },
@@ -129,7 +128,7 @@ export class ShellView extends ItemView {
             target.closest('.shell-model-select-container') ||
             target.closest('.shell-action-buttons') ||
             target.closest('.shell-header-buttons') ||
-            target.closest('.ocli-history-menu') ||
+            target.closest('.baizer-history-menu') ||
             target.closest('.shell-history-btn')
         ) return;
         this.hideHistoryMenu();
@@ -188,7 +187,7 @@ export class ShellView extends ItemView {
     }
 
     getDisplayText() {
-        return 'Obsidian Shell';
+        return PLUGIN_NAME;
     }
 
     getIcon() {
@@ -200,20 +199,20 @@ export class ShellView extends ItemView {
         contentEl.empty();
 
         // Create a wrapper container to ensure proper flexbox layout
-        const container = contentEl.createDiv({ cls: 'ocli-shell-view' });
+        const container = contentEl.createDiv({ cls: 'baizer-shell-view' });
 
         // 1. Header
         const header = container.createDiv({ cls: 'shell-header' });
         const headerTitle = header.createDiv({ cls: 'shell-header-title' });
         const headerIdentity = headerTitle.createDiv({ cls: 'shell-header-identity' });
-        headerIdentity.createDiv({ cls: 'shell-brand-mark', text: 'CLI' });
+        headerIdentity.createDiv({ cls: 'shell-brand-mark', text: 'BZ' });
         const headerCopy = headerIdentity.createDiv({ cls: 'shell-header-copy' });
-        headerCopy.createEl('h1', { text: 'Shell', cls: 'shell-title' });
+        headerCopy.createEl('h1', { text: PLUGIN_NAME, cls: 'shell-title' });
         headerCopy.createDiv({ cls: 'shell-header-state', text: 'Ready - current note scoped' });
         this.tabBarContainerEl = headerTitle.createDiv({ cls: 'shell-tab-bar-container' });
         this.createHeaderActions(header);
 
-        this.historyMenuContainerEl = header.createDiv({ cls: 'ocli-history-menu' });
+        this.historyMenuContainerEl = header.createDiv({ cls: 'baizer-history-menu' });
         this.historyMenu = new HistoryMenu(this.historyMenuContainerEl, {
             onOpen: (id) => this.openConversationFromHistory(id),
             onDelete: (id) => this.deleteConversationFromHistory(id),
@@ -836,7 +835,7 @@ export class ShellView extends ItemView {
             this.inputEl.removeEventListener('paste', this.handlePasteBound);
             this.inputEl.removeEventListener('drop', this.handleDropBound);
         }
-        const container = this.contentEl.querySelector('.ocli-shell-view');
+        const container = this.contentEl.querySelector('.baizer-shell-view');
         if (container) {
             container.removeEventListener('click', this.handleContainerClickBound as EventListener);
         }
@@ -922,7 +921,7 @@ export class ShellView extends ItemView {
                 void this.openKnowledgeSummaryForPath(path);
             },
             onRunLint: () => {
-                (this.app as any).commands?.executeCommandById?.('obsidian-cli:knowledge-lint');
+                (this.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
             },
             onCopyPath: (path) => {
                 void globalThis.navigator?.clipboard?.writeText?.(path);
@@ -1025,7 +1024,7 @@ export class ShellView extends ItemView {
             await (this.app.workspace as any).openLinkText(summaryPath, '', false);
             return;
         }
-        (this.app as any).commands?.executeCommandById?.('obsidian-cli:knowledge-open-index');
+        (this.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
     }
 
     private excludeCurrentNoteContext(path: string) {
@@ -1049,7 +1048,7 @@ export class ShellView extends ItemView {
         // @ts-ignore - app setting tab activation
         this.app.setting.open();
         // @ts-ignore - activate plugin settings tab
-        this.app.setting.openTabById('obsidian-cli');
+        this.app.setting.openTabById(PLUGIN_ID);
     }
 
     private async handlePaste(e: ClipboardEvent) {
@@ -1227,7 +1226,7 @@ export class ShellView extends ItemView {
         // @ts-ignore - app setting tab activation
         this.app.setting.open();
         // @ts-ignore - activate plugin settings tab
-        this.app.setting.openTabById('obsidian-cli');
+        this.app.setting.openTabById(PLUGIN_ID);
         this.refreshInputToolbarProviders();
     }
 
@@ -1428,7 +1427,7 @@ export class ShellView extends ItemView {
     }
 
     private getPluginInstance(): IPlugin | undefined {
-        return this.plugin ?? (this.app as any).plugins.plugins['obsidian-cli'];
+        return this.plugin ?? (this.app as any).plugins.plugins[PLUGIN_ID];
     }
 
     private ensureActiveTabSession(): ShellTabSession {

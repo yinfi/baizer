@@ -1,3 +1,5 @@
+import { MemoryRecord } from './hindsight-types';
+
 export interface UserProfile {
     name?: string;
     profession?: string;
@@ -40,6 +42,50 @@ export interface ChatMessage {
 export interface MemoryContext {
     userProfile: string;
     recentSessions: string;
+}
+
+export type MemoryViewMode =
+    | 'overview'
+    | 'observations'
+    | 'facts'
+    | 'recent'
+    | 'search'
+    | 'raw';
+
+export interface MemoryViewRequest {
+    mode?: MemoryViewMode;
+    query?: string;
+    limit?: number;
+    now?: number;
+}
+
+export interface MemoryStats {
+    total: number;
+    world: number;
+    experience: number;
+    observation: number;
+    lastUpdatedAt: number | null;
+}
+
+export interface MemoryViewSections {
+    observations: MemoryRecord[];
+    facts: MemoryRecord[];
+    recent: MemoryRecord[];
+    searchResults: MemoryRecord[];
+    raw: MemoryRecord[];
+}
+
+export interface MemoryView {
+    privacyMode: boolean;
+    legacyProfile: UserProfile;
+    stats: MemoryStats;
+    sections: MemoryViewSections;
+}
+
+export interface MemoryMutationResult {
+    success: boolean;
+    deletedCount: number;
+    message: string;
 }
 
 export const DEFAULT_USER_PROFILE: UserProfile = {

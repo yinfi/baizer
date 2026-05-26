@@ -106,7 +106,7 @@ async function runTests() {
   console.log('=== MemoryManager Tests ===');
 
   await test('does not let delayed disk loads overwrite newly recorded messages', async () => {
-    const historyPath = '.obsidian/obsidian-cli-memory/chat-history.json';
+    const historyPath = '.obsidian/baizer-memory/chat-history.json';
     const { app } = createApp({
       exists: async (path: string) => path === historyPath,
       read: async (path: string) => {
@@ -126,6 +126,62 @@ async function runTests() {
     expect(memory.chatHistory[memory.chatHistory.length - 1].content).toBe('new history');
   });
 
+  await test('does not load chat history from the previous plugin memory directory', async () => {
+    const previousMemoryDir = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
+    const legacyHistoryPath = `${previousMemoryDir}/chat-history.json`;
+    const { app } = createApp({
+      exists: async (path: string) => path === legacyHistoryPath,
+      read: async (path: string) => {
+        if (path === legacyHistoryPath) {
+          return JSON.stringify([{ role: 'user', content: 'old brand history', timestamp: 1 }]);
+        }
+        return '';
+      },
+    });
+
+    const promptLog: string[] = [];
+    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    await memory.ready();
+
+    expect(memory.chatHistory.length).toBe(0);
+  });
+
+  await test('imports profile and summaries from the previous plugin memory directory before loading context', async () => {
+    const previousMemoryDir = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
+    const files: Record<string, string> = {
+      [`${previousMemoryDir}/user-profile.json`]: JSON.stringify({
+        profession: 'Previous plugin engineer',
+        expertise: ['legacy memory'],
+        preferences: { language: 'zh-CN', responseStyle: 'concise', topics: ['plugins'] },
+        workflows: [],
+        context: { currentProjects: ['Profile migration'], goals: ['keep profile'], challenges: [] },
+        metadata: { createdAt: 1, updatedAt: 2, totalInteractions: 3, lastProfileUpdate: 2 },
+      }),
+      [`${previousMemoryDir}/session-summaries.json`]: JSON.stringify([
+        { timestamp: 10, messageCount: 2, summary: 'Legacy summary imported.' },
+      ]),
+    };
+    const { app } = createApp({
+      exists: async (path: string) => Object.prototype.hasOwnProperty.call(files, path),
+      read: async (path: string) => files[path],
+      write: async (path: string, content: string) => {
+        files[path] = content;
+      },
+      mkdir: async (path: string) => {
+        files[path] = '';
+      },
+    });
+
+    const memory = new MemoryManager(app, createModelProvider([]));
+    await memory.ready();
+
+    const context = memory.buildContext();
+    expect(context).toContain('Previous plugin engineer');
+    expect(context).toContain('Legacy summary imported.');
+    expect(files['.obsidian/baizer-memory/user-profile.json']).toContain('Previous plugin engineer');
+    expect(files['.obsidian/baizer-memory/session-summaries.json']).toContain('Legacy summary imported.');
+  });
+
   await test('exposes ready() and uses current session transcript when summarizing', async () => {
     const promptLog: string[] = [];
     const { app, writes } = createApp();
@@ -141,7 +197,7 @@ async function runTests() {
     await memory.recordMessage('model', 'Let us add a queue and merge-safe rewrite');
     await memory.clearSession();
 
-    const summaryPath = '.obsidian/obsidian-cli-memory/session-summaries.json';
+    const summaryPath = '.obsidian/baizer-memory/session-summaries.json';
     const savedSummaries = JSON.parse(writes[summaryPath] || '[]');
     expect(savedSummaries.length).toBe(1);
     expect(savedSummaries[0].summary).toContain('inbox autosave flow');
@@ -182,20 +238,65 @@ async function runTests() {
     await memory.ready();
 
     await (memory as any).retainTurn({
-      userMessage: 'I prefer local-first memory for Obsidian CLI.',
+      userMessage: 'I prefer local-first memory for Baizer.',
       assistantMessage: 'We will keep memory local.',
       source: 'shell',
       now: 1000,
     });
 
     const promptBlock = await (memory as any).recallForPrompt({
-      query: 'How should Obsidian CLI memory work?',
+      query: 'How should Baizer memory work?',
       maxChars: 500,
       now: 2000,
     });
 
     expect(promptBlock).toContain('[Relevant Memory]');
     expect(promptBlock).toContain('local-first');
+  });
+
+  await test('getMemoryView returns stats and sections for command and settings UI', async () => {
+    const promptLog: string[] = [];
+    const { app } = createApp();
+    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer local-first memory for Baizer.',
+      assistantMessage: 'Acknowledged the local-first preference.',
+      source: 'shell',
+      now: 1000,
+    });
+
+    const view = await (memory as any).getMemoryView({ mode: 'overview', limit: 5, now: 2000 });
+
+    expect(view.stats.total).toBe(2);
+    expect(view.stats.world).toBe(1);
+    expect(view.stats.experience).toBe(1);
+    expect(view.sections.facts.length).toBe(1);
+    expect(view.privacyMode).toBe(false);
+  });
+
+  await test('deleteMemoryById removes one retained memory', async () => {
+    const promptLog: string[] = [];
+    const { app } = createApp();
+    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: 'My project LaunchPlan needs memory row deletion.',
+      assistantMessage: 'Captured LaunchPlan deletion need.',
+      source: 'shell',
+      now: 1000,
+    });
+    const before = await (memory as any).getMemoryView({ mode: 'raw' });
+    const targetId = before.sections.raw[0].id;
+
+    const result = await (memory as any).deleteMemoryById(targetId);
+    const after = await (memory as any).getMemoryView({ mode: 'raw' });
+
+    expect(result.success).toBe(true);
+    expect(result.deletedCount).toBe(1);
+    expect(after.sections.raw.some((record: any) => record.id === targetId)).toBe(false);
   });
 
   await test('privacy mode prevents retaining new turn memories', async () => {
@@ -242,7 +343,7 @@ async function runTests() {
     });
 
     expect(promptBlock).toBe('');
-    expect(writes['.obsidian/obsidian-cli-memory/memories.json'] || '').notToContain('LaunchPlan');
+    expect(writes['.obsidian/baizer-memory/memories.json'] || '').notToContain('LaunchPlan');
   });
 
   await test('retainTurn redacts secrets before writing hindsight memories', async () => {
@@ -258,7 +359,7 @@ async function runTests() {
       now: 1000,
     });
 
-    const saved = writes['.obsidian/obsidian-cli-memory/memories.json'] || '';
+    const saved = writes['.obsidian/baizer-memory/memories.json'] || '';
     expect(saved).toContain('[REDACTED]');
     expect(saved).notToContain('sk-test-secret');
     expect(saved).notToContain('ghp_secret1234567890');

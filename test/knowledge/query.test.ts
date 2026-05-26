@@ -1,5 +1,7 @@
 // test/knowledge/query.test.ts
 
+import { TFile } from 'obsidian';
+import { MetadataIndex } from '../../src/knowledge/metadata-index';
 import { QueryKnowledgeExecutor } from '../../src/knowledge/query';
 
 function expect(actual: any) {
@@ -23,6 +25,38 @@ function test(name: string, fn: () => Promise<void> | void) {
   } else {
     console.log(`  ✓ ${name}`);
   }
+}
+
+function createFile(path: string): TFile {
+  const file = new TFile();
+  file.path = path;
+  file.basename = path.split('/').pop()?.replace(/\.md$/, '') || path;
+  file.extension = 'md';
+  return file;
+}
+
+function createMetadataIndex(entries: { path: string; frontmatter: Record<string, any> }[]): MetadataIndex {
+  const files = new Map<string, { file: TFile; frontmatter: Record<string, any> }>();
+  for (const entry of entries) {
+    files.set(entry.path, {
+      file: createFile(entry.path),
+      frontmatter: entry.frontmatter,
+    });
+  }
+  const app = {
+    vault: {
+      getMarkdownFiles: () => Array.from(files.values()).map((entry) => entry.file),
+    },
+    metadataCache: {
+      getFileCache: (file: TFile) => {
+        const entry = files.get(file.path);
+        return entry ? { frontmatter: entry.frontmatter } : null;
+      },
+    },
+  } as any;
+  const index = new MetadataIndex(app, 'Knowledge Wiki');
+  index.rebuild();
+  return index;
 }
 
 // Mock MetadataIndex — 需要 buildSmartIndex 方法
@@ -78,6 +112,38 @@ test('max_results parameter is passed through', async () => {
   const executor = new QueryKnowledgeExecutor(createMockIndex(0, ''));
   const result = await executor.execute({ query: 'test', max_results: 10 });
   expect(result.maxResults).toBe(10);
+});
+
+test('ontology fields are indexed and returned in query context', async () => {
+  const index = createMetadataIndex([
+    {
+      path: 'Knowledge Wiki/Articles/ksrc_ontology.md',
+      frontmatter: {
+        knowledge_generated: true,
+        knowledge_source_id: 'ksrc_ontology',
+        title: 'Ontology Workflow',
+        compiled_at: '2026-05-26T00:00:00Z',
+        topics: ['Knowledge'],
+        concepts: ['Schema'],
+        key_claims: ['Ontology supports stable extraction'],
+        categorized_knowledge: [
+          { category: 'Methods', items: ['Preview first workflow'] },
+        ],
+        entities: [
+          { name: 'Obsidian', type: 'Tool', description: 'Knowledge management app' },
+        ],
+        schema_hash: 'abc123',
+      },
+    },
+  ]);
+
+  const executor = new QueryKnowledgeExecutor(index);
+  const result = await executor.execute({ query: 'Obsidian preview' });
+
+  expect(result.indexContent).toContain('Ontology Workflow');
+  expect(result.indexContent).toContain('Methods');
+  expect(result.indexContent).toContain('Preview first workflow');
+  expect(result.indexContent).toContain('Obsidian');
 });
 
 console.log('All query_knowledge tests passed!');

@@ -1,12 +1,14 @@
 import { Plugin } from "obsidian";
+import { OntologyUpdateMode } from "../knowledge/types";
 
 // ===== 品牌配置 — 改名只需改这里 =====
-export const PLUGIN_ID = 'obsidian-cli';
-export const PLUGIN_NAME = 'Obsidian CLI';
-export const PLUGIN_PREFIX = 'obsidian-cli';
+export const PLUGIN_ID = 'baizer';
+export const PLUGIN_NAME = 'Baizer';
+export const PLUGIN_PREFIX = 'baizer';
 export const VIEW_TYPE_SHELL = `${PLUGIN_ID}-shell-view`;
 export const MEMORY_DIR = `.obsidian/${PLUGIN_ID}-memory`;
-export const CSS_PREFIX = 'ocli';
+export const PLUGIN_DATA_DIR = `.obsidian/${PLUGIN_ID}`;
+export const CSS_PREFIX = 'baizer';
 
 declare module "obsidian" {
     interface App {
@@ -114,6 +116,12 @@ export interface PluginSettings {
     knowledgeAutoCompile: boolean;
     knowledgeWikiFolder: string;
     knowledgeMaxCompileBatch: number;
+    knowledgeOntologyEnabled: boolean;
+    knowledgeOntologyUpdateMode: OntologyUpdateMode;
+    knowledgeOntologyMinArticles: number;
+    knowledgeOntologyMinTopicFrequency: number;
+    knowledgeOntologyMinConceptFrequency: number;
+    knowledgeOntologyAutoRecompileStale: boolean;
 
     // --- 🔌 Plugin Skill Generator ---
     autoGeneratePluginSkills: boolean;
@@ -150,7 +158,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 
     // Prompt
     customizePrompt: false,
-    systemPrompt: `You are a command-line interface inside Obsidian. Be concise. Output valid Markdown.
+    systemPrompt: `You are Baizer, an AI knowledge workbench inside Obsidian. Be concise. Output valid Markdown.
 
 你是用户的个人 AI 助手，拥有用户的笔记库和知识库。
 回答实质性问题前，先查询用户的知识库和笔记，基于用户的实际情况给出个性化回答。
@@ -168,6 +176,12 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     knowledgeAutoCompile: false,
     knowledgeWikiFolder: 'Knowledge Wiki',
     knowledgeMaxCompileBatch: 50,
+    knowledgeOntologyEnabled: true,
+    knowledgeOntologyUpdateMode: 'suggest',
+    knowledgeOntologyMinArticles: 10,
+    knowledgeOntologyMinTopicFrequency: 3,
+    knowledgeOntologyMinConceptFrequency: 2,
+    knowledgeOntologyAutoRecompileStale: false,
 
     // Plugin Skill Generator
     autoGeneratePluginSkills: true,

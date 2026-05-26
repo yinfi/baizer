@@ -155,7 +155,7 @@ Create `src/knowledge/types.ts` with:
 - runtime constants for all spec-required enums and field lists
 
 Create `src/knowledge/paths.ts` with fixed phase-1 paths:
-- `.obsidian/obsidian-cli/knowledge-registry.json`
+- `.obsidian/baizer/knowledge-registry.json`
 - `Knowledge Wiki/index.md`
 - `Knowledge Wiki/Articles/`
 - `Knowledge Wiki/Articles/<knowledge_source_id>.md`
@@ -414,10 +414,10 @@ Expected: FAIL on missing runtime owner
 
 Create `src/knowledge/runtime.ts` responsible for:
 - command registration:
-  - `obsidian-cli:compile-this-clipping`
-  - `obsidian-cli:compile-pending-knowledge-items`
-  - `obsidian-cli:open-knowledge-index`
-  - `obsidian-cli:run-knowledge-lint`
+  - `baizer:compile-this-clipping`
+  - `baizer:compile-pending-knowledge-items`
+  - `baizer:open-knowledge-index`
+  - `baizer:run-knowledge-lint`
 - registry bootstrap
 - rename/delete listeners
 - queue drain trigger entrypoints
