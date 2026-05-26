@@ -30,13 +30,19 @@ function createFile(path: string): TFile {
   return file;
 }
 
-function createApp(entries: Record<string, string>) {
+type TestEntry = string | {
+  content: string;
+  frontmatter?: Record<string, any>;
+};
+
+function createApp(entries: Record<string, TestEntry>) {
   const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>();
-  for (const [path, content] of Object.entries(entries)) {
+  for (const [path, entry] of Object.entries(entries)) {
+    const content = typeof entry === 'string' ? entry : entry.content;
     files.set(path, {
       file: createFile(path),
       content,
-      frontmatter: {},
+      frontmatter: typeof entry === 'string' ? {} : entry.frontmatter || {},
     });
   }
 
@@ -147,7 +153,60 @@ knowledge_artifact_type: note
 
     expect(loaded).toBe(null);
   });
+
+  await test('discovery readiness reports insufficient articles below threshold', async () => {
+    const service = new OntologyService(createApp({
+      'Knowledge Wiki/Articles/a.md': { content: '# A', frontmatter: { topics: ['AI'] } },
+      'Knowledge Wiki/Articles/b.md': { content: '# B', frontmatter: { topics: ['AI'] } },
+    }), createSettings({ knowledgeOntologyMinArticles: 3 }));
+
+    const readiness = await service.getDiscoveryReadiness();
+
+    expect(readiness.kind).toBe('insufficient_articles');
+    expect(readiness.totalCount).toBe(2);
+  });
+
+  await test('discovery readiness reports insufficient signal when frequencies are too low', async () => {
+    const service = new OntologyService(createApp({
+      'Knowledge Wiki/Articles/a.md': { content: '# A', frontmatter: { topics: ['AI'], concepts: ['Agent'] } },
+      'Knowledge Wiki/Articles/b.md': { content: '# B', frontmatter: { topics: ['PKM'], concepts: ['Vault'] } },
+    }), createSettings({
+      knowledgeOntologyMinArticles: 2,
+      knowledgeOntologyMinTopicFrequency: 2,
+      knowledgeOntologyMinConceptFrequency: 2,
+    }));
+
+    const readiness = await service.getDiscoveryReadiness();
+
+    expect(readiness.kind).toBe('insufficient_signal');
+    expect(readiness.totalCount).toBe(2);
+  });
+
+  await test('discovery readiness uses configured thresholds for article signals', async () => {
+    const service = new OntologyService(createApp({
+      'Knowledge Wiki/Articles/a.md': {
+        content: '# A',
+        frontmatter: { topics: ['AI'], concepts: ['Agent'], key_claims: ['A claim'] },
+      },
+      'Knowledge Wiki/Articles/b.md': {
+        content: '# B',
+        frontmatter: { topics: ['AI'], concepts: ['Agent'], key_claims: ['B claim'] },
+      },
+    }), createSettings({
+      knowledgeOntologyMinArticles: 2,
+      knowledgeOntologyMinTopicFrequency: 2,
+      knowledgeOntologyMinConceptFrequency: 2,
+    }));
+
+    const readiness = await service.getDiscoveryReadiness();
+
+    expect(readiness.kind).toBe('ready');
+    expect(readiness.totalCount).toBe(2);
+    expect(readiness.topTopics[0].topic).toBe('AI');
+    expect(readiness.topTopics[0].count).toBe(2);
+    expect(readiness.topConcepts[0].concept).toBe('Agent');
+    expect(readiness.recentClaims[1]).toBe('B claim');
+  });
 }
 
 void runTests();
-
