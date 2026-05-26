@@ -16,6 +16,11 @@ function expect(actual: any) {
       const expectedStr = JSON.stringify(expected);
       if (actualStr !== expectedStr) throw new Error(`Expected ${expectedStr} but got ${actualStr}`);
     },
+    toBeInstanceOf: (expected: any) => {
+      if (!(actual instanceof expected)) {
+        throw new Error(`Expected ${actual} to be instance of ${expected.name}`);
+      }
+    },
   };
 }
 
@@ -128,6 +133,10 @@ async function collect(stream: AsyncIterable<StreamEvent>): Promise<StreamEvent[
   return events;
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function runTests() {
   console.log('=== Pi Chat Runtime Tests ===');
   const { PiChatRuntime } = await import('../src/runtime/pi/pi-chat-runtime');
@@ -205,6 +214,37 @@ async function runTests() {
 
     expect(events.map(event => event.type)).toEqual(['tool_call', 'tool_result', 'done']);
     expect((events[2] as any).text).toBe('');
+    expect(deps.sessionInputs.length).toBe(1);
+  });
+
+  await test('aborts the Pi tool batch after an approval result', async () => {
+    const deps = createDeps({
+      streamFactory: (input) => Array.isArray(input)
+        ? [
+            { type: 'text_delta', content: 'This should not run' },
+            { type: 'done', text: 'This should not run' },
+          ]
+        : [
+            { type: 'tool_call', id: 'call_1', name: 'update_file', args: { path: 'A.md', content: 'after' } },
+            { type: 'tool_call', id: 'call_2', name: 'read_note', args: { path: 'A.md' } },
+            { type: 'done', text: '' },
+          ],
+      workspaceResult: {
+        approval_required: true,
+        action: 'update_file',
+        target: 'A.md',
+      },
+      toolResults: { read_note: { success: true, content: 'A' } },
+    });
+
+    const runtime = new PiChatRuntime(deps);
+    const events = await collect(runtime.queryStream(createTurn()));
+    await wait(20);
+
+    expect(events.map(event => event.type)).toEqual(['tool_call', 'tool_result', 'done']);
+    expect((events[1] as any).name).toBe('update_file');
+    expect((events[2] as any).text).toBe('');
+    expect(deps.registryCalls).toEqual([]);
     expect(deps.sessionInputs.length).toBe(1);
   });
 
@@ -309,6 +349,29 @@ async function runTests() {
     expect(retained).toEqual([
       { userMessage: 'remember this', assistantMessage: 'Remembered', source: 'shell' },
     ]);
+  });
+
+  await test('emits provider errors from queryStream and query throws them', async () => {
+    const deps = createDeps({
+      streamFactory: () => [
+        { type: 'error', message: 'provider failed' },
+      ],
+    });
+
+    const runtime = new PiChatRuntime(deps);
+    const events = await collect(runtime.queryStream(createTurn()));
+
+    expect(events).toEqual([
+      { type: 'error', message: 'provider failed' },
+    ]);
+
+    try {
+      await runtime.query(createTurn());
+      throw new Error('Expected query to throw provider error');
+    } catch (e: any) {
+      expect(e).toBeInstanceOf(Error);
+      expect(e.message).toBe('provider failed');
+    }
   });
 }
 
