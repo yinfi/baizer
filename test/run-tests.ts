@@ -63,6 +63,7 @@ const tests = [
   'test/knowledge/file-back.test.ts',
   'test/knowledge/indexer.test.ts',
   'test/knowledge/linter.test.ts',
+  'test/knowledge/ontology-service.test.ts',
   'test/knowledge/ontology.test.ts',
   'test/knowledge/query.test.ts',
   'test/knowledge/types.test.ts',

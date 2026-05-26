@@ -47,6 +47,8 @@ export class KnowledgeRuntime {
   getQueryExecutor(): QueryKnowledgeExecutor { return this.queryExecutor; }
   getFileBackExecutor(): FileBackExecutor { return this.fileBackExecutor; }
   getStatusService(): KnowledgeStatusService { return this.statusService; }
+  async getOntologyStatus() { return this.ontologyService.getStatus(); }
+  async getOntologyDiscoveryReadiness() { return this.ontologyService.getDiscoveryReadiness(); }
   private autoCompiling = false;
 
   constructor(
@@ -295,6 +297,45 @@ export class KnowledgeRuntime {
     });
 
     plugin.addCommand({
+      id: 'knowledge-ontology-status',
+      name: 'Knowledge: Ontology status',
+      callback: async () => {
+        const status = await this.getOntologyStatus();
+        const readiness = await this.getOntologyDiscoveryReadiness();
+        new Notice(`Ontology: ${status.kind}; discovery: ${readiness.kind}`);
+      }
+    });
+
+    plugin.addCommand({
+      id: 'knowledge-ontology-open',
+      name: 'Knowledge: Open ontology schema',
+      callback: async () => {
+        await this.openOntologyFile();
+      }
+    });
+
+    plugin.addCommand({
+      id: 'knowledge-ontology-discover',
+      name: 'Knowledge: Discover ontology schema',
+      callback: async () => {
+        const path = await this.discoverOntology();
+        new Notice(path ? `Ontology schema created: ${path}` : 'Ontology schema was not created. Check status or update mode.');
+      }
+    });
+
+    plugin.addCommand({
+      id: 'knowledge-ontology-regenerate-preview',
+      name: 'Knowledge: Preview ontology regeneration',
+      callback: async () => {
+        const preview = await this.discoverOntologyPreview();
+        if (preview.content) {
+          console.log('[KnowledgeRuntime] Ontology preview:\n', preview.content);
+        }
+        new Notice(preview.message);
+      }
+    });
+
+    plugin.addCommand({
       id: 'knowledge-lint',
       name: 'Knowledge: Run knowledge lint',
       callback: async () => {
@@ -401,6 +442,46 @@ export class KnowledgeRuntime {
    * @param minArticles 最少需要多少篇已编译文章才触发（默认 10）
    * @returns schema 文件路径，或 null（文章不足/AI 失败时）
    */
+  async openOntologyFile(): Promise<boolean> {
+    const status = await this.ontologyService.getStatus();
+    const file = this.app.vault.getAbstractFileByPath(status.path);
+    if (file && file instanceof TFile) {
+      await this.app.workspace.getLeaf(false).openFile(file);
+      return true;
+    }
+    new Notice('Ontology schema not found.');
+    return false;
+  }
+
+  async discoverOntologyPreview(): Promise<{ content?: string; message: string }> {
+    const status = await this.ontologyService.getStatus();
+    if (status.kind === 'valid') {
+      return { message: 'Ontology schema already exists.' };
+    }
+    if (status.kind === 'empty' || status.kind === 'invalid' || status.kind === 'disabled') {
+      return { message: `Ontology preview unavailable: ${status.kind}.` };
+    }
+
+    const candidate = await this.ontologyService.generateDiscoveryCandidate((prompt) => this.modelService.generate(prompt));
+    if (!candidate.content) {
+      return {
+        message: candidate.error || `Ontology discovery is not ready: ${candidate.readiness.kind}.`,
+      };
+    }
+    return {
+      content: candidate.content,
+      message: `Ontology preview generated from ${candidate.readiness.totalCount} articles.`,
+    };
+  }
+
+  async markOntologyStaleFilesPending(): Promise<number> {
+    const staleFiles = await this.statusService.getStaleFiles();
+    for (const file of staleFiles) {
+      await setKnowledgeStatus(this.app, file, 'pending');
+    }
+    return staleFiles.length;
+  }
+
   async discoverOntology(minArticles: number = 10): Promise<string | null> {
     try {
       const status = await this.ontologyService.getStatus();
