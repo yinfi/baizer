@@ -143,6 +143,14 @@ export type OntologyStatusKind =
   | 'insufficient_articles'
   | 'insufficient_signal';
 
+export interface OntologyStatus {
+  kind: OntologyStatusKind;
+  path: string;
+  schema?: OntologySchema;
+  hash?: string;
+  message?: string;
+}
+
 // ===== Constants =====
 
 export const DEFAULT_WIKI_FOLDER = 'Knowledge Wiki';
