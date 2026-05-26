@@ -43,6 +43,8 @@ async function runTests() {
   await test('uses explicit tool execution metadata first', () => {
     expect(inferToolExecutionMode('custom_tool', { executionMode: 'parallel' } as any)).toBe('parallel');
     expect(inferToolExecutionMode('custom_tool', { executionMode: 'sequential' } as any)).toBe('sequential');
+    expect(inferToolExecutionMode('custom_writer', { risk: 'write' } as any)).toBe('sequential');
+    expect(inferToolExecutionMode('custom_reader', { risk: 'read', executionMode: 'parallel' } as any)).toBe('parallel');
   });
 
   await test('routes direct write tools through WorkspaceEditService', async () => {
