@@ -3,7 +3,8 @@
 import { TFile } from 'obsidian';
 import {
   isInWatchedFolder,
-  shouldEnqueueFile
+  shouldEnqueueFile,
+  KnowledgeWatcher
 } from '../../src/knowledge/watcher';
 import { computeContentHash } from '../../src/knowledge/compiler';
 import { KnowledgeRuntime } from '../../src/knowledge/runtime';
@@ -64,6 +65,62 @@ async function runTests() {
 
   await test('shouldEnqueueFile excludes wiki output folder', () => {
     expect(shouldEnqueueFile('Knowledge Wiki/Articles/ksrc_a.md', ['Knowledge Wiki'])).toBeFalsy();
+  });
+
+  await test('onFileModify ignores frontmatter-only updates when source content hash is unchanged', async () => {
+    const sourcePath = 'Projects/Native AI.md';
+    const summaryPath = 'Knowledge Wiki/Articles/ksrc_native-ai.md';
+    const sourceContent = '---\nknowledge_status: done\n---\n# Native AI\nsame body';
+    const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>([
+      [sourcePath, {
+        file: createFile(sourcePath),
+        content: sourceContent,
+        frontmatter: {
+          knowledge_status: 'done',
+          knowledge_summary: summaryPath,
+        },
+      }],
+      [summaryPath, {
+        file: createFile(summaryPath),
+        content: '# Summary',
+        frontmatter: {
+          compiled_at: '2026-05-13T10:00:00Z',
+          content_hash: computeContentHash(sourceContent),
+        },
+      }],
+    ]);
+    const statusWrites: string[] = [];
+    const app = {
+      vault: {
+        getAbstractFileByPath: (path: string) => files.get(path)?.file || null,
+        read: async (file: TFile) => files.get(file.path)?.content || '',
+      },
+      metadataCache: {
+        getFileCache: (file: TFile) => {
+          const entry = files.get(file.path);
+          return entry ? { frontmatter: entry.frontmatter } : null;
+        },
+      },
+      fileManager: {
+        processFrontMatter: async (file: TFile, updater: (fm: any) => void) => {
+          const entry = files.get(file.path);
+          if (!entry) throw new Error(`Missing file: ${file.path}`);
+          updater(entry.frontmatter);
+          statusWrites.push(entry.frontmatter.knowledge_status);
+        },
+      },
+    } as any;
+
+    const watcher = new KnowledgeWatcher(app, ['Projects'], 'Knowledge Wiki', 1);
+    let compileNeeded = 0;
+    watcher.setOnCompileNeeded(() => { compileNeeded++; });
+
+    watcher.onFileModify(files.get(sourcePath)!.file);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(files.get(sourcePath)!.frontmatter.knowledge_status).toBe('done');
+    expect(statusWrites.length).toBe(0);
+    expect(compileNeeded).toBe(0);
   });
 
   await test('KnowledgeRuntime exposes a status service with derived stale note state', async () => {
