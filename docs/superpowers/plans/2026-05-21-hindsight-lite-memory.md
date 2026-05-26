@@ -525,7 +525,7 @@ Append these tests inside `runTests()` in `test/hindsight-memory.test.ts`:
         id: 'mem_obsidian',
         type: 'world',
         text: 'User is working on the Baizer memory layer.',
-        normalizedText: 'user is working on the obsidian cli memory layer.',
+        normalizedText: 'user is working on the baizer memory layer.',
         entities: ['baizer', 'memory'],
         tags: ['project'],
         mentionedAt: 1000,

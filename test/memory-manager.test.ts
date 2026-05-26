@@ -146,6 +146,42 @@ async function runTests() {
     expect(memory.chatHistory.length).toBe(0);
   });
 
+  await test('imports profile and summaries from the previous plugin memory directory before loading context', async () => {
+    const previousMemoryDir = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
+    const files: Record<string, string> = {
+      [`${previousMemoryDir}/user-profile.json`]: JSON.stringify({
+        profession: 'Previous plugin engineer',
+        expertise: ['legacy memory'],
+        preferences: { language: 'zh-CN', responseStyle: 'concise', topics: ['plugins'] },
+        workflows: [],
+        context: { currentProjects: ['Profile migration'], goals: ['keep profile'], challenges: [] },
+        metadata: { createdAt: 1, updatedAt: 2, totalInteractions: 3, lastProfileUpdate: 2 },
+      }),
+      [`${previousMemoryDir}/session-summaries.json`]: JSON.stringify([
+        { timestamp: 10, messageCount: 2, summary: 'Legacy summary imported.' },
+      ]),
+    };
+    const { app } = createApp({
+      exists: async (path: string) => Object.prototype.hasOwnProperty.call(files, path),
+      read: async (path: string) => files[path],
+      write: async (path: string, content: string) => {
+        files[path] = content;
+      },
+      mkdir: async (path: string) => {
+        files[path] = '';
+      },
+    });
+
+    const memory = new MemoryManager(app, createModelProvider([]));
+    await memory.ready();
+
+    const context = memory.buildContext();
+    expect(context).toContain('Previous plugin engineer');
+    expect(context).toContain('Legacy summary imported.');
+    expect(files['.obsidian/baizer-memory/user-profile.json']).toContain('Previous plugin engineer');
+    expect(files['.obsidian/baizer-memory/session-summaries.json']).toContain('Legacy summary imported.');
+  });
+
   await test('exposes ready() and uses current session transcript when summarizing', async () => {
     const promptLog: string[] = [];
     const { app, writes } = createApp();
@@ -225,7 +261,7 @@ async function runTests() {
     await memory.ready();
 
     await (memory as any).retainTurn({
-      userMessage: 'I prefer local-first memory for Obsidian CLI.',
+      userMessage: 'I prefer local-first memory for Baizer.',
       assistantMessage: 'Acknowledged the local-first preference.',
       source: 'shell',
       now: 1000,

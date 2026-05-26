@@ -51,7 +51,7 @@ The panel lives as a new top-level settings section named `Memory`. It is an ope
 ├─────────────────────────────────────────────────────────────────────┤
 │ Privacy Mode  [ On/Off toggle ]                                     │
 │ When on, new conversation turns are not retained as Hindsight memory.│
-│ Data folder: .obsidian/obsidian-cli-memory                          │
+│ Data folder: .obsidian/baizer-memory                          │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Total 42      Facts 15      Experiences 21      Observations 6      │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -148,7 +148,7 @@ Append inside `runTests()` in `test/memory-manager.test.ts`:
     await memory.ready();
 
     await (memory as any).retainTurn({
-      userMessage: 'I prefer local-first memory for Obsidian CLI.',
+      userMessage: 'I prefer local-first memory for Baizer.',
       assistantMessage: 'Acknowledged the local-first preference.',
       now: 1000,
     });
@@ -1014,7 +1014,7 @@ Replace the placeholder `renderMemorySection(...)` with:
 
         toolbar.createDiv({
             cls: 'baizer-memory-path',
-            text: 'Data folder: .obsidian/obsidian-cli-memory',
+            text: 'Data folder: .obsidian/baizer-memory',
         });
 
         const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });

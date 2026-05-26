@@ -61,6 +61,324 @@ interface SettingsSectionMeta {
     keywords: string[];
 }
 
+const SETTINGS_FALLBACK_STYLE_ID = 'baizer-settings-fallback-styles';
+
+export function getSettingsFallbackCss(): string {
+    return `
+.baizer-settings-page {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding-bottom: 24px;
+}
+.baizer-settings-hero {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.baizer-settings-title {
+    margin: 0;
+    font-size: var(--font-ui-large);
+    font-weight: var(--font-semibold);
+}
+.baizer-settings-subtitle {
+    margin: 0;
+    color: var(--text-muted);
+    max-width: 76ch;
+}
+.baizer-settings-search-row {
+    display: flex;
+}
+.baizer-settings-search {
+    width: min(420px, 100%);
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+}
+.baizer-settings-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.baizer-settings-nav-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 0 2px;
+}
+.baizer-settings-nav-title {
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    font-weight: var(--font-medium);
+    text-transform: uppercase;
+}
+.baizer-settings-nav-kicker {
+    color: var(--text-faint);
+    font-size: var(--font-smallest);
+}
+.baizer-settings-nav-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.baizer-settings-nav-item {
+    display: block;
+    flex: 0 0 auto;
+    min-width: 148px;
+    max-width: 100%;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--background-secondary) 88%, transparent);
+    color: var(--text-normal);
+    text-align: left;
+}
+.baizer-settings-nav-item.is-active {
+    background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
+    border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
+}
+.baizer-settings-nav-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+}
+.baizer-settings-nav-copy,
+.baizer-settings-main,
+.baizer-settings-section-copy,
+.baizer-settings-detail-value {
+    min-width: 0;
+}
+.baizer-settings-nav-label,
+.baizer-settings-section-title,
+.baizer-settings-workspace-title,
+.baizer-settings-provider-card-title,
+.baizer-settings-detail-label {
+    font-weight: var(--font-semibold);
+}
+.baizer-settings-main {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.baizer-settings-section-card {
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 90%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary));
+    overflow: hidden;
+}
+.baizer-settings-section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+}
+.baizer-settings-section-title {
+    margin: 0;
+    font-size: var(--font-ui-large);
+}
+.baizer-settings-section-description {
+    margin: 6px 0 0;
+    color: var(--text-muted);
+}
+.baizer-settings-section-content {
+    padding: 16px 18px 18px;
+}
+.baizer-settings-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    white-space: nowrap;
+}
+.baizer-settings-badge.is-warning,
+.baizer-settings-inline-note.is-warning {
+    color: #8b5e00;
+    background: color-mix(in srgb, var(--color-yellow) 16%, transparent);
+}
+.baizer-settings-badge.is-danger,
+.baizer-settings-inline-note.is-danger {
+    color: var(--text-error);
+    background: color-mix(in srgb, var(--text-error) 12%, transparent);
+}
+.baizer-settings-badge.is-muted {
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--background-modifier-border) 65%, transparent);
+}
+.baizer-settings-badge.is-accent,
+.baizer-settings-inline-note.is-accent {
+    color: var(--text-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+}
+.baizer-settings-badge.is-success,
+.baizer-settings-inline-note.is-success {
+    color: var(--color-green);
+    background: color-mix(in srgb, var(--color-green) 10%, transparent);
+}
+.baizer-settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.baizer-settings-action {
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-secondary);
+    color: var(--text-normal);
+}
+.baizer-settings-inline-note,
+.baizer-settings-empty-state,
+.baizer-settings-empty-nav {
+    padding: 10px 12px;
+    border-radius: 8px;
+}
+.baizer-settings-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 7fr);
+    gap: 16px;
+    align-items: stretch;
+}
+.baizer-settings-workspace-panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--background-primary-alt) 96%, var(--background-secondary));
+    overflow: hidden;
+}
+.baizer-settings-workspace-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+}
+.baizer-settings-workspace-copy,
+.baizer-settings-provider-list,
+.baizer-settings-detail-body {
+    display: flex;
+    flex-direction: column;
+}
+.baizer-settings-workspace-copy {
+    gap: 4px;
+}
+.baizer-settings-workspace-subtitle,
+.baizer-settings-provider-card-meta,
+.baizer-settings-provider-summary,
+.baizer-settings-inline-hint {
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+}
+.baizer-settings-provider-list {
+    gap: 8px;
+    padding: 12px;
+}
+.baizer-settings-provider-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary));
+    color: var(--text-normal);
+    text-align: left;
+}
+.baizer-settings-provider-card.is-active {
+    border-color: color-mix(in srgb, var(--interactive-accent) 46%, var(--background-modifier-border));
+    background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
+}
+.baizer-settings-provider-card-header,
+.baizer-settings-provider-card-identity,
+.baizer-settings-provider-card-statuses,
+.baizer-settings-detail-secret,
+.baizer-settings-detail-secret-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.baizer-settings-provider-card-header {
+    justify-content: space-between;
+}
+.baizer-settings-provider-card-identity,
+.baizer-settings-provider-card-statuses,
+.baizer-settings-detail-secret {
+    flex-wrap: wrap;
+}
+.baizer-settings-provider-card-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--background-modifier-border) 45%, transparent);
+    color: var(--text-muted);
+    font-size: 11px;
+}
+.baizer-settings-provider-summary {
+    padding: 0 12px 12px;
+}
+.baizer-settings-detail-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+    padding: 10px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+}
+.baizer-settings-detail-input {
+    display: block;
+    width: 100%;
+    min-height: 34px;
+    padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--background-primary) 95%, var(--background-secondary));
+    color: var(--text-normal);
+}
+.baizer-settings-detail-secret .baizer-settings-detail-input {
+    flex: 1 1 360px;
+}
+.baizer-full-width-textarea textarea {
+    width: 100%;
+    min-height: 120px;
+    resize: vertical;
+}
+@media (max-width: 840px) {
+    .baizer-settings-workspace,
+    .baizer-settings-detail-row {
+        grid-template-columns: 1fr;
+    }
+}
+`;
+}
+
+function ensureSettingsFallbackStyles(): void {
+    const doc = typeof document === 'undefined' ? null : document;
+    if (!doc || doc.getElementById(SETTINGS_FALLBACK_STYLE_ID)) return;
+
+    const styleEl = doc.createElement('style');
+    styleEl.id = SETTINGS_FALLBACK_STYLE_ID;
+    styleEl.textContent = getSettingsFallbackCss();
+    doc.head?.appendChild(styleEl);
+}
+
 const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     {
         id: 'connection',
@@ -351,6 +669,7 @@ export class SettingTab extends PluginSettingTab {
     display(): void {
         const token = ++this.renderToken;
         const { containerEl } = this;
+        ensureSettingsFallbackStyles();
         containerEl.empty();
 
         const visibleSections = this.getVisibleSections();
