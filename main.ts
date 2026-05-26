@@ -1,7 +1,7 @@
 import { Plugin, debounce, Notice, MarkdownView, TFile } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
-import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, DEFAULT_PROVIDERS, ProviderConfig } from './src/mcp/types';
+import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, DEFAULT_PROVIDERS, ProviderConfig, PLUGIN_NAME } from './src/mcp/types';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
@@ -31,8 +31,9 @@ import { PluginWatcher } from './src/skills/builtin/plugin-ctrl/plugin-watcher';
 import { PluginSkillGenerator } from './src/skills/builtin/plugin-ctrl/skill-generator';
 import { InboxAutosaveCoordinator } from './src/services/inbox-autosave';
 import { ObsidianContextService } from './src/services/obsidian-context-service';
+import { USER_SKILLS_DIR } from './src/skills/skill-files';
 
-export default class ObsidianCliPlugin extends Plugin {
+export default class BaizerPlugin extends Plugin {
     settings: PluginSettings;
     modelService: ModelService;
     knowledgeRuntime: KnowledgeRuntime | null = null;
@@ -48,7 +49,7 @@ export default class ObsidianCliPlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
-        new Notice('Obsidian Shell: Plugin Loaded (v2)');
+        new Notice(`${PLUGIN_NAME}: Plugin loaded`);
 
         // Initialize Skill Architecture
         this.toolRegistry = new ToolRegistry(this.app, this.settings);
@@ -79,7 +80,7 @@ export default class ObsidianCliPlugin extends Plugin {
             (settings) => settings.allowPluginControl,
         );
 
-        console.log(`[ObsidianCli] SkillRegistry initialized: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
+        console.log(`[Baizer] SkillRegistry initialized: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
 
         // Initialize Knowledge Runtime
         this.knowledgeRuntime = new KnowledgeRuntime(
@@ -99,12 +100,12 @@ export default class ObsidianCliPlugin extends Plugin {
         );
         this.skillRegistry.registerBuiltinFromMd(knowledgeSkillMd, createKnowledgeSkillExecutor(this.toolRegistry));
 
-        console.log(`[ObsidianCli] Final: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
+        console.log(`[Baizer] Final: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
 
         // 加载用户自定义 Skill
-        await this.skillRegistry.loadUserSkills('.obsidian/obsidian-cli/skills', this.app);
+        await this.skillRegistry.loadUserSkills(USER_SKILLS_DIR, this.app);
 
-        console.log(`[ObsidianCli] Skill system ready: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
+        console.log(`[Baizer] Skill system ready: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
 
         // 防止 hot reload 时重复注册
         this.app.workspace.detachLeavesOfType(VIEW_TYPE_SHELL);
@@ -115,17 +116,17 @@ export default class ObsidianCliPlugin extends Plugin {
             );
         } catch (e) {
             // hot reload 时 view type 可能已注册，忽略
-            console.log('[ObsidianCli] View type already registered, skipping.');
+            console.log('[Baizer] View type already registered, skipping.');
         }
 
-        // Add ribbon icon for quick access to Obsidian Shell
-        this.addRibbonIcon('terminal', 'Open Obsidian Shell', (evt: MouseEvent) => {
+        // Add ribbon icon for quick access to Baizer
+        this.addRibbonIcon('terminal', `Open ${PLUGIN_NAME}`, (evt: MouseEvent) => {
             this.activateView();
         });
 
         this.addCommand({
             id: 'open-shell',
-            name: 'Open Obsidian Shell',
+            name: `Open ${PLUGIN_NAME}`,
             callback: () => this.activateView(),
             hotkeys: [{ modifiers: ["Mod"], key: "j" }]
         });
@@ -264,7 +265,7 @@ export default class ObsidianCliPlugin extends Plugin {
         await this.modelService.updateSettings(this.settings);
         this.toolRegistry.updateContext(this.settings);
         if (this.knowledgeRuntime) {
-            this.knowledgeRuntime.updateSettings(this.settings);
+            await this.knowledgeRuntime.updateSettings(this.settings);
         }
     }
 

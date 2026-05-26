@@ -117,7 +117,7 @@ async function runTests() {
     });
 
     const turn = await runtime.prepareTurn({
-      userMessage: 'Design memory for Obsidian CLI',
+      userMessage: 'Design memory for Baizer',
       contextItems: [],
       selection: '',
       source: 'shell',
@@ -224,6 +224,9 @@ async function runTests() {
 
     expect(prepared.prompt).toContain('[Slash Command Contract]');
     expect(prepared.prompt).toContain('`/clear`');
+    expect(prepared.prompt).toContain('`/memory [overview|observations|search <query>|forget <field>]`');
+    expect(prepared.prompt.includes('/profile')).toBe(false);
+    expect(prepared.prompt.includes('/forget [field]')).toBe(false);
     expect(prepared.prompt).toContain('`/save`');
     expect(prepared.prompt).toContain('Do not mention or recommend slash commands that are not listed here');
     expect(prepared.prompt).toContain('Do not invent generic commands like `/do` or `/ask`');

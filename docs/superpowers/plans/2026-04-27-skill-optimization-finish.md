@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED: Use `superpowers:subagent-driven-development` (if subagents available) or `superpowers:executing-plans` to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Complete the remaining `skill` workflow gaps so `obsidian-cli` is genuinely skill-first across chat routing, slash commands, generated plugin skills, and UI affordances.
+**Goal:** Complete the remaining `skill` workflow gaps so `baizer` is genuinely skill-first across chat routing, slash commands, generated plugin skills, and UI affordances.
 
 **Architecture:** Keep the current `ToolRegistry + SkillRegistry + ChatRuntime + ChatController` architecture intact and finish the missing links instead of introducing a new abstraction. The work falls into three closing moves: wire `resolveByIntent()` into the real runtime path, make `use_skill` materially change what the runtime can execute, and remove legacy slash/UI branches only after instruction-only skills and plugin-generated skills have parity with built-in skills.
 

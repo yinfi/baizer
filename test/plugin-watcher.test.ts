@@ -47,12 +47,12 @@ const mockGenerator = {
   generateSkillMd: async () => `---\nname: test\ndescription: test\n---\n# Test`,
   writeSkillFile: async (id: string) => {
     generatedPlugins.push(id);
-    return `.obsidian/obsidian-cli/skills/plugin-${id}/SKILL.md`;
+    return `.obsidian/baizer/skills/plugin-${id}/SKILL.md`;
   },
-  skillFilePath: (id: string) => `.obsidian/obsidian-cli/skills/plugin-${id}/SKILL.md`,
+  skillFilePath: (id: string) => `.obsidian/baizer/skills/plugin-${id}/SKILL.md`,
 };
 
-const enabledPlugins = new Set(['plugin-a', 'plugin-b']);
+const enabledPlugins = new Set(['baizer', 'plugin-a', 'plugin-b']);
 
 const mockApp = {
   plugins: {
@@ -96,9 +96,9 @@ async function runTests() {
     settings,
   );
 
-  await test('getEnabledPluginIds excludes obsidian-cli', async () => {
+  await test('getEnabledPluginIds excludes baizer', async () => {
     const ids = watcher.getEnabledPluginIds();
-    expect(ids.includes('obsidian-cli')).toBe(false);
+    expect(ids.includes('baizer')).toBe(false);
   });
 
   await test('diffPlugins detects added plugins', async () => {

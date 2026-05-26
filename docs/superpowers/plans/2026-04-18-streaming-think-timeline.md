@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add streaming output and a collapsible think timeline to Obsidian Shell, replacing the current wait-for-complete-response UX.
+**Goal:** Add streaming output and a collapsible think timeline to Baizer, replacing the current wait-for-complete-response UX.
 
 **Architecture:** New `StreamEvent` union type flows from provider → ModelService → ChatController → ShellView. Each provider implements `sendMessageStream()` as an AsyncGenerator. ModelService orchestrates multi-turn function call loops, yielding events in real-time. ShellView renders a timeline UI above the streaming response text.
 
@@ -1055,7 +1055,7 @@ Expected: PASS
 
 - [ ] **Step 12: Manual test**
 
-1. Open Obsidian, open Gemini Shell
+1. Open Obsidian, open Baizer
 2. Send a message — verify text streams in real-time
 3. Send a complex question that triggers thinking — verify timeline nodes appear
 4. Send a question that triggers tool calls — verify tool nodes with expand/collapse

@@ -1,5 +1,6 @@
 import { App, TFile } from 'obsidian';
 import { computeContentHash } from '../src/knowledge/compiler';
+import { computeSchemaHash } from '../src/knowledge/ontology';
 import { KnowledgeStatusService } from '../src/knowledge/status-service';
 
 function expect(actual: any) {
@@ -207,6 +208,60 @@ async function runTests() {
       pending: 1,
       failed: 1,
       stale: 1,
+    });
+  });
+
+  await test('getNoteStatus marks old summaries stale when ontology schema is enabled', async () => {
+    const summaryPath = 'Knowledge Wiki/Articles/ksrc_old.md';
+    const ontologyContent = `---
+knowledge_artifact_type: ontology_schema
+version: 1
+categories:
+  - name: "Methods"
+    description: "Reusable methods"
+---
+# Knowledge Ontology Schema
+`;
+    const { app } = createKnowledgeApp([
+      {
+        path: 'Knowledge Wiki/_ontology.md',
+        content: ontologyContent,
+      },
+      {
+        path: 'Projects/Old.md',
+        content: '# Old\nsame body',
+        frontmatter: {
+          knowledge_status: 'done',
+          knowledge_summary: summaryPath,
+        },
+      },
+      {
+        path: summaryPath,
+        content: '# Old Summary',
+        frontmatter: {
+          compiled_at: '2026-05-13T11:00:00Z',
+          content_hash: computeContentHash('# Old\nsame body'),
+        },
+      },
+    ]);
+
+    const service = new KnowledgeStatusService(app, {
+      watchedFolders: ['Projects'],
+      wikiFolder: 'Knowledge Wiki',
+    });
+
+    expect(await service.getNoteStatus('Projects/Old.md')).toMatchObject({
+      state: 'stale',
+      summaryPath,
+    });
+
+    const summaryFile = app.vault.getAbstractFileByPath(summaryPath) as TFile;
+    const summaryCache = app.metadataCache.getFileCache(summaryFile)!;
+    summaryCache.frontmatter.schema_hash = computeSchemaHash(ontologyContent);
+
+    expect(await service.getNoteStatus('Projects/Old.md')).toMatchObject({
+      state: 'done',
+      summaryPath,
     });
   });
 }

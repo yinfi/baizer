@@ -84,7 +84,7 @@ async function runTests() {
     expect(banks[0].id).toBe(DEFAULT_MEMORY_BANK_ID);
     expect(memories.length).toBe(1);
     expect(memories[0].normalizedText).toBe('user prefers local-first memory.');
-    expect(writes['.obsidian/obsidian-cli-memory/memories.json']).toContain('local-first');
+    expect(writes['.obsidian/baizer-memory/memories.json']).toContain('local-first');
   });
 
   await test('store treats duplicate ids as updates instead of duplicate rows', async () => {
@@ -108,9 +108,9 @@ async function runTests() {
       makeMemory({
         id: 'mem_obsidian',
         type: 'world',
-        text: 'User is working on the Obsidian CLI memory layer.',
-        normalizedText: 'user is working on the obsidian cli memory layer.',
-        entities: ['obsidian-cli', 'memory'],
+        text: 'User is working on the Baizer memory layer.',
+        normalizedText: 'user is working on the baizer memory layer.',
+        entities: ['baizer', 'memory'],
         tags: ['project'],
         mentionedAt: 1000,
       }),
@@ -128,13 +128,13 @@ async function runTests() {
     const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
     const retriever = new HindsightRetriever(store);
     const result = await retriever.recall({
-      query: 'How should we improve Obsidian CLI memory?',
+      query: 'How should we improve Baizer memory?',
       maxRecords: 2,
       now: 3000,
     });
 
     expect(result.records[0].id).toBe('mem_obsidian');
-    expect(result.promptBlock).toContain('Obsidian CLI memory layer');
+    expect(result.promptBlock).toContain('Baizer memory layer');
   });
 
   await test('retriever writes access metadata for selected memories', async () => {
@@ -177,14 +177,14 @@ async function runTests() {
   });
 
   await test('migration converts legacy profile and summaries exactly once', async () => {
-    const profilePath = '.obsidian/obsidian-cli-memory/user-profile.json';
-    const summariesPath = '.obsidian/obsidian-cli-memory/session-summaries.json';
+    const profilePath = '.obsidian/baizer-memory/user-profile.json';
+    const summariesPath = '.obsidian/baizer-memory/session-summaries.json';
     const { app } = createApp({
       [profilePath]: JSON.stringify({
         profession: 'Product engineer',
         expertise: ['Obsidian plugins'],
         preferences: { responseStyle: 'concise', language: 'zh-CN', topics: [] },
-        context: { currentProjects: ['Obsidian CLI memory'], goals: ['local-first recall'], challenges: [] },
+        context: { currentProjects: ['Baizer memory'], goals: ['local-first recall'], challenges: [] },
         workflows: [],
         metadata: { totalInteractions: 4, createdAt: 1, updatedAt: 2, lastProfileUpdate: 2 },
       }),
@@ -203,6 +203,39 @@ async function runTests() {
     expect(memories.filter((memory) => memory.source.kind === 'profile-migration').length).toBe(5);
     expect(memories.filter((memory) => memory.source.kind === 'summary-migration').length).toBe(1);
     expect(memories.some((memory) => memory.text.includes('Product engineer'))).toBe(true);
+  });
+
+  await test('migration imports the previous plugin memory directory', async () => {
+    const previousMemoryDir = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
+    const { app } = createApp({
+      [`${previousMemoryDir}/user-profile.json`]: JSON.stringify({
+        profession: 'Previous plugin engineer',
+        expertise: ['old plugin'],
+        preferences: { responseStyle: 'verbose' },
+        context: { currentProjects: ['Old memory'], goals: [], challenges: [] },
+      }),
+      [`${previousMemoryDir}/session-summaries.json`]: JSON.stringify([
+        { timestamp: 10, messageCount: 2, summary: 'Old summary.' },
+      ]),
+      [`${previousMemoryDir}/memories.json`]: JSON.stringify([
+        makeMemory({
+          id: 'mem_previous_plugin',
+          text: 'Previous plugin memory fact.',
+          normalizedText: 'previous plugin memory fact.',
+          mentionedAt: 20,
+        }),
+      ]),
+    });
+    const store = new HindsightStore(app);
+    await store.ready();
+
+    const { migrateLegacyMemory } = await import('../src/memory/hindsight-migration');
+    await migrateLegacyMemory(app, store, 5000);
+
+    const memories = await store.listMemories();
+    expect(memories.some((memory) => memory.text.includes('Previous plugin engineer'))).toBe(true);
+    expect(memories.some((memory) => memory.text.includes('Old summary.'))).toBe(true);
+    expect(memories.some((memory) => memory.id === 'mem_previous_plugin')).toBe(true);
   });
 
   await test('consolidator creates observations with evidence ids', async () => {

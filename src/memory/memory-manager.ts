@@ -1,6 +1,14 @@
 import { App } from 'obsidian';
 import { IModelProvider, IChatSession, ToolDefinition } from '../models/interfaces';
-import { UserProfile, SessionSummary, ChatMessage, DEFAULT_USER_PROFILE } from './types';
+import {
+    UserProfile,
+    SessionSummary,
+    ChatMessage,
+    DEFAULT_USER_PROFILE,
+    MemoryMutationResult,
+    MemoryView,
+    MemoryViewRequest,
+} from './types';
 import { MEMORY_DIR } from '../mcp/types';
 import { budgetTextBlock } from '../services/context-budget';
 import {
@@ -10,7 +18,7 @@ import {
     RetainTurnInput,
 } from './hindsight-types';
 import { HindsightConsolidator } from './hindsight-consolidator';
-import { migrateLegacyMemory } from './hindsight-migration';
+import { importPreviousMemoryFiles, migrateLegacyMemory } from './hindsight-migration';
 import { HindsightRetriever } from './hindsight-retriever';
 import { HindsightStore } from './hindsight-store';
 
@@ -56,10 +64,11 @@ export class MemoryManager {
     }
 
     private async initialize() {
+        await this.hindsightStore.ready();
+        await importPreviousMemoryFiles(this.app, this.hindsightStore);
         await this.loadProfile();
         await this.loadSummaries();
         await this.loadChatHistory();
-        await this.hindsightStore.ready();
         await migrateLegacyMemory(this.app, this.hindsightStore);
     }
 
@@ -113,6 +122,43 @@ export class MemoryManager {
         return result.promptBlock;
     }
 
+    async getMemoryView(request: MemoryViewRequest = {}): Promise<MemoryView> {
+        await this.ready();
+        const limit = Math.max(1, Math.min(request.limit ?? 5, 25));
+        const memories = await this.hindsightStore.listMemories(DEFAULT_MEMORY_BANK_ID);
+        const sorted = [...memories].sort((a, b) => b.mentionedAt - a.mentionedAt);
+        const query = request.query?.trim() || '';
+        const searchResult = query
+            ? await this.hindsightRetriever.recall({
+                query,
+                maxRecords: limit,
+                maxChars: 4000,
+                now: request.now,
+            })
+            : { records: [], promptBlock: '' };
+
+        return {
+            privacyMode: this.options.privacyMode === true,
+            legacyProfile: this.getProfile(),
+            stats: {
+                total: memories.length,
+                world: memories.filter((memory) => memory.type === 'world').length,
+                experience: memories.filter((memory) => memory.type === 'experience').length,
+                observation: memories.filter((memory) => memory.type === 'observation').length,
+                lastUpdatedAt: memories.length
+                    ? Math.max(...memories.map((memory) => memory.updatedAt || memory.mentionedAt))
+                    : null,
+            },
+            sections: {
+                observations: sorted.filter((memory) => memory.type === 'observation').slice(0, limit),
+                facts: sorted.filter((memory) => memory.type === 'world').slice(0, limit),
+                recent: sorted.filter((memory) => memory.type === 'experience').slice(0, limit),
+                searchResults: searchResult.records,
+                raw: sorted.slice(0, limit),
+            },
+        };
+    }
+
     async retainTurn(input: RetainTurnInput): Promise<void> {
         await this.ready();
         if (this.options.privacyMode) return;
@@ -128,15 +174,44 @@ export class MemoryManager {
         }
     }
 
-    async forgetMemory(field: string): Promise<void> {
+    async forgetMemory(field: string): Promise<MemoryMutationResult> {
         await this.ready();
+        const before = (await this.hindsightStore.listMemories()).length;
         const normalizedField = field.trim().toLowerCase() as ForgetMemoryField;
         if (normalizedField === 'all') {
             await this.hindsightStore.clearMemories();
-            return;
+            const after = (await this.hindsightStore.listMemories()).length;
+            return {
+                success: true,
+                deletedCount: before - after,
+                message: 'Cleared all remembered Hindsight memory.',
+            };
         }
 
         await this.hindsightStore.deleteMemories((memory) => this.shouldForgetHindsightMemory(memory, normalizedField));
+        const after = (await this.hindsightStore.listMemories()).length;
+        return {
+            success: true,
+            deletedCount: before - after,
+            message: `Forgot memory field: ${normalizedField}`,
+        };
+    }
+
+    async deleteMemoryById(id: string): Promise<MemoryMutationResult> {
+        await this.ready();
+        const target = id.trim();
+        if (!target) {
+            return { success: false, deletedCount: 0, message: 'Missing memory id.' };
+        }
+
+        const before = (await this.hindsightStore.listMemories()).length;
+        await this.hindsightStore.deleteMemories((memory) => memory.id === target);
+        const after = (await this.hindsightStore.listMemories()).length;
+        return {
+            success: before !== after,
+            deletedCount: before - after,
+            message: before !== after ? `Deleted memory: ${target}` : `Memory not found: ${target}`,
+        };
     }
 
     private formatProfileForContext(): string {
@@ -555,9 +630,8 @@ ${transcript}`;
     private async loadProfile() {
         try {
             const path = `${this.MEMORY_DIR}/${this.PROFILE_FILE}`;
-            const exists = await this.app.vault.adapter.exists(path);
 
-            if (exists) {
+            if (await this.app.vault.adapter.exists(path)) {
                 const content = await this.app.vault.adapter.read(path);
                 this.userProfile = JSON.parse(content);
             }
@@ -583,9 +657,8 @@ ${transcript}`;
     private async loadSummaries() {
         try {
             const path = `${this.MEMORY_DIR}/${this.SUMMARY_FILE}`;
-            const exists = await this.app.vault.adapter.exists(path);
 
-            if (exists) {
+            if (await this.app.vault.adapter.exists(path)) {
                 const content = await this.app.vault.adapter.read(path);
                 this.sessionSummaries = JSON.parse(content);
             }
@@ -611,9 +684,8 @@ ${transcript}`;
     private async loadChatHistory() {
         try {
             const path = `${this.MEMORY_DIR}/${this.HISTORY_FILE}`;
-            const exists = await this.app.vault.adapter.exists(path);
 
-            if (exists) {
+            if (await this.app.vault.adapter.exists(path)) {
                 const content = await this.app.vault.adapter.read(path);
                 this.chatHistory = JSON.parse(content);
             }

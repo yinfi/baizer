@@ -1,7 +1,7 @@
 # Skill 架构设计
 
 **Date:** 2026-04-17
-**Project:** `obsidian-cli`
+**Project:** `baizer`
 **Status:** Proposed design, pending spec review
 
 ## 目标
@@ -44,7 +44,7 @@
 │  │   ├─ knowledge                                │
 │  │   └─ plugin-ctrl                              │
 │  └─ 用户 Skill（SKILL.md）                       │
-│      └─ vault:.obsidian/obsidian-cli/skills/     │
+│      └─ vault:.obsidian/baizer/skills/     │
 │                                                  │
 │  每个 Skill 声明它需要哪些工具                    │
 │  激活时才把工具注入 function calling              │
@@ -333,7 +333,7 @@ interface Skill {
 ### 存放位置
 
 ```
-vault/.obsidian/obsidian-cli/skills/
+vault/.obsidian/baizer/skills/
 ├── daily-digest/
 │   └── SKILL.md
 ├── meeting-notes/
@@ -398,7 +398,7 @@ enabled: true
 
 ### 解析规则
 
-1. `SkillLoader` 在插件启动时扫描 `vault:.obsidian/obsidian-cli/skills/*/SKILL.md`
+1. `SkillLoader` 在插件启动时扫描 `vault:.obsidian/baizer/skills/*/SKILL.md`
 2. 解析 YAML frontmatter 提取 Level 1 metadata
 3. Markdown body 作为 Level 2 instructions，触发时才读取
 4. `tools` 字段引用 ToolRegistry 中已注册的原子工具
@@ -523,7 +523,7 @@ type SkillEvent =
 **目标**：支持用户在 vault 中创建 SKILL.md
 
 1. 实现 SkillLoader 的 SKILL.md 解析
-2. 插件启动时扫描 `.obsidian/obsidian-cli/skills/` 目录
+2. 插件启动时扫描 `.obsidian/baizer/skills/` 目录
 3. 用户 Skill 注册到 SkillRegistry
 4. 设置页面增加 Skill 管理 UI（列表、启用/禁用）
 5. 提供 2-3 个示例 Skill 模板

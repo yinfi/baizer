@@ -5,9 +5,11 @@ import { App, TFile, debounce } from 'obsidian';
 import { DEFAULT_WIKI_FOLDER } from './types';
 import {
   getKnowledgeStatus,
+  getSummaryFrontmatter,
   setKnowledgeStatus,
   ensureSourceId,
 } from './frontmatter';
+import { computeContentHash } from './compiler';
 
 /**
  * 检查文件路径是否在监听文件夹列表中
@@ -30,6 +32,24 @@ export function shouldEnqueueFile(
   if (!filePath.endsWith('.md')) return false;
   if (filePath.startsWith(wikiFolder + '/')) return false;
   return isInWatchedFolder(filePath, watchedFolders);
+}
+
+export async function hasSourceContentChanged(app: App, file: TFile): Promise<boolean> {
+  const cache = app.metadataCache.getFileCache(file);
+  const summaryPath = typeof cache?.frontmatter?.knowledge_summary === 'string'
+    ? cache.frontmatter.knowledge_summary
+    : null;
+  if (!summaryPath) return true;
+
+  const summaryFrontmatter = getSummaryFrontmatter(app, summaryPath);
+  if (!summaryFrontmatter?.content_hash) return true;
+
+  try {
+    const content = await app.vault.read(file);
+    return computeContentHash(content) !== summaryFrontmatter.content_hash;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -87,7 +107,7 @@ export class KnowledgeWatcher {
 
     const handler = debounce(async () => {
       const status = getKnowledgeStatus(this.app, file);
-      if (status === 'done') {
+      if (status === 'done' && await hasSourceContentChanged(this.app, file)) {
         this.writingPaths.add(file.path);
         try {
           await setKnowledgeStatus(this.app, file, 'pending');

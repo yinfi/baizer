@@ -202,7 +202,7 @@ providerSelectEl.addEventListener('change', async (e) => {
         new Notice(`${config.label} 未配置 API Key，请先在设置中配置`);
         // 打开设置页
         this.app.setting.open();
-        this.app.setting.openTabById('obsidian-cli');
+        this.app.setting.openTabById('baizer');
         // 恢复选择
         this.populateProviderOptions(this.providerSelectEl);
         return;

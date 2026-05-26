@@ -119,7 +119,7 @@ async function run() {
     await ensureDirectory(adapter, `${USER_SKILLS_DIR}/plugin-a`);
     expectEqual(
       adapter.mkdirCalls,
-      ['.obsidian', '.obsidian/obsidian-cli', USER_SKILLS_DIR, `${USER_SKILLS_DIR}/plugin-a`],
+      ['.obsidian', '.obsidian/baizer', USER_SKILLS_DIR, `${USER_SKILLS_DIR}/plugin-a`],
       'ensureDirectory should create each missing path segment once',
     );
   }

@@ -111,6 +111,23 @@ async function runTests() {
     ]);
   });
 
+  await test('ModelService exposes memory view and memory deletion facade methods', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.memoryManager = {
+      getMemoryView: async (request: any) => ({ request, stats: { total: 0 }, sections: {} }),
+      deleteMemoryById: async (id: string) => ({ success: true, deletedCount: 1, message: id }),
+      forgetMemory: async (field: string) => ({ success: true, deletedCount: 2, message: field }),
+    };
+
+    const view = await service.getMemoryView({ mode: 'observations', limit: 3 });
+    const deleted = await service.deleteMemoryById('mem_1');
+    const forgotten = await service.forgetMemory('projects');
+
+    expect(view.request).toEqual({ mode: 'observations', limit: 3 });
+    expect(deleted).toEqual({ success: true, deletedCount: 1, message: 'mem_1' });
+    expect(forgotten).toEqual({ success: true, deletedCount: 2, message: 'projects' });
+  });
+
   await test('getSkillCommands proxies command entries from the skill registry', async () => {
     const service: any = Object.create(ModelService.prototype);
     const commands = [

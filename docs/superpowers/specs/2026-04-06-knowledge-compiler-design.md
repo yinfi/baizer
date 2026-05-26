@@ -1,7 +1,7 @@
 # Knowledge Compiler Design
 
 **Date:** 2026-04-06
-**Project:** `obsidian-cli`
+**Project:** `baizer`
 **Status:** Proposed design, pending spec review
 
 ## Goal
@@ -135,7 +135,7 @@ The wiki layer is derived, rebuildable, and reviewable.
 
 **Persistence model:**
 
-- the registry is stored in `.obsidian/obsidian-cli/knowledge-registry.json`
+- the registry is stored in `.obsidian/baizer/knowledge-registry.json`
 - registry state persists across plugin restarts
 - the Raw Registry unit owns this file and exposes read/write operations to the orchestrator and compile flow
 
@@ -401,7 +401,7 @@ Phase 1 should create these concrete artifacts:
   - location: existing clipping area
   - identity: `knowledge_source_id` in frontmatter
 - registry record
-  - location: `.obsidian/obsidian-cli/knowledge-registry.json`
+  - location: `.obsidian/baizer/knowledge-registry.json`
   - purpose: queue state and current path tracking for one raw clipping
 - generated summary note
   - location: `Knowledge Wiki/Articles/<knowledge_source_id>.md`

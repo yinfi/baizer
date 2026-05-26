@@ -1,3 +1,5 @@
+import { PLUGIN_DATA_DIR } from '../mcp/types';
+
 export interface ListedFilesLike {
   files: string[];
   folders: string[];
@@ -12,7 +14,7 @@ export interface SkillFilesAdapter {
 }
 
 export const SKILL_FILE_NAME = 'SKILL.md';
-export const USER_SKILLS_DIR = '.obsidian/obsidian-cli/skills';
+export const USER_SKILLS_DIR = `${PLUGIN_DATA_DIR}/skills`;
 
 function joinPath(...segments: string[]): string {
   return segments

@@ -111,11 +111,11 @@ async function runTests() {
 
     renderer.appendThinking('This is a very long thought message for testing label truncation.');
 
-    const block = timeline.querySelector('.ocli-thinking-block');
-    const header = timeline.querySelector('.ocli-thinking-header');
-    const label = timeline.querySelector('.ocli-thinking-label');
-    const timer = timeline.querySelector('.ocli-thinking-timer');
-    const content = timeline.querySelector('.ocli-thinking-content');
+    const block = timeline.querySelector('.baizer-thinking-block');
+    const header = timeline.querySelector('.baizer-thinking-header');
+    const label = timeline.querySelector('.baizer-thinking-label');
+    const timer = timeline.querySelector('.baizer-thinking-timer');
+    const content = timeline.querySelector('.baizer-thinking-content');
 
     expect(!!block).toBe(true);
     expect(header?.attributes.role).toBe('button');
@@ -132,8 +132,8 @@ async function runTests() {
 
     renderer.appendThinking('checking context');
 
-    const block = timeline.querySelector('.ocli-thinking-block')!;
-    const header = timeline.querySelector('.ocli-thinking-header')!;
+    const block = timeline.querySelector('.baizer-thinking-block')!;
+    const header = timeline.querySelector('.baizer-thinking-header')!;
 
     header.click();
     expect(block.hasClass('is-collapsed')).toBe(true);
@@ -157,9 +157,9 @@ async function runTests() {
     now = 3600;
     renderer.finalizeCurrentThinking();
 
-    const block = timeline.querySelector('.ocli-thinking-block')!;
-    const label = timeline.querySelector('.ocli-thinking-label')!;
-    const header = timeline.querySelector('.ocli-thinking-header')!;
+    const block = timeline.querySelector('.baizer-thinking-block')!;
+    const label = timeline.querySelector('.baizer-thinking-label')!;
+    const header = timeline.querySelector('.baizer-thinking-header')!;
 
     expect(block.hasClass('is-thinking')).toBe(false);
     expect(block.hasClass('is-complete')).toBe(true);
@@ -176,8 +176,8 @@ async function runTests() {
     renderer.appendThinking('first detail');
     now = 2500;
     renderer.finalizeCurrentThinking();
-    const firstBlock = timeline.querySelector('.ocli-thinking-block')!;
-    const firstHeader = timeline.querySelector('.ocli-thinking-header')!;
+    const firstBlock = timeline.querySelector('.baizer-thinking-block')!;
+    const firstHeader = timeline.querySelector('.baizer-thinking-header')!;
 
     expect(firstBlock.hasClass('is-collapsed')).toBe(false);
     expect(firstHeader.attributes['aria-expanded']).toBe('true');

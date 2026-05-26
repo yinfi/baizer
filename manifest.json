@@ -1,10 +1,10 @@
 {
-    "id": "obsidian-cli",
-    "name": "Obsidian CLI",
+    "id": "baizer",
+    "name": "Baizer",
     "version": "1.0.0",
     "minAppVersion": "1.0.0",
-    "description": "A terminal-like interface powered by AI to orchestrate your Obsidian vault.",
+    "description": "An AI knowledge workbench for Obsidian.",
     "author": "yinfie",
-    "authorUrl": "https://github.com/yinfie/obsidian-cli",
+    "authorUrl": "https://github.com/yinfie/baizer",
     "isDesktopOnly": false
 }

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Upgrade Obsidian CLI from a single shell sidebar into a Claudian-style multi-conversation AI workbench while preserving the current skill, tool, knowledge, Guardian, and provider runtime behavior.
+**Goal:** Upgrade Baizer from a single shell sidebar into a Claudian-style multi-conversation AI workbench while preserving the current skill, tool, knowledge, Guardian, and provider runtime behavior.
 
-**Architecture:** Keep `ShellView` as the public Obsidian `ItemView` entry point used by `main.ts`, but move most UI responsibility into focused workbench modules. Each chat tab owns a `ChatState`, `ChatController`, and `ContextManager`; shared UI pieces render tabs, messages, tool calls, thinking blocks, approvals, context chips, history, and the input toolbar. Conversation history is persisted outside `PluginSettings` in `.obsidian/obsidian-cli/conversations.json` so large chat data does not bloat settings.
+**Architecture:** Keep `ShellView` as the public Obsidian `ItemView` entry point used by `main.ts`, but move most UI responsibility into focused workbench modules. Each chat tab owns a `ChatState`, `ChatController`, and `ContextManager`; shared UI pieces render tabs, messages, tool calls, thinking blocks, approvals, context chips, history, and the input toolbar. Conversation history is persisted outside `PluginSettings` in `.obsidian/baizer/conversations.json` so large chat data does not bloat settings.
 
 **Tech Stack:** TypeScript, Obsidian Plugin API, existing `ModelService`, `ChatRuntime`, `ToolRegistry`, `SkillRegistry`, `KnowledgeRuntime`, custom `tsx` test harness, generated `styles.css`.
 
@@ -283,7 +283,7 @@ Expected: PASS.
 - Modify: `test/run-tests.ts`
 
 - [ ] **Step 1: Write failing tests for load-empty, save, list sorting by `updatedAt`, delete, and corrupted JSON fallback.**
-- [ ] **Step 2: Implement storage using `app.vault.adapter` at `.obsidian/obsidian-cli/conversations.json`.**
+- [ ] **Step 2: Implement storage using `app.vault.adapter` at `.obsidian/baizer/conversations.json`.**
 
 Persistence shape:
 
@@ -419,7 +419,7 @@ Expected: PASS.
 - Test: `test/stream-controller.test.ts`
 
 - [ ] **Step 1: Add tests for timer label, collapsed state, keyboard toggling, and final label.**
-- [ ] **Step 2: Replace raw timeline nodes with `.ocli-thinking-block`, `.ocli-thinking-header`, and `.ocli-thinking-content`.**
+- [ ] **Step 2: Replace raw timeline nodes with `.baizer-thinking-block`, `.baizer-thinking-header`, and `.baizer-thinking-content`.**
 - [ ] **Step 3: Add `tabindex`, `role="button"`, and `aria-expanded`.**
 - [ ] **Step 4: Keep existing stream callbacks compatible with `ShellView`.**
 - [ ] **Step 5: Run focused tests.**
@@ -722,7 +722,7 @@ Expected: generated `styles.css` exists and contains all imported modules in ord
 - Create: `src/style/accessibility.css`
 - Modify: `styles.css`
 
-- [ ] **Step 1: Define an `ocli-` class naming convention for new workbench UI.**
+- [ ] **Step 1: Define an `baizer-` class naming convention for new workbench UI.**
 - [ ] **Step 2: Keep card radius at 8px or less.**
 - [ ] **Step 3: Use Obsidian variables for colors and typography.**
 - [ ] **Step 4: Avoid one-hue styling; keep the interface quiet and native to Obsidian.**
@@ -857,7 +857,7 @@ Expected: `main.js` builds successfully and `styles.css` is current.
 
 - No code changes unless manual testing reveals defects.
 
-- [ ] **Step 1: Open Obsidian Shell from ribbon or command palette.**
+- [ ] **Step 1: Open Baizer from ribbon or command palette.**
 - [ ] **Step 2: Verify initial tab renders and input focuses on click.**
 - [ ] **Step 3: Send a normal chat message.**
 - [ ] **Step 4: Trigger `/tools` and verify command routing.**

@@ -43,15 +43,15 @@ export class HistoryMenu {
 
     if (this.items.length === 0) {
       this.containerEl.createDiv({
-        cls: 'ocli-history-empty',
+        cls: 'baizer-history-empty',
         text: 'No saved conversations yet.',
       });
       return;
     }
 
-    const toolbar = this.containerEl.createDiv({ cls: 'ocli-history-toolbar' });
+    const toolbar = this.containerEl.createDiv({ cls: 'baizer-history-toolbar' });
     const searchInput = toolbar.createEl('input', {
-      cls: 'ocli-history-search',
+      cls: 'baizer-history-search',
       value: this.filterQuery,
       attr: {
         type: 'search',
@@ -72,22 +72,22 @@ export class HistoryMenu {
 
     const filteredItems = this.getFilteredItems();
     toolbar.createSpan({
-      cls: 'ocli-history-count',
+      cls: 'baizer-history-count',
       text: `${filteredItems.length} / ${this.items.length}`,
     });
     searchInput.focus();
 
     if (filteredItems.length === 0) {
       this.containerEl.createDiv({
-        cls: 'ocli-history-empty',
+        cls: 'baizer-history-empty',
         text: 'No matching conversations.',
       });
       return;
     }
 
     this.buildGroups(filteredItems).forEach((group) => {
-      const section = this.containerEl.createDiv({ cls: 'ocli-history-group' });
-      section.createDiv({ cls: 'ocli-history-group-title', text: group.title });
+      const section = this.containerEl.createDiv({ cls: 'baizer-history-group' });
+      section.createDiv({ cls: 'baizer-history-group-title', text: group.title });
       group.items.forEach((item) => this.renderItem(section, item));
     });
   }
@@ -148,32 +148,32 @@ export class HistoryMenu {
 
   private renderItem(containerEl: HTMLElement, item: HistoryMenuItem) {
     const row = containerEl.createDiv({
-      cls: `ocli-history-item${item.isActive ? ' is-active' : ''}`,
+      cls: `baizer-history-item${item.isActive ? ' is-active' : ''}`,
       attr: { role: 'button', tabindex: '0' },
     });
     if (item.currentNote) {
       row.setAttribute('title', item.currentNote);
     }
-    const body = row.createDiv({ cls: 'ocli-history-body' });
-    body.createSpan({ cls: 'ocli-history-title', text: item.title });
-    const meta = body.createDiv({ cls: 'ocli-history-meta' });
-    meta.createSpan({ cls: 'ocli-history-provider', text: item.providerId || 'Unknown provider' });
+    const body = row.createDiv({ cls: 'baizer-history-body' });
+    body.createSpan({ cls: 'baizer-history-title', text: item.title });
+    const meta = body.createDiv({ cls: 'baizer-history-meta' });
+    meta.createSpan({ cls: 'baizer-history-provider', text: item.providerId || 'Unknown provider' });
     if (item.modelId) {
-      meta.createSpan({ cls: 'ocli-history-model', text: item.modelId });
+      meta.createSpan({ cls: 'baizer-history-model', text: item.modelId });
     }
     if (item.currentNote) {
-      meta.createSpan({ cls: 'ocli-history-note', text: item.currentNote });
+      meta.createSpan({ cls: 'baizer-history-note', text: item.currentNote });
     }
-    meta.createSpan({ cls: 'ocli-history-updated', text: this.formatTimestamp(item.updatedAt) });
+    meta.createSpan({ cls: 'baizer-history-updated', text: this.formatTimestamp(item.updatedAt) });
 
-    const actions = row.createDiv({ cls: 'ocli-history-actions' });
+    const actions = row.createDiv({ cls: 'baizer-history-actions' });
     const pinButton = actions.createEl('button', {
-      cls: 'ocli-history-pin clickable-icon',
+      cls: 'baizer-history-pin clickable-icon',
       text: item.pinnedAt ? 'Unpin' : 'Pin',
       attr: { 'aria-label': `${item.pinnedAt ? 'Unpin' : 'Pin'} ${item.title}` },
     });
     const deleteButton = actions.createEl('button', {
-      cls: 'ocli-history-delete clickable-icon',
+      cls: 'baizer-history-delete clickable-icon',
       text: 'Delete',
       attr: { 'aria-label': `Delete ${item.title}` },
     });

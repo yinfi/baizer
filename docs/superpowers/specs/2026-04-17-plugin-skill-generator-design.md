@@ -1,7 +1,7 @@
 # Plugin Skill 自动生成器设计
 
 **Date:** 2026-04-17
-**Project:** `obsidian-cli`
+**Project:** `baizer`
 **Status:** Proposed design, pending spec review
 
 ## 目标
@@ -44,12 +44,12 @@ AI 内部流程:
   │
   ├─ 正常初始化 SkillRegistry、ToolRegistry
   ├─ 注册内置 skill（web-clipper, knowledge, plugin-ctrl...）
-  ├─ 加载用户 skill（.obsidian/obsidian-cli/skills/）
+  ├─ 加载用户 skill（.obsidian/baizer/skills/）
   │
   └─ 启动 PluginWatcher（后台异步）
        │
        ├─ 首次扫描：遍历所有已启用插件
-       │   ├─ 跳过自身（obsidian-cli）
+       │   ├─ 跳过自身（baizer）
        │   ├─ 检查是否已有 SKILL.md → 有则跳过
        │   └─ 无 SKILL.md → 收集插件信息 → 调 AI 生成 → 写入 vault → 注册
        │
@@ -299,7 +299,7 @@ async onunload() {
 生成的 SKILL.md 存放在用户 skill 目录：
 
 ```
-.obsidian/obsidian-cli/skills/
+.obsidian/baizer/skills/
 ├── plugin-obsidian-tasks/
 │   └── SKILL.md          # AI 生成
 ├── plugin-obsidian-kanban/
@@ -338,7 +338,7 @@ async onunload() {
 
 ### 5. 自身排除
 
-`obsidian-cli` 自身不生成 skill，硬编码排除。
+`baizer` 自身不生成 skill，硬编码排除。
 
 ## 设置项
 

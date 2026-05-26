@@ -261,7 +261,7 @@ async function runTests() {
     expect(container.children.length).toBe(4);
     expect(container.children[0].attributes.role).toBe('tab');
     expect(container.children[0].attributes['aria-selected']).toBe('true');
-    expect(container.children[1].className).toBe('ocli-tab-active-title');
+    expect(container.children[1].className).toBe('baizer-tab-active-title');
     expect(container.children[1].textContent).toBe('First');
     expect(container.children[2].attributes['aria-selected']).toBe('false');
 
