@@ -275,7 +275,7 @@ export class DefaultChatRuntime implements ChatRuntime {
     return buildFileWriteFailureMessage(state.attempted, state.lastError);
   }
 
-  private applyGenerationQuality(turn: PreparedChatTurn, modelText: string): string {
+  protected applyGenerationQuality(turn: PreparedChatTurn, modelText: string): string {
     if (!turn.generationPlan) return modelText;
     const evaluation = evaluateGenerationQuality({
       originalText: turn.selection,
@@ -377,7 +377,7 @@ If no listed command fits, suggest a plain-language request instead.
     return skillName ? this.deps.skillRegistry.activateSkill(skillName) : null;
   }
 
-  private createSkillScope(turn: PreparedChatTurn): ActiveSkillScope {
+  protected createSkillScope(turn: PreparedChatTurn): ActiveSkillScope {
     if (!turn.activeSkillName) {
       return { allowedToolNames: null };
     }
@@ -469,7 +469,7 @@ If no listed command fits, suggest a plain-language request instead.
     return index >= 0 ? prompt.slice(index + marker.length) : prompt;
   }
 
-  private async retainCompletedTurn(turn: PreparedChatTurn, assistantMessage: string): Promise<void> {
+  protected async retainCompletedTurn(turn: PreparedChatTurn, assistantMessage: string): Promise<void> {
     if (!this.deps.memoryManager) return;
 
     const memoryManager = this.deps.memoryManager as any;
