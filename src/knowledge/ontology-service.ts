@@ -9,6 +9,9 @@ import {
 import {
   computeSchemaHash,
   extractFrontmatter,
+  buildDiscoveryPrompt,
+  buildOntologyFile,
+  parseDiscoveryResponse,
   parseOntologySchema,
 } from './ontology';
 
@@ -29,7 +32,7 @@ export class OntologyService {
 
   async getStatus(): Promise<OntologyStatus> {
     const path = this.getSchemaPath();
-    if (!this.settings.knowledgeOntologyEnabled) {
+    if (this.settings.knowledgeOntologyEnabled === false) {
       return { kind: 'disabled', path, message: 'Ontology schema is disabled.' };
     }
 
@@ -73,7 +76,7 @@ export class OntologyService {
       recentClaims: [],
     };
 
-    if (!this.settings.knowledgeOntologyEnabled) {
+    if (this.settings.knowledgeOntologyEnabled === false) {
       return { kind: 'disabled', ...emptyStats, message: 'Ontology schema is disabled.' };
     }
 
@@ -83,7 +86,7 @@ export class OntologyService {
       .filter((file: TFile) => file.path.startsWith(`${articlesDir}/`));
 
     const totalCount = articles.length;
-    const minArticles = this.settings.knowledgeOntologyMinArticles || 10;
+    const minArticles = this.settings.knowledgeOntologyMinArticles ?? 10;
     if (totalCount < minArticles) {
       return {
         kind: 'insufficient_articles',
@@ -112,8 +115,8 @@ export class OntologyService {
       recentClaims.push(...readStringArray(fm.key_claims).slice(0, 3));
     }
 
-    const minTopicFrequency = this.settings.knowledgeOntologyMinTopicFrequency || 3;
-    const minConceptFrequency = this.settings.knowledgeOntologyMinConceptFrequency || 2;
+    const minTopicFrequency = this.settings.knowledgeOntologyMinTopicFrequency ?? 3;
+    const minConceptFrequency = this.settings.knowledgeOntologyMinConceptFrequency ?? 2;
     const topTopics = Array.from(topicCounts.entries())
       .filter(([, count]) => count >= minTopicFrequency)
       .sort((a, b) => b[1] - a[1])
@@ -145,6 +148,41 @@ export class OntologyService {
       topConcepts,
       recentClaims: recentClaims.slice(-20),
     };
+  }
+
+  async generateDiscoveryCandidate(
+    generateFn: (prompt: string) => Promise<string>,
+  ): Promise<{ readiness: OntologyDiscoveryReadiness; content?: string; error?: string }> {
+    const readiness = await this.getDiscoveryReadiness();
+    if (readiness.kind !== 'ready') return { readiness };
+
+    const prompt = buildDiscoveryPrompt({
+      totalCount: readiness.totalCount,
+      topTopics: readiness.topTopics,
+      topConcepts: readiness.topConcepts,
+      recentClaims: readiness.recentClaims,
+    });
+    const response = await generateFn(prompt);
+    const schema = parseDiscoveryResponse(response);
+    if (!schema) {
+      return { readiness, error: 'Failed to parse ontology discovery response.' };
+    }
+
+    return { readiness, content: buildOntologyFile(schema) };
+  }
+
+  async createSchemaFile(content: string): Promise<string> {
+    const path = this.getSchemaPath();
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing) throw new Error(`Ontology schema already exists: ${path}`);
+
+    const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
+    if (!this.app.vault.getAbstractFileByPath(wikiFolder) && typeof this.app.vault.createFolder === 'function') {
+      await this.app.vault.createFolder(wikiFolder);
+    }
+
+    await this.app.vault.create(path, content);
+    return path;
   }
 }
 
