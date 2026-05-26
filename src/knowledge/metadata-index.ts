@@ -30,6 +30,45 @@ function extractStringArray(fm: Record<string, any>, key: string): string[] {
   return [];
 }
 
+function parseStringList(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    // Fall through to a single item.
+  }
+  return value ? [value] : [];
+}
+
+function extractCategorizedKnowledge(fm: Record<string, any>): { category: string; items: string[] }[] {
+  const raw = fm.categorized_knowledge;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((entry: any) => entry && typeof entry.category === 'string')
+    .map((entry: any) => ({
+      category: entry.category,
+      items: Array.isArray(entry.items)
+        ? entry.items.map(String)
+        : typeof entry.items === 'string'
+          ? parseStringList(entry.items)
+          : [],
+    }))
+    .filter((entry) => entry.category.length > 0);
+}
+
+function extractEntities(fm: Record<string, any>): { name: string; type: string; description: string }[] {
+  const raw = fm.entities;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((entry: any) => entry && typeof entry.name === 'string' && typeof entry.type === 'string')
+    .map((entry: any) => ({
+      name: entry.name,
+      type: entry.type,
+      description: typeof entry.description === 'string' ? entry.description : '',
+    }))
+    .filter((entry) => entry.name.length > 0);
+}
+
 /**
  * 基于 metadataCache 的轻量内存索引
  * 启动时全量构建，之后通过事件增量更新
@@ -87,6 +126,9 @@ export class MetadataIndex {
       compiledAt: fm.compiled_at || '',
       sourceUrl: fm.source_url || undefined,
       author: fm.author || undefined,
+      categorizedKnowledge: extractCategorizedKnowledge(fm),
+      entities: extractEntities(fm),
+      schemaHash: fm.schema_hash || undefined,
     };
     this.articles.set(sourceId, meta);
   }
@@ -122,11 +164,24 @@ export class MetadataIndex {
       const titleLower = article.title.toLowerCase();
       const topicsLower = article.topics.map(t => t.toLowerCase());
       const conceptsLower = article.concepts.map(c => c.toLowerCase());
+      const claimsLower = article.keyClaims.map(c => c.toLowerCase());
+      const categorizedLower = (article.categorizedKnowledge || []).flatMap(entry => [
+        entry.category.toLowerCase(),
+        ...entry.items.map(item => item.toLowerCase()),
+      ]);
+      const entitiesLower = (article.entities || []).flatMap(entry => [
+        entry.name.toLowerCase(),
+        entry.type.toLowerCase(),
+        entry.description.toLowerCase(),
+      ]);
 
       for (const kw of keywords) {
-        if (titleLower.includes(kw)) score += 3;
-        if (topicsLower.some(t => t.includes(kw))) score += 2;
-        if (conceptsLower.some(c => c.includes(kw))) score += 1;
+        if (titleLower.includes(kw)) score += 5;
+        if (topicsLower.some(t => t.includes(kw))) score += 4;
+        if (conceptsLower.some(c => c.includes(kw))) score += 3;
+        if (claimsLower.some(c => c.includes(kw))) score += 2;
+        if (categorizedLower.some(c => c.includes(kw))) score += 3;
+        if (entitiesLower.some(e => e.includes(kw))) score += 4;
       }
       return { article, score };
     });
@@ -204,6 +259,16 @@ export class MetadataIndex {
         parts.push(`观点: ${a.keyClaims.slice(0, 2).join('；')}`);
       }
       parts.push(`路径: [[${a.summaryPath}]]`);
+      const ontologyParts: string[] = [];
+      if (a.categorizedKnowledge && a.categorizedKnowledge.length > 0) {
+        ontologyParts.push(...a.categorizedKnowledge.slice(0, 2).map(entry =>
+          `${entry.category}: ${entry.items.slice(0, 2).join('/')}`
+        ));
+      }
+      if (a.entities && a.entities.length > 0) {
+        ontologyParts.push(`Entities: ${a.entities.slice(0, 3).map(entry => entry.name).join('/')}`);
+      }
+      if (ontologyParts.length > 0) parts.push(`Ontology: ${ontologyParts.join('; ')}`);
       result += parts.join(' | ') + '\n';
     }
     return result;

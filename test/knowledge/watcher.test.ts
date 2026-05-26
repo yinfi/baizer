@@ -172,6 +172,172 @@ async function runTests() {
     expect(status?.state).toBe('stale');
   });
 
+  await test('KnowledgeRuntime loads valid ontology schema and ignores empty schema files', async () => {
+    const schemaPath = 'Knowledge Wiki/_ontology.md';
+    const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>([
+      [schemaPath, {
+        file: createFile(schemaPath),
+        content: '',
+        frontmatter: {},
+      }],
+    ]);
+
+    const app = {
+      vault: {
+        getMarkdownFiles: () => Array.from(files.values()).map((entry) => entry.file),
+        getAbstractFileByPath: (path: string) => files.get(path)?.file || null,
+        read: async (file: TFile) => files.get(file.path)?.content || '',
+        getFiles: () => Array.from(files.values()).map((entry) => entry.file),
+      },
+      metadataCache: {
+        getFileCache: (file: TFile) => {
+          const entry = files.get(file.path);
+          return entry ? { frontmatter: entry.frontmatter } : null;
+        },
+      },
+    } as any;
+
+    const runtime = new KnowledgeRuntime(app, {
+      knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'],
+      knowledgeAutoCompile: false,
+      knowledgeMaxCompileBatch: 50,
+      knowledgeOntologyEnabled: true,
+    } as any, {
+      generate: async () => '',
+    } as any);
+
+    expect(await runtime.loadOntologySchema()).toBe(null);
+
+    files.set(schemaPath, {
+      file: createFile(schemaPath),
+      content: `---
+knowledge_artifact_type: ontology_schema
+version: 1
+categories:
+  - name: "Methods"
+    description: "Reusable methods"
+---
+# Knowledge Ontology Schema
+`,
+      frontmatter: {},
+    });
+
+    const loaded = await runtime.loadOntologySchema();
+    expect(loaded?.schema.categories[0].name).toBe('Methods');
+  });
+
+  await test('KnowledgeRuntime does not auto-write ontology in manual or suggest mode', async () => {
+    for (const mode of ['manual', 'suggest']) {
+      const writes: string[] = [];
+      let generated = false;
+      const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>();
+      for (const name of ['a', 'b']) {
+        const path = `Knowledge Wiki/Articles/${name}.md`;
+        files.set(path, {
+          file: createFile(path),
+          content: `# ${name}`,
+          frontmatter: {
+            topics: ['AI'],
+            concepts: ['Agent'],
+            key_claims: [`${name} claim`],
+          },
+        });
+      }
+
+      const app = {
+        vault: {
+          getMarkdownFiles: () => Array.from(files.values()).map((entry) => entry.file),
+          getAbstractFileByPath: (path: string) => files.get(path)?.file || null,
+          read: async (file: TFile) => files.get(file.path)?.content || '',
+          getFiles: () => Array.from(files.values()).map((entry) => entry.file),
+          create: async (path: string, content: string) => { writes.push(path); files.set(path, { file: createFile(path), content, frontmatter: {} }); },
+        },
+        metadataCache: {
+          getFileCache: (file: TFile) => {
+            const entry = files.get(file.path);
+            return entry ? { frontmatter: entry.frontmatter } : null;
+          },
+        },
+      } as any;
+
+      const runtime = new KnowledgeRuntime(app, {
+        knowledgeWikiFolder: 'Knowledge Wiki',
+        knowledgeSourceFolders: ['Projects'],
+        knowledgeAutoCompile: false,
+        knowledgeMaxCompileBatch: 50,
+        knowledgeOntologyEnabled: true,
+        knowledgeOntologyUpdateMode: mode,
+        knowledgeOntologyMinArticles: 2,
+        knowledgeOntologyMinTopicFrequency: 2,
+        knowledgeOntologyMinConceptFrequency: 2,
+      } as any, {
+        generate: async () => {
+          generated = true;
+          return '{"categories":[{"name":"Methods","description":"Reusable methods"}],"entity_types":[]}';
+        },
+      } as any);
+
+      const result = await runtime.discoverOntology();
+
+      expect(result).toBe(null);
+      expect(generated).toBeFalsy();
+      expect(writes.length).toBe(0);
+    }
+  });
+
+  await test('KnowledgeRuntime auto mode creates missing ontology when discovery is ready', async () => {
+    const writes: string[] = [];
+    const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>();
+    for (const name of ['a', 'b']) {
+      const path = `Knowledge Wiki/Articles/${name}.md`;
+      files.set(path, {
+        file: createFile(path),
+        content: `# ${name}`,
+        frontmatter: {
+          topics: ['AI'],
+          concepts: ['Agent'],
+          key_claims: [`${name} claim`],
+        },
+      });
+    }
+
+    const app = {
+      vault: {
+        getMarkdownFiles: () => Array.from(files.values()).map((entry) => entry.file),
+        getAbstractFileByPath: (path: string) => files.get(path)?.file || null,
+        read: async (file: TFile) => files.get(file.path)?.content || '',
+        getFiles: () => Array.from(files.values()).map((entry) => entry.file),
+        create: async (path: string, content: string) => { writes.push(path); files.set(path, { file: createFile(path), content, frontmatter: {} }); },
+      },
+      metadataCache: {
+        getFileCache: (file: TFile) => {
+          const entry = files.get(file.path);
+          return entry ? { frontmatter: entry.frontmatter } : null;
+        },
+      },
+    } as any;
+
+    const runtime = new KnowledgeRuntime(app, {
+      knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'],
+      knowledgeAutoCompile: false,
+      knowledgeMaxCompileBatch: 50,
+      knowledgeOntologyEnabled: true,
+      knowledgeOntologyUpdateMode: 'auto',
+      knowledgeOntologyMinArticles: 2,
+      knowledgeOntologyMinTopicFrequency: 2,
+      knowledgeOntologyMinConceptFrequency: 2,
+    } as any, {
+      generate: async () => '{"categories":[{"name":"Methods","description":"Reusable methods"}],"entity_types":[]}',
+    } as any);
+
+    const result = await runtime.discoverOntology();
+
+    expect(result).toBe('Knowledge Wiki/_ontology.md');
+    expect(writes.includes('Knowledge Wiki/_ontology.md')).toBeTruthy();
+  });
+
   await test('KnowledgeRuntime does not read the previous plugin registry during startup', async () => {
     const previousRegistryPath = ['.obsidian', ['obsidian', 'cli'].join('-'), 'knowledge-registry.json'].join('/');
     const touchedPaths: string[] = [];

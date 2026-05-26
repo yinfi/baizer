@@ -1,4 +1,5 @@
 import { Plugin } from "obsidian";
+import { OntologyUpdateMode } from "../knowledge/types";
 
 // ===== 品牌配置 — 改名只需改这里 =====
 export const PLUGIN_ID = 'baizer';
@@ -115,6 +116,12 @@ export interface PluginSettings {
     knowledgeAutoCompile: boolean;
     knowledgeWikiFolder: string;
     knowledgeMaxCompileBatch: number;
+    knowledgeOntologyEnabled: boolean;
+    knowledgeOntologyUpdateMode: OntologyUpdateMode;
+    knowledgeOntologyMinArticles: number;
+    knowledgeOntologyMinTopicFrequency: number;
+    knowledgeOntologyMinConceptFrequency: number;
+    knowledgeOntologyAutoRecompileStale: boolean;
 
     // --- 🔌 Plugin Skill Generator ---
     autoGeneratePluginSkills: boolean;
@@ -169,6 +176,12 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     knowledgeAutoCompile: false,
     knowledgeWikiFolder: 'Knowledge Wiki',
     knowledgeMaxCompileBatch: 50,
+    knowledgeOntologyEnabled: true,
+    knowledgeOntologyUpdateMode: 'suggest',
+    knowledgeOntologyMinArticles: 10,
+    knowledgeOntologyMinTopicFrequency: 3,
+    knowledgeOntologyMinConceptFrequency: 2,
+    knowledgeOntologyAutoRecompileStale: false,
 
     // Plugin Skill Generator
     autoGeneratePluginSkills: true,
