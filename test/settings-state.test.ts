@@ -205,6 +205,26 @@ async function runTests() {
     });
   });
 
+  await test('exposes ontology defaults for knowledge schema controls', () => {
+    const settings = cloneSettings();
+
+    expect({
+      knowledgeOntologyEnabled: (settings as any).knowledgeOntologyEnabled,
+      knowledgeOntologyUpdateMode: (settings as any).knowledgeOntologyUpdateMode,
+      knowledgeOntologyMinArticles: (settings as any).knowledgeOntologyMinArticles,
+      knowledgeOntologyMinTopicFrequency: (settings as any).knowledgeOntologyMinTopicFrequency,
+      knowledgeOntologyMinConceptFrequency: (settings as any).knowledgeOntologyMinConceptFrequency,
+      knowledgeOntologyAutoRecompileStale: (settings as any).knowledgeOntologyAutoRecompileStale,
+    }).toEqual({
+      knowledgeOntologyEnabled: true,
+      knowledgeOntologyUpdateMode: 'suggest',
+      knowledgeOntologyMinArticles: 10,
+      knowledgeOntologyMinTopicFrequency: 3,
+      knowledgeOntologyMinConceptFrequency: 2,
+      knowledgeOntologyAutoRecompileStale: false,
+    });
+  });
+
   await test('settings fallback CSS covers the Baizer configuration layout', () => {
     const css = getSettingsFallbackCss();
 
