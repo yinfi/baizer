@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, TextComponent } from 'obsidian';
 import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
+import { OntologyUpdateMode } from './knowledge/types';
 
 export type SettingsSectionId =
     | 'connection'
@@ -425,8 +426,8 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     {
         id: 'knowledge',
         title: 'Knowledge',
-        description: 'Knowledge compiler sources, output, and batching.',
-        keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch'],
+        description: 'Knowledge compiler sources, output, ontology schema, and batching.',
+        keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema'],
     },
     {
         id: 'plugin-skills',
@@ -438,6 +439,12 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
 
 function normalizeSearchQuery(query: string): string {
     return query.trim().toLowerCase();
+}
+
+function clampInteger(value: string, min: number, max: number, fallback: number): number {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
 }
 
 export function getMatchingSettingsSections(query: string): SettingsSectionId[] {
@@ -1647,6 +1654,131 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
+        containerEl.createEl('h3', { text: 'Ontology Schema' });
+
+        new Setting(containerEl)
+            .setName('Enable Ontology Schema')
+            .setDesc('Use Knowledge Wiki/_ontology.md to add stable categories and entity extraction to future compiles.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.knowledgeOntologyEnabled !== false)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.knowledgeOntologyEnabled = value;
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Ontology Update Mode')
+            .setDesc('Manual never discovers automatically. Suggest reports readiness without writing. Auto creates a missing schema when thresholds are met.')
+            .addDropdown(drop => drop
+                .addOption('manual', 'Manual')
+                .addOption('suggest', 'Suggest (recommended)')
+                .addOption('auto', 'Auto create when missing')
+                .setValue(this.plugin.settings.knowledgeOntologyUpdateMode || 'suggest')
+                .onChange(async (value: OntologyUpdateMode) => {
+                    this.plugin.settings.knowledgeOntologyUpdateMode = value;
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Minimum Articles')
+            .setDesc('Minimum compiled wiki articles required before ontology discovery can run.')
+            .addText(text => text
+                .setPlaceholder('10')
+                .setValue(String(this.plugin.settings.knowledgeOntologyMinArticles ?? 10))
+                .onChange(async (value: string) => {
+                    this.plugin.settings.knowledgeOntologyMinArticles = clampInteger(value, 1, 500, 10);
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Minimum Topic Frequency')
+            .setDesc('A topic must appear this many times before it can influence ontology discovery.')
+            .addText(text => text
+                .setPlaceholder('3')
+                .setValue(String(this.plugin.settings.knowledgeOntologyMinTopicFrequency ?? 3))
+                .onChange(async (value: string) => {
+                    this.plugin.settings.knowledgeOntologyMinTopicFrequency = clampInteger(value, 1, 100, 3);
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Minimum Concept Frequency')
+            .setDesc('A concept must appear this many times before it can influence ontology discovery.')
+            .addText(text => text
+                .setPlaceholder('2')
+                .setValue(String(this.plugin.settings.knowledgeOntologyMinConceptFrequency ?? 2))
+                .onChange(async (value: string) => {
+                    this.plugin.settings.knowledgeOntologyMinConceptFrequency = clampInteger(value, 1, 100, 2);
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Auto Recompile Stale Articles')
+            .setDesc('Automatically recompile affected notes after ontology changes. Keep off if you want to review stale notes first.')
+            .addToggle(toggle => toggle
+                .setValue(!!this.plugin.settings.knowledgeOntologyAutoRecompileStale)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.knowledgeOntologyAutoRecompileStale = value;
+                    await this.persistSettings();
+                }));
+
+        const ontologyStatusEl = containerEl.createDiv({
+            cls: 'baizer-settings-inline-note',
+            text: 'Ontology status: loading...',
+        });
+        void this.refreshOntologyStatus(ontologyStatusEl);
+
+        new Setting(containerEl)
+            .setName('Ontology Actions')
+            .setDesc('Open, discover, preview, or mark affected notes pending without leaving settings.')
+            .addButton(btn => btn
+                .setButtonText('Open')
+                .onClick(async () => {
+                    const runtime = (this.plugin as any).knowledgeRuntime;
+                    if (!runtime?.openOntologyFile) {
+                        new Notice('Knowledge runtime is not available.');
+                        return;
+                    }
+                    await runtime.openOntologyFile();
+                    await this.refreshOntologyStatus(ontologyStatusEl);
+                }))
+            .addButton(btn => btn
+                .setButtonText('Discover')
+                .onClick(async () => {
+                    const runtime = (this.plugin as any).knowledgeRuntime;
+                    if (!runtime?.discoverOntology) {
+                        new Notice('Knowledge runtime is not available.');
+                        return;
+                    }
+                    const path = await runtime.discoverOntology();
+                    new Notice(path ? `Ontology schema created: ${path}` : 'Ontology schema was not created.');
+                    await this.refreshOntologyStatus(ontologyStatusEl);
+                }))
+            .addButton(btn => btn
+                .setButtonText('Preview')
+                .onClick(async () => {
+                    const runtime = (this.plugin as any).knowledgeRuntime;
+                    if (!runtime?.discoverOntologyPreview) {
+                        new Notice('Knowledge runtime is not available.');
+                        return;
+                    }
+                    const preview = await runtime.discoverOntologyPreview();
+                    if (preview.content) console.log('[Baizer] Ontology preview:\n', preview.content);
+                    new Notice(preview.message);
+                }))
+            .addButton(btn => btn
+                .setButtonText('Mark stale pending')
+                .onClick(async () => {
+                    const runtime = (this.plugin as any).knowledgeRuntime;
+                    if (!runtime?.markOntologyStaleFilesPending) {
+                        new Notice('Knowledge runtime is not available.');
+                        return;
+                    }
+                    const count = await runtime.markOntologyStaleFilesPending();
+                    new Notice(`Marked ${count} stale notes pending.`);
+                    await this.refreshOntologyStatus(ontologyStatusEl);
+                }));
+
         new Setting(containerEl)
             .setName('Source Folders')
             .setDesc('Folders to watch, one per line.')
@@ -1661,6 +1793,33 @@ export class SettingTab extends PluginSettingTab {
                         .filter(entry => entry.length > 0);
                     await this.persistSettings();
                 }));
+    }
+
+    private async refreshOntologyStatus(statusEl: HTMLElement): Promise<void> {
+        const runtime = (this.plugin as any).knowledgeRuntime;
+        if (!runtime?.getOntologyStatus) {
+            statusEl.textContent = 'Ontology status: Knowledge runtime is not available.';
+            return;
+        }
+
+        try {
+            const status = await runtime.getOntologyStatus();
+            const readiness = runtime.getOntologyDiscoveryReadiness
+                ? await runtime.getOntologyDiscoveryReadiness()
+                : null;
+            const counts = runtime.getStatusService
+                ? await runtime.getStatusService().getGlobalCounts()
+                : null;
+            const parts = [
+                `Ontology status: ${status.kind}`,
+                `path: ${status.path}`,
+            ];
+            if (readiness) parts.push(`discovery: ${readiness.kind}`);
+            if (counts) parts.push(`stale notes: ${counts.stale}`);
+            statusEl.textContent = parts.join(' | ');
+        } catch (e: any) {
+            statusEl.textContent = `Ontology status unavailable: ${e.message}`;
+        }
     }
 
     private renderPluginSkillsSection(containerEl: HTMLElement): void {

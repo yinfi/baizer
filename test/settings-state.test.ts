@@ -80,6 +80,10 @@ async function runTests() {
     expect(getMatchingSettingsSections('memory')).toEqual(['memory']);
   });
 
+  await test('settings search exposes ontology controls under Knowledge', () => {
+    expect(getMatchingSettingsSections('ontology')).toEqual(['knowledge']);
+  });
+
   await test('marks Memory as private when privacy mode is enabled', () => {
     const settings = cloneSettings();
     settings.privacyMode = true;
