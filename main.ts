@@ -265,7 +265,7 @@ export default class BaizerPlugin extends Plugin {
         await this.modelService.updateSettings(this.settings);
         this.toolRegistry.updateContext(this.settings);
         if (this.knowledgeRuntime) {
-            this.knowledgeRuntime.updateSettings(this.settings);
+            await this.knowledgeRuntime.updateSettings(this.settings);
         }
     }
 
