@@ -132,6 +132,41 @@ export interface OntologySchema {
   entity_types: OntologyEntityType[];
 }
 
+export type OntologyUpdateMode = 'manual' | 'suggest' | 'auto';
+
+export type OntologyStatusKind =
+  | 'disabled'
+  | 'missing'
+  | 'empty'
+  | 'invalid'
+  | 'valid'
+  | 'insufficient_articles'
+  | 'insufficient_signal';
+
+export interface OntologyStatus {
+  kind: OntologyStatusKind;
+  path: string;
+  schema?: OntologySchema;
+  hash?: string;
+  message?: string;
+}
+
+export type OntologyDiscoveryReadinessKind =
+  | 'disabled'
+  | 'insufficient_articles'
+  | 'insufficient_signal'
+  | 'ready';
+
+export interface OntologyDiscoveryReadiness {
+  kind: OntologyDiscoveryReadinessKind;
+  path: string;
+  totalCount: number;
+  topTopics: { topic: string; count: number }[];
+  topConcepts: { concept: string; count: number }[];
+  recentClaims: string[];
+  message?: string;
+}
+
 // ===== Constants =====
 
 export const DEFAULT_WIKI_FOLDER = 'Knowledge Wiki';
