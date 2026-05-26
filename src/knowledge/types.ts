@@ -132,6 +132,17 @@ export interface OntologySchema {
   entity_types: OntologyEntityType[];
 }
 
+export type OntologyUpdateMode = 'manual' | 'suggest' | 'auto';
+
+export type OntologyStatusKind =
+  | 'disabled'
+  | 'missing'
+  | 'empty'
+  | 'invalid'
+  | 'valid'
+  | 'insufficient_articles'
+  | 'insufficient_signal';
+
 // ===== Constants =====
 
 export const DEFAULT_WIKI_FOLDER = 'Knowledge Wiki';
