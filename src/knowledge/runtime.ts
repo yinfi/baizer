@@ -416,7 +416,7 @@ export class KnowledgeRuntime {
     return context;
   }
 
-  updateSettings(settings: PluginSettings): void {
+  async updateSettings(settings: PluginSettings): Promise<void> {
     this.settings = settings;
     this.ontologyService.updateSettings(settings);
     this.watcher.updateWatchedFolders(settings.knowledgeSourceFolders || []);
@@ -424,6 +424,22 @@ export class KnowledgeRuntime {
       watchedFolders: settings.knowledgeSourceFolders || [],
       wikiFolder: settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER,
     });
+    await this.runOntologySettingsAutomation();
+  }
+
+  private async runOntologySettingsAutomation(): Promise<void> {
+    if (this.settings.knowledgeOntologyEnabled === false) return;
+
+    if (this.settings.knowledgeOntologyUpdateMode === 'auto') {
+      await this.discoverOntology();
+    }
+
+    if (this.settings.knowledgeOntologyAutoRecompileStale) {
+      const marked = await this.markOntologyStaleFilesPending();
+      if (marked > 0 && this.settings.knowledgeAutoCompile) {
+        this.watcher.triggerCompile();
+      }
+    }
   }
 
   /**
