@@ -226,6 +226,9 @@ async function runTests() {
     expect(events.map(event => event.type)).toEqual(['tool_call', 'tool_result', 'done']);
     expect((events[2] as any).text).toBe('');
     expect(deps.sessionInputs.length).toBe(1);
+
+    const queryText = await runtime.query(createTurn());
+    expect(queryText).toBe('Approval required to update_file: A.md');
   });
 
   await test('aborts the Pi tool batch after an approval result', async () => {

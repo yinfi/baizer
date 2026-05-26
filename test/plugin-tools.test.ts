@@ -63,6 +63,26 @@ async function runTests() {
     },
   } as unknown as App;
 
+  await test('classifies plugin-control tools as sequential plugin-control risk', async () => {
+    const registry = new ToolRegistry(mockApp, {
+      ...DEFAULT_SETTINGS,
+      allowPluginControl: true,
+    });
+    registerTools(registry);
+
+    for (const name of [
+      'list_plugins',
+      'get_plugin_commands',
+      'get_plugin_settings',
+      'execute_plugin_command',
+    ]) {
+      const tool = registry.get(name);
+      expect(!!tool).toBe(true);
+      expect(tool!.executionMode).toBe('sequential');
+      expect(tool!.risk).toBe('plugin-control');
+    }
+  });
+
   await test('execute_plugin_command returns approval_required when confirmExecutions is enabled', async () => {
     executeCalls.length = 0;
     const registry = new ToolRegistry(mockApp, {

@@ -35,15 +35,19 @@ export class PiChatRuntime extends DefaultChatRuntime implements ChatRuntime {
 
   async query(turn: PreparedChatTurn): Promise<string> {
     let finalText = '';
+    let approvalText = '';
     for await (const event of this.queryStream(turn)) {
       if (event.type === 'error') {
         throw new Error(event.message);
+      }
+      if (event.type === 'tool_result' && isPiApprovalResponse(event.result)) {
+        approvalText = formatPiApprovalMessage(event.result);
       }
       if (event.type === 'done') {
         finalText = event.text;
       }
     }
-    return finalText;
+    return finalText || approvalText;
   }
 
   async *queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {

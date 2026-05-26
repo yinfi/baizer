@@ -84,6 +84,35 @@ async function runTests() {
     expect(session.inputs).toEqual(['hello']);
   });
 
+  await test('bridges Baizer thinking deltas into Pi assistant thinking events', async () => {
+    const session = createMockSession([
+      { type: 'thinking', content: 'plan' },
+      { type: 'text_delta', content: 'hi' },
+      { type: 'done', text: 'hi' },
+    ]);
+    const model = createPiBridgeModel();
+    const context: Context = {
+      messages: [{ role: 'user', content: 'hello', timestamp: 1 }],
+    };
+
+    const stream = createBaizerStreamFn(session)(model, context);
+    const events = await collect(stream);
+    const result = await stream.result();
+
+    expect(events.map(event => event.type)).toEqual([
+      'start',
+      'thinking_start',
+      'thinking_delta',
+      'thinking_end',
+      'text_start',
+      'text_delta',
+      'text_end',
+      'done',
+    ]);
+    expect(result.content[0]).toEqual({ type: 'thinking', thinking: 'plan' });
+    expect(result.content[1]).toEqual({ type: 'text', text: 'hi' });
+  });
+
   await test('bridges Baizer tool calls into Pi tool call events', async () => {
     const session = createMockSession([
       { type: 'tool_call', id: 'call_1', name: 'read_note', args: { path: 'Daily.md' } },

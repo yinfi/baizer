@@ -131,6 +131,9 @@ async function bridgeBaizerStream(
   const partial = createAssistantMessage(model);
   let textContent = '';
   let textContentIndex: number | undefined;
+  let thinkingContent = '';
+  let thinkingContentIndex: number | undefined;
+  let thinkingOpen = false;
   let hasToolCall = false;
   let finished = false;
 
@@ -147,6 +150,7 @@ async function bridgeBaizerStream(
       }
 
       if (event.type === 'text_delta') {
+        finishThinkingIfNeeded();
         if (textContentIndex === undefined) {
           textContentIndex = partial.content.length;
           partial.content.push({ type: 'text', text: '' });
@@ -163,7 +167,27 @@ async function bridgeBaizerStream(
         continue;
       }
 
+      if (event.type === 'thinking') {
+        if (!thinkingOpen) {
+          thinkingContent = '';
+          thinkingContentIndex = partial.content.length;
+          partial.content.push({ type: 'thinking', thinking: '' });
+          stream.push({ type: 'thinking_start', contentIndex: thinkingContentIndex, partial });
+          thinkingOpen = true;
+        }
+        thinkingContent += event.content || '';
+        partial.content[thinkingContentIndex!] = { type: 'thinking', thinking: thinkingContent };
+        stream.push({
+          type: 'thinking_delta',
+          contentIndex: thinkingContentIndex!,
+          delta: event.content || '',
+          partial,
+        });
+        continue;
+      }
+
       if (event.type === 'tool_call') {
+        finishThinkingIfNeeded();
         hasToolCall = true;
         const contentIndex = partial.content.length;
         const toolCall: ToolCall = {
@@ -185,6 +209,7 @@ async function bridgeBaizerStream(
       }
 
       if (event.type === 'done') {
+        finishThinkingIfNeeded();
         finishTextIfNeeded(stream, partial, textContentIndex, textContent);
         const final = {
           ...partial,
@@ -202,6 +227,7 @@ async function bridgeBaizerStream(
     }
 
     if (!finished) {
+      finishThinkingIfNeeded();
       finishTextIfNeeded(stream, partial, textContentIndex, textContent);
       const final = {
         ...partial,
@@ -217,6 +243,17 @@ async function bridgeBaizerStream(
   } catch (e: any) {
     const reason = e?.name === 'AbortError' ? 'aborted' : 'error';
     finishWithError(stream, partial, e?.message || 'Provider error', reason);
+  }
+
+  function finishThinkingIfNeeded(): void {
+    if (!thinkingOpen || thinkingContentIndex === undefined) return;
+    stream.push({
+      type: 'thinking_end',
+      contentIndex: thinkingContentIndex,
+      content: thinkingContent,
+      partial,
+    });
+    thinkingOpen = false;
   }
 }
 
