@@ -1,4 +1,4 @@
-import { App } from 'obsidian';
+import { App, TFile } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/mcp/types';
 import { ToolRegistry } from '../src/skills/tool-registry';
 import { registerVaultTools } from '../src/skills/builtin/vault-ops';
@@ -37,17 +37,18 @@ async function test(name: string, fn: () => Promise<void>) {
 }
 
 function createFile(path: string) {
-  return {
-    path,
-    basename: path.split('/').pop()?.replace(/\.[^.]+$/, '') || path,
-    extension: path.split('.').pop() || '',
-  };
+  const file = new TFile();
+  file.path = path;
+  file.basename = path.split('/').pop()?.replace(/\.[^.]+$/, '') || path;
+  file.extension = path.split('.').pop() || '';
+  return file;
 }
 
 function createMockApp() {
   const opened: string[] = [];
   const trashed: string[] = [];
   const files = new Map<string, any>([
+    ['Notes', { path: 'Notes' }],
     ['Notes/source.md', createFile('Notes/source.md')],
   ]);
   const contents = new Map<string, string>([
@@ -67,7 +68,12 @@ function createMockApp() {
       modify: async (file: any, content: string) => {
         contents.set(file.path, content);
       },
-      read: async (file: any) => contents.get(file.path) || '',
+      read: async (file: any) => {
+        if (!contents.has(file.path)) {
+          throw new Error('EISDIR: illegal operation on a directory, read');
+        }
+        return contents.get(file.path) || '';
+      },
       trash: async (file: any) => {
         trashed.push(file.path);
         files.delete(file.path);
@@ -213,6 +219,19 @@ async function runTests() {
     });
 
     expect(result.approval_required).toBe(true);
+  });
+
+  await test('direct workspace writes do not read folders while taking snapshots', async () => {
+    const { app } = createMockApp();
+    const service = createService(app);
+
+    const result = await service.executeWorkspaceTool('create_file', {
+      path: 'Notes',
+      content: 'new content',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('File already exists');
   });
 }
 

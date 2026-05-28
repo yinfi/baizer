@@ -1,4 +1,4 @@
-import { App } from 'obsidian';
+import { App, TFile } from 'obsidian';
 import { ToolRegistry } from '../skills/tool-registry';
 import { getFileWriteResultPath } from '../utils/file-operation-contract';
 
@@ -121,11 +121,11 @@ export class WorkspaceEditService {
     }
 
     const file = this.app.vault.getAbstractFileByPath(record.summary.path);
-    if (!file) {
+    if (!(file instanceof TFile)) {
       return { success: false, error: `File not found: ${record.summary.path}` };
     }
 
-    const currentContent = await this.app.vault.read(file as any);
+    const currentContent = await this.app.vault.read(file);
     if (this.hashContent(currentContent) !== record.afterHash) {
       return {
         success: false,
@@ -134,10 +134,10 @@ export class WorkspaceEditService {
     }
 
     if (record.beforeExists) {
-      await this.app.vault.modify(file as any, record.beforeContent);
+      await this.app.vault.modify(file, record.beforeContent);
       await this.openFile(record.summary.path);
     } else {
-      await this.app.vault.trash(file as any, true);
+      await this.app.vault.trash(file, true);
     }
 
     record.summary = { ...record.summary, status: 'undone' };
@@ -172,10 +172,10 @@ export class WorkspaceEditService {
 
   private async readOptionalFile(path: string): Promise<{ exists: boolean; content: string }> {
     const file = this.app.vault.getAbstractFileByPath(path);
-    if (!file) return { exists: false, content: '' };
+    if (!(file instanceof TFile)) return { exists: false, content: '' };
     return {
       exists: true,
-      content: await this.app.vault.read(file as any),
+      content: await this.app.vault.read(file),
     };
   }
 
@@ -209,8 +209,8 @@ export class WorkspaceEditService {
   private async openFile(path: string): Promise<void> {
     try {
       const file = this.app.vault.getAbstractFileByPath(path);
-      if (!file) return;
-      await this.app.workspace.getLeaf(false)?.openFile?.(file as any);
+      if (!(file instanceof TFile)) return;
+      await this.app.workspace.getLeaf(false)?.openFile?.(file);
     } catch {
       // Opening is best-effort; the write itself remains the source of truth.
     }
