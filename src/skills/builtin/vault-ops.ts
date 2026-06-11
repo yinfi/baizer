@@ -544,7 +544,7 @@ function isObsidianConfigPath(path: string): boolean {
 }
 
 function isReadableVaultFile(file: any): file is TFile {
-  return !!file && typeof file.path === 'string';
+  return file instanceof TFile;
 }
 
 async function ensureParentFolder(app: App, path: string): Promise<void> {

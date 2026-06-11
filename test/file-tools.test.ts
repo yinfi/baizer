@@ -41,6 +41,7 @@ function createMockApp() {
   const modified: Array<{ path: string; content: string }> = [];
   const folders: string[] = [];
   const files = new Map<string, any>([
+    ['Boards', { path: 'Boards' }],
     ['Boards/roadmap.canvas', createFile('Boards/roadmap.canvas')],
     ['Bases/tasks.base', createFile('Bases/tasks.base')],
   ]);
@@ -66,7 +67,12 @@ function createMockApp() {
         modified.push({ path: file.path, content });
         contents.set(file.path, content);
       },
-      read: async (file: any) => contents.get(file.path) || '',
+      read: async (file: any) => {
+        if (!contents.has(file.path)) {
+          throw new Error('EISDIR: illegal operation on a directory, read');
+        }
+        return contents.get(file.path) || '';
+      },
       trash: async () => { },
       rename: async () => { },
       getMarkdownFiles: () => [],
@@ -126,6 +132,21 @@ async function runTests() {
       path: 'Boards/roadmap.canvas',
       content: '{"nodes":[],"edges":[]}',
       truncated: false,
+    });
+  });
+
+  await test('read_file rejects folders before calling vault.read', async () => {
+    const { app } = createMockApp();
+    const registry = new ToolRegistry(app, DEFAULT_SETTINGS);
+    registerVaultTools(registry);
+
+    const result = await registry.execute('read_file', {
+      path: 'Boards',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'File not found',
     });
   });
 
