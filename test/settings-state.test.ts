@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, PluginSettings } from '../src/mcp/types';
+import { DEFAULT_SETTINGS, PluginSettings, mergeProviderDefaults } from '../src/mcp/types';
 import {
   getConnectionTestStatusPresentation,
   getProviderCardMeta,
@@ -102,15 +102,31 @@ async function runTests() {
     expect(statuses.permissions).toEqual({ label: 'Risk', tone: 'danger' });
   });
 
-  await test('disables provider deletion for built-in providers with an explicit reason', () => {
+  await test('enables provider deletion for built-in providers when alternatives remain', () => {
     const settings = cloneSettings();
-    settings.activeProvider = 'deepseek';
+    settings.activeProvider = 'openai';
+
+    const deletion = getProviderDeletionState(settings);
+
+    expect(deletion).toEqual({
+      canDelete: true,
+      helperText: 'Remove the selected provider from this workspace.',
+      label: 'Delete Provider',
+    });
+  });
+
+  await test('prevents deleting the final remaining provider', () => {
+    const settings = cloneSettings();
+    settings.activeProvider = 'openai';
+    settings.providers = {
+      openai: settings.providers.openai,
+    };
 
     const deletion = getProviderDeletionState(settings);
 
     expect(deletion).toEqual({
       canDelete: false,
-      helperText: 'Built-in providers cannot be deleted.',
+      helperText: 'At least one provider must remain configured.',
       label: 'Delete Provider',
     });
   });
@@ -130,7 +146,7 @@ async function runTests() {
 
     expect(deletion).toEqual({
       canDelete: true,
-      helperText: 'Remove the selected custom provider from this workspace.',
+      helperText: 'Remove the selected provider from this workspace.',
       label: 'Delete Provider',
     });
   });
@@ -195,6 +211,16 @@ async function runTests() {
       protocolGlyph: '◎',
       statusGlyph: '!',
     });
+  });
+
+  await test('restores missing default providers unless they were deliberately deleted', () => {
+    const settings = cloneSettings();
+
+    const restored = mergeProviderDefaults({
+      gemini: settings.providers.gemini,
+    }, ['openai', 'deepseek']);
+
+    expect(Object.keys(restored)).toEqual(['gemini', 'qwen']);
   });
 
   await test('exposes an explicit vault write scope default for permission controls', () => {
