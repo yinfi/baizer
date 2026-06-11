@@ -29,6 +29,7 @@ const tests = [
   'test/obsidian-context-service.test.ts',
   'test/context-chips.test.ts',
   'test/input-toolbar.test.ts',
+  'test/shell-input-layout.test.ts',
   'test/stream-controller.test.ts',
   'test/thinking-renderer.test.ts',
   'test/tool-renderer.test.ts',
