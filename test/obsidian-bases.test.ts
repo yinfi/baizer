@@ -31,6 +31,16 @@ async function runTests() {
     '../src/skills/builtin/obsidian-bases/executor'
   );
 
+  await test('classifies validate_base_yaml as a parallel read-only tool', async () => {
+    const toolRegistry = new ToolRegistry({} as any, DEFAULT_SETTINGS);
+    registerObsidianBasesTools(toolRegistry);
+
+    const tool = toolRegistry.get('validate_base_yaml');
+    expect(!!tool, 'validate_base_yaml should be registered');
+    expect(tool!.executionMode === 'parallel', 'validate_base_yaml should run in parallel');
+    expect(tool!.risk === 'read', 'validate_base_yaml should be read-only');
+  });
+
   await test('registers as a routable skill scoped to base file tools', async () => {
     const skillMd = readFileSync(
       join(process.cwd(), 'src/skills/builtin/obsidian-bases/SKILL.md'),

@@ -15,8 +15,8 @@ export interface WorkspaceEditSummary {
 }
 
 interface WorkspaceEditRecord {
-  summary: WorkspaceEditSummary;
   order: number;
+  summary: WorkspaceEditSummary;
   beforeExists: boolean;
   beforeContent: string;
   beforeHash: string;
@@ -90,8 +90,8 @@ export class WorkspaceEditService {
     };
 
     this.records.set(summary.id, {
-      summary,
       order: ++this.nextEditOrder,
+      summary,
       beforeExists: beforeSnapshot.exists,
       beforeContent: beforeSnapshot.content,
       beforeHash: this.hashContent(beforeSnapshot.content),
@@ -148,7 +148,7 @@ export class WorkspaceEditService {
   async undoAllWorkspaceEdits(): Promise<WorkspaceEditResult[]> {
     const active = Array.from(this.records.values())
       .filter(record => record.summary.status === 'applied')
-      .sort((a, b) => b.summary.appliedAt - a.summary.appliedAt);
+      .sort((a, b) => b.order - a.order);
 
     const results: WorkspaceEditResult[] = [];
     for (const record of active) {

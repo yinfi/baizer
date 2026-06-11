@@ -178,6 +178,35 @@ async function runTests() {
     expect(contents.get('Notes/source.md')).toBe('before');
   });
 
+  await test('undo still requires the latest AI edit first when stacked edits share a timestamp', async () => {
+    const originalNow = Date.now;
+    Date.now = () => 1700000000000;
+    try {
+      const { app, contents } = createMockApp();
+      const service = createService(app);
+
+      const first = await service.executeWorkspaceTool('update_file', {
+        path: 'Notes/source.md',
+        content: 'same millisecond 1',
+      });
+      const second = await service.executeWorkspaceTool('update_file', {
+        path: 'Notes/source.md',
+        content: 'same millisecond 2',
+      });
+
+      const staleUndo = await service.undoWorkspaceEdit(first.workspaceEdit.id);
+      expect(staleUndo.success).toBe(false);
+      expect(staleUndo.error).toContain('latest AI edit');
+      expect(contents.get('Notes/source.md')).toBe('same millisecond 2');
+
+      const latestUndo = await service.undoWorkspaceEdit(second.workspaceEdit.id);
+      expect(latestUndo.success).toBe(true);
+      expect(contents.get('Notes/source.md')).toBe('same millisecond 1');
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
   await test('undoing a created file trashes the created file', async () => {
     const { app, files, contents, trashed } = createMockApp();
     const service = createService(app);

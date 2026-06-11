@@ -401,6 +401,8 @@ export function createSaveWebpageTool(modelService: any, deps: WebClipperDeps = 
   return {
     name: 'save_webpage',
     description: 'Save a webpage or video transcript to a new note.',
+    executionMode: 'sequential',
+    risk: 'write',
     parameters: {
       type: 'object',
       properties: {

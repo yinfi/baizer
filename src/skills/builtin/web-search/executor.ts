@@ -17,6 +17,8 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
   return {
     name: 'web_search',
     description: 'Search the web for information using DuckDuckGo.',
+    executionMode: 'parallel',
+    risk: 'network',
     parameters: {
       type: 'object',
       properties: {

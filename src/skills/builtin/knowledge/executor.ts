@@ -16,6 +16,8 @@ export function createKnowledgeTools(
   const queryKnowledge: Tool = {
     name: 'query_knowledge',
     description: '从个人知识库中检索相关知识。',
+    executionMode: 'parallel',
+    risk: 'read',
     parameters: {
       type: 'object',
       properties: {
@@ -33,6 +35,8 @@ export function createKnowledgeTools(
   const fileBackKnowledge: Tool = {
     name: 'file_back_knowledge',
     description: '将高质量知识回答存回知识库 Wiki。',
+    executionMode: 'sequential',
+    risk: 'write',
     parameters: {
       type: 'object',
       properties: {

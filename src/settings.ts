@@ -502,17 +502,17 @@ export function getProviderDeletionState(settings: PluginSettings): ProviderDele
         };
     }
 
-    if (BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider)) {
+    if (Object.keys(settings.providers || {}).length <= 1) {
         return {
             canDelete: false,
-            helperText: 'Built-in providers cannot be deleted.',
+            helperText: 'At least one provider must remain configured.',
             label: 'Delete Provider',
         };
     }
 
     return {
         canDelete: true,
-        helperText: 'Remove the selected custom provider from this workspace.',
+        helperText: 'Remove the selected provider from this workspace.',
         label: 'Delete Provider',
     };
 }
@@ -1296,8 +1296,17 @@ export class SettingTab extends PluginSettingTab {
 
         this.createActionButton(actions, deletion.label, async () => {
             if (!deletion.canDelete) return;
-            delete settings.providers[settings.activeProvider];
-            settings.activeProvider = 'gemini';
+            const deletedProviderId = settings.activeProvider;
+            delete settings.providers[deletedProviderId];
+            if (BUILTIN_PROVIDER_KEYS.includes(deletedProviderId)) {
+                settings.deletedProviderIds = Array.from(new Set([
+                    ...(settings.deletedProviderIds || []),
+                    deletedProviderId,
+                ]));
+            }
+            settings.activeProvider = settings.providers.gemini
+                ? 'gemini'
+                : Object.keys(settings.providers)[0];
             this.revealApiKey = false;
             this.resetConnectionTestStatus();
             await this.persistSettings();

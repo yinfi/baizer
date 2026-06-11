@@ -15,6 +15,8 @@ export function getPluginCommandPreconditions(): string[] {
 const listPlugins: Tool = {
   name: 'list_plugins',
   description: 'List all installed plugins and their status, including whether they have an AI skill.',
+  executionMode: 'sequential',
+  risk: 'plugin-control',
   parameters: { type: 'object', properties: {} },
   async execute(args, ctx) {
     if (!ctx.settings.allowPluginControl) return { error: 'Permission denied' };
@@ -32,6 +34,8 @@ const listPlugins: Tool = {
 const getPluginCommands: Tool = {
   name: 'get_plugin_commands',
   description: 'Get available commands for a specific plugin.',
+  executionMode: 'sequential',
+  risk: 'plugin-control',
   parameters: {
     type: 'object',
     properties: {
@@ -51,6 +55,8 @@ const getPluginCommands: Tool = {
 const getPluginSettings: Tool = {
   name: 'get_plugin_settings',
   description: 'Get settings for a specific plugin.',
+  executionMode: 'sequential',
+  risk: 'plugin-control',
   parameters: {
     type: 'object',
     properties: {
@@ -69,6 +75,8 @@ const getPluginSettings: Tool = {
 const executePluginCommand: Tool = {
   name: 'execute_plugin_command',
   description: 'Execute a plugin command by its ID. Use get_plugin_commands first to find the command ID.',
+  executionMode: 'sequential',
+  risk: 'plugin-control',
   parameters: {
     type: 'object',
     properties: {

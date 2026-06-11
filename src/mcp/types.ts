@@ -79,6 +79,7 @@ export interface PluginSettings {
     // --- 🤖 Core Connection ---
     activeProvider: string;
     providers: Record<string, ProviderConfig>;
+    deletedProviderIds: string[];
     contextWindow: number;
 
     // --- 🛡️ Guardian Behavior ---
@@ -132,6 +133,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     // Core
     activeProvider: 'gemini',
     providers: { ...DEFAULT_PROVIDERS },
+    deletedProviderIds: [],
     contextWindow: 100000,
 
     // Guardian
@@ -187,6 +189,22 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     autoGeneratePluginSkills: true,
     pluginSkillExcludeList: []
 };
+
+export function mergeProviderDefaults(
+    providers: Record<string, ProviderConfig> = {},
+    deletedProviderIds: string[] = []
+): Record<string, ProviderConfig> {
+    const deleted = new Set(deletedProviderIds);
+    const merged: Record<string, ProviderConfig> = { ...providers };
+
+    for (const [id, defaultConfig] of Object.entries(DEFAULT_PROVIDERS)) {
+        if (!merged[id] && !deleted.has(id)) {
+            merged[id] = { ...defaultConfig };
+        }
+    }
+
+    return merged;
+}
 
 export interface IPlugin extends Plugin {
     settings: PluginSettings;

@@ -1,12 +1,8 @@
-import { MemoryManager } from '../memory/memory-manager';
 import {
   ChatContextItem,
-  IModelProvider,
   StreamEvent,
   ToolDefinition,
 } from '../models/interfaces';
-import { SkillRegistry } from '../skills/skill-registry';
-import { ToolRegistry } from '../skills/tool-registry';
 import {
   buildFileWriteFailureMessage,
   FILE_OPERATION_CONTRACT_TEXT,
@@ -17,16 +13,8 @@ import {
 } from '../utils/file-operation-contract';
 import { evaluateGenerationQuality } from '../services/generation-quality';
 import { formatGenerationPlanBlock, GenerationStrategyService } from '../services/generation-strategy-service';
-import { WorkspaceEditService, isDirectApplyWorkspaceTool } from '../services/workspace-edit-service';
-import { PreparedChatTurn, ChatRuntime, ChatTurnRequest } from './runtime-types';
-
-interface ChatRuntimeDeps {
-  provider: IModelProvider;
-  memoryManager: MemoryManager | null;
-  toolRegistry: ToolRegistry;
-  skillRegistry: SkillRegistry;
-  workspaceEditService?: Pick<WorkspaceEditService, 'executeWorkspaceTool'> | null;
-}
+import { isDirectApplyWorkspaceTool } from '../services/workspace-edit-service';
+import { PreparedChatTurn, ChatRuntime, ChatRuntimeDeps, ChatTurnRequest } from './runtime-types';
 
 interface ActiveSkillScope {
   activeSkillName?: string;
@@ -286,7 +274,7 @@ export class DefaultChatRuntime implements ChatRuntime {
     return buildFileWriteFailureMessage(state.attempted, state.lastError);
   }
 
-  private applyGenerationQuality(turn: PreparedChatTurn, modelText: string): string {
+  protected applyGenerationQuality(turn: PreparedChatTurn, modelText: string): string {
     if (!turn.generationPlan) return modelText;
     const evaluation = evaluateGenerationQuality({
       originalText: turn.selection,
@@ -388,7 +376,7 @@ If no listed command fits, suggest a plain-language request instead.
     return skillName ? this.deps.skillRegistry.activateSkill(skillName) : null;
   }
 
-  private createSkillScope(turn: PreparedChatTurn): ActiveSkillScope {
+  protected createSkillScope(turn: PreparedChatTurn): ActiveSkillScope {
     if (!turn.activeSkillName) {
       return { allowedToolNames: null };
     }
@@ -480,7 +468,7 @@ If no listed command fits, suggest a plain-language request instead.
     return index >= 0 ? prompt.slice(index + marker.length) : prompt;
   }
 
-  private async retainCompletedTurn(turn: PreparedChatTurn, assistantMessage: string): Promise<void> {
+  protected async retainCompletedTurn(turn: PreparedChatTurn, assistantMessage: string): Promise<void> {
     if (!this.deps.memoryManager) return;
 
     const memoryManager = this.deps.memoryManager as any;
