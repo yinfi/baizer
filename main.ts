@@ -1,7 +1,7 @@
 import { Plugin, debounce, Notice, MarkdownView, TFile } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
-import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, DEFAULT_PROVIDERS, ProviderConfig, PLUGIN_NAME } from './src/mcp/types';
+import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, ProviderConfig, PLUGIN_NAME, mergeProviderDefaults } from './src/mcp/types';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
@@ -30,6 +30,7 @@ import obsidianBasesSkillMd from './src/skills/builtin/obsidian-bases/SKILL.md';
 import { PluginWatcher } from './src/skills/builtin/plugin-ctrl/plugin-watcher';
 import { PluginSkillGenerator } from './src/skills/builtin/plugin-ctrl/skill-generator';
 import { InboxAutosaveCoordinator } from './src/services/inbox-autosave';
+import { BaizerClipProtocolHandler } from './src/services/clip-protocol';
 import { ObsidianContextService } from './src/services/obsidian-context-service';
 import { USER_SKILLS_DIR } from './src/skills/skill-files';
 
@@ -164,6 +165,16 @@ export default class BaizerPlugin extends Plugin {
             })
         );
 
+        // Register direct clip protocol:
+        // obsidian://baizer-clip?url=<encoded-http-url>
+        const clipProtocolHandler = new BaizerClipProtocolHandler({
+            saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+            notify: (message: string) => new Notice(message),
+        });
+        this.registerObsidianProtocolHandler('baizer-clip', (params) => {
+            void clipProtocolHandler.handle(params);
+        });
+
         // 启动插件 Skill 自动生成（后台异步，不阻塞）
         const skillGenerator = new PluginSkillGenerator(
             this.app, this.modelService, this.settings,
@@ -251,12 +262,19 @@ export default class BaizerPlugin extends Plugin {
         }
 
         // 确保 providers 中包含所有默认 provider（防止新增 provider 时旧数据缺失）
+        this.settings.deletedProviderIds = Array.isArray(this.settings.deletedProviderIds)
+            ? this.settings.deletedProviderIds
+            : [];
+
         if (this.settings.providers) {
-            for (const [id, defaultConfig] of Object.entries(DEFAULT_PROVIDERS)) {
-                if (!this.settings.providers[id]) {
-                    this.settings.providers[id] = { ...defaultConfig };
-                }
-            }
+            this.settings.providers = mergeProviderDefaults(
+                this.settings.providers,
+                this.settings.deletedProviderIds
+            );
+        }
+
+        if (!this.settings.providers[this.settings.activeProvider]) {
+            this.settings.activeProvider = Object.keys(this.settings.providers)[0] || 'gemini';
         }
     }
 

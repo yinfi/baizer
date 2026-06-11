@@ -1,0 +1,89 @@
+function expect(actual: any) {
+  return {
+    toEqual: (expected: any) => {
+      const actualStr = JSON.stringify(actual);
+      const expectedStr = JSON.stringify(expected);
+      if (actualStr !== expectedStr) {
+        throw new Error(`Expected ${expectedStr} but got ${actualStr}`);
+      }
+    },
+    toBe: (expected: any) => {
+      if (actual !== expected) {
+        throw new Error(`Expected ${JSON.stringify(expected)} but got ${JSON.stringify(actual)}`);
+      }
+    },
+    toContain: (expected: string) => {
+      if (typeof actual !== 'string' || !actual.includes(expected)) {
+        throw new Error(`Expected string to contain ${JSON.stringify(expected)} but got ${JSON.stringify(actual)}`);
+      }
+    },
+  };
+}
+
+async function test(name: string, fn: () => Promise<void> | void) {
+  try {
+    await fn();
+    console.log(`  PASS ${name}`);
+  } catch (e: any) {
+    console.error(`  FAIL ${name}: ${e.message}`);
+    process.exit(1);
+  }
+}
+
+async function runTests() {
+  console.log('=== Clip protocol Tests ===');
+  const {
+    parseBaizerClipProtocolParams,
+    BaizerClipProtocolHandler,
+  } = await import('../src/services/clip-protocol');
+
+  await test('parses obsidian protocol url parameter and decodes encoded WeChat links', () => {
+    const params = parseBaizerClipProtocolParams({
+      url: encodeURIComponent('https://mp.weixin.qq.com/s/abc123?chksm=hello&scene=21#wechat_redirect'),
+    });
+
+    expect(params).toEqual({
+      url: 'https://mp.weixin.qq.com/s/abc123?chksm=hello&scene=21#wechat_redirect',
+    });
+  });
+
+  await test('rejects missing or non-http urls before calling save_webpage', async () => {
+    const calls: string[] = [];
+    const notices: string[] = [];
+    const handler = new BaizerClipProtocolHandler({
+      saveUrl: async (url: string) => {
+        calls.push(url);
+        return { success: true, path: 'Clippings/ignored.md' };
+      },
+      notify: (message: string) => notices.push(message),
+    });
+
+    await handler.handle({ url: 'obsidian://open?vault=bad' });
+
+    expect(calls).toEqual([]);
+    expect(notices[0]).toContain('Invalid clip URL');
+  });
+
+  await test('saves valid protocol url through save_webpage and reports the saved path', async () => {
+    const calls: string[] = [];
+    const notices: string[] = [];
+    const handler = new BaizerClipProtocolHandler({
+      saveUrl: async (url: string) => {
+        calls.push(url);
+        return { success: true, path: 'Clippings/微信文章.md' };
+      },
+      notify: (message: string) => notices.push(message),
+    });
+
+    await handler.handle({ url: encodeURIComponent('https://mp.weixin.qq.com/s/abc123') });
+
+    expect(calls).toEqual(['https://mp.weixin.qq.com/s/abc123']);
+    expect(notices[0]).toContain('Clipping');
+    expect(notices[1]).toContain('Clippings/微信文章.md');
+  });
+}
+
+runTests().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

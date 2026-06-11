@@ -111,6 +111,42 @@ async function runTests() {
     ]);
   });
 
+  await test('updateSettings notifies provider listeners so UI selectors refresh immediately', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const order: string[] = [];
+
+    service.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    service.modelListCache = new Map();
+    service.providerChangedCallbacks = [
+      () => { order.push('providerChanged'); },
+    ];
+    service.memoryManager = null;
+    service.cleanup = () => {
+      order.push('cleanup');
+    };
+    service.initializeProvider = () => {
+      order.push('initializeProvider');
+    };
+
+    const nextSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    nextSettings.providers['custom-local'] = {
+      type: 'openai-compatible',
+      label: 'Local Gateway',
+      apiKey: 'sk-local',
+      baseUrl: 'http://localhost:11434/v1',
+      model: 'local-model',
+    };
+    nextSettings.activeProvider = 'custom-local';
+
+    await service.updateSettings(nextSettings);
+
+    expect(order).toEqual([
+      'cleanup',
+      'initializeProvider',
+      'providerChanged',
+    ]);
+  });
+
   await test('ModelService exposes memory view and memory deletion facade methods', async () => {
     const service: any = Object.create(ModelService.prototype);
     service.memoryManager = {

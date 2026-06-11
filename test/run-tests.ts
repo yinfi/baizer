@@ -58,6 +58,7 @@ const tests = [
   'test/skill-files.test.ts',
   'test/gemini-thought-signatures.test.ts',
   'test/inbox-autosave.test.ts',
+  'test/clip-protocol.test.ts',
   'test/plugin-skill-generator.test.ts',
   'test/plugin-watcher.test.ts',
   'test/video-transcription.test.ts',

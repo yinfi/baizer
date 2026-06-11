@@ -29,6 +29,7 @@ export class ModelService {
     private readonly modelListCacheTtlMs = 10 * 60 * 1000;
     private readonly generationStrategyService = new GenerationStrategyService();
     private providerChangedCallbacks: Array<() => void> = [];
+    private suppressProviderChangedNotification = false;
     private skillRegistry: SkillRegistry;
     private toolRegistry: ToolRegistry;
     private operationAuditLog: OperationAuditLog;
@@ -111,13 +112,20 @@ export class ModelService {
         if (!config) return;
 
         this.settings.activeProvider = providerId;
-        if (saveFn) await saveFn();
+        if (saveFn) {
+            this.suppressProviderChangedNotification = true;
+            try {
+                await saveFn();
+            } finally {
+                this.suppressProviderChangedNotification = false;
+            }
+        }
         await this.flushMemorySession();
 
         this.cleanup();
         this.modelListCache.clear();
         this.initializeProvider();
-        this.providerChangedCallbacks.forEach(cb => cb());
+        this.notifyProviderChanged();
     }
 
     public async switchModel(modelId: string, saveFn?: () => Promise<void>): Promise<void> {
@@ -145,6 +153,13 @@ export class ModelService {
         this.cleanup();
         this.initializeProvider();
         this.modelListCache.clear();
+        if (!this.suppressProviderChangedNotification) {
+            this.notifyProviderChanged();
+        }
+    }
+
+    private notifyProviderChanged(): void {
+        this.providerChangedCallbacks.forEach(cb => cb());
     }
 
     private unhandledRejectionHandler = (event: PromiseRejectionEvent) => {
