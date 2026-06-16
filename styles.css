@@ -3463,10 +3463,14 @@ textarea.shell-input {
 
 .baizer-shell-view .shell-input-wrapper {
     display: block;
+    width: 100%;
     padding: 0;
 }
 
 .baizer-shell-view textarea.shell-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
     min-height: 58px;
     max-height: 160px;
     padding: 8px 10px;
