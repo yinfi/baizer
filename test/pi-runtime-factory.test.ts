@@ -42,10 +42,10 @@ async function runTests() {
     } as any,
   };
 
-  await test('defaults to the legacy runtime', () => {
+  await test('defaults to the Pi runtime', () => {
     resetRuntimeEngineForTesting();
     const runtime = createChatRuntime(deps);
-    expect(runtime.constructor.name).toBe('DefaultChatRuntime');
+    expect(runtime.constructor.name).toBe('PiChatRuntime');
   });
 
   await test('can create the Pi runtime through the internal engine flag', () => {

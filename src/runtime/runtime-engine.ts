@@ -1,6 +1,6 @@
 import type { RuntimeEngine } from './runtime-types';
 
-let runtimeEngine: RuntimeEngine = 'legacy';
+let runtimeEngine: RuntimeEngine = 'pi';
 
 export function getRuntimeEngine(): RuntimeEngine {
   return runtimeEngine;
@@ -11,5 +11,5 @@ export function setRuntimeEngineForTesting(engine: RuntimeEngine): void {
 }
 
 export function resetRuntimeEngineForTesting(): void {
-  runtimeEngine = 'legacy';
+  runtimeEngine = 'pi';
 }

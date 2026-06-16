@@ -33,6 +33,8 @@ async function test(name: string, fn: () => Promise<void>) {
 async function runTests() {
   console.log('=== ChatRuntime Tests ===');
   const { createChatRuntime } = await import('../src/runtime/runtime-factory');
+  const { setRuntimeEngineForTesting } = await import('../src/runtime/runtime-engine');
+  setRuntimeEngineForTesting('legacy');
   const createObsidianContext = (overrides: Record<string, any> = {}) => ({
     activeNote: { path: 'Projects/Native AI.md', title: 'Native AI' },
     selection: { text: 'Bad sentence.', from: 1, to: 1 },
