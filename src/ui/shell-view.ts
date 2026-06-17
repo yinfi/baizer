@@ -590,26 +590,27 @@ export class ShellView extends ItemView {
 
         this.streamContainer = this.outputContainer.createDiv({ cls: 'shell-entry ai shell-stream-container' });
         this.streamTimeline = this.streamContainer.createDiv({ cls: 'shell-think-timeline' });
-        this.thinkingRenderer = new ThinkingRenderer(this.streamTimeline);
-        this.toolRenderer = new ToolRenderer(this.streamTimeline, {
+        const streamTimeline = this.streamTimeline;
+        this.thinkingRenderer = new ThinkingRenderer(streamTimeline);
+        this.toolRenderer = new ToolRenderer(streamTimeline, {
             onToolUpdate: (run) => {
                 this.tabManager.getActiveTab()?.state.upsertTool(run);
             },
         });
 
-        const summary = this.streamTimeline.createDiv({ cls: 'shell-think-summary' });
+        const summary = streamTimeline.createDiv({ cls: 'shell-think-summary' });
         summary.createSpan({ cls: 'think-toggle', text: '\u25BC' });
         summary.createSpan({ cls: 'think-summary-text', text: 'Thinking in progress...' });
         summary.setAttribute('role', 'button');
         summary.setAttribute('tabindex', '0');
         summary.setAttribute('aria-expanded', 'true');
         summary.addEventListener('click', () => {
-            this.toggleStreamTimeline();
+            this.toggleStreamTimeline(streamTimeline);
         });
         summary.addEventListener('keydown', (event: KeyboardEvent) => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
-            this.toggleStreamTimeline();
+            this.toggleStreamTimeline(streamTimeline);
         });
 
         this.streamContent = this.streamContainer.createDiv({ cls: 'shell-response-content' });
@@ -621,11 +622,11 @@ export class ShellView extends ItemView {
         return (this.thinkingRenderer?.getNodeCount() || 0) + (this.toolRenderer?.getNodeCount() || 0);
     }
 
-    private toggleStreamTimeline() {
-        if (!this.streamTimeline) return;
-        const nextCollapsed = !this.streamTimeline.hasClass('is-collapsed');
-        this.streamTimeline.toggleClass('is-collapsed', nextCollapsed);
-        const summary = this.streamTimeline.querySelector('.shell-think-summary') as HTMLElement;
+    private toggleStreamTimeline(timeline: HTMLElement | null = this.streamTimeline) {
+        if (!timeline) return;
+        const nextCollapsed = !timeline.hasClass('is-collapsed');
+        timeline.toggleClass('is-collapsed', nextCollapsed);
+        const summary = timeline.querySelector('.shell-think-summary') as HTMLElement;
         summary?.setAttribute('aria-expanded', String(!nextCollapsed));
     }
 

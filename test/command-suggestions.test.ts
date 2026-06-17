@@ -32,6 +32,7 @@ class FakeElement {
   parentElement: FakeElement | null = null;
   attributes: Record<string, string> = {};
   listeners: Record<string, Function[]> = {};
+  style: Record<string, string> = {};
 
   createDiv(attr?: any) {
     return this.createEl('div', attr);
@@ -74,6 +75,29 @@ class FakeElement {
   addEventListener(type: string, handler: Function) {
     if (!this.listeners[type]) this.listeners[type] = [];
     this.listeners[type].push(handler);
+  }
+
+  click() {
+    for (const handler of this.listeners.click || []) {
+      handler();
+    }
+  }
+
+  addClass(name: string) {
+    if (!this.hasClass(name)) {
+      this.className = `${this.className} ${name}`.trim();
+    }
+  }
+
+  toggleClass(name: string, enabled: boolean) {
+    if (enabled) {
+      this.addClass(name);
+      return;
+    }
+    this.className = this.className
+      .split(' ')
+      .filter(part => part && part !== name)
+      .join(' ');
   }
 
   hasClass(name: string) {
@@ -447,6 +471,39 @@ async function runTests() {
     expect(contextChips?.children[0]?.hasClass('shell-knowledge-status-host')).toBe(true);
     expect(inputContainer?.querySelector('.shell-input-top-actions')).toBe(null);
     expect(root.querySelector('.shell-input-shell')?.querySelector('.shell-input-top-actions')).toBe(null);
+  });
+
+  await test('ShellView keeps completed thinking summary expandable after stream cleanup', async () => {
+    const { ShellView } = await import('../src/ui/shell-view');
+
+    const view = new ShellView({} as any, {
+      getSkillCommands: () => [],
+    } as any);
+    const output = new FakeElement();
+    (globalThis as any).document = {
+      createElement: () => new FakeElement(),
+      getElementById: () => null,
+    };
+    (view as any).outputContainer = output;
+    (view as any).getMessageRenderer = () => ({
+      renderAiContent: async () => undefined,
+      addActionToolbar: () => undefined,
+    });
+    (view as any).persistActiveTab = async () => undefined;
+
+    (view as any).ensureStreamContainer();
+    const timeline = output.querySelector('.shell-think-timeline')!;
+    const summary = timeline.querySelector('.shell-think-summary')!;
+    (view as any).streamNodeCount = 1;
+
+    (view as any).finalizeStream();
+    expect(timeline.hasClass('is-collapsed')).toBe(true);
+    expect(summary.attributes['aria-expanded']).toBe('false');
+
+    summary.click();
+
+    expect(timeline.hasClass('is-collapsed')).toBe(false);
+    expect(summary.attributes['aria-expanded']).toBe('true');
   });
 
   await test('ShellView helper actions add related context and prepare edit input', async () => {
