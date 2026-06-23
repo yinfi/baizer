@@ -2,7 +2,10 @@
 import { App, Notice } from 'obsidian';
 import { PluginSettings, PLUGIN_ID } from '../../../mcp/types';
 import {
+  pluginSkillDirPath,
   pluginSkillFileExists,
+  pluginSkillSkipMarkerPath,
+  ensureDirectory,
   readTextIfExists,
 } from '../../skill-files';
 import { SkillLoader } from '../../skill-loader';
@@ -45,6 +48,59 @@ export class PluginWatcher {
     return pluginSkillFileExists(this.app.vault.adapter, pluginId);
   }
 
+  private async readPluginVersion(pluginId: string): Promise<string> {
+    const path = `.obsidian/plugins/${pluginId}/manifest.json`;
+    try {
+      const raw = await this.app.vault.adapter.read(path);
+      const manifest = JSON.parse(raw);
+      return manifest.version || '';
+    } catch {
+      const fallback = (this.app as any).plugins?.manifests?.[pluginId];
+      return fallback?.version || '';
+    }
+  }
+
+  private async readSkipMarkerVersion(pluginId: string): Promise<string> {
+    const marker = await readTextIfExists(
+      this.app.vault.adapter,
+      pluginSkillSkipMarkerPath(pluginId),
+    );
+    if (marker === null) return '';
+    try {
+      const parsed = JSON.parse(marker);
+      return parsed.version || '';
+    } catch {
+      return '';
+    }
+  }
+
+  private async writeSkipMarker(pluginId: string, version: string): Promise<void> {
+    const dirPath = pluginSkillDirPath(pluginId);
+    await ensureDirectory(this.app.vault.adapter, dirPath);
+    await this.app.vault.adapter.write(
+      pluginSkillSkipMarkerPath(pluginId),
+      JSON.stringify({ version, skippedAt: new Date().toISOString() }, null, 2),
+    );
+  }
+
+  private async getGenerationCandidate(pluginId: string): Promise<string | null> {
+    if (await this.hasSkillFile(pluginId)) return null;
+
+    const version = await this.readPluginVersion(pluginId);
+    const cachedVersion = await this.readSkipMarkerVersion(pluginId);
+    if (version && cachedVersion && cachedVersion === version) {
+      return null;
+    }
+
+    const info = await this.generator.collectBasicPluginInfo(pluginId);
+    if (this.generator.shouldSkipPlugin(info)) {
+      await this.writeSkipMarker(pluginId, info.version || version);
+      return null;
+    }
+
+    return pluginId;
+  }
+
   async start(): Promise<void> {
     if (!this.settings.autoGeneratePluginSkills) {
       console.log('[PluginWatcher] Disabled by settings');
@@ -72,7 +128,8 @@ export class PluginWatcher {
 
     const toGenerate: string[] = [];
     for (const id of pluginIds) {
-      if (!await this.hasSkillFile(id)) {
+      const candidate = await this.getGenerationCandidate(id);
+      if (candidate) {
         toGenerate.push(id);
       }
     }
@@ -84,10 +141,7 @@ export class PluginWatcher {
 
     const candidates: string[] = [];
     for (const id of toGenerate) {
-      const info = await this.generator.collectPluginInfo(id);
-      if (!this.generator.shouldSkipPlugin(info)) {
-        candidates.push(id);
-      }
+      candidates.push(id);
     }
 
     if (candidates.length === 0) return;
@@ -115,9 +169,9 @@ export class PluginWatcher {
       if (await this.hasSkillFile(id)) {
         await this.loadAndRegister(id);
       } else {
-        const info = await this.generator.collectPluginInfo(id);
-        if (!this.generator.shouldSkipPlugin(info)) {
-          new Notice(`Generating skill for ${info.name}...`);
+        const candidate = await this.getGenerationCandidate(id);
+        if (candidate) {
+          new Notice(`Generating skill for ${id}...`);
           await this.generateAndRegister(id);
         }
       }

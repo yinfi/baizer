@@ -111,7 +111,24 @@ export class PluginSkillGenerator {
   // ---------- 信息收集 ----------
 
   async collectPluginInfo(pluginId: string): Promise<PluginInfo> {
-    // 从 manifest.json 文件读取完整信息（比内存中的 manifest 更可靠）
+    const baseInfo = await this.collectBasicPluginInfo(pluginId);
+
+    // Local syntax hints from main.js.
+    const syntaxHints = await this.extractSyntaxHints(pluginId);
+    // Remote README/search context is only needed when generating a skill.
+    const webContext = await this.fetchPluginContext(pluginId, baseInfo.name);
+
+    console.log(`[SkillGenerator] ${pluginId} syntaxHints:`, syntaxHints);
+    console.log(`[SkillGenerator] ${pluginId} webContext length:`, webContext.length);
+
+    return {
+      ...baseInfo,
+      syntaxHints,
+      webContext,
+    };
+  }
+
+  async collectBasicPluginInfo(pluginId: string): Promise<PluginInfo> {
     const manifestData = await this.readManifest(pluginId);
     const fallbackManifest = (this.app as any).plugins.manifests[pluginId];
 
@@ -126,18 +143,15 @@ export class PluginSkillGenerator {
     const rawSettings = plugin?.settings || plugin?.data || {};
     const settingsKeys = this.extractSettingsKeys(rawSettings);
 
-    // 本地层：从 main.js 提取语法标识符
-    const syntaxHints = await this.extractSyntaxHints(pluginId);
-    // 网络层：分层获取插件文档上下文
-    const webContext = await this.fetchPluginContext(pluginId, name);
-
-    console.log(`[SkillGenerator] ${pluginId} syntaxHints:`, syntaxHints);
-    console.log(`[SkillGenerator] ${pluginId} webContext length:`, webContext.length);
-
     return {
-      id: pluginId, name, description,
+      id: pluginId,
+      name,
+      description,
       version: manifestData.version || fallbackManifest?.version || '',
-      commands, settingsKeys, syntaxHints, webContext,
+      commands,
+      settingsKeys,
+      syntaxHints: [],
+      webContext: '',
     };
   }
 

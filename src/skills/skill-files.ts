@@ -14,6 +14,7 @@ export interface SkillFilesAdapter {
 }
 
 export const SKILL_FILE_NAME = 'SKILL.md';
+export const SKILL_SKIP_MARKER_FILE_NAME = '.skip-generation.json';
 export const USER_SKILLS_DIR = `${PLUGIN_DATA_DIR}/skills`;
 
 function joinPath(...segments: string[]): string {
@@ -44,6 +45,13 @@ export function pluginSkillFilePath(
   skillsDir = USER_SKILLS_DIR,
 ): string {
   return skillFilePath(pluginSkillDirPath(pluginId, skillsDir));
+}
+
+export function pluginSkillSkipMarkerPath(
+  pluginId: string,
+  skillsDir = USER_SKILLS_DIR,
+): string {
+  return joinPath(pluginSkillDirPath(pluginId, skillsDir), SKILL_SKIP_MARKER_FILE_NAME);
 }
 
 export async function pluginSkillFileExists(

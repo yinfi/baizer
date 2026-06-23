@@ -25,6 +25,29 @@ function expect(actual: any) {
   };
 }
 
+class FakeAdapter {
+  files = new Map<string, string>();
+  folders = new Set<string>();
+
+  async exists(path: string): Promise<boolean> {
+    return this.files.has(path) || this.folders.has(path);
+  }
+
+  async read(path: string): Promise<string> {
+    const content = this.files.get(path);
+    if (content === undefined) throw new Error(`File not found: ${path}`);
+    return content;
+  }
+
+  async write(path: string, data: string): Promise<void> {
+    this.files.set(path, data);
+  }
+
+  async mkdir(path: string): Promise<void> {
+    this.folders.add(path);
+  }
+}
+
 const registeredSkills: string[] = [];
 const unregisteredSkills: string[] = [];
 
@@ -65,6 +88,7 @@ const mockApp = {
   },
   commands: { listCommands: () => [] },
   vault: {
+    adapter: new FakeAdapter(),
     getAbstractFileByPath: mockFn(() => null),
     createFolder: mockFn(),
     create: mockFn(),
@@ -116,6 +140,93 @@ async function runTests() {
     const diff = watcher.diffPlugins(oldSet, newSet);
     expect(diff.removed.length).toBe(1);
     expect(diff.removed[0]).toBe('plugin-b');
+  });
+
+  await test('initial scan skips plugins without using full skill generation context', async () => {
+    let basicCalls = 0;
+    let fullCalls = 0;
+    const adapter = new FakeAdapter();
+    const app = {
+      ...mockApp,
+      plugins: {
+        ...(mockApp as any).plugins,
+        enabledPlugins: new Set(['baizer', 'skip-only']),
+        manifests: {
+          'skip-only': { id: 'skip-only', name: 'Skip Only', version: '1.0.0', description: '' },
+        },
+      },
+      vault: { adapter },
+    } as unknown as App;
+    const generator = {
+      ...mockGenerator,
+      collectBasicPluginInfo: async (id: string) => {
+        basicCalls += 1;
+        return {
+          id, name: id, description: '', version: '1.0.0',
+          commands: [], settingsKeys: [], syntaxHints: [], webContext: '',
+        };
+      },
+      collectPluginInfo: async (id: string) => {
+        fullCalls += 1;
+        return mockGenerator.collectPluginInfo(id);
+      },
+      shouldSkipPlugin: (info: any) =>
+        info.commands.length === 0 && info.settingsKeys.length === 0,
+    };
+    const localWatcher = new PluginWatcher(
+      app,
+      mockSkillRegistry as any,
+      generator as any,
+      settings,
+    );
+
+    await (localWatcher as any).initialScan();
+
+    expect(basicCalls).toBe(1);
+    expect(fullCalls).toBe(0);
+  });
+
+  await test('initial scan remembers skipped plugin versions across restarts', async () => {
+    let basicCalls = 0;
+    const adapter = new FakeAdapter();
+    const app = {
+      ...mockApp,
+      plugins: {
+        ...(mockApp as any).plugins,
+        enabledPlugins: new Set(['baizer', 'skip-cached']),
+        manifests: {
+          'skip-cached': { id: 'skip-cached', name: 'Skip Cached', version: '1.0.0', description: '' },
+        },
+      },
+      vault: { adapter },
+    } as unknown as App;
+    const generator = {
+      ...mockGenerator,
+      collectBasicPluginInfo: async (id: string) => {
+        basicCalls += 1;
+        return {
+          id, name: id, description: '', version: '1.0.0',
+          commands: [], settingsKeys: [], syntaxHints: [], webContext: '',
+        };
+      },
+      shouldSkipPlugin: (info: any) =>
+        info.commands.length === 0 && info.settingsKeys.length === 0,
+    };
+
+    await (new PluginWatcher(
+      app,
+      mockSkillRegistry as any,
+      generator as any,
+      settings,
+    ) as any).initialScan();
+    await (new PluginWatcher(
+      app,
+      mockSkillRegistry as any,
+      generator as any,
+      settings,
+    ) as any).initialScan();
+
+    expect(basicCalls).toBe(1);
   });
 }
 
