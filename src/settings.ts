@@ -1627,6 +1627,16 @@ export class SettingTab extends PluginSettingTab {
                     this.plugin.settings.wechatStoragePath = value;
                     await this.persistSettings();
                 }));
+        const mobileSchemeTemplate = 'obsidian://baizer-clip?text=<encoded-share-text>';
+        new Setting(containerEl)
+            .setName('Mobile WeChat Capture')
+            .setDesc('Use this URL scheme from iOS Shortcuts or Android automation. Fallback command: Baizer: Save URL from clipboard.')
+            .addButton(btn => btn
+                .setButtonText('Copy URL Scheme')
+                .onClick(async () => {
+                    await globalThis.navigator?.clipboard?.writeText?.(mobileSchemeTemplate);
+                    new Notice('Baizer mobile capture URL scheme copied.');
+                }));
     }
 
     private renderKnowledgeSection(containerEl: HTMLElement): void {

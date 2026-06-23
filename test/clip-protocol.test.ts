@@ -1,4 +1,4 @@
-function expect(actual: any) {
+﻿function expect(actual: any) {
   return {
     toEqual: (expected: any) => {
       const actualStr = JSON.stringify(actual);
@@ -70,7 +70,7 @@ async function runTests() {
     const handler = new BaizerClipProtocolHandler({
       saveUrl: async (url: string) => {
         calls.push(url);
-        return { success: true, path: 'Clippings/微信文章.md' };
+        return { success: true, path: 'Clippings/寰俊鏂囩珷.md' };
       },
       notify: (message: string) => notices.push(message),
     });
@@ -79,7 +79,23 @@ async function runTests() {
 
     expect(calls).toEqual(['https://mp.weixin.qq.com/s/abc123']);
     expect(notices[0]).toContain('Clipping');
-    expect(notices[1]).toContain('Clippings/微信文章.md');
+    expect(notices[1]).toContain('Clippings/寰俊鏂囩珷.md');
+  });
+  await test('saves a URL extracted from encoded mobile share text', async () => {
+    const calls: string[] = [];
+    const handler = new BaizerClipProtocolHandler({
+      saveUrl: async (url: string) => {
+        calls.push(url);
+        return { success: true, path: 'Clippings/mobile-share.md' };
+      },
+      notify: (_message: string) => undefined,
+    });
+
+    await handler.handle({
+      text: encodeURIComponent('文章标题\nhttps://mp.weixin.qq.com/s/mobile123?scene=1#wechat_redirect\n来自微信'),
+    });
+
+    expect(calls).toEqual(['https://mp.weixin.qq.com/s/mobile123?scene=1#wechat_redirect']);
   });
 }
 
@@ -87,3 +103,4 @@ runTests().catch((e) => {
   console.error(e);
   process.exit(1);
 });
+

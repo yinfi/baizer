@@ -1,7 +1,7 @@
 import { App, TFile } from 'obsidian';
 import {
   getKnowledgeStatus,
-  getSummaryFrontmatter,
+  readSummaryFrontmatter,
 } from './frontmatter';
 import { computeContentHash } from './compiler';
 import { computeSchemaHash } from './ontology';
@@ -96,7 +96,7 @@ export class KnowledgeStatusService {
     }
 
     const summaryFrontmatter = summaryPath
-      ? getSummaryFrontmatter(this.app, summaryPath)
+      ? await readSummaryFrontmatter(this.app, summaryPath)
       : null;
 
     return {
@@ -193,7 +193,7 @@ export class KnowledgeStatusService {
   ): Promise<boolean> {
     if (!summaryPath) return false;
 
-    const summaryFrontmatter = getSummaryFrontmatter(this.app, summaryPath);
+    const summaryFrontmatter = await readSummaryFrontmatter(this.app, summaryPath);
     if (!summaryFrontmatter) return false;
 
     if (

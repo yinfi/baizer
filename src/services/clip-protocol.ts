@@ -1,6 +1,9 @@
+import { extractFirstHttpUrl } from './clip-input';
+
 export interface ClipProtocolParams {
   [key: string]: string | undefined;
   url?: string;
+  text?: string;
 }
 
 export interface ClipProtocolResult {
@@ -14,23 +17,25 @@ export interface ClipProtocolHandlerOptions {
   notify?: (message: string) => void;
 }
 
-export function parseBaizerClipProtocolParams(params: ClipProtocolParams): { url: string | null } {
-  const rawUrl = typeof params.url === 'string' ? params.url.trim() : '';
-  if (!rawUrl) return { url: null };
-
-  let decodedUrl = rawUrl;
+function decodeProtocolValue(value: string): string {
   try {
-    decodedUrl = decodeURIComponent(rawUrl);
+    return decodeURIComponent(value);
   } catch {
-    decodedUrl = rawUrl;
+    return value;
   }
+}
 
-  const normalizedUrl = decodedUrl.trim();
-  if (!/^https?:\/\//i.test(normalizedUrl)) {
-    return { url: null };
-  }
+export function parseBaizerClipProtocolParams(params: ClipProtocolParams): { url: string | null } {
+  const rawInput = typeof params.url === 'string' && params.url.trim()
+    ? params.url
+    : typeof params.text === 'string'
+      ? params.text
+      : '';
 
-  return { url: normalizedUrl };
+  if (!rawInput.trim()) return { url: null };
+
+  const decodedInput = decodeProtocolValue(rawInput).trim();
+  return { url: extractFirstHttpUrl(decodedInput) };
 }
 
 export class BaizerClipProtocolHandler {
@@ -39,7 +44,7 @@ export class BaizerClipProtocolHandler {
   async handle(params: ClipProtocolParams): Promise<ClipProtocolResult> {
     const { url } = parseBaizerClipProtocolParams(params);
     if (!url) {
-      const error = 'Invalid clip URL. Expected obsidian://baizer-clip?url=<encoded-http-url>.';
+      const error = 'Invalid clip URL. Expected obsidian://baizer-clip?url=<encoded-http-url> or obsidian://baizer-clip?text=<encoded-share-text>.';
       this.options.notify?.(error);
       return { success: false, error };
     }

@@ -2,6 +2,7 @@
 // 通过 Obsidian frontmatter 管理知识编译状态，替代外部 registry
 
 import { App, TFile } from 'obsidian';
+import { extractFrontmatter } from './ontology';
 
 export type KnowledgeStatus = 'pending' | 'processing' | 'done' | 'failed';
 
@@ -227,4 +228,31 @@ export function getSummaryFrontmatter(
     content_hash: cache.frontmatter.content_hash || undefined,
     compiled_at: cache.frontmatter.compiled_at || undefined,
   };
+}
+
+export async function readSummaryFrontmatter(
+  app: App,
+  summaryPath: string
+): Promise<{ schema_hash?: string; content_hash?: string; compiled_at?: string } | null> {
+  const cached = getSummaryFrontmatter(app, summaryPath);
+  if (cached?.schema_hash && cached?.content_hash && cached?.compiled_at) {
+    return cached;
+  }
+
+  const file = app.vault.getAbstractFileByPath(summaryPath);
+  if (!file || !(file instanceof TFile)) return cached;
+
+  try {
+    const content = await app.vault.read(file);
+    const frontmatter = extractFrontmatter(content);
+    if (!frontmatter) return cached;
+
+    return {
+      schema_hash: cached?.schema_hash || frontmatter.schema_hash || undefined,
+      content_hash: cached?.content_hash || frontmatter.content_hash || undefined,
+      compiled_at: cached?.compiled_at || frontmatter.compiled_at || undefined,
+    };
+  } catch {
+    return cached;
+  }
 }

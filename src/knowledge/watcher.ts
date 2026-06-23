@@ -5,7 +5,7 @@ import { App, TFile, debounce } from 'obsidian';
 import { DEFAULT_WIKI_FOLDER } from './types';
 import {
   getKnowledgeStatus,
-  getSummaryFrontmatter,
+  readSummaryFrontmatter,
   setKnowledgeStatus,
   ensureSourceId,
 } from './frontmatter';
@@ -41,7 +41,7 @@ export async function hasSourceContentChanged(app: App, file: TFile): Promise<bo
     : null;
   if (!summaryPath) return true;
 
-  const summaryFrontmatter = getSummaryFrontmatter(app, summaryPath);
+  const summaryFrontmatter = await readSummaryFrontmatter(app, summaryPath);
   if (!summaryFrontmatter?.content_hash) return true;
 
   try {

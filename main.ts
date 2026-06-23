@@ -31,6 +31,7 @@ import { PluginWatcher } from './src/skills/builtin/plugin-ctrl/plugin-watcher';
 import { PluginSkillGenerator } from './src/skills/builtin/plugin-ctrl/skill-generator';
 import { InboxAutosaveCoordinator } from './src/services/inbox-autosave';
 import { BaizerClipProtocolHandler } from './src/services/clip-protocol';
+import { saveClipText } from './src/services/clip-input';
 import { ObsidianContextService } from './src/services/obsidian-context-service';
 import { USER_SKILLS_DIR } from './src/skills/skill-files';
 
@@ -130,6 +131,27 @@ export default class BaizerPlugin extends Plugin {
             name: `Open ${PLUGIN_NAME}`,
             callback: () => this.activateView(),
             hotkeys: [{ modifiers: ["Mod"], key: "j" }]
+        });
+        this.addCommand({
+            id: 'save-url-from-clipboard',
+            name: 'Baizer: Save URL from clipboard',
+            callback: async () => {
+                try {
+                    const text = await globalThis.navigator?.clipboard?.readText?.();
+                    const result = await saveClipText({
+                        text: text || '',
+                        saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+                    });
+
+                    if (result.success && result.path) {
+                        new Notice(`Saved: ${result.path}`);
+                    } else {
+                        new Notice(`Failed to save URL: ${result.error || 'unknown error'}`);
+                    }
+                } catch (e: any) {
+                    new Notice(`Failed to read clipboard: ${e?.message || 'unknown error'}`);
+                }
+            },
         });
 
         // Manual Guardian Trigger

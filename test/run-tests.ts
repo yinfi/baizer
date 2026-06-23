@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+﻿import { execSync } from 'child_process';
 
 const tests = [
   'test/brand.test.ts',
@@ -59,6 +59,7 @@ const tests = [
   'test/skill-files.test.ts',
   'test/gemini-thought-signatures.test.ts',
   'test/inbox-autosave.test.ts',
+  'test/clip-input.test.ts',
   'test/clip-protocol.test.ts',
   'test/plugin-skill-generator.test.ts',
   'test/plugin-watcher.test.ts',
@@ -91,3 +92,4 @@ for (const testFile of tests) {
 }
 
 console.log(`Executed ${tests.length} test files successfully.`);
+
