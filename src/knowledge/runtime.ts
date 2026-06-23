@@ -3,7 +3,7 @@
 import { App, TFile, Notice, debounce } from 'obsidian';
 import { PluginSettings } from '../mcp/types';
 import { ModelService } from '../services/model-service';
-import { KnowledgeCompiler } from './compiler';
+import { KnowledgeCompiler, findCurrentCompiledSummary } from './compiler';
 import { WikiIndexer } from './indexer';
 import { KnowledgeLinter } from './linter';
 import { KnowledgeWatcher } from './watcher';
@@ -147,6 +147,11 @@ export class KnowledgeRuntime {
     }
 
     // 2. 检测过期文件（schema 或内容变更）
+    const reconciledCount = await this.reconcilePendingFiles(wikiFolder, sourceFolders);
+    if (reconciledCount > 0) {
+      console.log(`[KnowledgeRuntime] Reconciled ${reconciledCount} pending files with current summaries`);
+    }
+
     const staleCount = await this.detectStaleFiles(wikiFolder);
     if (staleCount > 0) {
       console.log(`[KnowledgeRuntime] Detected ${staleCount} stale files for recompilation`);
@@ -181,6 +186,32 @@ export class KnowledgeRuntime {
    * 检测过期文件：schema 变更或内容变更时标记为 pending
    * 快速路径：先比较 ontology hash，没变则只检查 mtime 近期变化的文件
    */
+  private async reconcilePendingFiles(wikiFolder: string, sourceFolders: string[]): Promise<number> {
+    if (sourceFolders.length === 0) return 0;
+
+    const candidates = [
+      ...getFilesByKnowledgeStatus(this.app, 'pending', sourceFolders),
+      ...getFilesByKnowledgeStatus(this.app, 'processing', sourceFolders),
+    ];
+    const unique = new Map<string, TFile>();
+    for (const file of candidates) unique.set(file.path, file);
+
+    let reconciled = 0;
+    for (const file of unique.values()) {
+      const currentSummary = await findCurrentCompiledSummary(this.app, file, wikiFolder);
+      if (!currentSummary) continue;
+
+      await setKnowledgeStatus(this.app, file, 'done', {
+        source_id: currentSummary.sourceId,
+        compiled_at: currentSummary.compiledAt || new Date().toISOString(),
+        summary: currentSummary.path,
+      });
+      reconciled++;
+    }
+
+    return reconciled;
+  }
+
   private async detectStaleFiles(wikiFolder: string): Promise<number> {
     const staleFiles = await this.statusService.getStaleFiles();
     for (const file of staleFiles) {

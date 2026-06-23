@@ -30,7 +30,7 @@ import obsidianBasesSkillMd from './src/skills/builtin/obsidian-bases/SKILL.md';
 import { PluginWatcher } from './src/skills/builtin/plugin-ctrl/plugin-watcher';
 import { PluginSkillGenerator } from './src/skills/builtin/plugin-ctrl/skill-generator';
 import { InboxAutosaveCoordinator } from './src/services/inbox-autosave';
-import { BaizerClipProtocolHandler } from './src/services/clip-protocol';
+import { registerBaizerClipProtocolHandler } from './src/services/clip-protocol';
 import { saveClipText } from './src/services/clip-input';
 import { ObsidianContextService } from './src/services/obsidian-context-service';
 import { USER_SKILLS_DIR } from './src/skills/skill-files';
@@ -189,12 +189,10 @@ export default class BaizerPlugin extends Plugin {
 
         // Register direct clip protocol:
         // obsidian://baizer-clip?url=<encoded-http-url>
-        const clipProtocolHandler = new BaizerClipProtocolHandler({
+        registerBaizerClipProtocolHandler(this, {
             saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
             notify: (message: string) => new Notice(message),
-        });
-        this.registerObsidianProtocolHandler('baizer-clip', (params) => {
-            void clipProtocolHandler.handle(params);
+            warn: (message: string) => console.warn(`[Baizer] ${message}`),
         });
 
         // 启动插件 Skill 自动生成（后台异步，不阻塞）

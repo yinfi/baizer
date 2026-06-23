@@ -9,7 +9,7 @@ import {
   getFilesByKnowledgeStatus,
   KnowledgeStatus,
 } from './frontmatter';
-import { computeSchemaHash } from './ontology';
+import { computeSchemaHash, extractFrontmatter } from './ontology';
 
 /**
  * 去除 markdown frontmatter（--- 之间的部分），返回正文
@@ -28,6 +28,94 @@ export function stripFrontmatter(content: string): string {
 export function computeContentHash(content: string): string {
   const body = stripFrontmatter(content);
   return computeSchemaHash(body);
+}
+
+export interface CurrentCompiledSummary {
+  path: string;
+  sourceId: string;
+  compiledAt?: string;
+  contentHash: string;
+  schemaHash?: string;
+}
+
+function asString(value: any): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function summarySourceIdFromPath(summaryPath: string): string {
+  return summaryPath.split('/').pop()?.replace(/\.md$/, '') || summaryPath;
+}
+
+async function readGeneratedSummary(
+  app: App,
+  summaryPath: string
+): Promise<CurrentCompiledSummary | null> {
+  const file = app.vault.getAbstractFileByPath(summaryPath);
+  if (!file || !(file instanceof TFile)) return null;
+
+  try {
+    const content = await app.vault.read(file);
+    const parsed = extractFrontmatter(content) || {};
+    const cached = app.metadataCache.getFileCache(file)?.frontmatter || {};
+    const generated = cached.knowledge_generated === true
+      || cached.knowledge_generated === 'true'
+      || parsed.knowledge_generated === true
+      || parsed.knowledge_generated === 'true'
+      || content.includes('knowledge_generated: true');
+    if (!generated) return null;
+
+    const contentHash = asString(cached.content_hash) || asString(parsed.content_hash);
+    if (!contentHash) return null;
+
+    const sourceId = asString(cached.knowledge_source_id)
+      || asString(parsed.knowledge_source_id)
+      || summarySourceIdFromPath(summaryPath);
+
+    return {
+      path: summaryPath,
+      sourceId,
+      compiledAt: asString(cached.compiled_at) || asString(parsed.compiled_at),
+      contentHash,
+      schemaHash: asString(cached.schema_hash) || asString(parsed.schema_hash),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function findCurrentCompiledSummary(
+  app: App,
+  file: TFile,
+  wikiFolder: string,
+  schemaHash?: string
+): Promise<CurrentCompiledSummary | null> {
+  const cache = app.metadataCache.getFileCache(file);
+  const frontmatter = cache?.frontmatter || {};
+  const candidates: string[] = [];
+  const summaryPath = asString(frontmatter.knowledge_summary);
+  const sourceId = asString(frontmatter.knowledge_source_id);
+
+  if (summaryPath) candidates.push(summaryPath);
+  if (sourceId) candidates.push(`${wikiFolder}/Articles/${sourceId}.md`);
+
+  if (candidates.length === 0) return null;
+
+  let contentHash: string;
+  try {
+    contentHash = computeContentHash(await app.vault.read(file));
+  } catch {
+    return null;
+  }
+
+  for (const candidate of Array.from(new Set(candidates))) {
+    const summary = await readGeneratedSummary(app, candidate);
+    if (!summary) continue;
+    if (summary.contentHash !== contentHash) continue;
+    if (schemaHash && summary.schemaHash !== schemaHash) continue;
+    return summary;
+  }
+
+  return null;
 }
 
 /**
@@ -598,6 +686,15 @@ export class KnowledgeCompiler {
     for (let i = 0; i < pendingFiles.length; i++) {
       const file = pendingFiles[i];
       onProgress?.(i + 1, pendingFiles.length, file.path);
+      const currentSummary = await findCurrentCompiledSummary(this.app, file, this.wikiFolder, schemaHash);
+      if (currentSummary) {
+        await setKnowledgeStatus(this.app, file, 'done', {
+          source_id: currentSummary.sourceId,
+          compiled_at: currentSummary.compiledAt || new Date().toISOString(),
+          summary: currentSummary.path,
+        });
+        continue;
+      }
       const result = await this.compileNote(file, schema, schemaHash, concurrency);
       if (result) { success++; } else { failed++; }
     }

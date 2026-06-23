@@ -35,6 +35,7 @@ async function runTests() {
   const {
     parseBaizerClipProtocolParams,
     BaizerClipProtocolHandler,
+    registerBaizerClipProtocolHandler,
   } = await import('../src/services/clip-protocol');
 
   await test('parses obsidian protocol url parameter and decodes encoded WeChat links', () => {
@@ -96,6 +97,26 @@ async function runTests() {
     });
 
     expect(calls).toEqual(['https://mp.weixin.qq.com/s/mobile123?scene=1#wechat_redirect']);
+  });
+
+  await test('protocol registration ignores duplicate baizer-clip action errors', () => {
+    let attempts = 0;
+    const warnings: string[] = [];
+    const plugin = {
+      registerObsidianProtocolHandler: (_action: string, _handler: (params: any) => void) => {
+        attempts++;
+        throw new Error('Action "baizer-clip" is already registered as a handler.');
+      },
+    };
+
+    registerBaizerClipProtocolHandler(plugin, {
+      saveUrl: async () => ({ success: true, path: 'Clippings/example.md' }),
+      notify: () => undefined,
+      warn: (message: string) => warnings.push(message),
+    });
+
+    expect(attempts).toBe(1);
+    expect(warnings[0]).toContain('already registered');
   });
 }
 

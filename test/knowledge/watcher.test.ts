@@ -229,6 +229,74 @@ content_hash: "${computeContentHash(sourceContent)}"
     expect(status?.state).toBe('stale');
   });
 
+  await test('compileAllPending skips pending notes when an existing summary is current', async () => {
+    const sourcePath = 'Projects/Already Compiled.md';
+    const summaryPath = 'Knowledge Wiki/Articles/ksrc_already.md';
+    const sourceContent = '---\nknowledge_status: pending\nknowledge_summary: Knowledge Wiki/Articles/ksrc_already.md\n---\n# Already Compiled\nsame body';
+    const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>([
+      [sourcePath, {
+        file: createFile(sourcePath),
+        content: sourceContent,
+        frontmatter: {
+          knowledge_status: 'pending',
+          knowledge_source_id: 'ksrc_already',
+          knowledge_summary: summaryPath,
+        },
+      }],
+      [summaryPath, {
+        file: createFile(summaryPath),
+        content: '# Existing Summary',
+        frontmatter: {
+          knowledge_generated: true,
+          knowledge_source_id: 'ksrc_already',
+          compiled_at: '2026-05-13T10:00:00Z',
+          content_hash: computeContentHash(sourceContent),
+        },
+      }],
+    ]);
+    let generated = false;
+    const app = {
+      vault: {
+        getMarkdownFiles: () => Array.from(files.values()).map((entry) => entry.file),
+        getAbstractFileByPath: (path: string) => files.get(path)?.file || null,
+        read: async (file: TFile) => files.get(file.path)?.content || '',
+        getFiles: () => Array.from(files.values()).map((entry) => entry.file),
+      },
+      metadataCache: {
+        getFileCache: (file: TFile) => {
+          const entry = files.get(file.path);
+          return entry ? { frontmatter: entry.frontmatter } : null;
+        },
+      },
+      fileManager: {
+        processFrontMatter: async (file: TFile, cb: (fm: Record<string, any>) => void) => {
+          const entry = files.get(file.path)!;
+          cb(entry.frontmatter);
+        },
+      },
+    } as any;
+
+    const runtime = new KnowledgeRuntime(app, {
+      knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'],
+      knowledgeAutoCompile: false,
+      knowledgeMaxCompileBatch: 50,
+    } as any, {
+      generate: async () => {
+        generated = true;
+        return '';
+      },
+    } as any);
+
+    const result = await runtime.compiler.compileAllPending(50);
+
+    expect(result.success).toBe(0);
+    expect(result.failed).toBe(0);
+    expect(generated).toBeFalsy();
+    expect(files.get(sourcePath)!.frontmatter.knowledge_status).toBe('done');
+    expect(files.get(sourcePath)!.frontmatter.knowledge_summary).toBe(summaryPath);
+  });
+
   await test('KnowledgeRuntime loads valid ontology schema and ignores empty schema files', async () => {
     const schemaPath = 'Knowledge Wiki/_ontology.md';
     const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>([
@@ -602,6 +670,99 @@ categories:
 
     expect(files.get('Projects/Old.md')!.frontmatter.knowledge_status).toBe('pending');
     expect(compileTriggered).toBeTruthy();
+  });
+
+  await test('KnowledgeRuntime startup reconciles pending notes with current summaries', async () => {
+    const sourcePath = 'Projects/Already Compiled.md';
+    const summaryPath = 'Knowledge Wiki/Articles/ksrc_old.md';
+    const sourceContent = '---\nknowledge_status: pending\nknowledge_source_id: ksrc_new\nknowledge_summary: Knowledge Wiki/Articles/ksrc_old.md\n---\n# Already Compiled\nsame body';
+    const folders = new Set(['Knowledge Wiki', 'Knowledge Wiki/Articles']);
+    const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>([
+      [sourcePath, {
+        file: createFile(sourcePath),
+        content: sourceContent,
+        frontmatter: {
+          knowledge_status: 'pending',
+          knowledge_source_id: 'ksrc_new',
+          knowledge_summary: summaryPath,
+        },
+      }],
+      [summaryPath, {
+        file: createFile(summaryPath),
+        content: '# Existing Summary',
+        frontmatter: {
+          knowledge_generated: true,
+          knowledge_source_id: 'ksrc_old',
+          compiled_at: '2026-05-13T10:00:00Z',
+          content_hash: computeContentHash(sourceContent),
+        },
+      }],
+    ]);
+    let generated = false;
+    const writes: string[] = [];
+    const app = {
+      vault: {
+        adapter: {
+          exists: async (path: string) => files.has(path) || folders.has(path),
+          write: async (path: string, content: string) => {
+            writes.push(`adapter:${path}`);
+            files.set(path, { file: createFile(path), content, frontmatter: {} });
+          },
+        },
+        getMarkdownFiles: () => Array.from(files.values()).map((entry) => entry.file),
+        getFiles: () => Array.from(files.values()).map((entry) => entry.file),
+        getAbstractFileByPath: (path: string) => files.get(path)?.file || (folders.has(path) ? { path } : null),
+        read: async (file: TFile) => files.get(file.path)?.content || '',
+        trash: async () => {},
+        createFolder: async (path: string) => { folders.add(path); },
+        create: async (path: string, content: string) => {
+          writes.push(`create:${path}`);
+          files.set(path, { file: createFile(path), content, frontmatter: {} });
+        },
+        modify: async (file: TFile, content: string) => {
+          writes.push(`modify:${file.path}`);
+          const entry = files.get(file.path);
+          if (entry) entry.content = content;
+        },
+      },
+      metadataCache: {
+        initialized: true,
+        getFileCache: (file: TFile) => {
+          const entry = files.get(file.path);
+          return entry ? { frontmatter: entry.frontmatter } : null;
+        },
+      },
+      fileManager: {
+        processFrontMatter: async (file: TFile, cb: (fm: Record<string, any>) => void) => {
+          const entry = files.get(file.path)!;
+          cb(entry.frontmatter);
+        },
+      },
+      internalPlugins: {
+        plugins: {
+          bases: { enabled: true },
+        },
+      },
+    } as any;
+
+    const runtime = new KnowledgeRuntime(app, {
+      knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'],
+      knowledgeAutoCompile: true,
+      knowledgeMaxCompileBatch: 50,
+    } as any, {
+      generate: async () => {
+        generated = true;
+        return '';
+      },
+    } as any);
+
+    await runtime.initialize();
+
+    expect(files.get(sourcePath)!.frontmatter.knowledge_status).toBe('done');
+    expect(files.get(sourcePath)!.frontmatter.knowledge_source_id).toBe('ksrc_old');
+    expect(files.get(sourcePath)!.frontmatter.knowledge_summary).toBe(summaryPath);
+    expect(generated).toBeFalsy();
   });
 
   await test('KnowledgeRuntime does not read the previous plugin registry during startup', async () => {

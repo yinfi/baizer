@@ -17,6 +17,17 @@ export interface ClipProtocolHandlerOptions {
   notify?: (message: string) => void;
 }
 
+export interface ClipProtocolRegistrationOptions extends ClipProtocolHandlerOptions {
+  warn?: (message: string) => void;
+}
+
+export interface ObsidianProtocolRegistrar {
+  registerObsidianProtocolHandler: (
+    action: string,
+    handler: (params: ClipProtocolParams) => void,
+  ) => void;
+}
+
 function decodeProtocolValue(value: string): string {
   try {
     return decodeURIComponent(value);
@@ -59,5 +70,27 @@ export class BaizerClipProtocolHandler {
     }
 
     return result;
+  }
+}
+
+function isDuplicateProtocolHandlerError(error: unknown): boolean {
+  const message = String((error as any)?.message || error || '');
+  return message.includes('baizer-clip') && message.includes('already registered');
+}
+
+export function registerBaizerClipProtocolHandler(
+  registrar: ObsidianProtocolRegistrar,
+  options: ClipProtocolRegistrationOptions,
+): boolean {
+  const handler = new BaizerClipProtocolHandler(options);
+  try {
+    registrar.registerObsidianProtocolHandler('baizer-clip', (params) => {
+      void handler.handle(params);
+    });
+    return true;
+  } catch (error) {
+    if (!isDuplicateProtocolHandlerError(error)) throw error;
+    options.warn?.('baizer-clip protocol handler is already registered; skipping duplicate registration.');
+    return false;
   }
 }
