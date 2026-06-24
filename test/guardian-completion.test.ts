@@ -169,8 +169,15 @@ async function runTests() {
       localBlock: '- next action is to',
     } as any;
 
+    const mediumContinuation = 'collect three customer examples, compare the timing of each decision, and write down which signal changed the team direction most clearly.';
+    const tooLongContinuation = [
+      'collect three customer examples, compare the timing of each decision, write down which signal changed the team direction most clearly,',
+      'then add a second paragraph explaining every stakeholder concern, implementation dependency, rollout sequence, measurement caveat, and follow-up question before sharing the note.',
+    ].join(' ');
+
     expect(service.evaluateSuggestion('next action is to', context).ok).toBe(false);
-    expect(service.evaluateSuggestion('This is a very important point that should be considered in detail because it has many implications across the whole project and overall workflow.', context).ok).toBe(false);
+    expect(service.evaluateSuggestion(mediumContinuation, context)).toEqual({ ok: true, reasons: [] });
+    expect(service.evaluateSuggestion(tooLongContinuation, context).ok).toBe(false);
     expect(service.evaluateSuggestion('collect three customer examples', context)).toEqual({ ok: true, reasons: [] });
   });
 
@@ -295,6 +302,7 @@ async function runTests() {
     });
 
     expect(context.prompt).toContain('Default to returning a completion');
+    expect(context.prompt).toContain('half to one sentence');
     expect(context.prompt).toContain('Use {"type":"none"} only');
     expect(context.prompt).toContain('Do not output reasoning');
   });

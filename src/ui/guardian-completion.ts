@@ -77,7 +77,7 @@ const GUARDIAN_SYSTEM_PROMPT = [
   'You are Baizer Guardian, a low-latency inline writing completer for Obsidian notes.',
   'Return ONLY one compact JSON object.',
   'Do not output reasoning, explanations, markdown fences, or commentary.',
-  'Prefer short, natural continuations that preserve the user voice.',
+  'Prefer focused, natural continuations that preserve the user voice.',
   'Never explain yourself and never mention the knowledge context.',
 ].join(' ');
 
@@ -309,10 +309,10 @@ export class GuardianCompletionService {
     const lines = [
       '[Task]',
       'Continue the note at the cursor. Return JSON: {"type":"completion","suggestion":"..."}.',
-      'Default to returning a completion: a short phrase, clause, or next sentence fragment is useful.',
+      'Default to returning a completion: half to one sentence of natural continuation is useful.',
       'Use {"type":"none"} only when the cursor is inside code, the current line is clearly finished, or any continuation would be misleading.',
       'Do not output reasoning, explanations, markdown fences, or commentary.',
-      'Keep the suggestion short enough to accept inline. Do not repeat text before the cursor.',
+      'Keep the suggestion focused enough to accept inline. Do not repeat text before the cursor.',
       '',
       `[Markdown Shape] ${context.markdownShape}`,
     ];
@@ -433,7 +433,7 @@ export class GuardianCompletionService {
 
   private maxSuggestionChars(): number {
     const sensitivity = clamp(this.deps.settings.guardianSensitivity ?? 50, 0, 100);
-    return sensitivity >= 70 ? 110 : 140;
+    return sensitivity >= 70 ? 220 : 280;
   }
 
   private getLineCount(editor: GuardianEditorLike, cursorLine: number): number {
