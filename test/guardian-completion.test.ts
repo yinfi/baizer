@@ -261,6 +261,28 @@ async function runTests() {
     expect(calls[0][5].maxTokens).toBe(undefined);
   });
 
+  await test('does not set a provider timeout below the guardian soft timeout', async () => {
+    const calls: any[] = [];
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {
+        isGenerationConfigured: () => true,
+        generate: async (...args: any[]) => {
+          calls.push(args);
+          return '{"type":"completion","suggestion":"cash flow changes"}';
+        },
+      } as any,
+    });
+
+    await service.completeAuto({
+      editor: createEditor(['profit and'], { line: 0, ch: 10 }),
+      obsidianContext: {} as any,
+      activePath: 'Notes/current.md',
+    });
+
+    expect(calls[0][5].timeoutMs).toBe(undefined);
+  });
+
   await test('prompt biases toward a completion instead of returning none by default', async () => {
     const service = new GuardianCompletionService({
       settings: createSettings() as any,
