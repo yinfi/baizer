@@ -1,4 +1,4 @@
-import { Plugin, debounce, Notice, MarkdownView, TFile } from 'obsidian';
+import { Plugin, Notice, MarkdownView, TFile } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
 import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, ProviderConfig, PLUGIN_NAME, mergeProviderDefaults } from './src/mcp/types';
@@ -8,6 +8,7 @@ import { guardianGutterExtension, updateGuardianState, GuardianState, guardianMo
 import { ghostTextExtension, showGhostText } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
 import { requestGuardianResponse } from './src/ui/guardian-request';
+import { GuardianCompletionService, getGuardianAutoDelayMs } from './src/ui/guardian-completion';
 import { selectionMenuExtension } from './src/ui/selection-menu';
 import { KnowledgeRuntime } from './src/knowledge/runtime';
 import { ToolRegistry } from './src/skills/tool-registry';
@@ -39,15 +40,19 @@ export default class BaizerPlugin extends Plugin {
     settings: PluginSettings;
     modelService: ModelService;
     knowledgeRuntime: KnowledgeRuntime | null = null;
+    guardianCompletionService: GuardianCompletionService;
+    guardianContextService: ObsidianContextService;
     toolRegistry: ToolRegistry;
     skillRegistry: SkillRegistry;
     private editorExtensionsRegistered = false;
     private pluginWatcher: PluginWatcher | null = null;
     private inboxAutosave: InboxAutosaveCoordinator | null = null;
+    private guardianCheckTimer: number | null = null;
+    private guardianRequestSeq = 0;
 
-
-    // Debounce with trailing edge (default/false) for inactivity trigger
-    private onEditorChangeDebounced = debounce(this.runGuardianCheck.bind(this), 3000);
+    private onEditorChange = (editor: any, info: any) => {
+        void this.queueGuardianCheck(editor, info);
+    };
 
     async onload() {
         await this.loadSettings();
@@ -57,6 +62,7 @@ export default class BaizerPlugin extends Plugin {
         this.toolRegistry = new ToolRegistry(this.app, this.settings);
         this.skillRegistry = new SkillRegistry(this.toolRegistry);
         this.modelService = new ModelService(this.app, this.settings, this.toolRegistry, this.skillRegistry);
+        this.guardianContextService = new ObsidianContextService(this.app);
         this.inboxAutosave = new InboxAutosaveCoordinator({
             app: this.app,
             getInboxPath: () => this.settings.wechatInboxPath,
@@ -91,6 +97,11 @@ export default class BaizerPlugin extends Plugin {
             this.modelService,
         );
         await this.knowledgeRuntime.initialize();
+        this.guardianCompletionService = new GuardianCompletionService({
+            settings: this.settings,
+            modelService: this.modelService,
+            knowledgeRuntime: this.knowledgeRuntime,
+        });
         this.knowledgeRuntime.registerCommands(this);
         this.knowledgeRuntime.registerEvents(this);
 
@@ -175,7 +186,7 @@ export default class BaizerPlugin extends Plugin {
 
         // Always register the event; runGuardianCheck will check the setting
         this.registerEvent(
-            this.app.workspace.on('editor-change', this.onEditorChangeDebounced)
+            this.app.workspace.on('editor-change', this.onEditorChange)
         );
 
         // Register Inbox Monitor
@@ -206,6 +217,10 @@ export default class BaizerPlugin extends Plugin {
     }
 
     onunload() {
+        if (this.guardianCheckTimer !== null) {
+            window.clearTimeout(this.guardianCheckTimer);
+            this.guardianCheckTimer = null;
+        }
         this.app.workspace.detachLeavesOfType(VIEW_TYPE_SHELL);
         if (this.knowledgeRuntime) {
             this.knowledgeRuntime.cleanup();
@@ -305,6 +320,11 @@ export default class BaizerPlugin extends Plugin {
         if (this.knowledgeRuntime) {
             await this.knowledgeRuntime.updateSettings(this.settings);
         }
+        this.guardianCompletionService = new GuardianCompletionService({
+            settings: this.settings,
+            modelService: this.modelService,
+            knowledgeRuntime: this.knowledgeRuntime,
+        });
     }
 
     async onFileModify(file: TFile) {
@@ -358,8 +378,116 @@ export default class BaizerPlugin extends Plugin {
         }
     }
 
+    private queueGuardianCheck(editor: any, info: any) {
+        if (this.guardianCheckTimer !== null) {
+            window.clearTimeout(this.guardianCheckTimer);
+            this.guardianCheckTimer = null;
+        }
+
+        const activePath = this.app.workspace.getActiveFile?.()?.path || '';
+        const decision = this.guardianCompletionService.shouldRunAuto({
+            editor,
+            activePath,
+        });
+        if (!decision.ok) return;
+
+        const delay = getGuardianAutoDelayMs(this.settings.guardianSensitivity);
+        this.guardianCheckTimer = window.setTimeout(() => {
+            this.guardianCheckTimer = null;
+            void this.runGuardianCheck(editor, info);
+        }, delay);
+    }
+
+    private async runAutoGuardianCheck(editor: any) {
+        if (!this.settings.guardianAutoMode) return;
+
+        const cursor = editor.getCursor();
+        const lineNumber = cursor.line + 1;
+        const view = (editor as any).cm as EditorView;
+        if (!view) return;
+
+        if (!view.state.field(guardianModeField)) return;
+
+        const activePath = this.app.workspace.getActiveFile?.()?.path || '';
+        const decision = this.guardianCompletionService.shouldRunAuto({ editor, activePath });
+        if (!decision.ok) return;
+
+        const requestSeq = ++this.guardianRequestSeq;
+        const requestLine = cursor.line;
+        const requestCh = cursor.ch;
+        const requestLineText = editor.getLine(requestLine) || '';
+
+        updateGuardianState(view, lineNumber, GuardianState.Thinking);
+
+        const isStale = () => {
+            const currentCursor = editor.getCursor();
+            return requestSeq !== this.guardianRequestSeq
+                || currentCursor.line !== requestLine
+                || currentCursor.ch !== requestCh
+                || (editor.getLine(requestLine) || '') !== requestLineText;
+        };
+
+        try {
+            const obsidianContext = await this.guardianContextService.collect({
+                includeBacklinks: false,
+            });
+            const result = await this.guardianCompletionService.completeAuto({
+                editor,
+                obsidianContext,
+                activePath,
+                userProfile: this.modelService.getUserProfile(),
+                isStale,
+            });
+
+            if (result.type !== 'completion') {
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
+
+            if (isStale()) {
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
+
+            const currentLineCount = view.state.doc.lines;
+            if (result.line > currentLineCount) {
+                console.warn("Guardian: Line number out of bounds after generation.");
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
+
+            const currentLine = view.state.doc.line(result.line);
+            const safeCh = Math.min(result.ch, currentLine.length);
+
+            if (this.shouldShowGuardianGhostText()) {
+                showGhostText(view, result.suggestion, result.line, safeCh);
+            }
+
+            updateGuardianState(
+                view,
+                result.line,
+                this.shouldShowGuardianGutter() ? GuardianState.HasSuggestion : GuardianState.Idle,
+            );
+        } catch (error: any) {
+            console.error("Guardian Error:", error);
+            updateGuardianState(view, lineNumber, GuardianState.Error);
+        }
+    }
+
+    private shouldShowGuardianGhostText(): boolean {
+        return this.settings.guardianUIStyle === 'ghost' || this.settings.guardianUIStyle === 'hybrid';
+    }
+
+    private shouldShowGuardianGutter(): boolean {
+        return this.settings.guardianUIStyle === 'gutter' || this.settings.guardianUIStyle === 'hybrid';
+    }
+
     async runGuardianCheck(editor: any, info: any, manualInstruction?: string) {
         if (!this.settings.enableGuardian) return;
+        if (!manualInstruction) {
+            await this.runAutoGuardianCheck(editor);
+            return;
+        }
 
         // Auto Mode Check: If not manual instruction and auto mode is disabled, skip.
         if (!manualInstruction && !this.settings.guardianAutoMode) return;

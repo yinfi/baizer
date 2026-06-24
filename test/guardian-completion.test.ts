@@ -1,0 +1,189 @@
+function expect(actual: any) {
+  return {
+    toBe: (expected: any) => {
+      if (actual !== expected) {
+        throw new Error(`Expected ${expected} but got ${actual}`);
+      }
+    },
+    toEqual: (expected: any) => {
+      const actualStr = JSON.stringify(actual);
+      const expectedStr = JSON.stringify(expected);
+      if (actualStr !== expectedStr) {
+        throw new Error(`Expected ${expectedStr} but got ${actualStr}`);
+      }
+    },
+    toContain: (expected: string) => {
+      if (typeof actual !== 'string' || !actual.includes(expected)) {
+        throw new Error(`Expected "${actual}" to contain "${expected}"`);
+      }
+    },
+    toBeGreaterThan: (expected: number) => {
+      if (!(actual > expected)) {
+        throw new Error(`Expected ${actual} to be greater than ${expected}`);
+      }
+    },
+  };
+}
+
+async function test(name: string, fn: () => Promise<void> | void) {
+  try {
+    await fn();
+    console.log(`  PASS ${name}`);
+  } catch (e: any) {
+    console.error(`  FAIL ${name}: ${e.message}`);
+    process.exit(1);
+  }
+}
+
+function createEditor(lines: string[], cursor: { line: number; ch: number } = { line: lines.length - 1, ch: lines[lines.length - 1].length }) {
+  return {
+    getCursor: () => cursor,
+    getLine: (line: number) => lines[line] ?? '',
+    lineCount: () => lines.length,
+  };
+}
+
+function createSettings(overrides: Record<string, any> = {}) {
+  return {
+    enableGuardian: true,
+    guardianAutoMode: true,
+    guardianSensitivity: 50,
+    guardianUIStyle: 'hybrid',
+    ignoredFolders: '',
+    systemPrompt: 'global prompt should not leak into auto completion',
+    ...overrides,
+  };
+}
+
+async function runTests() {
+  console.log('=== Guardian Completion Tests ===');
+  const {
+    GuardianCompletionService,
+    getGuardianAutoDelayMs,
+  } = await import('../src/ui/guardian-completion');
+
+  await test('derives lower latency delay from higher sensitivity', () => {
+    expect(getGuardianAutoDelayMs(90)).toBe(840);
+    expect(getGuardianAutoDelayMs(10)).toBe(1160);
+    expect(getGuardianAutoDelayMs(50)).toBe(1000);
+  });
+
+  await test('skips automatic completion in ignored folders and very short text', () => {
+    const service = new GuardianCompletionService({
+      settings: createSettings({ ignoredFolders: 'Private/\nTemplates/' }) as any,
+      modelService: {} as any,
+    });
+
+    expect(service.shouldRunAuto({
+      editor: createEditor(['hello world']),
+      activePath: 'Private/diary.md',
+    })).toEqual({ ok: false, reason: 'ignored-folder' });
+
+    expect(service.shouldRunAuto({
+      editor: createEditor(['hi'], { line: 0, ch: 2 }),
+      activePath: 'Notes/current.md',
+    })).toEqual({ ok: false, reason: 'too-short' });
+  });
+
+  await test('builds compact markdown-aware context around the cursor', async () => {
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {} as any,
+    });
+
+    const context = await service.buildContext({
+      editor: createEditor([
+        '# Product Notes',
+        '',
+        '- existing decision',
+        '- next action is to',
+      ], { line: 3, ch: 19 }),
+      obsidianContext: {
+        activeHeading: '# Product Notes',
+        tags: ['#product'],
+        outgoingLinks: ['Roadmap'],
+      } as any,
+    });
+
+    expect(context.markdownShape).toBe('list');
+    expect(context.currentHeading).toBe('# Product Notes');
+    expect(context.cursorPrefix).toBe('- next action is to');
+    expect(context.localBlock).toContain('- existing decision');
+    expect(context.prompt.includes('global prompt should not leak')).toBe(false);
+    expect(context.prompt).toContain('[Cursor]');
+  });
+
+  await test('injects only small relevant knowledge context', async () => {
+    const knowledgeCalls: string[] = [];
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {} as any,
+      knowledgeRuntime: {
+        getGuardianKnowledgeContext: async (query: string) => {
+          knowledgeCalls.push(query);
+          return [
+            '[Knowledge Reference]',
+            'From Roadmap: use progressive disclosure for adoption.',
+            'From Product Notes: keep defaults lightweight.',
+            'From Extra: this should be trimmed away.',
+          ].join('\n');
+        },
+      } as any,
+    });
+
+    const context = await service.buildContext({
+      editor: createEditor(['## Roadmap', 'The adoption plan should']),
+      obsidianContext: {
+        activeHeading: '## Roadmap',
+        tags: ['#strategy'],
+        outgoingLinks: ['Roadmap'],
+      } as any,
+    });
+
+    expect(knowledgeCalls.length).toBe(1);
+    expect(context.knowledgeContext).toContain('From Roadmap');
+    expect(context.knowledgeContext).toContain('From Product Notes');
+    expect(context.knowledgeContext.includes('From Extra')).toBe(false);
+  });
+
+  await test('rejects low quality suggestions before display', () => {
+    const service = new GuardianCompletionService({
+      settings: createSettings({ guardianSensitivity: 70 }) as any,
+      modelService: {} as any,
+    });
+    const context = {
+      currentLine: '- next action is to',
+      cursorPrefix: '- next action is to',
+      cursorSuffix: '',
+      markdownShape: 'list',
+      localBlock: '- next action is to',
+    } as any;
+
+    expect(service.evaluateSuggestion('next action is to', context).ok).toBe(false);
+    expect(service.evaluateSuggestion('This is a very important point that should be considered in detail because it has many implications across the whole project and overall workflow.', context).ok).toBe(false);
+    expect(service.evaluateSuggestion('collect three customer examples', context)).toEqual({ ok: true, reasons: [] });
+  });
+
+  await test('returns none when model response is stale after generation', async () => {
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {
+        generate: async () => '{"type":"completion","suggestion":"collect three examples"}',
+      } as any,
+    });
+
+    const result = await service.completeAuto({
+      editor: createEditor(['- next action is to']),
+      obsidianContext: {} as any,
+      activePath: 'Notes/current.md',
+      isStale: () => true,
+    });
+
+    expect(result).toEqual({ type: 'none', reason: 'stale' });
+  });
+}
+
+runTests().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

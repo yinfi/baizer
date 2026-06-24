@@ -3,7 +3,7 @@ import { PluginSettings, ProviderConfig } from '../mcp/types';
 import { MemoryManager } from '../memory/memory-manager';
 import { MemoryMutationResult, MemoryView, MemoryViewRequest, UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
-import { IModelProvider, ModelOption, ToolDefinition, StreamEvent } from '../models/interfaces';
+import { GenerationOptions, IModelProvider, ModelOption, ToolDefinition, StreamEvent } from '../models/interfaces';
 import { GeminiProvider } from '../models/gemini';
 import { OpenAIProvider } from '../models/openai';
 import { SkillRegistry } from '../skills/skill-registry';
@@ -364,6 +364,7 @@ export class ModelService {
         source: GenerationSource = 'shell',
         obsidianContext?: ObsidianContextSnapshot,
         userProfile?: UserProfile | null,
+        options?: GenerationOptions,
     ): Promise<string> {
         if (!this.hasValidConfig()) {
             throw new Error(`${this.getActiveProviderConfig()?.label || 'AI'} API Key not configured`);
@@ -379,7 +380,7 @@ export class ModelService {
                     userProfile ?? this.getUserProfile(),
                 )
                 : prompt;
-            const result = await this.provider.generateContent(finalPrompt, systemPrompt);
+            const result = await this.provider.generateContent(finalPrompt, systemPrompt, options);
             return result.text;
         } catch (e: any) {
             logger.error('Stateless generation failed', e, 'ModelService.generate');

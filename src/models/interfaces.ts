@@ -50,6 +50,12 @@ export interface GenerationResult {
     functionCalls?: ToolCall[];
 }
 
+export interface GenerationOptions {
+    temperature?: number;
+    maxTokens?: number;
+    timeoutMs?: number;
+}
+
 export type StreamEvent =
     | { type: 'thinking'; content: string }
     | { type: 'text_delta'; content: string }
@@ -74,6 +80,6 @@ export interface IModelProvider {
     checkAvailability(): Promise<boolean>;
     listModels?(): Promise<ModelOption[]>;
 
-    generateContent(prompt: string, systemPrompt?: string): Promise<GenerationResult>;
+    generateContent(prompt: string, systemPrompt?: string, options?: GenerationOptions): Promise<GenerationResult>;
     startChat(tools?: ToolDefinition[]): IChatSession;
 }

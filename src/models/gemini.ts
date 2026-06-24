@@ -2,6 +2,7 @@ import { ChatSession, GenerativeModel, GoogleGenerativeAI } from '@google/genera
 import { requestUrl } from 'obsidian';
 import {
   ChatMessage,
+  GenerationOptions,
   GenerationResult,
   IChatSession,
   IModelProvider,
@@ -95,14 +96,24 @@ export class GeminiProvider implements IModelProvider {
         return Array.from(deduped.values());
     }
 
-    async generateContent(prompt: string, systemPrompt?: string): Promise<GenerationResult> {
-        const model = systemPrompt
+    async generateContent(prompt: string, systemPrompt?: string, options?: GenerationOptions): Promise<GenerationResult> {
+        const generationConfig = {
+            ...(typeof options?.temperature === 'number' ? { temperature: options.temperature } : {}),
+            ...(typeof options?.maxTokens === 'number' ? { maxOutputTokens: options.maxTokens } : {}),
+        };
+        const hasGenerationConfig = Object.keys(generationConfig).length > 0;
+        const model = systemPrompt || hasGenerationConfig
             ? this.genAI.getGenerativeModel({
                 model: this.config.modelName,
-                systemInstruction: systemPrompt
+                ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
+                ...(hasGenerationConfig ? { generationConfig } : {}),
             })
             : this.model;
-        const result = await model.generateContent(prompt);
+        const result = await withTimeout(
+            model.generateContent(prompt),
+            options?.timeoutMs,
+            'Gemini generation timed out',
+        );
         return {
             text: result.response.text()
         };
@@ -242,5 +253,21 @@ class GeminiChatSession implements IChatSession {
 
     async clearHistory(): Promise<void> {
         // Gemini ChatSession doesn't support clearing history directly without creating a new session.
+    }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number | undefined, message: string): Promise<T> {
+    if (!timeoutMs || timeoutMs <= 0) return promise;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((_resolve, reject) => {
+                timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
     }
 }

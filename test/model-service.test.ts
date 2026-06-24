@@ -562,6 +562,53 @@ async function runTests() {
     expect(calls[0].prompt.includes('Source: guardian')).toEqual(true);
     expect(calls[0].prompt.includes('Mode: co-write')).toEqual(true);
   });
+
+  await test('generate forwards guardian generation options to the provider', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const calls: any[] = [];
+
+    service.hasValidConfig = () => true;
+    service.getActiveProviderConfig = () => ({ label: 'Test Provider' });
+    service.provider = {
+      generateContent: async (prompt: string, systemPrompt?: string, options?: any) => {
+        calls.push({ prompt, systemPrompt, options });
+        return { text: '{"type":"none"}' };
+      },
+    };
+    service.memoryManager = {
+      getProfile: () => null,
+    };
+
+    await service.generate(
+      'guardian prompt',
+      'Return ONLY JSON.',
+      'guardian',
+      {
+        activeNote: { path: 'Daily/2026-05-13.md', title: '2026-05-13' },
+        selection: null,
+        activeHeading: '## Draft',
+        frontmatter: {},
+        tags: [],
+        outgoingLinks: [],
+        backlinks: [],
+        recentNotes: [],
+        explicitScopes: [],
+        contextItems: [],
+      },
+      null,
+      {
+        temperature: 0.2,
+        maxTokens: 64,
+        timeoutMs: 5000,
+      },
+    );
+
+    expect(calls[0].options).toEqual({
+      temperature: 0.2,
+      maxTokens: 64,
+      timeoutMs: 5000,
+    });
+  });
 }
 
 runTests().catch((e) => {

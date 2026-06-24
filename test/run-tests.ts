@@ -25,6 +25,7 @@ const tests = [
   'test/message-renderer.test.ts',
   'test/knowledge-status-panel.test.ts',
   'test/guardian-request.test.ts',
+  'test/guardian-completion.test.ts',
   'test/file-operation-contract.test.ts',
   'test/chat-controller.test.ts',
   'test/selection-menu.test.ts',
@@ -75,6 +76,7 @@ const tests = [
   'test/knowledge/ontology-service.test.ts',
   'test/knowledge/ontology.test.ts',
   'test/knowledge/query.test.ts',
+  'test/knowledge/guardian-context.test.ts',
   'test/knowledge/types.test.ts',
   'test/knowledge/watcher.test.ts',
 ];

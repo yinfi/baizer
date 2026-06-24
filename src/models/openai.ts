@@ -1,4 +1,4 @@
-import { IModelProvider, ModelConfig, IChatSession, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption, StreamEvent } from './interfaces';
+import { IModelProvider, ModelConfig, IChatSession, GenerationOptions, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption, StreamEvent } from './interfaces';
 import { requestUrl, RequestUrlParam } from 'obsidian';
 import { logger } from '../utils/logger';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
@@ -84,32 +84,36 @@ export class OpenAIProvider implements IModelProvider {
         return Array.from(deduped.values());
     }
 
-    async generateContent(prompt: string, systemPrompt?: string): Promise<GenerationResult> {
+    async generateContent(prompt: string, systemPrompt?: string, options?: GenerationOptions): Promise<GenerationResult> {
         const messages = [
             { role: 'system', content: systemPrompt ?? this.config.systemPrompt ?? '' },
             { role: 'user', content: prompt }
         ];
-        return this.chatCompletion(messages);
+        return this.chatCompletion(messages, undefined, options);
     }
 
     startChat(tools?: ToolDefinition[]): IChatSession {
         return new OpenAIChatSession(this.config, tools, this);
     }
 
-    async chatCompletion(messages: any[], tools?: ToolDefinition[]): Promise<GenerationResult> {
-        const raw = await this.chatCompletionRaw(messages, tools);
+    async chatCompletion(messages: any[], tools?: ToolDefinition[], options?: GenerationOptions): Promise<GenerationResult> {
+        const raw = await this.chatCompletionRaw(messages, tools, options);
         return OpenAIProvider.toGenerationResult(raw);
     }
 
     /** 返回原始 assistant message（含 tool_call id），供 ChatSession 维护 history */
-    async chatCompletionRaw(messages: any[], tools?: ToolDefinition[]): Promise<any> {
+    async chatCompletionRaw(messages: any[], tools?: ToolDefinition[], options?: GenerationOptions): Promise<any> {
         const url = `${this.config.baseUrl || 'https://api.openai.com/v1'}/chat/completions`;
 
         const body: any = {
             model: this.config.modelName,
             messages: messages,
-            temperature: 0.7
+            temperature: options?.temperature ?? 0.7
         };
+
+        if (typeof options?.maxTokens === 'number') {
+            body.max_tokens = options.maxTokens;
+        }
 
         if (tools && tools.length > 0) {
             body.tools = tools.map(t => ({
@@ -134,7 +138,11 @@ export class OpenAIProvider implements IModelProvider {
             body: JSON.stringify(body)
         };
 
-        const response = await requestUrl(params);
+        const response = await withTimeout(
+            requestUrl(params),
+            options?.timeoutMs,
+            'OpenAI generation timed out',
+        );
 
         if (response.status !== 200) {
             throw new Error(`OpenAI API Error: ${response.status} - ${response.text}`);
@@ -407,5 +415,21 @@ class OpenAIChatSession implements IChatSession {
         }
 
         return toolCalls.find((tc: any) => tc.function.name === result.name && !usedCallIds.has(tc.id));
+    }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number | undefined, message: string): Promise<T> {
+    if (!timeoutMs || timeoutMs <= 0) return promise;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((_resolve, reject) => {
+                timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
     }
 }
