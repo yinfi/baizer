@@ -35,6 +35,7 @@ import { registerBaizerClipProtocolHandler } from './src/services/clip-protocol'
 import { saveClipText } from './src/services/clip-input';
 import { ObsidianContextService } from './src/services/obsidian-context-service';
 import { USER_SKILLS_DIR } from './src/skills/skill-files';
+import { logger } from './src/utils/logger';
 
 export default class BaizerPlugin extends Plugin {
     settings: PluginSettings;
@@ -382,6 +383,7 @@ export default class BaizerPlugin extends Plugin {
         if (this.guardianCheckTimer !== null) {
             window.clearTimeout(this.guardianCheckTimer);
             this.guardianCheckTimer = null;
+            this.logGuardianAuto('debounce reset');
         }
 
         const activePath = this.app.workspace.getActiveFile?.()?.path || '';
@@ -389,33 +391,93 @@ export default class BaizerPlugin extends Plugin {
             editor,
             activePath,
         });
-        if (!decision.ok) return;
+        if (!decision.ok) {
+            this.logGuardianAuto('trigger skipped', {
+                reason: decision.reason || 'unknown',
+                activePath,
+                sensitivity: this.settings.guardianSensitivity,
+                uiStyle: this.settings.guardianUIStyle,
+            });
+            return;
+        }
 
         const delay = getGuardianAutoDelayMs(this.settings.guardianSensitivity);
+        this.logGuardianAuto('trigger scheduled', {
+            delayMs: delay,
+            activePath,
+            sensitivity: this.settings.guardianSensitivity,
+            uiStyle: this.settings.guardianUIStyle,
+        });
         this.guardianCheckTimer = window.setTimeout(() => {
             this.guardianCheckTimer = null;
+            this.logGuardianAuto('debounce fired', {
+                activePath,
+                delayMs: delay,
+            });
             void this.runGuardianCheck(editor, info);
         }, delay);
     }
 
     private async runAutoGuardianCheck(editor: any) {
-        if (!this.settings.guardianAutoMode) return;
+        if (!this.settings.guardianAutoMode) {
+            this.logGuardianAuto('auto skipped', { reason: 'auto-disabled' });
+            return;
+        }
 
         const cursor = editor.getCursor();
         const lineNumber = cursor.line + 1;
         const view = (editor as any).cm as EditorView;
-        if (!view) return;
-
-        if (!view.state.field(guardianModeField)) return;
-
         const activePath = this.app.workspace.getActiveFile?.()?.path || '';
+        if (!view) {
+            this.logGuardianAuto('auto skipped', {
+                reason: 'missing-editor-view',
+                activePath,
+                line: lineNumber,
+                ch: cursor.ch,
+            });
+            return;
+        }
+
+        if (!view.state.field(guardianModeField)) {
+            this.logGuardianAuto('auto skipped', {
+                reason: 'guardian-paused',
+                activePath,
+                line: lineNumber,
+                ch: cursor.ch,
+            });
+            return;
+        }
+
         const decision = this.guardianCompletionService.shouldRunAuto({ editor, activePath });
-        if (!decision.ok) return;
+        if (!decision.ok) {
+            this.logGuardianAuto('auto skipped', {
+                reason: decision.reason || 'unknown',
+                activePath,
+                line: lineNumber,
+                ch: cursor.ch,
+            });
+            return;
+        }
 
         const requestSeq = ++this.guardianRequestSeq;
+        const startedAt = Date.now();
         const requestLine = cursor.line;
         const requestCh = cursor.ch;
         const requestLineText = editor.getLine(requestLine) || '';
+        const providerConfig = this.modelService.getActiveProviderConfig();
+
+        this.logGuardianAuto('request started', {
+            requestSeq,
+            activePath,
+            line: lineNumber,
+            ch: requestCh,
+            lineLength: requestLineText.length,
+            provider: this.settings.activeProvider,
+            providerType: providerConfig?.type,
+            model: providerConfig?.model,
+            hasApiKey: !!providerConfig?.apiKey?.trim(),
+            uiStyle: this.settings.guardianUIStyle,
+        });
 
         updateGuardianState(view, lineNumber, GuardianState.Thinking);
 
@@ -428,15 +490,34 @@ export default class BaizerPlugin extends Plugin {
         };
 
         try {
+            const contextStartedAt = Date.now();
             const obsidianContext = await this.guardianContextService.collect({
                 includeBacklinks: false,
             });
+            this.logGuardianAuto('context collected', {
+                requestSeq,
+                elapsedMs: Date.now() - contextStartedAt,
+                activeHeading: !!obsidianContext.activeHeading,
+                tagCount: obsidianContext.tags?.length || 0,
+                outgoingLinkCount: obsidianContext.outgoingLinks?.length || 0,
+            });
+
+            const generationStartedAt = Date.now();
             const result = await this.guardianCompletionService.completeAuto({
                 editor,
                 obsidianContext,
                 activePath,
                 userProfile: this.modelService.getUserProfile(),
                 isStale,
+            });
+            this.logGuardianAuto('completion returned', {
+                requestSeq,
+                resultType: result.type,
+                reason: result.type === 'none' ? result.reason : undefined,
+                suggestionLength: result.type === 'completion' ? result.suggestion.length : undefined,
+                qualityReasons: result.type === 'completion' ? result.quality.reasons : undefined,
+                elapsedMs: Date.now() - generationStartedAt,
+                totalElapsedMs: Date.now() - startedAt,
             });
 
             if (result.type !== 'completion') {
@@ -445,13 +526,23 @@ export default class BaizerPlugin extends Plugin {
             }
 
             if (isStale()) {
+                this.logGuardianAuto('completion discarded', {
+                    requestSeq,
+                    reason: 'stale-after-result',
+                    totalElapsedMs: Date.now() - startedAt,
+                });
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
 
             const currentLineCount = view.state.doc.lines;
             if (result.line > currentLineCount) {
-                console.warn("Guardian: Line number out of bounds after generation.");
+                this.logGuardianAuto('completion discarded', {
+                    requestSeq,
+                    reason: 'line-out-of-bounds',
+                    resultLine: result.line,
+                    currentLineCount,
+                }, 'warn');
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
@@ -470,9 +561,40 @@ export default class BaizerPlugin extends Plugin {
                 result.line,
                 this.shouldShowGuardianGutter() ? GuardianState.HasSuggestion : GuardianState.Idle,
             );
+            this.logGuardianAuto('completion displayed', {
+                requestSeq,
+                line: result.line,
+                ch: safeCh,
+                suggestionLength: result.suggestion.length,
+                ghostVisible: this.shouldShowGuardianGhostText(),
+                gutterVisible: this.shouldShowGuardianGutter(),
+                totalElapsedMs: Date.now() - startedAt,
+            });
         } catch (error: any) {
+            logger.error('Auto completion failed', error, 'Baizer Guardian', {
+                requestSeq,
+                activePath,
+                line: lineNumber,
+                ch: requestCh,
+                totalElapsedMs: Date.now() - startedAt,
+            });
             console.error("Guardian Error:", error);
             updateGuardianState(view, lineNumber, GuardianState.Error);
+        }
+    }
+
+    private logGuardianAuto(message: string, metadata?: Record<string, any>, level: 'info' | 'warn' | 'debug' = 'info') {
+        const safeMetadata = {
+            autoMode: this.settings.guardianAutoMode,
+            enabled: this.settings.enableGuardian,
+            ...metadata,
+        };
+        if (level === 'warn') {
+            logger.warn(message, 'Baizer Guardian', safeMetadata);
+        } else if (level === 'debug') {
+            logger.debug(message, 'Baizer Guardian', safeMetadata);
+        } else {
+            logger.info(message, 'Baizer Guardian', safeMetadata);
         }
     }
 
@@ -485,7 +607,12 @@ export default class BaizerPlugin extends Plugin {
     }
 
     async runGuardianCheck(editor: any, info: any, manualInstruction?: string) {
-        if (!this.settings.enableGuardian) return;
+        if (!this.settings.enableGuardian) {
+            this.logGuardianAuto(manualInstruction ? 'manual skipped' : 'auto skipped', {
+                reason: 'guardian-disabled',
+            });
+            return;
+        }
         if (!manualInstruction) {
             await this.runAutoGuardianCheck(editor);
             return;
