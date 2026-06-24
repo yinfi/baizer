@@ -461,6 +461,13 @@ export function getMatchingSettingsSections(query: string): SettingsSectionId[] 
         .map(section => section.id);
 }
 
+export function getRenderableSettingsSections(
+    visibleSections: SettingsSectionId[],
+    openSectionIds: ReadonlySet<SettingsSectionId>
+): SettingsSectionId[] {
+    return visibleSections.filter(sectionId => openSectionIds.has(sectionId));
+}
+
 export function getSettingsSectionStatuses(
     settings: PluginSettings
 ): Partial<Record<SettingsSectionId, SettingsSectionStatus>> {
@@ -737,6 +744,7 @@ export class SettingTab extends PluginSettingTab {
 
         const accordion = containerEl.createDiv({ cls: 'baizer-settings-accordion' });
         const statuses = getSettingsSectionStatuses(this.plugin.settings);
+        const renderableSections = new Set(getRenderableSettingsSections(visibleSections, this.openSectionIds));
 
         visibleSections.forEach(sectionId => {
             const meta = getSectionMeta(sectionId);
@@ -744,8 +752,12 @@ export class SettingTab extends PluginSettingTab {
             const card = accordion.createEl('details', { cls: 'baizer-settings-section-card' }) as HTMLDetailsElement;
             card.open = this.openSectionIds.has(sectionId);
             card.addEventListener('toggle', () => {
-                if (card.open) this.openSectionIds.add(sectionId);
-                else this.openSectionIds.delete(sectionId);
+                if (card.open) {
+                    this.openSectionIds.add(sectionId);
+                    if (!renderableSections.has(sectionId)) this.display();
+                    return;
+                }
+                this.openSectionIds.delete(sectionId);
             });
 
             const summary = card.createEl('summary', { cls: 'baizer-settings-section-summary' });
@@ -758,8 +770,10 @@ export class SettingTab extends PluginSettingTab {
             }
             summary.createSpan({ cls: 'baizer-settings-section-chevron', text: '>' });
 
-            const content = card.createDiv({ cls: 'baizer-settings-section-content' });
-            this.renderSectionContent(sectionId, content, token);
+            if (renderableSections.has(sectionId)) {
+                const content = card.createDiv({ cls: 'baizer-settings-section-content' });
+                this.renderSectionContent(sectionId, content, token);
+            }
         });
     }
 

@@ -8,6 +8,7 @@ import {
   getSettingsSectionStatuses,
   getSettingsFallbackCss,
   getSettingsOverviewActions,
+  getRenderableSettingsSections,
 } from '../src/settings';
 
 function cloneSettings(): PluginSettings {
@@ -295,6 +296,15 @@ async function runTests() {
       { label: 'OpenAI 缺少 API Key', sectionId: 'connection', tone: 'warning' },
       { label: 'Qwen 缺少 API Key', sectionId: 'connection', tone: 'warning' },
     ]);
+  });
+
+  await test('collapsed settings sections do not render heavy section content', () => {
+    expect(getRenderableSettingsSections([
+      'overview',
+      'connection',
+      'memory',
+      'knowledge',
+    ], new Set(['connection']))).toEqual(['connection']);
   });
 
   await test('settings fallback CSS covers the accordion configuration layout', () => {
