@@ -68,7 +68,7 @@ async function runTests() {
     expect(getGuardianAutoDelayMs(50)).toBe(1000);
   });
 
-  await test('skips automatic completion in ignored folders and very short text', () => {
+  await test('skips automatic completion in ignored folders and only one-character text at normal sensitivity', () => {
     const service = new GuardianCompletionService({
       settings: createSettings({ ignoredFolders: 'Private/\nTemplates/' }) as any,
       modelService: {} as any,
@@ -80,9 +80,14 @@ async function runTests() {
     })).toEqual({ ok: false, reason: 'ignored-folder' });
 
     expect(service.shouldRunAuto({
-      editor: createEditor(['hi'], { line: 0, ch: 2 }),
+      editor: createEditor(['h'], { line: 0, ch: 1 }),
       activePath: 'Notes/current.md',
     })).toEqual({ ok: false, reason: 'too-short' });
+
+    expect(service.shouldRunAuto({
+      editor: createEditor(['hi'], { line: 0, ch: 2 }),
+      activePath: 'Notes/current.md',
+    })).toEqual({ ok: true });
   });
 
   await test('builds compact markdown-aware context around the cursor', async () => {
@@ -227,6 +232,39 @@ async function runTests() {
     expect(result.type).toBe('completion');
     expect(calls[0][2]).toBe('guardian');
     expect(calls[0][5].skipGenerationPlan).toBe(true);
+  });
+
+  await test('prompt biases toward a completion instead of returning none by default', async () => {
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {} as any,
+    });
+
+    const context = await service.buildContext({
+      editor: createEditor(['收入表反映了'], { line: 0, ch: 6 }),
+      obsidianContext: {} as any,
+    });
+
+    expect(context.prompt).toContain('Default to returning a completion');
+    expect(context.prompt).toContain('Use {"type":"none"} only');
+  });
+
+  await test('accepts clean plain text when the model ignores JSON formatting', async () => {
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {
+        isGenerationConfigured: () => true,
+        generate: async () => '企业在一定期间内的收入、成本和利润变化',
+      } as any,
+    });
+
+    const result = await service.completeAuto({
+      editor: createEditor(['收入表反映了'], { line: 0, ch: 6 }),
+      obsidianContext: {} as any,
+      activePath: 'Notes/current.md',
+    });
+
+    expect(result.type).toBe('completion');
   });
 }
 

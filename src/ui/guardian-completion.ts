@@ -168,12 +168,16 @@ export class GuardianCompletionService {
     if (input.isStale?.()) return { type: 'none', reason: 'stale' };
 
     const parsed = parseGuardianJson(response);
-    if (!parsed) return { type: 'none', reason: 'invalid-json' };
-    if (parsed.type === 'none') return { type: 'none', reason: 'explicit-none' };
-    if (parsed.type !== 'completion') return { type: 'none', reason: 'unexpected-type' };
-    if (typeof parsed.suggestion !== 'string') return { type: 'none', reason: 'missing-suggestion' };
-
-    const suggestion = parsed.suggestion.trim();
+    let suggestion: string;
+    if (!parsed) {
+      suggestion = extractPlainSuggestion(response);
+      if (!suggestion) return { type: 'none', reason: 'invalid-json' };
+    } else {
+      if (parsed.type === 'none') return { type: 'none', reason: 'explicit-none' };
+      if (parsed.type !== 'completion') return { type: 'none', reason: 'unexpected-type' };
+      if (typeof parsed.suggestion !== 'string') return { type: 'none', reason: 'missing-suggestion' };
+      suggestion = parsed.suggestion.trim();
+    }
     const quality = this.evaluateSuggestion(suggestion, context);
     if (!quality.ok) return { type: 'none', reason: quality.reasons[0] || 'low-quality' };
 
@@ -216,7 +220,9 @@ export class GuardianCompletionService {
   private buildPrompt(context: GuardianCompletionContext): string {
     const lines = [
       '[Task]',
-      'Continue the note at the cursor. Return JSON: {"type":"completion","suggestion":"..."} or {"type":"none"}.',
+      'Continue the note at the cursor. Return JSON: {"type":"completion","suggestion":"..."}.',
+      'Default to returning a completion: a short phrase, clause, or next sentence fragment is useful.',
+      'Use {"type":"none"} only when the cursor is inside code, the current line is clearly finished, or any continuation would be misleading.',
       'Keep the suggestion short enough to accept inline. Do not repeat text before the cursor.',
       '',
       `[Markdown Shape] ${context.markdownShape}`,
@@ -281,7 +287,7 @@ export class GuardianCompletionService {
 
   private minTriggerChars(): number {
     const sensitivity = clamp(this.deps.settings.guardianSensitivity ?? 50, 0, 100);
-    return sensitivity >= 75 ? 2 : sensitivity >= 35 ? 3 : 5;
+    return sensitivity >= 75 ? 1 : sensitivity >= 35 ? 2 : 3;
   }
 
   private maxSuggestionChars(): number {
@@ -391,6 +397,20 @@ function parseGuardianJson(response: string): any | null {
     }
   }
   return null;
+}
+
+function extractPlainSuggestion(response: string): string {
+  const trimmed = response
+    .trim()
+    .replace(/^```(?:json|markdown|md)?\s*/i, '')
+    .replace(/```$/i, '')
+    .trim();
+  if (!trimmed) return '';
+  if (/^\s*(?:sure|当然|可以|以下是|here is|as an ai)\b/i.test(trimmed)) return '';
+  if (trimmed.includes('{') || trimmed.includes('}')) return '';
+
+  const firstLine = trimmed.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || '';
+  return firstLine.slice(0, 160).trim();
 }
 
 function trimKnowledgeContext(value: string): string {
