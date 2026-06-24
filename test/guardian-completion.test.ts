@@ -181,6 +181,29 @@ async function runTests() {
 
     expect(result).toEqual({ type: 'none', reason: 'stale' });
   });
+
+  await test('skips automatic completion when the active model is not configured', async () => {
+    let generateCalled = false;
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {
+        isGenerationConfigured: () => false,
+        generate: async () => {
+          generateCalled = true;
+          return '{"type":"completion","suggestion":"collect examples"}';
+        },
+      } as any,
+    });
+
+    const result = await service.completeAuto({
+      editor: createEditor(['- next action is to']),
+      obsidianContext: {} as any,
+      activePath: 'Notes/current.md',
+    });
+
+    expect(result).toEqual({ type: 'none', reason: 'model-not-configured' });
+    expect(generateCalled).toBe(false);
+  });
 }
 
 runTests().catch((e) => {

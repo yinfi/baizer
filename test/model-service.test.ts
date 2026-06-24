@@ -609,6 +609,38 @@ async function runTests() {
       timeoutMs: 5000,
     });
   });
+
+  await test('getAvailableModels uses fallbacks without calling provider when api key is missing', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    let listModelsCalled = false;
+
+    service.settings = {
+      activeProvider: 'openai',
+      providers: {
+        openai: {
+          type: 'openai-compatible',
+          label: 'OpenAI',
+          apiKey: '',
+          baseUrl: 'https://api.openai.com/v1',
+          model: 'gpt-4o',
+        },
+      },
+    };
+    service.modelListCache = new Map();
+    service.modelListCacheTtlMs = 10 * 60 * 1000;
+    service.getActiveProviderConfig = () => service.settings.providers.openai;
+    service.provider = {
+      listModels: async () => {
+        listModelsCalled = true;
+        return [];
+      },
+    };
+
+    const models = await service.getAvailableModels(true);
+
+    expect(listModelsCalled).toEqual(false);
+    expect(models.some((model: any) => model.value === 'gpt-4o')).toEqual(true);
+  });
 }
 
 runTests().catch((e) => {

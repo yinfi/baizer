@@ -100,7 +100,11 @@ export class ModelService {
 
     private hasValidConfig(): boolean {
         const config = this.getActiveProviderConfig();
-        return !!config?.apiKey;
+        return !!config?.apiKey?.trim();
+    }
+
+    isGenerationConfigured(): boolean {
+        return this.hasValidConfig();
     }
 
     getActiveProviderConfig(): ProviderConfig | undefined {
@@ -203,7 +207,7 @@ export class ModelService {
         }
 
         let models: ModelOption[] = [];
-        if (typeof this.provider.listModels === 'function') {
+        if (config.apiKey?.trim() && typeof this.provider.listModels === 'function') {
             try {
                 models = await this.provider.listModels();
             } catch (error: any) {

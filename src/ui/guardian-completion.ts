@@ -49,7 +49,7 @@ interface GuardianKnowledgeRuntimeLike {
 
 interface GuardianCompletionServiceDeps {
   settings: PluginSettings;
-  modelService: ModelService;
+  modelService: ModelService & { isGenerationConfigured?: () => boolean };
   knowledgeRuntime?: GuardianKnowledgeRuntimeLike | null;
 }
 
@@ -148,6 +148,9 @@ export class GuardianCompletionService {
       activePath: input.activePath,
     });
     if (!trigger.ok) return { type: 'none', reason: trigger.reason || 'skipped' };
+    if (this.deps.modelService.isGenerationConfigured?.() === false) {
+      return { type: 'none', reason: 'model-not-configured' };
+    }
 
     const context = await this.buildContext(input);
     if (input.isStale?.()) return { type: 'none', reason: 'stale' };
