@@ -76,13 +76,14 @@ interface TriggerDecision {
 const GUARDIAN_SYSTEM_PROMPT = [
   'You are Baizer Guardian, a low-latency inline writing completer for Obsidian notes.',
   'Return ONLY one compact JSON object.',
+  'Do not output reasoning, explanations, markdown fences, or commentary.',
   'Prefer short, natural continuations that preserve the user voice.',
   'Never explain yourself and never mention the knowledge context.',
 ].join(' ');
 
 const GUARDIAN_GENERATION_OPTIONS: GenerationOptions = {
   temperature: 0.25,
-  maxTokens: 90,
+  maxTokens: 256,
   timeoutMs: 8000,
   skipGenerationPlan: true,
 };
@@ -312,6 +313,7 @@ export class GuardianCompletionService {
       'Continue the note at the cursor. Return JSON: {"type":"completion","suggestion":"..."}.',
       'Default to returning a completion: a short phrase, clause, or next sentence fragment is useful.',
       'Use {"type":"none"} only when the cursor is inside code, the current line is clearly finished, or any continuation would be misleading.',
+      'Do not output reasoning, explanations, markdown fences, or commentary.',
       'Keep the suggestion short enough to accept inline. Do not repeat text before the cursor.',
       '',
       `[Markdown Shape] ${context.markdownShape}`,
