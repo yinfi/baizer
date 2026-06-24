@@ -204,6 +204,30 @@ async function runTests() {
     expect(result).toEqual({ type: 'none', reason: 'model-not-configured' });
     expect(generateCalled).toBe(false);
   });
+
+  await test('requests raw model prompt for automatic completion', async () => {
+    const calls: any[] = [];
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {
+        isGenerationConfigured: () => true,
+        generate: async (...args: any[]) => {
+          calls.push(args);
+          return '{"type":"completion","suggestion":"collect examples"}';
+        },
+      } as any,
+    });
+
+    const result = await service.completeAuto({
+      editor: createEditor(['- next action is to']),
+      obsidianContext: {} as any,
+      activePath: 'Notes/current.md',
+    });
+
+    expect(result.type).toBe('completion');
+    expect(calls[0][2]).toBe('guardian');
+    expect(calls[0][5].skipGenerationPlan).toBe(true);
+  });
 }
 
 runTests().catch((e) => {

@@ -563,6 +563,50 @@ async function runTests() {
     expect(calls[0].prompt.includes('Mode: co-write')).toEqual(true);
   });
 
+  await test('generate can bypass generation-plan metadata for raw guardian prompts', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const calls: any[] = [];
+
+    service.hasValidConfig = () => true;
+    service.getActiveProviderConfig = () => ({ label: 'Test Provider' });
+    service.provider = {
+      generateContent: async (prompt: string, systemPrompt?: string, options?: any) => {
+        calls.push({ prompt, systemPrompt, options });
+        return { text: '{"type":"completion","suggestion":"raw continuation"}' };
+      },
+    };
+    service.memoryManager = {
+      getProfile: () => null,
+    };
+
+    const result = await service.generate(
+      'guardian prompt',
+      'Return ONLY JSON.',
+      'guardian',
+      {
+        activeNote: { path: 'Daily/2026-05-13.md', title: '2026-05-13' },
+        selection: null,
+        activeHeading: '## Draft',
+        frontmatter: {},
+        tags: [],
+        outgoingLinks: [],
+        backlinks: [],
+        recentNotes: [],
+        explicitScopes: [],
+        contextItems: [],
+      },
+      null,
+      {
+        temperature: 0.2,
+        skipGenerationPlan: true,
+      } as any,
+    );
+
+    expect(result).toEqual('{"type":"completion","suggestion":"raw continuation"}');
+    expect(calls[0].prompt).toEqual('guardian prompt');
+    expect(calls[0].options).toEqual({ temperature: 0.2 });
+  });
+
   await test('generate forwards guardian generation options to the provider', async () => {
     const service: any = Object.create(ModelService.prototype);
     const calls: any[] = [];

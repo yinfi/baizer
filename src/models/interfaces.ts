@@ -54,6 +54,7 @@ export interface GenerationOptions {
     temperature?: number;
     maxTokens?: number;
     timeoutMs?: number;
+    skipGenerationPlan?: boolean;
 }
 
 export type StreamEvent =

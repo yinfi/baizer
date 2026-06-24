@@ -375,7 +375,8 @@ export class ModelService {
         }
 
         try {
-            const shouldApplyGenerationPlan = source !== 'shell' || !!obsidianContext || !!userProfile;
+            const { skipGenerationPlan, ...providerOptions } = options ?? {};
+            const shouldApplyGenerationPlan = !skipGenerationPlan && (source !== 'shell' || !!obsidianContext || !!userProfile);
             const finalPrompt = shouldApplyGenerationPlan
                 ? this.buildPlannedGenerationPrompt(
                     prompt,
@@ -384,7 +385,11 @@ export class ModelService {
                     userProfile ?? this.getUserProfile(),
                 )
                 : prompt;
-            const result = await this.provider.generateContent(finalPrompt, systemPrompt, options);
+            const result = await this.provider.generateContent(
+                finalPrompt,
+                systemPrompt,
+                Object.keys(providerOptions).length > 0 ? providerOptions : undefined,
+            );
             return result.text;
         } catch (e: any) {
             logger.error('Stateless generation failed', e, 'ModelService.generate');

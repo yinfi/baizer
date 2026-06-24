@@ -69,6 +69,7 @@ const GUARDIAN_GENERATION_OPTIONS: GenerationOptions = {
   temperature: 0.25,
   maxTokens: 90,
   timeoutMs: 8000,
+  skipGenerationPlan: true,
 };
 
 export function getGuardianAutoDelayMs(sensitivity: number): number {
@@ -167,7 +168,9 @@ export class GuardianCompletionService {
     if (input.isStale?.()) return { type: 'none', reason: 'stale' };
 
     const parsed = parseGuardianJson(response);
-    if (!parsed || parsed.type === 'none') return { type: 'none', reason: 'model-none' };
+    if (!parsed) return { type: 'none', reason: 'invalid-json' };
+    if (parsed.type === 'none') return { type: 'none', reason: 'explicit-none' };
+    if (parsed.type !== 'completion') return { type: 'none', reason: 'unexpected-type' };
     if (typeof parsed.suggestion !== 'string') return { type: 'none', reason: 'missing-suggestion' };
 
     const suggestion = parsed.suggestion.trim();
