@@ -589,13 +589,54 @@ export default class BaizerPlugin extends Plugin {
             enabled: this.settings.enableGuardian,
             ...metadata,
         };
+        const formattedMessage = `${message}${this.formatGuardianLogMetadata(safeMetadata)}`;
         if (level === 'warn') {
-            logger.warn(message, 'Baizer Guardian', safeMetadata);
+            logger.warn(formattedMessage, 'Baizer Guardian', safeMetadata);
         } else if (level === 'debug') {
-            logger.debug(message, 'Baizer Guardian', safeMetadata);
+            logger.debug(formattedMessage, 'Baizer Guardian', safeMetadata);
         } else {
-            logger.info(message, 'Baizer Guardian', safeMetadata);
+            logger.info(formattedMessage, 'Baizer Guardian', safeMetadata);
         }
+    }
+
+    private formatGuardianLogMetadata(metadata: Record<string, any>): string {
+        const keys = [
+            'requestSeq',
+            'reason',
+            'resultType',
+            'delayMs',
+            'elapsedMs',
+            'totalElapsedMs',
+            'activePath',
+            'line',
+            'ch',
+            'lineLength',
+            'provider',
+            'providerType',
+            'model',
+            'hasApiKey',
+            'uiStyle',
+            'ghostVisible',
+            'gutterVisible',
+            'suggestionLength',
+            'qualityReasons',
+            'activeHeading',
+            'tagCount',
+            'outgoingLinkCount',
+            'sensitivity',
+            'autoMode',
+            'enabled',
+        ];
+        const parts = keys
+            .filter((key) => metadata[key] !== undefined)
+            .map((key) => `${key}=${this.formatGuardianLogValue(metadata[key])}`);
+        return parts.length ? ` ${parts.join(' ')}` : '';
+    }
+
+    private formatGuardianLogValue(value: any): string {
+        if (Array.isArray(value)) return `[${value.join(',')}]`;
+        if (typeof value === 'string') return JSON.stringify(value);
+        return String(value);
     }
 
     private shouldShowGuardianGhostText(): boolean {
