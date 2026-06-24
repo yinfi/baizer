@@ -302,7 +302,8 @@ async function runTests() {
     });
 
     expect(context.prompt).toContain('Default to returning a completion');
-    expect(context.prompt).toContain('half to one sentence');
+    expect(context.prompt).toContain('one complete sentence');
+    expect(context.prompt).toContain('not just a keyword or tiny phrase');
     expect(context.prompt).toContain('Use {"type":"none"} only');
     expect(context.prompt).toContain('Do not output reasoning');
   });
