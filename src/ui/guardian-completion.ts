@@ -58,7 +58,7 @@ interface GuardianCompletionServiceDeps {
 }
 
 export interface GuardianCompletionDiagnosticEvent {
-  stage: 'build-context-start' | 'build-context-finished' | 'knowledge-start' | 'knowledge-finished' | 'knowledge-timeout' | 'model-start' | 'model-finished' | 'completion-timeout' | 'response-parse-failed';
+  stage: 'build-context-start' | 'build-context-finished' | 'knowledge-start' | 'knowledge-finished' | 'knowledge-timeout' | 'model-start' | 'model-finished' | 'completion-timeout' | 'response-parse-failed' | 'empty-response';
   requestId?: number;
   activePath?: string;
   elapsedMs?: number;
@@ -236,6 +236,16 @@ export class GuardianCompletionService {
     });
 
     if (input.isStale?.()) return { type: 'none', reason: 'stale' };
+
+    if (!response.trim()) {
+      this.emitDiagnostic({
+        stage: 'empty-response',
+        requestId: input.requestId,
+        activePath: input.activePath,
+        responseLength: response.length,
+      });
+      return { type: 'none', reason: 'empty-response' };
+    }
 
     const parsed = parseGuardianJson(response);
     let suggestion: string;

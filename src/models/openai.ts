@@ -149,7 +149,18 @@ export class OpenAIProvider implements IModelProvider {
         }
 
         const data = JSON.parse(response.text);
-        return data.choices[0].message;
+        const choice = Array.isArray(data?.choices) ? data.choices[0] : null;
+        const message = choice?.message || {};
+        if (!message.content && !message.tool_calls?.length) {
+            logger.warn('OpenAI response returned empty assistant content', 'OpenAIProvider.chatCompletionRaw', {
+                model: this.config.modelName,
+                finishReason: choice?.finish_reason,
+                messageKeys: Object.keys(message),
+                hasReasoningContent: !!message.reasoning_content,
+                responseId: data?.id,
+            });
+        }
+        return message;
     }
 
     static toGenerationResult(message: any): GenerationResult {

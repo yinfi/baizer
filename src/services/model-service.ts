@@ -390,6 +390,19 @@ export class ModelService {
                 systemPrompt,
                 Object.keys(providerOptions).length > 0 ? providerOptions : undefined,
             );
+            if (!result.text?.trim()) {
+                const config = this.getActiveProviderConfig();
+                logger.warn('Stateless generation returned empty text', 'ModelService.generate', {
+                    source,
+                    provider: this.settings.activeProvider,
+                    providerType: config?.type,
+                    model: config?.model,
+                    promptLength: finalPrompt.length,
+                    hasSystemPrompt: !!systemPrompt,
+                    maxTokens: providerOptions.maxTokens,
+                    timeoutMs: providerOptions.timeoutMs,
+                });
+            }
             return result.text;
         } catch (e: any) {
             logger.error('Stateless generation failed', e, 'ModelService.generate');

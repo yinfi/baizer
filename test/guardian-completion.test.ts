@@ -320,6 +320,30 @@ async function runTests() {
     expect(parseEvent.responsePreview).toContain('{type:completion');
   });
 
+  await test('reports empty response separately from invalid json', async () => {
+    const events: any[] = [];
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {
+        isGenerationConfigured: () => true,
+        generate: async () => '',
+      } as any,
+      diagnostics: (event: any) => events.push(event),
+    });
+
+    const result = await service.completeAuto({
+      editor: createEditor(['profit and'], { line: 0, ch: 10 }),
+      obsidianContext: {} as any,
+      activePath: 'Notes/current.md',
+      requestId: 10,
+    });
+
+    expect(result).toEqual({ type: 'none', reason: 'empty-response' });
+    const emptyEvent = events.find((event) => event.stage === 'empty-response');
+    expect(emptyEvent.requestId).toBe(10);
+    expect(emptyEvent.responseLength).toBe(0);
+  });
+
   await test('does not wait forever for guardian knowledge context', async () => {
     const events: string[] = [];
     const service = new GuardianCompletionService({
