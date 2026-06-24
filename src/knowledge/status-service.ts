@@ -196,13 +196,6 @@ export class KnowledgeStatusService {
     const summaryFrontmatter = await readSummaryFrontmatter(this.app, summaryPath);
     if (!summaryFrontmatter) return false;
 
-    if (
-      currentSchemaHash &&
-      (!summaryFrontmatter.schema_hash || summaryFrontmatter.schema_hash !== currentSchemaHash)
-    ) {
-      return true;
-    }
-
     if (!summaryFrontmatter.content_hash) {
       return false;
     }

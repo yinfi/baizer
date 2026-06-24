@@ -24,9 +24,13 @@ import {
   ensureSourceId,
   getFilesByKnowledgeStatus,
   getUnregisteredFiles,
+  getPendingReason,
+  KnowledgePendingReason,
 } from './frontmatter';
 import { OntologyService } from './ontology-service';
 import { parseOntologySchema, extractFrontmatter, computeSchemaHash, buildDiscoveryPrompt, parseDiscoveryResponse, buildOntologyFile } from './ontology';
+
+const AUTO_COMPILE_PENDING_REASONS: KnowledgePendingReason[] = ['new', 'content_changed'];
 
 /**
  * Knowledge Wiki 生命周期管理器
@@ -89,7 +93,14 @@ export class KnowledgeRuntime {
         const maxBatch = this.settings.knowledgeMaxCompileBatch || 50;
         const ontology = await this.loadOntologySchema();
         console.log(`[KnowledgeRuntime] Auto-compiling pending notes...${ontology ? ' (with ontology schema)' : ''}`);
-        const result = await this.compiler.compileAllPending(maxBatch, undefined, ontology?.schema, ontology?.hash);
+        const result = await this.compiler.compileAllPending(
+          maxBatch,
+          undefined,
+          ontology?.schema,
+          ontology?.hash,
+          undefined,
+          { pendingReasons: AUTO_COMPILE_PENDING_REASONS }
+        );
         if (result.success > 0) {
           await this.indexer.rebuildIndex();
           new Notice(`Auto-compiled: ${result.success} notes`);
@@ -164,7 +175,7 @@ export class KnowledgeRuntime {
     const unregistered = getUnregisteredFiles(this.app, sourceFolders, wikiFolder);
     for (const file of unregistered) {
       await ensureSourceId(this.app, file);
-      await setKnowledgeStatus(this.app, file, 'pending');
+      await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'new' });
     }
     if (unregistered.length > 0) {
       console.log(`[KnowledgeRuntime] Startup scan: registered ${unregistered.length} new files`);
@@ -173,13 +184,27 @@ export class KnowledgeRuntime {
     // 计算总 pending 数：刚注册的 + 之前 stuck 的 + 已有的 pending
     // 注意：刚写入 frontmatter 的文件 metadataCache 可能还没更新，
     // 所以用已知数量而非再次查询 metadataCache
-    const existingPending = getFilesByKnowledgeStatus(this.app, 'pending').length;
-    const totalPending = Math.max(existingPending, unregistered.length + stuckFiles.length);
+    const autoCompilePending = await this.countAutoCompileCandidates(sourceFolders);
+    const totalPending = Math.max(autoCompilePending, unregistered.length + staleCount);
 
     if (this.settings.knowledgeAutoCompile && totalPending > 0) {
       console.log(`[KnowledgeRuntime] ${totalPending} pending notes, scheduling auto-compile...`);
       setTimeout(() => this.watcher.triggerCompile(), 10000);
     }
+  }
+
+  private async countAutoCompileCandidates(sourceFolders: string[]): Promise<number> {
+    if (sourceFolders.length === 0) return 0;
+
+    const candidates = getFilesByKnowledgeStatus(this.app, 'pending', sourceFolders);
+    let count = 0;
+    for (const file of candidates) {
+      const reason = getPendingReason(this.app, file);
+      if (reason === 'new' || reason === 'content_changed') {
+        count++;
+      }
+    }
+    return count;
   }
 
   /**
@@ -215,7 +240,7 @@ export class KnowledgeRuntime {
   private async detectStaleFiles(wikiFolder: string): Promise<number> {
     const staleFiles = await this.statusService.getStaleFiles();
     for (const file of staleFiles) {
-      await setKnowledgeStatus(this.app, file, 'pending');
+      await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'content_changed' });
     }
     return staleFiles.length;
 
@@ -524,7 +549,7 @@ export class KnowledgeRuntime {
   async markOntologyStaleFilesPending(): Promise<number> {
     const staleFiles = await this.statusService.getStaleFiles();
     for (const file of staleFiles) {
-      await setKnowledgeStatus(this.app, file, 'pending');
+      await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'content_changed' });
     }
     return staleFiles.length;
   }

@@ -297,6 +297,82 @@ content_hash: "${computeContentHash(sourceContent)}"
     expect(files.get(sourcePath)!.frontmatter.knowledge_summary).toBe(summaryPath);
   });
 
+  await test('compileAllPending can filter auto-compile candidates by pending reason', async () => {
+    const legacyPath = 'Projects/Legacy Pending.md';
+    const newPath = 'Projects/New Pending.md';
+    const folders = new Set(['Knowledge Wiki', 'Knowledge Wiki/Articles']);
+    const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>([
+      [legacyPath, {
+        file: createFile(legacyPath),
+        content: '---\nknowledge_status: pending\n---\n# Legacy Pending\nold backlog',
+        frontmatter: {
+          knowledge_status: 'pending',
+        },
+      }],
+      [newPath, {
+        file: createFile(newPath),
+        content: '---\nknowledge_status: pending\nknowledge_pending_reason: new\nknowledge_source_id: ksrc_new\n---\n# New Pending\nfresh note',
+        frontmatter: {
+          knowledge_status: 'pending',
+          knowledge_pending_reason: 'new',
+          knowledge_source_id: 'ksrc_new',
+        },
+      }],
+    ]);
+    const generatedPrompts: string[] = [];
+    const app = {
+      vault: {
+        getMarkdownFiles: () => Array.from(files.values()).map((entry) => entry.file),
+        getAbstractFileByPath: (path: string) => files.get(path)?.file || (folders.has(path) ? { path } : null),
+        read: async (file: TFile) => files.get(file.path)?.content || '',
+        getFiles: () => Array.from(files.values()).map((entry) => entry.file),
+        createFolder: async (path: string) => { folders.add(path); },
+        create: async (path: string, content: string) => {
+          files.set(path, { file: createFile(path), content, frontmatter: {} });
+        },
+        modify: async (file: TFile, content: string) => {
+          const entry = files.get(file.path);
+          if (entry) entry.content = content;
+        },
+      },
+      metadataCache: {
+        getFileCache: (file: TFile) => {
+          const entry = files.get(file.path);
+          return entry ? { frontmatter: entry.frontmatter } : null;
+        },
+      },
+      fileManager: {
+        processFrontMatter: async (file: TFile, cb: (fm: Record<string, any>) => void) => {
+          const entry = files.get(file.path)!;
+          cb(entry.frontmatter);
+        },
+      },
+    } as any;
+
+    const runtime = new KnowledgeRuntime(app, {
+      knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'],
+      knowledgeAutoCompile: false,
+      knowledgeMaxCompileBatch: 50,
+    } as any, {
+      generate: async (prompt: string) => {
+        generatedPrompts.push(prompt);
+        return '{"title":"Compiled","author":"","source_url":"","created_at":"","topics":[],"concepts":[],"key_claims":[],"review_flags":[]}';
+      },
+    } as any);
+
+    const result = await runtime.compiler.compileAllPending(50, undefined, undefined, undefined, undefined, {
+      pendingReasons: ['new', 'content_changed'],
+    });
+
+    expect(result.success).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(generatedPrompts.length).toBe(1);
+    expect(generatedPrompts[0].includes(newPath)).toBeTruthy();
+    expect(files.get(legacyPath)!.frontmatter.knowledge_status).toBe('pending');
+    expect(files.get(newPath)!.frontmatter.knowledge_status).toBe('done');
+  });
+
   await test('KnowledgeRuntime loads valid ontology schema and ignores empty schema files', async () => {
     const schemaPath = 'Knowledge Wiki/_ontology.md';
     const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>([
@@ -588,7 +664,7 @@ categories:
     expect(writes.includes('Knowledge Wiki/_ontology.md')).toBeTruthy();
   });
 
-  await test('KnowledgeRuntime updateSettings marks ontology stale files pending when enabled', async () => {
+  await test('KnowledgeRuntime updateSettings does not auto-recompile schema-only stale files', async () => {
     const summaryPath = 'Knowledge Wiki/Articles/ksrc_old.md';
     const schemaPath = 'Knowledge Wiki/_ontology.md';
     const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>([
@@ -668,8 +744,8 @@ categories:
       knowledgeOntologyAutoRecompileStale: true,
     } as any);
 
-    expect(files.get('Projects/Old.md')!.frontmatter.knowledge_status).toBe('pending');
-    expect(compileTriggered).toBeTruthy();
+    expect(files.get('Projects/Old.md')!.frontmatter.knowledge_status).toBe('done');
+    expect(compileTriggered).toBeFalsy();
   });
 
   await test('KnowledgeRuntime startup reconciles pending notes with current summaries', async () => {
@@ -763,6 +839,84 @@ categories:
     expect(files.get(sourcePath)!.frontmatter.knowledge_source_id).toBe('ksrc_old');
     expect(files.get(sourcePath)!.frontmatter.knowledge_summary).toBe(summaryPath);
     expect(generated).toBeFalsy();
+  });
+
+  await test('KnowledgeRuntime startup does not auto-compile legacy pending notes with missing summaries', async () => {
+    const sourcePath = 'Projects/Legacy Pending.md';
+    const files = new Map<string, { file: TFile; content: string; frontmatter: Record<string, any> }>([
+      [sourcePath, {
+        file: createFile(sourcePath),
+        content: '---\nknowledge_status: pending\nknowledge_source_id: ksrc_legacy\nknowledge_summary: Knowledge Wiki/Articles/missing.md\n---\n# Legacy Pending\nsame body',
+        frontmatter: {
+          knowledge_status: 'pending',
+          knowledge_source_id: 'ksrc_legacy',
+          knowledge_summary: 'Knowledge Wiki/Articles/missing.md',
+        },
+      }],
+    ]);
+    const folders = new Set(['Knowledge Wiki', 'Knowledge Wiki/Articles']);
+    const scheduledDelays: number[] = [];
+    const originalSetTimeout = global.setTimeout;
+    (global as any).setTimeout = ((cb: (...args: any[]) => void, delay?: number) => {
+      scheduledDelays.push(delay || 0);
+      return 0 as any;
+    }) as any;
+
+    try {
+      const app = {
+        vault: {
+          adapter: {
+            exists: async (path: string) => files.has(path) || folders.has(path),
+            write: async (path: string, content: string) => {
+              files.set(path, { file: createFile(path), content, frontmatter: {} });
+            },
+          },
+          getMarkdownFiles: () => Array.from(files.values()).map((entry) => entry.file),
+          getFiles: () => Array.from(files.values()).map((entry) => entry.file),
+          getAbstractFileByPath: (path: string) => files.get(path)?.file || (folders.has(path) ? { path } : null),
+          read: async (file: TFile) => files.get(file.path)?.content || '',
+          trash: async () => {},
+          createFolder: async (path: string) => { folders.add(path); },
+          create: async (path: string, content: string) => {
+            files.set(path, { file: createFile(path), content, frontmatter: {} });
+          },
+        },
+        metadataCache: {
+          initialized: true,
+          getFileCache: (file: TFile) => {
+            const entry = files.get(file.path);
+            return entry ? { frontmatter: entry.frontmatter } : null;
+          },
+        },
+        fileManager: {
+          processFrontMatter: async (file: TFile, cb: (fm: Record<string, any>) => void) => {
+            const entry = files.get(file.path)!;
+            cb(entry.frontmatter);
+          },
+        },
+        internalPlugins: {
+          plugins: {
+            bases: { enabled: true },
+          },
+        },
+      } as any;
+
+      const runtime = new KnowledgeRuntime(app, {
+        knowledgeWikiFolder: 'Knowledge Wiki',
+        knowledgeSourceFolders: ['Projects'],
+        knowledgeAutoCompile: true,
+        knowledgeMaxCompileBatch: 50,
+      } as any, {
+        generate: async () => '',
+      } as any);
+
+      await runtime.initialize();
+
+      expect(files.get(sourcePath)!.frontmatter.knowledge_status).toBe('pending');
+      expect(scheduledDelays.length).toBe(0);
+    } finally {
+      global.setTimeout = originalSetTimeout;
+    }
   });
 
   await test('KnowledgeRuntime does not read the previous plugin registry during startup', async () => {
