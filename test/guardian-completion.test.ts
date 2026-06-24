@@ -305,6 +305,35 @@ async function runTests() {
     expect(events.join('|')).toContain('model-start:7');
     expect(events.join('|')).toContain('model-finished:7');
   });
+
+  await test('returns timeout instead of waiting forever for the model', async () => {
+    const events: string[] = [];
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {
+        isGenerationConfigured: () => true,
+        generate: async () => new Promise<string>((resolve) => {
+          setTimeout(() => resolve('late model response'), 30);
+        }),
+      } as any,
+      completionTimeoutMs: 1,
+      diagnostics: (event: any) => {
+        events.push(`${event.stage}:${event.requestId ?? 'na'}`);
+      },
+    });
+
+    const startedAt = Date.now();
+    const result = await service.completeAuto({
+      editor: createEditor(['收入表反映了'], { line: 0, ch: 6 }),
+      obsidianContext: {} as any,
+      activePath: 'Notes/current.md',
+      requestId: 8,
+    });
+
+    expect(result).toEqual({ type: 'none', reason: 'completion-timeout' });
+    expect(Date.now() - startedAt).toBeLessThan(20);
+    expect(events.join('|')).toContain('completion-timeout:8');
+  });
 }
 
 runTests().catch((e) => {

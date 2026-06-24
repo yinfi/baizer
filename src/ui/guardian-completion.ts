@@ -53,11 +53,12 @@ interface GuardianCompletionServiceDeps {
   modelService: ModelService & { isGenerationConfigured?: () => boolean };
   knowledgeRuntime?: GuardianKnowledgeRuntimeLike | null;
   knowledgeTimeoutMs?: number;
+  completionTimeoutMs?: number;
   diagnostics?: (event: GuardianCompletionDiagnosticEvent) => void;
 }
 
 export interface GuardianCompletionDiagnosticEvent {
-  stage: 'build-context-start' | 'build-context-finished' | 'knowledge-start' | 'knowledge-finished' | 'knowledge-timeout' | 'model-start' | 'model-finished';
+  stage: 'build-context-start' | 'build-context-finished' | 'knowledge-start' | 'knowledge-finished' | 'knowledge-timeout' | 'model-start' | 'model-finished' | 'completion-timeout';
   requestId?: number;
   activePath?: string;
   elapsedMs?: number;
@@ -159,6 +160,31 @@ export class GuardianCompletionService {
   }
 
   async completeAuto(input: GuardianCompletionRequest): Promise<GuardianCompletionResult> {
+    const timeoutMs = this.deps.completionTimeoutMs ?? 9000;
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        this.completeAutoInner(input),
+        new Promise<GuardianCompletionResult>((resolve) => {
+          timeoutHandle = setTimeout(() => {
+            this.emitDiagnostic({
+              stage: 'completion-timeout',
+              requestId: input.requestId,
+              activePath: input.activePath,
+              elapsedMs: timeoutMs,
+            });
+            resolve({ type: 'none', reason: 'completion-timeout' });
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
+  private async completeAutoInner(input: GuardianCompletionRequest): Promise<GuardianCompletionResult> {
     const trigger = this.shouldRunAuto({
       editor: input.editor,
       activePath: input.activePath,
