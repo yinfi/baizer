@@ -22,6 +22,11 @@ function expect(actual: any) {
         throw new Error(`Expected ${actual} to be greater than ${expected}`);
       }
     },
+    toBeLessThan: (expected: number) => {
+      if (!(actual < expected)) {
+        throw new Error(`Expected ${actual} to be less than ${expected}`);
+      }
+    },
   };
 }
 
@@ -265,6 +270,40 @@ async function runTests() {
     });
 
     expect(result.type).toBe('completion');
+  });
+
+  await test('does not wait forever for guardian knowledge context', async () => {
+    const events: string[] = [];
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {
+        isGenerationConfigured: () => true,
+        generate: async () => '{"type":"completion","suggestion":"collect examples"}',
+      } as any,
+      knowledgeRuntime: {
+        getGuardianKnowledgeContext: async () => new Promise<string>((resolve) => {
+          setTimeout(() => resolve('late knowledge'), 30);
+        }),
+      } as any,
+      knowledgeTimeoutMs: 1,
+      diagnostics: (event: any) => {
+        events.push(`${event.stage}:${event.requestId ?? 'na'}`);
+      },
+    });
+
+    const startedAt = Date.now();
+    const result = await service.completeAuto({
+      editor: createEditor(['收入表反映了'], { line: 0, ch: 6 }),
+      obsidianContext: {} as any,
+      activePath: 'Notes/current.md',
+      requestId: 7,
+    });
+
+    expect(result.type).toBe('completion');
+    expect(Date.now() - startedAt).toBeLessThan(20);
+    expect(events.join('|')).toContain('knowledge-timeout:7');
+    expect(events.join('|')).toContain('model-start:7');
+    expect(events.join('|')).toContain('model-finished:7');
   });
 }
 

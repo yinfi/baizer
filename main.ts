@@ -98,11 +98,7 @@ export default class BaizerPlugin extends Plugin {
             this.modelService,
         );
         await this.knowledgeRuntime.initialize();
-        this.guardianCompletionService = new GuardianCompletionService({
-            settings: this.settings,
-            modelService: this.modelService,
-            knowledgeRuntime: this.knowledgeRuntime,
-        });
+        this.guardianCompletionService = this.createGuardianCompletionService();
         this.knowledgeRuntime.registerCommands(this);
         this.knowledgeRuntime.registerEvents(this);
 
@@ -321,10 +317,21 @@ export default class BaizerPlugin extends Plugin {
         if (this.knowledgeRuntime) {
             await this.knowledgeRuntime.updateSettings(this.settings);
         }
-        this.guardianCompletionService = new GuardianCompletionService({
+        this.guardianCompletionService = this.createGuardianCompletionService();
+    }
+
+    private createGuardianCompletionService(): GuardianCompletionService {
+        return new GuardianCompletionService({
             settings: this.settings,
             modelService: this.modelService,
             knowledgeRuntime: this.knowledgeRuntime,
+            diagnostics: (event) => {
+                const { stage, requestId, ...metadata } = event;
+                this.logGuardianAuto(stage, {
+                    requestSeq: requestId,
+                    ...metadata,
+                }, stage === 'knowledge-timeout' ? 'warn' : 'info');
+            },
         });
     }
 
@@ -509,6 +516,7 @@ export default class BaizerPlugin extends Plugin {
                 activePath,
                 userProfile: this.modelService.getUserProfile(),
                 isStale,
+                requestId: requestSeq,
             });
             this.logGuardianAuto('completion returned', {
                 requestSeq,

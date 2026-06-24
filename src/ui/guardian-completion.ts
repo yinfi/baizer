@@ -26,6 +26,7 @@ export interface GuardianCompletionRequest {
   activePath?: string;
   userProfile?: UserProfile | null;
   isStale?: () => boolean;
+  requestId?: number;
 }
 
 export type GuardianCompletionResult =
@@ -51,6 +52,18 @@ interface GuardianCompletionServiceDeps {
   settings: PluginSettings;
   modelService: ModelService & { isGenerationConfigured?: () => boolean };
   knowledgeRuntime?: GuardianKnowledgeRuntimeLike | null;
+  knowledgeTimeoutMs?: number;
+  diagnostics?: (event: GuardianCompletionDiagnosticEvent) => void;
+}
+
+export interface GuardianCompletionDiagnosticEvent {
+  stage: 'build-context-start' | 'build-context-finished' | 'knowledge-start' | 'knowledge-finished' | 'knowledge-timeout' | 'model-start' | 'model-finished';
+  requestId?: number;
+  activePath?: string;
+  elapsedMs?: number;
+  contextLength?: number;
+  knowledgeLength?: number;
+  responseLength?: number;
 }
 
 interface TriggerDecision {
@@ -113,6 +126,8 @@ export class GuardianCompletionService {
       localBlock,
       currentHeading,
       obsidianContext: input.obsidianContext,
+      requestId: input.requestId,
+      activePath: input.activePath,
     });
     const prompt = this.buildPrompt({
       currentLine: line,
@@ -153,9 +168,30 @@ export class GuardianCompletionService {
       return { type: 'none', reason: 'model-not-configured' };
     }
 
+    this.emitDiagnostic({
+      stage: 'build-context-start',
+      requestId: input.requestId,
+      activePath: input.activePath,
+    });
+    const contextStartedAt = Date.now();
     const context = await this.buildContext(input);
+    this.emitDiagnostic({
+      stage: 'build-context-finished',
+      requestId: input.requestId,
+      activePath: input.activePath,
+      elapsedMs: Date.now() - contextStartedAt,
+      contextLength: context.prompt.length,
+      knowledgeLength: context.knowledgeContext.length,
+    });
     if (input.isStale?.()) return { type: 'none', reason: 'stale' };
 
+    this.emitDiagnostic({
+      stage: 'model-start',
+      requestId: input.requestId,
+      activePath: input.activePath,
+      contextLength: context.prompt.length,
+    });
+    const modelStartedAt = Date.now();
     const response = await this.deps.modelService.generate(
       context.prompt,
       GUARDIAN_SYSTEM_PROMPT,
@@ -164,6 +200,13 @@ export class GuardianCompletionService {
       input.userProfile,
       GUARDIAN_GENERATION_OPTIONS,
     );
+    this.emitDiagnostic({
+      stage: 'model-finished',
+      requestId: input.requestId,
+      activePath: input.activePath,
+      elapsedMs: Date.now() - modelStartedAt,
+      responseLength: response.length,
+    });
 
     if (input.isStale?.()) return { type: 'none', reason: 'stale' };
 
@@ -254,6 +297,8 @@ export class GuardianCompletionService {
     localBlock: string;
     currentHeading: string | null;
     obsidianContext?: ObsidianContextSnapshot;
+    requestId?: number;
+    activePath?: string;
   }): Promise<string> {
     const runtime = this.deps.knowledgeRuntime;
     if (!runtime?.getGuardianKnowledgeContext) return '';
@@ -271,8 +316,58 @@ export class GuardianCompletionService {
 
     if (stripMarkdownPrefix(signals).length < 12) return '';
 
-    const raw = await runtime.getGuardianKnowledgeContext(signals.slice(0, 600));
+    const startedAt = Date.now();
+    const query = signals.slice(0, 600);
+    this.emitDiagnostic({
+      stage: 'knowledge-start',
+      requestId: input.requestId,
+      activePath: input.activePath,
+      contextLength: query.length,
+    });
+
+    const timeoutMs = this.deps.knowledgeTimeoutMs ?? 120;
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let timedOut = false;
+    const raw = await Promise.race([
+      runtime.getGuardianKnowledgeContext(query),
+      new Promise<string>((resolve) => {
+        timeoutHandle = setTimeout(() => {
+          timedOut = true;
+          this.emitDiagnostic({
+            stage: 'knowledge-timeout',
+            requestId: input.requestId,
+            activePath: input.activePath,
+            elapsedMs: Date.now() - startedAt,
+          });
+          resolve('');
+        }, timeoutMs);
+      }),
+    ]);
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+    if (raw) {
+      this.emitDiagnostic({
+        stage: 'knowledge-finished',
+        requestId: input.requestId,
+        activePath: input.activePath,
+        elapsedMs: Date.now() - startedAt,
+        knowledgeLength: raw.length,
+      });
+    } else if (!timedOut) {
+      this.emitDiagnostic({
+        stage: 'knowledge-finished',
+        requestId: input.requestId,
+        activePath: input.activePath,
+        elapsedMs: Date.now() - startedAt,
+        knowledgeLength: 0,
+      });
+    }
     return trimKnowledgeContext(raw);
+  }
+
+  private emitDiagnostic(event: GuardianCompletionDiagnosticEvent): void {
+    this.deps.diagnostics?.(event);
   }
 
   private isIgnoredPath(path: string): boolean {
