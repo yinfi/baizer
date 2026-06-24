@@ -5,7 +5,7 @@ import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, ProviderConfig, PLUG
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
-import { ghostTextExtension, showGhostText } from './src/ui/ghost-text';
+import { ghostTextExtension, showGhostText, storeGhostText } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
 import { requestGuardianResponse } from './src/ui/guardian-request';
 import { GuardianCompletionService, getGuardianAutoDelayMs } from './src/ui/guardian-completion';
@@ -461,6 +461,8 @@ export default class BaizerPlugin extends Plugin {
 
             if (this.shouldShowGuardianGhostText()) {
                 showGhostText(view, result.suggestion, result.line, safeCh);
+            } else {
+                storeGhostText(view, result.suggestion, result.line, safeCh);
             }
 
             updateGuardianState(

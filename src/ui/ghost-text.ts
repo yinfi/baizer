@@ -8,6 +8,7 @@ export interface GhostTextSuggestion {
     line: number;
     ch: number;
     replaceRange?: { from: number; to: number }; // Optional replacement range
+    visible?: boolean;
 }
 
 // 更新 Ghost Text 的 Effect
@@ -43,7 +44,10 @@ const ghostTextField = StateField.define<DecorationSet>({
         for (let effect of tr.effects) {
             if (effect.is(setGhostText)) {
                 if (effect.value) {
-                    const { text, line, ch } = effect.value;
+                    const { text, line, ch, visible = true } = effect.value;
+                    if (!visible) {
+                        return Decoration.none;
+                    }
 
                     // Validate line number
                     if (line < 1 || line > tr.state.doc.lines) {
@@ -155,7 +159,13 @@ export function ghostTextExtension(): Extension {
 // 导出辅助函数：显示 Ghost Text
 export function showGhostText(view: EditorView, text: string, line: number, ch: number, replaceRange?: { from: number; to: number }) {
     view.dispatch({
-        effects: setGhostText.of({ text, line, ch, replaceRange })
+        effects: setGhostText.of({ text, line, ch, replaceRange, visible: true })
+    });
+}
+
+export function storeGhostText(view: EditorView, text: string, line: number, ch: number, replaceRange?: { from: number; to: number }) {
+    view.dispatch({
+        effects: setGhostText.of({ text, line, ch, replaceRange, visible: false })
     });
 }
 
