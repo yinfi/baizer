@@ -82,14 +82,30 @@ export function getSettingsFallbackCss(): string {
 }
 .baizer-settings-hero {
     display: grid;
-    grid-template-columns: minmax(220px, 1fr) minmax(220px, 420px) auto;
-    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+    grid-template-areas: "title search" "subtitle search";
+    column-gap: 12px;
+    row-gap: 4px;
     align-items: center;
 }
 .baizer-settings-title {
+    grid-area: title;
     margin: 0;
     font-size: var(--font-ui-large);
     font-weight: var(--font-semibold);
+}
+.baizer-settings-subtitle {
+    grid-area: subtitle;
+    min-width: 0;
+    margin: 0;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.baizer-settings-search-row {
+    grid-area: search;
+    min-width: 0;
 }
 .baizer-settings-search {
     width: 100%;
@@ -128,30 +144,23 @@ export function getSettingsFallbackCss(): string {
     border-color: color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border));
 }
 .baizer-settings-section-summary {
-    min-height: 48px;
+    min-height: 42px;
     display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) auto 20px;
+    grid-template-columns: minmax(0, 1fr) auto 18px;
     gap: 8px;
     align-items: center;
-    padding: 8px 10px;
+    padding: 7px 10px;
     cursor: pointer;
     list-style: none;
 }
 .baizer-settings-section-summary::-webkit-details-marker {
     display: none;
 }
-.baizer-settings-section-icon {
-    width: 30px;
-    height: 30px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 7px;
-    color: var(--text-muted);
-    background: var(--background-secondary);
-    font-size: var(--font-smallest);
-    font-weight: var(--font-semibold);
+.baizer-settings-section-copy {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
 }
 .baizer-settings-section-title {
     margin: 0;
@@ -159,7 +168,7 @@ export function getSettingsFallbackCss(): string {
     font-weight: var(--font-semibold);
 }
 .baizer-settings-section-description {
-    margin: 2px 0 0;
+    margin: 0;
     color: var(--text-muted);
     font-size: var(--font-smallest);
     white-space: nowrap;
@@ -272,7 +281,10 @@ export function getSettingsFallbackCss(): string {
 }
 .baizer-settings-provider-card-main {
     width: 100%;
-    display: block;
+    display: grid;
+    grid-template-columns: minmax(120px, .8fr) minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
     padding: 8px 10px;
     border: 0;
     background: transparent;
@@ -280,14 +292,8 @@ export function getSettingsFallbackCss(): string {
     text-align: left;
     cursor: pointer;
 }
-.baizer-settings-provider-card-header {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    align-items: center;
-}
-.baizer-settings-provider-card-title { font-weight: var(--font-semibold); }
-.baizer-settings-provider-card-meta { margin-top: 4px; color: var(--text-muted); font-size: var(--font-smallest); }
+.baizer-settings-provider-card-title { min-width: 0; font-weight: var(--font-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.baizer-settings-provider-card-meta { min-width: 0; margin: 0; color: var(--text-muted); font-size: var(--font-smallest); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .baizer-settings-provider-detail-inline {
     border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
     background: color-mix(in srgb, var(--background-primary) 68%, transparent);
@@ -364,29 +370,41 @@ export function getSettingsFallbackCss(): string {
 .baizer-settings-inline-hint { color: var(--text-muted); font-size: var(--font-smallest); }
 .baizer-full-width-textarea textarea { width: 100%; min-height: 110px; resize: vertical; }
 .gemini-danger-setting { border-left: 3px solid color-mix(in srgb, var(--text-error) 75%, transparent); padding-left: 10px; }
-@container (max-width: 900px) {
-    .baizer-settings-hero,
+@container (max-width: 560px) {
+    .baizer-settings-hero {
+        grid-template-columns: 1fr;
+        grid-template-areas: "title" "subtitle" "search";
+    }
     .baizer-settings-section-summary,
+    .baizer-settings-provider-card-main,
     .baizer-settings-connection-detail-grid,
     .baizer-settings-detail-row,
     .baizer-settings-preset-grid {
         grid-template-columns: 1fr;
     }
+    .baizer-settings-section-copy { flex-direction: column; align-items: flex-start; gap: 2px; }
     .baizer-settings-top-status,
     .baizer-settings-section-meta { justify-content: flex-start; }
-    .baizer-settings-section-description { white-space: normal; }
+    .baizer-settings-section-description,
+    .baizer-settings-subtitle { white-space: normal; }
 }
-@media (max-width: 900px) {
-    .baizer-settings-hero,
+@media (max-width: 560px) {
+    .baizer-settings-hero {
+        grid-template-columns: 1fr;
+        grid-template-areas: "title" "subtitle" "search";
+    }
     .baizer-settings-section-summary,
+    .baizer-settings-provider-card-main,
     .baizer-settings-connection-detail-grid,
     .baizer-settings-detail-row,
     .baizer-settings-preset-grid {
         grid-template-columns: 1fr;
     }
+    .baizer-settings-section-copy { flex-direction: column; align-items: flex-start; gap: 2px; }
     .baizer-settings-top-status,
     .baizer-settings-section-meta { justify-content: flex-start; }
-    .baizer-settings-section-description { white-space: normal; }
+    .baizer-settings-section-description,
+    .baizer-settings-subtitle { white-space: normal; }
 }
 `;
 }
@@ -731,7 +749,6 @@ export class SettingTab extends PluginSettingTab {
             });
 
             const summary = card.createEl('summary', { cls: 'baizer-settings-section-summary' });
-            summary.createSpan({ cls: 'baizer-settings-section-icon', text: this.getSectionIcon(sectionId) });
             const copy = summary.createSpan({ cls: 'baizer-settings-section-copy' });
             copy.createEl('h3', { text: meta.title, cls: 'baizer-settings-section-title' });
             copy.createEl('p', { text: meta.description, cls: 'baizer-settings-section-description' });
@@ -739,27 +756,11 @@ export class SettingTab extends PluginSettingTab {
             if (status) {
                 metaEl.createSpan({ cls: 'baizer-settings-badge is-' + status.tone, text: status.label });
             }
-            summary.createSpan({ cls: 'baizer-settings-section-chevron', text: '›' });
+            summary.createSpan({ cls: 'baizer-settings-section-chevron', text: '>' });
 
             const content = card.createDiv({ cls: 'baizer-settings-section-content' });
             this.renderSectionContent(sectionId, content, token);
         });
-    }
-
-    private getSectionIcon(sectionId: SettingsSectionId): string {
-        const icons: Record<SettingsSectionId, string> = {
-            overview: 'OV',
-            connection: 'CN',
-            behavior: 'BH',
-            memory: 'MM',
-            permissions: 'PM',
-            capture: 'CP',
-            knowledge: 'KG',
-            guardian: 'GD',
-            appearance: 'AP',
-            'plugin-skills': 'SK',
-        };
-        return icons[sectionId];
     }
 
     private renderSectionContent(sectionId: SettingsSectionId, containerEl: HTMLElement, token: number): void {
@@ -1077,10 +1078,9 @@ export class SettingTab extends PluginSettingTab {
                     'aria-pressed': meta.isActive ? 'true' : 'false',
                 },
             }) as HTMLButtonElement;
-            const header = button.createDiv({ cls: 'baizer-settings-provider-card-header' });
-            header.createDiv({ cls: 'baizer-settings-provider-card-title', text: meta.label });
-            header.createSpan({ cls: `baizer-settings-badge is-${badgeTone}`, text: badgeLabel });
+            button.createDiv({ cls: 'baizer-settings-provider-card-title', text: meta.label });
             button.createDiv({ cls: 'baizer-settings-provider-card-meta', text: meta.compactMeta });
+            button.createSpan({ cls: `baizer-settings-badge is-${badgeTone}`, text: badgeLabel });
 
             button.addEventListener('click', async () => {
                 if (providerId === settings.activeProvider) return;

@@ -3615,3 +3615,215 @@ textarea.shell-input {
 .baizer-shell-view .shell-workspace-edit-entry.is-undone .shell-workspace-edit-name {
     color: var(--text-faint);
 }
+
+/* Baizer settings compact accordion overrides */
+.baizer-settings-page {
+    gap: 10px;
+    padding-bottom: 24px;
+    container-type: inline-size;
+}
+
+.baizer-settings-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+    grid-template-areas: "title search" "subtitle search";
+    column-gap: 12px;
+    row-gap: 4px;
+    align-items: center;
+}
+
+.baizer-settings-title {
+    grid-area: title;
+    margin: 0;
+    font-size: var(--font-ui-large);
+}
+
+.baizer-settings-subtitle {
+    grid-area: subtitle;
+    min-width: 0;
+    margin: 0;
+    color: var(--text-muted);
+    max-width: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.baizer-settings-search-row {
+    grid-area: search;
+    min-width: 0;
+}
+
+.baizer-settings-search {
+    width: 100%;
+}
+
+.baizer-settings-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.baizer-settings-section-card {
+    border-radius: 8px;
+}
+
+.baizer-settings-section-summary {
+    min-height: 42px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 18px;
+    gap: 8px;
+    align-items: center;
+    padding: 7px 10px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.baizer-settings-section-summary::-webkit-details-marker {
+    display: none;
+}
+
+.baizer-settings-section-copy {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.baizer-settings-section-title {
+    margin: 0;
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-semibold);
+}
+
+.baizer-settings-section-description {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.baizer-settings-section-meta {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.baizer-settings-section-content {
+    padding: 8px;
+}
+
+.baizer-settings-provider-list {
+    gap: 6px;
+    padding: 8px;
+}
+
+.baizer-settings-provider-card {
+    gap: 0;
+    border-radius: 8px;
+}
+
+.baizer-settings-provider-card-main {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(120px, .8fr) minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.baizer-settings-provider-card-title {
+    min-width: 0;
+    font-weight: var(--font-semibold);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.baizer-settings-provider-card-meta {
+    min-width: 0;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.baizer-settings-provider-detail-inline {
+    border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+}
+
+.baizer-settings-connection-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 8px;
+}
+
+@container (max-width: 560px) {
+    .baizer-settings-hero {
+        grid-template-columns: 1fr;
+        grid-template-areas: "title" "subtitle" "search";
+    }
+
+    .baizer-settings-section-summary,
+    .baizer-settings-provider-card-main,
+    .baizer-settings-connection-detail-grid,
+    .baizer-settings-detail-row,
+    .baizer-settings-preset-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .baizer-settings-section-copy {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+
+    .baizer-settings-section-meta {
+        justify-content: flex-start;
+    }
+
+    .baizer-settings-section-description,
+    .baizer-settings-subtitle {
+        white-space: normal;
+    }
+}
+
+@media (max-width: 560px) {
+    .baizer-settings-hero {
+        grid-template-columns: 1fr;
+        grid-template-areas: "title" "subtitle" "search";
+    }
+
+    .baizer-settings-section-summary,
+    .baizer-settings-provider-card-main,
+    .baizer-settings-connection-detail-grid,
+    .baizer-settings-detail-row,
+    .baizer-settings-preset-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .baizer-settings-section-copy {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+
+    .baizer-settings-section-meta {
+        justify-content: flex-start;
+    }
+
+    .baizer-settings-section-description,
+    .baizer-settings-subtitle {
+        white-space: normal;
+    }
+}
