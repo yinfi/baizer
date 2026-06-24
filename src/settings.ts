@@ -4,14 +4,15 @@ import { ModelOption } from './models/interfaces';
 import { OntologyUpdateMode } from './knowledge/types';
 
 export type SettingsSectionId =
+    | 'overview'
     | 'connection'
-    | 'runtime'
+    | 'behavior'
     | 'memory'
-    | 'guardian'
     | 'permissions'
-    | 'appearance'
     | 'capture'
     | 'knowledge'
+    | 'guardian'
+    | 'appearance'
     | 'plugin-skills';
 
 export type SettingsBadgeTone = 'warning' | 'danger' | 'muted' | 'accent' | 'success';
@@ -55,6 +56,12 @@ export interface ProviderCardMeta {
     statusGlyph: string;
 }
 
+export interface SettingsOverviewAction {
+    label: string;
+    sectionId: SettingsSectionId;
+    tone: SettingsBadgeTone;
+}
+
 interface SettingsSectionMeta {
     id: SettingsSectionId;
     title: string;
@@ -69,168 +76,133 @@ export function getSettingsFallbackCss(): string {
 .baizer-settings-page {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 10px;
     padding-bottom: 24px;
+    container-type: inline-size;
 }
 .baizer-settings-hero {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) minmax(220px, 420px) auto;
+    gap: 12px;
+    align-items: center;
 }
 .baizer-settings-title {
     margin: 0;
     font-size: var(--font-ui-large);
     font-weight: var(--font-semibold);
 }
-.baizer-settings-subtitle {
-    margin: 0;
-    color: var(--text-muted);
-    max-width: 76ch;
-}
-.baizer-settings-search-row {
-    display: flex;
-}
 .baizer-settings-search {
-    width: min(420px, 100%);
+    width: 100%;
     height: 34px;
     padding: 0 12px;
     border: 1px solid var(--background-modifier-border);
     border-radius: 8px;
     background: var(--background-secondary);
     color: var(--text-normal);
+    font-size: var(--font-ui-small);
 }
-.baizer-settings-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-.baizer-settings-nav-header {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 0 2px;
-}
-.baizer-settings-nav-title {
-    color: var(--text-muted);
-    font-size: var(--font-smallest);
-    font-weight: var(--font-medium);
-    text-transform: uppercase;
-}
-.baizer-settings-nav-kicker {
-    color: var(--text-faint);
-    font-size: var(--font-smallest);
-}
-.baizer-settings-nav-list {
+.baizer-settings-top-status,
+.baizer-settings-actions,
+.baizer-settings-segments,
+.baizer-settings-tabs {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
-}
-.baizer-settings-nav-item {
-    display: block;
-    flex: 0 0 auto;
-    min-width: 148px;
-    max-width: 100%;
-    padding: 0;
-    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--background-secondary) 88%, transparent);
-    color: var(--text-normal);
-    text-align: left;
-}
-.baizer-settings-nav-item.is-active {
-    background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
-    border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
-}
-.baizer-settings-nav-row {
-    display: flex;
+    gap: 8px;
     align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 10px 12px;
 }
-.baizer-settings-nav-copy,
-.baizer-settings-main,
-.baizer-settings-section-copy,
-.baizer-settings-detail-value {
-    min-width: 0;
+.baizer-settings-top-status {
+    justify-content: flex-end;
 }
-.baizer-settings-nav-label,
-.baizer-settings-section-title,
-.baizer-settings-workspace-title,
-.baizer-settings-provider-card-title,
-.baizer-settings-detail-label {
-    font-weight: var(--font-semibold);
-}
-.baizer-settings-main {
+.baizer-settings-accordion {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 6px;
 }
 .baizer-settings-section-card {
-    padding: 0;
     border: 1px solid color-mix(in srgb, var(--background-modifier-border) 90%, transparent);
-    border-radius: 14px;
+    border-radius: 8px;
     background: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary));
     overflow: hidden;
 }
-.baizer-settings-section-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 18px 14px;
-    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+.baizer-settings-section-card[open] {
+    border-color: color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border));
+}
+.baizer-settings-section-summary {
+    min-height: 48px;
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) auto 20px;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    cursor: pointer;
+    list-style: none;
+}
+.baizer-settings-section-summary::-webkit-details-marker {
+    display: none;
+}
+.baizer-settings-section-icon {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 7px;
+    color: var(--text-muted);
+    background: var(--background-secondary);
+    font-size: var(--font-smallest);
+    font-weight: var(--font-semibold);
 }
 .baizer-settings-section-title {
     margin: 0;
-    font-size: var(--font-ui-large);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-semibold);
 }
 .baizer-settings-section-description {
-    margin: 6px 0 0;
+    margin: 2px 0 0;
     color: var(--text-muted);
+    font-size: var(--font-smallest);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.baizer-settings-section-meta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+}
+.baizer-settings-section-chevron {
+    color: var(--text-muted);
+    transition: transform 120ms ease;
+}
+.baizer-settings-section-card[open] .baizer-settings-section-chevron {
+    transform: rotate(90deg);
 }
 .baizer-settings-section-content {
-    padding: 16px 18px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+    border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+    background: color-mix(in srgb, var(--background-secondary) 35%, transparent);
 }
 .baizer-settings-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 22px;
-    padding: 0 8px;
+    min-height: 20px;
+    padding: 0 7px;
     border-radius: 999px;
     font-size: var(--font-smallest);
+    font-weight: var(--font-medium);
     white-space: nowrap;
 }
-.baizer-settings-badge.is-warning,
-.baizer-settings-inline-note.is-warning {
-    color: #8b5e00;
-    background: color-mix(in srgb, var(--color-yellow) 16%, transparent);
-}
-.baizer-settings-badge.is-danger,
-.baizer-settings-inline-note.is-danger {
-    color: var(--text-error);
-    background: color-mix(in srgb, var(--text-error) 12%, transparent);
-}
-.baizer-settings-badge.is-muted {
-    color: var(--text-muted);
-    background: color-mix(in srgb, var(--background-modifier-border) 65%, transparent);
-}
-.baizer-settings-badge.is-accent,
-.baizer-settings-inline-note.is-accent {
-    color: var(--text-accent);
-    background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
-}
-.baizer-settings-badge.is-success,
-.baizer-settings-inline-note.is-success {
-    color: var(--color-green);
-    background: color-mix(in srgb, var(--color-green) 10%, transparent);
-}
-.baizer-settings-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-}
+.baizer-settings-badge.is-warning { color: #8b5e00; background: color-mix(in srgb, var(--color-yellow) 18%, transparent); }
+.baizer-settings-badge.is-danger { color: var(--text-error); background: color-mix(in srgb, var(--text-error) 12%, transparent); }
+.baizer-settings-badge.is-muted { color: var(--text-muted); background: color-mix(in srgb, var(--background-modifier-border) 65%, transparent); }
+.baizer-settings-badge.is-accent { color: var(--text-accent); background: color-mix(in srgb, var(--interactive-accent) 14%, transparent); }
+.baizer-settings-badge.is-success { color: var(--color-green); background: color-mix(in srgb, var(--color-green) 12%, transparent); }
 .baizer-settings-action {
     min-height: 32px;
     padding: 0 12px;
@@ -238,141 +210,195 @@ export function getSettingsFallbackCss(): string {
     border-radius: 8px;
     background: var(--background-secondary);
     color: var(--text-normal);
+    cursor: pointer;
 }
-.baizer-settings-inline-note,
-.baizer-settings-empty-state,
-.baizer-settings-empty-nav {
-    padding: 10px 12px;
-    border-radius: 8px;
-}
-.baizer-settings-workspace {
-    display: grid;
-    grid-template-columns: minmax(0, 3fr) minmax(0, 7fr);
-    gap: 16px;
-    align-items: stretch;
-}
-.baizer-settings-workspace-panel {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
+.baizer-settings-action.is-primary { border-color: color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border)); color: var(--text-accent); }
+.baizer-settings-action.is-accent { border-style: dashed; }
+.baizer-settings-action.is-danger { border-color: color-mix(in srgb, var(--text-error) 30%, var(--background-modifier-border)); color: var(--text-error); }
+.baizer-settings-action:disabled { cursor: default; opacity: .45; }
+.baizer-settings-panel,
+.baizer-settings-task,
+.baizer-settings-advanced,
+.baizer-settings-provider-shell,
+.baizer-settings-provider-card,
+.baizer-settings-connection-card {
     border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
-    border-radius: 14px;
+    border-radius: 8px;
     background: color-mix(in srgb, var(--background-primary-alt) 96%, var(--background-secondary));
     overflow: hidden;
 }
-.baizer-settings-workspace-header {
+.baizer-settings-panel-header,
+.baizer-settings-provider-toolbar,
+.baizer-settings-connection-card-header {
     display: flex;
-    align-items: flex-start;
     justify-content: space-between;
-    gap: 12px;
-    padding: 12px 14px;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
     border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+    background: color-mix(in srgb, var(--background-secondary) 74%, transparent);
 }
-.baizer-settings-workspace-copy,
-.baizer-settings-provider-list,
-.baizer-settings-detail-body {
-    display: flex;
-    flex-direction: column;
+.baizer-settings-panel-title,
+.baizer-settings-connection-card-title {
+    margin: 0;
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-semibold);
 }
-.baizer-settings-workspace-copy {
-    gap: 4px;
-}
-.baizer-settings-workspace-subtitle,
-.baizer-settings-provider-card-meta,
-.baizer-settings-provider-summary,
-.baizer-settings-inline-hint {
+.baizer-settings-panel-body { padding: 8px 10px; }
+.baizer-settings-task {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
     color: var(--text-muted);
-    font-size: var(--font-smallest);
+    font-size: var(--font-ui-small);
 }
+.baizer-settings-task strong { color: var(--text-normal); }
 .baizer-settings-provider-list {
-    gap: 8px;
-    padding: 12px;
-}
-.baizer-settings-provider-card {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    padding: 8px;
+}
+.baizer-settings-provider-card {
     width: 100%;
-    padding: 10px 12px;
-    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary));
+    padding: 0;
     color: var(--text-normal);
-    text-align: left;
 }
 .baizer-settings-provider-card.is-active {
     border-color: color-mix(in srgb, var(--interactive-accent) 46%, var(--background-modifier-border));
     background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
 }
-.baizer-settings-provider-card-header,
-.baizer-settings-provider-card-identity,
-.baizer-settings-provider-card-statuses,
-.baizer-settings-detail-secret,
-.baizer-settings-detail-secret-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+.baizer-settings-provider-card-main {
+    width: 100%;
+    display: block;
+    padding: 8px 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
 }
 .baizer-settings-provider-card-header {
+    display: flex;
     justify-content: space-between;
-}
-.baizer-settings-provider-card-identity,
-.baizer-settings-provider-card-statuses,
-.baizer-settings-detail-secret {
-    flex-wrap: wrap;
-}
-.baizer-settings-provider-card-icon {
-    display: inline-flex;
+    gap: 8px;
     align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--background-modifier-border) 45%, transparent);
-    color: var(--text-muted);
-    font-size: 11px;
 }
-.baizer-settings-provider-summary {
-    padding: 0 12px 12px;
+.baizer-settings-provider-card-title { font-weight: var(--font-semibold); }
+.baizer-settings-provider-card-meta { margin-top: 4px; color: var(--text-muted); font-size: var(--font-smallest); }
+.baizer-settings-provider-detail-inline {
+    border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+    background: color-mix(in srgb, var(--background-primary) 68%, transparent);
+}
+.baizer-settings-connection-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 8px;
 }
 .baizer-settings-detail-row {
     display: grid;
-    grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
-    gap: 18px;
+    grid-template-columns: 130px minmax(0, 1fr);
+    gap: 12px;
     align-items: start;
-    padding: 10px 14px;
-    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+    padding: 8px 10px;
+    border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
 }
+.baizer-settings-detail-row:first-child { border-top: 0; }
+.baizer-settings-detail-label { padding-top: 6px; font-size: var(--font-ui-small); font-weight: var(--font-semibold); }
+.baizer-settings-detail-value { min-width: 0; }
 .baizer-settings-detail-input {
     display: block;
     width: 100%;
     min-height: 34px;
     padding: 0 10px;
-    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border: 1px solid var(--background-modifier-border);
     border-radius: 8px;
-    background: color-mix(in srgb, var(--background-primary) 95%, var(--background-secondary));
+    background: var(--background-primary);
     color: var(--text-normal);
 }
-.baizer-settings-detail-secret .baizer-settings-detail-input {
-    flex: 1 1 360px;
+.baizer-settings-detail-secret,
+.baizer-settings-detail-secret-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
 }
-.baizer-full-width-textarea textarea {
-    width: 100%;
-    min-height: 120px;
-    resize: vertical;
+.baizer-settings-detail-secret .baizer-settings-detail-input { flex: 1 1 240px; }
+.baizer-settings-summary-list,
+.baizer-settings-skill-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
 }
-@media (max-width: 840px) {
-    .baizer-settings-workspace,
-    .baizer-settings-detail-row {
+.baizer-settings-summary-list li,
+.baizer-settings-skill-list li,
+.baizer-settings-sample-line {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 8px;
+    color: var(--text-muted);
+}
+.baizer-settings-summary-list strong,
+.baizer-settings-skill-list strong,
+.baizer-settings-sample-line strong { color: var(--text-normal); }
+.baizer-settings-preset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.baizer-settings-preset { padding: 8px 10px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-secondary); color: var(--text-normal); text-align: left; }
+.baizer-settings-preset.is-active { border-color: color-mix(in srgb, var(--interactive-accent) 46%, var(--background-modifier-border)); background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary)); }
+.baizer-settings-advanced summary { padding: 8px 10px; cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-small); font-weight: var(--font-semibold); }
+.baizer-settings-advanced-body { padding: 0 10px 10px; }
+.baizer-settings-inline-note { padding: 10px 12px; border-radius: 8px; font-size: var(--font-ui-small); }
+.baizer-settings-inline-note.is-warning { color: #8b5e00; background: color-mix(in srgb, var(--color-yellow) 16%, transparent); }
+.baizer-settings-inline-note.is-success { color: var(--color-green); background: color-mix(in srgb, var(--color-green) 10%, transparent); }
+.baizer-settings-inline-note.is-danger { color: var(--text-error); background: color-mix(in srgb, var(--text-error) 12%, transparent); }
+.baizer-settings-inline-note.is-accent { color: var(--text-accent); background: color-mix(in srgb, var(--interactive-accent) 10%, transparent); }
+.baizer-settings-inline-hint { color: var(--text-muted); font-size: var(--font-smallest); }
+.baizer-full-width-textarea textarea { width: 100%; min-height: 110px; resize: vertical; }
+.gemini-danger-setting { border-left: 3px solid color-mix(in srgb, var(--text-error) 75%, transparent); padding-left: 10px; }
+@container (max-width: 900px) {
+    .baizer-settings-hero,
+    .baizer-settings-section-summary,
+    .baizer-settings-connection-detail-grid,
+    .baizer-settings-detail-row,
+    .baizer-settings-preset-grid {
         grid-template-columns: 1fr;
     }
+    .baizer-settings-top-status,
+    .baizer-settings-section-meta { justify-content: flex-start; }
+    .baizer-settings-section-description { white-space: normal; }
+}
+@media (max-width: 900px) {
+    .baizer-settings-hero,
+    .baizer-settings-section-summary,
+    .baizer-settings-connection-detail-grid,
+    .baizer-settings-detail-row,
+    .baizer-settings-preset-grid {
+        grid-template-columns: 1fr;
+    }
+    .baizer-settings-top-status,
+    .baizer-settings-section-meta { justify-content: flex-start; }
+    .baizer-settings-section-description { white-space: normal; }
 }
 `;
 }
-
 function ensureSettingsFallbackStyles(): void {
     const doc = typeof document === 'undefined' ? null : document;
-    if (!doc || doc.getElementById(SETTINGS_FALLBACK_STYLE_ID)) return;
+    if (!doc) return;
+
+    const existing = doc.getElementById(SETTINGS_FALLBACK_STYLE_ID);
+    if (existing) {
+        existing.textContent = getSettingsFallbackCss();
+        return;
+    }
 
     const styleEl = doc.createElement('style');
     styleEl.id = SETTINGS_FALLBACK_STYLE_ID;
@@ -381,60 +407,16 @@ function ensureSettingsFallbackStyles(): void {
 }
 
 const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
-    {
-        id: 'connection',
-        title: 'Connection',
-        description: 'Provider, API key, model selection, and connection checks.',
-        keywords: ['provider', 'api key', 'base url', 'model', 'connection', 'openai', 'gemini', 'deepseek', 'qwen'],
-    },
-    {
-        id: 'runtime',
-        title: 'Runtime',
-        description: 'Context window and system prompt behavior.',
-        keywords: ['runtime', 'context window', 'token', 'system prompt', 'persona', 'prompt'],
-    },
-    {
-        id: 'memory',
-        title: 'Memory',
-        description: 'Local Hindsight memory, recall, retention, and deletion.',
-        keywords: ['memory', 'hindsight', 'recall', 'forget', 'profile', 'privacy', 'observation'],
-    },
-    {
-        id: 'guardian',
-        title: 'Guardian',
-        description: 'Inline assistance, trigger behavior, and ignored folders.',
-        keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity'],
-    },
-    {
-        id: 'permissions',
-        title: 'Permissions',
-        description: 'File, plugin, and execution safeguards.',
-        keywords: ['permissions', 'file creation', 'file modification', 'plugin control', 'confirm'],
-    },
-    {
-        id: 'appearance',
-        title: 'Appearance',
-        description: 'Terminal theme and visual density.',
-        keywords: ['appearance', 'theme', 'font', 'opacity', 'terminal'],
-    },
-    {
-        id: 'capture',
-        title: 'Capture',
-        description: 'WeChat inbox monitoring and storage paths.',
-        keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings'],
-    },
-    {
-        id: 'knowledge',
-        title: 'Knowledge',
-        description: 'Knowledge compiler sources, output, ontology schema, and batching.',
-        keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema'],
-    },
-    {
-        id: 'plugin-skills',
-        title: 'Plugin Skills',
-        description: 'Auto-generated plugin workflows and exclusions.',
-        keywords: ['plugin', 'skills', 'generator', 'exclude', 'startup'],
-    },
+    { id: 'overview', title: 'Overview', description: 'Configuration health and actions that need attention.', keywords: ['overview', 'health', 'risk', 'status'] },
+    { id: 'connection', title: 'Connection', description: 'Provider, API key, endpoint, model, and connection tests.', keywords: ['provider', 'api key', 'base url', 'model', 'connection', 'openai', 'gemini', 'deepseek', 'qwen'] },
+    { id: 'behavior', title: 'Behavior', description: 'Context budget, system prompt, and runtime behavior.', keywords: ['behavior', 'runtime', 'context window', 'token', 'system prompt', 'persona', 'prompt'] },
+    { id: 'memory', title: 'Memory', description: 'Memory retention, recall, search, and deletion.', keywords: ['memory', 'hindsight', 'recall', 'forget', 'profile', 'privacy', 'observation'] },
+    { id: 'permissions', title: 'Permissions', description: 'Vault write scope, file operations, plugin control, and confirmations.', keywords: ['permissions', 'file creation', 'file modification', 'plugin control', 'confirm'] },
+    { id: 'capture', title: 'Capture', description: 'Inbox, clipping storage, WeChat import, and URL capture.', keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper'] },
+    { id: 'knowledge', title: 'Knowledge', description: 'Source folders, output folder, compile state, and ontology.', keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema'] },
+    { id: 'guardian', title: 'Guardian', description: 'Inline writing assistance, trigger mode, and ignored folders.', keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity'] },
+    { id: 'appearance', title: 'Appearance', description: 'Workbench theme, font size, and opacity.', keywords: ['appearance', 'theme', 'font', 'opacity', 'terminal', 'workbench'] },
+    { id: 'plugin-skills', title: 'Plugin Skills', description: 'Skill generation, excluded plugins, and startup scanning.', keywords: ['plugin', 'skills', 'generator', 'exclude', 'startup'] },
 ];
 
 function normalizeSearchQuery(query: string): string {
@@ -481,7 +463,7 @@ export function getSettingsSectionStatuses(
         statuses.memory = { label: 'Private', tone: 'accent' };
     }
 
-    if (settings.allowPluginControl || !settings.confirmExecutions) {
+    if (settings.allowPluginControl || !settings.confirmExecutions || settings.vaultWriteScope === 'all-vault') {
         statuses.permissions = { label: 'Risk', tone: 'danger' };
     }
 
@@ -489,7 +471,31 @@ export function getSettingsSectionStatuses(
         statuses['plugin-skills'] = { label: 'Off', tone: 'muted' };
     }
 
+    const overviewActions = getSettingsOverviewActions(settings);
+    if (overviewActions.length > 0) {
+        statuses.overview = {
+            label: overviewActions.length + ' actions',
+            tone: overviewActions.some(action => action.tone === 'danger') ? 'danger' : 'warning',
+        };
+    }
+
     return statuses;
+}
+
+export function getSettingsOverviewActions(settings: PluginSettings): SettingsOverviewAction[] {
+    const actions: SettingsOverviewAction[] = [];
+
+    if (settings.allowPluginControl || !settings.confirmExecutions || settings.vaultWriteScope === 'all-vault') {
+        actions.push({ label: '\u6743\u9650\u8FC7\u5BBD', sectionId: 'permissions', tone: 'danger' });
+    }
+
+    for (const [_providerId, provider] of Object.entries(settings.providers || {})) {
+        if (!provider.apiKey?.trim()) {
+            actions.push({ label: provider.label + ' \u7F3A\u5C11 API Key', sectionId: 'connection', tone: 'warning' });
+        }
+    }
+
+    return actions;
 }
 
 export function getProviderDeletionState(settings: PluginSettings): ProviderDeletionState {
@@ -587,7 +593,7 @@ function getSectionMeta(id: SettingsSectionId): SettingsSectionMeta {
 export class SettingTab extends PluginSettingTab {
     plugin: IPlugin;
     private renderToken = 0;
-    private activeSectionId: SettingsSectionId = 'connection';
+    private openSectionIds = new Set<SettingsSectionId>();
     private searchQuery = '';
     private revealApiKey = false;
     private connectionTestStatus: ConnectionTestStatus = { state: 'idle', message: '' };
@@ -609,13 +615,6 @@ export class SettingTab extends PluginSettingTab {
 
     private getVisibleSections(): SettingsSectionId[] {
         return getMatchingSettingsSections(this.searchQuery);
-    }
-
-    private ensureActiveSection(visibleSections: SettingsSectionId[]): void {
-        if (!visibleSections.length) return;
-        if (!visibleSections.includes(this.activeSectionId)) {
-            this.activeSectionId = visibleSections[0];
-        }
     }
 
     private async persistSettings(): Promise<void> {
@@ -680,12 +679,10 @@ export class SettingTab extends PluginSettingTab {
         containerEl.empty();
 
         const visibleSections = this.getVisibleSections();
-        this.ensureActiveSection(visibleSections);
 
         const root = containerEl.createDiv({ cls: 'baizer-settings-page' });
         this.renderHeader(root);
-        this.renderSidebar(root, visibleSections);
-        this.renderMain(root.createDiv({ cls: 'baizer-settings-main' }), visibleSections, token);
+        this.renderMain(root, visibleSections, token);
     }
 
     private renderHeader(containerEl: HTMLElement): void {
@@ -712,46 +709,6 @@ export class SettingTab extends PluginSettingTab {
         });
     }
 
-    private renderSidebar(containerEl: HTMLElement, visibleSections: SettingsSectionId[]): void {
-        const nav = containerEl.createDiv({ cls: 'baizer-settings-nav' });
-        const navHeader = nav.createDiv({ cls: 'baizer-settings-nav-header' });
-        navHeader.createDiv({ cls: 'baizer-settings-nav-title', text: 'Sections' });
-        navHeader.createDiv({ cls: 'baizer-settings-nav-kicker', text: 'Switch between groups' });
-
-        if (!visibleSections.length) {
-            nav.createDiv({ cls: 'baizer-settings-empty-nav', text: 'No matching sections.' });
-            return;
-        }
-
-        const list = nav.createDiv({ cls: 'baizer-settings-nav-list' });
-        const statuses = getSettingsSectionStatuses(this.plugin.settings);
-
-        visibleSections.forEach(sectionId => {
-            const meta = getSectionMeta(sectionId);
-            const button = list.createEl('button', {
-                cls: `baizer-settings-nav-item${sectionId === this.activeSectionId ? ' is-active' : ''}`,
-                attr: { type: 'button' },
-            }) as HTMLButtonElement;
-
-            const row = button.createDiv({ cls: 'baizer-settings-nav-row' });
-            const copy = row.createDiv({ cls: 'baizer-settings-nav-copy' });
-            copy.createDiv({ cls: 'baizer-settings-nav-label', text: meta.title });
-
-            const status = statuses[sectionId];
-            if (status) {
-                row.createSpan({ cls: `baizer-settings-badge is-${status.tone}`, text: status.label });
-            }
-
-            button.addEventListener('click', () => {
-                this.activeSectionId = sectionId;
-                if (this.searchQuery.trim()) {
-                    this.searchQuery = '';
-                }
-                this.display();
-            });
-        });
-    }
-
     private renderMain(containerEl: HTMLElement, visibleSections: SettingsSectionId[], token: number): void {
         if (!visibleSections.length) {
             const empty = containerEl.createDiv({ cls: 'baizer-settings-empty-state' });
@@ -760,32 +717,60 @@ export class SettingTab extends PluginSettingTab {
             return;
         }
 
-        const query = normalizeSearchQuery(this.searchQuery);
-        const sectionsToRender = query ? visibleSections : [this.activeSectionId];
+        const accordion = containerEl.createDiv({ cls: 'baizer-settings-accordion' });
+        const statuses = getSettingsSectionStatuses(this.plugin.settings);
 
-        sectionsToRender.forEach(sectionId => {
+        visibleSections.forEach(sectionId => {
             const meta = getSectionMeta(sectionId);
-            const status = getSettingsSectionStatuses(this.plugin.settings)[sectionId];
-            const card = containerEl.createDiv({ cls: 'baizer-settings-section-card' });
-            const header = card.createDiv({ cls: 'baizer-settings-section-header' });
-            const headerCopy = header.createDiv({ cls: 'baizer-settings-section-copy' });
-            headerCopy.createEl(query ? 'h3' : 'h2', { text: meta.title, cls: 'baizer-settings-section-title' });
-            headerCopy.createEl('p', { text: meta.description, cls: 'baizer-settings-section-description' });
+            const status = statuses[sectionId];
+            const card = accordion.createEl('details', { cls: 'baizer-settings-section-card' }) as HTMLDetailsElement;
+            card.open = this.openSectionIds.has(sectionId);
+            card.addEventListener('toggle', () => {
+                if (card.open) this.openSectionIds.add(sectionId);
+                else this.openSectionIds.delete(sectionId);
+            });
+
+            const summary = card.createEl('summary', { cls: 'baizer-settings-section-summary' });
+            summary.createSpan({ cls: 'baizer-settings-section-icon', text: this.getSectionIcon(sectionId) });
+            const copy = summary.createSpan({ cls: 'baizer-settings-section-copy' });
+            copy.createEl('h3', { text: meta.title, cls: 'baizer-settings-section-title' });
+            copy.createEl('p', { text: meta.description, cls: 'baizer-settings-section-description' });
+            const metaEl = summary.createSpan({ cls: 'baizer-settings-section-meta' });
             if (status) {
-                header.createSpan({ cls: `baizer-settings-badge is-${status.tone}`, text: status.label });
+                metaEl.createSpan({ cls: 'baizer-settings-badge is-' + status.tone, text: status.label });
             }
+            summary.createSpan({ cls: 'baizer-settings-section-chevron', text: '›' });
 
             const content = card.createDiv({ cls: 'baizer-settings-section-content' });
             this.renderSectionContent(sectionId, content, token);
         });
     }
 
+    private getSectionIcon(sectionId: SettingsSectionId): string {
+        const icons: Record<SettingsSectionId, string> = {
+            overview: 'OV',
+            connection: 'CN',
+            behavior: 'BH',
+            memory: 'MM',
+            permissions: 'PM',
+            capture: 'CP',
+            knowledge: 'KG',
+            guardian: 'GD',
+            appearance: 'AP',
+            'plugin-skills': 'SK',
+        };
+        return icons[sectionId];
+    }
+
     private renderSectionContent(sectionId: SettingsSectionId, containerEl: HTMLElement, token: number): void {
         switch (sectionId) {
+            case 'overview':
+                this.renderOverviewSection(containerEl);
+                return;
             case 'connection':
                 this.renderConnectionSection(containerEl, token);
                 return;
-            case 'runtime':
+            case 'behavior':
                 this.renderRuntimeSection(containerEl);
                 return;
             case 'memory':
@@ -809,6 +794,31 @@ export class SettingTab extends PluginSettingTab {
             case 'plugin-skills':
                 this.renderPluginSkillsSection(containerEl);
                 return;
+        }
+    }
+
+    private renderOverviewSection(containerEl: HTMLElement): void {
+        const actions = getSettingsOverviewActions(this.plugin.settings);
+        if (!actions.length) {
+            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-success', text: 'No immediate configuration actions.' });
+            return;
+        }
+
+        for (const action of actions) {
+            const row = containerEl.createDiv({ cls: 'baizer-settings-task' });
+            const copy = row.createSpan();
+            copy.createEl('strong', { text: action.label });
+            copy.createEl('br');
+            copy.appendText(getSectionMeta(action.sectionId).title);
+            const button = row.createEl('button', {
+                text: getSectionMeta(action.sectionId).title,
+                cls: 'baizer-settings-badge is-' + action.tone,
+                attr: { type: 'button' },
+            });
+            button.addEventListener('click', () => {
+                this.openSectionIds.add(action.sectionId);
+                this.display();
+            });
         }
     }
 
@@ -838,7 +848,6 @@ export class SettingTab extends PluginSettingTab {
             await this.refreshMemoryView();
         }, 'default', this.memoryLoading);
 
-        this.renderMemoryStats(containerEl);
         this.renderMemorySearch(containerEl);
         this.renderMemoryTabs(containerEl);
         this.renderMemoryList(containerEl);
@@ -886,21 +895,6 @@ export class SettingTab extends PluginSettingTab {
             ...(sections.observations || []),
             ...(sections.facts || []),
         ].slice(0, 10);
-    }
-
-    private renderMemoryStats(containerEl: HTMLElement): void {
-        const stats = this.memoryView?.stats;
-        const row = containerEl.createDiv({ cls: 'baizer-memory-stats' });
-        this.createMemoryStat(row, 'Total', stats?.total ?? 0);
-        this.createMemoryStat(row, 'Facts', stats?.world ?? 0);
-        this.createMemoryStat(row, 'Experiences', stats?.experience ?? 0);
-        this.createMemoryStat(row, 'Observations', stats?.observation ?? 0);
-    }
-
-    private createMemoryStat(parent: HTMLElement, label: string, value: number): void {
-        const item = parent.createDiv({ cls: 'baizer-memory-stat' });
-        item.createDiv({ cls: 'baizer-memory-stat-value', text: String(value) });
-        item.createDiv({ cls: 'baizer-memory-stat-label', text: label });
     }
 
     private renderMemorySearch(containerEl: HTMLElement): void {
@@ -976,8 +970,8 @@ export class SettingTab extends PluginSettingTab {
     private renderMemoryDangerZone(containerEl: HTMLElement): void {
         const zone = containerEl.createDiv({ cls: 'baizer-memory-danger' });
         const copy = zone.createDiv({ cls: 'baizer-memory-danger-copy' });
-        copy.createDiv({ cls: 'baizer-settings-workspace-title', text: 'Danger Zone' });
-        copy.createDiv({ cls: 'baizer-settings-workspace-subtitle', text: 'Clear all remembered Hindsight memory.' });
+        copy.createDiv({ cls: 'baizer-settings-panel-title', text: 'Danger Zone' });
+        copy.createDiv({ cls: 'baizer-settings-inline-hint', text: 'Clear all remembered Hindsight memory.' });
         this.createActionButton(zone, 'Clear Memory', async () => {
             this.confirmClearAllMemory();
         }, 'danger');
@@ -1041,15 +1035,10 @@ export class SettingTab extends PluginSettingTab {
             return;
         }
 
-        const workspace = containerEl.createDiv({ cls: 'baizer-settings-workspace' });
-        const listPanel = workspace.createDiv({ cls: 'baizer-settings-workspace-panel is-list' });
-        const detailPanel = workspace.createDiv({ cls: 'baizer-settings-workspace-panel is-detail' });
-
-        const listHeader = listPanel.createDiv({ cls: 'baizer-settings-workspace-header' });
-        const listCopy = listHeader.createDiv({ cls: 'baizer-settings-workspace-copy' });
-        listCopy.createDiv({ cls: 'baizer-settings-workspace-title', text: 'Providers' });
-        listCopy.createDiv({ cls: 'baizer-settings-workspace-subtitle', text: 'Select a provider' });
-        this.createActionButton(listHeader, '+ Add', async () => {
+        const shell = containerEl.createDiv({ cls: 'baizer-settings-provider-shell' });
+        const toolbar = shell.createDiv({ cls: 'baizer-settings-provider-toolbar' });
+        toolbar.createDiv({ cls: 'baizer-settings-panel-title', text: 'Providers' });
+        this.createActionButton(toolbar, '+ Add', async () => {
             new AddProviderModal(this.app, async (label, baseUrl) => {
                 const key = `custom-${Date.now()}`;
                 settings.providers[key] = {
@@ -1061,94 +1050,75 @@ export class SettingTab extends PluginSettingTab {
                 };
                 settings.activeProvider = key;
                 this.resetConnectionTestStatus();
+                this.openSectionIds.add('connection');
                 await this.persistSettings();
                 this.revealApiKey = false;
-                this.activeSectionId = 'connection';
                 this.display();
             }).open();
         }, 'accent');
 
-        const providerList = listPanel.createDiv({ cls: 'baizer-settings-provider-list' });
+        const providerList = shell.createDiv({ cls: 'baizer-settings-provider-list' });
         Object.keys(settings.providers).forEach(providerId => {
             const meta = getProviderCardMeta(settings, providerId);
+            const provider = settings.providers[providerId];
+            const hasApiKey = !!provider.apiKey?.trim();
+            const badgeLabel = !hasApiKey ? 'Needs key' : meta.isActive ? 'Active' : 'Ready';
+            const badgeTone: SettingsBadgeTone = !hasApiKey ? 'warning' : 'success';
+
             const card = providerList.createDiv({
                 cls: `baizer-settings-provider-card${meta.isActive ? ' is-active' : ''}`,
             });
-            card.tabIndex = 0;
-            card.setAttribute('role', 'button');
-            card.setAttribute('aria-pressed', meta.isActive ? 'true' : 'false');
+            card.setAttribute('data-provider-id', providerId);
 
-            const cardHeader = card.createDiv({ cls: 'baizer-settings-provider-card-header' });
-            const cardIdentity = cardHeader.createDiv({ cls: 'baizer-settings-provider-card-identity' });
-            cardIdentity.createDiv({ cls: 'baizer-settings-provider-card-title', text: meta.label });
-            cardIdentity.createSpan({
-                cls: 'baizer-settings-provider-card-icon is-protocol',
-                text: meta.protocolGlyph,
-                attr: { 'aria-label': meta.protocolLabel, title: meta.protocolLabel },
-            });
+            const button = card.createEl('button', {
+                cls: 'baizer-settings-provider-card-main',
+                attr: {
+                    type: 'button',
+                    'aria-pressed': meta.isActive ? 'true' : 'false',
+                },
+            }) as HTMLButtonElement;
+            const header = button.createDiv({ cls: 'baizer-settings-provider-card-header' });
+            header.createDiv({ cls: 'baizer-settings-provider-card-title', text: meta.label });
+            header.createSpan({ cls: `baizer-settings-badge is-${badgeTone}`, text: badgeLabel });
+            button.createDiv({ cls: 'baizer-settings-provider-card-meta', text: meta.compactMeta });
 
-            const cardStatus = cardHeader.createDiv({ cls: 'baizer-settings-provider-card-statuses' });
-            if (meta.isActive) {
-                cardStatus.createSpan({
-                    cls: 'baizer-settings-provider-card-icon is-active',
-                    text: '✓',
-                    attr: { 'aria-label': 'Active provider', title: 'Active provider' },
-                });
-            }
-            cardStatus.createSpan({
-                cls: `baizer-settings-provider-card-icon is-${meta.statusTone}`,
-                text: meta.statusGlyph,
-                attr: { 'aria-label': meta.statusLabel, title: meta.statusLabel },
-            });
-
-            card.createDiv({ cls: 'baizer-settings-provider-card-meta', text: meta.compactMeta });
-
-            const activateProvider = async () => {
+            button.addEventListener('click', async () => {
                 if (providerId === settings.activeProvider) return;
                 this.resetConnectionTestStatus();
                 await this.plugin.modelService.switchProvider(providerId, () => this.persistSettings());
                 this.revealApiKey = false;
-                this.activeSectionId = 'connection';
+                this.openSectionIds.add('connection');
                 this.display();
-            };
+            });
 
-            card.addEventListener('click', () => {
-                void activateProvider();
-            });
-            card.addEventListener('keydown', (event: KeyboardEvent) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    void activateProvider();
-                }
-            });
+            if (meta.isActive) {
+                this.renderActiveProviderDetail(card, activeConfig, token);
+            }
         });
+    }
 
-        const listSummary = getProviderListSummary(settings);
-        listPanel.createDiv({ cls: 'baizer-settings-provider-summary', text: listSummary.label });
+    private renderActiveProviderDetail(parent: HTMLElement, activeConfig: ProviderConfig, token: number): void {
+        const settings = this.plugin.settings;
+        const detail = parent.createDiv({ cls: 'baizer-settings-provider-detail-inline' });
+        const grid = detail.createDiv({ cls: 'baizer-settings-connection-detail-grid' });
+        const basic = grid.createDiv({ cls: 'baizer-settings-connection-card' });
+        basic.createDiv({ cls: 'baizer-settings-connection-card-header' })
+            .createEl('h4', { text: 'Basic', cls: 'baizer-settings-connection-card-title' });
 
-        const detailHeader = detailPanel.createDiv({ cls: 'baizer-settings-workspace-header is-detail' });
-        const detailCopy = detailHeader.createDiv({ cls: 'baizer-settings-workspace-copy' });
-        detailCopy.createDiv({ cls: 'baizer-settings-workspace-title', text: 'Provider Detail' });
-        detailCopy.createDiv({ cls: 'baizer-settings-workspace-subtitle', text: 'Fill the selected provider configuration.' });
-
-        const detailBody = detailPanel.createDiv({ cls: 'baizer-settings-detail-body' });
-        this.renderConnectionField(detailBody, 'Provider Name', (valueEl) => {
+        this.renderConnectionField(basic, 'Provider Name', (valueEl) => {
             const input = valueEl.createEl('input', {
                 cls: 'baizer-settings-detail-input',
-                attr: {
-                    type: 'text',
-                    value: activeConfig.label,
-                    'aria-label': 'Provider name',
-                },
+                attr: { type: 'text', value: activeConfig.label, 'aria-label': 'Provider name' },
             }) as HTMLInputElement;
             input.addEventListener('change', async () => {
                 activeConfig.label = input.value.trim() || activeConfig.label;
+                this.openSectionIds.add('connection');
                 await this.persistSettings();
                 this.display();
             });
         });
 
-        this.renderConnectionField(detailBody, 'Protocol', (valueEl) => {
+        this.renderConnectionField(basic, 'Protocol', (valueEl) => {
             const select = valueEl.createEl('select', {
                 cls: 'baizer-settings-detail-input',
                 attr: { 'aria-label': 'Provider protocol' },
@@ -1158,32 +1128,53 @@ export class SettingTab extends PluginSettingTab {
             select.value = activeConfig.type;
             select.addEventListener('change', async () => {
                 activeConfig.type = select.value as ProviderConfig['type'];
-                if (activeConfig.type === 'gemini') {
-                    activeConfig.baseUrl = '';
-                }
+                if (activeConfig.type === 'gemini') activeConfig.baseUrl = '';
                 this.resetConnectionTestStatus();
+                this.openSectionIds.add('connection');
                 await this.plugin.modelService.updateSettings(this.plugin.settings);
                 await this.persistSettings();
                 this.display();
             });
         });
 
-        const deletion = getProviderDeletionState(settings);
+        this.renderConnectionField(basic, 'Model', (valueEl) => {
+            const select = valueEl.createEl('select', {
+                cls: 'baizer-settings-detail-input',
+                attr: { 'aria-label': 'Model' },
+            }) as HTMLSelectElement;
+            if (activeConfig.model) {
+                select.createEl('option', { value: activeConfig.model, text: activeConfig.model });
+            } else {
+                select.createEl('option', { value: '__empty__', text: 'Select a model' });
+            }
+            this.loadDynamicModelSelect(select, token).catch(() => undefined);
+            select.value = activeConfig.model || '__empty__';
+            select.addEventListener('change', async () => {
+                const value = select.value;
+                if (value === '__loading__' || value === '__failed__' || value === '__empty__') return;
+                this.resetConnectionTestStatus();
+                this.openSectionIds.add('connection');
+                await this.plugin.modelService.switchModel(value, () => this.persistSettings());
+                this.display();
+            });
+        });
 
-        this.renderConnectionField(detailBody, 'API Endpoint', (valueEl) => {
+        const credentials = grid.createDiv({ cls: 'baizer-settings-connection-card' });
+        credentials.createDiv({ cls: 'baizer-settings-connection-card-header' })
+            .createEl('h4', { text: 'Credentials', cls: 'baizer-settings-connection-card-title' });
+
+        this.renderConnectionField(credentials, 'API Endpoint', (valueEl) => {
+            const supportsCustomBaseUrl = this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl;
             const input = valueEl.createEl('input', {
                 cls: 'baizer-settings-detail-input',
                 attr: {
                     type: 'text',
                     placeholder: 'https://api.openai.com/v1',
-                    value: activeConfig.baseUrl,
+                    value: supportsCustomBaseUrl ? activeConfig.baseUrl : (activeConfig.baseUrl || 'Default Gemini endpoint'),
                     'aria-label': 'API endpoint',
-                    disabled: this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl ? undefined : 'true',
+                    disabled: supportsCustomBaseUrl ? undefined : 'true',
                 },
             }) as HTMLInputElement;
-            if (!this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl) {
-                input.value = activeConfig.baseUrl || 'Default Gemini endpoint';
-            }
             input.addEventListener('change', async () => {
                 activeConfig.baseUrl = input.value;
                 this.resetConnectionTestStatus();
@@ -1191,7 +1182,7 @@ export class SettingTab extends PluginSettingTab {
             });
         });
 
-        this.renderConnectionField(detailBody, 'API Key', (valueEl) => {
+        this.renderConnectionField(credentials, 'API Key', (valueEl) => {
             const keyRow = valueEl.createDiv({ cls: 'baizer-settings-detail-secret' });
             const input = keyRow.createEl('input', {
                 cls: 'baizer-settings-detail-input',
@@ -1213,111 +1204,69 @@ export class SettingTab extends PluginSettingTab {
             const secretActions = keyRow.createDiv({ cls: 'baizer-settings-detail-secret-actions' });
             this.createActionButton(secretActions, this.revealApiKey ? 'Hide' : 'Reveal', async () => {
                 this.revealApiKey = !this.revealApiKey;
+                this.openSectionIds.add('connection');
                 this.display();
             });
             this.createActionButton(secretActions, 'Clear', async () => {
                 activeConfig.apiKey = '';
                 this.revealApiKey = false;
                 this.resetConnectionTestStatus();
+                this.openSectionIds.add('connection');
                 await this.persistSettings();
                 this.display();
             }, 'danger');
         });
 
-        this.renderConnectionField(detailBody, 'Model', (valueEl) => {
-            const select = valueEl.createEl('select', {
-                cls: 'baizer-settings-detail-input',
-                attr: { 'aria-label': 'Model' },
-            }) as HTMLSelectElement;
-            if (activeConfig.model) {
-                select.createEl('option', { value: activeConfig.model, text: activeConfig.model });
-            } else {
-                select.createEl('option', { value: '__empty__', text: 'Select a model' });
-            }
+        this.renderConnectionField(credentials, 'Test', (valueEl) => {
+            const actions = valueEl.createDiv({ cls: 'baizer-settings-actions' });
+            this.createActionButton(actions, this.connectionTestStatus.state === 'testing' ? 'Testing...' : 'Run test', async () => {
+                const label = activeConfig.label || 'AI provider';
+                if (!activeConfig.apiKey.trim()) {
+                    this.connectionTestStatus = { state: 'error', message: `No API key configured for ${label}.` };
+                    this.openSectionIds.add('connection');
+                    this.display();
+                    return;
+                }
 
-            this.loadDynamicModelSelect(select, token).catch(() => undefined);
-            select.value = activeConfig.model || '__empty__';
-            select.addEventListener('change', async () => {
-                const value = select.value;
-                if (value === '__loading__' || value === '__failed__' || value === '__empty__') return;
+                try {
+                    this.connectionTestStatus = { state: 'testing', message: `Testing connection to ${label}...` };
+                    this.openSectionIds.add('connection');
+                    this.display();
+                    await this.plugin.modelService.updateSettings(this.plugin.settings);
+                    const success = await this.plugin.modelService.checkAvailability();
+                    this.connectionTestStatus = success
+                        ? { state: 'success', message: `Connection successful for ${label}.` }
+                        : { state: 'error', message: 'Connection failed. Check API key, base URL, and model.' };
+                } catch (error: any) {
+                    this.connectionTestStatus = { state: 'error', message: `Connection failed: ${error.message}` };
+                }
+
+                this.openSectionIds.add('connection');
+                this.display();
+            }, 'primary', this.connectionTestStatus.state === 'testing');
+
+            const deletion = getProviderDeletionState(settings);
+            this.createActionButton(actions, deletion.label, async () => {
+                if (!deletion.canDelete) return;
+                const deletedProviderId = settings.activeProvider;
+                delete settings.providers[deletedProviderId];
+                if (BUILTIN_PROVIDER_KEYS.includes(deletedProviderId)) {
+                    settings.deletedProviderIds = Array.from(new Set([...(settings.deletedProviderIds || []), deletedProviderId]));
+                }
+                settings.activeProvider = settings.providers.gemini ? 'gemini' : Object.keys(settings.providers)[0];
+                this.revealApiKey = false;
                 this.resetConnectionTestStatus();
-                await this.plugin.modelService.switchModel(value, () => this.persistSettings());
+                this.openSectionIds.add('connection');
+                await this.persistSettings();
+                new Notice('Provider deleted');
                 this.display();
-            });
-        });
+            }, 'danger', !deletion.canDelete);
 
-        const connectionStatus = getConnectionTestStatusPresentation(this.connectionTestStatus)
-            || {
-                tone: activeConfig.apiKey.trim() ? 'muted' : 'warning',
-                label: activeConfig.apiKey.trim()
-                    ? 'Run a connection test after updating credentials.'
-                    : `No API key configured for ${activeConfig.label}.`,
-            };
-
-        this.renderConnectionField(detailBody, 'Connection Status', (valueEl) => {
-            valueEl.createDiv({
-                cls: `baizer-settings-inline-note is-${connectionStatus.tone} baizer-settings-inline-note-compact`,
-                text: connectionStatus.label,
-            });
-        });
-
-        const actions = detailPanel.createDiv({ cls: 'baizer-settings-actions baizer-settings-detail-actions' });
-        this.createActionButton(actions, this.connectionTestStatus.state === 'testing' ? 'Testing...' : 'Test Connection', async () => {
-            const label = activeConfig.label || 'AI provider';
-            if (!activeConfig.apiKey.trim()) {
-                this.connectionTestStatus = {
-                    state: 'error',
-                    message: `No API key configured for ${label}.`,
-                };
-                this.display();
-                return;
+            const status = getConnectionTestStatusPresentation(this.connectionTestStatus);
+            if (status) {
+                valueEl.createDiv({ cls: `baizer-settings-inline-note is-${status.tone}`, text: status.label });
             }
-
-            try {
-                this.connectionTestStatus = {
-                    state: 'testing',
-                    message: `Testing connection to ${label}...`,
-                };
-                this.display();
-                await this.plugin.modelService.updateSettings(this.plugin.settings);
-                const success = await this.plugin.modelService.checkAvailability();
-                this.connectionTestStatus = success
-                    ? { state: 'success', message: `Connection successful for ${label}.` }
-                    : { state: 'error', message: 'Connection failed. Check API key, base URL, and model.' };
-            } catch (error: any) {
-                this.connectionTestStatus = {
-                    state: 'error',
-                    message: `Connection failed: ${error.message}`,
-                };
-            }
-
-            this.display();
-        }, 'primary', this.connectionTestStatus.state === 'testing');
-
-        this.createActionButton(actions, deletion.label, async () => {
-            if (!deletion.canDelete) return;
-            const deletedProviderId = settings.activeProvider;
-            delete settings.providers[deletedProviderId];
-            if (BUILTIN_PROVIDER_KEYS.includes(deletedProviderId)) {
-                settings.deletedProviderIds = Array.from(new Set([
-                    ...(settings.deletedProviderIds || []),
-                    deletedProviderId,
-                ]));
-            }
-            settings.activeProvider = settings.providers.gemini
-                ? 'gemini'
-                : Object.keys(settings.providers)[0];
-            this.revealApiKey = false;
-            this.resetConnectionTestStatus();
-            await this.persistSettings();
-            new Notice('Provider deleted');
-            this.display();
-        }, 'danger', !deletion.canDelete);
-
-        detailPanel.createDiv({ cls: 'baizer-settings-inline-hint', text: deletion.helperText });
-        detailPanel.createDiv({
-            cls: 'baizer-settings-inline-hint baizer-settings-inline-hint-strong',
-            text: 'Available models are loaded from the selected provider API.',
+            valueEl.createDiv({ cls: 'baizer-settings-inline-hint', text: getProviderDeletionState(settings).helperText });
         });
     }
 
@@ -1491,7 +1440,25 @@ export class SettingTab extends PluginSettingTab {
     }
 
     private renderPermissionsSection(containerEl: HTMLElement): void {
-        new Setting(containerEl)
+        const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
+        panel.createDiv({ cls: 'baizer-settings-panel-header' })
+            .createEl('h4', { text: 'Permission presets', cls: 'baizer-settings-panel-title' });
+        const presetGrid = panel.createDiv({ cls: 'baizer-settings-panel-body' }).createDiv({ cls: 'baizer-settings-preset-grid' });
+        this.renderPermissionPreset(presetGrid, 'read-only', 'Read only', 'Read and analyze notes without writing to the vault.');
+        this.renderPermissionPreset(presetGrid, 'configured-folders', 'Scoped write', 'Write only inside explicitly configured folders.');
+        this.renderPermissionPreset(presetGrid, 'automation', 'Automation', 'Allow scoped writes with fewer repeated confirmations.');
+        this.renderPermissionPreset(presetGrid, 'open', 'Open access', 'Allow full-vault writes and plugin control.');
+
+        const summaryPanel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
+        summaryPanel.createDiv({ cls: 'baizer-settings-panel-header' })
+            .createEl('h4', { text: 'Effective permissions', cls: 'baizer-settings-panel-title' });
+        this.renderEffectivePermissions(summaryPanel.createDiv({ cls: 'baizer-settings-panel-body' }));
+
+        const advanced = containerEl.createEl('details', { cls: 'baizer-settings-advanced' });
+        advanced.createEl('summary', { text: 'Advanced permission switches' });
+        const advancedBody = advanced.createDiv({ cls: 'baizer-settings-advanced-body' });
+
+        new Setting(advancedBody)
             .setName('Vault Write Scope')
             .setDesc('Choose how broadly AI can write inside your vault.')
             .addDropdown(drop => drop
@@ -1507,7 +1474,7 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         if (this.plugin.settings.vaultWriteScope === 'configured-folders') {
-            new Setting(containerEl)
+            new Setting(advancedBody)
                 .setName('Writable Folders')
                 .setDesc('One vault folder per line. AI can create or modify files only inside these folders.')
                 .setClass('baizer-full-width-textarea')
@@ -1523,7 +1490,7 @@ export class SettingTab extends PluginSettingTab {
                     }));
         }
 
-        new Setting(containerEl)
+        new Setting(advancedBody)
             .setName('Allow File Creation')
             .setDesc('Allow note and file creation after the selected write scope is satisfied.')
             .addToggle(toggle => toggle
@@ -1531,9 +1498,10 @@ export class SettingTab extends PluginSettingTab {
                 .onChange(async (value: boolean) => {
                     this.plugin.settings.allowFileCreation = value;
                     await this.persistSettings();
+                    this.display();
                 }));
 
-        new Setting(containerEl)
+        new Setting(advancedBody)
             .setName('Allow File Modification')
             .setDesc('Allow note and file modification after the selected write scope is satisfied.')
             .addToggle(toggle => toggle
@@ -1541,9 +1509,10 @@ export class SettingTab extends PluginSettingTab {
                 .onChange(async (value: boolean) => {
                     this.plugin.settings.allowFileModification = value;
                     await this.persistSettings();
+                    this.display();
                 }));
 
-        new Setting(containerEl)
+        new Setting(advancedBody)
             .setName('Allow Plugin Control')
             .setDesc('Let AI execute commands from other plugins.')
             .setClass('gemini-danger-setting')
@@ -1556,7 +1525,7 @@ export class SettingTab extends PluginSettingTab {
                     this.display();
                 }));
 
-        new Setting(containerEl)
+        new Setting(advancedBody)
             .setName('Confirm Executions')
             .setDesc('Always ask for confirmation before writing files or running commands.')
             .addToggle(toggle => toggle
@@ -1568,8 +1537,93 @@ export class SettingTab extends PluginSettingTab {
                 }));
     }
 
+    private getPermissionPresetId(): 'read-only' | 'configured-folders' | 'automation' | 'open' | 'custom' {
+        const settings = this.plugin.settings;
+        if (settings.vaultWriteScope === 'read-only' && !settings.allowFileCreation && !settings.allowFileModification && !settings.allowPluginControl && settings.confirmExecutions) {
+            return 'read-only';
+        }
+        if (settings.vaultWriteScope === 'configured-folders' && settings.allowFileCreation && settings.allowFileModification && !settings.allowPluginControl && settings.confirmExecutions) {
+            return 'configured-folders';
+        }
+        if (settings.vaultWriteScope === 'configured-folders' && settings.allowFileCreation && settings.allowFileModification && !settings.allowPluginControl && !settings.confirmExecutions) {
+            return 'automation';
+        }
+        if (settings.vaultWriteScope === 'all-vault' && settings.allowFileCreation && settings.allowFileModification && settings.allowPluginControl && settings.confirmExecutions) {
+            return 'open';
+        }
+        return 'custom';
+    }
+
+    private renderPermissionPreset(parent: HTMLElement, id: 'read-only' | 'configured-folders' | 'automation' | 'open', title: string, desc: string): void {
+        const button = parent.createEl('button', {
+            cls: 'baizer-settings-preset' + (this.getPermissionPresetId() === id ? ' is-active' : ''),
+            attr: { type: 'button' },
+        });
+        button.createEl('strong', { text: title });
+        button.createEl('br');
+        button.createSpan({ text: desc });
+        button.addEventListener('click', async () => {
+            await this.applyPermissionPreset(id);
+            this.display();
+        });
+    }
+
+    private async applyPermissionPreset(id: 'read-only' | 'configured-folders' | 'automation' | 'open'): Promise<void> {
+        if (id === 'read-only') {
+            this.plugin.settings.vaultWriteScope = 'read-only';
+            this.plugin.settings.allowFileCreation = false;
+            this.plugin.settings.allowFileModification = false;
+            this.plugin.settings.allowPluginControl = false;
+            this.plugin.settings.confirmExecutions = true;
+        } else if (id === 'configured-folders') {
+            this.plugin.settings.vaultWriteScope = 'configured-folders';
+            this.plugin.settings.allowFileCreation = true;
+            this.plugin.settings.allowFileModification = true;
+            this.plugin.settings.allowPluginControl = false;
+            this.plugin.settings.confirmExecutions = true;
+        } else if (id === 'automation') {
+            this.plugin.settings.vaultWriteScope = 'configured-folders';
+            this.plugin.settings.allowFileCreation = true;
+            this.plugin.settings.allowFileModification = true;
+            this.plugin.settings.allowPluginControl = false;
+            this.plugin.settings.confirmExecutions = false;
+        } else {
+            this.plugin.settings.vaultWriteScope = 'all-vault';
+            this.plugin.settings.allowFileCreation = true;
+            this.plugin.settings.allowFileModification = true;
+            this.plugin.settings.allowPluginControl = true;
+            this.plugin.settings.confirmExecutions = true;
+        }
+        await this.persistSettings();
+    }
+
+    private renderEffectivePermissions(parent: HTMLElement): void {
+        const list = parent.createEl('ul', { cls: 'baizer-settings-summary-list' });
+        const rows: Array<[string, string]> = [
+            ['Write scope', this.plugin.settings.vaultWriteScope],
+            ['Writable folders', this.plugin.settings.vaultWriteScope === 'configured-folders' ? (this.plugin.settings.vaultWriteAllowedFolders.join(', ') || 'Not configured') : 'Not applicable'],
+            ['File creation', this.plugin.settings.allowFileCreation ? 'Allowed' : 'Blocked'],
+            ['File modification', this.plugin.settings.allowFileModification ? 'Allowed' : 'Blocked'],
+            ['Plugin control', this.plugin.settings.allowPluginControl ? 'Allowed' : 'Blocked'],
+            ['Execution confirmation', this.plugin.settings.confirmExecutions ? 'Required' : 'Automatic'],
+        ];
+        for (const [label, value] of rows) {
+            const item = list.createEl('li');
+            item.createEl('strong', { text: label });
+            item.createSpan({ text: value });
+        }
+        if (this.plugin.settings.allowPluginControl || !this.plugin.settings.confirmExecutions || this.plugin.settings.vaultWriteScope === 'all-vault') {
+            parent.createDiv({ cls: 'baizer-settings-inline-note is-danger', text: 'Current permissions are broad. Keep this enabled only when automation requires it.' });
+        }
+    }
+
     private renderAppearanceSection(containerEl: HTMLElement): void {
-        new Setting(containerEl)
+        const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
+        panel.createDiv({ cls: 'baizer-settings-panel-header' })
+            .createEl('h4', { text: 'Workbench', cls: 'baizer-settings-panel-title' });
+        const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
+
+        new Setting(body)
             .setName('Theme Style')
             .setDesc('Adjust the terminal look and feel.')
             .addDropdown(drop => drop
@@ -1580,10 +1634,12 @@ export class SettingTab extends PluginSettingTab {
                 .onChange(async (value: 'hacker-green' | 'cyberpunk' | 'obsidian-native') => {
                     this.plugin.settings.terminalTheme = value;
                     await this.persistSettings();
+                    this.display();
                 }));
 
-        new Setting(containerEl)
+        new Setting(body)
             .setName('Font Size')
+            .setDesc('Workbench text size.')
             .addSlider(slider => slider
                 .setLimits(12, 24, 1)
                 .setValue(this.plugin.settings.terminalFontSize)
@@ -1591,10 +1647,12 @@ export class SettingTab extends PluginSettingTab {
                 .onChange(async (value: number) => {
                     this.plugin.settings.terminalFontSize = value;
                     await this.persistSettings();
+                    this.display();
                 }));
 
-        new Setting(containerEl)
+        new Setting(body)
             .setName('Background Opacity')
+            .setDesc('Workbench panel opacity.')
             .addSlider(slider => slider
                 .setLimits(0.5, 1.0, 0.05)
                 .setValue(this.plugin.settings.terminalOpacity)
@@ -1602,7 +1660,12 @@ export class SettingTab extends PluginSettingTab {
                 .onChange(async (value: number) => {
                     this.plugin.settings.terminalOpacity = value;
                     await this.persistSettings();
+                    this.display();
                 }));
+
+        const sample = body.createDiv({ cls: 'baizer-settings-sample-line' });
+        sample.createEl('strong', { text: 'Preview' });
+        sample.createSpan({ text: this.plugin.settings.terminalTheme + ' / ' + this.plugin.settings.terminalFontSize + 'px / ' + Math.round(this.plugin.settings.terminalOpacity * 100) + '%' });
     }
 
     private renderCaptureSection(containerEl: HTMLElement): void {
@@ -1640,17 +1703,27 @@ export class SettingTab extends PluginSettingTab {
     }
 
     private renderKnowledgeSection(containerEl: HTMLElement): void {
-        new Setting(containerEl)
-            .setName('Auto Compile')
-            .setDesc('Compile notes automatically when watched folders change.')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.knowledgeAutoCompile)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.knowledgeAutoCompile = value;
+        const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
+        panel.createDiv({ cls: 'baizer-settings-panel-header' })
+            .createEl('h4', { text: 'Knowledge Compile', cls: 'baizer-settings-panel-title' });
+        const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
+
+        new Setting(body)
+            .setName('Source Folders')
+            .setDesc('Folders to watch, one per line.')
+            .setClass('baizer-full-width-textarea')
+            .addTextArea(text => text
+                .setPlaceholder('Clippings\nReading Notes')
+                .setValue((this.plugin.settings.knowledgeSourceFolders || []).join('\n'))
+                .onChange(async (value: string) => {
+                    this.plugin.settings.knowledgeSourceFolders = value
+                        .split('\n')
+                        .map(entry => entry.trim())
+                        .filter(entry => entry.length > 0);
                     await this.persistSettings();
                 }));
 
-        new Setting(containerEl)
+        new Setting(body)
             .setName('Wiki Output Folder')
             .setDesc('The folder where compiled wiki pages are stored.')
             .addText(text => text
@@ -1661,7 +1734,17 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
-        new Setting(containerEl)
+        new Setting(body)
+            .setName('Auto Compile')
+            .setDesc('Compile notes automatically when watched folders change.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.knowledgeAutoCompile)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.knowledgeAutoCompile = value;
+                    await this.persistSettings();
+                }));
+
+        new Setting(body)
             .setName('Max Compile Batch')
             .setDesc('Maximum number of notes to compile in a single batch.')
             .addSlider(slider => slider
@@ -1673,9 +1756,58 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
-        containerEl.createEl('h3', { text: 'Ontology Schema' });
+        const ontologyStatusEl = containerEl.createDiv({
+            cls: 'baizer-settings-inline-note',
+            text: 'Ontology status: loading...',
+        });
+        void this.refreshOntologyStatus(ontologyStatusEl);
 
-        new Setting(containerEl)
+        const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
+        this.createActionButton(actions, 'Open ontology', async () => {
+            const runtime = (this.plugin as any).knowledgeRuntime;
+            if (!runtime?.openOntologyFile) {
+                new Notice('Knowledge runtime is not available.');
+                return;
+            }
+            await runtime.openOntologyFile();
+            await this.refreshOntologyStatus(ontologyStatusEl);
+        });
+        this.createActionButton(actions, 'Discover', async () => {
+            const runtime = (this.plugin as any).knowledgeRuntime;
+            if (!runtime?.discoverOntology) {
+                new Notice('Knowledge runtime is not available.');
+                return;
+            }
+            const path = await runtime.discoverOntology();
+            new Notice(path ? 'Ontology schema created: ' + path : 'Ontology schema was not created.');
+            await this.refreshOntologyStatus(ontologyStatusEl);
+        }, 'accent');
+        this.createActionButton(actions, 'Preview', async () => {
+            const runtime = (this.plugin as any).knowledgeRuntime;
+            if (!runtime?.discoverOntologyPreview) {
+                new Notice('Knowledge runtime is not available.');
+                return;
+            }
+            const preview = await runtime.discoverOntologyPreview();
+            if (preview.content) console.log('[Baizer] Ontology preview:\n', preview.content);
+            new Notice(preview.message);
+        });
+        this.createActionButton(actions, 'Mark stale pending', async () => {
+            const runtime = (this.plugin as any).knowledgeRuntime;
+            if (!runtime?.markOntologyStaleFilesPending) {
+                new Notice('Knowledge runtime is not available.');
+                return;
+            }
+            const count = await runtime.markOntologyStaleFilesPending();
+            new Notice('Marked ' + count + ' stale notes pending.');
+            await this.refreshOntologyStatus(ontologyStatusEl);
+        });
+
+        const advanced = containerEl.createEl('details', { cls: 'baizer-settings-advanced' });
+        advanced.createEl('summary', { text: 'Ontology advanced settings' });
+        const advancedBody = advanced.createDiv({ cls: 'baizer-settings-advanced-body' });
+
+        new Setting(advancedBody)
             .setName('Enable Ontology Schema')
             .setDesc('Use Knowledge Wiki/_ontology.md to add stable categories and entity extraction to future compiles.')
             .addToggle(toggle => toggle
@@ -1685,7 +1817,7 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
-        new Setting(containerEl)
+        new Setting(advancedBody)
             .setName('Ontology Update Mode')
             .setDesc('Manual never discovers automatically. Suggest reports readiness without writing. Auto creates a missing schema when thresholds are met.')
             .addDropdown(drop => drop
@@ -1698,7 +1830,7 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
-        new Setting(containerEl)
+        new Setting(advancedBody)
             .setName('Minimum Articles')
             .setDesc('Minimum compiled wiki articles required before ontology discovery can run.')
             .addText(text => text
@@ -1709,7 +1841,7 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
-        new Setting(containerEl)
+        new Setting(advancedBody)
             .setName('Minimum Topic Frequency')
             .setDesc('A topic must appear this many times before it can influence ontology discovery.')
             .addText(text => text
@@ -1720,7 +1852,7 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
-        new Setting(containerEl)
+        new Setting(advancedBody)
             .setName('Minimum Concept Frequency')
             .setDesc('A concept must appear this many times before it can influence ontology discovery.')
             .addText(text => text
@@ -1731,85 +1863,13 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
-        new Setting(containerEl)
+        new Setting(advancedBody)
             .setName('Auto Recompile Stale Articles')
             .setDesc('Automatically recompile affected notes after ontology changes. Keep off if you want to review stale notes first.')
             .addToggle(toggle => toggle
                 .setValue(!!this.plugin.settings.knowledgeOntologyAutoRecompileStale)
                 .onChange(async (value: boolean) => {
                     this.plugin.settings.knowledgeOntologyAutoRecompileStale = value;
-                    await this.persistSettings();
-                }));
-
-        const ontologyStatusEl = containerEl.createDiv({
-            cls: 'baizer-settings-inline-note',
-            text: 'Ontology status: loading...',
-        });
-        void this.refreshOntologyStatus(ontologyStatusEl);
-
-        new Setting(containerEl)
-            .setName('Ontology Actions')
-            .setDesc('Open, discover, preview, or mark affected notes pending without leaving settings.')
-            .addButton(btn => btn
-                .setButtonText('Open')
-                .onClick(async () => {
-                    const runtime = (this.plugin as any).knowledgeRuntime;
-                    if (!runtime?.openOntologyFile) {
-                        new Notice('Knowledge runtime is not available.');
-                        return;
-                    }
-                    await runtime.openOntologyFile();
-                    await this.refreshOntologyStatus(ontologyStatusEl);
-                }))
-            .addButton(btn => btn
-                .setButtonText('Discover')
-                .onClick(async () => {
-                    const runtime = (this.plugin as any).knowledgeRuntime;
-                    if (!runtime?.discoverOntology) {
-                        new Notice('Knowledge runtime is not available.');
-                        return;
-                    }
-                    const path = await runtime.discoverOntology();
-                    new Notice(path ? `Ontology schema created: ${path}` : 'Ontology schema was not created.');
-                    await this.refreshOntologyStatus(ontologyStatusEl);
-                }))
-            .addButton(btn => btn
-                .setButtonText('Preview')
-                .onClick(async () => {
-                    const runtime = (this.plugin as any).knowledgeRuntime;
-                    if (!runtime?.discoverOntologyPreview) {
-                        new Notice('Knowledge runtime is not available.');
-                        return;
-                    }
-                    const preview = await runtime.discoverOntologyPreview();
-                    if (preview.content) console.log('[Baizer] Ontology preview:\n', preview.content);
-                    new Notice(preview.message);
-                }))
-            .addButton(btn => btn
-                .setButtonText('Mark stale pending')
-                .onClick(async () => {
-                    const runtime = (this.plugin as any).knowledgeRuntime;
-                    if (!runtime?.markOntologyStaleFilesPending) {
-                        new Notice('Knowledge runtime is not available.');
-                        return;
-                    }
-                    const count = await runtime.markOntologyStaleFilesPending();
-                    new Notice(`Marked ${count} stale notes pending.`);
-                    await this.refreshOntologyStatus(ontologyStatusEl);
-                }));
-
-        new Setting(containerEl)
-            .setName('Source Folders')
-            .setDesc('Folders to watch, one per line.')
-            .setClass('baizer-full-width-textarea')
-            .addTextArea(text => text
-                .setPlaceholder('Clippings\nReading Notes')
-                .setValue((this.plugin.settings.knowledgeSourceFolders || []).join('\n'))
-                .onChange(async (value: string) => {
-                    this.plugin.settings.knowledgeSourceFolders = value
-                        .split('\n')
-                        .map(entry => entry.trim())
-                        .filter(entry => entry.length > 0);
                     await this.persistSettings();
                 }));
     }
@@ -1842,7 +1902,12 @@ export class SettingTab extends PluginSettingTab {
     }
 
     private renderPluginSkillsSection(containerEl: HTMLElement): void {
-        new Setting(containerEl)
+        const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
+        panel.createDiv({ cls: 'baizer-settings-panel-header' })
+            .createEl('h4', { text: 'Generation', cls: 'baizer-settings-panel-title' });
+        const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
+
+        new Setting(body)
             .setName('Auto-generate plugin skills')
             .setDesc('Generate AI skills for installed plugins on startup.')
             .addToggle(toggle => toggle
@@ -1853,7 +1918,7 @@ export class SettingTab extends PluginSettingTab {
                     this.display();
                 }));
 
-        new Setting(containerEl)
+        new Setting(body)
             .setName('Excluded plugins')
             .setDesc('Plugin IDs to exclude from skill generation, comma-separated.')
             .addText(text => text
@@ -1866,6 +1931,14 @@ export class SettingTab extends PluginSettingTab {
                         .filter(entry => entry.length > 0);
                     await this.persistSettings();
                 }));
+
+        const list = body.createEl('ul', { cls: 'baizer-settings-skill-list' });
+        const autoItem = list.createEl('li');
+        autoItem.createEl('strong', { text: 'Startup scan' });
+        autoItem.createSpan({ text: this.plugin.settings.autoGeneratePluginSkills ? 'Enabled' : 'Off' });
+        const excludeItem = list.createEl('li');
+        excludeItem.createEl('strong', { text: 'Excluded plugins' });
+        excludeItem.createSpan({ text: String(this.plugin.settings.pluginSkillExcludeList.length) });
     }
 
     private createActionButton(

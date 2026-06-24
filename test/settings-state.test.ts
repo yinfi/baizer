@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, PluginSettings, mergeProviderDefaults } from '../src/mcp/types';
+﻿import { DEFAULT_SETTINGS, PluginSettings, mergeProviderDefaults } from '../src/mcp/types';
 import {
   getConnectionTestStatusPresentation,
   getProviderCardMeta,
@@ -7,6 +7,7 @@ import {
   getMatchingSettingsSections,
   getSettingsSectionStatuses,
   getSettingsFallbackCss,
+  getSettingsOverviewActions,
 } from '../src/settings';
 
 function cloneSettings(): PluginSettings {
@@ -96,6 +97,17 @@ async function runTests() {
   await test('marks permissions as risky when plugin control is enabled', () => {
     const settings = cloneSettings();
     settings.allowPluginControl = true;
+
+    const statuses = getSettingsSectionStatuses(settings);
+
+    expect(statuses.permissions).toEqual({ label: 'Risk', tone: 'danger' });
+  });
+
+  await test('marks permissions as risky when vault-wide writes are enabled', () => {
+    const settings = cloneSettings();
+    settings.vaultWriteScope = 'all-vault';
+    settings.allowPluginControl = false;
+    settings.confirmExecutions = true;
 
     const statuses = getSettingsSectionStatuses(settings);
 
@@ -255,23 +267,60 @@ async function runTests() {
     });
   });
 
-  await test('settings fallback CSS covers the Baizer configuration layout', () => {
+  await test('settings search exposes the Overview section by default', () => {
+    expect(getMatchingSettingsSections('')).toEqual([
+      'overview',
+      'connection',
+      'behavior',
+      'memory',
+      'permissions',
+      'capture',
+      'knowledge',
+      'guardian',
+      'appearance',
+      'plugin-skills',
+    ]);
+  });
+
+  await test('overview actions surface only actionable configuration issues', () => {
+    const settings = cloneSettings();
+    settings.providers.gemini.apiKey = '';
+    settings.providers.deepseek.apiKey = 'ds-key';
+    settings.activeProvider = 'deepseek';
+    settings.allowPluginControl = true;
+
+    expect(getSettingsOverviewActions(settings)).toEqual([
+      { label: '权限过宽', sectionId: 'permissions', tone: 'danger' },
+      { label: 'Google Gemini 缺少 API Key', sectionId: 'connection', tone: 'warning' },
+      { label: 'OpenAI 缺少 API Key', sectionId: 'connection', tone: 'warning' },
+      { label: 'Qwen 缺少 API Key', sectionId: 'connection', tone: 'warning' },
+    ]);
+  });
+
+  await test('settings fallback CSS covers the accordion configuration layout', () => {
     const css = getSettingsFallbackCss();
 
     expect({
       hasRoot: css.includes('.baizer-settings-page'),
-      hasNav: css.includes('.baizer-settings-nav-list'),
-      hasCards: css.includes('.baizer-settings-section-card'),
-      hasWorkspace: css.includes('.baizer-settings-workspace'),
-      hasProviderCards: css.includes('.baizer-settings-provider-card'),
+      hasAccordion: css.includes('.baizer-settings-accordion'),
+      hasSectionSummary: css.includes('.baizer-settings-section-summary'),
+      hasInlineProviderDetail: css.includes('.baizer-settings-provider-detail-inline'),
+      hasConnectionDetailGrid: css.includes('.baizer-settings-connection-detail-grid'),
+      removedNavLayout: css.includes('.baizer-settings-nav-list'),
+      removedWorkspaceSplit: css.includes('.baizer-settings-workspace {'),
+      removedMetricCards: css.includes('.baizer-settings-metric'),
     }).toEqual({
       hasRoot: true,
-      hasNav: true,
-      hasCards: true,
-      hasWorkspace: true,
-      hasProviderCards: true,
+      hasAccordion: true,
+      hasSectionSummary: true,
+      hasInlineProviderDetail: true,
+      hasConnectionDetailGrid: true,
+      removedNavLayout: false,
+      removedWorkspaceSplit: false,
+      removedMetricCards: false,
     });
   });
 }
 
 runTests();
+
