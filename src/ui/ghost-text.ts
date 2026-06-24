@@ -9,6 +9,7 @@ export interface GhostTextSuggestion {
     ch: number;
     replaceRange?: { from: number; to: number }; // Optional replacement range
     visible?: boolean;
+    acceptable?: boolean;
 }
 
 // 更新 Ghost Text 的 Effect
@@ -102,6 +103,12 @@ function acceptGhostTextReal(view: EditorView): boolean {
     if (!suggestion) return false;
 
     const { text, replaceRange, line, ch } = suggestion;
+    if (suggestion.acceptable === false) {
+        view.dispatch({
+            effects: setGhostText.of(null)
+        });
+        return true;
+    }
 
     // Calculate insert position if not replacing
     let from = replaceRange ? replaceRange.from : 0;
@@ -159,13 +166,19 @@ export function ghostTextExtension(): Extension {
 // 导出辅助函数：显示 Ghost Text
 export function showGhostText(view: EditorView, text: string, line: number, ch: number, replaceRange?: { from: number; to: number }) {
     view.dispatch({
-        effects: setGhostText.of({ text, line, ch, replaceRange, visible: true })
+        effects: setGhostText.of({ text, line, ch, replaceRange, visible: true, acceptable: true })
     });
 }
 
 export function storeGhostText(view: EditorView, text: string, line: number, ch: number, replaceRange?: { from: number; to: number }) {
     view.dispatch({
-        effects: setGhostText.of({ text, line, ch, replaceRange, visible: false })
+        effects: setGhostText.of({ text, line, ch, replaceRange, visible: false, acceptable: true })
+    });
+}
+
+export function showDiagnosticGhostText(view: EditorView, text: string, line: number, ch: number) {
+    view.dispatch({
+        effects: setGhostText.of({ text, line, ch, visible: true, acceptable: false })
     });
 }
 

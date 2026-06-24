@@ -20,7 +20,7 @@ async function test(name: string, fn: () => Promise<void> | void) {
 
 async function runTests() {
   console.log('=== Ghost Text Tests ===');
-  const { showGhostText, storeGhostText } = await import('../src/ui/ghost-text');
+  const { showGhostText, storeGhostText, showDiagnosticGhostText } = await import('../src/ui/ghost-text');
 
   await test('storeGhostText preserves accept state without visible decoration', () => {
     let payload: any = null;
@@ -47,6 +47,20 @@ async function runTests() {
     showGhostText(view, 'continue writing', 2, 4);
 
     expect(payload.effects.value.visible).toBe(true);
+  });
+
+  await test('showDiagnosticGhostText is visible but not acceptable', () => {
+    let payload: any = null;
+    const view = {
+      dispatch: (value: any) => {
+        payload = value;
+      },
+    } as any;
+
+    showDiagnosticGhostText(view, ' Guardian: timeout', 2, 4);
+
+    expect(payload.effects.value.visible).toBe(true);
+    expect(payload.effects.value.acceptable).toBe(false);
   });
 }
 

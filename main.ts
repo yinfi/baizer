@@ -5,7 +5,7 @@ import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, ProviderConfig, PLUG
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
-import { ghostTextExtension, showGhostText, storeGhostText } from './src/ui/ghost-text';
+import { ghostTextExtension, showGhostText, showDiagnosticGhostText } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
 import { requestGuardianResponse } from './src/ui/guardian-request';
 import { GuardianCompletionService, getGuardianAutoDelayMs } from './src/ui/guardian-completion';
@@ -405,6 +405,7 @@ export default class BaizerPlugin extends Plugin {
                 sensitivity: this.settings.guardianSensitivity,
                 uiStyle: this.settings.guardianUIStyle,
             });
+            this.showGuardianDiagnosticGhost(editor, decision.reason || 'unknown');
             return;
         }
 
@@ -428,6 +429,7 @@ export default class BaizerPlugin extends Plugin {
     private async runAutoGuardianCheck(editor: any) {
         if (!this.settings.guardianAutoMode) {
             this.logGuardianAuto('auto skipped', { reason: 'auto-disabled' });
+            this.showGuardianDiagnosticGhost(editor, 'auto-disabled');
             return;
         }
 
@@ -452,6 +454,7 @@ export default class BaizerPlugin extends Plugin {
                 line: lineNumber,
                 ch: cursor.ch,
             });
+            this.showGuardianDiagnosticGhost(editor, 'guardian-paused');
             return;
         }
 
@@ -463,6 +466,7 @@ export default class BaizerPlugin extends Plugin {
                 line: lineNumber,
                 ch: cursor.ch,
             });
+            this.showGuardianDiagnosticGhost(editor, decision.reason || 'unknown');
             return;
         }
 
@@ -529,6 +533,7 @@ export default class BaizerPlugin extends Plugin {
             });
 
             if (result.type !== 'completion') {
+                this.showGuardianDiagnosticGhost(editor, result.reason);
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
@@ -539,6 +544,7 @@ export default class BaizerPlugin extends Plugin {
                     reason: 'stale-after-result',
                     totalElapsedMs: Date.now() - startedAt,
                 });
+                this.showGuardianDiagnosticGhost(editor, 'stale-after-result');
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
@@ -551,6 +557,7 @@ export default class BaizerPlugin extends Plugin {
                     resultLine: result.line,
                     currentLineCount,
                 }, 'warn');
+                this.showGuardianDiagnosticGhost(editor, 'line-out-of-bounds');
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
@@ -558,11 +565,7 @@ export default class BaizerPlugin extends Plugin {
             const currentLine = view.state.doc.line(result.line);
             const safeCh = Math.min(result.ch, currentLine.length);
 
-            if (this.shouldShowGuardianGhostText()) {
-                showGhostText(view, result.suggestion, result.line, safeCh);
-            } else {
-                storeGhostText(view, result.suggestion, result.line, safeCh);
-            }
+            showGhostText(view, result.suggestion, result.line, safeCh);
 
             updateGuardianState(
                 view,
@@ -579,6 +582,7 @@ export default class BaizerPlugin extends Plugin {
                 totalElapsedMs: Date.now() - startedAt,
             });
         } catch (error: any) {
+            this.showGuardianDiagnosticGhost(editor, `error:${error?.message || 'unknown'}`);
             logger.error('Auto completion failed', error, 'Baizer Guardian', {
                 requestSeq,
                 activePath,
@@ -589,6 +593,21 @@ export default class BaizerPlugin extends Plugin {
             console.error("Guardian Error:", error);
             updateGuardianState(view, lineNumber, GuardianState.Error);
         }
+    }
+
+    private showGuardianDiagnosticGhost(editor: any, reason: string) {
+        const view = (editor as any).cm as EditorView;
+        if (!view) return;
+        const cursor = editor.getCursor();
+        const lineNumber = cursor.line + 1;
+        const currentLine = editor.getLine(cursor.line) || '';
+        const safeCh = Math.min(cursor.ch, currentLine.length);
+        showDiagnosticGhostText(view, ` Guardian: ${reason}`, lineNumber, safeCh);
+        updateGuardianState(
+            view,
+            lineNumber,
+            this.shouldShowGuardianGutter() ? GuardianState.HasSuggestion : GuardianState.Idle,
+        );
     }
 
     private logGuardianAuto(message: string, metadata?: Record<string, any>, level: 'info' | 'warn' | 'debug' = 'info') {

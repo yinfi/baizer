@@ -47,20 +47,22 @@
 
 /* Ghost Text Styles */
 .guardian-ghost-text {
-    color: rgba(255, 255, 255, 0.3);
+    color: rgba(0, 230, 118, 0.82);
     font-style: italic;
     pointer-events: none;
     user-select: none;
+    text-shadow: 0 0 8px rgba(0, 230, 118, 0.55);
 }
 
 /* Dark theme adjustments */
 .theme-dark .guardian-ghost-text {
-    color: rgba(255, 255, 255, 0.25);
+    color: rgba(0, 230, 118, 0.78);
 }
 
 /* Light theme adjustments */
 .theme-light .guardian-ghost-text {
-    color: rgba(0, 0, 0, 0.25);
+    color: rgba(0, 160, 82, 0.82);
+    text-shadow: 0 0 6px rgba(0, 200, 83, 0.35);
 }
 
 .theme-light .guardian-gutter-marker.guardian-thinking,
