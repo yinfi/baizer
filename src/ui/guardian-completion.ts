@@ -83,7 +83,6 @@ const GUARDIAN_SYSTEM_PROMPT = [
 
 const GUARDIAN_GENERATION_OPTIONS: GenerationOptions = {
   temperature: 0.25,
-  maxTokens: 256,
   timeoutMs: 8000,
   skipGenerationPlan: true,
 };

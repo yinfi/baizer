@@ -239,7 +239,7 @@ async function runTests() {
     expect(calls[0][5].skipGenerationPlan).toBe(true);
   });
 
-  await test('uses enough output budget for reasoning-compatible providers', async () => {
+  await test('does not cap output budget for reasoning-compatible providers', async () => {
     const calls: any[] = [];
     const service = new GuardianCompletionService({
       settings: createSettings() as any,
@@ -258,7 +258,7 @@ async function runTests() {
       activePath: 'Notes/current.md',
     });
 
-    expect(calls[0][5].maxTokens).toBeGreaterThan(180);
+    expect(calls[0][5].maxTokens).toBe(undefined);
   });
 
   await test('prompt biases toward a completion instead of returning none by default', async () => {
