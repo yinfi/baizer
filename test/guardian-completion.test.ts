@@ -272,6 +272,54 @@ async function runTests() {
     expect(result.type).toBe('completion');
   });
 
+  await test('skips malformed leading json and accepts the first valid completion object', async () => {
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {
+        isGenerationConfigured: () => true,
+        generate: async () => 'draft {type:completion,suggestion:"bad"}\n{"type":"completion","suggestion":"cash flow changes"}',
+      } as any,
+    });
+
+    const result = await service.completeAuto({
+      editor: createEditor(['profit and'], { line: 0, ch: 10 }),
+      obsidianContext: {} as any,
+      activePath: 'Notes/current.md',
+    });
+
+    expect(result).toEqual({
+      type: 'completion',
+      suggestion: 'cash flow changes',
+      line: 1,
+      ch: 10,
+      quality: { ok: true, reasons: [] },
+    });
+  });
+
+  await test('reports response preview when invalid json cannot be used', async () => {
+    const events: any[] = [];
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {
+        isGenerationConfigured: () => true,
+        generate: async () => '{type:completion,suggestion:"cash flow"}',
+      } as any,
+      diagnostics: (event: any) => events.push(event),
+    });
+
+    const result = await service.completeAuto({
+      editor: createEditor(['profit and'], { line: 0, ch: 10 }),
+      obsidianContext: {} as any,
+      activePath: 'Notes/current.md',
+      requestId: 9,
+    });
+
+    expect(result).toEqual({ type: 'none', reason: 'invalid-json' });
+    const parseEvent = events.find((event) => event.stage === 'response-parse-failed');
+    expect(parseEvent.requestId).toBe(9);
+    expect(parseEvent.responsePreview).toContain('{type:completion');
+  });
+
   await test('does not wait forever for guardian knowledge context', async () => {
     const events: string[] = [];
     const service = new GuardianCompletionService({

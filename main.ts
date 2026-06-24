@@ -649,6 +649,7 @@ export default class BaizerPlugin extends Plugin {
             'contextLength',
             'knowledgeLength',
             'responseLength',
+            'responsePreview',
             'qualityReasons',
             'activeHeading',
             'tagCount',

@@ -58,13 +58,14 @@ interface GuardianCompletionServiceDeps {
 }
 
 export interface GuardianCompletionDiagnosticEvent {
-  stage: 'build-context-start' | 'build-context-finished' | 'knowledge-start' | 'knowledge-finished' | 'knowledge-timeout' | 'model-start' | 'model-finished' | 'completion-timeout';
+  stage: 'build-context-start' | 'build-context-finished' | 'knowledge-start' | 'knowledge-finished' | 'knowledge-timeout' | 'model-start' | 'model-finished' | 'completion-timeout' | 'response-parse-failed';
   requestId?: number;
   activePath?: string;
   elapsedMs?: number;
   contextLength?: number;
   knowledgeLength?: number;
   responseLength?: number;
+  responsePreview?: string;
 }
 
 interface TriggerDecision {
@@ -240,7 +241,16 @@ export class GuardianCompletionService {
     let suggestion: string;
     if (!parsed) {
       suggestion = extractPlainSuggestion(response);
-      if (!suggestion) return { type: 'none', reason: 'invalid-json' };
+      if (!suggestion) {
+        this.emitDiagnostic({
+          stage: 'response-parse-failed',
+          requestId: input.requestId,
+          activePath: input.activePath,
+          responseLength: response.length,
+          responsePreview: previewResponse(response),
+        });
+        return { type: 'none', reason: 'invalid-json' };
+      }
     } else {
       if (parsed.type === 'none') return { type: 'none', reason: 'explicit-none' };
       if (parsed.type !== 'completion') return { type: 'none', reason: 'unexpected-type' };
@@ -484,9 +494,19 @@ export class GuardianCompletionService {
 }
 
 function parseGuardianJson(response: string): any | null {
-  const start = response.indexOf('{');
-  if (start < 0) return null;
+  for (let start = response.indexOf('{'); start >= 0; start = response.indexOf('{', start + 1)) {
+    const candidate = extractJsonObjectAt(response, start);
+    if (!candidate) continue;
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
 
+function extractJsonObjectAt(response: string, start: number): string | null {
   let depth = 0;
   let inString = false;
   let escape = false;
@@ -508,13 +528,7 @@ function parseGuardianJson(response: string): any | null {
     if (ch === '{') depth += 1;
     if (ch === '}') {
       depth -= 1;
-      if (depth === 0) {
-        try {
-          return JSON.parse(response.slice(start, i + 1));
-        } catch {
-          return null;
-        }
-      }
+      if (depth === 0) return response.slice(start, i + 1);
     }
   }
   return null;
@@ -532,6 +546,13 @@ function extractPlainSuggestion(response: string): string {
 
   const firstLine = trimmed.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || '';
   return firstLine.slice(0, 160).trim();
+}
+
+function previewResponse(response: string): string {
+  return response
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
 }
 
 function trimKnowledgeContext(value: string): string {
