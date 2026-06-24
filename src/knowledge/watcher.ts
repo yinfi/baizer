@@ -89,7 +89,7 @@ export class KnowledgeWatcher {
     this.writingPaths.add(file.path);
     try {
       await ensureSourceId(this.app, file);
-      await setKnowledgeStatus(this.app, file, 'pending');
+      await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'new' });
       console.log(`[KnowledgeWatcher] Registered new file: ${file.path}`);
       this._onCompileNeeded?.();
     } finally {
@@ -110,7 +110,7 @@ export class KnowledgeWatcher {
       if (status === 'done' && await hasSourceContentChanged(this.app, file)) {
         this.writingPaths.add(file.path);
         try {
-          await setKnowledgeStatus(this.app, file, 'pending');
+          await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'content_changed' });
           console.log(`[KnowledgeWatcher] Marked pending (was done): ${file.path}`);
           this._onCompileNeeded?.();
         } finally {

@@ -5,6 +5,7 @@ import { App, TFile } from 'obsidian';
 import { extractFrontmatter } from './ontology';
 
 export type KnowledgeStatus = 'pending' | 'processing' | 'done' | 'failed';
+export type KnowledgePendingReason = 'new' | 'content_changed' | 'manual' | 'legacy' | 'interrupted';
 
 /** frontmatter 中的知识编译字段 */
 export interface KnowledgeFrontmatter {
@@ -13,6 +14,7 @@ export interface KnowledgeFrontmatter {
   knowledge_compiled_at?: string;
   knowledge_summary?: string;
   knowledge_error?: string;
+  knowledge_pending_reason?: KnowledgePendingReason;
 }
 
 /** 生成 ksrc_xxx 格式的 source ID */
@@ -42,6 +44,15 @@ export function getSourceId(app: App, file: TFile): string | null {
   return cache?.frontmatter?.knowledge_source_id ?? null;
 }
 
+export function getPendingReason(app: App, file: TFile): KnowledgePendingReason | null {
+  const cache = app.metadataCache.getFileCache(file);
+  const reason = cache?.frontmatter?.knowledge_pending_reason;
+  if (['new', 'content_changed', 'manual', 'legacy', 'interrupted'].includes(reason)) {
+    return reason as KnowledgePendingReason;
+  }
+  return null;
+}
+
 /**
  * 写入/更新 frontmatter 中的知识编译字段
  * 使用 Obsidian 原生 processFrontMatter API，安全地合并字段
@@ -56,6 +67,7 @@ export async function setKnowledgeStatus(
     compiled_at?: string;
     summary?: string;
     error?: string;
+    pending_reason?: KnowledgePendingReason;
   }
 ): Promise<void> {
   try {
@@ -65,6 +77,11 @@ export async function setKnowledgeStatus(
       if (extra?.source_id) fm.knowledge_source_id = extra.source_id;
       if (extra?.compiled_at) fm.knowledge_compiled_at = extra.compiled_at;
       if (extra?.summary) fm.knowledge_summary = extra.summary;
+      if (status === 'pending' && extra?.pending_reason) {
+        fm.knowledge_pending_reason = extra.pending_reason;
+      } else {
+        delete fm.knowledge_pending_reason;
+      }
 
       // error 字段：失败时写入，成功时清除
       if (extra?.error) {
@@ -94,6 +111,7 @@ async function fixAndSetFrontmatter(
     compiled_at?: string;
     summary?: string;
     error?: string;
+    pending_reason?: KnowledgePendingReason;
   }
 ): Promise<void> {
   let content = await app.vault.read(file);
@@ -114,6 +132,9 @@ async function fixAndSetFrontmatter(
   if (extra?.compiled_at) fields.push(`knowledge_compiled_at: "${extra.compiled_at}"`);
   if (extra?.summary) fields.push(`knowledge_summary: "${extra.summary}"`);
   if (extra?.error) fields.push(`knowledge_error: "${extra.error.replace(/"/g, '\\"')}"`);
+  if (status === 'pending' && extra?.pending_reason) {
+    fields.push(`knowledge_pending_reason: "${extra.pending_reason}"`);
+  }
 
   if (fmMatch) {
     // 在现有 frontmatter 末尾追加

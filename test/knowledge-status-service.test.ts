@@ -211,7 +211,7 @@ async function runTests() {
     });
   });
 
-  await test('getNoteStatus marks old summaries stale when ontology schema is enabled', async () => {
+  await test('getNoteStatus keeps content-current summaries done when only ontology schema changed', async () => {
     const summaryPath = 'Knowledge Wiki/Articles/ksrc_old.md';
     const ontologyContent = `---
 knowledge_artifact_type: ontology_schema
@@ -251,7 +251,7 @@ categories:
     });
 
     expect(await service.getNoteStatus('Projects/Old.md')).toMatchObject({
-      state: 'stale',
+      state: 'done',
       summaryPath,
     });
 

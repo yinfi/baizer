@@ -7,7 +7,9 @@ import {
   ensureSourceId,
   setKnowledgeStatus,
   getFilesByKnowledgeStatus,
+  getPendingReason,
   KnowledgeStatus,
+  KnowledgePendingReason,
 } from './frontmatter';
 import { computeSchemaHash, extractFrontmatter } from './ontology';
 
@@ -36,6 +38,10 @@ export interface CurrentCompiledSummary {
   compiledAt?: string;
   contentHash: string;
   schemaHash?: string;
+}
+
+export interface CompileAllPendingOptions {
+  pendingReasons?: KnowledgePendingReason[];
 }
 
 function asString(value: any): string | undefined {
@@ -675,11 +681,17 @@ export class KnowledgeCompiler {
     onProgress?: (current: number, total: number, path: string) => void,
     schema?: OntologySchema,
     schemaHash?: string,
-    concurrency?: number
+    concurrency?: number,
+    options?: CompileAllPendingOptions
   ): Promise<{ success: number; failed: number }> {
     // stuck-file reset 已移到 runtime.ts onMetadataReady() 统一管理
 
-    const pendingFiles = getFilesByKnowledgeStatus(this.app, 'pending').slice(0, maxBatch);
+    const allowedReasons = options?.pendingReasons
+      ? new Set<KnowledgePendingReason>(options.pendingReasons)
+      : null;
+    const pendingFiles = getFilesByKnowledgeStatus(this.app, 'pending')
+      .filter((file) => !allowedReasons || allowedReasons.has(getPendingReason(this.app, file) as KnowledgePendingReason))
+      .slice(0, maxBatch);
     let success = 0;
     let failed = 0;
 
