@@ -1,6 +1,48 @@
 ---
 
-### [2026-06-26 09:25] Task Summary
+### [2026-06-26 10:55] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 修复了"短确认被当前笔记上下文劫持"的新问题（历史注入已生效，但模型有时被当前打开的文件带偏）。在 `chat-runtime.ts` 的 `prepareTurn` 实现 A+B 两层防护，加 6 个单测。
+- A：当 prompt 仍带自动注入的环境上下文（当前笔记/反链）时，附 `[Context Note]` 定性说明——环境信息可能与本轮无关，与对话冲突时以对话为准。
+- B：当用户消息是短确认/延续回复（"需要"/"用第二个"/"继续"等，长度≤12 且命中模式）且存在对话历史时，剔除自动注入的环境上下文，仅保留用户显式选择的上下文与编辑器选区。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 根因：每轮 `collectCommandContext` 无条件、全量、靠前地把当前活动文件正文（≤1200字）注入 prompt 最新一条 user 消息。当用户用"需要"这种极短回复、且此刻打开的文件又和对话主题不一致（如对话在聊日记链接、当前却开着 ai-digest 模板）时，又大又新的当前笔记上下文盖过了那句短确认的对话意图，模型改口去问要不要处理当前文件。
+- 选 A+B：A 一句指令立刻缓解全局；B 根除"短回复被上下文劫持"这一类。C（检测活动文件变更）偏启发式，后置。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 第一版引入未使用的 `hadAmbientContext` 变量，会触发 `noUnusedLocals`，已移除。
+- 误伤风险：长度限制（≤12字）确保"需要你把整篇文章改写成..."这类实质性长请求不被当成纯确认，对应单测已覆盖。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 新增 3 个 helper：`isContinuationMessage`（短确认识别，中英双语模式）、`isAmbientContextItem`/`hasAmbientContext`（按 `active-note:`/`backlinks:` id 前缀判定环境上下文）、`stripAmbientContext`（过滤剔除）。
+- 环境上下文判定依据 `ChatContextItem.id` 前缀，由 obsidian-context-service 注入时打标，用户显式上下文/选区不带这些前缀因此不受影响。
+- build + tsc(0 错误) + 79 个测试文件（含 6 个新测试）全部通过。
+
+---
+
+### [2026-06-26 09:40] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 把多轮对话历史修复提交到 main（commit e736242）。
+- 新开 worktree（基于最新 main）执行死代码清理：纯删除 9 个全库无引用的导出符号，7 文件 38 行（hideGhostText / clearGuardianState / resetSelectionMenu / KNOWLEDGE_GENERATED_MARKER / PLUGIN_PREFIX / CSS_PREFIX / MemoryContext / CORE_VAULT_TOOL_NAMES / DANGER_VAULT_TOOL_NAMES）。
+- 验证通过后 fast-forward 合并回 main（commit c9d24ca），并清理 worktree 与临时分支。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户要求隔离清理任务：先保存正在进行的修复，再在独立 worktree 做有风险的删除，确认无回归后才合入主目录，避免污染主工作区。
+- worktree 默认从 origin/main 起（落后于本地 main），先 rebase 到 main 再清理，保证基于最新代码、合并时线性 FF。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- worktree 创建后被 OMC 工具的 .omc 状态文件占用，rebase 报 unstaged changes。
+- 删除 worktree 时 Windows 报 Permission denied（文件锁），一次 rm -rf 删不掉。
+
+**4. 如何修复的？ (How was it fixed?)**
+- rebase 前先 `git stash -u` 暂存无关的 .omc 状态文件。
+- worktree remove 已完成 git 元数据移除（worktree list 已无该项），物理目录用 `git worktree prune` + 第二次 `rm -rf` 在锁释放后成功删除，分支 `git branch -d` 正常删除。
+- 全程 build + tsc(0 错误) + 79 个测试文件均通过。
+
+
 
 **1. 刚刚做了什么？ (What was done?)**
 - 先做了无用代码分析：用依赖图可达性 + 全库符号引用计数确认无孤儿文件，定位出 8 个真死代码导出 + 1 个死类型 + 89 个冗余导出。

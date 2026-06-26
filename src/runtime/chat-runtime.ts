@@ -42,6 +42,26 @@ const LOCAL_SLASH_COMMANDS = [
   { command: '/help', description: 'Show the command list' },
 ];
 
+// [A] 给自动注入的当前笔记上下文加定性说明：它只是环境背景，可能与本轮请求无关。
+// 意图由对话历史和 User Request 定义；二者与 Context 冲突时，以对话为准。
+// 这样可避免模型在用户给出"需要/继续/用第二个"这类短回复时，被当前打开的文件带偏。
+const CONTEXT_DISCLAIMER =
+  "[Context Note] The Context above is ambient information about the user's current Obsidian workspace (the note open right now). It may be unrelated to this request. Use the conversation history and the User Request to determine intent; when they conflict with the Context, follow the conversation.";
+
+// [B] 自动注入的"环境"上下文项前缀（当前笔记 / 反链）。用户短确认时剔除这些，
+// 但保留用户显式选择的上下文与编辑器选区。
+const AMBIENT_CONTEXT_PREFIXES = ['active-note:', 'backlinks:'];
+
+// [B] 短确认 / 延续性回复的识别模式。命中且消息很短时，视为延续上一轮对话，
+// 而非对当前打开文件的新请求。
+const CONTINUATION_PATTERNS: RegExp[] = [
+  /^(需要|不需要|好|好的|是|是的|对|对的|行|可以|可以的|继续|嗯+|确认|同意|没错|要|不用|可)$/,
+  /^(ok|okay|yes|yep|yeah|sure|y|continue|go ahead|do it|proceed)$/i,
+  /^(用|选|采用|使用|按|就用|就选|就)\s*(第\s*[一二三四五六七八九十\d]+|这|那|上面|前面|刚才|这个|那个|这样)/,
+  /^第\s*[一二三四五六七八九十\d]+\s*(个|种|条|项|方法|方式|选项|步)?$/,
+  /^(方法|方式|选项|option)\s*[一二三四五六七八九十\d]+$/i,
+];
+
 export class DefaultChatRuntime implements ChatRuntime {
   private readonly generationStrategyService = new GenerationStrategyService();
 
@@ -93,7 +113,21 @@ export class DefaultChatRuntime implements ChatRuntime {
       prompt += `${memoryContext}\n\n`;
     }
     prompt += `[Current Time: ${new Date().toLocaleString()} (${new Date().toLocaleDateString(undefined, { weekday: 'long' })})]\n`;
-    prompt += `[Context: ${this.formatContextItems(request.contextItems)}]\n`;
+
+    // [B] 用户给出短确认/延续性回复（"需要"、"用第二个"等）且存在对话历史时，
+    // 剔除自动注入的环境上下文（当前笔记/反链），避免它盖过对话意图把模型带偏。
+    // 用户显式选择的上下文与编辑器选区始终保留。
+    const isContinuation = this.isContinuationMessage(request.userMessage)
+      && (request.priorMessages?.length ?? 0) > 0;
+    const promptContextItems = isContinuation
+      ? this.stripAmbientContext(request.contextItems)
+      : request.contextItems;
+
+    prompt += `[Context: ${this.formatContextItems(promptContextItems)}]\n`;
+    // [A] 仅当 prompt 里仍带有自动注入的环境上下文时，附上"以对话为准"的定性说明。
+    if (this.hasAmbientContext(promptContextItems)) {
+      prompt += `${CONTEXT_DISCLAIMER}\n`;
+    }
     prompt += `${this.buildSlashCommandContract()}\n`;
     if (activeSkill) {
       prompt += `[Active Skill: ${activeSkill.skill.name}]\n`;
@@ -292,6 +326,33 @@ export class DefaultChatRuntime implements ChatRuntime {
       if (item.type === 'image') return `[Image: ${item.summary || 'Attached Image'}]`;
       return `[Context (${item.type}): ${item.data}]\n${item.content || ''}`;
     }).join('\n\n');
+  }
+
+  /**
+   * [B] 判断用户消息是否为短确认/延续性回复（"需要"、"用第二个"、"继续"等）。
+   * 这类回复在延续上一轮对话，而非针对当前打开的文件发起新请求。
+   * 限制长度避免误伤——"需要帮我把整篇文章改写成..." 不应被当作纯确认。
+   */
+  private isContinuationMessage(message: string): boolean {
+    const text = (message ?? '').trim();
+    if (!text || text.length > 12) return false;
+    return CONTINUATION_PATTERNS.some(pattern => pattern.test(text));
+  }
+
+  /** [B] 某个上下文项是否为自动注入的环境上下文（当前笔记 / 反链）。 */
+  private isAmbientContextItem(item: ChatContextItem): boolean {
+    const id = item.id ?? '';
+    return AMBIENT_CONTEXT_PREFIXES.some(prefix => id.startsWith(prefix));
+  }
+
+  /** [B] 是否存在自动注入的环境上下文。用于决定是否附加 Context 定性说明。 */
+  private hasAmbientContext(contextItems: ChatContextItem[]): boolean {
+    return (contextItems ?? []).some(item => this.isAmbientContextItem(item));
+  }
+
+  /** [B] 剔除自动注入的环境上下文，保留用户显式选择的上下文与选区。 */
+  private stripAmbientContext(contextItems: ChatContextItem[]): ChatContextItem[] {
+    return (contextItems ?? []).filter(item => !this.isAmbientContextItem(item));
   }
 
   private buildSlashCommandContract(): string {

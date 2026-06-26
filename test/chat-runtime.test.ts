@@ -707,6 +707,134 @@ async function runTests() {
     expect(result).toContain('Generation quality check failed');
     expect(result).toContain('Generated text is too close to the original text.');
   });
+
+  const makeContextRuntime = () => createChatRuntime({
+    provider: {} as any,
+    memoryManager: null,
+    toolRegistry: {
+      getAllDefinitions: () => [],
+      execute: async () => ({}),
+    } as any,
+    skillRegistry: {
+      resolveByIntent: () => null,
+      getSkillSummaryText: () => '',
+      activateSkill: () => null,
+    } as any,
+  });
+
+  const ambientNote = () => ({
+    id: 'active-note:Daily/2026/2026-06-24.md',
+    type: 'file',
+    data: 'Daily/2026/2026-06-24.md',
+    summary: 'Active note: 2026-06-24',
+    content: 'AI digest body that should not hijack a short confirmation.',
+  });
+
+  await test('[B] short confirmation with prior history strips ambient note context', async () => {
+    const runtime = makeContextRuntime();
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: '需要',
+      contextItems: [ambientNote()],
+      priorMessages: [
+        { role: 'user', content: '日记里的链接为什么点不动' },
+        { role: 'model', content: '可以改成 wikilink，要我帮你改吗' },
+      ],
+    } as any);
+
+    // 当前笔记正文被剔除，模型不再被它带偏
+    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(false);
+    expect(prepared.prompt.includes('Daily/2026/2026-06-24.md')).toBe(false);
+    // 没有残留的环境上下文，就不该附定性说明
+    expect(prepared.prompt.includes('[Context Note]')).toBe(false);
+    expect(prepared.prompt.includes('User Request: 需要')).toBe(true);
+  });
+
+  await test('[B] "用第二个方法" is treated as a continuation and strips ambient context', async () => {
+    const runtime = makeContextRuntime();
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: '用第二个方法',
+      contextItems: [ambientNote()],
+      priorMessages: [
+        { role: 'user', content: '链接点不动' },
+        { role: 'model', content: '方法一：建文件；方法二：改绝对路径' },
+      ],
+    } as any);
+
+    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(false);
+    expect(prepared.prompt.includes('User Request: 用第二个方法')).toBe(true);
+  });
+
+  await test('[B] continuation detection requires prior history', async () => {
+    const runtime = makeContextRuntime();
+
+    // 没有历史时，"需要" 不应剔除上下文（可能就是针对当前笔记的首轮请求）
+    const prepared = await runtime.prepareTurn({
+      userMessage: '需要',
+      contextItems: [ambientNote()],
+    } as any);
+
+    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(true);
+    // 保留了环境上下文，则附上定性说明
+    expect(prepared.prompt.includes('[Context Note]')).toBe(true);
+  });
+
+  await test('[B] long substantive message keeps ambient context even with history', async () => {
+    const runtime = makeContextRuntime();
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: '需要你把当前这篇文章整体改写得更精炼一些',
+      contextItems: [ambientNote()],
+      priorMessages: [
+        { role: 'user', content: '前面的问题' },
+        { role: 'model', content: '前面的回答' },
+      ],
+    } as any);
+
+    // 实质性长请求不算确认，当前笔记上下文必须保留
+    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(true);
+  });
+
+  await test('[A] explicit user-selected context is never stripped on confirmation', async () => {
+    const runtime = makeContextRuntime();
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: '好的',
+      contextItems: [
+        ambientNote(),
+        {
+          id: 'user-scope:Projects/Plan.md',
+          type: 'file',
+          data: 'Projects/Plan.md',
+          summary: 'User added: Plan',
+          content: 'Explicitly attached project plan content.',
+        },
+      ],
+      priorMessages: [
+        { role: 'user', content: 'q' },
+        { role: 'model', content: 'a' },
+      ],
+    } as any);
+
+    // 环境笔记被剔除
+    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(false);
+    // 用户显式附加的上下文必须保留
+    expect(prepared.prompt.includes('Explicitly attached project plan content.')).toBe(true);
+  });
+
+  await test('[A] ambient context on a normal request carries the conversation-wins disclaimer', async () => {
+    const runtime = makeContextRuntime();
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: '总结一下这篇文章的要点',
+      contextItems: [ambientNote()],
+    } as any);
+
+    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(true);
+    expect(prepared.prompt.includes('[Context Note]')).toBe(true);
+    expect(prepared.prompt.includes('follow the conversation')).toBe(true);
+  });
 }
 
 runTests().catch((e) => {
