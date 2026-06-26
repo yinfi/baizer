@@ -4,11 +4,9 @@ import { OntologyUpdateMode } from "../knowledge/types";
 // ===== 品牌配置 — 改名只需改这里 =====
 export const PLUGIN_ID = 'baizer';
 export const PLUGIN_NAME = 'Baizer';
-export const PLUGIN_PREFIX = 'baizer';
 export const VIEW_TYPE_SHELL = `${PLUGIN_ID}-shell-view`;
 export const MEMORY_DIR = `.obsidian/${PLUGIN_ID}-memory`;
 export const PLUGIN_DATA_DIR = `.obsidian/${PLUGIN_ID}`;
-export const CSS_PREFIX = 'baizer';
 
 declare module "obsidian" {
     interface App {

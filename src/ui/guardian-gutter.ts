@@ -177,10 +177,3 @@ export function updateGuardianState(view: EditorView, line: number, state: Guard
         effects: setGuardianLineState.of({ line, state })
     });
 }
-
-// Helper: Clear Local State
-export function clearGuardianState(view: EditorView) {
-    view.dispatch({
-        effects: setGuardianLineState.of(null)
-    });
-}

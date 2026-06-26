@@ -609,16 +609,6 @@ const ALL_VAULT_TOOLS: Tool[] = [
   readFile, createFile, updateFile,
 ];
 
-/** 高频核心工具（始终注册到 function calling） */
-export const CORE_VAULT_TOOL_NAMES = [
-  'read_note', 'create_note', 'update_note', 'append_to_note',
-  'list_notes', 'search_vault', 'open_file',
-  'read_file', 'create_file', 'update_file',
-];
-
-/** 危险操作工具（通过 vault-danger skill 按需激活） */
-export const DANGER_VAULT_TOOL_NAMES = ['delete_note', 'rename_note'];
-
 /**
  * 将所有 vault 工具注册到 ToolRegistry
  */

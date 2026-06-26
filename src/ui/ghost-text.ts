@@ -181,10 +181,3 @@ export function showDiagnosticGhostText(view: EditorView, text: string, line: nu
         effects: setGhostText.of({ text, line, ch, visible: true, acceptable: false })
     });
 }
-
-// 导出辅助函数：隐藏 Ghost Text
-export function hideGhostText(view: EditorView) {
-    view.dispatch({
-        effects: setGhostText.of(null)
-    });
-}

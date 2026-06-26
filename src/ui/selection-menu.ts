@@ -105,12 +105,6 @@ export function selectionMenuExtension(app: App, modelService: ModelService): Ex
     ];
 }
 
-export function resetSelectionMenu(view: EditorView) {
-    view.dispatch({
-        effects: setSelectionMenuState.of({ type: 'hidden' }),
-    });
-}
-
 function findAtTriggerInState(state: EditorState, cursor: number): { from: number; to: number } | null {
     if (cursor <= 0) return null;
 

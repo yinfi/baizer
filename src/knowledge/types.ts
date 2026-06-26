@@ -175,5 +175,4 @@ export const WIKI_TOPICS_SUBFOLDER = 'Topics';
 export const WIKI_HEALTH_SUBFOLDER = 'Health';
 export const WIKI_INDEX_FILENAME = 'index.md';
 export const WIKI_INDEX_BASE_FILENAME = 'index.base';
-export const KNOWLEDGE_GENERATED_MARKER = 'knowledge_generated';
 export const ONTOLOGY_SCHEMA_FILENAME = '_ontology.md';

@@ -39,11 +39,6 @@ export interface ChatMessage {
     timestamp: number;
 }
 
-export interface MemoryContext {
-    userProfile: string;
-    recentSessions: string;
-}
-
 export type MemoryViewMode =
     | 'overview'
     | 'observations'
