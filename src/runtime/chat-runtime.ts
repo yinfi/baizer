@@ -123,11 +123,12 @@ export class DefaultChatRuntime implements ChatRuntime {
       generationPlan,
       writingProfile,
       systemPromptOverride: request.systemPromptOverride,
+      priorMessages: request.priorMessages,
     };
   }
 
   async query(turn: PreparedChatTurn): Promise<string> {
-    const chat = this.deps.provider.startChat(turn.tools);
+    const chat = this.deps.provider.startChat(turn.tools, turn.priorMessages);
 
     let result = await chat.sendMessage(turn.prompt);
     let loopCount = 0;
@@ -168,7 +169,7 @@ export class DefaultChatRuntime implements ChatRuntime {
   }
 
   async *queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
-    const chat = this.deps.provider.startChat(turn.tools);
+    const chat = this.deps.provider.startChat(turn.tools, turn.priorMessages);
 
     let loopCount = 0;
     const maxLoops = 10;

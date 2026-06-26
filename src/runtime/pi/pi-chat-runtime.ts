@@ -51,7 +51,9 @@ export class PiChatRuntime extends DefaultChatRuntime implements ChatRuntime {
   }
 
   async *queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
-    const chat = this.deps.provider.startChat(turn.tools);
+    // priorMessages 注入底层会话：pi 的 agentLoop context 只承载本轮工具循环，
+    // 跨轮历史由底层 IChatSession 维护，getBaizerInput 每轮只取当前输入即可。
+    const chat = this.deps.provider.startChat(turn.tools, turn.priorMessages);
     const controller = new AbortController();
     const forwardExternalAbort = () => controller.abort(signal?.reason);
     if (signal?.aborted) {

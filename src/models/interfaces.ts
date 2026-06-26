@@ -19,6 +19,16 @@ export interface ChatMessage {
     content: string;
 }
 
+/**
+ * 跨轮注入到新会话的历史消息。
+ * 只携带干净的对话原文（用户提问 + AI 回答），不包含 system 装饰、
+ * 工具调用细节或审批提示——这些每轮由 prepareTurn 重新挂在最新一条消息上。
+ */
+export interface PriorChatMessage {
+    role: 'user' | 'model';
+    content: string;
+}
+
 export interface ChatContextItem {
     id?: string;
     type: string;
@@ -82,5 +92,5 @@ export interface IModelProvider {
     listModels?(): Promise<ModelOption[]>;
 
     generateContent(prompt: string, systemPrompt?: string, options?: GenerationOptions): Promise<GenerationResult>;
-    startChat(tools?: ToolDefinition[]): IChatSession;
+    startChat(tools?: ToolDefinition[], priorMessages?: PriorChatMessage[]): IChatSession;
 }

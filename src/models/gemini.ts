@@ -8,6 +8,7 @@ import {
   IModelProvider,
   ModelConfig,
   ModelOption,
+  PriorChatMessage,
   StreamEvent,
   ToolDefinition,
   ToolResult,
@@ -119,14 +120,20 @@ export class GeminiProvider implements IModelProvider {
         };
     }
 
-    startChat(tools?: ToolDefinition[]): IChatSession {
+    startChat(tools?: ToolDefinition[], priorMessages?: PriorChatMessage[]): IChatSession {
         const modelWithTools = tools ? this.genAI.getGenerativeModel({
             model: this.config.modelName,
             systemInstruction: this.config.systemPrompt,
             tools: [{ functionDeclarations: tools }]
         }) : this.model;
 
-        const chat = modelWithTools.startChat();
+        // 把上一轮起的干净对话作为初始 history 注入，模型才能看到自己之前说过的话。
+        const history = (priorMessages ?? []).map(message => ({
+            role: message.role,
+            parts: [{ text: message.content }],
+        }));
+
+        const chat = modelWithTools.startChat(history.length > 0 ? { history } : undefined);
         return new GeminiChatSession(chat);
     }
 }

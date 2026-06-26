@@ -1,6 +1,26 @@
 ---
 
-### [2026-04-19 20:51] Task Summary
+### [2026-06-26 09:25] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 先做了无用代码分析：用依赖图可达性 + 全库符号引用计数确认无孤儿文件，定位出 8 个真死代码导出 + 1 个死类型 + 89 个冗余导出。
+- 然后修复了「多轮对话 AI 看不到自己上一轮回答」的 bug：给 `IModelProvider.startChat` 增加可选 `priorMessages` 参数，让每轮新建的会话注入上一轮起的干净对话历史。改动覆盖 interfaces / gemini / openai / runtime-types / chat-runtime / pi-chat-runtime / model-service / chat-controller，并补了 2 个新单测。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 根因：每轮 `query`/`queryStream` 都 `provider.startChat()` 新建空会话且只发当前 prompt，UI 层 `ChatController.messages` 存着完整历史却从不下传。模型每轮只能看到 system + Hindsight 语义召回 + 当前一句，看不到上一轮自己说的「两个方法」，于是去 vault 里找不到、答非所问。
+- 选路线 A（每轮注入历史、保持无状态重建）而非复用长生命周期 session：避免 prepareTurn 每轮塞的 memory/时间/context 装饰被永久累积进 history 越滚越脏，token 也更可控。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- `.worktrees/` 和 node_modules 干扰文件扫描，需排除。
+- 命令行 `tsc` 未带 `--skipLibCheck` 时报 typebox 第三方 d.ts 错误，加上后本项目 0 错误。
+- 既有测试 `processCommand normalizes legacy string context` 因 `api.chat` 参数扩展而断言失配，已同步更新。
+
+**4. 如何修复的？ (How was it fixed?)**
+- ChatController 新增 `buildPriorMessages(excludeLastUser)`：过滤 system 消息、跳过 interrupted 残答、ai→model 角色映射、排除刚入列的当前 user 消息，再透传到 `chat`/`chatStream`。
+- Gemini 用 `startChat({history})` 注入；OpenAI 在 session 构造时把历史 push 进 `this.history`；pi 模式透传给底层 session。
+- 全量 79 个测试文件通过，生产构建与 tsc 类型检查均无本项目错误。
+
+
 
 **1. 刚刚做了什么？ (What was done?)**
 - 完成 /plan-eng-review，审查 /emit 输出引擎设计文档。4 个架构 issue + Codex outside voice 12 个发现（7 个采纳）。范围从 7 文件减到 6 文件。2 个 TODO 加入 TODOS.md。

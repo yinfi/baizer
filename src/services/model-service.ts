@@ -3,7 +3,7 @@ import { PluginSettings, ProviderConfig } from '../mcp/types';
 import { MemoryManager } from '../memory/memory-manager';
 import { MemoryMutationResult, MemoryView, MemoryViewRequest, UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
-import { GenerationOptions, IModelProvider, ModelOption, ToolDefinition, StreamEvent } from '../models/interfaces';
+import { GenerationOptions, IModelProvider, ModelOption, PriorChatMessage, ToolDefinition, StreamEvent } from '../models/interfaces';
 import { GeminiProvider } from '../models/gemini';
 import { OpenAIProvider } from '../models/openai';
 import { SkillRegistry } from '../skills/skill-registry';
@@ -292,6 +292,7 @@ export class ModelService {
         obsidianContext?: ObsidianContextSnapshot,
         userProfile?: UserProfile | null,
         systemPromptOverride?: string,
+        priorMessages?: PriorChatMessage[],
     ): Promise<string> {
         logger.info(`Processing chat message: ${userMessage.substring(0, 50)}...`, 'ModelService.chat');
 
@@ -313,6 +314,7 @@ export class ModelService {
                 obsidianContext,
                 userProfile: userProfile ?? this.getUserProfile(),
                 systemPromptOverride,
+                priorMessages,
             });
             return await runtime.query(preparedTurn);
         } catch (e: any) {
@@ -329,6 +331,7 @@ export class ModelService {
         obsidianContext?: ObsidianContextSnapshot,
         userProfile?: UserProfile | null,
         signal?: AbortSignal,
+        priorMessages?: PriorChatMessage[],
     ): AsyncGenerator<StreamEvent, void, unknown> {
         logger.info(`Processing streaming chat: ${userMessage.substring(0, 50)}...`, 'ModelService.chatStream');
 
@@ -349,6 +352,7 @@ export class ModelService {
                 source: resolvedSource,
                 obsidianContext,
                 userProfile: userProfile ?? this.getUserProfile(),
+                priorMessages,
             });
             for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
                 yield event;

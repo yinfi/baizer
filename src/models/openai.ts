@@ -1,4 +1,4 @@
-import { IModelProvider, ModelConfig, IChatSession, GenerationOptions, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption, StreamEvent } from './interfaces';
+import { IModelProvider, ModelConfig, IChatSession, GenerationOptions, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption, StreamEvent, PriorChatMessage } from './interfaces';
 import { requestUrl, RequestUrlParam } from 'obsidian';
 import { logger } from '../utils/logger';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
@@ -92,8 +92,8 @@ export class OpenAIProvider implements IModelProvider {
         return this.chatCompletion(messages, undefined, options);
     }
 
-    startChat(tools?: ToolDefinition[]): IChatSession {
-        return new OpenAIChatSession(this.config, tools, this);
+    startChat(tools?: ToolDefinition[], priorMessages?: PriorChatMessage[]): IChatSession {
+        return new OpenAIChatSession(this.config, tools, this, priorMessages);
     }
 
     async chatCompletion(messages: any[], tools?: ToolDefinition[], options?: GenerationOptions): Promise<GenerationResult> {
@@ -302,10 +302,18 @@ class OpenAIChatSession implements IChatSession {
     constructor(
         private config: ModelConfig,
         private tools: ToolDefinition[] | undefined,
-        private provider: OpenAIProvider
+        private provider: OpenAIProvider,
+        priorMessages?: PriorChatMessage[]
     ) {
         if (config.systemPrompt) {
             this.history.push({ role: 'system', content: config.systemPrompt });
+        }
+        // 注入上一轮起的干净对话原文，OpenAI 的 model 角色对应内部 assistant。
+        for (const message of priorMessages ?? []) {
+            this.history.push({
+                role: message.role === 'model' ? 'assistant' : 'user',
+                content: message.content,
+            });
         }
     }
 

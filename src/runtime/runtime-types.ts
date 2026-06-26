@@ -1,4 +1,4 @@
-import type { ChatContextItem, IModelProvider, StreamEvent, ToolDefinition } from '../models/interfaces';
+import type { ChatContextItem, IModelProvider, PriorChatMessage, StreamEvent, ToolDefinition } from '../models/interfaces';
 import type { MemoryManager } from '../memory/memory-manager';
 import type { UserProfile } from '../memory/types';
 import type { ObsidianContextSnapshot } from '../services/obsidian-context-service';
@@ -26,6 +26,8 @@ export interface ChatTurnRequest {
   obsidianContext?: ObsidianContextSnapshot;
   userProfile?: UserProfile | null;
   systemPromptOverride?: string;
+  /** 上一轮起的干净对话原文，由 UI 层提供，用于跨轮上下文延续。 */
+  priorMessages?: PriorChatMessage[];
 }
 
 export interface PreparedChatTurn {
@@ -40,6 +42,8 @@ export interface PreparedChatTurn {
   generationPlan?: GenerationPlan;
   writingProfile?: WritingProfile;
   systemPromptOverride?: string;
+  /** 透传给 provider.startChat 的历史，使新会话携带跨轮上下文。 */
+  priorMessages?: PriorChatMessage[];
 }
 
 export interface ChatRuntime {

@@ -333,6 +333,11 @@ async function runTests() {
         content: 'Selected Text:\nalpha',
       }],
       'alpha',
+      'shell',
+      undefined,
+      undefined,
+      undefined,
+      [],
     ]]);
 
     controller.cleanup();
@@ -639,6 +644,76 @@ async function runTests() {
       content: 'Response stopped.',
       timestamp: messages[messages.length - 1].timestamp,
     });
+
+    controller.cleanup();
+  });
+
+  await test('second turn forwards prior user and AI messages so the model keeps context', async () => {
+    const chatCalls: any[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async (...args: any[]) => {
+          chatCalls.push(args);
+          return 'Method one: create the files. Method two: use absolute links.';
+        },
+        chatStream: async function* () { },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+    });
+
+    await controller.processCommand('Why can the links not jump?');
+    await controller.processCommand('Use the second method');
+
+    // 第一轮没有历史
+    expect(chatCalls[0][7]).toEqual([]);
+    // 第二轮必须带上第一轮的 user 提问 + AI 回答，否则模型看不到"两个方法"
+    expect(chatCalls[1][7]).toEqual([
+      { role: 'user', content: 'Why can the links not jump?' },
+      { role: 'model', content: 'Method one: create the files. Method two: use absolute links.' },
+    ]);
+
+    controller.cleanup();
+  });
+
+  await test('interrupted AI replies are excluded from prior messages', async () => {
+    const chatCalls: any[] = [];
+
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async (...args: any[]) => {
+          chatCalls.push(args);
+          return 'ok';
+        },
+        chatStream: async function* () { },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+    });
+
+    (controller as any).messages.push(
+      { id: 'u0', role: 'user', content: 'earlier question', timestamp: 1 },
+      { id: 'a0', role: 'ai', content: 'partial answer', timestamp: 2, metadata: { interrupted: true } },
+      { id: 's0', role: 'system', content: 'Session cleared.', timestamp: 3 },
+    );
+
+    await controller.processCommand('next question');
+
+    // 中断的 AI 回答和 system 消息都不应进入历史
+    expect(chatCalls[0][7]).toEqual([
+      { role: 'user', content: 'earlier question' },
+    ]);
 
     controller.cleanup();
   });
