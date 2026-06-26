@@ -2,6 +2,7 @@ import { App } from 'obsidian';
 import {
   DEFAULT_MEMORY_BANK_ID,
   MemoryRecord,
+  tokenizeForRetrieval,
 } from '../src/memory/hindsight-types';
 import { HindsightStore } from '../src/memory/hindsight-store';
 
@@ -236,6 +237,163 @@ async function runTests() {
     expect(memories.some((memory) => memory.text.includes('Previous plugin engineer'))).toBe(true);
     expect(memories.some((memory) => memory.text.includes('Old summary.'))).toBe(true);
     expect(memories.some((memory) => memory.id === 'mem_previous_plugin')).toBe(true);
+  });
+
+  // ── tokenizeForRetrieval unit tests ──────────────────────────────────────
+
+  await test('tokenizeForRetrieval expands CJK runs into overlapping bigrams', async () => {
+    const tokens = tokenizeForRetrieval('记忆语义召回升级');
+    // Expected bigrams: 记忆, 忆语, 语义, 义召, 召回, 回升, 升级
+    expect(tokens).toContain('记忆');
+    expect(tokens).toContain('召回');
+    expect(tokens).toContain('语义');
+    // Should NOT contain the full run as a single token
+    expect(tokens.includes('记忆语义召回升级')).toBe(false);
+  });
+
+  await test('tokenizeForRetrieval keeps latin tokens and mixes with CJK bigrams', async () => {
+    const tokens = tokenizeForRetrieval('记忆召回升级 baizer memory');
+    expect(tokens).toContain('记忆');
+    expect(tokens).toContain('召回');
+    expect(tokens).toContain('baizer');
+    expect(tokens).toContain('memory');
+  });
+
+  await test('tokenizeForRetrieval emits unigram for single CJK character', async () => {
+    const tokens = tokenizeForRetrieval('我');
+    expect(tokens.includes('我')).toBe(true);
+    expect(tokens.length).toBe(1);
+  });
+
+  await test('tokenizeForRetrieval deduplicates repeated bigrams', async () => {
+    const tokens = tokenizeForRetrieval('记忆记忆');
+    const count = tokens.filter((t) => t === '记忆').length;
+    expect(count).toBe(1);
+  });
+
+  // ── BM25 / Chinese multi-word recall tests ────────────────────────────────
+
+  await test('retriever recalls CN memory via shared CJK bigrams (multi-word query)', async () => {
+    // Document contains 「记忆语义召回升级」; query is 「记忆召回」.
+    // Old tokenizer: doc token = ["记忆语义召回升级"], query token = ["记忆召回"] → 0 overlap → miss.
+    // New bigram tokenizer: doc bigrams include 记忆, 召回; query bigrams include 记忆, 召回 → 2 overlaps → hit.
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemories([
+      makeMemory({
+        id: 'mem_cn_recall',
+        type: 'world',
+        text: '用户正在开发记忆语义召回升级功能。',
+        normalizedText: '用户正在开发记忆语义召回升级功能。',
+        entities: ['记忆语义召回升级', 'baizer'],
+        tags: ['项目'],
+        confidence: 0.9,
+        mentionedAt: 1000,
+      }),
+      makeMemory({
+        id: 'mem_cn_unrelated',
+        type: 'experience',
+        text: '用户今天讨论了午饭计划。',
+        normalizedText: '用户今天讨论了午饭计划。',
+        entities: ['午饭'],
+        tags: ['聊天'],
+        confidence: 0.7,
+        mentionedAt: 2000,
+      }),
+    ]);
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    const result = await retriever.recall({
+      query: '记忆召回',
+      maxRecords: 2,
+      now: 3000,
+    });
+
+    // mem_cn_recall must be retrieved and ranked first
+    expect(result.records.length >= 1).toBe(true);
+    expect(result.records[0].id).toBe('mem_cn_recall');
+    expect(result.promptBlock).toContain('记忆语义召回升级');
+  });
+
+  await test('retriever ranks CN memory with more bigram overlaps above less-relevant one', async () => {
+    // Two CN memories; query shares more bigrams with the first.
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemories([
+      makeMemory({
+        id: 'mem_cn_high',
+        type: 'world',
+        text: 'Baizer 的记忆召回模块使用 BM25 算法。',
+        normalizedText: 'baizer 的记忆召回模块使用 bm25 算法。',
+        entities: ['记忆召回', 'bm25'],
+        tags: ['架构'],
+        confidence: 0.85,
+        mentionedAt: 1000,
+      }),
+      makeMemory({
+        id: 'mem_cn_low',
+        type: 'world',
+        text: '用户偏好简洁的回答风格。',
+        normalizedText: '用户偏好简洁的回答风格。',
+        entities: ['回答风格'],
+        tags: ['偏好'],
+        confidence: 0.85,
+        mentionedAt: 1500,
+      }),
+    ]);
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    const result = await retriever.recall({
+      query: '记忆召回 BM25',
+      maxRecords: 2,
+      now: 3000,
+    });
+
+    expect(result.records[0].id).toBe('mem_cn_high');
+  });
+
+  await test('retriever BM25 scores unrelated CN record as 0 and excludes it', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemories([
+      makeMemory({
+        id: 'mem_match',
+        type: 'world',
+        text: '项目采用本地优先的存储架构。',
+        normalizedText: '项目采用本地优先的存储架构。',
+        entities: ['本地优先', '存储架构'],
+        tags: ['架构'],
+        confidence: 0.9,
+        mentionedAt: 1000,
+      }),
+      makeMemory({
+        id: 'mem_nomatch',
+        type: 'world',
+        text: '用户在周五参加了团队会议。',
+        normalizedText: '用户在周五参加了团队会议。',
+        entities: ['团队会议'],
+        tags: ['日程'],
+        confidence: 0.9,
+        mentionedAt: 2000,
+      }),
+    ]);
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    const result = await retriever.recall({
+      query: '本地优先存储',
+      maxRecords: 5,
+      now: 3000,
+    });
+
+    // Only the matching record should survive the score > 0 filter
+    expect(result.records.length).toBe(1);
+    expect(result.records[0].id).toBe('mem_match');
   });
 
   await test('consolidator creates observations with evidence ids', async () => {

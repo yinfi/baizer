@@ -4,28 +4,16 @@ import {
   ToolDefinition,
 } from '../models/interfaces';
 import {
-  buildFileWriteFailureMessage,
   FILE_OPERATION_CONTRACT_TEXT,
-  getFileWriteError,
   isFileWriteRequest,
-  isFileWriteToolName,
-  isSuccessfulWriteToolResult,
 } from '../utils/file-operation-contract';
 import { evaluateGenerationQuality } from '../services/generation-quality';
 import { formatGenerationPlanBlock, GenerationStrategyService } from '../services/generation-strategy-service';
-import { isDirectApplyWorkspaceTool } from '../services/workspace-edit-service';
 import { PreparedChatTurn, ChatRuntime, ChatRuntimeDeps, ChatTurnRequest } from './runtime-types';
 
 interface ActiveSkillScope {
   activeSkillName?: string;
   allowedToolNames: Set<string> | null;
-}
-
-interface FileWriteState {
-  required: boolean;
-  attempted: boolean;
-  succeeded: boolean;
-  lastError: string;
 }
 
 const LOCAL_SLASH_COMMANDS = [
@@ -56,20 +44,27 @@ const AMBIENT_CONTEXT_PREFIXES = ['active-note:', 'backlinks:'];
 // 而非对当前打开文件的新请求。
 const CONTINUATION_PATTERNS: RegExp[] = [
   /^(需要|不需要|好|好的|是|是的|对|对的|行|可以|可以的|继续|嗯+|确认|同意|没错|要|不用|可)$/,
-  /^(ok|okay|yes|yep|yeah|sure|y|continue|go ahead|do it|proceed)$/i,
+  // 单词级精确确认（不带额外内容）
+  /^(ok|okay|yes|yep|yeah|sure|y|proceed)$/i,
+  // 动作性延续词：可带后缀说明，如 "go ahead with option 2"、"continue with that"、"do it now"
+  /^(go ahead|continue|do it)(\s|$)/i,
   /^(用|选|采用|使用|按|就用|就选|就)\s*(第\s*[一二三四五六七八九十\d]+|这|那|上面|前面|刚才|这个|那个|这样)/,
   /^第\s*[一二三四五六七八九十\d]+\s*(个|种|条|项|方法|方式|选项|步)?$/,
   /^(方法|方式|选项|option)\s*[一二三四五六七八九十\d]+$/i,
 ];
 
-export class DefaultChatRuntime implements ChatRuntime {
+export abstract class BaseChatRuntime implements ChatRuntime {
   private readonly generationStrategyService = new GenerationStrategyService();
 
-  constructor(private deps: ChatRuntimeDeps) { }
+  constructor(protected deps: ChatRuntimeDeps) { }
 
   getTools(): ToolDefinition[] {
     return this.buildSkillModeTools();
   }
+
+  abstract query(turn: PreparedChatTurn): Promise<string>;
+
+  abstract queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown>;
 
   async prepareTurn(request: ChatTurnRequest): Promise<PreparedChatTurn> {
     let memoryContext = '';
@@ -161,154 +156,6 @@ export class DefaultChatRuntime implements ChatRuntime {
     };
   }
 
-  async query(turn: PreparedChatTurn): Promise<string> {
-    const chat = this.deps.provider.startChat(turn.tools, turn.priorMessages);
-
-    let result = await chat.sendMessage(turn.prompt);
-    let loopCount = 0;
-    const maxLoops = 10;
-    const skillScope = this.createSkillScope(turn);
-    const fileWriteState = this.createFileWriteState(turn);
-
-    while (result.functionCalls && result.functionCalls.length > 0) {
-      loopCount++;
-      if (loopCount > maxLoops) break;
-
-      const toolResults = [];
-      for (const call of result.functionCalls) {
-        const response = await this.executeToolCall(call.name, call.args, skillScope);
-        this.recordFileWriteResult(fileWriteState, call.name, response);
-        if (this.isApprovalResponse(response)) {
-          const approvalMessage = response.message || this.formatApprovalMessage(response);
-          await this.retainCompletedTurn(turn, approvalMessage);
-          return approvalMessage;
-        }
-
-        toolResults.push({
-          id: call.id,
-          name: call.name,
-          response,
-        });
-      }
-
-      result = await chat.sendMessage(toolResults);
-    }
-
-    const finalText = this.resolveFinalText(turn, fileWriteState, result.text);
-    const qualityCheckedText = this.applyGenerationQuality(turn, finalText);
-
-    await this.retainCompletedTurn(turn, qualityCheckedText);
-
-    return qualityCheckedText;
-  }
-
-  async *queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
-    const chat = this.deps.provider.startChat(turn.tools, turn.priorMessages);
-
-    let loopCount = 0;
-    const maxLoops = 10;
-    let input: string | { name: string; response: any }[] = turn.prompt;
-    let fullResponseText = '';
-    let approvalMessage = '';
-    const skillScope = this.createSkillScope(turn);
-    const fileWriteState = this.createFileWriteState(turn);
-
-    while (loopCount <= maxLoops) {
-      this.throwIfAborted(signal);
-      const pendingCalls: { id?: string; name: string; args: any }[] = [];
-
-      for await (const event of chat.sendMessageStream(input, signal)) {
-        this.throwIfAborted(signal);
-        if (event.type === 'tool_call') {
-          pendingCalls.push({ id: event.id, name: event.name, args: event.args });
-          yield event;
-        } else if (event.type === 'text_delta') {
-          fullResponseText += event.content;
-          yield event;
-        } else if (event.type === 'thinking') {
-          yield event;
-        }
-      }
-
-      if (pendingCalls.length === 0) break;
-
-      loopCount++;
-      if (loopCount > maxLoops) break;
-
-      const toolResults: { id?: string; name: string; response: any }[] = [];
-      for (const call of pendingCalls) {
-        this.throwIfAborted(signal);
-        const toolResult = await this.executeToolCall(call.name, call.args, skillScope);
-        this.recordFileWriteResult(fileWriteState, call.name, toolResult);
-
-        yield { type: 'tool_result' as const, name: call.name, result: toolResult };
-        if (this.isApprovalResponse(toolResult)) {
-          approvalMessage = toolResult.message || this.formatApprovalMessage(toolResult);
-          fullResponseText = '';
-          break;
-        }
-
-        toolResults.push({ id: call.id, name: call.name, response: toolResult });
-      }
-
-      if (approvalMessage) break;
-
-      input = toolResults;
-      fullResponseText = '';
-    }
-
-    if (!approvalMessage) {
-      fullResponseText = this.resolveFinalText(turn, fileWriteState, fullResponseText);
-      fullResponseText = this.applyGenerationQuality(turn, fullResponseText);
-    }
-
-    await this.retainCompletedTurn(turn, approvalMessage || fullResponseText);
-
-    yield { type: 'done' as const, text: fullResponseText };
-  }
-
-  private isApprovalResponse(result: any): result is {
-    approval_required: true;
-    action?: string;
-    target?: string;
-    message?: string;
-  } {
-    return !!result && result.approval_required === true;
-  }
-
-  private formatApprovalMessage(result: { action?: string; target?: string }): string {
-    const action = result.action || 'perform this action';
-    const target = result.target ? `: ${result.target}` : '';
-    return `Approval required to ${action}${target}`;
-  }
-
-  private createFileWriteState(turn: PreparedChatTurn): FileWriteState {
-    return {
-      required: turn.requiresFileWrite === true,
-      attempted: false,
-      succeeded: false,
-      lastError: '',
-    };
-  }
-
-  private recordFileWriteResult(state: FileWriteState, toolName: string, result: any): void {
-    if (!state.required || !isFileWriteToolName(toolName)) return;
-    state.attempted = true;
-    if (isSuccessfulWriteToolResult(result)) {
-      state.succeeded = true;
-      return;
-    }
-
-    const error = getFileWriteError(result);
-    if (error) state.lastError = error;
-  }
-
-  private resolveFinalText(turn: PreparedChatTurn, state: FileWriteState, modelText: string): string {
-    if (!turn.requiresFileWrite) return modelText;
-    if (state.succeeded) return modelText;
-    return buildFileWriteFailureMessage(state.attempted, state.lastError);
-  }
-
   protected applyGenerationQuality(turn: PreparedChatTurn, modelText: string): string {
     if (!turn.generationPlan) return modelText;
     const evaluation = evaluateGenerationQuality({
@@ -331,11 +178,20 @@ export class DefaultChatRuntime implements ChatRuntime {
   /**
    * [B] 判断用户消息是否为短确认/延续性回复（"需要"、"用第二个"、"继续"等）。
    * 这类回复在延续上一轮对话，而非针对当前打开的文件发起新请求。
-   * 限制长度避免误伤——"需要帮我把整篇文章改写成..." 不应被当作纯确认。
+   * 长度门：中文（含CJK字符）按字符数 ≤12 判断；纯英文按词数 ≤5 判断。
+   * 这样 "go ahead with option 2" 等英文延续句也能被正确识别，不会因字符数超标漏掉。
    */
   private isContinuationMessage(message: string): boolean {
     const text = (message ?? '').trim();
-    if (!text || text.length > 12) return false;
+    if (!text) return false;
+    const hasCJK = /[一-鿿㐀-䶿]/.test(text);
+    if (hasCJK) {
+      // 中文：字符总长 ≤12
+      if (text.length > 12) return false;
+    } else {
+      // 纯英文/其他：词数 ≤5（空白分割）
+      if (text.split(/\s+/).length > 5) return false;
+    }
     return CONTINUATION_PATTERNS.some(pattern => pattern.test(text));
   }
 
@@ -448,82 +304,6 @@ If no listed command fits, suggest a plain-language request instead.
     };
   }
 
-  private async executeToolCall(
-    name: string,
-    args: any,
-    skillScope: ActiveSkillScope,
-  ): Promise<any> {
-    if (name === 'use_skill') {
-      const activation = this.activateSkillRequest(args);
-      if (activation.activeSkillName) {
-        skillScope.activeSkillName = activation.activeSkillName;
-        skillScope.allowedToolNames = new Set(activation.allowedToolNames ?? []);
-      }
-      return activation.toolResult;
-    }
-
-    if (skillScope.allowedToolNames && !skillScope.allowedToolNames.has(name)) {
-      return {
-        error: `Tool "${name}" is not available for active skill "${skillScope.activeSkillName}"`,
-      };
-    }
-
-    const executor = this.deps.workspaceEditService && isDirectApplyWorkspaceTool(name)
-      ? this.deps.workspaceEditService.executeWorkspaceTool(name, args)
-      : this.deps.toolRegistry.execute(name, args);
-
-    return this.withTimeout(executor, 30000, `Tool ${name} execution timed out`);
-  }
-
-  private activateSkillRequest(args: any): {
-    activeSkillName?: string;
-    allowedToolNames?: string[];
-    toolResult: any;
-  } {
-    const skillName = args?.name;
-    if (!skillName) {
-      return { toolResult: { error: 'Missing skill name' } };
-    }
-
-    const activated = this.deps.skillRegistry.activateSkill(skillName);
-    if (!activated) {
-      return { toolResult: { error: `Skill "${skillName}" not found or disabled` } };
-    }
-
-    return {
-      activeSkillName: activated.skill?.name ?? skillName,
-      allowedToolNames: activated.tools.map(tool => tool.name),
-      toolResult: {
-        action_required: 'Use the returned instructions immediately with the available tools to complete the user request.',
-        instructions: activated.instructions,
-        available_tools: activated.tools.map(tool => tool.name),
-      },
-    };
-  }
-
-  private async withTimeout<T>(
-    promise: Promise<T>,
-    timeoutMs: number,
-    errorMessage: string,
-  ): Promise<T> {
-    const controller = new AbortController();
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      const timeoutId = setTimeout(() => {
-        reject(new Error(errorMessage));
-      }, timeoutMs);
-
-      controller.signal.addEventListener('abort', () => {
-        clearTimeout(timeoutId);
-      });
-    });
-
-    try {
-      return await Promise.race([promise, timeoutPromise]);
-    } finally {
-      controller.abort();
-    }
-  }
-
   private extractUserRequest(prompt: string): string {
     const marker = 'User Request: ';
     const index = prompt.lastIndexOf(marker);
@@ -531,10 +311,21 @@ If no listed command fits, suggest a plain-language request instead.
   }
 
   protected async retainCompletedTurn(turn: PreparedChatTurn, assistantMessage: string): Promise<void> {
+    const userRequest = turn.userRequest || this.extractUserRequest(turn.prompt);
+
+    // Session 持久化：把本轮 user/assistant 原文落盘到 JSONL，使跨轮上下文跨重启可恢复。
+    // 落盘失败不应阻断回答返回，仅记录告警。
+    if (this.deps.sessionStore) {
+      try {
+        await this.deps.sessionStore.appendTurn(userRequest, assistantMessage);
+      } catch {
+        // SessionStore 内部已记日志；这里吞掉以保证回答正常返回。
+      }
+    }
+
     if (!this.deps.memoryManager) return;
 
     const memoryManager = this.deps.memoryManager as any;
-    const userRequest = turn.userRequest || this.extractUserRequest(turn.prompt);
     if (typeof memoryManager.retainTurn === 'function') {
       await memoryManager.retainTurn({
         userMessage: userRequest,
@@ -547,12 +338,5 @@ If no listed command fits, suggest a plain-language request instead.
     await this.deps.memoryManager.recordMessage('user', userRequest);
     await this.deps.memoryManager.recordMessage('model', assistantMessage);
   }
-
-  private throwIfAborted(signal?: AbortSignal): void {
-    if (signal?.aborted) {
-      const error = new Error('Stream aborted');
-      error.name = 'AbortError';
-      throw error;
-    }
-  }
 }
+

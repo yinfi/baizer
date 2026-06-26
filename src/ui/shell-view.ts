@@ -27,6 +27,7 @@ import { TabData, TabId } from './tabs/types';
 import { ConversationController } from './history/conversation-controller';
 import { ConversationStore } from './history/conversation-store';
 import { showGhostText } from './ghost-text';
+import { debounce } from '../utils/throttle';
 
 export { VIEW_TYPE_SHELL };
 
@@ -78,8 +79,11 @@ export class ShellView extends ItemView {
     private streamTimeline: HTMLElement | null = null;
     private streamContent: HTMLElement | null = null;
     private streamAccumulatedText: string = '';
-    private streamRenderTimer: number | null = null;
     private streamNodeCount = 0;
+    private readonly debouncedRenderStream = debounce(
+        () => this.renderStreamContent(),
+        { wait: 100 }
+    );
     private readonly localCommandSuggestions: CommandSuggestion[] = [
         { label: '/clear', desc: 'Clear session history' },
         { label: '/memory', desc: 'View, search, and forget Hindsight memory' },
@@ -114,7 +118,7 @@ export class ShellView extends ItemView {
 
             this.inputEl.value = '';
             this.adjustHeight(); // Reset height
-            await this.processCommand(query);
+            await this.submitInput(query);
         }
     };
 
@@ -298,7 +302,7 @@ export class ShellView extends ItemView {
                 if (!query) return;
                 this.inputEl.value = '';
                 this.adjustHeight();
-                await this.processCommand(query);
+                await this.submitInput(query);
             },
             onStop: () => this.stopActiveResponse(),
         });
@@ -516,6 +520,25 @@ export class ShellView extends ItemView {
 
     // ==================== Chat Logic ====================
 
+    /**
+     * 提交入口：根据当前是否有正在运行的流，决定「补话」还是「发起新一轮」。
+     * - 运行中且输入是普通文本：把它作为 steering 补话排队，注入正在跑的 agentLoop 下一轮，
+     *   不打断、不重启当前流（避免覆盖 activeStreamController 造成孤儿流）。
+     * - 否则（无活动流，或输入是 / 斜杠命令）：走原有 processCommand 发起新一轮。
+     *   斜杠命令在 ChatController 内于创建 AbortController 之前分流处理，故运行中执行斜杠命令安全。
+     */
+    private async submitInput(query: string) {
+        const session = this.ensureActiveTabSession();
+        const isSlashCommand = query.startsWith('/');
+        if (!isSlashCommand && session.chatController.isRunActive()) {
+            if (session.chatController.steerActiveRun(query)) {
+                this.updateActivity();
+                return;
+            }
+        }
+        await this.processCommand(query);
+    }
+
     async processCommand(query: string) {
         try {
             this.ensureActiveTabSession();
@@ -632,13 +655,7 @@ export class ShellView extends ItemView {
 
     private handleTextDelta(content: string) {
         this.streamAccumulatedText += content;
-
-        if (this.streamRenderTimer !== null) {
-            window.clearTimeout(this.streamRenderTimer);
-        }
-        this.streamRenderTimer = window.setTimeout(() => {
-            this.renderStreamContent();
-        }, 100);
+        this.debouncedRenderStream();
     }
 
     private renderStreamContent() {
@@ -658,10 +675,7 @@ export class ShellView extends ItemView {
     }
 
     private finalizeStream() {
-        if (this.streamRenderTimer !== null) {
-            window.clearTimeout(this.streamRenderTimer);
-            this.streamRenderTimer = null;
-        }
+        this.debouncedRenderStream.flush();
 
         this.thinkingRenderer?.finalizeCurrentThinking();
 
@@ -1767,10 +1781,7 @@ export class ShellView extends ItemView {
     }
 
     private resetStreamState() {
-        if (this.streamRenderTimer !== null) {
-            window.clearTimeout(this.streamRenderTimer);
-            this.streamRenderTimer = null;
-        }
+        this.debouncedRenderStream.cancel();
         this.streamContainer = null;
         this.streamTimeline = null;
         this.streamContent = null;

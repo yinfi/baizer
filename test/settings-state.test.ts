@@ -338,6 +338,18 @@ async function runTests() {
       removedMetricCards: false,
     });
   });
+  await test('exposes thinkingLevel default for behavior controls', () => {
+    const settings = cloneSettings();
+
+    expect({ thinkingLevel: (settings as any).thinkingLevel }).toEqual({
+      thinkingLevel: 'medium',
+    });
+  });
+
+  await test('settings search exposes the Behavior section for thinking', () => {
+    const matches = getMatchingSettingsSections('thinking');
+    expect({ hasBehavior: matches.includes('behavior') }).toEqual({ hasBehavior: true });
+  });
 }
 
 runTests();

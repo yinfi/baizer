@@ -147,10 +147,6 @@ async function runTests() {
   console.log('=== Pi Chat Runtime Tests ===');
   const { PiChatRuntime } = await import('../src/runtime/pi/pi-chat-runtime');
   const { createChatRuntime } = await import('../src/runtime/runtime-factory');
-  const {
-    resetRuntimeEngineForTesting,
-    setRuntimeEngineForTesting,
-  } = await import('../src/runtime/runtime-engine');
 
   await test('query consumes queryStream and returns the final done text', async () => {
     const deps = createDeps({
@@ -346,47 +342,67 @@ async function runTests() {
   });
 
   await test('factory-selected Pi runtime preserves write failure warnings', async () => {
-    setRuntimeEngineForTesting('pi');
-    try {
-      const deps = createDeps({
-        streamFactory: (input) => Array.isArray(input)
-          ? [
-              { type: 'text_delta', content: 'Created' },
-              { type: 'done', text: 'Created' },
-            ]
-          : [
-              {
-                type: 'tool_call',
-                id: 'call_1',
-                name: 'create_file',
-                args: {
-                  path: '../summary.canvas',
-                  content: '{"nodes":[],"edges":[]}',
-                },
+    const deps = createDeps({
+      streamFactory: (input) => Array.isArray(input)
+        ? [
+            { type: 'text_delta', content: 'Created' },
+            { type: 'done', text: 'Created' },
+          ]
+        : [
+            {
+              type: 'tool_call',
+              id: 'call_1',
+              name: 'create_file',
+              args: {
+                path: '../summary.canvas',
+                content: '{"nodes":[],"edges":[]}',
               },
-              { type: 'done', text: '' },
-            ],
-        toolDefinitions: [
-          { name: 'create_file', description: 'Create file', parameters: { type: 'object', properties: {} } },
-        ],
-        toolResults: {
-          create_file: { success: false, error: 'Unsafe vault path' },
-        },
-        workspaceEditService: null,
-      });
-      const runtime = createChatRuntime(deps);
-      const prepared = await runtime.prepareTurn({
-        userMessage: 'Create a canvas file',
-        contextItems: [],
-      });
+            },
+            { type: 'done', text: '' },
+          ],
+      toolDefinitions: [
+        { name: 'create_file', description: 'Create file', parameters: { type: 'object', properties: {} } },
+      ],
+      toolResults: {
+        create_file: { success: false, error: 'Unsafe vault path' },
+      },
+      workspaceEditService: null,
+    });
+    const runtime = createChatRuntime(deps);
+    const prepared = await runtime.prepareTurn({
+      userMessage: 'Create a canvas file',
+      contextItems: [],
+    });
 
-      const result = await runtime.query(prepared);
+    const result = await runtime.query(prepared);
 
-      expect(result).toContain('No file was created or modified');
-      expect(result).toContain('Unsafe vault path');
-    } finally {
-      resetRuntimeEngineForTesting();
-    }
+    expect(result).toContain('No file was created or modified');
+    expect(result).toContain('Unsafe vault path');
+  });
+
+  await test('queryStream surfaces generation quality failures in done text', async () => {
+    const deps = createDeps({
+      streamFactory: () => [
+        { type: 'text_delta', content: 'Bad sentence.' },
+        { type: 'done', text: 'Bad sentence.' },
+      ],
+    });
+
+    const runtime = new PiChatRuntime(deps);
+    const done = (await collect(runtime.queryStream(createTurn({
+      selection: 'Bad sentence.',
+      generationPlan: {
+        source: 'slash-edit',
+        mode: 'rewrite',
+        targetShape: 'replacement',
+        previewRequired: true,
+        mustPreserveVoice: true,
+        mustUseObsidianMarkdown: true,
+        qualityChecklist: [],
+      },
+    } as any)))).at(-1) as any;
+
+    expect(done.text).toContain('Generation quality check failed');
   });
 
   await test('retains completed Pi turns in memory', async () => {
@@ -430,6 +446,108 @@ async function runTests() {
       expect(e).toBeInstanceOf(Error);
       expect(e.message).toBe('provider failed');
     }
+  });
+
+  await test('persists the completed turn to the injected sessionStore', async () => {
+    const appended: Array<{ user: string; assistant: string }> = [];
+    const deps = createDeps({
+      streamFactory: () => [
+        { type: 'text_delta', content: 'Answer' },
+        { type: 'done', text: 'Answer' },
+      ],
+    });
+    // 注入一个最小 SessionStore stub，断言 retainCompletedTurn 触发落盘。
+    (deps as ChatRuntimeDeps).sessionStore = {
+      appendTurn: async (user: string, assistant: string) => {
+        appended.push({ user, assistant });
+      },
+    } as any;
+
+    const runtime = new PiChatRuntime(deps);
+    const text = await runtime.query(createTurn({ userRequest: 'persist me' }));
+
+    expect(text).toBe('Answer');
+    expect(appended.length).toBe(1);
+    expect(appended[0].user).toBe('persist me');
+    expect(appended[0].assistant).toBe('Answer');
+  });
+
+  await test('turn still completes when sessionStore append throws', async () => {
+    const deps = createDeps({
+      streamFactory: () => [
+        { type: 'text_delta', content: 'Resilient' },
+        { type: 'done', text: 'Resilient' },
+      ],
+    });
+    (deps as ChatRuntimeDeps).sessionStore = {
+      appendTurn: async () => {
+        throw new Error('disk full');
+      },
+    } as any;
+
+    const runtime = new PiChatRuntime(deps);
+    // 落盘失败不得阻断回答返回。
+    const text = await runtime.query(createTurn());
+    expect(text).toBe('Resilient');
+  });
+
+  await test('thinking level defaults to medium when not specified in deps', async () => {
+    // deps 未设置 thinkingLevel，startChat 第三参数应为 undefined，
+    // agentLoop config.reasoning 以 "medium" 兜底。
+    let capturedThinkingLevel: string | undefined = 'NOT_SET';
+    const deps = createDeps({
+      streamFactory: () => [
+        { type: 'text_delta', content: 'Hi' },
+        { type: 'done', text: 'Hi' },
+      ],
+    });
+    // 明确不设置 thinkingLevel，保留 undefined。
+    expect((deps as ChatRuntimeDeps).thinkingLevel).toBe(undefined);
+    // 包装 provider.startChat，捕获传入的 thinkingLevel 参数。
+    const origStartChat = deps.provider.startChat.bind(deps.provider);
+    deps.provider.startChat = (tools, priorMessages, thinkingLevel) => {
+      capturedThinkingLevel = thinkingLevel;
+      return origStartChat(tools, priorMessages, thinkingLevel);
+    };
+
+    const runtime = new PiChatRuntime(deps);
+    const text = await runtime.query(createTurn());
+    expect(text).toBe('Hi');
+    // thinkingLevel 未设置时，startChat 收到 undefined（运行时以 "medium" 兜底）。
+    expect(capturedThinkingLevel).toBe(undefined);
+  });
+
+  await test('thinking level is forwarded from deps to startChat and bridge model', async () => {
+    // 验证透传路径：deps.thinkingLevel → provider.startChat(thinkingLevel) → createPiBridgeModel(reasoning=true)
+    let capturedThinkingLevel: string | undefined = 'NOT_SET';
+    const deps = createDeps({
+      streamFactory: () => [
+        { type: 'text_delta', content: 'Low thinking' },
+        { type: 'done', text: 'Low thinking' },
+      ],
+    });
+    (deps as ChatRuntimeDeps).thinkingLevel = 'low';
+    // 包装 provider.startChat，捕获传入的 thinkingLevel 参数。
+    const origStartChat = deps.provider.startChat.bind(deps.provider);
+    deps.provider.startChat = (tools, priorMessages, thinkingLevel) => {
+      capturedThinkingLevel = thinkingLevel;
+      return origStartChat(tools, priorMessages, thinkingLevel);
+    };
+
+    const runtime = new PiChatRuntime(deps);
+    const text = await runtime.query(createTurn());
+    expect(text).toBe('Low thinking');
+    // thinkingLevel 必须从 deps 透传到 provider.startChat。
+    expect(capturedThinkingLevel).toBe('low');
+
+    // 验证 createPiBridgeModel：'low' 不是 'off'，所以 reasoning 应为 true。
+    const { createPiBridgeModel } = await import('../src/runtime/pi/pi-provider-bridge');
+    const bridgeModel = createPiBridgeModel(undefined, 'low');
+    expect(bridgeModel.reasoning).toBe(true);
+
+    // 'off' 时 reasoning 应为 false。
+    const bridgeModelOff = createPiBridgeModel(undefined, 'off');
+    expect(bridgeModelOff.reasoning).toBe(false);
   });
 }
 

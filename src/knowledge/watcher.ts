@@ -1,7 +1,8 @@
 // src/knowledge/watcher.ts
 // 文件夹监听器：检测监听目录中的文件变更，通过 frontmatter 管理状态
 
-import { App, TFile, debounce } from 'obsidian';
+import { App, TFile } from 'obsidian';
+import { debounce } from '../utils/throttle';
 import { DEFAULT_WIKI_FOLDER } from './types';
 import {
   getKnowledgeStatus,
@@ -118,7 +119,7 @@ export class KnowledgeWatcher {
         }
       }
       this.debouncedHandlers.delete(key);
-    }, this.debounceMs, true);
+    }, { wait: this.debounceMs });
 
     this.debouncedHandlers.set(key, handler);
     handler();

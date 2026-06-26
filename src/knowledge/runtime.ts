@@ -1,6 +1,7 @@
 // src/knowledge/runtime.ts
 
-import { App, TFile, Notice, debounce } from 'obsidian';
+import { App, TFile, Notice } from 'obsidian';
+import { debounce } from '../utils/throttle';
 import { PluginSettings } from '../mcp/types';
 import { ModelService } from '../services/model-service';
 import { KnowledgeCompiler, findCurrentCompiledSummary } from './compiler';
@@ -113,7 +114,7 @@ export class KnowledgeRuntime {
       } finally {
         this.autoCompiling = false;
       }
-    }, 5000, true);
+    }, { wait: 5000 });
 
     this.watcher.setOnCompileNeeded(debouncedAutoCompile);
 

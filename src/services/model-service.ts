@@ -11,6 +11,9 @@ import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
+import { SteeringController } from '../runtime/steering-controller';
+import { SessionStore, type PersistedSessionRef } from '../runtime/pi/session-store';
+import { createVaultFileAdapter } from '../runtime/pi/vault-session-fs';
 import { computeContentHash } from '../knowledge/compiler';
 import { getFileWriteResultPath } from '../utils/file-operation-contract';
 import {
@@ -34,6 +37,17 @@ export class ModelService {
     private toolRegistry: ToolRegistry;
     private operationAuditLog: OperationAuditLog;
     private workspaceEditService: WorkspaceEditService;
+    /**
+     * Session 持久化层。仅当 vault.adapter 可用时启用（桌面与移动端均有，测试 mock 可能缺失）。
+     * 提供跨轮上下文与跨重启恢复；不可用时退化为旧的 UI 内存回灌行为。
+     */
+    private sessionStore: SessionStore | null = null;
+    /**
+     * 运行中 steering 控制器。承载长任务运行时的「补话」与「动态工具集」。
+     * 跨轮复用同一实例：每次 queryStream 启动时由 runtime 调用 reset() 清空遗留状态，
+     * 故运行期间 UI 调用 steer() 的窗口对齐当前流。
+     */
+    private readonly steeringController = new SteeringController();
 
     constructor(
         private app: App,
@@ -57,6 +71,50 @@ export class ModelService {
         });
         this.initializeProvider();
         this.setupErrorHandlers();
+        this.initializeSessionStore();
+    }
+
+    /**
+     * 构造 Session 持久化层。把会话引用存进插件 data（通过 settings.sessionRef），
+     * 实现跨重启恢复。vault.adapter 不可用时静默跳过（保持旧行为）。
+     */
+    private initializeSessionStore() {
+        const adapter = (this.app?.vault as any)?.adapter;
+        if (!adapter || typeof adapter.read !== 'function' || typeof adapter.append !== 'function') {
+            this.sessionStore = null;
+            return;
+        }
+        try {
+            this.sessionStore = new SessionStore(createVaultFileAdapter(adapter), {
+                loadRef: () => this.loadSessionRef(),
+                saveRef: (ref) => this.saveSessionRef(ref),
+                // 自动压缩阈值取当前模型的上下文窗口（settings 可运行期改动，故用 getter 取最新值）。
+                contextWindow: () => this.settings.contextWindow ?? 0,
+                // 摘要用上层自己的 provider 生成（pi 的 compact() 会绕过 bridge，不复用）。
+                summarize: (prompt, systemPrompt) => this.summarizeForCompaction(prompt, systemPrompt),
+            });
+        } catch (error) {
+            logger.warn('Failed to initialize SessionStore; falling back to in-memory history.', 'ModelService');
+            this.sessionStore = null;
+        }
+    }
+
+    /**
+     * 为自动压缩生成摘要：用无状态 generate 直连当前 provider，
+     * 跳过生成计划装饰（摘要是纯文本压缩任务，不需要写作风格/上下文注入）。
+     */
+    private async summarizeForCompaction(prompt: string, systemPrompt?: string): Promise<string> {
+        return this.generate(prompt, systemPrompt, 'shell', undefined, null, {
+            skipGenerationPlan: true,
+        });
+    }
+
+    private loadSessionRef(): PersistedSessionRef | null {
+        return this.settings.sessionRef ?? null;
+    }
+
+    private saveSessionRef(ref: PersistedSessionRef | null): void {
+        this.settings.sessionRef = ref;
     }
 
     private initializeProvider() {
@@ -306,6 +364,7 @@ export class ModelService {
 
         try {
             const runtime = this.createChatRuntime();
+            const resolvedPrior = await this.resolvePriorMessages(priorMessages);
             const preparedTurn = await runtime.prepareTurn({
                 userMessage,
                 contextItems,
@@ -314,7 +373,7 @@ export class ModelService {
                 obsidianContext,
                 userProfile: userProfile ?? this.getUserProfile(),
                 systemPromptOverride,
-                priorMessages,
+                priorMessages: resolvedPrior,
             });
             return await runtime.query(preparedTurn);
         } catch (e: any) {
@@ -345,6 +404,7 @@ export class ModelService {
             const resolvedSource = this.isAbortSignalValue(source) ? 'shell' : source;
             const resolvedSignal = this.isAbortSignalValue(source) ? source : signal;
             const runtime = this.createChatRuntime();
+            const resolvedPrior = await this.resolvePriorMessages(priorMessages);
             const preparedTurn = await runtime.prepareTurn({
                 userMessage,
                 contextItems,
@@ -352,7 +412,7 @@ export class ModelService {
                 source: resolvedSource,
                 obsidianContext,
                 userProfile: userProfile ?? this.getUserProfile(),
-                priorMessages,
+                priorMessages: resolvedPrior,
             });
             for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
                 yield event;
@@ -417,6 +477,15 @@ export class ModelService {
     async clearSession() {
         if (this.memoryManager) {
             await this.memoryManager.clearSession();
+        }
+        // 与内存历史协调：/clear 时开一个新的持久会话文件（旧文件保留），
+        // 使跨轮上下文与内存会话保持一致。
+        if (this.sessionStore) {
+            try {
+                await this.sessionStore.clearSession();
+            } catch (error) {
+                logger.warn('Failed to start a fresh persistent session on clear.', 'ModelService.clearSession');
+            }
         }
     }
 
@@ -541,7 +610,49 @@ export class ModelService {
             toolRegistry: this.toolRegistry,
             skillRegistry: this.skillRegistry,
             workspaceEditService: this.workspaceEditService,
+            sessionStore: this.sessionStore,
+            contextWindow: this.settings.contextWindow,
+            thinkingLevel: this.settings.thinkingLevel,
+            steeringController: this.steeringController,
         });
+    }
+
+    /**
+     * 运行中补话入口：长任务运行时往 steering 队列追加一条用户指令，
+     * 不打断当前流，由正在运行的 agentLoop 在下一轮纳入。空白文本忽略。
+     */
+    public steerActiveRun(text: string): void {
+        this.steeringController.steer(text);
+    }
+
+    /**
+     * 运行时调整可用工具集：下一轮起 pi 只在这些工具内执行调用（use_skill 由 runtime 兜底保留）。
+     */
+    public setActiveTools(toolNames: string[]): void {
+        this.steeringController.setActiveTools(toolNames);
+    }
+
+    /** 当前是否有尚未纳入的补话。供 UI 显示「补话已排队」状态。 */
+    public hasPendingSteering(): boolean {
+        return this.steeringController.hasPendingSteering();
+    }
+
+    /**
+     * 解析本轮的 priorMessages 来源：
+     * - 有 SessionStore 时，从持久会话派生（含压缩视图），作为跨轮上下文的唯一真相源；
+     *   UI 传入的 priorMessages 被忽略（UI 退化为纯渲染）。
+     * - 无 SessionStore 时，沿用 UI 回灌的 priorMessages（旧行为）。
+     */
+    private async resolvePriorMessages(
+        fallback?: PriorChatMessage[],
+    ): Promise<PriorChatMessage[] | undefined> {
+        if (!this.sessionStore) return fallback;
+        try {
+            return await this.sessionStore.buildPriorMessages();
+        } catch (error) {
+            logger.warn('Failed to derive prior messages from session; using UI fallback.', 'ModelService');
+            return fallback;
+        }
     }
 
     private isAbortError(error: any): boolean {

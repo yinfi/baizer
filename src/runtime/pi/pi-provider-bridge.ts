@@ -11,14 +11,19 @@ import type {
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { IChatSession, StreamEvent, ToolResult } from '../../models/interfaces';
 
-export function createPiBridgeModel(): Model<any> {
+/** 与 settings.contextWindow 默认值对齐（src/mcp/types.ts DEFAULT_SETTINGS）。 */
+const DEFAULT_CONTEXT_WINDOW = 100000;
+
+export function createPiBridgeModel(contextWindow?: number, thinkingLevel?: string): Model<any> {
   return {
     id: 'baizer-bridge',
     name: 'Baizer Bridge',
     api: 'baizer-bridge',
     provider: 'baizer',
     baseUrl: 'baizer://local',
-    reasoning: false,
+    // thinkingLevel が 'off' 以外のときは reasoning: true にして
+    // pi が thinking イベントを通すようにする。undefined (缺省) も有効化。
+    reasoning: thinkingLevel !== 'off',
     input: ['text'],
     cost: {
       input: 0,
@@ -26,7 +31,8 @@ export function createPiBridgeModel(): Model<any> {
       cacheRead: 0,
       cacheWrite: 0,
     },
-    contextWindow: 128000,
+    // 取実際配置的上下文窗口，而非誤導性的硬編碼常量；缺省回落到 settings 默認值。
+    contextWindow: contextWindow && contextWindow > 0 ? contextWindow : DEFAULT_CONTEXT_WINDOW,
     maxTokens: 8192,
   };
 }

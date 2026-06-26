@@ -302,6 +302,118 @@ async function runTests() {
       (globalThis as any).fetch = originalFetch;
     }
   });
+
+  // --- reasoning_effort モデル門控テスト ---
+
+  await test('reasoning_effort is NOT sent for gpt-4o (default OpenAI model)', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    let capturedBody: any;
+    (globalThis as any).fetch = async (_url: string, init: any) => {
+      capturedBody = JSON.parse(init.body);
+      return streamResponse([
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+        'data: [DONE]',
+      ]);
+    };
+    try {
+      const provider = new OpenAIProvider();
+      provider.configure({ apiKey: 'k', baseUrl: 'https://api.openai.test/v1', modelName: 'gpt-4o' });
+      const chat = provider.startChat(undefined, undefined, 'medium');
+      await collect(chat.sendMessageStream('hello'));
+      expect(capturedBody.reasoning_effort).toBe(undefined);
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
+  await test('reasoning_effort is NOT sent for deepseek-chat (openai-compatible)', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    let capturedBody: any;
+    (globalThis as any).fetch = async (_url: string, init: any) => {
+      capturedBody = JSON.parse(init.body);
+      return streamResponse([
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+        'data: [DONE]',
+      ]);
+    };
+    try {
+      const provider = new OpenAIProvider();
+      provider.configure({ apiKey: 'k', baseUrl: 'https://api.deepseek.com', modelName: 'deepseek-chat' });
+      const chat = provider.startChat(undefined, undefined, 'high');
+      await collect(chat.sendMessageStream('hello'));
+      expect(capturedBody.reasoning_effort).toBe(undefined);
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
+  await test('reasoning_effort IS sent for o3-mini with mapped value', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    let capturedBody: any;
+    (globalThis as any).fetch = async (_url: string, init: any) => {
+      capturedBody = JSON.parse(init.body);
+      return streamResponse([
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+        'data: [DONE]',
+      ]);
+    };
+    try {
+      const provider = new OpenAIProvider();
+      provider.configure({ apiKey: 'k', baseUrl: 'https://api.openai.test/v1', modelName: 'o3-mini' });
+      const chat = provider.startChat(undefined, undefined, 'xhigh');
+      await collect(chat.sendMessageStream('hello'));
+      // xhigh → フォールバック "high"
+      expect(capturedBody.reasoning_effort).toBe('high');
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
+  await test('reasoning_effort is NOT sent when thinkingLevel is off, even for o-series', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    let capturedBody: any;
+    (globalThis as any).fetch = async (_url: string, init: any) => {
+      capturedBody = JSON.parse(init.body);
+      return streamResponse([
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+        'data: [DONE]',
+      ]);
+    };
+    try {
+      const provider = new OpenAIProvider();
+      provider.configure({ apiKey: 'k', baseUrl: 'https://api.openai.test/v1', modelName: 'o1-mini' });
+      const chat = provider.startChat(undefined, undefined, 'off');
+      await collect(chat.sendMessageStream('hello'));
+      expect(capturedBody.reasoning_effort).toBe(undefined);
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
+
+  await test('effortMap: minimal→low, medium→medium, high→high for o4-series', async () => {
+    const originalFetch = (globalThis as any).fetch;
+    const capturedEfforts: (string | undefined)[] = [];
+    let callCount = 0;
+    (globalThis as any).fetch = async (_url: string, init: any) => {
+      capturedEfforts.push(JSON.parse(init.body).reasoning_effort);
+      callCount++;
+      return streamResponse([
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+        'data: [DONE]',
+      ]);
+    };
+    try {
+      const provider = new OpenAIProvider();
+      provider.configure({ apiKey: 'k', baseUrl: 'https://api.openai.test/v1', modelName: 'o4-mini' });
+      for (const level of ['minimal', 'medium', 'high'] as const) {
+        const chat = provider.startChat(undefined, undefined, level);
+        await collect(chat.sendMessageStream('hello'));
+      }
+      expect(capturedEfforts.join(',')).toBe('low,medium,high');
+    } finally {
+      (globalThis as any).fetch = originalFetch;
+    }
+  });
 }
 
 runTests().catch((e) => {

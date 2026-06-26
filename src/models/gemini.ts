@@ -120,12 +120,31 @@ export class GeminiProvider implements IModelProvider {
         };
     }
 
-    startChat(tools?: ToolDefinition[], priorMessages?: PriorChatMessage[]): IChatSession {
-        const modelWithTools = tools ? this.genAI.getGenerativeModel({
+    startChat(tools?: ToolDefinition[], priorMessages?: PriorChatMessage[], thinkingLevel?: string): IChatSession {
+        // thinkingConfig は Gemini 2.x+ 専用パラメータ。
+        // gemini-1.5-* / gemini-1.0-* など非対応モデルに送ると 400 になるため、
+        // モデル名が "gemini-2" で始まる場合のみ付与する。
+        const modelName = this.config.modelName ?? '';
+        const supportsThinkingConfig = /^gemini-2/i.test(modelName);
+
+        // thinkingBudget: -1 = モデルが自動決定, 0 = 無効化, 正数 = 最大 token 数。
+        // thinkingLevel が 'off' のときのみ明示的に 0 を渡して thinking を無効化する。
+        const thinkingBudget = thinkingLevel === 'off' ? 0
+            : thinkingLevel === 'minimal' ? 512
+            : thinkingLevel === 'low' ? 1024
+            : thinkingLevel === 'medium' ? 4096
+            : thinkingLevel === 'high' ? 8192
+            : thinkingLevel === 'xhigh' ? 16384
+            : -1; // undefined / unknown → モデルに任せる
+        const generationConfig: any = (supportsThinkingConfig && thinkingLevel !== undefined)
+            ? { thinkingConfig: { thinkingBudget } }
+            : {};
+        const modelWithTools = this.genAI.getGenerativeModel({
             model: this.config.modelName,
             systemInstruction: this.config.systemPrompt,
-            tools: [{ functionDeclarations: tools }]
-        }) : this.model;
+            ...(tools ? { tools: [{ functionDeclarations: tools }] } : {}),
+            ...(supportsThinkingConfig && thinkingLevel !== undefined ? { generationConfig } : {}),
+        });
 
         // 把上一轮起的干净对话作为初始 history 注入，模型才能看到自己之前说过的话。
         const history = (priorMessages ?? []).map(message => ({

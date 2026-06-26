@@ -92,8 +92,8 @@ export class OpenAIProvider implements IModelProvider {
         return this.chatCompletion(messages, undefined, options);
     }
 
-    startChat(tools?: ToolDefinition[], priorMessages?: PriorChatMessage[]): IChatSession {
-        return new OpenAIChatSession(this.config, tools, this, priorMessages);
+    startChat(tools?: ToolDefinition[], priorMessages?: PriorChatMessage[], thinkingLevel?: string): IChatSession {
+        return new OpenAIChatSession(this.config, tools, this, priorMessages, thinkingLevel);
     }
 
     async chatCompletion(messages: any[], tools?: ToolDefinition[], options?: GenerationOptions): Promise<GenerationResult> {
@@ -179,7 +179,7 @@ export class OpenAIProvider implements IModelProvider {
         return result;
     }
 
-    async *chatCompletionStream(messages: any[], tools?: ToolDefinition[], signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
+    async *chatCompletionStream(messages: any[], tools?: ToolDefinition[], signal?: AbortSignal, thinkingLevel?: string): AsyncGenerator<StreamEvent, void, unknown> {
         const url = `${this.config.baseUrl || 'https://api.openai.com/v1'}/chat/completions`;
 
         const body: any = {
@@ -188,6 +188,26 @@ export class OpenAIProvider implements IModelProvider {
             temperature: 0.7,
             stream: true
         };
+
+        // reasoning_effort は OpenAI o-series モデル専用パラメータ。
+        // gpt-4o / gpt-4.* / deepseek-chat / qwen-* などは受け付けない → 400 になる。
+        // o1-* / o3-* / o4-* / *-reasoning のみ付与する。
+        const modelName = this.config.modelName ?? '';
+        const isOSeries = /^o[1-9](-|$)/i.test(modelName) || modelName.includes('reasoning');
+        if (isOSeries && thinkingLevel && thinkingLevel !== 'off') {
+            // pi の "xhigh" は OpenAI にはなく、最大値 "high" にフォールバック。
+            const effortMap: Record<string, string> = {
+                minimal: 'low',
+                low: 'low',
+                medium: 'medium',
+                high: 'high',
+                xhigh: 'high',
+            };
+            const effort = effortMap[thinkingLevel];
+            if (effort) {
+                body.reasoning_effort = effort;
+            }
+        }
 
         if (tools && tools.length > 0) {
             body.tools = tools.map(t => ({
@@ -303,7 +323,8 @@ class OpenAIChatSession implements IChatSession {
         private config: ModelConfig,
         private tools: ToolDefinition[] | undefined,
         private provider: OpenAIProvider,
-        priorMessages?: PriorChatMessage[]
+        priorMessages?: PriorChatMessage[],
+        private thinkingLevel?: string
     ) {
         if (config.systemPrompt) {
             this.history.push({ role: 'system', content: config.systemPrompt });
@@ -377,7 +398,7 @@ class OpenAIChatSession implements IChatSession {
         let reasoningContent = '';
         const toolCalls: any[] = [];
 
-        for await (const event of this.provider.chatCompletionStream(this.history, this.tools, signal)) {
+        for await (const event of this.provider.chatCompletionStream(this.history, this.tools, signal, this.thinkingLevel)) {
             if (event.type === 'text_delta') {
                 fullText += event.content;
             } else if (event.type === 'thinking') {

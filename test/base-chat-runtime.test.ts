@@ -31,10 +31,8 @@ async function test(name: string, fn: () => Promise<void>) {
 }
 
 async function runTests() {
-  console.log('=== ChatRuntime Tests ===');
+  console.log('=== BaseChatRuntime Prepare-Layer Tests ===');
   const { createChatRuntime } = await import('../src/runtime/runtime-factory');
-  const { setRuntimeEngineForTesting } = await import('../src/runtime/runtime-engine');
-  setRuntimeEngineForTesting('legacy');
   const createObsidianContext = (overrides: Record<string, any> = {}) => ({
     activeNote: { path: 'Projects/Native AI.md', title: 'Native AI' },
     selection: { text: 'Bad sentence.', from: 1, to: 1 },
@@ -80,18 +78,10 @@ async function runTests() {
     expect(prepared.prompt.includes('User Request: Explain this')).toBe(true);
   });
 
-  await test('runtime recalls relevant memory and retains completed turns', async () => {
+  await test('runtime recalls relevant memory during prepareTurn', async () => {
     const memoryCalls: any[] = [];
-    const providerInputs: any[] = [];
     const runtime = createChatRuntime({
-      provider: {
-        startChat: () => ({
-          sendMessage: async (input: any) => {
-            providerInputs.push(input);
-            return { text: 'Done' };
-          },
-        }),
-      } as any,
+      provider: {} as any,
       memoryManager: {
         ready: async () => undefined,
         buildContext: () => '',
@@ -124,13 +114,9 @@ async function runTests() {
       selection: '',
       source: 'shell',
     });
-    const response = await runtime.query(turn);
 
     expect(turn.prompt).toContain('[Relevant Memory]');
-    expect(response).toBe('Done');
-    expect(providerInputs.length).toBe(1);
     expect(memoryCalls[0].type).toBe('recallForPrompt');
-    expect(memoryCalls[memoryCalls.length - 1].type).toBe('retainTurn');
   });
 
   await test('prepareTurn activates the matched intent skill and scopes turn tools', async () => {
@@ -298,416 +284,6 @@ async function runTests() {
     expect(prepared.prompt.includes('Return only the revised replacement text.')).toBe(true);
   });
 
-  await test('query resolves use_skill and tool calls through the runtime loop', async () => {
-    const chatInputs: any[] = [];
-    const runtime = createChatRuntime({
-      provider: {
-        startChat: () => ({
-          sendMessage: async (input: any) => {
-            chatInputs.push(input);
-            if (typeof input === 'string') {
-              return {
-                text: '',
-                functionCalls: [
-                  { name: 'use_skill', args: { name: 'web-search' } },
-                  { name: 'search_vault', args: { query: 'obsidian' } },
-                ],
-              };
-            }
-            return { text: 'done' };
-          },
-        }),
-      } as any,
-      memoryManager: null,
-      toolRegistry: {
-        getAllDefinitions: () => [{ name: 'search_vault', description: 'Search vault', parameters: {} }],
-        execute: async (name: string, args: any) => ({ name, args, ok: true }),
-      } as any,
-      skillRegistry: {
-        getSkillSummaryText: () => '- web-search: Search the web',
-        activateSkill: () => ({
-          instructions: 'Use search tools',
-          tools: [{ name: 'web_search', description: 'Search the web', parameters: {} }],
-        }),
-      } as any,
-    });
-
-    const result = await runtime.query({
-      prompt: 'prepared prompt',
-      tools: [{ name: 'search_vault', description: 'Search vault', parameters: {} }],
-    });
-
-    expect(result).toBe('done');
-    expect(chatInputs.length).toBe(2);
-    expect(Array.isArray(chatInputs[1])).toBe(true);
-  });
-
-  await test('query preserves provider tool call ids when returning tool results', async () => {
-    const chatInputs: any[] = [];
-    const runtime = createChatRuntime({
-      provider: {
-        startChat: () => ({
-          sendMessage: async (input: any) => {
-            chatInputs.push(input);
-            if (typeof input === 'string') {
-              return {
-                text: '',
-                functionCalls: [
-                  { id: 'call_tasks', name: 'read_note', args: { path: 'tasks.md' } },
-                  { id: 'call_home', name: 'read_note', args: { path: 'home.md' } },
-                ],
-              };
-            }
-            return { text: 'done' };
-          },
-        }),
-      } as any,
-      memoryManager: null,
-      toolRegistry: {
-        getAllDefinitions: () => [{ name: 'read_note', description: 'Read note', parameters: {} }],
-        execute: async (name: string, args: any) => ({ name, args, ok: true }),
-      } as any,
-      skillRegistry: {
-        resolveByIntent: () => null,
-        getSkillSummaryText: () => '',
-        activateSkill: () => null,
-      } as any,
-    });
-
-    const result = await runtime.query({
-      prompt: 'prepared prompt',
-      tools: [{ name: 'read_note', description: 'Read note', parameters: {} }],
-    });
-
-    const toolResultIds = chatInputs[1].map((input: any) => input.id).join(',');
-
-    expect(result).toBe('done');
-    expect(toolResultIds).toBe('call_tasks,call_home');
-  });
-
-  await test('query blocks tool calls outside the active skill scope after use_skill', async () => {
-    const executedCalls: any[] = [];
-    const toolResponses: any[] = [];
-    const runtime = createChatRuntime({
-      provider: {
-        startChat: () => ({
-          sendMessage: async (input: any) => {
-            if (typeof input === 'string') {
-              return {
-                text: '',
-                functionCalls: [
-                  { name: 'use_skill', args: { name: 'web-search' } },
-                  { name: 'search_vault', args: { query: 'obsidian' } },
-                ],
-              };
-            }
-            toolResponses.push(...input);
-            return { text: 'done' };
-          },
-        }),
-      } as any,
-      memoryManager: null,
-      toolRegistry: {
-        getAllDefinitions: () => [
-          { name: 'search_vault', description: 'Search vault', parameters: {} },
-          { name: 'web_search', description: 'Search the web', parameters: {} },
-        ],
-        execute: async (name: string, args: any) => {
-          executedCalls.push({ name, args });
-          return { success: true };
-        },
-      } as any,
-      skillRegistry: {
-        resolveByIntent: () => null,
-        getSkillSummaryText: () => '- web-search: Search the web',
-        activateSkill: () => ({
-          skill: { name: 'web-search' },
-          instructions: 'Use web_search for internet lookups.',
-          tools: [{ name: 'web_search', description: 'Search the web', parameters: {} }],
-        }),
-      } as any,
-    });
-
-    const result = await runtime.query({
-      prompt: 'prepared prompt',
-      tools: [
-        { name: 'search_vault', description: 'Search vault', parameters: {} },
-        { name: 'web_search', description: 'Search the web', parameters: {} },
-        { name: 'use_skill', description: 'Activate a skill', parameters: {} },
-      ],
-    } as any);
-
-    expect(result).toBe('done');
-    expect(executedCalls).toEqual([]);
-    expect(toolResponses[1].response.error).toBe(
-      'Tool "search_vault" is not available for active skill "web-search"'
-    );
-  });
-
-  await test('query stops before the model can claim success when a tool requires approval', async () => {
-    const chatInputs: any[] = [];
-    const executedCalls: any[] = [];
-    const runtime = createChatRuntime({
-      provider: {
-        startChat: () => ({
-          sendMessage: async (input: any) => {
-            chatInputs.push(input);
-            if (typeof input === 'string') {
-              return {
-                text: '',
-                functionCalls: [
-                  {
-                    name: 'create_file',
-                    args: {
-                      path: 'Assets/Canvas/summary.canvas',
-                      content: '{"nodes":[],"edges":[]}',
-                    },
-                  },
-                ],
-              };
-            }
-            return { text: 'I created the canvas file.' };
-          },
-        }),
-      } as any,
-      memoryManager: null,
-      toolRegistry: {
-        getAllDefinitions: () => [
-          { name: 'create_file', description: 'Create file', parameters: {} },
-        ],
-        execute: async (name: string, args: any) => {
-          executedCalls.push({ name, args });
-          return {
-            approval_required: true,
-            action: 'create_file',
-            target: args.path,
-            args,
-            message: `Approval required to create file: ${args.path}`,
-          };
-        },
-      } as any,
-      skillRegistry: {
-        resolveByIntent: () => null,
-        getSkillSummaryText: () => '',
-        activateSkill: () => null,
-      } as any,
-    });
-
-    const result = await runtime.query({
-      prompt: 'prepared prompt',
-      tools: [{ name: 'create_file', description: 'Create file', parameters: {} }],
-    });
-
-    expect(result).toBe('Approval required to create file: Assets/Canvas/summary.canvas');
-    expect(chatInputs.length).toBe(1);
-    expect(executedCalls).toEqual([{
-      name: 'create_file',
-      args: {
-        path: 'Assets/Canvas/summary.canvas',
-        content: '{"nodes":[],"edges":[]}',
-      },
-    }]);
-  });
-
-  await test('query routes safe workspace write tools through WorkspaceEditService when available', async () => {
-    const chatInputs: any[] = [];
-    const registryCalls: any[] = [];
-    const workspaceCalls: any[] = [];
-    const runtime = createChatRuntime({
-      provider: {
-        startChat: () => ({
-          sendMessage: async (input: any) => {
-            chatInputs.push(input);
-            if (typeof input === 'string') {
-              return {
-                text: '',
-                functionCalls: [
-                  {
-                    id: 'call_update',
-                    name: 'update_file',
-                    args: {
-                      path: 'Notes/source.md',
-                      content: 'after',
-                    },
-                  },
-                ],
-              };
-            }
-            return { text: 'done' };
-          },
-        }),
-      } as any,
-      memoryManager: null,
-      toolRegistry: {
-        getAllDefinitions: () => [
-          { name: 'update_file', description: 'Update file', parameters: {} },
-        ],
-        execute: async (name: string, args: any) => {
-          registryCalls.push({ name, args });
-          return { success: true };
-        },
-      } as any,
-      skillRegistry: {
-        resolveByIntent: () => null,
-        getSkillSummaryText: () => '',
-        activateSkill: () => null,
-      } as any,
-      workspaceEditService: {
-        executeWorkspaceTool: async (name: string, args: any) => {
-          workspaceCalls.push({ name, args });
-          return {
-            success: true,
-            path: args.path,
-            workspaceEdit: {
-              id: 'edit-1',
-              action: name,
-              path: args.path,
-              kind: 'update',
-              appliedAt: 1,
-              status: 'applied',
-            },
-          };
-        },
-      } as any,
-    });
-
-    const result = await runtime.query({
-      prompt: 'prepared prompt',
-      tools: [{ name: 'update_file', description: 'Update file', parameters: {} }],
-    });
-
-    expect(result).toBe('done');
-    expect(registryCalls).toEqual([]);
-    expect(workspaceCalls).toEqual([{
-      name: 'update_file',
-      args: {
-        path: 'Notes/source.md',
-        content: 'after',
-      },
-    }]);
-    expect(chatInputs[1]).toEqual([{
-      id: 'call_update',
-      name: 'update_file',
-      response: {
-        success: true,
-        path: 'Notes/source.md',
-        workspaceEdit: {
-          id: 'edit-1',
-          action: 'update_file',
-          path: 'Notes/source.md',
-          kind: 'update',
-          appliedAt: 1,
-          status: 'applied',
-        },
-      },
-    }]);
-  });
-
-  await test('query returns a workspace warning when the write tool fails and the model still claims success', async () => {
-    const chatInputs: any[] = [];
-    const executedCalls: any[] = [];
-    const runtime = createChatRuntime({
-      provider: {
-        startChat: () => ({
-          sendMessage: async (input: any) => {
-            chatInputs.push(input);
-            if (typeof input === 'string') {
-              return {
-                text: '',
-                functionCalls: [
-                  {
-                    name: 'create_file',
-                    args: {
-                      path: '../summary.canvas',
-                      content: '{"nodes":[],"edges":[]}',
-                    },
-                  },
-                ],
-              };
-            }
-            return { text: 'I created the canvas file.' };
-          },
-        }),
-      } as any,
-      memoryManager: null,
-      toolRegistry: {
-        getAllDefinitions: () => [
-          { name: 'create_file', description: 'Create file', parameters: {} },
-        ],
-        execute: async (name: string, args: any) => {
-          executedCalls.push({ name, args });
-          return {
-            success: false,
-            error: 'Unsafe vault path',
-          };
-        },
-      } as any,
-      skillRegistry: {
-        resolveByIntent: () => null,
-        getSkillSummaryText: () => '',
-        activateSkill: () => null,
-      } as any,
-    });
-
-    const prepared = await runtime.prepareTurn({
-      userMessage: 'Create a canvas file',
-      contextItems: [],
-    });
-
-    const result = await runtime.query(prepared);
-
-    expect(result).toContain('No file was created or modified');
-    expect(result).toContain('Unsafe vault path');
-    expect(chatInputs.length).toBe(2);
-    expect(executedCalls).toEqual([{
-      name: 'create_file',
-      args: {
-        path: '../summary.canvas',
-        content: '{"nodes":[],"edges":[]}',
-      },
-    }]);
-  });
-
-  await test('query blocks rewrite results that fail the generation quality check', async () => {
-    const runtime = createChatRuntime({
-      provider: {
-        startChat: () => ({
-          sendMessage: async () => ({
-            text: 'Bad sentence.',
-          }),
-        }),
-      } as any,
-      memoryManager: null,
-      toolRegistry: {
-        getAllDefinitions: () => [],
-        execute: async () => ({}),
-      } as any,
-      skillRegistry: {
-        resolveByIntent: () => null,
-        getSkillSummaryText: () => '',
-        activateSkill: () => null,
-      } as any,
-    });
-
-    const result = await runtime.query({
-      prompt: 'prepared prompt',
-      tools: [],
-      selection: 'Bad sentence.',
-      generationPlan: {
-        source: 'slash-edit',
-        mode: 'rewrite',
-        targetShape: 'replacement',
-        previewRequired: true,
-        mustPreserveVoice: true,
-        mustUseObsidianMarkdown: true,
-        qualityChecklist: [],
-      },
-    } as any);
-
-    expect(result).toContain('Generation quality check failed');
-    expect(result).toContain('Generated text is too close to the original text.');
-  });
-
   const makeContextRuntime = () => createChatRuntime({
     provider: {} as any,
     memoryManager: null,
@@ -834,6 +410,39 @@ async function runTests() {
     expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(true);
     expect(prepared.prompt.includes('[Context Note]')).toBe(true);
     expect(prepared.prompt.includes('follow the conversation')).toBe(true);
+  });
+
+  await test('[B] English continuation "go ahead with option 2" (5 words) strips ambient context', async () => {
+    const runtime = makeContextRuntime();
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: 'go ahead with option 2',
+      contextItems: [ambientNote()],
+      priorMessages: [
+        { role: 'user', content: 'how do I fix the links?' },
+        { role: 'model', content: 'Option 1: wikilink. Option 2: absolute path.' },
+      ],
+    } as any);
+
+    // "go ahead with option 2" = 5 词，命中 CONTINUATION_PATTERNS，环境上下文应被剔除
+    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(false);
+    expect(prepared.prompt.includes('User Request: go ahead with option 2')).toBe(true);
+  });
+
+  await test('[B] English long request (>5 words) keeps ambient context even with history', async () => {
+    const runtime = makeContextRuntime();
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: 'please rewrite the entire article to be more concise and clear',
+      contextItems: [ambientNote()],
+      priorMessages: [
+        { role: 'user', content: 'previous question' },
+        { role: 'model', content: 'previous answer' },
+      ],
+    } as any);
+
+    // 超过5词的英文实质请求，不是延续，环境上下文必须保留
+    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(true);
   });
 }
 

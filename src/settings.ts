@@ -427,7 +427,7 @@ function ensureSettingsFallbackStyles(): void {
 const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     { id: 'overview', title: 'Overview', description: 'Configuration health and actions that need attention.', keywords: ['overview', 'health', 'risk', 'status'] },
     { id: 'connection', title: 'Connection', description: 'Provider, API key, endpoint, model, and connection tests.', keywords: ['provider', 'api key', 'base url', 'model', 'connection', 'openai', 'gemini', 'deepseek', 'qwen'] },
-    { id: 'behavior', title: 'Behavior', description: 'Context budget, system prompt, and runtime behavior.', keywords: ['behavior', 'runtime', 'context window', 'token', 'system prompt', 'persona', 'prompt'] },
+    { id: 'behavior', title: 'Behavior', description: 'Context budget, system prompt, and runtime behavior.', keywords: ['behavior', 'runtime', 'context window', 'token', 'system prompt', 'persona', 'prompt', 'thinking', 'reasoning'] },
     { id: 'memory', title: 'Memory', description: 'Memory retention, recall, search, and deletion.', keywords: ['memory', 'hindsight', 'recall', 'forget', 'profile', 'privacy', 'observation'] },
     { id: 'permissions', title: 'Permissions', description: 'Vault write scope, file operations, plugin control, and confirmations.', keywords: ['permissions', 'file creation', 'file modification', 'plugin control', 'confirm'] },
     { id: 'capture', title: 'Capture', description: 'Inbox, clipping storage, WeChat import, and URL capture.', keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper'] },
@@ -1347,6 +1347,22 @@ export class SettingTab extends PluginSettingTab {
                 .setDynamicTooltip()
                 .onChange(async (value: number) => {
                     this.plugin.settings.contextWindow = value;
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Thinking Level')
+            .setDesc('Controls how much reasoning the model uses. Lower = fewer tokens; higher = better results on complex tasks.')
+            .addDropdown(drop => drop
+                .addOption('off', 'Off (no thinking)')
+                .addOption('minimal', 'Minimal')
+                .addOption('low', 'Low')
+                .addOption('medium', 'Medium (default)')
+                .addOption('high', 'High')
+                .addOption('xhigh', 'X-High (select models only)')
+                .setValue(this.plugin.settings.thinkingLevel ?? 'medium')
+                .onChange(async (value: PluginSettings['thinkingLevel']) => {
+                    this.plugin.settings.thinkingLevel = value;
                     await this.persistSettings();
                 }));
 

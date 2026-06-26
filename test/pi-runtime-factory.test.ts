@@ -23,10 +23,6 @@ async function runTests() {
   const {
     createChatRuntime,
   } = await import('../src/runtime/runtime-factory');
-  const {
-    resetRuntimeEngineForTesting,
-    setRuntimeEngineForTesting,
-  } = await import('../src/runtime/runtime-engine');
 
   const deps = {
     provider: {} as any,
@@ -42,20 +38,9 @@ async function runTests() {
     } as any,
   };
 
-  await test('defaults to the Pi runtime', () => {
-    resetRuntimeEngineForTesting();
+  await test('createChatRuntime returns a PiChatRuntime', () => {
     const runtime = createChatRuntime(deps);
     expect(runtime.constructor.name).toBe('PiChatRuntime');
-  });
-
-  await test('can create the Pi runtime through the internal engine flag', () => {
-    setRuntimeEngineForTesting('pi');
-    try {
-      const runtime = createChatRuntime(deps);
-      expect(runtime.constructor.name).toBe('PiChatRuntime');
-    } finally {
-      resetRuntimeEngineForTesting();
-    }
   });
 }
 

@@ -80,6 +80,18 @@ export interface PluginSettings {
     deletedProviderIds: string[];
     contextWindow: number;
 
+    // --- 💾 Session Persistence ---
+    /**
+     * 当前活跃会话的引用，用于跨重启恢复持久化的对话历史。
+     * 由 SessionStore 写入，结构与 PersistedSessionRef 对齐。运行期可选。
+     */
+    sessionRef?: {
+        id: string;
+        path: string;
+        createdAt: string;
+        cwd: string;
+    } | null;
+
     // --- 🛡️ Guardian Behavior ---
     enableGuardian: boolean;
     guardianAutoMode: boolean; // New: Auto-trigger toggle
@@ -121,6 +133,18 @@ export interface PluginSettings {
     knowledgeOntologyMinTopicFrequency: number;
     knowledgeOntologyMinConceptFrequency: number;
     knowledgeOntologyAutoRecompileStale: boolean;
+
+    // --- 🧠 Thinking Level ---
+    /**
+     * 控制模型推理深度（thinking / reasoning token 用量）。
+     * "off"     — 关闭 thinking，最省 token，适合简单补全。
+     * "minimal" — 最低档 thinking，极少 token 开销。
+     * "low"     — 低档，轻度推理。
+     * "medium"  — 中档，默认推荐值。
+     * "high"    — 高档，复杂任务。
+     * "xhigh"   — 最高档，仅部分模型支持。
+     */
+    thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
     // --- 🔌 Plugin Skill Generator ---
     autoGeneratePluginSkills: boolean;
@@ -182,6 +206,9 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     knowledgeOntologyMinTopicFrequency: 3,
     knowledgeOntologyMinConceptFrequency: 2,
     knowledgeOntologyAutoRecompileStale: false,
+
+    // Thinking Level
+    thinkingLevel: 'medium',
 
     // Plugin Skill Generator
     autoGeneratePluginSkills: true,

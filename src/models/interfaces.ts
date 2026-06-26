@@ -92,5 +92,5 @@ export interface IModelProvider {
     listModels?(): Promise<ModelOption[]>;
 
     generateContent(prompt: string, systemPrompt?: string, options?: GenerationOptions): Promise<GenerationResult>;
-    startChat(tools?: ToolDefinition[], priorMessages?: PriorChatMessage[]): IChatSession;
+    startChat(tools?: ToolDefinition[], priorMessages?: PriorChatMessage[], thinkingLevel?: string): IChatSession;
 }

@@ -401,6 +401,31 @@ export class ChatController {
         return true;
     }
 
+    /**
+     * 运行中补话：长任务正在跑（有 activeStream）时，把用户补充指令排队，
+     * 不打断当前流，由正在运行的 agentLoop 在下一轮纳入。
+     * 同时把这条补话渲染为一条用户消息，保持对话可见性。
+     * @returns 是否成功排队（无活动流或 API 不支持时返回 false）。
+     */
+    public steerActiveRun(text: string): boolean {
+        const trimmed = text?.trim();
+        if (!trimmed) return false;
+        if (!this.activeStreamController || this.activeStreamController.signal.aborted) {
+            return false;
+        }
+        const steer = (this.api as any).steerActiveRun;
+        if (typeof steer !== 'function') return false;
+
+        steer.call(this.api, trimmed);
+        this.addMessage('user', trimmed);
+        return true;
+    }
+
+    /** 是否正在运行一个可被补话的流。供 UI 决定补话入口的可用态。 */
+    public isRunActive(): boolean {
+        return !!this.activeStreamController && !this.activeStreamController.signal.aborted;
+    }
+
     public async undoWorkspaceEdit(editId: string): Promise<any> {
         const undo = (this.api as any).undoWorkspaceEdit;
         if (typeof undo !== 'function') {

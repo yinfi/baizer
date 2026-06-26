@@ -72,6 +72,64 @@ export function tokenizeMemoryText(value: string): string[] {
     .filter((token) => token.length >= 2);
 }
 
+/**
+ * Retrieval tokenizer: extends tokenizeMemoryText by expanding every contiguous
+ * CJK run into overlapping character bigrams (Lucene CJKBigram approach).
+ *
+ * \u300c\u8bb0\u5fc6\u8bed\u4e49\u53ec\u56de\u300d -> \u8bb0\u5fc6, \u5fc6\u8bed, \u8bed\u4e49, \u4e49\u53ec, \u53ec\u56de
+ *
+ * This lets a query \u300c\u8bb0\u5fc6\u53ec\u56de\u300d(tokens: \u8bb0\u5fc6, \u53ec\u56de) overlap with a document
+ * containing \u300c\u8bb0\u5fc6\u8bed\u4e49\u53ec\u56de\u300d on both terms, whereas the original tokenizer
+ * would produce a single token \u300c\u8bb0\u5fc6\u8bed\u4e49\u53ec\u56de\u300d that never matches \u300c\u8bb0\u5fc6\u53ec\u56de\u300d.
+ *
+ * Latin/alphanumeric tokens are kept as-is (min length 2 unchanged).
+ * CJK single-character runs emit a unigram so length-1 words are not lost.
+ * All bigrams are length 2, satisfying the >=2 filter naturally.
+ *
+ * No new imports \u2014 pure Map/string/Array, mobile-safe.
+ */
+export function tokenizeForRetrieval(value: string): string[] {
+  const raw = normalizeMemoryText(value)
+    .split(/[^a-z0-9\u4e00-\u9fff_.:/-]+/i)
+    .filter((token) => token.length >= 1);
+
+  const result: string[] = [];
+  // Track bigrams already emitted to avoid duplicates within the same value
+  const seen = new Set<string>();
+
+  for (const token of raw) {
+    // Detect whether the token is a pure CJK run
+    const isCjk = /^[\u4e00-\u9fff]+$/.test(token);
+
+    if (!isCjk) {
+      // Keep latin / mixed tokens with the same min-length-2 rule as the original
+      if (token.length >= 2) {
+        if (!seen.has(token)) {
+          seen.add(token);
+          result.push(token);
+        }
+      }
+    } else if (token.length === 1) {
+      // Single CJK character: emit as unigram (no bigram possible)
+      if (!seen.has(token)) {
+        seen.add(token);
+        result.push(token);
+      }
+    } else {
+      // Multi-character CJK run: emit overlapping bigrams
+      for (let i = 0; i < token.length - 1; i += 1) {
+        const bigram = token[i] + token[i + 1];
+        if (!seen.has(bigram)) {
+          seen.add(bigram);
+          result.push(bigram);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 export function createMemoryId(input: {
   bankId: string;
   type: MemoryType;

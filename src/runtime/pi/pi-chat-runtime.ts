@@ -1,9 +1,7 @@
 import { StreamEvent } from '../../models/interfaces';
-import { DefaultChatRuntime } from '../chat-runtime';
+import { BaseChatRuntime } from '../base-chat-runtime';
 import {
   ChatRuntime,
-  ChatRuntimeDeps,
-  ChatTurnRequest,
   PreparedChatTurn,
 } from '../runtime-types';
 import {
@@ -16,23 +14,9 @@ import {
 import { mapPiEventToStreamEvent, unwrapPiToolResult } from './pi-event-adapter';
 import { createBaizerStreamFn, createPiBridgeModel } from './pi-provider-bridge';
 import { adaptToolDefinitionsToPi } from './pi-tool-adapter';
+import { filterPiToolsByActiveTools } from '../steering-controller';
 
-export class PiChatRuntime extends DefaultChatRuntime implements ChatRuntime {
-  private readonly legacy: DefaultChatRuntime;
-
-  constructor(private readonly deps: ChatRuntimeDeps) {
-    super(deps);
-    this.legacy = new DefaultChatRuntime(deps);
-  }
-
-  getTools() {
-    return this.legacy.getTools();
-  }
-
-  prepareTurn(request: ChatTurnRequest): Promise<PreparedChatTurn> {
-    return this.legacy.prepareTurn(request);
-  }
-
+export class PiChatRuntime extends BaseChatRuntime implements ChatRuntime {
   async query(turn: PreparedChatTurn): Promise<string> {
     let finalText = '';
     let approvalText = '';
@@ -53,7 +37,7 @@ export class PiChatRuntime extends DefaultChatRuntime implements ChatRuntime {
   async *queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
     // priorMessages 注入底层会话：pi 的 agentLoop context 只承载本轮工具循环，
     // 跨轮历史由底层 IChatSession 维护，getBaizerInput 每轮只取当前输入即可。
-    const chat = this.deps.provider.startChat(turn.tools, turn.priorMessages);
+    const chat = this.deps.provider.startChat(turn.tools, turn.priorMessages, this.deps.thinkingLevel);
     const controller = new AbortController();
     const forwardExternalAbort = () => controller.abort(signal?.reason);
     if (signal?.aborted) {
@@ -70,9 +54,15 @@ export class PiChatRuntime extends DefaultChatRuntime implements ChatRuntime {
       workspaceEditService: this.deps.workspaceEditService,
       skillScope,
     });
-    const model = createPiBridgeModel();
+    // 运行中 steering：每次新运行清空遗留的补话/工具变更，避免跨次泄漏。
+    const steeringController = this.deps.steeringController ?? null;
+    steeringController?.reset();
+    const model = createPiBridgeModel(this.deps.contextWindow, this.deps.thinkingLevel);
     const streamFn = createBaizerStreamFn(chat);
     const { agentLoop } = await import('@earendil-works/pi-agent-core');
+    // 推理深度：透传 settings.thinkingLevel → agentLoop config.reasoning。
+    // "off" 关闭 thinking，省 token；"medium"(默认) 适合常规任务；"high"/"xhigh" 适合复杂任务。
+    const reasoning = (this.deps.thinkingLevel ?? 'medium') as any;
     let fullResponseText = '';
     let approvalMessage = '';
     let approvalToolResultYielded = false;
@@ -81,8 +71,13 @@ export class PiChatRuntime extends DefaultChatRuntime implements ChatRuntime {
       messages: [],
       tools,
     };
+    // 暂缓 steering 一轮的闸门：本轮产生了工具结果时置位，
+    // 让工具结果先作为最后一条消息回传给 provider，下一轮再放行补话。
+    // 详见下方 getSteeringMessages / prepareNextTurn 注释。
+    let holdSteeringForPendingToolResults = false;
     const config = {
       model,
+      reasoning,
       convertToLlm: (messages: any[]) => messages.filter(message =>
         message?.role === 'user'
         || message?.role === 'assistant'
@@ -99,6 +94,38 @@ export class PiChatRuntime extends DefaultChatRuntime implements ChatRuntime {
         return undefined;
       },
       shouldStopAfterTurn: () => approvalMessage !== '',
+      // 运行中补话：pi 在每轮 turn 结束后轮询此钩子，把队列里的用户指令
+      // 注入会话作为下一轮输入。无补话时返回 []（满足 pi「不得抛错」契约）。
+      //
+      // 关键：当本轮刚产生工具结果时暂缓一轮放行（holdSteeringForPendingToolResults）。
+      // 否则 pi 会把补话 user 消息压在工具结果之后，使其成为 context 的最后一条；
+      // bridge 的 getBaizerInput 只看最后一条，便会丢弃尚未回传的工具结果，
+      // 导致模型的 tool_call 永远得不到应答（OpenAI 还会主动抹掉该 assistant 轮）。
+      // 暂缓一轮让工具结果先回传，下一轮再放行补话，两者都不丢。
+      getSteeringMessages: async () => {
+        if (!steeringController) return [];
+        if (holdSteeringForPendingToolResults) {
+          holdSteeringForPendingToolResults = false;
+          return [];
+        }
+        return steeringController.drainSteeringMessages();
+      },
+      // 运行时动态工具集：pi 在每轮 turn 结束后调用此钩子（早于 getSteeringMessages）。
+      // 这里兼做暂缓闸门的置位点：本轮有工具结果时置位，使紧随其后的 getSteeringMessages
+      // 暂缓一轮，保证工具结果先回传 provider。
+      // 收到工具集变更时，按变更过滤 pi 工具数组并替换 context.tools，下一轮起生效。
+      prepareNextTurn: ({ context: turnContext, toolResults }: any) => {
+        holdSteeringForPendingToolResults = Array.isArray(toolResults) && toolResults.length > 0;
+        if (!steeringController) return undefined;
+        const activeTools = steeringController.consumeActiveToolsUpdate();
+        if (!activeTools) return undefined;
+        return {
+          context: {
+            ...turnContext,
+            tools: filterPiToolsByActiveTools(tools, activeTools),
+          },
+        };
+      },
     };
     const prompts = [{
       role: 'user' as const,

@@ -7,8 +7,10 @@ const tests = [
   'test/obsidian-markdown-skill.test.ts',
   'test/skill-routing.test.ts',
   'test/model-service.test.ts',
-  'test/chat-runtime.test.ts',
+  'test/base-chat-runtime.test.ts',
+  'test/session-store.test.ts',
   'test/pi-chat-runtime.test.ts',
+  'test/steering.test.ts',
   'test/pi-runtime-factory.test.ts',
   'test/pi-approval-policy.test.ts',
   'test/pi-event-adapter.test.ts',
@@ -52,6 +54,7 @@ const tests = [
   'test/plugin-tools.test.ts',
   'test/provider-capabilities.test.ts',
   'test/openai-provider.test.ts',
+  'test/gemini-provider.test.ts',
   'test/context-budget.test.ts',
   'test/context-manager.test.ts',
   'test/settings-state.test.ts',
@@ -80,6 +83,7 @@ const tests = [
   'test/knowledge/guardian-context.test.ts',
   'test/knowledge/types.test.ts',
   'test/knowledge/watcher.test.ts',
+  'test/throttle.test.ts',
 ];
 
 for (const testFile of tests) {
