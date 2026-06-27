@@ -46,6 +46,12 @@ async function runTests() {
     } as any)).toEqual({ type: 'thinking', content: 'plan' });
   });
 
+  await test('maps turn_start to a step boundary for process grouping', () => {
+    expect(mapPiEventToStreamEvent({
+      type: 'turn_start',
+    } as any)).toEqual({ type: 'step_boundary' });
+  });
+
   await test('maps tool execution start', () => {
     expect(mapPiEventToStreamEvent({
       type: 'tool_execution_start',

@@ -31,11 +31,13 @@ async function runTests() {
       onToolCall: (name) => calls.push(`tool_call:${name}`),
       onToolResult: (name) => calls.push(`tool_result:${name}`),
       onTextDelta: (content) => calls.push(`text:${content}`),
+      onStepBoundary: () => calls.push('step'),
       onDone: () => calls.push('done'),
       onError: (message) => calls.push(`error:${message}`),
       onScrollRequest: () => calls.push('scroll'),
     });
 
+    controller.handleEvent({ type: 'step_boundary' });
     controller.handleEvent({ type: 'thinking', content: 'plan' });
     controller.handleEvent({ type: 'tool_call', name: 'search_vault', args: {} });
     controller.handleEvent({ type: 'tool_result', name: 'search_vault', result: {} });
@@ -43,6 +45,7 @@ async function runTests() {
     controller.handleEvent({ type: 'done', text: 'hello' });
 
     expect(calls).toEqual([
+      'step', 'scroll',
       'thinking:plan', 'scroll',
       'tool_call:search_vault', 'scroll',
       'tool_result:search_vault', 'scroll',

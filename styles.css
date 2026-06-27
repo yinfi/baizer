@@ -1372,6 +1372,27 @@ textarea.shell-input::placeholder {
     display: block;
 }
 
+/* 回合分组标记:把「过程叙述 + 工具调用」按智能体的一个工具循环回合分段。 */
+.shell-think-step-divider {
+    padding: 6px 0 2px 0;
+}
+
+.shell-think-step-divider::before {
+    display: none;
+}
+
+.shell-think-step-label {
+    font-size: 0.72em;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+
+.shell-think-timeline.is-collapsed .shell-think-step-divider {
+    display: none;
+}
+
 .shell-response-content {
     min-height: 1em;
 }

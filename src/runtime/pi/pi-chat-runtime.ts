@@ -181,6 +181,17 @@ export class PiChatRuntime extends BaseChatRuntime implements ChatRuntime {
           continue;
         }
 
+        if (streamEvent.type === 'tool_call') {
+          // 工具调用出现 = 此前这一轮的正文是「该步的过程叙述」,不属于最终答案。
+          // 重置累计,使 done.text 只保留最后一轮(其后不再有工具调用)的回复,
+          // 既让叙述沉淀进 UI 时间线,又避免叙述污染最终答案与历史。
+          fullResponseText = '';
+          if (!approvalMessage) {
+            yield streamEvent;
+          }
+          continue;
+        }
+
         if (!approvalMessage) {
           yield streamEvent;
         }

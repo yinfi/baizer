@@ -174,7 +174,9 @@ async function runTests() {
     const runtime = new PiChatRuntime(deps);
     const events = await collect(runtime.queryStream(createTurn()));
 
+    // agentLoop 每回合开头发 turn_start → 映射为 step_boundary;单回合响应带 1 个。
     expect(events).toEqual([
+      { type: 'step_boundary' },
       { type: 'text_delta', content: 'Hello' },
       { type: 'done', text: 'Hello' },
     ]);
@@ -197,7 +199,7 @@ async function runTests() {
     const runtime = new PiChatRuntime(deps);
     const events = await collect(runtime.queryStream(createTurn()));
 
-    expect(events.map(event => event.type)).toEqual(['tool_call', 'tool_result', 'text_delta', 'done']);
+    expect(events.map(event => event.type)).toEqual(['step_boundary', 'tool_call', 'tool_result', 'step_boundary', 'text_delta', 'done']);
     expect(deps.sessionInputs[1]).toEqual([
       { id: 'call_1', name: 'read_note', response: { success: true, content: 'A' } },
     ]);
@@ -219,8 +221,8 @@ async function runTests() {
     const runtime = new PiChatRuntime(deps);
     const events = await collect(runtime.queryStream(createTurn()));
 
-    expect(events.map(event => event.type)).toEqual(['tool_call', 'tool_result', 'done']);
-    expect((events[2] as any).text).toBe('');
+    expect(events.map(event => event.type)).toEqual(['step_boundary', 'tool_call', 'tool_result', 'done']);
+    expect((events[3] as any).text).toBe('');
     expect(deps.sessionInputs.length).toBe(1);
 
     const queryText = await runtime.query(createTurn());
@@ -251,9 +253,9 @@ async function runTests() {
     const events = await collect(runtime.queryStream(createTurn()));
     await wait(20);
 
-    expect(events.map(event => event.type)).toEqual(['tool_call', 'tool_result', 'done']);
+    expect(events.map(event => event.type)).toEqual(['step_boundary', 'tool_call', 'tool_result', 'done']);
     expect((events[1] as any).name).toBe('update_file');
-    expect((events[2] as any).text).toBe('');
+    expect((events[3] as any).text).toBe('');
     expect(deps.registryCalls).toEqual([]);
     expect(deps.sessionInputs.length).toBe(1);
   });
@@ -435,7 +437,9 @@ async function runTests() {
     const runtime = new PiChatRuntime(deps);
     const events = await collect(runtime.queryStream(createTurn()));
 
+    // 错误发生在第一回合内,前面已有 turn_start → step_boundary。
     expect(events).toEqual([
+      { type: 'step_boundary' },
       { type: 'error', message: 'provider failed' },
     ]);
 
@@ -489,6 +493,50 @@ async function runTests() {
     // 落盘失败不得阻断回答返回。
     const text = await runtime.query(createTurn());
     expect(text).toBe('Resilient');
+  });
+
+  await test('drops intermediate-turn narration so the final answer keeps only the last turn', async () => {
+    // 第一轮: 模型先叙述"我要读文件"再发起工具调用 → 叙述属于过程,不进最终答案。
+    // 第二轮(收到工具结果后): 输出真正的回答。done.text 应只含第二轮文本。
+    const deps = createDeps({
+      streamFactory: (input) => Array.isArray(input)
+        ? [
+            { type: 'text_delta', content: 'Here is the real answer.' },
+            { type: 'done', text: 'Here is the real answer.' },
+          ]
+        : [
+            { type: 'text_delta', content: 'Let me read the note first. ' },
+            { type: 'tool_call', id: 'call_1', name: 'read_note', args: { path: 'A.md' } },
+            { type: 'done', text: '' },
+          ],
+      toolResults: { read_note: { success: true, content: 'A' } },
+    });
+
+    const runtime = new PiChatRuntime(deps);
+    const events = await collect(runtime.queryStream(createTurn()));
+    const done = events.at(-1) as any;
+
+    // 中间叙述通过 text_delta 透传给 UI(沉淀进时间线),但不留在最终答案里。
+    expect(done.text).toBe('Here is the real answer.');
+    // query() 同样只返回末轮答案。
+    const queryText = await runtime.query(createTurn());
+    expect(queryText).toBe('Here is the real answer.');
+  });
+
+  await test('forwards turn_start as a step_boundary through queryStream', async () => {
+    // step_boundary 由真实 agentLoop 的 turn_start 派生(非 provider 层注入)。
+    // 单回合无工具响应应恰好携带 1 个 step_boundary,位于内容之前。
+    const deps = createDeps({
+      streamFactory: () => [
+        { type: 'text_delta', content: 'Hi' },
+        { type: 'done', text: 'Hi' },
+      ],
+    });
+
+    const runtime = new PiChatRuntime(deps);
+    const events = await collect(runtime.queryStream(createTurn()));
+
+    expect(events.map(event => event.type)).toEqual(['step_boundary', 'text_delta', 'done']);
   });
 
   await test('thinking level defaults to medium when not specified in deps', async () => {

@@ -5,6 +5,7 @@ interface StreamControllerDeps {
   onToolCall: (name: string, args: any) => void;
   onToolResult: (name: string, result: any, error?: string) => void;
   onTextDelta: (content: string) => void;
+  onStepBoundary?: () => void;
   onDone: () => void;
   onError: (message: string) => void;
   onScrollRequest?: () => void;
@@ -26,6 +27,9 @@ export class StreamController {
         break;
       case 'text_delta':
         this.deps.onTextDelta(event.content);
+        break;
+      case 'step_boundary':
+        this.deps.onStepBoundary?.();
         break;
       case 'done':
         this.deps.onDone();

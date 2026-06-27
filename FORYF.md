@@ -1519,3 +1519,24 @@ UI 层：
 
 **4. 如何修复的? (How was it fixed?)**
 - 逐项加回归测试后验证。watcher/ontology-service 单测全绿;npm test 83文件全绿 + npm run build exit 0。全部行为保持,未改既定设计取舍(不偷开 schema 重编译)。
+
+---
+### [2026-06-27 13:05] Task Summary
+
+**1. 刚刚做了什么? (What was done?)**
+- 让 think 时间线呈现「智能体处理问题的过程」,而非仅光秃秃的工具调用。两件事一起做:
+  1. 过程叙述进时间线: 工具调用出现时,把此前回复区流出的正文(「我打算做 X、因为 Y」)「毕业」为时间线思路节点,回复区随即清空为下一轮腾空;最终答案只保留最后一轮(其后无工具调用)的回复。
+  2. 回合分组: 利用此前被丢弃的 agentLoop turn_start 事件,映射为 step_boundary,在时间线按回合插入「Step N」分组标记(懒插入,末轮纯答案不产生空分隔)。
+- 改动文件: interfaces.ts(加 step_boundary 事件)、pi-event-adapter.ts(turn_start→step_boundary)、pi-chat-runtime.ts(tool_call 时重置 fullResponseText)、stream-controller.ts(onStepBoundary)、chat-controller.ts(转发 step_boundary + tool_call 重置 abort 兜底 fullText)、shell-view.ts(graduateNarrationToTimeline + flushPendingStepDivider)、styles.css(Step 分隔样式)。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 根因: pi 的 agentLoop 发出完整回合结构(turn_start/turn_end/message_update/tool_*),但 adapter 只映射了 message_update 与 tool_*,turn 边界被完全忽略;且 pi-chat-runtime 把所有回合的 assistant 文本无差别累加进最终答案并流向回复区 —— 中间「过程叙述」既没进时间线、还污染了最终答案。
+- 本质修复 = 用回合边界区分两类文本: 中间回合(后跟工具调用)= 过程叙述→时间线;末轮(其后无工具)= 答案→回复区。一并修掉叙述污染答案的潜在 bug。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 字符串替换误删了 pi-chat-runtime 的 for/finally 闭合结构 —— 读回确认后补回。
+- 我误把「forwards step_boundary」测试写在 provider/bridge 层(往 streamFactory 注入 step_boundary),但 step_boundary 实际由真实 agentLoop 的 turn_start 派生,bridge 会忽略注入值 —— 改为断言真实派生路径。
+- adapter 改动导致每次真实运行都带 step_boundary,4 个断言精确事件序列的旧测试连锁失败 —— 逐个更新序列与索引(单回合 1 个、双回合 2 个、错误/审批路径前导 1 个)。
+
+**4. 如何修复的? (How was it fixed?)**
+- 验证: npm test 500 PASS / 0 FAIL + npm run build exit 0。

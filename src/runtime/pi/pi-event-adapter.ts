@@ -15,6 +15,12 @@ export function unwrapPiToolResult(result: any): any {
 }
 
 export function mapPiEventToStreamEvent(event: any): StreamEvent | undefined {
+  // turn_start: 智能体一个工具循环回合开始。透传为 step_boundary,
+  // 让 UI 把「过程叙述 + 工具调用」按回合分组(Step N)。
+  if (event.type === 'turn_start') {
+    return { type: 'step_boundary' };
+  }
+
   if (event.type === 'message_update') {
     const assistantEvent = event.assistantMessageEvent;
     if (assistantEvent?.type === 'text_delta') {

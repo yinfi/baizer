@@ -212,7 +212,7 @@ export class ChatController {
                         } else {
                             this.onStreamEvent(event);
                         }
-                    } else if (event.type === 'tool_call' || event.type === 'tool_result') {
+                    } else if (event.type === 'tool_call' || event.type === 'tool_result' || event.type === 'step_boundary') {
                         this.onStreamEvent(event);
                     } else if (event.type === 'error') {
                         this.onStreamEvent(event);
@@ -226,6 +226,11 @@ export class ChatController {
                         return;
                     } else if (event.type === 'text_delta') {
                         fullText += event.content;
+                    } else if (event.type === 'tool_call') {
+                        // 与底层 runtime 对齐:工具调用前的正文是该步过程叙述,
+                        // 不属于最终答案。重置 abort 兜底用的 fullText,使中断时
+                        // 回填的也是「末轮回复」而非夹带叙述。
+                        fullText = '';
                     }
                 }
                 // 娴佸紡妯″紡涓嬪彧璁板綍鍒板巻鍙诧紝涓嶈Е鍙?appendMessage锛圲I 宸查€氳繃 stream 浜嬩欢娓叉煋锛?

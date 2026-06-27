@@ -72,6 +72,8 @@ export type StreamEvent =
     | { type: 'text_delta'; content: string }
     | { type: 'tool_call'; name: string; args: any; id?: string }
     | { type: 'tool_result'; name: string; result: any; error?: string }
+    // 智能体一个工具循环回合的开始,用于把过程按「回合」分组展示(Step N)。
+    | { type: 'step_boundary' }
     | { type: 'done'; text: string; interrupted?: boolean }
     | { type: 'error'; message: string };
 

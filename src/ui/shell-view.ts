@@ -84,6 +84,10 @@ export class ShellView extends ItemView {
     private streamPlainTextEl: HTMLElement | null = null;
     private streamAccumulatedText: string = '';
     private streamNodeCount = 0;
+    /** 智能体工具循环回合数(step_boundary 计数),用于时间线「Step N」分组标签。 */
+    private streamStepCount = 0;
+    /** 待插入的回合分隔:置位后由下一个时间线节点触发真正插入,避免空分隔。 */
+    private pendingStepDivider = false;
     private readonly debouncedRenderStream = debounce(
         () => this.renderStreamContent(),
         { wait: 100 }
@@ -168,11 +172,15 @@ export class ShellView extends ItemView {
         this.streamController = new StreamController({
             onThinking: (content) => {
                 this.ensureStreamContainer();
+                this.flushPendingStepDivider();
                 this.thinkingRenderer?.appendThinking(content);
                 this.streamNodeCount = this.getStreamNodeCount();
             },
             onToolCall: (name, args) => {
                 this.ensureStreamContainer();
+                // 工具调用出现 = 此前回复区的正文是「这一步的过程叙述」,
+                // 把它毕业进时间线作为思路节点,并清空回复区为下一轮腾空。
+                this.graduateNarrationToTimeline();
                 this.thinkingRenderer?.finalizeCurrentThinking();
                 this.toolRenderer?.addToolCall(name, args);
                 this.streamNodeCount = this.getStreamNodeCount();
@@ -183,6 +191,13 @@ export class ShellView extends ItemView {
             onTextDelta: (content) => {
                 this.ensureStreamContainer();
                 this.handleTextDelta(content);
+            },
+            onStepBoundary: () => {
+                this.ensureStreamContainer();
+                this.streamStepCount++;
+                // 懒标记:真正的分隔推迟到本回合产生时间线内容时再插入,
+                // 末轮(只出答案、无工具/思考)不产生时间线内容 → 不会留下空分隔。
+                this.pendingStepDivider = true;
             },
             onDone: () => this.finalizeStream(),
             onError: () => this.finalizeStream(),
@@ -669,6 +684,37 @@ export class ShellView extends ItemView {
     }
 
     /**
+     * 把回复区累计的正文「毕业」为时间线里的过程思路节点。
+     * 在工具调用出现时调用:此前这一轮流出的正文是「我打算做什么、为什么」的叙述,
+     * 属于处理过程而非最终答案,沉淀进时间线;回复区随即清空,为下一轮腾空。
+     */
+    private graduateNarrationToTimeline() {
+        this.debouncedRenderStream.flush();
+        this.flushPendingStepDivider();
+        const narration = this.streamAccumulatedText.trim();
+        if (!narration) return;
+
+        this.thinkingRenderer?.appendThinking(narration);
+        this.streamNodeCount = this.getStreamNodeCount();
+        this.streamAccumulatedText = '';
+        if (this.streamPlainTextEl) {
+            this.streamPlainTextEl.textContent = '';
+        }
+    }
+
+    /**
+     * 若有待插入的回合分隔,在时间线当前末尾插入「Step N」分组标记。
+     * 由「即将新增时间线节点」的路径(思考/叙述毕业/工具调用)触发,
+     * 保证分隔总在本回合内容之上,且末轮无内容时不产生空分隔。
+     */
+    private flushPendingStepDivider() {
+        if (!this.pendingStepDivider || !this.streamTimeline) return;
+        this.pendingStepDivider = false;
+        const divider = (this.streamTimeline as any).createDiv({ cls: 'shell-think-step-divider think-node' }) as HTMLElement;
+        (divider as any).createSpan({ cls: 'shell-think-step-label', text: `Step ${this.streamStepCount}` });
+    }
+
+    /**
      * 流式途中只做轻量纯文本同步:把累计文本写进一个纯文本节点,不跑 Markdown 渲染。
      * 完整 Markdown 渲染推迟到 finalizeStream() 一次性完成,避免每帧 empty()+整段重渲的 O(n²)。
      */
@@ -728,6 +774,8 @@ export class ShellView extends ItemView {
         this.streamPlainTextEl = null;
         this.streamAccumulatedText = '';
         this.streamNodeCount = 0;
+        this.streamStepCount = 0;
+        this.pendingStepDivider = false;
         this.thinkingRenderer = null;
         this.toolRenderer = null;
         void this.persistActiveTab();
@@ -1846,6 +1894,8 @@ export class ShellView extends ItemView {
         this.streamPlainTextEl = null;
         this.streamAccumulatedText = '';
         this.streamNodeCount = 0;
+        this.streamStepCount = 0;
+        this.pendingStepDivider = false;
         this.thinkingRenderer = null;
         this.toolRenderer = null;
     }
