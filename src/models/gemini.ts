@@ -136,8 +136,13 @@ export class GeminiProvider implements IModelProvider {
             : thinkingLevel === 'high' ? 8192
             : thinkingLevel === 'xhigh' ? 16384
             : -1; // undefined / unknown → モデルに任せる
+        // includeThoughts: Gemini が思考サマリ(thought part)を返すための必須スイッチ。
+        // これが無いと thinkingBudget を渡してもモデルは内部でだけ考え、ストリームに
+        // thought part を一切流さない → UI の think タイムラインがツール呼び出しだけになる。
+        // 'off'(budget 0)のときは思考自体を無効化するので includeThoughts も付けない。
+        const includeThoughts = thinkingBudget !== 0;
         const generationConfig: any = (supportsThinkingConfig && thinkingLevel !== undefined)
-            ? { thinkingConfig: { thinkingBudget } }
+            ? { thinkingConfig: { thinkingBudget, includeThoughts } }
             : {};
         const modelWithTools = this.genAI.getGenerativeModel({
             model: this.config.modelName,

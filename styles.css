@@ -556,6 +556,11 @@ textarea.shell-input::placeholder {
     width: 0;
 }
 
+.shell-thinking-select {
+    flex: 0 0 76px;
+    max-width: 76px;
+}
+
 .shell-action-buttons {
     flex-shrink: 0;
     display: flex;
@@ -1065,6 +1070,14 @@ textarea.shell-input::placeholder {
     color: var(--text-normal);
 }
 
+/* setIcon() 注入的 lucide SVG 默认按 --icon-size(约 18px)渲染,会撑大紧凑的反馈按钮。
+ * 统一约束消息操作栏(复制/点赞/点踩)内的图标为 14px,与按钮 padding 协调、对齐居中。 */
+.shell-feedback-bar .shell-message-action-btn svg,
+.shell-feedback-bar .shell-feedback-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
 .shell-feedback-btn.active {
     border-color: var(--interactive-accent);
     color: var(--interactive-accent);
@@ -1179,6 +1192,42 @@ textarea.shell-input::placeholder {
 .shell-thumbs-down.active {
     color: var(--color-red);
     border-color: var(--color-red);
+}
+
+/* 点踩后的内联理由输入:让用户一句话说明哪里不好,AI 据此重答。 */
+.shell-feedback-reason {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 6px;
+    width: 100%;
+}
+
+.shell-feedback-reason-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 4px 8px;
+    font-size: var(--font-ui-small);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+}
+
+.shell-feedback-reason-input:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+}
+
+.shell-feedback-reason-submit {
+    flex: 0 0 auto;
+    padding: 4px 10px;
+    font-size: var(--font-ui-small);
+    border-radius: 6px;
+    border: 1px solid var(--interactive-accent);
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    cursor: pointer;
 }
 
 /* ==================== Think Timeline ==================== */
@@ -1325,6 +1374,13 @@ textarea.shell-input::placeholder {
 
 .shell-response-content {
     min-height: 1em;
+}
+
+/* 流式途中的纯文本节点:保留原始 Markdown 的换行与空白,完成后会被替换为渲染好的 Markdown。 */
+.shell-stream-plaintext {
+    display: inline;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .shell-stream-cursor {
@@ -3490,13 +3546,14 @@ textarea.shell-input {
 .baizer-shell-view .shell-model-select-container {
     min-width: 0;
     display: grid;
-    grid-template-columns: minmax(78px, 92px) minmax(0, 1fr);
+    grid-template-columns: minmax(72px, 88px) minmax(0, 1fr) minmax(64px, 76px);
     gap: 6px;
     overflow: hidden;
 }
 
 .baizer-shell-view .shell-provider-select,
-.baizer-shell-view .shell-main-model-select {
+.baizer-shell-view .shell-main-model-select,
+.baizer-shell-view .shell-thinking-select {
     width: 100%;
     max-width: none;
     min-width: 0;
@@ -3524,7 +3581,7 @@ textarea.shell-input {
     box-shadow: none;
 }
 
-.baizer-shell-view .shell-image-btn {
+.baizer-shell-view .shell-attach-btn {
     color: var(--text-muted);
     background: var(--baizer-surface-muted);
 }
@@ -3548,7 +3605,7 @@ textarea.shell-input {
 
 @media (max-width: 380px) {
     .baizer-shell-view .shell-model-select-container {
-        grid-template-columns: minmax(68px, 84px) minmax(0, 1fr);
+        grid-template-columns: minmax(60px, 76px) minmax(0, 1fr) minmax(54px, 64px);
     }
 
     .baizer-shell-view .baizer-tab-active-title {
@@ -3827,3 +3884,132 @@ textarea.shell-input {
         white-space: normal;
     }
 }
+
+/* ===== File Attachment Modal ===== */
+.baizer-attachment-modal .baizer-attachment-hint {
+    margin: 0 0 12px;
+    color: var(--text-muted);
+    font-size: var(--font-smaller);
+}
+
+.baizer-attachment-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px 16px;
+    border: 1.5px dashed var(--baizer-border-strong, var(--background-modifier-border));
+    border-radius: var(--baizer-radius-m, 8px);
+    background: var(--baizer-surface-muted, var(--background-secondary));
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.baizer-attachment-dropzone:hover {
+    border-color: var(--interactive-accent);
+    color: var(--text-normal);
+}
+
+.baizer-attachment-dropzone.is-dragover {
+    border-color: var(--interactive-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
+    color: var(--text-normal);
+}
+
+.baizer-attachment-dropzone-icon {
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    opacity: 0.8;
+}
+
+.baizer-attachment-dropzone-text {
+    font-size: var(--font-smaller);
+}
+
+.baizer-attachment-list {
+    margin-top: 12px;
+    max-height: 220px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.baizer-attachment-empty {
+    padding: 12px;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: var(--font-smaller);
+}
+
+.baizer-attachment-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--baizer-border, var(--background-modifier-border));
+    border-radius: var(--baizer-radius-s, 6px);
+    background: var(--background-primary);
+}
+
+.baizer-attachment-row-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    color: var(--text-muted);
+}
+
+.baizer-attachment-row-meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.baizer-attachment-row-name {
+    font-size: var(--font-smaller);
+    color: var(--text-normal);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.baizer-attachment-row-size {
+    font-size: var(--font-smallest);
+    color: var(--text-faint);
+}
+
+.baizer-attachment-row-remove {
+    flex: 0 0 auto;
+}
+
+.baizer-attachment-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+/* ==================== Reduced Motion ====================
+ * 尊重系统「减少动态效果」偏好:关闭所有持续动画(流式光标闪烁、思考/知识脉冲等),
+ * 并把过渡压到几乎瞬时,避免前庭敏感用户被动画困扰。前庭安全:仅去动效,不改布局。 */
+@media (prefers-reduced-motion: reduce) {
+    .baizer-shell-view *,
+    .baizer-shell-view *::before,
+    .baizer-shell-view *::after,
+    .guardian-selection-tooltip *,
+    .baizer-attachment-modal * {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    /* 流式光标改为静态显示,不再闪烁。 */
+    .shell-stream-cursor {
+        animation: none !important;
+    }
+}
+

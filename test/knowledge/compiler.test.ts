@@ -359,4 +359,15 @@ test('chunkDocument handles content without headings via paragraph split', () =>
   expect(chunks.length >= 2).toBeTruthy();
 });
 
+test('chunkDocument terminates when only heading is within overlap distance (no infinite loop)', () => {
+  // 回归：早期 splitIdx <= overlap 时 max(0, splitIdx-overlap) 钳到 0，remaining 原地不动死循环。
+  // 构造：唯一 ## 标题在前 100 字符内，其后是一大段无标题、无空行的连续文本。
+  let content = '## Intro\n';
+  content += 'x'.repeat(60000); // 单段连续文本，无 heading、无 \n\n
+  const chunks = chunkDocument(content);
+  expect(chunks.length >= 2).toBeTruthy();
+  // 还原（去掉每块的 contextPrefix）后应无限增长则永不到此断言；能到此即证明已终止
+  expect(chunks.every(c => c.length > 0)).toBeTruthy();
+});
+
 console.log('All compiler tests passed!');

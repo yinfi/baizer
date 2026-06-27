@@ -511,6 +511,22 @@ export class ModelService {
         return this.memoryManager ? await this.memoryManager.deleteMemoryById(id) : null;
     }
 
+    /**
+     * 用户点踩时透传:把「被否定的回答 + 原因」提炼成一条「应避免」教训写入记忆。
+     * 返回写入的教训文本(供调用方做即时 steering),无记忆管理器时返回 null。
+     */
+    async retainLesson(input: {
+        userInput: string;
+        rejectedOutput: string;
+        reason: string;
+        source?: 'shell' | 'guardian' | 'selection-menu' | 'slash-edit';
+    }): Promise<string | null> {
+        if (!this.memoryManager) return null;
+        const retainLesson = (this.memoryManager as any).retainLesson;
+        if (typeof retainLesson !== 'function') return null;
+        return await retainLesson.call(this.memoryManager, input);
+    }
+
     async learnFromMessages(messages: string[]): Promise<any> {
         if (this.memoryManager) {
             return await this.memoryManager.learnFromRecentMessages(messages);

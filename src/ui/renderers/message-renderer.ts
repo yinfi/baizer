@@ -19,8 +19,10 @@ interface MessageRendererOptions {
   onCancel?: (message: ChatMessage) => void | Promise<void>;
   onFocusApprovalPreview?: (message: ChatMessage) => void | Promise<void>;
   onCopy?: (content: string, message: ChatMessage) => void | Promise<void>;
+  /** 点赞:用户认可该回答,归档到知识库。 */
   onFeedbackUp?: (message: ChatMessage) => void | Promise<void>;
-  onFeedbackDown?: (message: ChatMessage) => void | Promise<void>;
+  /** 点踩:用户不满意。reason 为用户在内联输入里填写的「哪里不好」。 */
+  onFeedbackDown?: (message: ChatMessage, reason: string) => void | Promise<void>;
   onReviewCodeBlock?: (content: string) => void | Promise<void>;
   onUndoWorkspaceEdit?: (editId: string) => void | Promise<void>;
   onInternalLinkClick?: (href: string) => void;
@@ -135,35 +137,98 @@ export class MessageRenderer {
       title: 'Copy message',
       attr: { 'aria-label': 'Copy message' },
     }) as HTMLElement;
-    copyButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>';
+    setIcon(copyButton, 'copy');
     copyButton.addEventListener('click', () => {
       void this.copyMessage(message);
     });
 
-    const thumbsUpButton = (toolbar as any).createEl('button', {
-      cls: 'shell-feedback-btn shell-thumbs-up',
-      title: 'Useful',
-      attr: { 'aria-label': 'Useful' },
-    }) as HTMLElement;
-    thumbsUpButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12"></path><path d="M15 2H7.5a2 2 0 0 0-2 1.5L3 10v10h12.7a2 2 0 0 0 2-1.6l1.3-8A2 2 0 0 0 17 10h-5.5V4a2 2 0 0 0-2-2z"></path></svg>';
+    // 点赞:用户认可该回答 → 归档到知识库(onFeedbackUp 内部走 file-back)。
+    // 仅在宿主接入归档通路时渲染,避免点了无反应的死按钮。
+    if (this.options.onFeedbackUp) {
+      const upButton = (toolbar as any).createEl('button', {
+        cls: 'shell-feedback-btn shell-thumbs-up clickable-icon',
+        title: '认可并保存到知识库',
+        attr: { 'aria-label': '认可并保存到知识库' },
+      }) as HTMLElement;
+      setIcon(upButton, 'thumbs-up');
+      upButton.addEventListener('click', () => {
+        (upButton as any).addClass?.('active') ?? upButton.classList.add('active');
+        void this.options.onFeedbackUp?.(message);
+      });
+    }
 
-    const thumbsDownButton = (toolbar as any).createEl('button', {
-      cls: 'shell-feedback-btn shell-thumbs-down',
-      title: 'Not useful',
-      attr: { 'aria-label': 'Not useful' },
-    }) as HTMLElement;
-    thumbsDownButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>';
-
-    thumbsUpButton.addEventListener('click', () => {
-      this.activateFeedback(thumbsUpButton, thumbsDownButton);
-      void this.options.onFeedbackUp?.(message);
-    });
-    thumbsDownButton.addEventListener('click', () => {
-      this.activateFeedback(thumbsDownButton, thumbsUpButton);
-      void this.options.onFeedbackDown?.(message);
-    });
+    // 点踩:用户不满意 → 展开内联输入问「哪里不好」,提交后回调 onFeedbackDown(message, reason)。
+    if (this.options.onFeedbackDown) {
+      const downButton = (toolbar as any).createEl('button', {
+        cls: 'shell-feedback-btn shell-thumbs-down clickable-icon',
+        title: '不满意,告诉 AI 哪里需要改进',
+        attr: { 'aria-label': '不满意,告诉 AI 哪里需要改进' },
+      }) as HTMLElement;
+      setIcon(downButton, 'thumbs-down');
+      downButton.addEventListener('click', () => {
+        this.toggleNegativeFeedbackInput(container, toolbar, downButton, message);
+      });
+    }
 
     return toolbar;
+  }
+
+  /**
+   * 点踩后在消息底部展开/收起一个轻量理由输入。
+   * 提交(Enter / 按钮)→ onFeedbackDown(message, reason);Esc / 再次点踩 → 收起。
+   */
+  private toggleNegativeFeedbackInput(
+    container: HTMLElement,
+    toolbar: HTMLElement,
+    downButton: HTMLElement,
+    message: ChatMessage,
+  ) {
+    const existing = (container as any).querySelector?.('.shell-feedback-reason') as HTMLElement | null;
+    if (existing) {
+      (existing as any).remove?.();
+      (downButton as any).removeClass?.('active') ?? downButton.classList.remove('active');
+      return;
+    }
+
+    (downButton as any).addClass?.('active') ?? downButton.classList.add('active');
+    const box = (container as any).createDiv({ cls: 'shell-feedback-reason' }) as HTMLElement;
+    const input = (box as any).createEl('input', {
+      cls: 'shell-feedback-reason-input',
+      attr: {
+        type: 'text',
+        placeholder: '哪里不好?AI 会据此改进并重新回答',
+        'aria-label': '反馈:哪里需要改进',
+      },
+    }) as HTMLInputElement;
+    const submit = (box as any).createEl('button', {
+      cls: 'shell-feedback-reason-submit',
+      text: '改进重答',
+      attr: { type: 'button' },
+    }) as HTMLElement;
+
+    const commit = () => {
+      const reason = (input.value || '').trim();
+      if (!reason) {
+        input.focus();
+        return;
+      }
+      (box as any).remove?.();
+      void this.options.onFeedbackDown?.(message, reason);
+    };
+
+    submit.addEventListener('click', commit);
+    input.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        commit();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        (box as any).remove?.();
+        (downButton as any).removeClass?.('active') ?? downButton.classList.remove('active');
+      }
+    });
+
+    setTimeout(() => input.focus?.(), 0);
   }
 
   private async copyMessage(message: ChatMessage) {
@@ -173,11 +238,6 @@ export class MessageRenderer {
     }
 
     await navigator.clipboard?.writeText(message.content);
-  }
-
-  private activateFeedback(active: HTMLElement, inactive: HTMLElement) {
-    (active as any).addClass?.('active') ?? active.classList.add('active');
-    (inactive as any).removeClass?.('active') ?? inactive.classList.remove('active');
   }
 
   private setText(entry: HTMLElement, text: string) {

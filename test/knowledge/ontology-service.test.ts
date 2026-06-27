@@ -207,6 +207,77 @@ knowledge_artifact_type: note
     expect(readiness.topConcepts[0].concept).toBe('Agent');
     expect(readiness.recentClaims[1]).toBe('B claim');
   });
+  await test('discovery readiness excludes file_back artifacts from stats', async () => {
+    const service = new OntologyService(createApp({
+      'Knowledge Wiki/Articles/a.md': {
+        content: '# A',
+        frontmatter: { topics: ['AI'], concepts: ['Agent'], key_claims: ['A claim'] },
+      },
+      'Knowledge Wiki/Articles/b.md': {
+        content: '# B',
+        frontmatter: { topics: ['AI'], concepts: ['Agent'], key_claims: ['B claim'] },
+      },
+      // file_back 二手归档：主题应被排除，不计入 totalCount 与高频统计
+      'Knowledge Wiki/Articles/fb_x.md': {
+        content: '# FB',
+        frontmatter: {
+          knowledge_artifact_type: 'file_back',
+          topics: ['Noise', 'Noise2', 'Noise3'],
+        },
+      },
+    }), createSettings({
+      knowledgeOntologyMinArticles: 2,
+      knowledgeOntologyMinTopicFrequency: 2,
+      knowledgeOntologyMinConceptFrequency: 2,
+    }));
+
+    const readiness = await service.getDiscoveryReadiness();
+
+    expect(readiness.kind).toBe('ready');
+    expect(readiness.totalCount).toBe(2);
+    expect(readiness.topTopics[0].topic).toBe('AI');
+    expect(readiness.topTopics.length).toBe(1);
+  });
+  await test('getStatus prefers metadataCache frontmatter over self-parsed YAML', async () => {
+    // content 用 2 空格缩进（自研 parseSimpleYaml 要求 >=4 空格，会解析失败），
+    // 但 metadataCache 提供完整解析结果 → 应判 valid，验证 cache 优先 + 回退链路。
+    const twoSpaceContent = `---
+knowledge_artifact_type: ontology_schema
+version: 1
+categories:
+  - name: "Methods"
+    description: "Reusable methods"
+---
+# Knowledge Ontology Schema
+`;
+    const service = new OntologyService(createApp({
+      'Knowledge Wiki/_ontology.md': {
+        content: twoSpaceContent,
+        frontmatter: {
+          knowledge_artifact_type: 'ontology_schema',
+          version: 1,
+          categories: [{ name: 'Methods', description: 'Reusable methods' }],
+        },
+      },
+    }), createSettings());
+
+    const status = await service.getStatus();
+
+    expect(status.kind).toBe('valid');
+    expect(status.schema?.categories[0].name).toBe('Methods');
+  });
+
+  await test('getStatus falls back to self-parser when cache frontmatter is absent', async () => {
+    // 字符串 entry → mock 的 cache frontmatter 为 {} → 必须回退到 extractFrontmatter。
+    const service = new OntologyService(createApp({
+      'Knowledge Wiki/_ontology.md': validSchemaContent,
+    }), createSettings());
+
+    const status = await service.getStatus();
+
+    expect(status.kind).toBe('valid');
+    expect(status.schema?.categories[0].name).toBe('Methods');
+  });
 }
 
 void runTests();

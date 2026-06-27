@@ -247,6 +247,34 @@ async function runTests() {
     expect(container.querySelector('.baizer-history-empty')?.textContent).toBe('No matching conversations.');
   });
 
+  await test('search input element is preserved across keystrokes (no rebuild)', () => {
+    const container = new FakeElement();
+    const menu = new HistoryMenu(container as any, {
+      onOpen: () => { },
+      onDelete: () => { },
+      onClose: () => { },
+    } as any);
+
+    menu.update([
+      { id: 'c-1', title: 'Roadmap chat', updatedAt: 20, providerId: 'gemini' },
+      { id: 'c-2', title: 'Daily note', updatedAt: 10, providerId: 'openai' },
+    ]);
+
+    const firstSearch = container.querySelector('.baizer-history-search');
+    if (!firstSearch) throw new Error('Expected search input to exist');
+
+    firstSearch.input('da');
+    firstSearch.input('dai');
+    firstSearch.input('daily');
+
+    // 关键:多次输入后,搜索框必须是同一个 DOM 节点(重建会打断 IME / 丢光标)。
+    const searchAfter = container.querySelector('.baizer-history-search');
+    expect(searchAfter === firstSearch).toBe(true);
+    expect(container.querySelectorAll('.baizer-history-search').length).toBe(1);
+    expect(container.querySelectorAll('.baizer-history-item').length).toBe(1);
+    expect(container.querySelector('.baizer-history-title')?.textContent).toBe('Daily note');
+  });
+
   await test('shows an empty state and can be hidden', () => {
     const container = new FakeElement();
     const menu = new HistoryMenu(container as any, {

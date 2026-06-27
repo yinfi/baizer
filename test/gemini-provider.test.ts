@@ -77,12 +77,16 @@ async function runTests() {
     const provider = makeProvider('gemini-2.5-flash');
     const config = captureGetGenerativeModel(provider, 'medium');
     expect(config.generationConfig?.thinkingConfig?.thinkingBudget).toBe(4096);
+    // includeThoughts が無いと thought part が一切返らず think タイムラインが空になる。
+    expect(config.generationConfig?.thinkingConfig?.includeThoughts).toBe(true);
   });
 
   await test('gemini-2.0-flash + thinkingLevel off → thinkingBudget 0 (disable)', () => {
     const provider = makeProvider('gemini-2.0-flash');
     const config = captureGetGenerativeModel(provider, 'off');
     expect(config.generationConfig?.thinkingConfig?.thinkingBudget).toBe(0);
+    // off は思考自体を無効化するので thought サマリも要求しない。
+    expect(config.generationConfig?.thinkingConfig?.includeThoughts).toBe(false);
   });
 
   await test('gemini-2.5-flash + thinkingLevel xhigh → thinkingBudget 16384', () => {

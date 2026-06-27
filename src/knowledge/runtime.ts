@@ -15,12 +15,10 @@ import { KnowledgeStatusService } from './status-service';
 import {
   DEFAULT_WIKI_FOLDER,
   WIKI_INDEX_BASE_FILENAME,
-  ONTOLOGY_SCHEMA_FILENAME,
   OntologySchema,
 } from './types';
 import {
   getKnowledgeStatus,
-  getSourceId,
   setKnowledgeStatus,
   ensureSourceId,
   getFilesByKnowledgeStatus,
@@ -29,7 +27,6 @@ import {
   KnowledgePendingReason,
 } from './frontmatter';
 import { OntologyService } from './ontology-service';
-import { parseOntologySchema, extractFrontmatter, computeSchemaHash, buildDiscoveryPrompt, parseDiscoveryResponse, buildOntologyFile } from './ontology';
 
 const AUTO_COMPILE_PENDING_REASONS: KnowledgePendingReason[] = ['new', 'content_changed'];
 
@@ -55,6 +52,8 @@ export class KnowledgeRuntime {
   async getOntologyStatus() { return this.ontologyService.getStatus(); }
   async getOntologyDiscoveryReadiness() { return this.ontologyService.getDiscoveryReadiness(); }
   private autoCompiling = false;
+  /** 自动编译运行期间若有新触发被丢弃，置位；本批结束后据此补跑一次 */
+  private autoCompileRerunRequested = false;
 
   constructor(
     private app: App,
@@ -88,10 +87,16 @@ export class KnowledgeRuntime {
     // 自动编译：watcher 检测到新文件/修改后，debounce 5秒合并批量编译
     const debouncedAutoCompile = debounce(async () => {
       if (!this.settings.knowledgeAutoCompile) return;
-      if (this.autoCompiling) return;
+      if (this.autoCompiling) {
+        // 本批运行期间又有新触发：记下来，本批结束后补跑，避免丢更新
+        this.autoCompileRerunRequested = true;
+        return;
+      }
       this.autoCompiling = true;
+      this.autoCompileRerunRequested = false;
+      const maxBatch = this.settings.knowledgeMaxCompileBatch || 50;
+      let processed = 0;
       try {
-        const maxBatch = this.settings.knowledgeMaxCompileBatch || 50;
         const ontology = await this.loadOntologySchema();
         console.log(`[KnowledgeRuntime] Auto-compiling pending notes...${ontology ? ' (with ontology schema)' : ''}`);
         const result = await this.compiler.compileAllPending(
@@ -102,6 +107,7 @@ export class KnowledgeRuntime {
           undefined,
           { pendingReasons: AUTO_COMPILE_PENDING_REASONS }
         );
+        processed = result.success + result.failed;
         if (result.success > 0) {
           await this.indexer.rebuildIndex();
           new Notice(`Auto-compiled: ${result.success} notes`);
@@ -113,6 +119,15 @@ export class KnowledgeRuntime {
         console.error(`[KnowledgeRuntime] Auto-compile error:`, e);
       } finally {
         this.autoCompiling = false;
+      }
+
+      // 补跑条件：(1) 运行期间有被丢弃的触发；或 (2) 本批打满 maxBatch，
+      // 说明可能还有未处理的 pending 残留。补跑走正常 debounce，不会递归爆栈。
+      // 成功项转 done、失败项转 failed，pending 每轮严格减少，不会无限循环。
+      if (this.settings.knowledgeAutoCompile &&
+          (this.autoCompileRerunRequested || processed >= maxBatch)) {
+        this.autoCompileRerunRequested = false;
+        this.watcher.triggerCompile();
       }
     }, { wait: 5000 });
 
@@ -244,55 +259,6 @@ export class KnowledgeRuntime {
       await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'content_changed' });
     }
     return staleFiles.length;
-
-    const doneFiles = getFilesByKnowledgeStatus(this.app, 'done');
-    if (doneFiles.length === 0) return 0;
-
-    // 加载当前 ontology schema hash
-    const schemaFile = this.app.vault.getAbstractFileByPath(
-      `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`
-    );
-    let currentSchemaHash: string | undefined;
-    if (schemaFile && schemaFile instanceof TFile) {
-      const schemaContent = await this.app.vault.read(schemaFile);
-      currentSchemaHash = computeSchemaHash(schemaContent);
-    }
-
-    let staleCount = 0;
-
-    for (const file of doneFiles) {
-      const cache = this.app.metadataCache.getFileCache(file);
-      const summaryPath = cache?.frontmatter?.knowledge_summary;
-      if (!summaryPath) continue;
-
-      const summaryFm = getSummaryFrontmatter(this.app, summaryPath);
-      if (!summaryFm) continue;
-
-      let isStale = false;
-
-      // 检查 schema_hash 变更
-      if (currentSchemaHash && summaryFm.schema_hash !== currentSchemaHash) {
-        isStale = true;
-      }
-
-      // 检查 content_hash 变更（只在 summary 有 content_hash 时比较）
-      if (!isStale && summaryFm.content_hash) {
-        try {
-          const content = await this.app.vault.read(file);
-          const currentHash = computeContentHash(content);
-          if (currentHash !== summaryFm.content_hash) {
-            isStale = true;
-          }
-        } catch { /* 文件读取失败，跳过 */ }
-      }
-
-      if (isStale) {
-        await setKnowledgeStatus(this.app, file, 'pending');
-        staleCount++;
-      }
-    }
-
-    return staleCount;
   }
 
   registerCommands(plugin: any): void {
@@ -580,103 +546,6 @@ export class KnowledgeRuntime {
       const path = await this.ontologyService.createSchemaFile(candidate.content);
       console.log(`[KnowledgeRuntime] Ontology schema created at ${path}`);
       return path;
-    } catch (e: any) {
-      console.error('[KnowledgeRuntime] Ontology discovery failed:', e.message);
-      return null;
-    }
-
-    const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
-    const schemaPath = `${wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`;
-
-    // 已存在则跳过
-    if (this.app.vault.getAbstractFileByPath(schemaPath)) {
-      console.log('[KnowledgeRuntime] Ontology schema already exists, skipping discovery');
-      return schemaPath;
-    }
-
-    // 扫描 Articles 目录，聚合统计
-    const articlesDir = `${wikiFolder}/Articles`;
-    const articlesFolder = this.app.vault.getAbstractFileByPath(articlesDir);
-    if (!articlesFolder) return null;
-
-    const articles: TFile[] = [];
-    for (const f of this.app.vault.getMarkdownFiles()) {
-      if (f.path.startsWith(articlesDir + '/')) articles.push(f);
-    }
-
-    if (articles.length < minArticles) {
-      console.log(`[KnowledgeRuntime] Only ${articles.length} articles, need ${minArticles} for ontology discovery`);
-      return null;
-    }
-
-    // 聚合 topics, concepts, claims
-    const topicCounts = new Map<string, number>();
-    const conceptCounts = new Map<string, number>();
-    const recentClaims: string[] = [];
-
-    for (const file of articles) {
-      const cache = this.app.metadataCache.getFileCache(file);
-      const fm = cache?.frontmatter;
-      if (!fm) continue;
-
-      // topics
-      if (Array.isArray(fm.topics)) {
-        for (const t of fm.topics) {
-          const label = typeof t === 'string' ? t : t?.label;
-          if (label) topicCounts.set(label, (topicCounts.get(label) || 0) + 1);
-        }
-      }
-      // concepts
-      if (Array.isArray(fm.concepts)) {
-        for (const c of fm.concepts) {
-          if (typeof c === 'string') conceptCounts.set(c, (conceptCounts.get(c) || 0) + 1);
-        }
-      }
-      // key_claims（取最近的）
-      if (Array.isArray(fm.key_claims)) {
-        for (const claim of fm.key_claims.slice(0, 3)) {
-          if (typeof claim === 'string') recentClaims.push(claim);
-        }
-      }
-    }
-
-    // 过滤高频项
-    const topTopics = Array.from(topicCounts.entries())
-      .filter(([, count]) => count >= 3)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 20)
-      .map(([topic, count]) => ({ topic, count }));
-
-    const topConcepts = Array.from(conceptCounts.entries())
-      .filter(([, count]) => count >= 2)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 20)
-      .map(([concept, count]) => ({ concept, count }));
-
-    if (topTopics.length === 0 && topConcepts.length === 0) {
-      console.log('[KnowledgeRuntime] No high-frequency topics/concepts found, skipping discovery');
-      return null;
-    }
-
-    try {
-      const prompt = buildDiscoveryPrompt({
-        totalCount: articles.length,
-        topTopics,
-        topConcepts,
-        recentClaims: recentClaims.slice(-20),
-      });
-
-      const response = await this.modelService.generate(prompt);
-      const schema = parseDiscoveryResponse(response);
-      if (!schema) {
-        console.error('[KnowledgeRuntime] Failed to parse ontology discovery response');
-        return null;
-      }
-
-      const content = buildOntologyFile(schema);
-      await this.app.vault.create(schemaPath, content);
-      console.log(`[KnowledgeRuntime] Ontology schema created at ${schemaPath}`);
-      return schemaPath;
     } catch (e: any) {
       console.error('[KnowledgeRuntime] Ontology discovery failed:', e.message);
       return null;

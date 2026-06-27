@@ -516,6 +516,51 @@ export class ChatController {
         await this.runFileBackInBackground(messageId);
     }
 
+    /**
+     * 正反馈(点赞):用户认可该回答 → 归档到知识 wiki。等价于 file-back。
+     */
+    public async recordPositiveFeedback(messageId: string) {
+        await this.runFileBackInBackground(messageId);
+    }
+
+    /**
+     * 负反馈(点踩):用户不满意该回答。
+     * 1. 把「被否定的回答 + 用户原因」提炼成「应避免」教训写入长期记忆(影响未来相似提问);
+     * 2. 带着这条原因当场重新生成一版回答(即时进化,不必等下一轮召回)。
+     * @param messageId 被点踩的 AI 消息 id
+     * @param reason    用户给出的「哪里不好」
+     */
+    public async recordNegativeFeedback(messageId: string, reason: string) {
+        const targetMsg = this.messages.find(m => m.id === messageId && m.role === 'ai');
+        if (!targetMsg) return;
+
+        const userInput = this.deriveFileBackSourceQuery(messageId);
+        const trimmedReason = reason.trim();
+
+        // 1. 存教训(失败不应阻断重答,仅记日志)。
+        const retainLesson = (this.api as any).retainLesson;
+        if (typeof retainLesson === 'function' && trimmedReason) {
+            try {
+                await retainLesson.call(this.api, {
+                    userInput,
+                    rejectedOutput: targetMsg.content,
+                    reason: trimmedReason,
+                    source: 'shell',
+                });
+            } catch (error: any) {
+                logger.error('Retain lesson failed', error, 'ChatController');
+            }
+        }
+
+        // 2. 当场重答:把原始问题与用户反馈拼成 steering 指令,复用正常流式通道。
+        //    不直接复述被否定的长回答,只give模型「上次哪里不好 + 重答」的约束。
+        const steeringQuery = trimmedReason
+            ? `${userInput}\n\n[反馈] 上次的回答我不满意:${trimmedReason}。请据此改进,重新回答。`
+            : `${userInput}\n\n[反馈] 上次的回答我不满意,请换一种方式重新回答。`;
+
+        await this.processCommand(steeringQuery);
+    }
+
     private async handleOpenFile(searchTerm: string) {
         // 妫€鏌ョ紦瀛?
         const now = Date.now();

@@ -185,7 +185,10 @@ export function chunkDocument(
 
     sections.push(remaining.substring(0, splitIdx));
     // overlap：回退 overlap 字符，保证上下文连续
-    const overlapStart = Math.max(0, splitIdx - overlap);
+    // 死循环防护：splitIdx 恒 >=1，但当 splitIdx <= overlap 时
+    // max(0, splitIdx-overlap) 会钳到 0 使 remaining 原地不动。
+    // 此时放弃 overlap、按 splitIdx 全量推进，保证每轮严格变短。
+    const overlapStart = splitIdx > overlap ? splitIdx - overlap : splitIdx;
     remaining = remaining.substring(overlapStart);
   }
 

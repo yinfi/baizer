@@ -4,10 +4,8 @@ import {
   readSummaryFrontmatter,
 } from './frontmatter';
 import { computeContentHash } from './compiler';
-import { computeSchemaHash } from './ontology';
 import {
   DEFAULT_WIKI_FOLDER,
-  ONTOLOGY_SCHEMA_FILENAME,
 } from './types';
 
 export type KnowledgePanelState =
@@ -82,8 +80,7 @@ export class KnowledgeStatusService {
     } else if (baseStatus === 'processing') {
       state = 'processing';
     } else {
-      const currentSchemaHash = await this.getCurrentSchemaHash();
-      const stale = await this.isStaleFile(file, summaryPath, currentSchemaHash);
+      const stale = await this.isStaleFile(file, summaryPath);
       if (stale) {
         state = 'stale';
       } else if (baseStatus === 'pending') {
@@ -128,7 +125,6 @@ export class KnowledgeStatusService {
   }
 
   async getStaleFiles(): Promise<TFile[]> {
-    const currentSchemaHash = await this.getCurrentSchemaHash();
     const staleFiles: TFile[] = [];
 
     for (const file of this.getTrackedFiles()) {
@@ -140,7 +136,7 @@ export class KnowledgeStatusService {
         ? cache.frontmatter.knowledge_summary
         : null;
 
-      if (await this.isStaleFile(file, summaryPath, currentSchemaHash)) {
+      if (await this.isStaleFile(file, summaryPath)) {
         staleFiles.push(file);
       }
     }
@@ -173,23 +169,9 @@ export class KnowledgeStatusService {
     });
   }
 
-  private async getCurrentSchemaHash(): Promise<string | undefined> {
-    const schemaPath = `${this.config.wikiFolder}/${ONTOLOGY_SCHEMA_FILENAME}`;
-    const file = this.app.vault.getAbstractFileByPath(schemaPath);
-    if (!(file instanceof TFile)) return undefined;
-
-    try {
-      const content = await this.app.vault.read(file);
-      return computeSchemaHash(content);
-    } catch {
-      return undefined;
-    }
-  }
-
   private async isStaleFile(
     file: TFile,
     summaryPath: string | null,
-    currentSchemaHash?: string,
   ): Promise<boolean> {
     if (!summaryPath) return false;
 

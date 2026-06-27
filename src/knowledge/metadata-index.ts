@@ -2,7 +2,7 @@
 // 基于 Obsidian metadataCache 的内存知识索引
 
 import { App, TFile } from 'obsidian';
-import { ArticleMeta, WIKI_ARTICLES_SUBFOLDER } from './types';
+import { ArticleMeta, WIKI_ARTICLES_SUBFOLDER, normalizeTopicSlug } from './types';
 
 /**
  * 从 metadataCache 的 frontmatter 中提取 topics 数组
@@ -138,11 +138,15 @@ export class MetadataIndex {
     return Array.from(this.articles.values());
   }
 
-  /** 按 topic 过滤 */
+  /** 按 topic 过滤（按归一化 slug 匹配，消除大小写/标点/空格差异） */
   getByTopic(topic: string): ArticleMeta[] {
-    const lower = topic.toLowerCase();
+    const targetSlug = normalizeTopicSlug(topic);
+    if (!targetSlug) return [];
     return this.getAllArticles().filter(a =>
-      a.topics.some(t => t.toLowerCase().includes(lower))
+      a.topics.some(t => {
+        const slug = normalizeTopicSlug(t);
+        return slug === targetSlug || slug.includes(targetSlug);
+      })
     );
   }
 
@@ -274,16 +278,27 @@ export class MetadataIndex {
     return result;
   }
 
-  /** 获取所有唯一 topic 及其文章数 */
+  /**
+   * 获取所有唯一 topic 及其文章数
+   * 按归一化 slug 聚合，使 "Second Brain"/"second-brain" 等变体合并为一项；
+   * 显示 label 取该 slug 下首次出现的原始写法。
+   */
   getTopicSummary(): { topic: string; count: number }[] {
     const counts = new Map<string, number>();
+    const labels = new Map<string, string>();
     for (const article of this.articles.values()) {
+      // 同一篇文章内 slug 去重，避免变体在单篇内重复计数
+      const seen = new Set<string>();
       for (const topic of article.topics) {
-        counts.set(topic, (counts.get(topic) || 0) + 1);
+        const slug = normalizeTopicSlug(topic);
+        if (!slug || seen.has(slug)) continue;
+        seen.add(slug);
+        counts.set(slug, (counts.get(slug) || 0) + 1);
+        if (!labels.has(slug)) labels.set(slug, topic);
       }
     }
     return Array.from(counts.entries())
-      .map(([topic, count]) => ({ topic, count }))
+      .map(([slug, count]) => ({ topic: labels.get(slug) || slug, count }))
       .sort((a, b) => b.count - a.count);
   }
 

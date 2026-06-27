@@ -26,6 +26,17 @@ const FIELD_BOOST_TEXT = 2;
 const FIELD_BOOST_ENTITY = 3;
 const FIELD_BOOST_TAG = 1.5;
 
+// 负反馈教训的召回加权:相同相关度下,「应避免」的教训比普通经验更该被模型看见,
+// 否则进化信号会被海量中性记忆淹没。1.5 是经验值,与 TYPE_WEIGHT 同量级、不至于压垮相关性。
+const POLARITY_BOOST: Record<NonNullable<MemoryRecord['polarity']>, number> = {
+  negative: 1.5,
+  positive: 1.2,
+};
+
+function polarityBoost(record: MemoryRecord): number {
+  return record.polarity ? POLARITY_BOOST[record.polarity] : 1;
+}
+
 /**
  * Corpus-level statistics computed once per recall() call over the in-memory
  * set of candidate records. No persistent index — fully mobile-safe.
@@ -163,7 +174,7 @@ export class HindsightRetriever {
       const ageMs = Math.max(0, now - record.mentionedAt);
       const recency = 1 / (1 + ageMs / (1000 * 60 * 60 * 24 * 14));
       const access = Math.min(record.accessCount, 10) * 0.05;
-      return (baseline * TYPE_WEIGHT[record.type]) + recency + access + record.confidence;
+      return ((baseline * TYPE_WEIGHT[record.type]) + recency + access + record.confidence) * polarityBoost(record);
     }
 
     const tf = this.termFreqs(record);
@@ -195,7 +206,7 @@ export class HindsightRetriever {
     const ageMs = Math.max(0, now - record.mentionedAt);
     const recency = 1 / (1 + ageMs / (1000 * 60 * 60 * 24 * 14));
     const access = Math.min(record.accessCount, 10) * 0.05;
-    return (lexScore * TYPE_WEIGHT[record.type]) + recency + access + record.confidence;
+    return ((lexScore * TYPE_WEIGHT[record.type]) + recency + access + record.confidence) * polarityBoost(record);
   }
 
   private applyBudget(records: MemoryRecord[], maxRecords: number, maxChars: number): MemoryRecord[] {
@@ -225,6 +236,16 @@ export class HindsightRetriever {
   }
 
   private formatLine(record: MemoryRecord): string {
+    // 极性记忆用明确的指令性前缀渲染,让模型在生成时直接据此取舍:
+    //   negative -> 「avoid」(用户否定过的做法,应规避)
+    //   positive -> 「prefer」(用户认可过的做法,应延续)
+    //   中性     -> 维持原始 `type` 前缀,兼容旧记忆。
+    if (record.polarity === 'negative') {
+      return `- avoid: ${record.text} (confidence: ${record.confidence.toFixed(2)})\n`;
+    }
+    if (record.polarity === 'positive') {
+      return `- prefer: ${record.text} (confidence: ${record.confidence.toFixed(2)})\n`;
+    }
     return `- ${record.type}: ${record.text} (confidence: ${record.confidence.toFixed(2)})\n`;
   }
 }

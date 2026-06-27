@@ -200,7 +200,7 @@ async function runTests() {
     expect(modelChanges).toEqual(['gemini-2.5-flash']);
   });
 
-  await test('disables image and send button when unsupported or empty', () => {
+  await test('disables attach button while responding and send button when empty', () => {
     const root = new FakeElement();
     const toolbar = new InputToolbar(root as any, {
       onProviderChange: () => { },
@@ -208,10 +208,14 @@ async function runTests() {
       onModelChange: () => { },
     });
 
-    toolbar.updateCapabilities({ supportsImageInput: false, isResponding: false, canSend: false });
-
-    expect((root.querySelector('.shell-image-btn') as any).disabled).toBe(true);
+    // 空输入且未响应：发送按钮禁用，附件按钮可用（与图片能力无关）。
+    toolbar.updateCapabilities({ isResponding: false, canSend: false });
+    expect((root.querySelector('.shell-attach-btn') as any).disabled).toBe(false);
     expect((root.querySelector('.shell-run-btn') as any).disabled).toBe(true);
+
+    // 响应进行中：附件按钮禁用，避免流式途中改动上下文。
+    toolbar.updateCapabilities({ isResponding: true, canSend: true, supportsCancellation: true });
+    expect((root.querySelector('.shell-attach-btn') as any).disabled).toBe(true);
   });
 
   await test('renders action controls as icon buttons with stable accessible names', () => {
@@ -222,13 +226,13 @@ async function runTests() {
       onModelChange: () => { },
     });
 
-    const imageButton = root.querySelector('.shell-image-btn') as any as FakeElement;
+    const attachButton = root.querySelector('.shell-attach-btn') as any as FakeElement;
     const runButton = root.querySelector('.shell-run-btn') as any as FakeElement;
 
-    expect(imageButton.textContent).toBe('');
+    expect(attachButton.textContent).toBe('');
     expect(runButton.textContent).toBe('');
-    expect(imageButton.attributes['aria-label']).toBe('Add image context');
-    expect(imageButton.attributes.title).toBe('Add image context');
+    expect(attachButton.attributes['aria-label']).toBe('Add file attachment');
+    expect(attachButton.attributes.title).toBe('Add file attachment');
     expect(runButton.attributes['aria-label']).toBe('Send message');
     expect(runButton.attributes.title).toBe('Send message');
     expect(root.querySelectorAll('.shell-run-btn').length).toBe(1);

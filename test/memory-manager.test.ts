@@ -400,6 +400,52 @@ async function runTests() {
       expect(promptBlock).toBe('');
     }
   });
+
+  await test('retainLesson stores a negative lesson recalled as an avoid line', async () => {
+    const promptLog: string[] = [];
+    const { app } = createApp();
+    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    await memory.ready();
+
+    const lesson = await (memory as any).retainLesson({
+      userInput: '帮我写部署流程文档',
+      rejectedOutput: '（一大段啰嗦的回答）',
+      reason: '太啰嗦了,要直接给步骤结论',
+      source: 'shell',
+      now: 1000,
+    });
+
+    // 返回提炼后的教训文本,供调用方做即时 steering。
+    expect(typeof lesson === 'string' && lesson.length > 0).toBe(true);
+
+    const promptBlock = await (memory as any).recallForPrompt({
+      query: '部署流程怎么写',
+      maxChars: 500,
+      now: 2000,
+    });
+
+    // 教训在相似提问下被召回,并以 avoid 前缀呈现。
+    expect(promptBlock).toContain('avoid:');
+    expect(promptBlock).toContain('直接给步骤结论');
+  });
+
+  await test('retainLesson is a no-op in privacy mode', async () => {
+    const promptLog: string[] = [];
+    const { app } = createApp();
+    const memory = new MemoryManager(app, createModelProvider(promptLog), { privacyMode: true } as any);
+    await memory.ready();
+
+    const lesson = await (memory as any).retainLesson({
+      userInput: '帮我写部署流程文档',
+      rejectedOutput: '回答',
+      reason: '不满意',
+      now: 1000,
+    });
+
+    expect(lesson).toBe(null);
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    expect(view.stats.total).toBe(0);
+  });
 }
 
 runTests().catch((e) => {

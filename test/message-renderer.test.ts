@@ -35,6 +35,7 @@ class FakeElement {
   className = '';
   textContent = '';
   innerHTML = '';
+  value = '';
   parentElement: FakeElement | null = null;
   attributes: Record<string, string> = {};
   listeners: Record<string, Function[]> = {};
@@ -69,6 +70,7 @@ class FakeElement {
       child.classList.values.add(part);
     }
     child.textContent = attr?.text || '';
+    if (attr?.value !== undefined) child.value = String(attr.value);
     if (attr?.title) child.attributes.title = attr.title;
     if (attr?.attr) {
       for (const [name, value] of Object.entries(attr.attr)) {
@@ -122,6 +124,23 @@ class FakeElement {
     for (const handler of this.listeners.click || []) {
       handler({ preventDefault: () => { } });
     }
+  }
+
+  keydown(key: string) {
+    for (const handler of this.listeners.keydown || []) {
+      handler({ key, preventDefault: () => { } });
+    }
+  }
+
+  focus() {
+    return;
+  }
+
+  remove() {
+    const parent = this.parentElement;
+    if (!parent) return;
+    parent.children = parent.children.filter((child) => child !== this);
+    this.parentElement = null;
   }
 
   querySelector(selector: string): FakeElement | null {
@@ -318,36 +337,82 @@ async function runTests() {
     expect(rendered).toEqual(['**hi**']);
     expect(!!container.querySelector('.shell-message-actions')).toBe(true);
     expect(!!container.querySelector('.shell-copy-btn')).toBe(true);
-    expect(container.querySelector('.shell-thumbs-up')?.getAttribute('title')).toBe('Useful');
-    expect(!!container.querySelector('.shell-archive-btn')).toBe(false);
+    // 未接入反馈通路时只有复制按钮,不出现点赞/点踩(避免死按钮)。
+    expect(!!container.querySelector('.shell-thumbs-up')).toBe(false);
+    expect(!!container.querySelector('.shell-thumbs-down')).toBe(false);
   });
 
-  await test('feedback buttons can be clicked without referencing missing controls', async () => {
+  await test('renders thumbs-up only when feedback-up handler is provided', async () => {
     const container = new FakeElement();
-    const feedback: string[] = [];
+    const approved: string[] = [];
     const renderer = new MessageRenderer({
       app: {},
       component: {},
       renderMarkdown: async (_app, markdown, el) => {
         el.createDiv({ cls: 'rendered-markdown', text: markdown });
       },
-      onFeedbackUp: async () => { feedback.push('up'); },
-      onFeedbackDown: async () => { feedback.push('down'); },
+      onFeedbackUp: async () => { approved.push('up'); },
     });
 
     await renderer.renderMessage(container as any, {
-      id: 'a-feedback',
+      id: 'a-up',
       role: 'ai',
       content: 'answer',
       timestamp: 5,
     });
 
-    container.querySelector('.shell-thumbs-up')?.click();
-    container.querySelector('.shell-thumbs-down')?.click();
+    const upBtn = container.querySelector('.shell-thumbs-up');
+    expect(!!upBtn).toBe(true);
+    expect(upBtn?.getAttribute('title')).toBe('认可并保存到知识库');
+    // 未提供 onFeedbackDown 时不渲染点踩。
+    expect(!!container.querySelector('.shell-thumbs-down')).toBe(false);
 
-    expect(feedback).toEqual(['up', 'down']);
-    expect(container.querySelector('.shell-thumbs-up')?.hasClass('active')).toBe(false);
-    expect(container.querySelector('.shell-thumbs-down')?.hasClass('active')).toBe(true);
+    upBtn?.click();
+    expect(approved).toEqual(['up']);
+    expect(upBtn?.hasClass('active')).toBe(true);
+  });
+
+  await test('thumbs-down expands a reason input and submits feedback with reason', async () => {
+    const container = new FakeElement();
+    const feedback: Array<{ id: string; reason: string }> = [];
+    const renderer = new MessageRenderer({
+      app: {},
+      component: {},
+      renderMarkdown: async (_app, markdown, el) => {
+        el.createDiv({ cls: 'rendered-markdown', text: markdown });
+      },
+      onFeedbackDown: async (message, reason) => {
+        feedback.push({ id: message.id, reason });
+      },
+    });
+
+    await renderer.renderMessage(container as any, {
+      id: 'a-down',
+      role: 'ai',
+      content: 'answer',
+      timestamp: 6,
+    });
+
+    const downBtn = container.querySelector('.shell-thumbs-down');
+    expect(!!downBtn).toBe(true);
+    // 初始无理由输入框。
+    expect(!!container.querySelector('.shell-feedback-reason')).toBe(false);
+
+    // 点踩 → 展开理由输入。
+    downBtn?.click();
+    const input = container.querySelector('.shell-feedback-reason-input');
+    expect(!!input).toBe(true);
+    expect(downBtn?.hasClass('active')).toBe(true);
+
+    // 空理由不应提交。
+    input!.keydown('Enter');
+    expect(feedback.length).toBe(0);
+
+    // 填写理由并回车提交 → 回调带 reason,输入框收起。
+    input!.value = '太啰嗦,要直接结论';
+    input!.keydown('Enter');
+    expect(feedback).toEqual([{ id: 'a-down', reason: '太啰嗦,要直接结论' }]);
+    expect(!!container.querySelector('.shell-feedback-reason')).toBe(false);
   });
 
   await test('renders approval cards and delegates approve and cancel callbacks', async () => {

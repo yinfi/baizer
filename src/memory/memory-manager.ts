@@ -16,6 +16,7 @@ import {
     DEFAULT_MEMORY_BANK_ID,
     normalizeMemoryText,
     RetainTurnInput,
+    RetainLessonInput,
 } from './hindsight-types';
 import { HindsightConsolidator } from './hindsight-consolidator';
 import { importPreviousMemoryFiles, migrateLegacyMemory } from './hindsight-migration';
@@ -174,6 +175,56 @@ export class MemoryManager {
         }
     }
 
+    /**
+     * 用户点踩(负反馈)时,把「这次回答被否定 + 用户给的原因」提炼成一条「应避免」教训写入记忆。
+     * - 教训以 observation + polarity:negative 落库,召回时渲染为「avoid: ...」直接约束后续生成。
+     * - query 相关性来自 userInput 的 token(写进 tags),使同类提问在未来命中该教训。
+     * - 纯规则提炼,不额外调用 LLM:同步、零延迟、移动端安全;reason 即最直接的教训信号。
+     * 返回写入的教训文本(供调用方做即时 steering),privacy 模式或内容为空时返回 null。
+     */
+    async retainLesson(input: RetainLessonInput): Promise<string | null> {
+        await this.ready();
+        if (this.options.privacyMode) return null;
+
+        const now = input.now ?? Date.now();
+        const reason = this.sanitizeMemoryText(input.reason.trim());
+        if (!reason) return null;
+
+        const userInput = this.sanitizeMemoryText(input.userInput.trim());
+        const topic = userInput ? this.truncateForLesson(userInput, 80) : '';
+        // 教训文本:把「场景」与「应避免什么」拼成一句可复用的指令。
+        const lessonText = topic
+            ? `回答关于「${topic}」一类问题时,应避免:${this.truncateForLesson(reason, 200)}`
+            : `应避免:${this.truncateForLesson(reason, 200)}`;
+
+        const tags = Array.from(new Set([
+            'feedback-lesson',
+            ...this.tagsForText(userInput),
+            ...this.tagsForText(reason),
+        ])).slice(0, 12);
+
+        const record = this.createMemoryRecord({
+            type: 'observation',
+            text: lessonText,
+            sourceKind: 'chat',
+            tags,
+            now,
+            confidence: 0.8,
+            polarity: 'negative',
+        });
+
+        await this.hindsightStore.upsertMemories([record]);
+        return lessonText;
+    }
+
+    /** 教训文本截断:按字符上限裁剪并补省略号,避免把整段差评原文塞进记忆。 */
+    private truncateForLesson(text: string, maxChars: number): string {
+        const normalized = text.replace(/\s+/g, ' ').trim();
+        return normalized.length > maxChars
+            ? `${normalized.slice(0, maxChars - 1)}…`
+            : normalized;
+    }
+
     async forgetMemory(field: string): Promise<MemoryMutationResult> {
         await this.ready();
         const before = (await this.hindsightStore.listMemories()).length;
@@ -330,12 +381,13 @@ export class MemoryManager {
     }
 
     private createMemoryRecord(input: {
-        type: 'world' | 'experience';
+        type: 'world' | 'experience' | 'observation';
         text: string;
         sourceKind: 'chat' | 'manual';
         tags: string[];
         now: number;
         confidence?: number;
+        polarity?: 'positive' | 'negative';
     }) {
         return {
             id: createMemoryId({
@@ -352,6 +404,7 @@ export class MemoryManager {
             tags: input.tags,
             source: { kind: input.sourceKind },
             confidence: input.confidence ?? (input.type === 'world' ? 0.75 : 0.6),
+            ...(input.polarity ? { polarity: input.polarity } : {}),
             createdAt: input.now,
             updatedAt: input.now,
             mentionedAt: input.now,

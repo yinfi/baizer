@@ -14,6 +14,7 @@ import {
   parseDiscoveryResponse,
   parseOntologySchema,
 } from './ontology';
+import { normalizeTopicSlug } from './types';
 
 export class OntologyService {
   constructor(
@@ -46,8 +47,14 @@ export class OntologyService {
       return { kind: 'empty', path, message: 'Ontology schema file is empty.' };
     }
 
-    const frontmatter = extractFrontmatter(rawContent);
-    const schema = parseOntologySchema(frontmatter);
+    // 优先用 Obsidian metadataCache 的 frontmatter（完整 YAML 解析，支持 2 空格缩进、
+    // 行内注释等自研 parseSimpleYaml 不认的写法）；cache 未就绪或解析不出 schema 时，
+    // 回退到自研 extractFrontmatter。_ontology.md 被鼓励用户手编，鲁棒性优先。
+    const cachedFm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    let schema = parseOntologySchema(cachedFm);
+    if (!schema) {
+      schema = parseOntologySchema(extractFrontmatter(rawContent));
+    }
     if (!schema) {
       return { kind: 'invalid', path, message: 'Ontology schema frontmatter is invalid.' };
     }
@@ -82,8 +89,14 @@ export class OntologyService {
 
     const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
     const articlesDir = `${wikiFolder}/Articles`;
+    // 只统计一手编译产物：排除 file_back（AI 回答的二手归档），
+    // 否则对话产物的主题会污染 ontology discovery 的高频统计，使 schema 偏离源知识。
     const articles = this.app.vault.getMarkdownFiles()
-      .filter((file: TFile) => file.path.startsWith(`${articlesDir}/`));
+      .filter((file: TFile) => file.path.startsWith(`${articlesDir}/`))
+      .filter((file: TFile) => {
+        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+        return fm?.knowledge_artifact_type !== 'file_back';
+      });
 
     const totalCount = articles.length;
     const minArticles = this.settings.knowledgeOntologyMinArticles ?? 10;
@@ -97,6 +110,7 @@ export class OntologyService {
     }
 
     const topicCounts = new Map<string, number>();
+    const topicLabels = new Map<string, string>();
     const conceptCounts = new Map<string, number>();
     const recentClaims: string[] = [];
 
@@ -104,8 +118,15 @@ export class OntologyService {
       const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
       if (!fm) continue;
 
+      // 按归一化 slug 聚合 topic，合并 "Second Brain"/"second-brain" 等变体；
+      // 单篇内 slug 去重，显示 label 取首次出现的原始写法。
+      const seenSlugs = new Set<string>();
       for (const topic of readTopics(fm)) {
-        topicCounts.set(topic, (topicCounts.get(topic) || 0) + 1);
+        const slug = normalizeTopicSlug(topic);
+        if (!slug || seenSlugs.has(slug)) continue;
+        seenSlugs.add(slug);
+        topicCounts.set(slug, (topicCounts.get(slug) || 0) + 1);
+        if (!topicLabels.has(slug)) topicLabels.set(slug, topic);
       }
 
       for (const concept of readStringArray(fm.concepts)) {
@@ -121,7 +142,7 @@ export class OntologyService {
       .filter(([, count]) => count >= minTopicFrequency)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 20)
-      .map(([topic, count]) => ({ topic, count }));
+      .map(([slug, count]) => ({ topic: topicLabels.get(slug) || slug, count }));
     const topConcepts = Array.from(conceptCounts.entries())
       .filter(([, count]) => count >= minConceptFrequency)
       .sort((a, b) => b[1] - a[1])

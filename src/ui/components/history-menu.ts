@@ -19,6 +19,9 @@ interface HistoryMenuHandlers {
 export class HistoryMenu {
   private items: HistoryMenuItem[] = [];
   private filterQuery = '';
+  /** 持久的列表容器与计数标签;搜索输入只重渲染列表区,绝不重建搜索框(避免打断 IME / 光标跳位)。 */
+  private listContainerEl: HTMLElement | null = null;
+  private countEl: HTMLElement | null = null;
 
   constructor(
     private readonly containerEl: HTMLElement,
@@ -34,12 +37,17 @@ export class HistoryMenu {
   hide() {
     this.containerEl.style.display = 'none';
     this.containerEl.empty();
+    this.listContainerEl = null;
+    this.countEl = null;
     this.filterQuery = '';
   }
 
+  /** 重建整个菜单骨架(toolbar + 列表容器)。仅在 update()/hide() 等数据集变更时调用一次。 */
   private render() {
     this.containerEl.empty();
     this.containerEl.style.display = 'block';
+    this.listContainerEl = null;
+    this.countEl = null;
 
     if (this.items.length === 0) {
       this.containerEl.createDiv({
@@ -62,7 +70,8 @@ export class HistoryMenu {
     searchInput.addEventListener('input', (event: Event) => {
       const target = event.target as HTMLInputElement | null;
       this.filterQuery = target?.value || '';
-      this.render();
+      // 只重渲染结果列表,搜索框本身保持不变 —— 不打断输入法、不丢光标。
+      this.renderList();
     });
     searchInput.addEventListener('keydown', (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -70,15 +79,26 @@ export class HistoryMenu {
       this.handlers.onClose?.();
     });
 
-    const filteredItems = this.getFilteredItems();
-    toolbar.createSpan({
-      cls: 'baizer-history-count',
-      text: `${filteredItems.length} / ${this.items.length}`,
-    });
+    this.countEl = toolbar.createSpan({ cls: 'baizer-history-count' });
+    this.listContainerEl = this.containerEl.createDiv({ cls: 'baizer-history-list' });
+
+    this.renderList();
     searchInput.focus();
+  }
+
+  /** 只刷新结果列表与计数,不触碰搜索框。每次按键走这里。 */
+  private renderList() {
+    const list = this.listContainerEl;
+    if (!list) return;
+    list.empty();
+
+    const filteredItems = this.getFilteredItems();
+    if (this.countEl) {
+      this.countEl.textContent = `${filteredItems.length} / ${this.items.length}`;
+    }
 
     if (filteredItems.length === 0) {
-      this.containerEl.createDiv({
+      list.createDiv({
         cls: 'baizer-history-empty',
         text: 'No matching conversations.',
       });
@@ -86,7 +106,7 @@ export class HistoryMenu {
     }
 
     this.buildGroups(filteredItems).forEach((group) => {
-      const section = this.containerEl.createDiv({ cls: 'baizer-history-group' });
+      const section = list.createDiv({ cls: 'baizer-history-group' });
       section.createDiv({ cls: 'baizer-history-group-title', text: group.title });
       group.items.forEach((item) => this.renderItem(section, item));
     });

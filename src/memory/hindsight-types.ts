@@ -26,6 +26,13 @@ export interface MemoryRecord {
   tags: string[];
   source: MemorySource;
   confidence: number;
+  /**
+   * 记忆极性:
+   * - 'positive' 用户认可的做法(可强化);
+   * - 'negative' 用户否定的做法,召回时渲染为「应避免」以约束生成;
+   * - 缺省(undefined)= 中性,等价于旧数据,向后兼容。
+   */
+  polarity?: 'positive' | 'negative';
   createdAt: number;
   updatedAt: number;
   mentionedAt: number;
@@ -57,6 +64,19 @@ export interface RetainTurnInput {
   source?: 'shell' | 'guardian' | 'selection-menu' | 'slash-edit';
   contextPaths?: string[];
   toolResults?: Array<{ name: string; result: unknown }>;
+  now?: number;
+}
+
+/**
+ * 用户点踩(负反馈)时提炼一条「应避免」教训的输入。
+ * userInput 决定该教训未来被哪些相似提问召回;reason 是用户给出的不满意原因。
+ */
+export interface RetainLessonInput {
+  bankId?: string;
+  userInput: string;
+  rejectedOutput: string;
+  reason: string;
+  source?: 'shell' | 'guardian' | 'selection-menu' | 'slash-edit';
   now?: number;
 }
 

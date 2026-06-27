@@ -13,7 +13,8 @@ import { detectSuggestionTrigger, InputController, SuggestionType } from './cont
 import { StreamController } from './controllers/stream-controller';
 import { CommandDropdown } from './components/command-dropdown';
 import { ContextChips } from './components/context-chips';
-import { InputToolbar } from './components/input-toolbar';
+import { InputToolbar, ThinkingLevel } from './components/input-toolbar';
+import { AttachmentModal, AttachmentResult } from './components/attachment-modal';
 import { HistoryMenu } from './components/history-menu';
 import { KnowledgeStatusPanel } from './components/knowledge-status-panel';
 import { ThinkingRenderer } from './renderers/thinking-renderer';
@@ -75,9 +76,12 @@ export class ShellView extends ItemView {
     private unsubscribeProvider: (() => void) | null = null;
 
     // Streaming state
+    private loadingIndicatorEl: HTMLElement | null = null;
     private streamContainer: HTMLElement | null = null;
     private streamTimeline: HTMLElement | null = null;
     private streamContent: HTMLElement | null = null;
+    /** 流式途中承载纯文本的节点。增量只往这里追加新增片段,避免每帧整段重渲染(O(n²))。 */
+    private streamPlainTextEl: HTMLElement | null = null;
     private streamAccumulatedText: string = '';
     private streamNodeCount = 0;
     private readonly debouncedRenderStream = debounce(
@@ -297,6 +301,8 @@ export class ShellView extends ItemView {
             onProviderChange: (id) => this.handleProviderChange(id),
             onUnavailableProvider: (id) => this.handleUnavailableProvider(id),
             onModelChange: (id) => this.handleModelChange(id),
+            onThinkingChange: (level) => this.handleThinkingChange(level),
+            onAttach: () => this.handleAttachFiles(),
             onSend: async () => {
                 const query = this.inputEl.value.trim();
                 if (!query) return;
@@ -309,6 +315,7 @@ export class ShellView extends ItemView {
         this.providerSelectEl = this.inputToolbar.getProviderSelectEl();
         this.modelSelectEl = this.inputToolbar.getModelSelectEl();
         this.refreshInputToolbarProviders();
+        this.refreshInputToolbarThinking();
         void this.refreshInputToolbarModels();
         this.updateInputToolbarCapabilities();
         // Event Listeners
@@ -583,20 +590,20 @@ export class ShellView extends ItemView {
         this.isResponding = isResponding;
         this.updateInputToolbarCapabilities();
         if (isResponding) {
-            // Show loading indicator
-            const loadingId = 'loading-indicator';
-            let loadingDiv = document.getElementById(loadingId);
-            if (!loadingDiv) {
-                loadingDiv = this.outputContainer.createDiv({ cls: 'shell-entry system' });
-                loadingDiv.id = loadingId;
+            // Show loading indicator (instance-scoped to avoid cross-view collisions)
+            if (!this.loadingIndicatorEl) {
+                const loadingDiv = this.outputContainer.createDiv({ cls: 'shell-entry system' });
+                loadingDiv.setAttribute('role', 'status');
+                loadingDiv.setAttribute('aria-live', 'polite');
                 loadingDiv.createSpan({ cls: 'shell-loading' });
                 loadingDiv.createSpan({ text: 'Thinking...' });
+                this.loadingIndicatorEl = loadingDiv;
             }
             this.scrollToEnd();
         } else {
             // Remove loading indicator
-            const loadingDiv = document.getElementById('loading-indicator');
-            if (loadingDiv) loadingDiv.remove();
+            this.loadingIndicatorEl?.remove();
+            this.loadingIndicatorEl = null;
         }
     }
 
@@ -608,8 +615,8 @@ export class ShellView extends ItemView {
     private ensureStreamContainer() {
         if (this.streamContainer) return;
 
-        const loadingDiv = document.getElementById('loading-indicator');
-        if (loadingDiv) loadingDiv.remove();
+        this.loadingIndicatorEl?.remove();
+        this.loadingIndicatorEl = null;
 
         this.streamContainer = this.outputContainer.createDiv({ cls: 'shell-entry ai shell-stream-container' });
         this.streamTimeline = this.streamContainer.createDiv({ cls: 'shell-think-timeline' });
@@ -637,6 +644,9 @@ export class ShellView extends ItemView {
         });
 
         this.streamContent = this.streamContainer.createDiv({ cls: 'shell-response-content' });
+        // 流式回复区声明为礼貌型 live region,读屏会随增量文本播报 AI 回复进展。
+        this.streamContent.setAttribute('aria-live', 'polite');
+        this.streamContent.setAttribute('aria-atomic', 'false');
         this.streamAccumulatedText = '';
         this.streamNodeCount = 0;
     }
@@ -658,20 +668,24 @@ export class ShellView extends ItemView {
         this.debouncedRenderStream();
     }
 
+    /**
+     * 流式途中只做轻量纯文本同步:把累计文本写进一个纯文本节点,不跑 Markdown 渲染。
+     * 完整 Markdown 渲染推迟到 finalizeStream() 一次性完成,避免每帧 empty()+整段重渲的 O(n²)。
+     */
     private renderStreamContent() {
         if (!this.streamContent) return;
 
-        this.streamContent.empty();
-        this.getMessageRenderer().renderAiContent(
-            this.streamContent,
-            this.streamAccumulatedText,
-            { postProcess: false },
-        ).then(() => {
+        if (!this.streamPlainTextEl) {
+            this.streamContent.empty();
+            this.streamPlainTextEl = this.streamContent.createDiv({ cls: 'shell-stream-plaintext' });
             const cursor = document.createElement('span');
             cursor.className = 'shell-stream-cursor';
-            this.streamContent?.appendChild(cursor);
-            this.scrollToEnd();
-        });
+            this.streamContent.appendChild(cursor);
+        }
+
+        // 仅更新文本内容(浏览器只 diff 这一个文本节点),开销与累计长度线性、与帧数无关。
+        this.streamPlainTextEl.textContent = this.streamAccumulatedText;
+        this.scrollToEnd();
     }
 
     private finalizeStream() {
@@ -711,6 +725,7 @@ export class ShellView extends ItemView {
         this.streamContainer = null;
         this.streamTimeline = null;
         this.streamContent = null;
+        this.streamPlainTextEl = null;
         this.streamAccumulatedText = '';
         this.streamNodeCount = 0;
         this.thinkingRenderer = null;
@@ -739,8 +754,11 @@ export class ShellView extends ItemView {
                     }
                 },
                 onFeedbackUp: async (message) => {
-                    await this.chatController.archiveMessage(message.id);
+                    await this.chatController.recordPositiveFeedback(message.id);
                     await this.refreshKnowledgeStatusPanel();
+                },
+                onFeedbackDown: async (message, reason) => {
+                    await this.chatController.recordNegativeFeedback(message.id, reason);
                 },
                 onReviewCodeBlock: (content) => this.reviewCodeBlock(content),
                 onUndoWorkspaceEdit: (editId) => this.chatController.undoWorkspaceEdit(editId),
@@ -833,6 +851,9 @@ export class ShellView extends ItemView {
     async onClose() {
         await this.persistAllTabs();
         this.stopHeartbeat();
+        // 释放思考计时器,避免视图关闭后 interval 泄漏。
+        this.thinkingRenderer?.dispose();
+        this.thinkingRenderer = null;
         this.hideHistoryMenu();
         this.tabBar?.destroy();
         this.tabBar = null;
@@ -1066,6 +1087,28 @@ export class ShellView extends ItemView {
         this.app.setting.openTabById(PLUGIN_ID);
     }
 
+    /**
+     * 打开文件附件弹窗：选中的本地文本文件读出内容后作为 type:'file' 上下文加入。
+     * 走与 @ 文件相同的上下文链路（base-chat-runtime 会把 content 真正拼进 prompt）。
+     */
+    private handleAttachFiles() {
+        new AttachmentModal(this.app, (results: AttachmentResult[]) => {
+            if (!results.length) return;
+            for (const result of results) {
+                this.contextManager.addContext({
+                    id: `attachment:${result.name}:${Date.now()}`,
+                    type: 'file',
+                    data: result.name,
+                    content: result.content,
+                    summary: result.name,
+                });
+            }
+            const contextContainer = this.getContextChipsContainer();
+            if (contextContainer) this.renderContextChips(contextContainer);
+            new Notice(`Attached ${results.length} file${results.length > 1 ? 's' : ''}.`);
+        }).open();
+    }
+
     private async handlePaste(e: ClipboardEvent) {
         const items = e.clipboardData?.items;
         if (!items) return;
@@ -1257,6 +1300,19 @@ export class ShellView extends ItemView {
             });
         }
         new Notice(`Switched to ${modelId}`);
+    }
+
+    private async handleThinkingChange(level: ThinkingLevel) {
+        const plugin = this.getPluginInstance();
+        if (!plugin) return;
+        plugin.settings.thinkingLevel = level;
+        await plugin.saveSettings();
+    }
+
+    private refreshInputToolbarThinking() {
+        const settings = this.getPluginInstance()?.settings;
+        if (!settings || !this.inputToolbar) return;
+        this.inputToolbar.updateThinking((settings.thinkingLevel ?? 'medium') as ThinkingLevel);
     }
 
     private async populateModelOptions(selectEl: HTMLSelectElement, forceRefresh: boolean = false) {
@@ -1782,9 +1838,12 @@ export class ShellView extends ItemView {
 
     private resetStreamState() {
         this.debouncedRenderStream.cancel();
+        // 丢弃流时主动释放思考计时器,避免 interval 泄漏(切换/关闭标签页会走到这里)。
+        this.thinkingRenderer?.dispose();
         this.streamContainer = null;
         this.streamTimeline = null;
         this.streamContent = null;
+        this.streamPlainTextEl = null;
         this.streamAccumulatedText = '';
         this.streamNodeCount = 0;
         this.thinkingRenderer = null;

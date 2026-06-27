@@ -428,6 +428,64 @@ async function runTests() {
     expect(created[0].evidenceIds).toEqual(['mem_local', 'mem_tests']);
     expect(created[0].text).toContain('local-first');
   });
+
+  await test('retriever renders negative memories as avoid lines', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemory(makeMemory({
+      id: 'mem_lesson',
+      type: 'observation',
+      polarity: 'negative',
+      text: '回答关于「部署流程」一类问题时,应避免:太啰嗦,要直接给结论',
+      normalizedText: '回答关于「部署流程」一类问题时,应避免:太啰嗦,要直接给结论',
+      entities: ['部署流程'],
+      tags: ['feedback-lesson', '部署'],
+      mentionedAt: 1000,
+    }));
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    const result = await retriever.recall({ query: '部署流程怎么做', now: 3000 });
+
+    // 负面教训以「avoid:」前缀注入,直接约束模型生成。
+    expect(result.promptBlock).toContain('avoid:');
+    expect(result.promptBlock).toContain('要直接给结论');
+  });
+
+  await test('retriever boosts a negative lesson above a neutral record of equal relevance', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    // 两条文本相关度相当,仅极性不同:负面教训应因加权排在前面。
+    await store.upsertMemories([
+      makeMemory({
+        id: 'mem_neutral',
+        type: 'observation',
+        text: '部署流程相关的中性记录内容',
+        normalizedText: '部署流程相关的中性记录内容',
+        entities: ['部署流程'],
+        tags: ['部署'],
+        mentionedAt: 1000,
+      }),
+      makeMemory({
+        id: 'mem_neg',
+        type: 'observation',
+        polarity: 'negative',
+        text: '部署流程相关的应避免做法内容',
+        normalizedText: '部署流程相关的应避免做法内容',
+        entities: ['部署流程'],
+        tags: ['部署'],
+        mentionedAt: 1000,
+      }),
+    ]);
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    const result = await retriever.recall({ query: '部署流程', maxRecords: 2, now: 3000 });
+
+    expect(result.records[0].id).toBe('mem_neg');
+  });
 }
 
 runTests().catch((error) => {

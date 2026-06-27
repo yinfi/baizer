@@ -35,3 +35,6 @@ Thumbs.db
 
 # Obsidian
 .obsidian/
+
+# OMC 运行时状态（会话/HUD/state，不入库）
+.omc/
