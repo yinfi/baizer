@@ -1,3 +1,5 @@
+import type { Model } from '@earendil-works/pi-ai';
+import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { ChatContextItem, IModelProvider, PriorChatMessage, StreamEvent, ToolDefinition } from '../models/interfaces';
 import type { MemoryManager } from '../memory/memory-manager';
 import type { UserProfile } from '../memory/types';
@@ -9,8 +11,42 @@ import type { WorkspaceEditService } from '../services/workspace-edit-service';
 import type { SessionStore } from './pi/session-store';
 import type { SteeringController } from './steering-controller';
 
+/**
+ * 一次 queryStream 运行所需的原生 LLM 直连句柄。
+ *
+ * Phase 2 起，pi 的 agentLoop 直接用 pi-ai 原生 streamFn 直连，
+ * 不再经由旧的 IChatSession 桥接路径调用 LLM。
+ * 本句柄把「该用哪个 Model」与「如何发起 stream」
+ * 这两件事打包在一起：
+ *   - model:    pi-ai 的 Model 配置对象（由 buildGeminiModel / buildOpenAICompatModel 构造）
+ *   - streamFn: 注入了 apiKey 的 StreamFn（生产由 createNativeStreamFn 提供；测试注入 mock）
+ *
+ * 两者必须同源构造（同一 provider 类型、同一 apiKey），故合并为一个句柄一次性给出，
+ * 避免 runtime 自己拼装 provider 细节。
+ */
+export interface NativeChatHandle {
+  model: Model<any>;
+  streamFn: StreamFn;
+}
+
+/**
+ * 原生直连句柄工厂。每次 queryStream 启动时调用一次，返回当前 provider 对应的
+ * model + streamFn。做成工厂（而非直接传 model/streamFn）是为了：
+ * (a) 凭证/模型可能在运行期被 settings 改动，每轮取最新值；
+ * (b) 测试可注入一个产出 mock streamFn 的工厂，作为「假 LLM 响应」的唯一注入点。
+ */
+export type NativeChatFactory = () => NativeChatHandle;
+
 export interface ChatRuntimeDeps {
   provider: IModelProvider;
+  /**
+   * 原生 LLM 直连句柄工厂（Phase 2 接入点）。
+   * 生产由 model-service 依据当前 ProviderConfig 构造（gemini→buildGeminiModel，
+   * openai-compatible→buildOpenAICompatModel，streamFn=createNativeStreamFn(apiKey)）。
+   * 测试注入 mock streamFn 以驱动工具循环。
+   * 缺省时 PiChatRuntime.queryStream 会抛出明确错误（生产必须提供）。
+   */
+  nativeChatFactory?: NativeChatFactory;
   memoryManager: MemoryManager | null;
   toolRegistry: ToolRegistry;
   skillRegistry: SkillRegistry;
@@ -64,7 +100,7 @@ export interface PreparedChatTurn {
   generationPlan?: GenerationPlan;
   writingProfile?: WritingProfile;
   systemPromptOverride?: string;
-  /** 透传给 provider.startChat 的历史，使新会话携带跨轮上下文。 */
+  /** 跨轮注入的历史消息，使新会话携带跨轮上下文。 */
   priorMessages?: PriorChatMessage[];
 }
 

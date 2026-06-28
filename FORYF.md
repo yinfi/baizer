@@ -1,6 +1,51 @@
 ---
 
-### [2026-06-27 14:20] Task Summary
+### [2026-06-28 01:45] Task Summary — 重构 Phase 4（删除已死的 IChatSession 流式路径）
+
+**1. 刚刚做了什么？ (What was done?)**
+- 删除 `IChatSession` 接口和 `IModelProvider.startChat` 方法声明（interfaces.ts）。
+- 删除 `GeminiProvider.startChat()` 方法 + `GeminiChatSession` 类 + 相关 dead imports（`ChatSession`、`mergeStreamThoughtSignatures`、`IChatSession`、`PriorChatMessage`、`ToolResult`）（gemini.ts，净删约 170 行）。
+- 删除 `OpenAIProvider.startChat()` 方法 + `OpenAIChatSession` 类 + dead imports（openai.ts，净删约 150 行）。
+- 删除整文件：`src/models/gemini-thought-signatures.ts`、`test/gemini-thought-signatures.test.ts`、`test/gemini-provider.test.ts`、`test/openai-provider.test.ts`（共约 715 行）。
+- 清理 `runtime-types.ts` 和 `pi-chat-runtime.ts` 中引用 `IChatSession`/`startChat` 的陈旧注释。
+- 修 `test/memory-manager.test.ts`：删 `IChatSession` import、`MockChatSession` 类、mock provider 的 `startChat` 字段。
+- 修 `test/pi-chat-runtime.test.ts` 和 `test/steering.test.ts`：删 `startChat` 哨兵实现（各 3 行）。
+- 从 `test/run-tests.ts` 移除 3 个已删测试文件条目。
+- 用 `git rm --cached` 将已删文件从 git index 移除，修复 `brand.test.ts` 的 `git ls-files` 扫描失败。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- Phase 2 已将 pi 的对话主线切换到原生 streamFn，`startChat/IChatSession` 路径自此零运行时调用。
+- 净删约 1100 行死代码，消除维护负担和潜在误导。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- `brand.test.ts` 通过 `git ls-files` 枚举所有追踪文件并 `readFileSync` 读取内容，而删除的文件仍在 git index 中，导致 ENOENT 崩溃。此问题在同阶段删除的 `pi-provider-bridge.ts` 上也复现。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 对所有已删文件执行 `git rm --cached`，将其从 git index 移除，`git ls-files` 不再列出它们，brand 扫描恢复正常。
+
+---
+
+### [2026-06-27 15:40] Task Summary — 重构 Phase 3（provider 层统一清理）
+
+**1. 刚刚做了什么？ (What was done?)**
+- 删除 memory-manager.ts 中证实零引用的死代码：`getOrCreateSession()` 方法、`chatSession` 字段、`clearSession()` 里的 `this.chatSession = null`，以及随之失效的 `IChatSession` / `ToolDefinition` import。
+- 同步清理 base-chat-runtime.test.ts 两处 mock 里残留的 `getOrCreateSession`（标注「not used」的占位）。
+- 决策：Route B（稳健）。其余 legacy（GeminiChatSession/thought-signatures、generateContent、@google/generative-ai）按证据保留，列入下一阶段技术债。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 第一性原理核查推翻了任务前提：`provider.startChat` 的唯一调用者 `getOrCreateSession` 全 src/ 零引用 → memory-manager 没有「自己的工具循环」，整条 IChatSession 流式路径已是生产死代码（仅被 provider 测试养活）。
+- memory-manager 唯一活的 provider 依赖是无状态 `generateContent`（画像提取/会话摘要），无需迁移执行路径。
+- generateContent 不迁移：现有测试 mock 在 `provider.generateContent` 边界，内部换 completeSimple 不被测试覆盖（Obsidian 真机 transport/systemPrompt/error 行为有回归风险）；且单迁它不能卸 SDK（startChat+checkAvailability 仍用）。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 任务给的关键约束（memory-manager 仍跑 startChat 工具循环）与实际代码不符，需先证伪再决策。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 多轮 grep 锁定零引用证据；build clean；受影响测试（memory-manager/hindsight/base-chat-runtime/model-service/pi-chat-runtime/pi-native-model/gemini-provider/openai-provider/knowledge×3）全 PASS。
+
+---
+
+
 
 **1. 刚刚做了什么？ (What was done?)**
 - 修复消息操作栏三个反馈按钮(复制/点赞/点踩)图标渲染异常(变形/错位):
@@ -1540,3 +1585,94 @@ UI 层：
 
 **4. 如何修复的? (How was it fixed?)**
 - 验证: npm test 500 PASS / 0 FAIL + npm run build exit 0。
+
+---
+
+### [2026-06-28 00:00] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 新建 `test/spike/pi-native-spike.ts`，验证了用 `@earendil-works/pi-ai` 原生 provider 直连 LLM 的可行性（Phase 0 闸门 Spike）。
+- 验证了两个 provider：Google (`google-generative-ai`) 和 OpenAI-compat (`openai-completions`)。
+- 验证了 `getModel()` 注册表查找和手写 `Model<T>` 字面量两种构造路径均可用。
+- 验证了 `agentLoop` + `streamFn` 适配闭包的接线结构完整无误。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 这是重构方案 Phase 0：在动任何 src/ 代码前，先用最小代价证明原生 provider 桥接路径在技术上可行。
+- WIRING OK 结论意味着 Phase 1（构造 Model 层）可以安全推进。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- `tsconfig.test.json` 设置 `"module": "commonjs"`，导致 tsx 通过 CJS loader 解析 pure-ESM 包时命中 `ERR_PACKAGE_PATH_NOT_EXPORTED`（包 exports 只有 `"import"` 条件，无 `"require"`）。
+- `AgentMessage` 类型在 `@earendil-works/pi-agent-core` 里，不在 `@earendil-works/pi-ai`，初始 import 写错了需要修正。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 将所有运行时 import 改为 `await import()`（动态导入），CJS 上下文可以动态加载 ESM 包。类型导入保留 `import type` 静态形式（编译时擦除，不影响运行时）。
+- 修正 `AgentMessage` 的 import 来源为 `@earendil-works/pi-agent-core`。
+- 最终运行输出：两个 provider 均判定为 `WIRING OK`，spike 以零错误通过。
+
+---
+
+### [2026-06-28 12:00] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 新建 `src/runtime/pi/pi-native-model.ts`：导出 `buildGeminiModel`、`buildOpenAICompatModel`、`createNativeStreamFn` 三个函数，把项目 ProviderConfig 映射成 pi-ai 原生 `Model` 对象，并提供注入 apiKey 的 `StreamFn` 闭包工厂。
+- 新建 `test/pi-native-model.test.ts`：23 个纯构造断言，零网络依赖，全部通过。
+- 在 `test/run-tests.ts` 的 `pi-provider-bridge.test.ts` 之后插入一行，把新测试纳入回归套件。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- Phase 1 目标：建立原生 Model 构造层，供 Phase 2 切换 agentLoop streamFn 时直接调用。
+- 当前 `pi-provider-bridge.ts` 用的是假 bridge model（`api: 'baizer-bridge'`）；这一层提供真实 provider 的 Model 描述（Gemini / OpenAI-compat），是迁移的前提基础。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- `@earendil-works/pi-ai` 是纯 ESM 包，测试环境 tsconfig 使用 `module: commonjs`，直接 `import { streamSimple }` 会触发 `ERR_PACKAGE_PATH_NOT_EXPORTED` 错误。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 将 `streamSimple` 的静态导入改为运行时 `await import('@earendil-works/pi-ai')`（动态导入），与 `pi-chat-runtime.ts` 中 `agentLoop` 的处理模式一致。
+- 因为 `StreamFn` 返回值必须是同步的 `AssistantMessageEventStream`，在闭包内实现了与 `pi-provider-bridge.ts` 同款的手动 push/pull 队列，将异步加载结果转发进同步可迭代的 stream 包装。
+- 类型导入保留 `import type`（编译时擦除，不影响运行时）。
+
+---
+
+---
+### [2026-06-27 00:57] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- Phase 2 重构：让 pi 的 agentLoop 改用 pi-ai 原生 streamFn 直连 LLM，拆掉「假模型 + 反向桥接 IChatSession」。
+- ChatRuntimeDeps 新增 nativeChatFactory（返回 {model, streamFn}）；PiChatRuntime.queryStream 改用它，priorMessages 作为 context.messages 历史前缀注入。
+- 删除 src/runtime/pi/pi-provider-bridge.ts 与 test/pi-provider-bridge.test.ts；model-service 用 buildGeminiModel/buildOpenAICompatModel + createNativeStreamFn(apiKey) 装配 nativeChatFactory。
+- pi-chat-runtime.test.ts / steering.test.ts 注入点从 mock IChatSession.streamFactory 上移到 mock streamFn。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 原架构真正 LLM 调用仍在自研 gemini/openai，pi 只是空转。直连后 pi 成为唯一 runtime，去掉反向桥接这层多余抽象。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 走原生后 IChatSession 消失，测试失去注入假 LLM 响应的入口；跨轮历史不再由会话维护。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 注入点上移到 mock streamFn：用 deriveInput 从 llmContext.messages 还原本轮输入（复刻 getBaizerInput），eventsToPiStream 把 StreamEvent[] 转 pi AssistantMessageEvent 流。
+- priorMessages 经 buildPriorContextMessages 转成 UserMessage/AssistantMessage 作 context.messages 前缀。systemPrompt 保持空字符串避免行为漂移。
+- 验证：npm run build 通过；pi-chat-runtime(18)/steering(8)/pi-event-adapter/pi-native-model/pi-runtime-factory/base-chat-runtime/pi-approval-policy/pi-tool-adapter/model-service/session-store 全绿；tsc src 零错误；无新增 Node API。
+
+---
+### [2026-06-28 01:15] Task Summary (ultrawork 总览：pi-agent 原生接入重构)
+
+**1. 刚刚做了什么？ (What was done?)**
+- 通过 ultrawork 5 阶段串行 workflow，把 chat runtime 从「假模型 + 反向桥接」重构为 pi-ai 原生 provider 直连。
+- Phase 0 可行性 Spike（test/spike/）→ Phase 1 pi-native-model.ts → Phase 2 PiChatRuntime 切原生 streamFn + 删 pi-provider-bridge → Phase 3 provider 清理 + memory-manager 解耦 → Phase 4 删整条已死 IChatSession 流式路径。
+- 净删 1311 行（+512/−1823），删除文件：pi-provider-bridge.ts、gemini-thought-signatures.ts、GeminiChatSession/OpenAIChatSession 类、IChatSession 接口及 3 个对应测试文件。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 根因：项目维护两套重叠的 agent 基础设施（自研 IChatSession 流式 + pi agentLoop），bridge 用假模型把 pi 反向接回自研 provider，反直觉且冗余。
+- 目标：让 pi-ai 原生 provider（google + openai-completions，均走 fetch、移动端兼容）直连 LLM，消除重复、降低认知负担。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 计划假设 Phase 3A/3B 可并行，实际三者共享 gemini.ts/openai.ts 且 memory-manager 仍走 legacy startChat → 非独立，合并为单一串行 Phase 3。
+- Phase 2 测试注入点（mock IChatSession）随 IChatSession 删除而失效。
+- 被删 provider 测试是否含 LIVE 覆盖的疑虑。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 每阶段先 grep 验证依赖真相再动手：发现 memory-manager 的 getOrCreateSession 实为死代码、provider.startChat 零运行时调用。
+- 测试注入点上移到 mock streamFn。
+- 核实被删 provider 测试全部仅覆盖已删流式路径，thinking 行为由 pi-native-model.test.ts 重新覆盖，streaming 契约移交 pi-ai 上游 → 自有 LIVE 代码零覆盖损失。
+- 验证：npm run build 通过；全量 80 测试文件全绿；src 零新增 Node API import；dist/main.js 正常产出。
+
+---

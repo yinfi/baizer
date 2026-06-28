@@ -1,4 +1,4 @@
-import { IModelProvider, ModelConfig, IChatSession, GenerationOptions, GenerationResult, ToolDefinition, ToolResult, ChatMessage, ModelOption, StreamEvent, PriorChatMessage } from './interfaces';
+import { IModelProvider, ModelConfig, GenerationOptions, GenerationResult, ToolDefinition, ModelOption, StreamEvent } from './interfaces';
 import { requestUrl, RequestUrlParam } from 'obsidian';
 import { logger } from '../utils/logger';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
@@ -92,16 +92,12 @@ export class OpenAIProvider implements IModelProvider {
         return this.chatCompletion(messages, undefined, options);
     }
 
-    startChat(tools?: ToolDefinition[], priorMessages?: PriorChatMessage[], thinkingLevel?: string): IChatSession {
-        return new OpenAIChatSession(this.config, tools, this, priorMessages, thinkingLevel);
-    }
-
     async chatCompletion(messages: any[], tools?: ToolDefinition[], options?: GenerationOptions): Promise<GenerationResult> {
         const raw = await this.chatCompletionRaw(messages, tools, options);
         return OpenAIProvider.toGenerationResult(raw);
     }
 
-    /** 返回原始 assistant message（含 tool_call id），供 ChatSession 维护 history */
+    /** 返回原始 assistant message（含 tool_call id） */
     async chatCompletionRaw(messages: any[], tools?: ToolDefinition[], options?: GenerationOptions): Promise<any> {
         const url = `${this.config.baseUrl || 'https://api.openai.com/v1'}/chat/completions`;
 
@@ -313,148 +309,6 @@ export class OpenAIProvider implements IModelProvider {
             error.name = 'AbortError';
             throw error;
         }
-    }
-}
-
-class OpenAIChatSession implements IChatSession {
-    private history: any[] = [];
-
-    constructor(
-        private config: ModelConfig,
-        private tools: ToolDefinition[] | undefined,
-        private provider: OpenAIProvider,
-        priorMessages?: PriorChatMessage[],
-        private thinkingLevel?: string
-    ) {
-        if (config.systemPrompt) {
-            this.history.push({ role: 'system', content: config.systemPrompt });
-        }
-        // 注入上一轮起的干净对话原文，OpenAI 的 model 角色对应内部 assistant。
-        for (const message of priorMessages ?? []) {
-            this.history.push({
-                role: message.role === 'model' ? 'assistant' : 'user',
-                content: message.content,
-            });
-        }
-    }
-
-    async sendMessage(text: string | ToolResult[]): Promise<GenerationResult> {
-        if (typeof text === 'string') {
-            this.dropUnresolvedToolCalls();
-            this.history.push({ role: 'user', content: text });
-        } else {
-            // 将 tool results 追加到 history，匹配上一条 assistant message 中的 tool_call_id
-            const lastMsg = this.history[this.history.length - 1];
-            if (lastMsg?.role === 'assistant' && lastMsg.tool_calls) {
-                const usedCallIds = new Set<string>();
-                text.forEach(t => {
-                    const call = this.findToolCall(lastMsg.tool_calls, t, usedCallIds);
-                    if (call) {
-                        usedCallIds.add(call.id);
-                        this.history.push({
-                            role: 'tool',
-                            tool_call_id: call.id,
-                            name: t.name,
-                            content: JSON.stringify(t.response)
-                        });
-                    }
-                });
-            }
-        }
-
-        // 使用 chatCompletionRaw 获取原始 message（含 tool_call id）
-        const rawMessage = await this.provider.chatCompletionRaw(this.history, this.tools);
-
-        // 将完整的 assistant message（含 tool_calls + id）push 到 history
-        this.history.push(rawMessage);
-
-        return OpenAIProvider.toGenerationResult(rawMessage);
-    }
-
-    async *sendMessageStream(text: string | ToolResult[], signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
-        if (typeof text === 'string') {
-            this.dropUnresolvedToolCalls();
-            this.history.push({ role: 'user', content: text });
-        } else {
-            const lastMsg = this.history[this.history.length - 1];
-            if (lastMsg?.role === 'assistant' && lastMsg.tool_calls) {
-                const usedCallIds = new Set<string>();
-                text.forEach(t => {
-                    const call = this.findToolCall(lastMsg.tool_calls, t, usedCallIds);
-                    if (call) {
-                        usedCallIds.add(call.id);
-                        this.history.push({
-                            role: 'tool',
-                            tool_call_id: call.id,
-                            name: t.name,
-                            content: JSON.stringify(t.response)
-                        });
-                    }
-                });
-            }
-        }
-
-        let fullText = '';
-        let reasoningContent = '';
-        const toolCalls: any[] = [];
-
-        for await (const event of this.provider.chatCompletionStream(this.history, this.tools, signal, this.thinkingLevel)) {
-            if (event.type === 'text_delta') {
-                fullText += event.content;
-            } else if (event.type === 'thinking') {
-                reasoningContent += event.content;
-            } else if (event.type === 'tool_call') {
-                toolCalls.push({
-                    id: event.id || `call_${Date.now()}_${toolCalls.length}`,
-                    type: 'function',
-                    function: { name: event.name, arguments: JSON.stringify(event.args) }
-                });
-            }
-            if (event.type !== 'done') {
-                yield event;
-            }
-        }
-
-        const assistantMsg: any = { role: 'assistant', content: fullText || null };
-        if (reasoningContent) {
-            assistantMsg.reasoning_content = reasoningContent;
-        }
-        if (toolCalls.length > 0) {
-            assistantMsg.tool_calls = toolCalls;
-        }
-        this.history.push(assistantMsg);
-
-        yield { type: 'done' as const, text: fullText };
-    }
-
-    async getHistory(): Promise<ChatMessage[]> {
-        return this.history.filter(h => h.role !== 'system' && h.role !== 'tool').map(h => ({
-            role: h.role,
-            content: h.content || ''
-        }));
-    }
-
-    async clearHistory(): Promise<void> {
-        this.history = [];
-        if (this.config.systemPrompt) {
-            this.history.push({ role: 'system', content: this.config.systemPrompt });
-        }
-    }
-
-    private dropUnresolvedToolCalls(): void {
-        const lastMsg = this.history[this.history.length - 1];
-        if (lastMsg?.role === 'assistant' && lastMsg.tool_calls?.length) {
-            this.history.pop();
-        }
-    }
-
-    private findToolCall(toolCalls: any[], result: ToolResult, usedCallIds: Set<string>): any | undefined {
-        if (result.id) {
-            const directMatch = toolCalls.find((tc: any) => tc.id === result.id && !usedCallIds.has(tc.id));
-            if (directMatch) return directMatch;
-        }
-
-        return toolCalls.find((tc: any) => tc.function.name === result.name && !usedCallIds.has(tc.id));
     }
 }
 

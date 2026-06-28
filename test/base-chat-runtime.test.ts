@@ -53,7 +53,6 @@ async function runTests() {
       memoryManager: {
         ready: async () => { },
         buildContext: () => '[Memory Context]',
-        getOrCreateSession: () => { throw new Error('not used'); },
         recordMessage: async () => { },
       } as any,
       toolRegistry: {
@@ -91,9 +90,6 @@ async function runTests() {
         },
         retainTurn: async (input: any) => {
           memoryCalls.push({ type: 'retainTurn', input });
-        },
-        getOrCreateSession: () => {
-          throw new Error('provider chat session should be scoped to the runtime turn');
         },
         recordMessage: async () => undefined,
       } as any,

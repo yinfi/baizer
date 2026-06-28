@@ -77,13 +77,6 @@ export type StreamEvent =
     | { type: 'done'; text: string; interrupted?: boolean }
     | { type: 'error'; message: string };
 
-export interface IChatSession {
-    sendMessage(text: string | ToolResult[]): Promise<GenerationResult>;
-    sendMessageStream(text: string | ToolResult[], signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown>;
-    getHistory(): Promise<ChatMessage[]>;
-    clearHistory(): Promise<void>;
-}
-
 export interface IModelProvider {
     id: string;
     name: string;
@@ -94,5 +87,4 @@ export interface IModelProvider {
     listModels?(): Promise<ModelOption[]>;
 
     generateContent(prompt: string, systemPrompt?: string, options?: GenerationOptions): Promise<GenerationResult>;
-    startChat(tools?: ToolDefinition[], priorMessages?: PriorChatMessage[], thinkingLevel?: string): IChatSession;
 }

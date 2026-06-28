@@ -1,6 +1,6 @@
 import { App } from 'obsidian';
 import { MemoryManager } from '../src/memory/memory-manager';
-import { IChatSession, IModelProvider, ToolDefinition } from '../src/models/interfaces';
+import { IModelProvider } from '../src/models/interfaces';
 
 function expect(actual: any) {
   return {
@@ -43,24 +43,6 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-class MockChatSession implements IChatSession {
-  async sendMessage(_text: string | any[]) {
-    return { text: 'ok' };
-  }
-
-  async *sendMessageStream(_text: string | any[]) {
-    yield { type: 'done' as const, text: 'ok' };
-  }
-
-  async getHistory() {
-    return [];
-  }
-
-  async clearHistory() {
-    return;
-  }
-}
-
 function createModelProvider(promptLog: string[]): IModelProvider {
   return {
     id: 'mock',
@@ -78,7 +60,6 @@ function createModelProvider(promptLog: string[]): IModelProvider {
       }
       return { text: 'summary missing session transcript' };
     },
-    startChat: (_tools?: ToolDefinition[]) => new MockChatSession(),
   };
 }
 

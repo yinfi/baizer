@@ -1,0 +1,211 @@
+/**
+ * pi-native-model.ts
+ *
+ * 把项目的 ProviderConfig 映射成 pi-ai 原生 Model 对象，并提供注入 apiKey 的
+ * StreamFn 工厂。这是 Phase 1 的纯构造层——不改任何现有文件，只新增。
+ *
+ * 使用场景（Phase 2 接入时调用）：
+ *   const model = buildGeminiModel(config, settings.contextWindow, settings.thinkingLevel);
+ *   const streamFn = createNativeStreamFn(config.apiKey);
+ *   // 然后把 model 和 streamFn 传给 pi agentLoop。
+ */
+
+import type { Model } from '@earendil-works/pi-ai';
+import type { StreamFn } from '@earendil-works/pi-agent-core';
+// streamSimple 只在运行期动态 import（与 pi-chat-runtime.ts 的 agentLoop 同模式），
+// 避免 ESM-only pi-ai 在 CJS 测试环境（tsconfig.test.json module=commonjs）下
+// 因 "No exports main defined" 错误而无法加载。
+import type { ProviderConfig } from '../../mcp/types';
+
+// 与 settings.contextWindow 默认值对齐（src/mcp/types.ts DEFAULT_SETTINGS），
+// 也与 pi-provider-bridge.ts 的同名常量保持一致。
+const DEFAULT_CONTEXT_WINDOW = 100000;
+
+/**
+ * thinking 档对应 OpenAI reasoning_effort 的映射表。
+ * - null  : 该档不支持 / 关闭推理（provider 用默认行为）
+ * - string: 传给 provider 的具体值（OpenAI 用 reasoning_effort）
+ *
+ * 项目自定义的 thinkingLevel 与 pi 的 ModelThinkingLevel 同名，
+ * 因此 key 直接对应，无需转换。
+ */
+const OPENAI_COMPAT_THINKING_LEVEL_MAP = {
+  off: null,
+  minimal: 'low',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'high',
+} as const;
+
+/**
+ * 把 Gemini provider 配置映射成 pi-ai Model。
+ *
+ * @param config        - 项目 ProviderConfig（type 必须为 'gemini'）
+ * @param contextWindow - 模型上下文窗口 token 数；缺省回落到 DEFAULT_CONTEXT_WINDOW
+ * @param thinkingLevel - 推理深度档位；'off' 关闭 reasoning，其余（含 undefined）开启
+ */
+export function buildGeminiModel(
+  config: ProviderConfig,
+  contextWindow?: number,
+  thinkingLevel?: string,
+): Model<'google-generative-ai'> {
+  return {
+    id: config.model,
+    name: config.model,
+    // google-generative-ai：pi 使用此 api 值路由到 Google Generative AI provider
+    api: 'google-generative-ai',
+    provider: 'google',
+    // Gemini 官方端点，pi 会在此基础上拼接模型路径
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    // thinkingLevel !== 'off' 时开启 reasoning（undefined 也视为开启）。
+    // 与 pi-provider-bridge.ts 的逻辑完全一致。
+    reasoning: thinkingLevel !== 'off',
+    // Gemini 支持文本和图像输入
+    input: ['text', 'image'],
+    // 成本字段全置 0：项目内部不做费用核算，pi 用于显示用途
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+    // 取真实配置的上下文窗口；缺省回落到默认值，避免 pi 内部预算判断出错
+    contextWindow: contextWindow && contextWindow > 0 ? contextWindow : DEFAULT_CONTEXT_WINDOW,
+    // Gemini 输出 token 上限（Phase 0 验证值）
+    maxTokens: 8192,
+    // Gemini 的 thinkingLevelMap 不显式设置，让 pi google provider 使用内置的
+    // thinking budget 默认值。reasoning flag（上方）控制是否开启思考。
+  };
+}
+
+/**
+ * 把 OpenAI-compatible provider 配置映射成 pi-ai Model。
+ * 覆盖 OpenAI 官方及所有兼容接口（DeepSeek、Qwen、自建 OpenAI-compat 服务等）。
+ *
+ * @param config        - 项目 ProviderConfig（type 为 'openai-compatible'）
+ * @param contextWindow - 模型上下文窗口 token 数；缺省回落到 DEFAULT_CONTEXT_WINDOW
+ * @param thinkingLevel - 推理深度档位；'off' 关闭 reasoning，其余（含 undefined）开启
+ */
+export function buildOpenAICompatModel(
+  config: ProviderConfig,
+  contextWindow?: number,
+  thinkingLevel?: string,
+): Model<'openai-completions'> {
+  // 用户没有配置 baseUrl 时回落到 OpenAI 官方端点
+  const baseUrl = config.baseUrl?.trim() || 'https://api.openai.com';
+
+  return {
+    id: config.model,
+    name: config.model,
+    // openai-completions：pi 用此值路由到 OpenAI-compatible completions provider
+    api: 'openai-completions',
+    provider: 'openai',
+    baseUrl,
+    // 同 Gemini：thinkingLevel !== 'off' 时开启 reasoning
+    reasoning: thinkingLevel !== 'off',
+    // OpenAI-compat 同样支持文本和图像输入
+    input: ['text', 'image'],
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+    contextWindow: contextWindow && contextWindow > 0 ? contextWindow : DEFAULT_CONTEXT_WINDOW,
+    // OpenAI 系列输出 token 上限（Phase 0 验证值）
+    maxTokens: 16384,
+    // 显式提供 thinkingLevelMap，把项目的 6 档映射到 OpenAI reasoning_effort。
+    // off → null（关闭，pi 不发送 reasoning_effort）
+    // minimal/low → 'low'，medium → 'medium'，high/xhigh → 'high'
+    thinkingLevelMap: { ...OPENAI_COMPAT_THINKING_LEVEL_MAP },
+  };
+}
+
+/**
+ * 创建一个把 apiKey 注入 streamSimple options 的 StreamFn 工厂。
+ *
+ * apiKey 不存入 Model 对象（Model 是纯配置描述，不含凭证），
+ * 而是在每次调用 streamSimple 时通过 options.apiKey 透传给 pi provider。
+ * 这样同一个 Model 实例可以在运行期安全共享，凭证切换只需重建 StreamFn。
+ *
+ * @param apiKey - 用户配置的 API 密钥（来自 ProviderConfig.apiKey）
+ */
+export function createNativeStreamFn(apiKey: string): StreamFn {
+  // 返回一个与 StreamFn 签名完全兼容的闭包：
+  // (model, context, options?) => AssistantMessageEventStream
+  //
+  // streamSimple 通过动态 import 加载（ESM-only 包在 CJS 上下文下需要此模式），
+  // 但 StreamFn 的返回值必须是同步的 AssistantMessageEventStream，不是 Promise。
+  // 解决方案：用 pi-provider-bridge 中同款的手动 push/pull stream 包装，
+  // 在后台 void 运行异步加载 + 调用，错误通过 stream 的 error 事件传出。
+  return (model, context, options) => {
+    // 用与 pi-provider-bridge 相同的动态 import 模式。
+    // 返回的 stream 是同步可迭代的，结果在异步加载完成后 push 进来。
+    const piAiPromise = import('@earendil-works/pi-ai');
+    let forwardedStream: any;
+    const queue: any[] = [];
+    const waiting: ((r: IteratorResult<any>) => void)[] = [];
+    let done = false;
+    let resolveFinal: (m: any) => void = () => undefined;
+    const finalPromise = new Promise<any>((res) => { resolveFinal = res; });
+
+    function push(event: any) {
+      if (done) return;
+      if (event.type === 'done' || event.type === 'error') {
+        done = true;
+        resolveFinal(event.type === 'done' ? event.message : event.error);
+      }
+      const waiter = waiting.shift();
+      if (waiter) waiter({ value: event, done: false });
+      else queue.push(event);
+    }
+
+    function end(result?: any) {
+      done = true;
+      if (result) resolveFinal(result);
+      while (waiting.length > 0) {
+        waiting.shift()?.({ value: undefined, done: true });
+      }
+    }
+
+    // 异步加载 pi-ai 并启动真实 stream，把事件转发到包装 stream
+    void piAiPromise.then(({ streamSimple }) => {
+      forwardedStream = streamSimple(model, context, { ...options, apiKey });
+      void (async () => {
+        try {
+          for await (const event of forwardedStream) {
+            push(event);
+          }
+          // 如果 forwardedStream 在 done 事件前耗尽，手动结束
+          if (!done) end();
+        } catch (e: any) {
+          // 把底层异常转成 error 事件，不让异常逃逸到调用方
+          push({ type: 'error', reason: 'error', error: { role: 'assistant', content: [], stopReason: 'error', errorMessage: e?.message || 'streamSimple failed' } as any });
+        }
+      })();
+    }).catch((e: any) => {
+      // import() 本身失败（罕见，但防御性处理）
+      push({ type: 'error', reason: 'error', error: { role: 'assistant', content: [], stopReason: 'error', errorMessage: e?.message || 'Failed to load pi-ai' } as any });
+    });
+
+    return {
+      async *[Symbol.asyncIterator]() {
+        while (true) {
+          if (queue.length > 0) {
+            yield queue.shift();
+          } else if (done) {
+            return;
+          } else {
+            const result = await new Promise<IteratorResult<any>>(resolve => waiting.push(resolve));
+            if (result.done) return;
+            yield result.value;
+          }
+        }
+      },
+      result() {
+        return finalPromise;
+      },
+    } as any;
+  };
+}

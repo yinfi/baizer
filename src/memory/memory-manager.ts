@@ -1,5 +1,5 @@
 import { App } from 'obsidian';
-import { IModelProvider, IChatSession, ToolDefinition } from '../models/interfaces';
+import { IModelProvider } from '../models/interfaces';
 import {
     UserProfile,
     SessionSummary,
@@ -30,7 +30,6 @@ interface MemoryManagerOptions {
 type ForgetMemoryField = 'name' | 'profession' | 'expertise' | 'preferences' | 'workflows' | 'projects' | 'goals' | 'all';
 
 export class MemoryManager {
-    private chatSession: IChatSession | null = null;
     private userProfile: UserProfile;
     private sessionSummaries: SessionSummary[] = [];
     public chatHistory: ChatMessage[] = [];
@@ -77,21 +76,11 @@ export class MemoryManager {
         await this.initPromise;
     }
 
-    getOrCreateSession(tools?: ToolDefinition[]): IChatSession {
-        if (!this.chatSession) {
-            this.chatSession = this.model.startChat(tools);
-            this.currentSessionMessages = 0;
-            this.currentSessionTranscript = [];
-        }
-        return this.chatSession;
-    }
-
     async clearSession() {
         await this.ready();
         if (this.currentSessionMessages > 0) {
             await this.endSession();
         }
-        this.chatSession = null;
         this.currentSessionMessages = 0;
         this.currentSessionTranscript = [];
     }

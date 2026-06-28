@@ -1,4 +1,6 @@
+import type { AssistantMessage, Message } from '@earendil-works/pi-ai';
 import { StreamEvent } from '../../models/interfaces';
+import type { PriorChatMessage } from '../../models/interfaces';
 import { BaseChatRuntime } from '../base-chat-runtime';
 import {
   ChatRuntime,
@@ -12,7 +14,6 @@ import {
   resolvePiFinalText,
 } from './pi-approval-policy';
 import { mapPiEventToStreamEvent, unwrapPiToolResult } from './pi-event-adapter';
-import { createBaizerStreamFn, createPiBridgeModel } from './pi-provider-bridge';
 import { adaptToolDefinitionsToPi } from './pi-tool-adapter';
 import { filterPiToolsByActiveTools } from '../steering-controller';
 
@@ -35,9 +36,13 @@ export class PiChatRuntime extends BaseChatRuntime implements ChatRuntime {
   }
 
   async *queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
-    // priorMessages 注入底层会话：pi 的 agentLoop context 只承载本轮工具循环，
-    // 跨轮历史由底层 IChatSession 维护，getBaizerInput 每轮只取当前输入即可。
-    const chat = this.deps.provider.startChat(turn.tools, turn.priorMessages, this.deps.thinkingLevel);
+    // Phase 2：pi 的 agentLoop 改用原生 streamFn 直连 LLM。
+    // 取本轮的 model + streamFn（生产由 model-service 依 ProviderConfig 构造，测试注入 mock）。
+    // 缺省即编程错误：生产装配必须提供 nativeChatFactory，故快速失败而非静默降级。
+    if (!this.deps.nativeChatFactory) {
+      throw new Error('PiChatRuntime requires deps.nativeChatFactory to stream natively');
+    }
+    const { model, streamFn } = this.deps.nativeChatFactory();
     const controller = new AbortController();
     const forwardExternalAbort = () => controller.abort(signal?.reason);
     if (signal?.aborted) {
@@ -57,8 +62,6 @@ export class PiChatRuntime extends BaseChatRuntime implements ChatRuntime {
     // 运行中 steering：每次新运行清空遗留的补话/工具变更，避免跨次泄漏。
     const steeringController = this.deps.steeringController ?? null;
     steeringController?.reset();
-    const model = createPiBridgeModel(this.deps.contextWindow, this.deps.thinkingLevel);
-    const streamFn = createBaizerStreamFn(chat);
     const { agentLoop } = await import('@earendil-works/pi-agent-core');
     // 推理深度：透传 settings.thinkingLevel → agentLoop config.reasoning。
     // "off" 关闭 thinking，省 token；"medium"(默认) 适合常规任务；"high"/"xhigh" 适合复杂任务。
@@ -66,9 +69,12 @@ export class PiChatRuntime extends BaseChatRuntime implements ChatRuntime {
     let fullResponseText = '';
     let approvalMessage = '';
     let approvalToolResultYielded = false;
+    // 跨轮上下文：priorMessages 作为 context.messages 的历史前缀（user/assistant 交替）。
+    // 历史不再由底层会话维护，必须显式放进 context。
+    // systemPrompt 保持空字符串：系统提示仍靠 turn.prompt 内拼接（与桥接期行为一致，避免漂移）。
     const context = {
       systemPrompt: '',
-      messages: [],
+      messages: buildPriorContextMessages(turn.priorMessages, model),
       tools,
     };
     // 暂缓 steering 一轮的闸门：本轮产生了工具结果时置位，
@@ -99,8 +105,9 @@ export class PiChatRuntime extends BaseChatRuntime implements ChatRuntime {
       //
       // 关键：当本轮刚产生工具结果时暂缓一轮放行（holdSteeringForPendingToolResults）。
       // 否则 pi 会把补话 user 消息压在工具结果之后，使其成为 context 的最后一条；
-      // bridge 的 getBaizerInput 只看最后一条，便会丢弃尚未回传的工具结果，
-      // 导致模型的 tool_call 永远得不到应答（OpenAI 还会主动抹掉该 assistant 轮）。
+      // agentLoopContinue 契约要求 context 最后一条必须能转成 user 或 toolResult。
+      // 工具结果与补话 user 消息同处一批时，会扰乱「工具调用→工具结果」的应答配对，
+      // 导致模型的 tool_call 得不到应答（OpenAI 兼容端还会主动抹掉该 assistant 轮）。
       // 暂缓一轮让工具结果先回传，下一轮再放行补话，两者都不丢。
       getSteeringMessages: async () => {
         if (!steeringController) return [];
@@ -224,6 +231,61 @@ function isTerminalAssistantError(event: any): boolean {
   if (event?.type !== 'message_end') return false;
   const stopReason = event.message?.stopReason;
   return stopReason === 'error' || stopReason === 'aborted';
+}
+
+/**
+ * 把跨轮历史（priorMessages）转成 pi 原生 context.messages 的历史前缀。
+ *
+ * priorMessages 已是「干净对话原文」（user 提问 + AI 回答，
+ * 无 system 装饰/工具细节），逐条转成 pi 的 UserMessage / AssistantMessage：
+ *   - role 'user'  → UserMessage（content 用纯文本即可被 convertToLlm 透传）
+ *   - role 'model' → AssistantMessage（需补齐 api/provider/model/usage/stopReason 等必填字段，
+ *                    取值对齐当前 model，使各 provider 的 convertMessages 能正确序列化历史）
+ *
+ * 本轮的新 prompt 不在此处加入——它由 agentLoop(prompts, ...) 的 prompts 参数注入，
+ * 会追加在这些历史消息之后，成为 context 的最后一条 user 消息。
+ */
+function buildPriorContextMessages(
+  priorMessages: PriorChatMessage[] | undefined,
+  model: { api: any; provider: any; id: string },
+): Message[] {
+  if (!priorMessages?.length) return [];
+  const now = Date.now();
+  return priorMessages.map((message): Message => {
+    if (message.role === 'model') {
+      return buildAssistantHistoryMessage(message.content, model, now);
+    }
+    return {
+      role: 'user',
+      content: message.content,
+      timestamp: now,
+    };
+  });
+}
+
+/** 构造一条历史 AssistantMessage：补齐 pi 必填字段，content 为单个 text 块。 */
+function buildAssistantHistoryMessage(
+  text: string,
+  model: { api: any; provider: any; id: string },
+  timestamp: number,
+): AssistantMessage {
+  return {
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: 'stop',
+    timestamp,
+  };
 }
 
 function createAbortError(message = 'Stream aborted'): Error {

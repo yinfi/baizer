@@ -1,5 +1,5 @@
-import type { IChatSession, IModelProvider, StreamEvent, ToolDefinition, ToolResult } from '../src/models/interfaces';
-import type { ChatRuntimeDeps, PreparedChatTurn } from '../src/runtime/runtime-types';
+import type { IModelProvider, StreamEvent, ToolDefinition, ToolResult } from '../src/models/interfaces';
+import type { ChatRuntimeDeps, NativeChatHandle, PreparedChatTurn } from '../src/runtime/runtime-types';
 
 function expect(actual: any) {
   return {
@@ -48,6 +48,123 @@ function createTurn(overrides: Partial<PreparedChatTurn> = {}): PreparedChatTurn
   };
 }
 
+/**
+ * 走原生后，假 LLM 响应的注入点从 mock IChatSession 上移到 mock streamFn。
+ * 下面两个 helper 把测试沿用的 streamFactory(StreamEvent[]) 契约桥接到
+ * pi 原生的 AssistantMessageEventStream 上：
+ *   - deriveInput：从 agentLoop 传入的 llmContext.messages 还原「本轮输入」
+ *     （首轮=最后一条 user 文本；工具轮=末尾连续 toolResult 批次解包成 ToolResult[]）。
+ *     这复刻了被删 bridge 的 getBaizerInput 语义，使 sessionInputs 断言保持不变。
+ *   - eventsToPiStream：把 StreamEvent[] 转成 pi 的 AssistantMessageEvent 流
+ *     （start→text/thinking/toolcall→done），事件形状照搬被删 bridge 的 bridgeBaizerStream。
+ */
+function deriveInput(messages: any[]): string | ToolResult[] {
+  const last = messages[messages.length - 1];
+  if (last?.role === 'toolResult') {
+    const batch: any[] = [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role !== 'toolResult') break;
+      batch.unshift(messages[i]);
+    }
+    return batch.map((message) => ({
+      id: message.toolCallId,
+      name: message.toolName,
+      response: message.details && Object.prototype.hasOwnProperty.call(message.details, 'baizerResponse')
+        ? message.details.baizerResponse
+        : unwrapToolResultText(message),
+    }));
+  }
+  const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+  if (!lastUser) return '';
+  if (typeof lastUser.content === 'string') return lastUser.content;
+  if (Array.isArray(lastUser.content)) {
+    return lastUser.content.filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
+  }
+  return '';
+}
+
+function unwrapToolResultText(message: any): any {
+  const text = (message.content || []).filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
+  if (!text) return message.content;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/** 把 baizer StreamEvent[] 转成 pi 的 AssistantMessageEventStream（同步可迭代 + result()）。 */
+function eventsToPiStream(model: any, events: StreamEvent[]): any {
+  const partial: any = {
+    role: 'assistant',
+    content: [],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: 'stop',
+    timestamp: Date.now(),
+  };
+  const out: any[] = [];
+  let textIndex: number | undefined;
+  let textContent = '';
+  let hasToolCall = false;
+  let errored = false;
+  let finalMessage: any;
+
+  out.push({ type: 'start', partial });
+  for (const event of events) {
+    if (event.type === 'text_delta') {
+      if (textIndex === undefined) {
+        textIndex = partial.content.length;
+        partial.content.push({ type: 'text', text: '' });
+        out.push({ type: 'text_start', contentIndex: textIndex, partial });
+      }
+      textContent += event.content || '';
+      partial.content[textIndex] = { type: 'text', text: textContent };
+      out.push({ type: 'text_delta', contentIndex: textIndex, delta: event.content || '', partial });
+    } else if (event.type === 'thinking') {
+      const idx = partial.content.length;
+      partial.content.push({ type: 'thinking', thinking: event.content || '' });
+      out.push({ type: 'thinking_start', contentIndex: idx, partial });
+      out.push({ type: 'thinking_delta', contentIndex: idx, delta: event.content || '', partial });
+      out.push({ type: 'thinking_end', contentIndex: idx, content: event.content || '', partial });
+    } else if (event.type === 'tool_call') {
+      hasToolCall = true;
+      const idx = partial.content.length;
+      const toolCall = { type: 'toolCall', id: event.id || `${event.name}_${idx}`, name: event.name, arguments: event.args || {} };
+      partial.content.push(toolCall);
+      out.push({ type: 'toolcall_start', contentIndex: idx, partial });
+      out.push({ type: 'toolcall_end', contentIndex: idx, toolCall, partial });
+    } else if (event.type === 'error') {
+      finalMessage = { ...partial, stopReason: 'error', errorMessage: event.message };
+      out.push({ type: 'error', reason: 'error', error: finalMessage });
+      errored = true;
+      break;
+    } else if (event.type === 'done') {
+      if (textIndex !== undefined) {
+        out.push({ type: 'text_end', contentIndex: textIndex, content: textContent, partial });
+      }
+      finalMessage = { ...partial, stopReason: hasToolCall ? 'toolUse' : 'stop' };
+      out.push({ type: 'done', reason: hasToolCall ? 'toolUse' : 'stop', message: finalMessage });
+      break;
+    }
+  }
+  if (!finalMessage && !errored) {
+    finalMessage = { ...partial, stopReason: hasToolCall ? 'toolUse' : 'stop' };
+    out.push({ type: 'done', reason: hasToolCall ? 'toolUse' : 'stop', message: finalMessage });
+  }
+
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const event of out) yield event;
+    },
+    result() {
+      return Promise.resolve(finalMessage);
+    },
+  };
+}
+
 function createDeps(options: {
   streamFactory: (input: string | ToolResult[]) => StreamEvent[];
   toolResults?: Record<string, any>;
@@ -57,27 +174,27 @@ function createDeps(options: {
   memoryManager?: any;
   skillRegistry?: any;
   toolDefinitions?: ToolDefinition[];
-}): ChatRuntimeDeps & { sessionInputs: (string | ToolResult[])[]; registryCalls: any[]; workspaceCalls: any[] } {
+}): ChatRuntimeDeps & {
+  sessionInputs: (string | ToolResult[])[];
+  registryCalls: any[];
+  workspaceCalls: any[];
+  capturedReasoning: () => string | undefined;
+} {
   const sessionInputs: (string | ToolResult[])[] = [];
   const registryCalls: any[] = [];
   const workspaceCalls: any[] = [];
-  const session: IChatSession = {
-    async sendMessage() {
-      throw new Error(options.sendMessageError || 'sendMessage should not be used by PiChatRuntime.query');
-    },
-    async *sendMessageStream(input: string | ToolResult[]) {
-      sessionInputs.push(input);
-      for (const event of options.streamFactory(input)) {
-        yield event;
-      }
-    },
-    async getHistory() {
-      return [];
-    },
-    async clearHistory() {
-      undefined;
-    },
+  let lastReasoning: string | undefined;
+  // 假 model：字段足够 eventsToPiStream / convertToLlm 使用即可，不发真实网络。
+  const model = { id: 'mock-model', name: 'Mock', api: 'mock', provider: 'mock' } as any;
+  // 假 streamFn：每次调用从 llmContext.messages 还原本轮输入，喂给测试的 streamFactory，
+  // 再把得到的 StreamEvent[] 转成 pi 事件流。这是「假 LLM 响应」的唯一注入点。
+  const streamFn = (_model: any, llmContext: any, opts?: any) => {
+    lastReasoning = opts?.reasoning;
+    const input = deriveInput(llmContext.messages || []);
+    sessionInputs.push(input);
+    return eventsToPiStream(model, options.streamFactory(input));
   };
+  const nativeChatFactory = (): NativeChatHandle => ({ model, streamFn: streamFn as any });
   const provider: IModelProvider = {
     id: 'mock',
     name: 'Mock',
@@ -93,9 +210,6 @@ function createDeps(options: {
     async generateContent() {
       return { text: '' };
     },
-    startChat(_tools?: ToolDefinition[]) {
-      return session;
-    },
   };
   const skillRegistry = options.skillRegistry || {
     getSkillSummaryText: () => '',
@@ -109,7 +223,9 @@ function createDeps(options: {
     sessionInputs,
     registryCalls,
     workspaceCalls,
+    capturedReasoning: () => lastReasoning,
     provider,
+    nativeChatFactory,
     memoryManager: options.memoryManager || null,
     skillRegistry,
     workspaceEditService: {
@@ -540,9 +656,8 @@ async function runTests() {
   });
 
   await test('thinking level defaults to medium when not specified in deps', async () => {
-    // deps 未设置 thinkingLevel，startChat 第三参数应为 undefined，
-    // agentLoop config.reasoning 以 "medium" 兜底。
-    let capturedThinkingLevel: string | undefined = 'NOT_SET';
+    // deps 未设置 thinkingLevel，agentLoop config.reasoning 以 "medium" 兜底，
+    // 透传到 streamFn 的 options.reasoning。
     const deps = createDeps({
       streamFactory: () => [
         { type: 'text_delta', content: 'Hi' },
@@ -551,23 +666,17 @@ async function runTests() {
     });
     // 明确不设置 thinkingLevel，保留 undefined。
     expect((deps as ChatRuntimeDeps).thinkingLevel).toBe(undefined);
-    // 包装 provider.startChat，捕获传入的 thinkingLevel 参数。
-    const origStartChat = deps.provider.startChat.bind(deps.provider);
-    deps.provider.startChat = (tools, priorMessages, thinkingLevel) => {
-      capturedThinkingLevel = thinkingLevel;
-      return origStartChat(tools, priorMessages, thinkingLevel);
-    };
 
     const runtime = new PiChatRuntime(deps);
     const text = await runtime.query(createTurn());
     expect(text).toBe('Hi');
-    // thinkingLevel 未设置时，startChat 收到 undefined（运行时以 "medium" 兜底）。
-    expect(capturedThinkingLevel).toBe(undefined);
+    // thinkingLevel 未设置时，streamFn 收到的 reasoning 以 "medium" 兜底。
+    expect(deps.capturedReasoning()).toBe('medium');
   });
 
-  await test('thinking level is forwarded from deps to startChat and bridge model', async () => {
-    // 验证透传路径：deps.thinkingLevel → provider.startChat(thinkingLevel) → createPiBridgeModel(reasoning=true)
-    let capturedThinkingLevel: string | undefined = 'NOT_SET';
+  await test('thinking level is forwarded from deps to the native streamFn and model', async () => {
+    // 验证透传路径：deps.thinkingLevel → agentLoop config.reasoning → streamFn options.reasoning；
+    // 同时验证 pi-native-model 依 thinkingLevel 设置 model.reasoning。
     const deps = createDeps({
       streamFactory: () => [
         { type: 'text_delta', content: 'Low thinking' },
@@ -575,27 +684,29 @@ async function runTests() {
       ],
     });
     (deps as ChatRuntimeDeps).thinkingLevel = 'low';
-    // 包装 provider.startChat，捕获传入的 thinkingLevel 参数。
-    const origStartChat = deps.provider.startChat.bind(deps.provider);
-    deps.provider.startChat = (tools, priorMessages, thinkingLevel) => {
-      capturedThinkingLevel = thinkingLevel;
-      return origStartChat(tools, priorMessages, thinkingLevel);
-    };
 
     const runtime = new PiChatRuntime(deps);
     const text = await runtime.query(createTurn());
     expect(text).toBe('Low thinking');
-    // thinkingLevel 必须从 deps 透传到 provider.startChat。
-    expect(capturedThinkingLevel).toBe('low');
+    // thinkingLevel 必须从 deps 透传到 streamFn 的 reasoning。
+    expect(deps.capturedReasoning()).toBe('low');
 
-    // 验证 createPiBridgeModel：'low' 不是 'off'，所以 reasoning 应为 true。
-    const { createPiBridgeModel } = await import('../src/runtime/pi/pi-provider-bridge');
-    const bridgeModel = createPiBridgeModel(undefined, 'low');
-    expect(bridgeModel.reasoning).toBe(true);
+    // 验证原生 model 构造：'low' 不是 'off'，所以 reasoning 应为 true。
+    const { buildGeminiModel } = await import('../src/runtime/pi/pi-native-model');
+    const lowModel = buildGeminiModel(
+      { type: 'gemini', label: 'G', apiKey: 'k', baseUrl: '', model: 'gemini-2.5-flash' },
+      undefined,
+      'low',
+    );
+    expect(lowModel.reasoning).toBe(true);
 
     // 'off' 时 reasoning 应为 false。
-    const bridgeModelOff = createPiBridgeModel(undefined, 'off');
-    expect(bridgeModelOff.reasoning).toBe(false);
+    const offModel = buildGeminiModel(
+      { type: 'gemini', label: 'G', apiKey: 'k', baseUrl: '', model: 'gemini-2.5-flash' },
+      undefined,
+      'off',
+    );
+    expect(offModel.reasoning).toBe(false);
   });
 }
 

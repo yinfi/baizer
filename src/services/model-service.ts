@@ -10,6 +10,7 @@ import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
+import { buildGeminiModel, buildOpenAICompatModel, createNativeStreamFn } from '../runtime/pi/pi-native-model';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import { SteeringController } from '../runtime/steering-controller';
 import { SessionStore, type PersistedSessionRef } from '../runtime/pi/session-store';
@@ -622,6 +623,7 @@ export class ModelService {
     createChatRuntime() {
         return createChatRuntime({
             provider: this.provider,
+            nativeChatFactory: () => this.buildNativeChatHandle(),
             memoryManager: this.memoryManager,
             toolRegistry: this.toolRegistry,
             skillRegistry: this.skillRegistry,
@@ -631,6 +633,26 @@ export class ModelService {
             thinkingLevel: this.settings.thinkingLevel,
             steeringController: this.steeringController,
         });
+    }
+
+    /**
+     * 构造本轮的原生 LLM 直连句柄（Phase 2）。
+     * 依当前 ProviderConfig.type 选择 model 构造器，并用同一 apiKey 造 streamFn。
+     * 每轮 queryStream 启动时调用一次，故 settings 运行期改动（切换 provider/model/key/
+     * contextWindow/thinkingLevel）都会在下一轮自动生效。
+     */
+    private buildNativeChatHandle() {
+        const config = this.getActiveProviderConfig();
+        if (!config) {
+            throw new Error(`Unknown provider: ${this.settings.activeProvider}`);
+        }
+        const model = config.type === 'gemini'
+            ? buildGeminiModel(config, this.settings.contextWindow, this.settings.thinkingLevel)
+            : buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
+        return {
+            model,
+            streamFn: createNativeStreamFn(config.apiKey),
+        };
     }
 
     /**
