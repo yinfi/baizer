@@ -53,23 +53,66 @@ export function getPendingReason(app: App, file: TFile): KnowledgePendingReason 
   return null;
 }
 
+type KnowledgeStatusExtra = {
+  source_id?: string;
+  compiled_at?: string;
+  summary?: string;
+  error?: string;
+  pending_reason?: KnowledgePendingReason;
+};
+
+/**
+ * 判断本次写入是否会真正改变 frontmatter。
+ * 若所有目标字段已等于期望值，返回 true（可跳过写盘，避免无谓 touch mtime，
+ * 从而不触发 Remotely Save 等同步工具的假改动）。
+ * 只用 metadataCache 里已解析的值比对；cache 缺失时保守返回 false（照常写）。
+ */
+function isKnowledgeStatusNoop(
+  app: App,
+  file: TFile,
+  status: KnowledgeStatus,
+  extra?: KnowledgeStatusExtra
+): boolean {
+  const fm = app.metadataCache.getFileCache(file)?.frontmatter;
+  if (!fm) return false;
+
+  if (fm.knowledge_status !== status) return false;
+  if (extra?.source_id && fm.knowledge_source_id !== extra.source_id) return false;
+  if (extra?.compiled_at && fm.knowledge_compiled_at !== extra.compiled_at) return false;
+  if (extra?.summary && fm.knowledge_summary !== extra.summary) return false;
+
+  // pending_reason：仅 pending 状态下保留，其余状态应被删除
+  const desiredReason = status === 'pending' && extra?.pending_reason
+    ? extra.pending_reason
+    : undefined;
+  if ((fm.knowledge_pending_reason ?? undefined) !== desiredReason) return false;
+
+  // error：失败时写入；done/pending 时清除；processing 时保持原值
+  if (extra?.error) {
+    if (fm.knowledge_error !== extra.error) return false;
+  } else if (status === 'done' || status === 'pending') {
+    if (fm.knowledge_error !== undefined) return false;
+  }
+
+  return true;
+}
+
 /**
  * 写入/更新 frontmatter 中的知识编译字段
  * 使用 Obsidian 原生 processFrontMatter API，安全地合并字段
  * 如果现有 frontmatter 解析失败（如含非法 YAML），先修复再写入
+ *
+ * 幂等：若所有字段已是目标值，直接跳过，避免无谓写盘触发外部同步。
  */
 export async function setKnowledgeStatus(
   app: App,
   file: TFile,
   status: KnowledgeStatus,
-  extra?: {
-    source_id?: string;
-    compiled_at?: string;
-    summary?: string;
-    error?: string;
-    pending_reason?: KnowledgePendingReason;
-  }
+  extra?: KnowledgeStatusExtra
 ): Promise<void> {
+  // 幂等短路：字段已是目标值则不写盘，杜绝相同内容重复 touch 文件
+  if (isKnowledgeStatusNoop(app, file, status, extra)) return;
+
   try {
     await app.fileManager.processFrontMatter(file, (fm: any) => {
       fm.knowledge_status = status;

@@ -1,5 +1,137 @@
 ---
 
+### [2026-06-30 设计阶段] Task Summary — 斜杠命令系统瘦身与渲染修复（设计 spec）
+
+**1. 刚刚做了什么？ (What was done?)**
+- 用第一性原理分析 sideshell 的 "/" 命令系统是否有存在必要，输出并提交设计文档 `docs/superpowers/specs/2026-06-30-slash-command-system-design.md`（含四刀方案）。
+- 与用户确认了瘦身边界（砍 `/profile` `/forget` `/save` `/edit`）、渲染修复方向、乱码范围（整文扫 chat-controller.ts），spec 已获用户确认。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户痛点是"命令作用不大 + 输出格式差"。按"AI 做不到或做不好的事才值得做命令"切分：真正不可替代的仅 `/clear`（清自身上下文）和 `/file-back`（精确引用），其余多为冗余/兼容残留/重复入口。
+- "格式差"根因是架构层渲染歧视：system 消息走 `setText` 纯文本，命令输出从未接进 markdown 渲染管线。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 审查中发现唯一不可替代的 `/clear` 本身是坏的：后端清干净（LLM 上下文 + 内存数组），但前端不清屏（DOM、tab.state 没动），出现"屏幕显示历史、AI 已失忆"的状态错位。
+- 根因：代码里有两套清空机制，正确的 `clearChat()` 是零调用死代码，`/clear` 接的是只清一半的 `clearHistory()`。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 设计第四刀并入 spec：新增 `onClear` 回调让 ChatController 单向通知 view 层，复活 `clearChat()` 死代码，职责归位。
+- 当前处于设计完成、待 writing-plans 出实现计划阶段，代码尚未改动。
+
+---
+
+### [2026-06-29] Task Summary — 深补全自动升级（快补无果+用户停留 → 自动深挖）
+
+**1. 刚刚做了什么？ (What was done?)**
+- types.ts：PluginSettings 加 `guardianAutoDeepEscalation: boolean`，默认 false（opt-in）。
+- guardian-completion.ts：导出纯判定 `shouldScheduleDeepEscalation({enabled,reason,alreadyEscalated})` + `GUARDIAN_ESCALATION_REASONS` 白名单（A+B 类：explicit-none/repeats-input/duplicates-suffix/too-long/filler-opening/no-substance/wrong-markdown-shape/meta-commentary/low-quality/empty）。
+- main.ts：加字段 guardianEscalationTimer / guardianEscalatedAnchors；新增 guardianAnchorKey(路径+行号+行全文)、clearGuardianEscalationTimer、maybeScheduleEscalation——在快补无果分支(主路径)调用：白名单+开关+锚点未升过→起 1.2s 停留计时→计时结束光标仍在原锚点才 runDeepGuardianCheck，每锚点只升一次(set 上限 200)。queueGuardianCheck(打字即进) 和 onunload 清 timer。
+- settings.ts：加 toggle UI「快补无果时自动深挖笔记」(中文说明较慢、耗 token)。
+- 测试：3 条覆盖白名单过滤 C/D、开关 gate、锚点一次性、reason set 内容。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户想让深补全触发更自动、结合实际动作判断意图。原思路是「Esc 取消+无新输入→自动深补」。
+- 经讨论纠正：Esc 是高度重载的负信号(多为"走开")，在拒绝后加倍推更贵的深补全是反模式；且"无输入≠想要帮助"。改为由「系统浅层承认无果(A+B reason) + 用户停留」这两个正信号合取触发——语义是"卡住了、欢迎帮忙"。
+- 计数阈值经讨论从"同锚点2次"改为"1次无果+1.2s停留确认"：当前快补只靠打字触发，凑不到2次；停留确认是更直接、更省(不重复跑快补)的"卡住"判据，且打字即取消=天然反悔窗口。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- "快补无果"需精确分桶：A(模型主动none)+B(质检过滤)触发；C(故障timeout/empty/invalid-json)不触发(重试无意义)；D(stale/拒绝/闸门)不触发。白名单实现此区分。
+- 在 main.ts 误加了重复的 ESCALATION_REASONS 静态成员 → 删除，改为复用 guardian-completion 导出的纯函数避免发散。
+- npm test 的 grep 收尾使任务 exit_code=1(grep无匹配)，非测试失败；harness 自身 exit:0、80 文件全过 0 FAIL。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 见上。Esc 仍只 dismiss、完全不参与升级。验证：build 通过、tsc 仅 typebox 噪音、npm test 全部 80 文件通过 0 FAIL。
+- 未碰：深补全/快补全生成逻辑、ghost-text 接口、Esc 行为。
+
+---
+
+### [2026-06-29] Task Summary — Guardian 双模式补全（深补全：读正文+个性化+连接意图）
+
+**1. 刚刚做了什么？ (What was done?)**
+- runtime.ts：新增 `getGuardianDeepKnowledgeContext` + `readSummaryExcerpt`——深补全读相关笔记 summary 正文片段（每篇~300字、剥 frontmatter）而非仅 claims 元数据；轻量版 `getGuardianKnowledgeContext` 保留给快补全。
+- guardian-completion.ts：引入 `mode: 'fast'|'deep'`。fast=自动/亚秒级/元数据检索/temp0.25；deep=手动/读正文/连接意图/temp0.5。新增 `buildVoiceHint(profile)` 把 UserProfile(语言/风格/职业/专长/主题/项目)拼成「作者画像」注入 prompt（两模式都用，缺省空串）。selectKnowledgeContext 按 mode 选检索函数+超时（fast 120→400ms、deep 2500ms）。buildPrompt 对 deep 追加「连接意图」指令。新增 GUARDIAN_DEEP_SYSTEM_PROMPT。shouldRunAuto 对 deep 放行 guardianAutoMode 闸门。诊断 stage 加 deep-knowledge-start/finished。
+- main.ts：新增命令 `Guardian: Deep completion at cursor`(hotkey Mod+Shift+Space)→`runDeepGuardianCheck`，独立 `guardianDeepInflight` 单飞（不被打字防抖 abort）、Notice 进度反馈、复用 showGhostText 渲染；onunload 清理。
+- 测试：新增 voice hint 拼装/缺省省略、deep 读正文 vs fast 元数据、deep 含连接意图 fast 不含 4 条。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户追问「内容生成本质是否合理/充分用知识库/让人惊喜」。诊断发现补全用的是降级检索：子串匹配（中文尤弱）、只喂 claims 不读正文、120ms 超时常丢知识、且 skipGenerationPlan:true 导致 UserProfile 被完全忽略——结构上=通用 autocomplete+知识碎末+失忆，不可能惊喜。
+- 经用户拍板：双模式分离（快丝滑/慢惊喜），四项全做（连接意图+个性化+喂正文+放宽超时）。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- completeAutoInner 内部 shouldRunAuto 会因 guardianAutoMode 关闭拦截 deep（手动触发）→ 给 shouldRunAuto 加 mode 参数放行。
+- `npm test | tail` 管道缓冲导致看似挂起，实为正常串行跑 80 文件（~4min）；直接重定向文件确认 0 FAIL。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 见上。个性化直接注入紧凑 voice hint 而非走 planner（planner 是聊天重 prompt，且补全要求全局 systemPrompt 不泄漏）。验证：build 通过、tsc 仅 typebox 噪音、npm test 全部 80 文件通过。
+- 未碰：自由指令 modal、聊天 query 路径、provider 网络层。embedding 语义检索(更治本)按用户选择留作后续。
+
+---
+
+### [2026-06-29] Task Summary — Guardian 补全质量与丝滑度优化（截断/沉默/质检/缓存）
+
+**1. 刚刚做了什么？ (What was done?)**
+- 改动1 超长截断不丢弃：completeAutoInner 在质检前对超过 maxSuggestionChars 的补全调新增 `truncateToBoundary`，截到句末(。！？!?…)/子句(；;，,、))/英文词边界，且仅当边界落在 40% 之后才用，保留有用前半段。
+- 改动2 收紧沉默：GUARDIAN_SYSTEM_PROMPT 与 buildPrompt 从「默认补全」反转为「高置信才补全，模糊/已完整/填充则 none」。
+- 改动4 质检空洞启发式：evaluateSuggestion 加 `duplicates-suffix`(与光标后文本重复)、`no-substance`(纯标点无字母数字/CJK)、`filler-opening`(套话开头，用 `(?![a-z])` 替代对 CJK 无效的 `\b`)；context 类型加 cursorSuffix。
+- 改动5 短时缓存：新增 completionCache（键=line+shape+cursorPrefix+cursorSuffix+localBlock），命中跳过 API；只缓存成功 completion，TTL 默认 5s(deps.cacheTtlMs)，LRU 上限 32 条；diagnostic stage 加 `cache-hit`。
+- 测试：更新「prompt 偏向」测试为「偏向沉默」断言；新增截断/filler+no-substance+suffix-dup/缓存命中/TTL 过期 4 条测试。
+- 跳过：改动3（给内联补全设 maxTokens）——用户明确不做，保留对推理模型不限预算的现状。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户要补全「丝滑、高质量、真帮到写作，不输出废话」。根因：原 prompt「默认补全」鼓励凑话；超长被整条丢弃导致「等半天得到空」；质检只看形状看不见空洞填充；无缓存重复打 API。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 截断测试 body 太短(166/211字)不触发截断、dropped 段句号落进 220 窗口——用 node 实测把总长调到 231、dropped 句号推到 220 之后。
+- filler 正则 `\b` 对 CJK 无效（\b 基于 \w），「来说」「，」间无词边界 → 改用负向前瞻 `(?![a-z])`。
+- 测试 helper 的 toContain 只支持字符串不支持数组 → reasons/events 改用 `.join(',')` 再断言。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 见上。验证：npm run build 通过；npm test 全部 80 个测试文件通过，退出码 0。
+
+---
+
+### [2026-06-29] Task Summary — 修复 Guardian 两个 🔴 缺陷（补全软取消+单飞、选中替换锚点重定位）
+
+**1. 刚刚做了什么？ (What was done?)**
+- interfaces.ts：`GenerationOptions` 加 `signal?: AbortSignal`（仅类型透传，不传给 provider）。
+- model-service.ts：`generate()` 摘出 signal，新增 `raceWithAbort` helper 实现软取消；catch 对 AbortError 静默不记错误。
+- guardian-completion.ts：`GuardianCompletionRequest` 加 signal，调 `generate` 时合并进 options。
+- main.ts：新增 `guardianInflight: AbortController` 字段；`runAutoGuardianCheck` 开始时 abort 旧请求、建新 controller 并把 signal 传入 `completeAuto`；catch 对 AbortError 当正常丢弃（不显示 Error 态）；finally 清理引用；onunload abort 在途请求。
+- selection-menu.ts：`applySelectionReplacement` 的 apply 回调改用新增 `relocateRange` helper——原位文本一致用原偏移，否则全文搜索取离原 from 最近的匹配，找不到则中止+Notice 提示。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 🔴#1：自动补全快速打字时并发请求堆积、旧结果污染 UI。
+- 🔴#2：选中替换经 DiffModal 异步审阅后，冻结的绝对偏移 state.from/to 可能失效、替换到错误位置。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 原计划「加 AbortController 硬中断」不可行：两个 provider 的非流式 generateContent 都走 Obsidian requestUrl（不支持 signal），Gemini 走 SDK 也无法中断。改 fetch 有 CORS 风险。
+- tsc --noEmit 报错均来自 node_modules/typebox 的 .d.mts（TS 4.7.4 解析不了新语法），与本次改动无关，退出码 0。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 经用户拍板：补全采用「软取消+在途单飞」（不碰网络层，signal abort 时调用方立即解脱、底层后台跑完结果丢弃）；选中替换采用「锚点重定位」（用选区快照文本重新定位）。
+- 验证：npm run build 通过；npm test 全部 80 个测试文件通过。
+
+---
+
+### [2026-06-29] Task Summary — 分析 Guardian 自动补全与选中修改功能
+
+**1. 刚刚做了什么？ (What was done?)**
+- 通读自动补全完整链路：`onEditorChange`→`queueGuardianCheck`(防抖)→`runAutoGuardianCheck`→`GuardianCompletionService.completeAuto`→`showGhostText`。
+- 通读选中修改链路：`selectionMenuField`→`ChatController`→`DiffModal`→`view.dispatch` 替换。
+- 按严重度列出问题清单（2 个 🔴、3 个 🟠、4 个 🟡），并给出修复优先级。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户要求评估这两个功能的设计/实现缺陷，判断是否需要改进。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 两个 Explore 子代理只返回了确认信息、未回传实际报告，改为自己直接读源码分析。
+- 关键缺陷：(a) 自动补全的模型请求无 AbortSignal，`isStale`/超时只丢弃结果不取消底层请求，快速打字时并发堆积浪费配额；(b) 选中替换用菜单创建时冻结的绝对偏移 `state.from/to`，经 DiffModal 异步审阅后若文档变化会替换错位置；(c) 光标移动不清 ghost text 且按存储 line/ch 而非当前光标插入；(d) 选区微调会精确匹配失败从而 abort 进行中的 AI 对话；(e) `globalGuardianEnabled` 模块级全局态在多编辑器间相互污染；(f) gutter 的 `setGuardianLineState` 的 line 参数实际未用、marker 永远画在光标行；(g) 手动/自动两套补全 JSON 解析逻辑重复。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 本次为分析任务，未改代码。建议优先修两个 🔴：补全链路接入 AbortController 真正取消请求；选中替换改用映射偏移或 apply 时重新校验选区。
+
+---
+
 ### [2026-06-28 01:45] Task Summary — 重构 Phase 4（删除已死的 IChatSession 流式路径）
 
 **1. 刚刚做了什么？ (What was done?)**
@@ -1676,3 +1808,72 @@ UI 层：
 - 验证：npm run build 通过；全量 80 测试文件全绿；src 零新增 Node API import；dist/main.js 正常产出。
 
 ---
+
+---
+### [2026-06-29 16:30] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 只读分析记忆系统(MemoryManager)在 Pi 唯一 runtime 重构后是否正常工作。
+- 厘清两套独立系统:MemoryManager(画像/摘要/历史/Hindsight) vs KnowledgeRuntime(知识 wiki),后者与记忆无关。
+- 追踪召回链(prepareTurn→recallForPrompt)与写入链(retainCompletedTurn→retainTurn)在生产路径的完整性。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 最近 commit d617330/d0e5032 引入 Hindsight 记忆库并改 Pi 直连,需核实记忆读写是否仍接通、有无重构断裂。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 主链路(Hindsight 召回+写入)正常,但发现三处断裂:
+  (1) recordMessage 整条成死代码——retainCompletedTurn 在 retainTurn 存在时直接 return(base-chat-runtime.ts:336),导致用户画像自动提取/totalInteractions/chat-history 全部停摆。
+  (2) buildContext()(legacy 画像注入)因 if/else 永走 recallForPrompt 分支而不可达。
+  (3) endSession/会话摘要依赖 currentSessionMessages>0,因 recordMessage 不再被调而恒为 0,摘要不再生成。
+- 根因:重构引入 Hindsight 新主轨,只加 return 短路旧轨,未决策旧画像/摘要系统该删/合/留,留下悬空死代码。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 本次仅诊断,未改代码。给出三个方向(彻底废弃旧画像/双轨并行/维持现状)供用户拍板,倾向方向1(删死代码,Hindsight 全面接管)。等待用户决策后再动手。
+
+---
+
+---
+### [2026-06-30 10:15] Task Summary
+
+**1. 刚刚做了什么? (What was done?)**
+- 将 Claude Code 从 2.1.165 升级到最新版 2.1.196
+- 安装方式从 native(`~/.local/bin/claude.exe`)切换为 npm 全局安装(经淘宝镜像)
+- 旧 native 二进制重命名备份为 `claude.exe.bak-2.1.165`(保留可回退)
+
+**2. 为什么要这么做? (Why was it done?)**
+- `claude update`(native 升级)只能从官方 `downloads.claude.ai` 拉二进制
+- 该域名直连超时、经当前 Clash 代理节点 TLS 握手即被 ECONNRESET(SNI 阻断),两条路都不通
+- 而 API 聊天走的是中转站 `ANTHROPIC_BASE_URL`,绕开了官方域名,所以能用但不能升级
+- npm 淘宝镜像 `registry.npmmirror.com` 可正常访问,绕开被墙域名
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 诊断耗时:需排除 DNS 污染(实际 DNS 解析干净,IP=35.190.46.17)
+- Node 内置 fetch 默认不读代理环境变量,加 `NODE_USE_ENV_PROXY=1` 后仍被代理节点阻断
+- PATH 中 `~/.local/bin` 优先级高于 npm 目录,装完 npm 版后 `claude` 仍指向旧 native 版
+
+**4. 如何修复的? (How was it fixed?)**
+- `npm install -g @anthropic-ai/claude-code@latest --registry=https://registry.npmmirror.com`
+- 将旧 native `claude.exe` 重命名备份,使 PATH 自然落到 npm 版(`~/AppData/Roaming/npm/claude`)
+- 验证 `claude --version` 输出 2.1.196,确认 npm 版 claude.exe 已随包下载、可独立运行(不依赖被墙域名)
+
+
+---
+### [2026-07-01 15:45] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 定位并修复 Obsidian vault「每天大批量文件被显示修改、实际未手动改动」的问题。
+- 将 `src/knowledge/frontmatter.ts` 的 `setKnowledgeStatus` 改为幂等：写盘前先比对 metadataCache 中现有字段，若 status/source_id/compiled_at/summary/pending_reason/error 全部已等于目标值则直接跳过 processFrontMatter，避免用相同内容重复 touch 文件 mtime。
+- 新增 `test/knowledge/frontmatter-idempotent.test.ts`（7 个用例）并注册到 run-tests.ts。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 取证发现：单次插件启动 touch 了 228 个 Assets 文件，其中 116 个「内容零变化、仅 mtime 变」。根因是知识库编译运行时的 setKnowledgeStatus 用 Obsidian processFrontMatter，该 API 无论字段是否真变都会重新序列化写盘，mtime 变化触发 Remotely Save 全量同步，制造假改动。
+- 幂等化从源头消除插件对未变文件的无谓写入。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 初期误判为 core.autocrlf 行尾问题和 BOM 导致的 content_hash 死循环，经字节级取证（无 BOM、CRLF 正常剥离、哈希只算正文）逐一排除。
+- 区分出两类 churn：插件的相同内容重写（可修）vs Remotely Save 启动同步拉取远端覆盖（需在同步侧治理，插件无法修）。
+- tsc --noEmit 报错全部来自 node_modules/typebox 的 .d.mts 新语法与 TS 4.7.4 不兼容，属既有环境噪音，与本次改动无关。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 新增 isKnowledgeStatusNoop 辅助函数做字段级比对，metadataCache 缺失时保守返回 false（照常写）；compiled_at 用 new Date() 的真实重编译因值不同仍会正常写入。
+- 验证：新测试 7/7 通过，watcher/compiler/status-service 既有测试无回归，生产构建 esbuild 通过。

@@ -80,6 +80,7 @@ const tests = [
   'test/knowledge/guardian-context.test.ts',
   'test/knowledge/types.test.ts',
   'test/knowledge/watcher.test.ts',
+  'test/knowledge/frontmatter-idempotent.test.ts',
   'test/throttle.test.ts',
 ];
 
