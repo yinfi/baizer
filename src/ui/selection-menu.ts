@@ -314,6 +314,14 @@ function applySelectionReplacement(
 
     new DiffModal(context.app, preview.oldContent || '', preview.newContent || '', async () => {
         const activeFile = context.app.workspace.getActiveFile();
+        // 锚点重定位：审阅期间文档可能被改动（后台写入/多窗口编辑），
+        // 冻结的 state.from/to 可能失效。apply 前用选区文本重新定位。
+        const target = relocateRange(view.state, state.from, state.to, selectionText);
+        if (!target) {
+            new Notice('选区在审阅期间发生了变化，无法定位原文本，已取消替换，请重新选择。');
+            view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
+            return;
+        }
         await state.controller.applyPreviewedChange({
             action: 'selection_rewrite',
             target: activeFile?.path || 'current-selection',
@@ -321,8 +329,8 @@ function applySelectionReplacement(
             apply: () => {
                 view.dispatch({
                     changes: {
-                        from: state.from,
-                        to: state.to,
+                        from: target.from,
+                        to: target.to,
                         insert: preview.newContent || '',
                     },
                     effects: setSelectionMenuState.of({ type: 'hidden' }),
@@ -330,6 +338,37 @@ function applySelectionReplacement(
             },
         });
     }).open();
+}
+
+/**
+ * 在当前文档中重新定位待替换的选区。
+ * - 原偏移处文本仍与快照一致 → 直接用原偏移（最常见、零歧义）。
+ * - 否则在全文搜索快照文本，取起点离原 from 最近的一处匹配。
+ * - 找不到则返回 null（调用方应中止替换，绝不盲写）。
+ */
+function relocateRange(
+    state: EditorState,
+    from: number,
+    to: number,
+    snapshot: string,
+): { from: number; to: number } | null {
+    if (!snapshot) return null;
+    const docLength = state.doc.length;
+    if (from >= 0 && to <= docLength && state.doc.sliceString(from, to) === snapshot) {
+        return { from, to };
+    }
+
+    const fullText = state.doc.toString();
+    let best: number | null = null;
+    let index = fullText.indexOf(snapshot);
+    while (index !== -1) {
+        if (best === null || Math.abs(index - from) < Math.abs(best - from)) {
+            best = index;
+        }
+        index = fullText.indexOf(snapshot, index + 1);
+    }
+    if (best === null) return null;
+    return { from: best, to: best + snapshot.length };
 }
 
 async function applyTriggerInsertion(
