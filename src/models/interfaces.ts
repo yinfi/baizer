@@ -65,6 +65,12 @@ export interface GenerationOptions {
     maxTokens?: number;
     timeoutMs?: number;
     skipGenerationPlan?: boolean;
+    /**
+     * 软取消信号。当前非流式 provider 走 requestUrl/SDK，无法硬中断网络请求；
+     * 该 signal 仅用于让调用方在 abort 后立即解脱、丢弃结果（底层请求后台自然结束）。
+     * 由 ModelService.generate 消费，不会透传给 provider。
+     */
+    signal?: AbortSignal;
 }
 
 export type StreamEvent =

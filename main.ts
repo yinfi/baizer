@@ -8,13 +8,13 @@ import { guardianGutterExtension, updateGuardianState, GuardianState, guardianMo
 import { ghostTextExtension, showGhostText, showDiagnosticGhostText } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
 import { requestGuardianResponse } from './src/ui/guardian-request';
-import { GuardianCompletionService, getGuardianAutoDelayMs } from './src/ui/guardian-completion';
-import { registerSkillReadTool } from './src/skills/builtin/read-skill';
+import { GuardianCompletionService, getGuardianAutoDelayMs, shouldScheduleDeepEscalation } from './src/ui/guardian-completion';
 import { selectionMenuExtension } from './src/ui/selection-menu';
 import { KnowledgeRuntime } from './src/knowledge/runtime';
 import { ToolRegistry } from './src/skills/tool-registry';
 import { SkillRegistry } from './src/skills/skill-registry';
 import { registerVaultTools } from './src/skills/builtin/vault-ops';
+import { registerSkillReadTool } from './src/skills/builtin/read-skill';
 import { executor as webSearchSkillExecutor, registerTools as registerWebSearchTools } from './src/skills/builtin/web-search/executor';
 import { createExecutor as createWebClipperSkillExecutor, registerTools as registerWebClipperTools } from './src/skills/builtin/web-clipper/executor';
 import { createExecutor as createKnowledgeSkillExecutor, registerTools as registerKnowledgeTools } from './src/skills/builtin/knowledge/executor';
@@ -51,6 +51,13 @@ export default class BaizerPlugin extends Plugin {
     private inboxAutosave: InboxAutosaveCoordinator | null = null;
     private guardianCheckTimer: number | null = null;
     private guardianRequestSeq = 0;
+    // 自动补全在途请求的单飞控制：新请求开始时 abort 上一个，避免并发堆积。
+    private guardianInflight: AbortController | null = null;
+    // 深补全(手动触发)独立单飞：与自动补全分离,避免昂贵的手动请求被随手打字 abort。
+    private guardianDeepInflight: AbortController | null = null;
+    // 自动升级到深补全：快补无果+用户停留时的停留确认计时,与已升级锚点记录(防重复烧钱)。
+    private guardianEscalationTimer: number | null = null;
+    private guardianEscalatedAnchors: Set<string> = new Set();
 
     private onEditorChange = (editor: any, info: any) => {
         void this.queueGuardianCheck(editor, info);
@@ -178,6 +185,14 @@ export default class BaizerPlugin extends Plugin {
             hotkeys: [{ modifiers: ["Mod", "Shift"], key: "g" }]
         });
 
+        // Deep completion: 手动触发,读知识库正文+个性化+连接意图,允许更慢以换取更高质量。
+        this.addCommand({
+            id: 'guardian-deep-completion',
+            name: 'Guardian: Deep completion at cursor',
+            editorCallback: (editor) => { void this.runDeepGuardianCheck(editor); },
+            hotkeys: [{ modifiers: ["Mod", "Shift"], key: " " }]
+        });
+
         this.addSettingTab(new SettingTab(this.app, this));
 
         if (!this.editorExtensionsRegistered) {
@@ -226,6 +241,12 @@ export default class BaizerPlugin extends Plugin {
             window.clearTimeout(this.guardianCheckTimer);
             this.guardianCheckTimer = null;
         }
+        // 中断在途自动补全请求，避免卸载后回调访问已销毁的状态。
+        this.guardianInflight?.abort();
+        this.guardianInflight = null;
+        this.guardianDeepInflight?.abort();
+        this.guardianDeepInflight = null;
+        this.clearGuardianEscalationTimer();
         this.app.workspace.detachLeavesOfType(VIEW_TYPE_SHELL);
         if (this.knowledgeRuntime) {
             this.knowledgeRuntime.cleanup();
@@ -395,6 +416,8 @@ export default class BaizerPlugin extends Plugin {
     }
 
     private queueGuardianCheck(editor: any, info: any) {
+        // 用户打字即取消待确认的升级:停留被打破,说明不再是「卡住」。
+        this.clearGuardianEscalationTimer();
         if (this.guardianCheckTimer !== null) {
             window.clearTimeout(this.guardianCheckTimer);
             this.guardianCheckTimer = null;
@@ -479,6 +502,10 @@ export default class BaizerPlugin extends Plugin {
         }
 
         const requestSeq = ++this.guardianRequestSeq;
+        // 单飞：abort 上一个在途请求，让其结果被丢弃；本次新建 controller。
+        this.guardianInflight?.abort();
+        const inflight = new AbortController();
+        this.guardianInflight = inflight;
         const startedAt = Date.now();
         const requestLine = cursor.line;
         const requestCh = cursor.ch;
@@ -529,6 +556,7 @@ export default class BaizerPlugin extends Plugin {
                 userProfile: this.modelService.getUserProfile(),
                 isStale,
                 requestId: requestSeq,
+                signal: inflight.signal,
             });
             this.logGuardianAuto('completion returned', {
                 requestSeq,
@@ -543,6 +571,8 @@ export default class BaizerPlugin extends Plugin {
             if (result.type !== 'completion') {
                 this.showGuardianDiagnosticGhost(editor, result.reason);
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
+                // 快补无果:若属 A+B 类且用户停留,安排自动升级到深补全。
+                this.maybeScheduleEscalation(editor, result.reason);
                 return;
             }
 
@@ -590,6 +620,16 @@ export default class BaizerPlugin extends Plugin {
                 totalElapsedMs: Date.now() - startedAt,
             });
         } catch (error: any) {
+            // 被单飞 abort（新输入触发了新请求）属正常丢弃，不显示为错误。
+            if (error?.name === 'AbortError') {
+                this.logGuardianAuto('completion aborted', {
+                    requestSeq,
+                    reason: 'superseded',
+                    totalElapsedMs: Date.now() - startedAt,
+                });
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
             this.showGuardianDiagnosticGhost(editor, `error:${error?.message || 'unknown'}`);
             logger.error('Auto completion failed', error, 'Baizer Guardian', {
                 requestSeq,
@@ -600,6 +640,161 @@ export default class BaizerPlugin extends Plugin {
             });
             console.error("Guardian Error:", error);
             updateGuardianState(view, lineNumber, GuardianState.Error);
+        } finally {
+            // 仅当自己仍是最新在途请求时清理引用，避免误删后续请求的 controller。
+            if (this.guardianInflight === inflight) {
+                this.guardianInflight = null;
+            }
+        }
+    }
+
+    /**
+     * 锚点 key:文件路径 + 行号 + 该行全文。行内容/行号一变即视为换位置,
+     * 用于区分「停在原地没辙」与「正在往下写」。
+     */
+    private guardianAnchorKey(editor: any, activePath: string): string {
+        const cursor = editor.getCursor();
+        return `${activePath}|${cursor.line}|${editor.getLine(cursor.line) || ''}`;
+    }
+
+    private clearGuardianEscalationTimer(): void {
+        if (this.guardianEscalationTimer !== null) {
+            window.clearTimeout(this.guardianEscalationTimer);
+            this.guardianEscalationTimer = null;
+        }
+    }
+
+    /**
+     * 快补无果后,若属 A+B 类且开关开、锚点未升过,起 1.2s 停留确认;
+     * 计时结束时光标仍在原锚点(用户没走也没打字)才升级到深补全。一锚点只升一次。
+     */
+    private maybeScheduleEscalation(editor: any, reason: string): void {
+        const activePath = this.app.workspace.getActiveFile?.()?.path || '';
+        const anchorKey = this.guardianAnchorKey(editor, activePath);
+
+        if (!shouldScheduleDeepEscalation({
+            enabled: !!this.settings.guardianAutoDeepEscalation,
+            reason,
+            alreadyEscalated: this.guardianEscalatedAnchors.has(anchorKey),
+        })) {
+            return;
+        }
+
+        this.clearGuardianEscalationTimer();
+        this.guardianEscalationTimer = window.setTimeout(() => {
+            this.guardianEscalationTimer = null;
+            // 停留确认:光标仍在原锚点才升级——打字/移动/接受都会改变 key 从而取消。
+            const stillThere = this.guardianAnchorKey(editor, this.app.workspace.getActiveFile?.()?.path || '');
+            if (stillThere !== anchorKey) return;
+            if (this.guardianEscalatedAnchors.has(anchorKey)) return;
+            this.guardianEscalatedAnchors.add(anchorKey);
+            // 限制 set 体积,避免长会话无限增长。
+            if (this.guardianEscalatedAnchors.size > 200) {
+                this.guardianEscalatedAnchors.clear();
+                this.guardianEscalatedAnchors.add(anchorKey);
+            }
+            this.logGuardianAuto('auto-escalate to deep', { reason, anchorKey });
+            void this.runDeepGuardianCheck(editor);
+        }, 1200);
+    }
+
+    /**
+     * 深度补全(手动触发):读知识库正文+注入个性化+连接意图,允许更慢以换高质量。
+     * 与自动补全分离:独立单飞控制器,不被打字防抖 abort;手动语义下绕过 paused 闸门。
+     */
+    private async runDeepGuardianCheck(editor: any) {
+        if (!this.settings.enableGuardian) {
+            new Notice('Baizer Guardian 未启用，请先在设置中开启。');
+            return;
+        }
+        const view = (editor as any).cm as EditorView;
+        if (!view) return;
+
+        const activePath = this.app.workspace.getActiveFile?.()?.path || '';
+        const decision = this.guardianCompletionService.shouldRunAuto({ editor, activePath, mode: 'deep' });
+        if (!decision.ok) {
+            new Notice(`深度补全跳过：${decision.reason || 'unknown'}`);
+            return;
+        }
+
+        // 独立单飞:abort 上一个深补全(若有),不影响自动补全的 guardianInflight。
+        this.guardianDeepInflight?.abort();
+        const inflight = new AbortController();
+        this.guardianDeepInflight = inflight;
+
+        const cursor = editor.getCursor();
+        const requestLine = cursor.line;
+        const requestCh = cursor.ch;
+        const requestLineText = editor.getLine(requestLine) || '';
+        const lineNumber = cursor.line + 1;
+        const startedAt = Date.now();
+        const requestSeq = ++this.guardianRequestSeq;
+
+        const isStale = () => {
+            const c = editor.getCursor();
+            return inflight.signal.aborted
+                || c.line !== requestLine
+                || c.ch !== requestCh
+                || (editor.getLine(requestLine) || '') !== requestLineText;
+        };
+
+        const notice = new Notice('Baizer Guardian 正在深度补全…', 0);
+        updateGuardianState(view, lineNumber, GuardianState.Thinking);
+        try {
+            const obsidianContext = await this.guardianContextService.collect({ includeBacklinks: true });
+            const result = await this.guardianCompletionService.completeAuto({
+                editor,
+                obsidianContext,
+                activePath,
+                userProfile: this.modelService.getUserProfile(),
+                isStale,
+                requestId: requestSeq,
+                signal: inflight.signal,
+                mode: 'deep',
+            });
+            notice.hide();
+            this.logGuardianAuto('deep completion returned', {
+                requestSeq,
+                resultType: result.type,
+                reason: result.type === 'none' ? result.reason : undefined,
+                totalElapsedMs: Date.now() - startedAt,
+            });
+
+            if (result.type !== 'completion') {
+                new Notice(`深度补全：无建议（${result.reason}）`);
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
+            if (isStale()) {
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
+            const currentLineCount = view.state.doc.lines;
+            if (result.line > currentLineCount) {
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
+            const currentLine = view.state.doc.line(result.line);
+            const safeCh = Math.min(result.ch, currentLine.length);
+            showGhostText(view, result.suggestion, result.line, safeCh);
+            updateGuardianState(
+                view,
+                result.line,
+                this.shouldShowGuardianGutter() ? GuardianState.HasSuggestion : GuardianState.Idle,
+            );
+        } catch (error: any) {
+            notice.hide();
+            if (error?.name === 'AbortError') {
+                updateGuardianState(view, lineNumber, GuardianState.Idle);
+                return;
+            }
+            new Notice(`深度补全失败：${error?.message || 'unknown'}`);
+            logger.error('Deep completion failed', error, 'Baizer Guardian', { requestSeq, activePath });
+            updateGuardianState(view, lineNumber, GuardianState.Error);
+        } finally {
+            if (this.guardianDeepInflight === inflight) {
+                this.guardianDeepInflight = null;
+            }
         }
     }
 

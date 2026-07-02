@@ -1462,6 +1462,16 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
+            .setName('快补无果时自动深挖笔记')
+            .setDesc('当 AI 没有即时建议、而你停留在原地时，自动读取相关笔记尝试更深的补全。较慢、消耗更多 token，默认关闭。')
+            .addToggle(toggle => toggle
+                .setValue(!!this.plugin.settings.guardianAutoDeepEscalation)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.guardianAutoDeepEscalation = value;
+                    await this.persistSettings();
+                }));
+
+        new Setting(containerEl)
             .setName('Ignored Folders')
             .setDesc('Path patterns to ignore, one per line.')
             .setClass('baizer-full-width-textarea')

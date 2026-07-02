@@ -97,6 +97,8 @@ export interface PluginSettings {
     guardianAutoMode: boolean; // New: Auto-trigger toggle
     guardianSensitivity: number;
     guardianUIStyle: 'ghost' | 'gutter' | 'hybrid';
+    // 快补无果且用户停留时,自动升级到深补全(读笔记正文)。默认关——自动花钱路径需显式开启。
+    guardianAutoDeepEscalation: boolean;
     ignoredFolders: string;
     privacyMode: boolean;
 
@@ -169,6 +171,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     guardianAutoMode: true, // Default to true
     guardianSensitivity: 50,
     guardianUIStyle: 'hybrid',
+    guardianAutoDeepEscalation: false,
     ignoredFolders: '',
     privacyMode: false,
 

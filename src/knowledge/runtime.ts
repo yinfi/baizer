@@ -439,6 +439,56 @@ export class KnowledgeRuntime {
     return context;
   }
 
+  /**
+   * Guardian 深度知识上下文：不止读元数据,而是读相关文章的 summary 正文片段,
+   * 给模型真实可连接的素材(支撑「连接型生成」与「惊喜」)。
+   * 与轻量版 getGuardianKnowledgeContext 并存,仅深补全调用。
+   */
+  async getGuardianDeepKnowledgeContext(editorContext: string): Promise<string> {
+    const keywords = editorContext
+      .split(/[\s,，。！？、；：""''（）\[\]{}]+/)
+      .filter(w => w.length >= 2)
+      .slice(0, 10)
+      .join(' ');
+
+    if (!keywords) return '';
+
+    const articles = this.metadataIndex.search(keywords, 3);
+    if (articles.length === 0) return '';
+
+    const sections: string[] = [];
+    for (const article of articles) {
+      const excerpt = await this.readSummaryExcerpt(article.summaryPath, 300);
+      if (!excerpt) continue;
+      sections.push(`《${article.title}》：\n${excerpt}`);
+    }
+
+    if (sections.length === 0) return '';
+
+    let context = '[知识库相关笔记节选]\n';
+    context += sections.join('\n\n');
+    context += '\n\n这些是用户自己的笔记。若其中某条能为当前写作带来新角度或可印证的连接，请自然融入并点明出处《标题》；否则忽略，不要强行套用。\n';
+    return context;
+  }
+
+  /** 读 summary 文件正文、剥除 frontmatter、压缩空白、截到 maxChars。 */
+  private async readSummaryExcerpt(path: string, maxChars: number): Promise<string> {
+    try {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile)) return '';
+      const raw = await this.app.vault.cachedRead(file);
+      const body = raw
+        .replace(/^﻿?---\r?\n[\s\S]*?\r?\n---\r?\n?/, '') // 剥 YAML frontmatter
+        .replace(/^#+\s.*$/gm, '')                              // 去标题行
+        .replace(/\n{2,}/g, '\n')
+        .trim();
+      if (!body) return '';
+      return body.length > maxChars ? body.slice(0, maxChars).trim() + '…' : body;
+    } catch {
+      return '';
+    }
+  }
+
   async updateSettings(settings: PluginSettings): Promise<void> {
     this.settings = settings;
     this.ontologyService.updateSettings(settings);

@@ -440,7 +440,10 @@ export class ModelService {
         }
 
         try {
-            const { skipGenerationPlan, ...providerOptions } = options ?? {};
+            const { skipGenerationPlan, signal, ...providerOptions } = options ?? {};
+            if (signal?.aborted) {
+                throw new DOMException('Generation aborted', 'AbortError');
+            }
             const shouldApplyGenerationPlan = !skipGenerationPlan && (source !== 'shell' || !!obsidianContext || !!userProfile);
             const finalPrompt = shouldApplyGenerationPlan
                 ? this.buildPlannedGenerationPrompt(
@@ -450,11 +453,16 @@ export class ModelService {
                     userProfile ?? this.getUserProfile(),
                 )
                 : prompt;
-            const result = await this.provider.generateContent(
+            const generation = this.provider.generateContent(
                 finalPrompt,
                 systemPrompt,
                 Object.keys(providerOptions).length > 0 ? providerOptions : undefined,
             );
+            // 软取消：signal abort 时立即 reject，让调用方解脱。
+            // 底层 requestUrl/SDK 无法硬中断，请求会在后台自然结束、结果被丢弃。
+            const result = signal
+                ? await this.raceWithAbort(generation, signal)
+                : await generation;
             if (!result.text?.trim()) {
                 const config = this.getActiveProviderConfig();
                 logger.warn('Stateless generation returned empty text', 'ModelService.generate', {
@@ -470,9 +478,36 @@ export class ModelService {
             }
             return result.text;
         } catch (e: any) {
+            // 软取消是正常流程，不当错误记录，避免日志噪音。
+            if (e?.name === 'AbortError') throw e;
             logger.error('Stateless generation failed', e, 'ModelService.generate');
             throw e;
         }
+    }
+
+    /**
+     * 让一个 Promise 与 abort 信号竞速：signal abort 时立即以 AbortError reject。
+     * 底层请求无法硬中断，仍会在后台跑完，但其结果不再被调用方使用。
+     */
+    private raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const onAbort = () => reject(new DOMException('Generation aborted', 'AbortError'));
+            if (signal.aborted) {
+                onAbort();
+                return;
+            }
+            signal.addEventListener('abort', onAbort, { once: true });
+            promise.then(
+                (value) => {
+                    signal.removeEventListener('abort', onAbort);
+                    resolve(value);
+                },
+                (error) => {
+                    signal.removeEventListener('abort', onAbort);
+                    reject(error);
+                },
+            );
+        });
     }
 
     async clearSession() {
