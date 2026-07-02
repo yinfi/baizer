@@ -275,6 +275,7 @@ async function runTests() {
       'behavior',
       'memory',
       'permissions',
+      'skills',
       'capture',
       'knowledge',
       'guardian',

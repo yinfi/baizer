@@ -8,7 +8,6 @@ import {
   ensureDirectory,
   readTextIfExists,
 } from '../../skill-files';
-import { SkillLoader } from '../../skill-loader';
 import { SkillRegistry } from '../../skill-registry';
 import { PluginSkillGenerator } from './skill-generator';
 
@@ -216,15 +215,9 @@ export class PluginWatcher {
     const content = await readTextIfExists(this.app.vault.adapter, filePath);
     if (content === null) return false;
 
-    const loader = new SkillLoader(
-      this.app,
-      this.skillRegistry.getToolRegistry(),
-    );
-    const skill = loader.parseSkillMd(content);
-    if (!skill) return false;
-
-    this.skillRegistry.registerUser(skill);
-    return true;
+    // Stage 3：统一走 registry 的 parseBuiltinSkill 解析器（保留 tools/triggers sidecar），
+    // 不再实例化 SkillLoader。
+    return this.skillRegistry.registerUserFromMd(content, filePath);
   }
 
   private delay(ms: number): Promise<void> {

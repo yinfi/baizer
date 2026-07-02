@@ -47,7 +47,7 @@ export class SteeringController {
   }
 
   /**
-   * 运行时调整可用工具集：下一轮起，pi 只在这些工具里执行调用（外加 use_skill 由 runtime 兜底保留）。
+   * 运行时调整可用工具集：下一轮起，pi 只在这些工具里执行调用（外加 read_skill 由 runtime 兜底保留）。
    * 多次调用以最后一次为准。
    */
   setActiveTools(toolNames: string[]): void {
@@ -98,12 +98,12 @@ export class SteeringController {
 }
 
 /**
- * 按运行时工具集过滤 pi 工具数组：保留命中名字的工具，并始终保留 use_skill
- * （技能激活是元能力，收窄工具集时不应被误删，否则模型无法再切换技能）。
+ * 按运行时工具集过滤 pi 工具数组：保留命中名字的工具，并始终保留 read_skill
+ * （skill 激活是元能力，收窄工具集时不应被误删，否则模型无法再读取/切换 skill）。
  */
 export function filterPiToolsByActiveTools<T extends NamedTool>(
   tools: T[],
   activeTools: Set<string>,
 ): T[] {
-  return tools.filter((tool) => tool.name === 'use_skill' || activeTools.has(tool.name));
+  return tools.filter((tool) => tool.name === 'read_skill' || activeTools.has(tool.name));
 }

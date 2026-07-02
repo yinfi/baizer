@@ -1,5 +1,22 @@
 ---
 
+### [2026-07-02 12:03] Task Summary — 安装外部 skill grill-me
+
+**1. 刚刚做了什么？ (What was done?)**
+- 从 GitHub 仓库 `VisualxIntelligence/mattpocok-skills` 提取 `grill-me` skill，安装到个人 skill 目录 `~/.claude/skills/grill-me/SKILL.md`（全局可用，非本项目）。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户要求安装该 skill。它是一个"逐条盘问方案设计"的交互式 skill（一次一问、给推荐答案、沿决策树解依赖），用于压力测试计划，触发词 "grill me"。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- GitHub 直连被网络策略拦截：WebFetch 报域名安全校验失败，`git clone` 直连报 Connection reset。
+- 环境仅配置了 `HTTP_PROXY=http://127.0.0.1:7890`，未配 `HTTPS_PROXY`，导致 https 克隆默认不走代理。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 克隆时显式带上 `https_proxy=http://127.0.0.1:7890` 走本地代理，成功拉取；确认为单文件 skill 后 `cp` 到个人目录，清理临时克隆。
+
+---
+
 ### [2026-06-30 设计阶段] Task Summary — 斜杠命令系统瘦身与渲染修复（设计 spec）
 
 **1. 刚刚做了什么？ (What was done?)**
@@ -1877,3 +1894,92 @@ UI 层：
 **4. 如何修复的？ (How was it fixed?)**
 - 新增 isKnowledgeStatusNoop 辅助函数做字段级比对，metadataCache 缺失时保守返回 false（照常写）；compiled_at 用 new Date() 的真实重编译因值不同仍会正常写入。
 - 验证：新测试 7/7 通过，watcher/compiler/status-service 既有测试无回归，生产构建 esbuild 通过。
+
+---
+### [2026-07-01 Stage 1] Skill 管理迁移到 pi-agent 原生激活机制（B 方案）
+
+**1. 刚刚做了什么？ (What was done?)**
+- 新增 `src/skills/pi-skill-source.ts`：`parseBuiltinSkill` 用 `yaml` 依赖把 bundled SKILL.md 解析成 pi 原生 `Skill` + Baizer sidecar（tools/triggers/executionMode）。
+- 重写 `SkillRegistry`：内部存 pi `Skill`，`init()` 动态 import 缓存 pi 格式化器，`getSkillSummaryText` 用 `formatSkillsForSystemPrompt`、`activateSkill` 用 `formatSkillInvocation`；删两份手写 YAML 解析器。
+- 内置 skill 启动时物化到隐藏目录 `.obsidian/.../skills/<name>/SKILL.md`（`materializeBuiltins`）；新增通用 `read_skill(name)` 工具走 `vault.adapter.read` 读取（绕开点目录对 metadataCache 不可见）。
+- 移除 `use_skill` 元工具：系统提示改注入 `<available_skills>` 清单，模型自主 `read_skill`；斜杠/强制激活仍走 `formatSkillInvocation`。
+- 解耦 skill 可用性与读写权限：删 `main.ts` 的 `allowPluginControl` enabledFn 耦合；新增 `disabledSkills` 设置 + 配置页 `🧩 Skills` 区块（与 `⚡ Permissions` 正交）。
+- 修正 3 处 use_skill→read_skill 的过时引用（系统提示、steering 过滤器、plugin-ctrl SKILL.md）。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户要接入更多 skill，需要 pi 的通用激活机制而非自研 use_skill 元工具；skill 是否可用（discoverability）与读写权限（safety）是两个正交关注点，不该耦合。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- pi 是 ESM-only，格式化器需动态 import，但 `getSkillSummaryText` 是同步调用链。
+- Obsidian 点目录对 `read_note`/`read_file`（metadataCache）不可见，物化文件模型读不到。
+- 全量测试出现失败，需甄别哪些是本次改动、哪些是既有未提交的 memory 重构遗留。
+
+**4. 如何修复的？ (How was it fixed?)**
+- `init()` 在 onload 一次性 await 加载并缓存 pi 格式化器，下游同步复用；测试确认动态 import 在 CJS(tsx) 下可跑通。
+- 新增 adapter-backed `read_skill` 工具专门读点目录，对内置/用户/未来 skill 统一生效。
+- 更新 6 个测试文件的断言到新机制（disabledSkills 门控、read_skill 保留、移除 use_skill 用例）；构建通过，381 测试全绿；唯一剩余失败 `memory-manager.test.ts` 经 git stash 验证为既有 memory 重构（删除 recordMessage，350 行）遗留，不在本次编辑范围，未越权修改。
+
+---
+### [2026-07-01 Stage 2] 权限决策集中到 PermissionService（Option 2）
+
+**1. 刚刚做了什么？ (What was done?)**
+- 新增 `src/permissions/permission-service.ts`：纯决策函数 `checkWriteScope` / `checkFileCapability('create'|'modify')` / `checkPluginControl` / `needsApproval(risk)`；`canWriteToVaultTarget` 及 scope helper 迁入此处。策略只读配置页 6 个设置，零硬编码。
+- `vault-ops.ts` 6 个写工具：内联的 getWriteScopeError（6处）/ allowFile*（7处）/ confirmExecutions（7处）三步替换为 PermissionService 调用；`canWriteToVaultTarget` 从此处再导出保持测试 import 兼容。
+- `plugin-ctrl/executor.ts`：4 处 allowPluginControl + 1 处 confirmExecutions 改调 PermissionService。
+- 新增 `test/permission-service.test.ts`：risk×confirmExecutions×scope×capability 决策矩阵 11 用例。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 权限「决策」此前逐字重复在 6+ 工具体内，散落且 risk 字段名存实亡。集中成纯函数：策略单一来源、config 驱动、按 risk 生效、可单测。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 计划草案的「adapter 前置 gate 返回简单 verdict」会丢掉 buildApprovalResponse 的 rich ChangePreview 载荷，并破坏 WorkspaceEditService 的 direct-apply 旁路（强制 approved:true）。
+- permission-service 的 normalizeScopePath 初版漏了反斜杠归一，Windows 路径会回归。
+- plugin-ctrl executor 比 vault-ops 深一层，import 相对路径需 `../../../` 而非 `../../`。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 改走 Option 2：PermissionService 只提供「决策」纯函数，工具调用替换重复判断；审批「载荷」仍由工具构造，direct-apply 旁路完全不动。
+- normalizeScopePath 补 `.replace(/\/g,'/')` 对齐原行为并保留 null 守卫。
+- 修正 import 路径；清理 vault-ops 的 FileOperation/PluginSettings 未使用导入。
+- 验证：build 通过；392 测试通过（含 11 个新决策矩阵 + vault-permissions/approval-flow 无回归）。唯一失败 `memory-manager.test.ts` 为 Stage 1 已确认的既有 memory 重构遗留，非本次范围。
+
+---
+### [2026-07-01 验证] Stage 1+2 集成追踪 + 用户手验通过
+
+**1. 刚刚做了什么？ (What was done?)**
+- 对 Stage 1+2 做集成缝隙代码级追踪（装配顺序 / read_skill 可达性 / prompt 注入 / 审批回流 / 读取链路）。
+- 修复一个真实缺陷：在 base-chat-runtime prepareTurn 的 skill 清单后追加 `[Skill Access]` 引导，明确指示用 read_skill(name) 而非去开 location 路径。
+- 用户在 Obsidian 中手动验证通过。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 桌面插件无法由 agent 自驱运行，需代码追踪 + 人工手验双保险；单测覆盖不到装配/prompt 等运行时接缝。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- read_skill 引导原放在 DEFAULT_SETTINGS.systemPrompt，但 pi 聊天路径 context.systemPrompt='' 且绕过 provider.configure，导致该引导对 chat 死代码；pi 原生 <available_skills> 反而引导模型去读够不到的 .obsidian location 路径。
+- 附带发现：基础 persona(settings.systemPrompt) 在 pi 聊天路径整体不可达（pi 重构删 provider.startChat 的既有缺口，非本次范围）。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 把可执行的 read_skill 引导直接注入 turn.prompt（保证到达模型），覆盖 pi 的“读文件”措辞。build + 392 测试通过。
+- 既有 persona 缺口记录在案，未越权处理。
+
+---
+### [2026-07-01 Stage 3] 用户 skill 加载统一到 parseBuiltinSkill，删除 SkillLoader
+
+**1. 刚刚做了什么？ (What was done?)**
+- SkillRegistry 新增 registerUserFromMd(md, filePath)：用 parseBuiltinSkill 解析并注册用户/插件 skill 为 LoadedSkill(isBuiltin:false)。
+- loadUserSkills 改用 listSkillFilePaths(adapter)+read+registerUserFromMd，删 SkillLoader 依赖。
+- plugin-watcher.loadAndRegister 改调 registerUserFromMd，删 SkillLoader import/实例化。
+- parseBuiltinSkill 补 name 校验 ^[a-z0-9-]+$ 且 ≤64（保 SkillLoader parity）。
+- 删除 src/skills/skill-loader.ts（199 行重复手写 YAML 解析器 + UserSkill 类），git rm 同步索引。
+- 删除死方法 SkillRegistry.getToolRegistry（Stage 3 后零调用者）。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户 skill 加载此前用 SkillLoader 的自研 YAML 解析器（parseSimpleYaml/parseYamlValue），是 parseBuiltinSkill 的重复。统一到单一 pi-Skill-model + yaml 库解析器，删掉真正的债。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 原 Stage 3 计划「用户 skill 改用 pi loadSkills」有损：pi Skill 不含 tools/triggers，loadSkills 会丢弃这两个字段，而插件生成 skill(skill-generator) 依赖 tools 白名单与 triggers.keywords 路由。
+- 删文件后 brand.test 失败：它用 git ls-files 扫描跟踪文件，rm 后 git 仍跟踪已删文件导致 ENOENT。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 调整为统一到 parseBuiltinSkill（保留 sidecar），不用 pi loadSkills，避免丢数据，同时无需 ExecutionEnv 适配。
+- git rm --quiet 同步索引使 git ls-files 不再列已删文件。
+- 验证：build 通过；392 测试通过。唯一失败 memory-manager.test.ts 为 Stage 1 已确认的既有 memory 重构遗留，非本次范围。

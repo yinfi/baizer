@@ -1,68 +1,30 @@
 // src/skills/builtin/vault-ops.ts — Vault 文件操作工具集
 
 import { App, TFile } from 'obsidian';
-import { PluginSettings, VaultWriteScope } from '../../mcp/types';
 import { Tool, ToolContext, ToolParameters } from '../types';
 import { ToolRegistry } from '../tool-registry';
 import { ChangePreview } from '../../ui/diff/change-preview';
+import {
+  checkWriteScope,
+  checkFileCapability,
+  needsApproval,
+  canWriteToVaultTarget as canWriteToVaultTargetImpl,
+  type VaultWriteTargetCheck,
+} from '../../permissions/permission-service';
 
 // ==================== 工具定义 ====================
 
 const MAX_FILE_READ_CHARS = 20000;
 
-export interface VaultWriteTargetCheck {
-  scope: VaultWriteScope;
-  target: string;
-  activeNote?: string | null;
-  configuredFolders?: string[];
-}
+// 权限决策已迁入 PermissionService（Stage 2）。这里再导出 canWriteToVaultTarget
+// 与其类型，保持既有调用方（test/vault-permissions.test.ts 等）import 路径不变。
+export { canWriteToVaultTargetImpl as canWriteToVaultTarget };
+export type { VaultWriteTargetCheck };
 
-function normalizeScopePath(path: string): string {
-  return path.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-}
-
-function isPathInsideFolder(target: string, folder: string): boolean {
-  const normalizedTarget = normalizeScopePath(target);
-  const normalizedFolder = normalizeScopePath(folder);
-  if (!normalizedFolder) return false;
-  return normalizedTarget === normalizedFolder || normalizedTarget.startsWith(`${normalizedFolder}/`);
-}
-
-export function canWriteToVaultTarget(input: VaultWriteTargetCheck): boolean {
-  const target = normalizeScopePath(input.target);
-  const activeNote = input.activeNote ? normalizeScopePath(input.activeNote) : '';
-  const configuredFolders = (input.configuredFolders || []).map(normalizeScopePath).filter(Boolean);
-
-  switch (input.scope) {
-    case 'read-only':
-      return false;
-    case 'current-note':
-      return !!activeNote && target === activeNote;
-    case 'configured-folders':
-      return configuredFolders.some((folder) => isPathInsideFolder(target, folder));
-    case 'all-vault':
-    default:
-      return true;
-  }
-}
-
-function getVaultWriteScope(settings: PluginSettings): VaultWriteScope {
-  return settings.vaultWriteScope || 'all-vault';
-}
-
-function getVaultWriteFolders(settings: PluginSettings): string[] {
-  return Array.isArray(settings.vaultWriteAllowedFolders) ? settings.vaultWriteAllowedFolders : [];
-}
-
+/** 写入范围检查：从 ctx 取 activeNote 后委托 PermissionService.checkWriteScope。 */
 function getWriteScopeError(ctx: ToolContext, target: string): string | null {
   const activeNote = ctx.app.workspace.getActiveFile?.()?.path || null;
-  const allowed = canWriteToVaultTarget({
-    scope: getVaultWriteScope(ctx.settings),
-    target,
-    activeNote,
-    configuredFolders: getVaultWriteFolders(ctx.settings),
-  });
-  return allowed ? null : `Write not allowed for path: ${target}`;
+  return checkWriteScope(target, ctx.settings, activeNote);
 }
 
 const readNote: Tool = {
@@ -108,8 +70,9 @@ const createNote: Tool = {
       return { success: false, error: scopeError };
     }
 
-    if (!ctx.settings.allowFileCreation) {
-      return { success: false, error: 'File creation is disabled' };
+    const capabilityError = checkFileCapability('create', ctx.settings);
+    if (capabilityError) {
+      return { success: false, error: capabilityError };
     }
 
     const existing = ctx.app.vault.getAbstractFileByPath(path);
@@ -117,7 +80,7 @@ const createNote: Tool = {
       return { status: 'error', message: `File already exists: ${path}. Use update_note to modify existing files.` };
     }
 
-    if (ctx.settings.confirmExecutions && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !args.approved) {
       return buildApprovalResponse('create_note', path, {
         filename: path,
         content: args.content || '',
@@ -156,12 +119,13 @@ const updateNote: Tool = {
     if (scopeError) {
       return { success: false, error: scopeError };
     }
-    if (!ctx.settings.allowFileModification) {
-      return { success: false, error: 'File modification is disabled' };
+    const capabilityError = checkFileCapability('modify', ctx.settings);
+    if (capabilityError) {
+      return { success: false, error: capabilityError };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.path);
     if (!file || !(file instanceof TFile)) return { success: false, error: 'File not found' };
-    if (ctx.settings.confirmExecutions && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !args.approved) {
       const oldContent = await ctx.app.vault.read(file);
       return buildApprovalResponse('update_note', args.path, {
         path: args.path,
@@ -200,12 +164,13 @@ const appendToNote: Tool = {
     if (scopeError) {
       return { success: false, error: scopeError };
     }
-    if (!ctx.settings.allowFileModification) {
-      return { success: false, error: 'File modification is disabled' };
+    const capabilityError = checkFileCapability('modify', ctx.settings);
+    if (capabilityError) {
+      return { success: false, error: capabilityError };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.path);
     if (!file || !(file instanceof TFile)) return { success: false, error: 'File not found' };
-    if (ctx.settings.confirmExecutions && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !args.approved) {
       const existing = await ctx.app.vault.read(file);
       return buildApprovalResponse('append_to_note', args.path, {
         path: args.path,
@@ -244,12 +209,13 @@ const deleteNote: Tool = {
     if (scopeError) {
       return { success: false, error: scopeError };
     }
-    if (!ctx.settings.allowFileModification) {
-      return { success: false, error: 'File modification is disabled' };
+    const capabilityError = checkFileCapability('modify', ctx.settings);
+    if (capabilityError) {
+      return { success: false, error: capabilityError };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.path);
     if (!file) return { success: false, error: 'File not found' };
-    if (ctx.settings.confirmExecutions && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !args.approved) {
       return buildApprovalResponse('delete_note', args.path, {
         path: args.path,
       }, 'delete note', {
@@ -288,12 +254,13 @@ const renameNote: Tool = {
     if (newPathScopeError) {
       return { success: false, error: newPathScopeError };
     }
-    if (!ctx.settings.allowFileModification) {
-      return { success: false, error: 'File modification is disabled' };
+    const capabilityError = checkFileCapability('modify', ctx.settings);
+    if (capabilityError) {
+      return { success: false, error: capabilityError };
     }
     const file = ctx.app.vault.getAbstractFileByPath(args.oldPath);
     if (!file) return { success: false, error: 'File not found' };
-    if (ctx.settings.confirmExecutions && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !args.approved) {
       return buildApprovalResponse('rename_note', args.oldPath, {
         oldPath: args.oldPath,
         newPath: args.newPath,
@@ -455,13 +422,14 @@ const createFile: Tool = {
     if (isObsidianConfigPath(pathResult.path)) {
       return { success: false, error: 'Writing .obsidian files is not allowed' };
     }
-    if (!ctx.settings.allowFileCreation) {
-      return { success: false, error: 'File creation is disabled' };
+    const capabilityError = checkFileCapability('create', ctx.settings);
+    if (capabilityError) {
+      return { success: false, error: capabilityError };
     }
     if (ctx.app.vault.getAbstractFileByPath(pathResult.path)) {
       return { success: false, error: `File already exists: ${pathResult.path}` };
     }
-    if (ctx.settings.confirmExecutions && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !args.approved) {
       return buildApprovalResponse('create_file', pathResult.path, {
         path: pathResult.path,
         content: args.content || '',
@@ -509,15 +477,16 @@ const updateFile: Tool = {
     if (isObsidianConfigPath(pathResult.path)) {
       return { success: false, error: 'Writing .obsidian files is not allowed' };
     }
-    if (!ctx.settings.allowFileModification) {
-      return { success: false, error: 'File modification is disabled' };
+    const capabilityError = checkFileCapability('modify', ctx.settings);
+    if (capabilityError) {
+      return { success: false, error: capabilityError };
     }
 
     const file = ctx.app.vault.getAbstractFileByPath(pathResult.path);
     if (!isReadableVaultFile(file)) {
       return { success: false, error: 'File not found' };
     }
-    if (ctx.settings.confirmExecutions && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !args.approved) {
       const oldContent = await ctx.app.vault.read(file);
       return buildApprovalResponse('update_file', pathResult.path, {
         path: pathResult.path,

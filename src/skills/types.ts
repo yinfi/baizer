@@ -85,6 +85,9 @@ export interface Skill {
   triggers?: SkillTriggers;
   executionMode?: 'direct' | 'instructions';
 
+  /** 物化后的 SKILL.md 路径（B 方案：系统提示 location 与 read_skill 读取用）。 */
+  filePath?: string;
+
   // === 生命周期 ===
   /** 是否启用，支持静态值或动态函数 */
   enabled?: boolean | ((settings: PluginSettings) => boolean);
@@ -117,6 +120,16 @@ export interface ActivatedSkill {
 }
 
 /**
+ * 路由返回的轻量 skill 句柄（B 方案）：斜杠命令执行 / 意图命名用。
+ * 不暴露完整 Skill，只给出调用方实际消费的字段。
+ */
+export interface ResolvedSkill {
+  name: string;
+  executionMode: 'direct' | 'instructions';
+  execute(args: any, ctx: ToolContext): Promise<any>;
+}
+
+/**
  * 原子工具注册表接口
  */
 export interface IToolRegistry {
@@ -137,8 +150,8 @@ export interface ISkillRegistry {
   getSkillSummaries(): SkillSummary[];
   listCommandEntries(): SkillCommandEntry[];
   getSkillSummaryText(): string;
-  resolveByCommand(command: string): Skill | null;
-  resolveByIntent(message: string): Skill | null;
+  resolveByCommand(command: string): ResolvedSkill | null;
+  resolveByIntent(message: string): ResolvedSkill | null;
   activateSkill(name: string, args?: any): ActivatedSkill | null;
   listSkills(): SkillSummary[];
 }

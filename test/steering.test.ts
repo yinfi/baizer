@@ -250,15 +250,16 @@ async function runTests() {
     expect(controller.consumeActiveToolsUpdate()).toBe(null);
   });
 
-  await test('filterPiToolsByActiveTools keeps use_skill plus active tools', () => {
+  await test('filterPiToolsByActiveTools keeps read_skill plus active tools', () => {
     const tools = [
       { name: 'read_note' },
       { name: 'web_search' },
-      { name: 'use_skill' },
+      { name: 'read_skill' },
       { name: 'delete_note' },
     ];
     const filtered = filterPiToolsByActiveTools(tools, new Set(['read_note']));
-    expect(filtered.map(t => t.name)).toEqual(['read_note', 'use_skill']);
+    // B 方案：read_skill 是 skill 激活的元能力，收窄工具集时必须保留。
+    expect(filtered.map(t => t.name)).toEqual(['read_note', 'read_skill']);
   });
 
   // 核心断言：运行中追加的 steering 消息被纳入后续轮次，

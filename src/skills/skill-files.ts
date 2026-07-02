@@ -33,6 +33,41 @@ export function skillFilePath(dirPath: string): string {
   return joinPath(dirPath, SKILL_FILE_NAME);
 }
 
+/** 内置 skill 的物化目录：与用户 skill 同根，按 skill name 分子目录。 */
+export function builtinSkillDirPath(
+  name: string,
+  skillsDir = USER_SKILLS_DIR,
+): string {
+  return joinPath(skillsDir, name);
+}
+
+/** 内置 skill 物化后的 SKILL.md 路径（= read_skill / 系统提示 location 指向的真实路径）。 */
+export function builtinSkillFilePath(
+  name: string,
+  skillsDir = USER_SKILLS_DIR,
+): string {
+  return skillFilePath(builtinSkillDirPath(name, skillsDir));
+}
+
+/**
+ * 物化一个内置 skill 到隐藏目录：写入 <skillsDir>/<name>/SKILL.md。
+ * 覆盖写——内置为代码所有，每次启动以 bundle 为准（无 staleness）。
+ * 返回物化后的文件路径，供 SkillRegistry 记录、read_skill 读取。
+ */
+export async function materializeBuiltinSkill(
+  adapter: Pick<SkillFilesAdapter, 'exists' | 'mkdir' | 'write'>,
+  name: string,
+  skillMd: string,
+  skillsDir = USER_SKILLS_DIR,
+): Promise<string> {
+  const dir = builtinSkillDirPath(name, skillsDir);
+  await ensureDirectory(adapter, dir);
+  const filePath = skillFilePath(dir);
+  await adapter.write(filePath, skillMd);
+  return filePath;
+}
+
+
 export function pluginSkillDirPath(
   pluginId: string,
   skillsDir = USER_SKILLS_DIR,

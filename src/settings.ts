@@ -9,6 +9,7 @@ export type SettingsSectionId =
     | 'behavior'
     | 'memory'
     | 'permissions'
+    | 'skills'
     | 'capture'
     | 'knowledge'
     | 'guardian'
@@ -430,6 +431,7 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     { id: 'behavior', title: 'Behavior', description: 'Context budget, system prompt, and runtime behavior.', keywords: ['behavior', 'runtime', 'context window', 'token', 'system prompt', 'persona', 'prompt', 'thinking', 'reasoning'] },
     { id: 'memory', title: 'Memory', description: 'Memory retention, recall, search, and deletion.', keywords: ['memory', 'hindsight', 'recall', 'forget', 'profile', 'privacy', 'observation'] },
     { id: 'permissions', title: 'Permissions', description: 'Vault write scope, file operations, plugin control, and confirmations.', keywords: ['permissions', 'file creation', 'file modification', 'plugin control', 'confirm'] },
+    { id: 'skills', title: 'Skills', description: 'Enable or disable individual skills (availability, separate from permissions).', keywords: ['skills', 'skill', 'enable', 'disable', 'workflow', 'available'] },
     { id: 'capture', title: 'Capture', description: 'Inbox, clipping storage, WeChat import, and URL capture.', keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper'] },
     { id: 'knowledge', title: 'Knowledge', description: 'Source folders, output folder, compile state, and ontology.', keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema'] },
     { id: 'guardian', title: 'Guardian', description: 'Inline writing assistance, trigger mode, and ignored folders.', keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity'] },
@@ -796,6 +798,9 @@ export class SettingTab extends PluginSettingTab {
                 return;
             case 'permissions':
                 this.renderPermissionsSection(containerEl);
+                return;
+            case 'skills':
+                this.renderSkillsSection(containerEl);
                 return;
             case 'appearance':
                 this.renderAppearanceSection(containerEl);
@@ -1565,6 +1570,38 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                     this.display();
                 }));
+    }
+
+    private renderSkillsSection(containerEl: HTMLElement): void {
+        containerEl.createDiv({
+            cls: 'baizer-settings-inline-note',
+            text: 'Enable or disable individual skills. This controls availability only — a skill being on does not bypass the read/write permissions above.',
+        });
+
+        const skills = typeof this.plugin.modelService?.getSkillList === 'function'
+            ? this.plugin.modelService.getSkillList()
+            : [];
+        if (!skills.length) {
+            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-muted', text: 'No skills registered.' });
+            return;
+        }
+
+        const disabled = new Set(this.plugin.settings.disabledSkills ?? []);
+        for (const skill of skills) {
+            const cmdHint = skill.commands?.length ? ` (${skill.commands.join(', ')})` : '';
+            new Setting(containerEl)
+                .setName(skill.name)
+                .setDesc(`${skill.description}${cmdHint}`)
+                .addToggle(toggle => toggle
+                    .setValue(!disabled.has(skill.name))
+                    .onChange(async (value: boolean) => {
+                        const next = new Set(this.plugin.settings.disabledSkills ?? []);
+                        if (value) next.delete(skill.name);
+                        else next.add(skill.name);
+                        this.plugin.settings.disabledSkills = [...next];
+                        await this.persistSettings();
+                    }));
+        }
     }
 
     private getPermissionPresetId(): 'read-only' | 'configured-folders' | 'automation' | 'open' | 'custom' {

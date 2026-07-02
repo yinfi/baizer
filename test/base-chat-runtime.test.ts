@@ -53,6 +53,7 @@ async function runTests() {
       memoryManager: {
         ready: async () => { },
         buildContext: () => '[Memory Context]',
+        recallForPrompt: async () => '[Memory Context]',
         recordMessage: async () => { },
       } as any,
       toolRegistry: {
@@ -150,7 +151,8 @@ async function runTests() {
 
     expect((prepared as any).activeSkillName).toBe('web-clipper');
     expect((prepared as any).allowedToolNames).toEqual(['save_webpage']);
-    expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['save_webpage', 'use_skill']);
+    // B 方案：use_skill 元工具已移除，激活 skill 时工具集只含该 skill 的工具子集。
+    expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['save_webpage']);
     expect(prepared.prompt.includes('Use save_webpage to save the requested page.')).toBe(true);
   });
 

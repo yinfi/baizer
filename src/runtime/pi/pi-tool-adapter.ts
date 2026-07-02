@@ -60,10 +60,9 @@ async function executeBaizerTool(
   args: any,
   input: AdaptToolDefinitionsInput,
 ): Promise<any> {
-  if (name === 'use_skill') {
-    return activateSkillRequest(args, input);
-  }
-
+  // B 方案：use_skill 元工具已移除，skill 激活改由 read_skill（普通工具）+ system prompt
+  // 的 <available_skills> 清单完成。此处不再有 use_skill 分支。
+  // 强制激活时的工具收窄（allowedToolNames）暂留，Stage 2 迁入 PermissionService。
   if (input.skillScope.allowedToolNames && !input.skillScope.allowedToolNames.has(name)) {
     return {
       error: `Tool "${name}" is not available for active skill "${input.skillScope.activeSkillName}"`,
@@ -75,30 +74,6 @@ async function executeBaizerTool(
   }
 
   return input.toolRegistry.execute(name, args);
-}
-
-function activateSkillRequest(args: any, input: AdaptToolDefinitionsInput): any {
-  const skillName = args?.name;
-  if (!skillName) {
-    return { error: 'Missing skill name' };
-  }
-  if (!input.skillRegistry) {
-    return { error: 'Skill registry is not available' };
-  }
-
-  const activated = input.skillRegistry.activateSkill(skillName);
-  if (!activated) {
-    return { error: `Skill "${skillName}" not found or disabled` };
-  }
-
-  input.skillScope.activeSkillName = activated.skill?.name ?? skillName;
-  input.skillScope.allowedToolNames = new Set(activated.tools.map(tool => tool.name));
-
-  return {
-    action_required: 'Use the returned instructions immediately with the available tools to complete the user request.',
-    instructions: activated.instructions,
-    available_tools: activated.tools.map(tool => tool.name),
-  };
 }
 
 function stringifyToolResponse(response: any): string {

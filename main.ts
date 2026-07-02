@@ -9,6 +9,7 @@ import { ghostTextExtension, showGhostText, showDiagnosticGhostText } from './sr
 import { GuardianModal } from './src/ui/guardian-modal';
 import { requestGuardianResponse } from './src/ui/guardian-request';
 import { GuardianCompletionService, getGuardianAutoDelayMs } from './src/ui/guardian-completion';
+import { registerSkillReadTool } from './src/skills/builtin/read-skill';
 import { selectionMenuExtension } from './src/ui/selection-menu';
 import { KnowledgeRuntime } from './src/knowledge/runtime';
 import { ToolRegistry } from './src/skills/tool-registry';
@@ -73,6 +74,7 @@ export default class BaizerPlugin extends Plugin {
 
         // 注册原子工具
         registerVaultTools(this.toolRegistry);
+        registerSkillReadTool(this.toolRegistry, this.skillRegistry);
         registerWebSearchTools(this.toolRegistry);
         registerWebClipperTools(this.toolRegistry, this.modelService);
         registerPluginCtrlTools(this.toolRegistry);
@@ -85,9 +87,9 @@ export default class BaizerPlugin extends Plugin {
         this.skillRegistry.registerBuiltinFromMd(obsidianMarkdownSkillMd, { execute: async () => ({ ok: true }) });
         this.skillRegistry.registerBuiltinFromMd(jsonCanvasSkillMd, jsonCanvasSkillExecutor);
         this.skillRegistry.registerBuiltinFromMd(obsidianBasesSkillMd, obsidianBasesSkillExecutor);
-        this.skillRegistry.registerBuiltinFromMd(pluginCtrlSkillMd, pluginCtrlSkillExecutor,
-            (settings) => settings.allowPluginControl,
-        );
+        // 可用性由 settings.disabledSkills 控制，与读写权限正交——
+        // 不再用 allowPluginControl 决定 plugin-ctrl 是否可用。
+        this.skillRegistry.registerBuiltinFromMd(pluginCtrlSkillMd, pluginCtrlSkillExecutor);
 
         console.log(`[Baizer] SkillRegistry initialized: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
 
@@ -109,6 +111,12 @@ export default class BaizerPlugin extends Plugin {
             this.knowledgeRuntime.getFileBackExecutor(),
         );
         this.skillRegistry.registerBuiltinFromMd(knowledgeSkillMd, createKnowledgeSkillExecutor(this.toolRegistry));
+
+        // 加载 pi 格式化器（getSkillSummaryText / activateSkill 依赖），并把内置 skill
+        // 物化为隐藏目录下的真实文件（read_skill 与系统提示 location 指向它）。
+        // 必须在所有内置注册后、loadUserSkills 前——使重扫到的内置文件按同名安全跳过。
+        await this.skillRegistry.init();
+        await this.skillRegistry.materializeBuiltins(this.app.vault.adapter);
 
         console.log(`[Baizer] Final: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
 

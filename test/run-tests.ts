@@ -6,6 +6,7 @@ const tests = [
   'test/skill-registry.test.ts',
   'test/obsidian-markdown-skill.test.ts',
   'test/skill-routing.test.ts',
+  'test/permission-service.test.ts',
   'test/model-service.test.ts',
   'test/base-chat-runtime.test.ts',
   'test/session-store.test.ts',

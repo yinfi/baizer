@@ -14,8 +14,8 @@ tools: ["list_plugins", "get_plugin_commands", "get_plugin_settings", "execute_p
 
 当用户的需求可能由某个插件完成时：
 
-1. 查看 skill 摘要列表，是否已有匹配的 `plugin-*` skill
-2. 如果有 → 直接调用该插件 skill（如 `use_skill("plugin-obsidian-tasks")`）
+1. 查看 <available_skills> 清单，是否已有匹配的 `plugin-*` skill
+2. 如果有 → 用 `read_skill` 读取该插件 skill（如 `read_skill("plugin-obsidian-tasks")`），按其指令操作
 3. 如果没有 → 使用 `list_plugins` 查看已安装插件
 4. 找到候选插件后，用 `get_plugin_commands` 了解其能力
 5. 根据命令和设置信息，直接操作完成任务

@@ -4,6 +4,7 @@ import { Tool, ToolContext } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import { pluginSkillFilePath } from '../../skill-files';
+import { checkPluginControl, needsApproval } from '../../../permissions/permission-service';
 
 export function getPluginCommandPreconditions(): string[] {
   return [
@@ -19,7 +20,7 @@ const listPlugins: Tool = {
   risk: 'plugin-control',
   parameters: { type: 'object', properties: {} },
   async execute(args, ctx) {
-    if (!ctx.settings.allowPluginControl) return { error: 'Permission denied' };
+    const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
     const manifests = (ctx.app as any).plugins.manifests;
     const enabled = (ctx.app as any).plugins.enabledPlugins;
     const list = await Promise.all(Object.values(manifests).map(async (m: any) => ({
@@ -44,7 +45,7 @@ const getPluginCommands: Tool = {
     required: ['pluginId'],
   },
   async execute(args, ctx) {
-    if (!ctx.settings.allowPluginControl) return { error: 'Permission denied' };
+    const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
     const cmds = (ctx.app as any).commands.listCommands()
       .filter((c: any) => c.id.startsWith(args.pluginId + ':'))
       .map((c: any) => ({ id: c.id, name: c.name }));
@@ -65,7 +66,7 @@ const getPluginSettings: Tool = {
     required: ['pluginId'],
   },
   async execute(args, ctx) {
-    if (!ctx.settings.allowPluginControl) return { error: 'Permission denied' };
+    const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
     const plugin = (ctx.app as any).plugins.getPlugin(args.pluginId);
     if (!plugin) return { error: 'Plugin not found or not enabled' };
     return { pluginId: args.pluginId, settings: plugin.settings || plugin.data || {} };
@@ -85,8 +86,8 @@ const executePluginCommand: Tool = {
     required: ['commandId'],
   },
   async execute(args, ctx) {
-    if (!ctx.settings.allowPluginControl) return { error: 'Permission denied' };
-    if (ctx.settings.confirmExecutions && !args.approved) {
+    const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
+    if (needsApproval('plugin-control', ctx.settings) && !args.approved) {
       return {
         approval_required: true,
         action: 'execute_plugin_command',

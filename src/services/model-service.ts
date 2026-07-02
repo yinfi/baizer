@@ -8,7 +8,7 @@ import { GeminiProvider } from '../models/gemini';
 import { OpenAIProvider } from '../models/openai';
 import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
-import { SkillCommandEntry } from '../skills/types';
+import { SkillCommandEntry, SkillSummary } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
 import { buildGeminiModel, buildOpenAICompatModel, createNativeStreamFn } from '../runtime/pi/pi-native-model';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
@@ -543,6 +543,11 @@ export class ModelService {
         return this.skillRegistry.listCommandEntries();
     }
 
+    /** 返回所有 skill 摘要（含被禁用的），供设置页 🧩 Skills 区块列出并逐个开关。 */
+    getSkillList(): SkillSummary[] {
+        return this.skillRegistry.getAllSkillSummaries();
+    }
+
     getProviderCapabilities(): ProviderCapabilities {
         return this.provider.getCapabilities();
     }
@@ -664,7 +669,7 @@ export class ModelService {
     }
 
     /**
-     * 运行时调整可用工具集：下一轮起 pi 只在这些工具内执行调用（use_skill 由 runtime 兜底保留）。
+     * 运行时调整可用工具集：下一轮起 pi 只在这些工具内执行调用（read_skill 由 runtime 兜底保留）。
      */
     public setActiveTools(toolNames: string[]): void {
         this.steeringController.setActiveTools(toolNames);

@@ -398,8 +398,10 @@ async function runTests() {
     expect(deps.registryCalls).toEqual([]);
   });
 
-  await test('activates use_skill and blocks non-active-skill tools in the same Pi turn', async () => {
-    const activated: string[] = [];
+  await test('blocks non-active-skill tools when the turn is scoped to an active skill', async () => {
+    // B 方案：use_skill 元工具已移除。skill 由 read_skill（普通工具）激活，
+    // 工具门控改为 turn 级：prepareTurn 强制激活 skill 时设 activeSkillName/allowedToolNames，
+    // 越出白名单的工具在 pi 回合内被拦截。此处直接用带 scope 的 turn 验证该行为。
     const deps = createDeps({
       streamFactory: (input) => Array.isArray(input)
         ? [
@@ -407,27 +409,22 @@ async function runTests() {
             { type: 'done', text: 'Scoped' },
           ]
         : [
-            { type: 'tool_call', id: 'call_1', name: 'use_skill', args: { name: 'web' } },
-            { type: 'tool_call', id: 'call_2', name: 'update_file', args: { path: 'A.md', content: 'after' } },
+            { type: 'tool_call', id: 'call_1', name: 'update_file', args: { path: 'A.md', content: 'after' } },
             { type: 'done', text: '' },
           ],
       skillRegistry: {
         getSkillSummaryText: () => '',
-        activateSkill: (name: string) => {
-          activated.push(name);
-          return {
-            skill: { name },
-            instructions: 'Use web_search only',
-            tools: [{ name: 'web_search', description: 'Search web', parameters: { type: 'object', properties: {} } }],
-          };
-        },
+        activateSkill: () => null,
       },
     });
 
     const runtime = new PiChatRuntime(deps);
-    const events = await collect(runtime.queryStream(createTurn()));
+    const scopedTurn = createTurn({
+      activeSkillName: 'web',
+      allowedToolNames: ['web_search'],
+    });
+    const events = await collect(runtime.queryStream(scopedTurn));
 
-    expect(activated).toEqual(['web']);
     expect(deps.workspaceCalls).toEqual([]);
     const blockedResult = events.find(event =>
       event.type === 'tool_result' && event.name === 'update_file',

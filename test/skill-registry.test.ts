@@ -27,8 +27,12 @@ async function runTests() {
   const { ToolRegistry } = await import('../src/skills/tool-registry');
   const { SkillRegistry } = await import('../src/skills/skill-registry');
 
-  await test('listCommandEntries returns enabled slash commands with skill metadata', async () => {
-    const toolRegistry = new ToolRegistry({} as any, JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
+  await test('listCommandEntries returns commands, excluding skills disabled via settings.disabledSkills', async () => {
+    const settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    // B 方案：skill 可用性由 settings.disabledSkills 控制（与权限正交），
+    // 不再有 registerBuiltinFromMd 的 enabledFn 参数。
+    settings.disabledSkills = ['hidden-skill'];
+    const toolRegistry = new ToolRegistry({} as any, settings);
     const registry = new SkillRegistry(toolRegistry);
 
     registry.registerBuiltinFromMd(`---
@@ -51,7 +55,7 @@ tools: []
 ---
 Hidden instructions.`, {
       execute: async () => ({ ok: true }),
-    }, () => false);
+    });
 
     expect(registry.listCommandEntries()).toEqual([
       {
@@ -60,6 +64,24 @@ Hidden instructions.`, {
         description: 'Save webpage to vault',
       },
     ]);
+  });
+
+  await test('getAllSkillSummaries lists disabled skills too (for settings toggles)', async () => {
+    const settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    settings.disabledSkills = ['hidden-skill'];
+    const toolRegistry = new ToolRegistry({} as any, settings);
+    const registry = new SkillRegistry(toolRegistry);
+    registry.registerBuiltinFromMd(`---
+name: hidden-skill
+description: Hidden command
+tools: []
+---
+x`, { execute: async () => ({ ok: true }) });
+
+    const names = registry.getAllSkillSummaries().map(s => s.name);
+    expect(names).toEqual(['hidden-skill']);
+    // 被禁用则不进 enabled 清单
+    expect(registry.getSkillSummaries().map(s => s.name)).toEqual([]);
   });
 }
 

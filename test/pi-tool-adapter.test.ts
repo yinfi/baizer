@@ -114,40 +114,6 @@ async function runTests() {
     expect(result.details.baizerResponse.approval_required).toBe(true);
   });
 
-  await test('activates skills through the use_skill pseudo-tool', async () => {
-    const registryCalls: any[] = [];
-    const skillScope = { allowedToolNames: null as Set<string> | null };
-    const piTools = adaptToolDefinitionsToPi({
-      definitions: [{ name: 'use_skill', description: 'Use skill', parameters: { type: 'object', properties: {} } }],
-      toolRegistry: {
-        get: () => undefined,
-        execute: async (name: string, args: any) => {
-          registryCalls.push({ name, args });
-          return { success: true };
-        },
-      } as any,
-      skillRegistry: {
-        activateSkill: (name: string) => ({
-          skill: { name },
-          instructions: 'Search instructions',
-          tools: [{ name: 'web_search' }],
-        }),
-      } as any,
-      workspaceEditService: null,
-      skillScope,
-    });
-
-    const result = await piTools[0].execute('call_1', { name: 'web-search' } as any);
-    expect(registryCalls).toEqual([]);
-    expect(skillScope.allowedToolNames instanceof Set).toBe(true);
-    expect(Array.from(skillScope.allowedToolNames || [])).toEqual(['web_search']);
-    expect(result.details.baizerResponse).toEqual({
-      action_required: 'Use the returned instructions immediately with the available tools to complete the user request.',
-      instructions: 'Search instructions',
-      available_tools: ['web_search'],
-    });
-  });
-
   await test('blocks tools outside active skill scope', async () => {
     const workspaceCalls: any[] = [];
     const piTools = adaptToolDefinitionsToPi({

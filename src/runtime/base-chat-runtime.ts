@@ -125,8 +125,18 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     }
     prompt += `${this.buildSlashCommandContract()}\n`;
     if (activeSkill) {
+      // 强制 / 斜杠激活：直接注入 pi formatSkillInvocation 包装的完整指令。
       prompt += `[Active Skill: ${activeSkill.skill.name}]\n`;
       prompt += `[Skill Instructions]\n${activeSkill.instructions}\n`;
+    } else {
+      // 自主发现（B 方案）：注入 pi 原生 skill 清单，模型按需 read_skill 拿完整正文。
+      const skillList = this.deps.skillRegistry.getSkillSummaryText();
+      if (skillList) {
+        prompt += `${skillList}\n`;
+        // 覆盖 pi 清单里“读取 skill 文件”的原生措辞：本插件的 skill 存放于隐藏目录，
+        // 普通文件读取工具够不到，必须用 read_skill(name)（name 取自上面清单）获取完整指令。
+        prompt += `[Skill Access] To load a skill's full instructions, call the read_skill tool with the skill's name (e.g. read_skill({"name":"web-search"})). Do not try to open the <location> path with file-reading tools — skill files live in a hidden folder those tools cannot access.\n`;
+      }
     }
     if (request.selection) {
       prompt += `[Selected Text: ${request.selection}]\n`;
@@ -264,28 +274,12 @@ If no listed command fits, suggest a plain-language request instead.
   }
 
   private buildSkillModeTools(activeSkill?: { tools: ToolDefinition[] } | null): ToolDefinition[] {
-    const tools = activeSkill?.tools?.length
+    // B 方案：不再注入 use_skill 元工具。skill 发现走 system prompt 的 <available_skills>
+    // 清单 + read_skill 工具（read_skill 已注册为核心工具，恒在全量集内）。
+    // 强制激活时仍收窄到该 skill 的工具子集（门控 Stage 2 交 PermissionService）。
+    return activeSkill?.tools?.length
       ? [...activeSkill.tools]
       : [...this.deps.toolRegistry.getAllDefinitions()];
-
-    const skillSummary = this.deps.skillRegistry.getSkillSummaryText();
-    const useSkillDesc = skillSummary
-      ? `Get detailed instructions for a specific workflow, then use the returned instructions with the existing tools.\n\n${skillSummary}`
-      : 'Get detailed instructions for a specific workflow.';
-
-    tools.push({
-      name: 'use_skill',
-      description: useSkillDesc,
-      parameters: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', description: 'Skill name' },
-        },
-        required: ['name'],
-      },
-    });
-
-    return tools;
   }
 
   private resolveRequestedSkill(request: ChatTurnRequest) {

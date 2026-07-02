@@ -108,6 +108,12 @@ export interface PluginSettings {
     allowPluginControl: boolean;
     confirmExecutions: boolean;
 
+    // --- 🧩 Skills ---
+    // Skill 可用性（discoverability），与 ⚡ Permissions（安全性）正交。
+    // 存放被用户显式禁用的 skill name；空数组 = 全部可用。
+    // 一个 skill 是否可用只由此决定；它暴露的工具能否执行/要不要批由 Permissions 决定。
+    disabledSkills: string[];
+
     // --- 🖥️ Terminal Appearance ---
     terminalTheme: 'hacker-green' | 'cyberpunk' | 'obsidian-native';
     terminalFont: string;
@@ -174,6 +180,9 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     allowPluginControl: false,
     confirmExecutions: true,
 
+    // Skills（空 = 全部可用，零迁移成本）
+    disabledSkills: [],
+
     // Terminal
     terminalTheme: 'hacker-green',
     terminalFont: 'JetBrains Mono',
@@ -188,8 +197,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 回答实质性问题前，先查询用户的知识库和笔记，基于用户的实际情况给出个性化回答。
 不要凭空生成通用内容。如果知识库中没有相关内容，正常回答即可。
 直接操作笔记（读写搜索）时优先使用 vault 工具。
-当用户请求明显匹配某个 workflow skill 时，优先激活对应 skill，并遵守该 skill 暴露的工具范围。
-如果当前 skill 不匹配任务，再调用 use_skill 切换到更合适的 workflow，并立即使用返回的 instructions 与工具完成任务。`,
+当任务匹配 <available_skills> 里某个 skill 的描述时，先用 read_skill 读取该 skill 的完整指令，再遵循指令与可用工具完成任务。`,
 
     // WeChat
     wechatInboxPath: 'Inbox.md',

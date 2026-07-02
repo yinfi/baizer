@@ -61,8 +61,11 @@ Web search instructions.`, {
     expect(matched?.name).toBe('web-search');
   });
 
-  await test('resolveByIntent returns null when no enabled skill keywords match', async () => {
-    const toolRegistry = new ToolRegistry({} as any, JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
+  await test('resolveByIntent returns null when the only matching skill is disabled via settings', async () => {
+    const settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    // B 方案：禁用走 settings.disabledSkills，不再有 registerBuiltinFromMd 的 enabledFn。
+    settings.disabledSkills = ['disabled-search'];
+    const toolRegistry = new ToolRegistry({} as any, settings);
     const registry = new SkillRegistry(toolRegistry);
 
     registry.registerBuiltinFromMd(`---
@@ -74,7 +77,7 @@ tools: []
 ---
 Disabled instructions.`, {
       execute: async () => ({ ok: true }),
-    }, () => false);
+    });
 
     const matched = registry.resolveByIntent('Please search the web for something');
 
