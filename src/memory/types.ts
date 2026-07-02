@@ -27,18 +27,6 @@ export interface UserProfile {
     };
 }
 
-export interface SessionSummary {
-    timestamp: number;
-    messageCount: number;
-    summary: string;
-}
-
-export interface ChatMessage {
-    role: 'user' | 'model';
-    content: string;
-    timestamp: number;
-}
-
 export type MemoryViewMode =
     | 'overview'
     | 'observations'

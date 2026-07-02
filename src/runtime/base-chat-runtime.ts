@@ -70,15 +70,11 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     let memoryContext = '';
     if (this.deps.memoryManager) {
       await this.deps.memoryManager.ready();
-      if (typeof (this.deps.memoryManager as any).recallForPrompt === 'function') {
-        memoryContext = await (this.deps.memoryManager as any).recallForPrompt({
-          query: request.userMessage,
-          source: request.source,
-          maxChars: 2500,
-        });
-      } else {
-        memoryContext = this.deps.memoryManager.buildContext();
-      }
+      memoryContext = await this.deps.memoryManager.recallForPrompt({
+        query: request.userMessage,
+        source: request.source,
+        maxChars: 2500,
+      });
     }
 
     const activeSkill = this.resolveRequestedSkill(request);
@@ -319,18 +315,11 @@ If no listed command fits, suggest a plain-language request instead.
 
     if (!this.deps.memoryManager) return;
 
-    const memoryManager = this.deps.memoryManager as any;
-    if (typeof memoryManager.retainTurn === 'function') {
-      await memoryManager.retainTurn({
-        userMessage: userRequest,
-        assistantMessage,
-        source: turn.generationPlan?.source || 'shell',
-      });
-      return;
-    }
-
-    await this.deps.memoryManager.recordMessage('user', userRequest);
-    await this.deps.memoryManager.recordMessage('model', assistantMessage);
+    await this.deps.memoryManager.retainTurn({
+      userMessage: userRequest,
+      assistantMessage,
+      source: turn.generationPlan?.source || 'shell',
+    });
   }
 }
 

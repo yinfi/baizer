@@ -147,7 +147,7 @@ export class ModelService {
         });
 
         if (this.hasValidConfig()) {
-            this.memoryManager = new MemoryManager(this.app, this.provider, this.buildMemoryOptions());
+            this.memoryManager = new MemoryManager(this.app, this.buildMemoryOptions());
         }
     }
 
@@ -561,13 +561,6 @@ export class ModelService {
         const retainLesson = (this.memoryManager as any).retainLesson;
         if (typeof retainLesson !== 'function') return null;
         return await retainLesson.call(this.memoryManager, input);
-    }
-
-    async learnFromMessages(messages: string[]): Promise<any> {
-        if (this.memoryManager) {
-            return await this.memoryManager.learnFromRecentMessages(messages);
-        }
-        return null;
     }
 
     getAvailableTools() {

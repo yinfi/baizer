@@ -1,6 +1,5 @@
 import { App } from 'obsidian';
 import { MemoryManager } from '../src/memory/memory-manager';
-import { IModelProvider } from '../src/models/interfaces';
 
 function expect(actual: any) {
   return {
@@ -39,30 +38,6 @@ async function test(name: string, fn: () => Promise<void>) {
   }
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function createModelProvider(promptLog: string[]): IModelProvider {
-  return {
-    id: 'mock',
-    name: 'Mock Provider',
-    configure: (_config: any) => undefined,
-    checkAvailability: async () => true,
-    generateContent: async (prompt: string) => {
-      promptLog.push(prompt);
-      if (prompt.includes('I am fixing the inbox autosave flow')) {
-        return { text: 'summary includes inbox autosave flow' };
-      }
-      if (prompt.includes('Analyze the following user message')
-        || prompt.includes('No profile information yet.')) {
-        return { text: '{}' };
-      }
-      return { text: 'summary missing session transcript' };
-    },
-  };
-}
-
 function createApp(adapterOverrides: Record<string, any> = {}) {
   const writes: Record<string, string> = {};
   const adapter = {
@@ -86,136 +61,9 @@ function createApp(adapterOverrides: Record<string, any> = {}) {
 async function runTests() {
   console.log('=== MemoryManager Tests ===');
 
-  await test('does not let delayed disk loads overwrite newly recorded messages', async () => {
-    const historyPath = '.obsidian/baizer-memory/chat-history.json';
-    const { app } = createApp({
-      exists: async (path: string) => path === historyPath,
-      read: async (path: string) => {
-        if (path === historyPath) {
-          await delay(30);
-          return JSON.stringify([{ role: 'user', content: 'old history', timestamp: 1 }]);
-        }
-        return '';
-      },
-    });
-
-    const promptLog: string[] = [];
-    const memory = new MemoryManager(app, createModelProvider(promptLog));
-    await memory.recordMessage('user', 'new history');
-    await delay(60);
-
-    expect(memory.chatHistory[memory.chatHistory.length - 1].content).toBe('new history');
-  });
-
-  await test('does not load chat history from the previous plugin memory directory', async () => {
-    const previousMemoryDir = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
-    const legacyHistoryPath = `${previousMemoryDir}/chat-history.json`;
-    const { app } = createApp({
-      exists: async (path: string) => path === legacyHistoryPath,
-      read: async (path: string) => {
-        if (path === legacyHistoryPath) {
-          return JSON.stringify([{ role: 'user', content: 'old brand history', timestamp: 1 }]);
-        }
-        return '';
-      },
-    });
-
-    const promptLog: string[] = [];
-    const memory = new MemoryManager(app, createModelProvider(promptLog));
-    await memory.ready();
-
-    expect(memory.chatHistory.length).toBe(0);
-  });
-
-  await test('imports profile and summaries from the previous plugin memory directory before loading context', async () => {
-    const previousMemoryDir = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
-    const files: Record<string, string> = {
-      [`${previousMemoryDir}/user-profile.json`]: JSON.stringify({
-        profession: 'Previous plugin engineer',
-        expertise: ['legacy memory'],
-        preferences: { language: 'zh-CN', responseStyle: 'concise', topics: ['plugins'] },
-        workflows: [],
-        context: { currentProjects: ['Profile migration'], goals: ['keep profile'], challenges: [] },
-        metadata: { createdAt: 1, updatedAt: 2, totalInteractions: 3, lastProfileUpdate: 2 },
-      }),
-      [`${previousMemoryDir}/session-summaries.json`]: JSON.stringify([
-        { timestamp: 10, messageCount: 2, summary: 'Legacy summary imported.' },
-      ]),
-    };
-    const { app } = createApp({
-      exists: async (path: string) => Object.prototype.hasOwnProperty.call(files, path),
-      read: async (path: string) => files[path],
-      write: async (path: string, content: string) => {
-        files[path] = content;
-      },
-      mkdir: async (path: string) => {
-        files[path] = '';
-      },
-    });
-
-    const memory = new MemoryManager(app, createModelProvider([]));
-    await memory.ready();
-
-    const context = memory.buildContext();
-    expect(context).toContain('Previous plugin engineer');
-    expect(context).toContain('Legacy summary imported.');
-    expect(files['.obsidian/baizer-memory/user-profile.json']).toContain('Previous plugin engineer');
-    expect(files['.obsidian/baizer-memory/session-summaries.json']).toContain('Legacy summary imported.');
-  });
-
-  await test('exposes ready() and uses current session transcript when summarizing', async () => {
-    const promptLog: string[] = [];
-    const { app, writes } = createApp();
-    const memory = new MemoryManager(app, createModelProvider(promptLog));
-    const readyFn = (memory as any).ready;
-
-    if (typeof readyFn !== 'function') {
-      throw new Error('ready() missing');
-    }
-
-    await readyFn.call(memory);
-    await memory.recordMessage('user', 'I am fixing the inbox autosave flow');
-    await memory.recordMessage('model', 'Let us add a queue and merge-safe rewrite');
-    await memory.clearSession();
-
-    const summaryPath = '.obsidian/baizer-memory/session-summaries.json';
-    const savedSummaries = JSON.parse(writes[summaryPath] || '[]');
-    expect(savedSummaries.length).toBe(1);
-    expect(savedSummaries[0].summary).toContain('inbox autosave flow');
-    expect(promptLog[promptLog.length - 1]).toContain('I am fixing the inbox autosave flow');
-  });
-
-  await test('buildContext applies a budget to long profile and summary blocks', async () => {
-    const promptLog: string[] = [];
-    const { app } = createApp();
-    const memory = new MemoryManager(app, createModelProvider(promptLog));
-    await memory.ready();
-
-    (memory as any).userProfile = {
-      name: 'User',
-      profession: 'Engineer',
-      expertise: ['x'.repeat(1500)],
-      preferences: { responseStyle: 'balanced' },
-      workflows: [],
-      context: { currentProjects: ['p'.repeat(1500)], goals: ['g'.repeat(1500)], challenges: [] },
-      metadata: { totalInteractions: 1, updatedAt: Date.now(), lastProfileUpdate: Date.now() },
-    };
-    (memory as any).sessionSummaries = [
-      { timestamp: Date.now(), messageCount: 5, summary: 's'.repeat(3000) },
-      { timestamp: Date.now(), messageCount: 6, summary: 't'.repeat(3000) },
-    ];
-
-    const context = memory.buildContext();
-
-    expect(context.length <= 4500).toBe(true);
-    expect(context).toContain('[User Profile]');
-    expect(context).toContain('[Recent Context]');
-  });
-
   await test('recallForPrompt returns relevant hindsight memories', async () => {
-    const promptLog: string[] = [];
     const { app } = createApp();
-    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    const memory = new MemoryManager(app);
     await memory.ready();
 
     await (memory as any).retainTurn({
@@ -236,9 +84,8 @@ async function runTests() {
   });
 
   await test('getMemoryView returns stats and sections for command and settings UI', async () => {
-    const promptLog: string[] = [];
     const { app } = createApp();
-    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    const memory = new MemoryManager(app);
     await memory.ready();
 
     await (memory as any).retainTurn({
@@ -258,9 +105,8 @@ async function runTests() {
   });
 
   await test('deleteMemoryById removes one retained memory', async () => {
-    const promptLog: string[] = [];
     const { app } = createApp();
-    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    const memory = new MemoryManager(app);
     await memory.ready();
 
     await (memory as any).retainTurn({
@@ -281,9 +127,8 @@ async function runTests() {
   });
 
   await test('privacy mode prevents retaining new turn memories', async () => {
-    const promptLog: string[] = [];
     const { app } = createApp();
-    const memory = new MemoryManager(app, createModelProvider(promptLog), { privacyMode: true } as any);
+    const memory = new MemoryManager(app, { privacyMode: true } as any);
     await memory.ready();
 
     await (memory as any).retainTurn({
@@ -303,9 +148,8 @@ async function runTests() {
   });
 
   await test('forgetMemory all removes retained hindsight memories from recall and disk', async () => {
-    const promptLog: string[] = [];
     const { app, writes } = createApp();
-    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    const memory = new MemoryManager(app);
     await memory.ready();
 
     await (memory as any).retainTurn({
@@ -328,9 +172,8 @@ async function runTests() {
   });
 
   await test('retainTurn redacts secrets before writing hindsight memories', async () => {
-    const promptLog: string[] = [];
     const { app, writes } = createApp();
-    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    const memory = new MemoryManager(app);
     await memory.ready();
 
     await (memory as any).retainTurn({
@@ -358,9 +201,8 @@ async function runTests() {
     ];
 
     for (const item of cases) {
-      const promptLog: string[] = [];
       const { app } = createApp();
-      const memory = new MemoryManager(app, createModelProvider(promptLog));
+      const memory = new MemoryManager(app);
       await memory.ready();
 
       await (memory as any).retainTurn({
@@ -383,9 +225,8 @@ async function runTests() {
   });
 
   await test('retainLesson stores a negative lesson recalled as an avoid line', async () => {
-    const promptLog: string[] = [];
     const { app } = createApp();
-    const memory = new MemoryManager(app, createModelProvider(promptLog));
+    const memory = new MemoryManager(app);
     await memory.ready();
 
     const lesson = await (memory as any).retainLesson({
@@ -411,9 +252,8 @@ async function runTests() {
   });
 
   await test('retainLesson is a no-op in privacy mode', async () => {
-    const promptLog: string[] = [];
     const { app } = createApp();
-    const memory = new MemoryManager(app, createModelProvider(promptLog), { privacyMode: true } as any);
+    const memory = new MemoryManager(app, { privacyMode: true } as any);
     await memory.ready();
 
     const lesson = await (memory as any).retainLesson({
