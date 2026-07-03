@@ -792,12 +792,12 @@ textarea.shell-input::placeholder {
     color: var(--text-on-accent);
     border: none;
     padding: 6px 12px;
-    border-radius: 4px;
-    font-size: 12px;
+    border-radius: var(--radius-s);
+    font-size: var(--font-ui-small);
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    transition: background-color 0.2s;
+    box-shadow: var(--shadow-s);
+    transition: background-color 0.15s ease;
 }
 
 .guardian-selection-btn:hover {
@@ -808,12 +808,12 @@ textarea.shell-input::placeholder {
 .guardian-chat-view {
     background-color: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow-s);
     display: flex;
     flex-direction: column;
-    width: 350px;
-    height: 400px;
+    width: min(420px, 90vw);
+    max-height: min(480px, 70vh);
     overflow: hidden;
 }
 
@@ -4085,4 +4085,88 @@ textarea.shell-input {
         animation: none !important;
     }
 }
+
+/* ==================== Selection AI 动作条 ==================== */
+.baizer-action-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary-alt);
+}
+.baizer-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-s);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+.baizer-action-btn:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+.baizer-action-btn .svg-icon { width: 15px; height: 15px; }
+.baizer-action-label { line-height: 1; }
+
+/* ==================== Selection AI 补全下拉 ==================== */
+.baizer-suggest-container {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    max-height: 180px;
+    overflow-y: auto;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow-s);
+    z-index: 210;
+}
+.guardian-input-wrapper { position: relative; }
+
+/* ==================== Selection AI 内联 diff ==================== */
+.baizer-inline-diff-old {
+    background: var(--background-modifier-error);
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+.baizer-inline-diff {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 4px;
+    padding: 1px 6px;
+    border-radius: var(--radius-s);
+    background: var(--background-modifier-success);
+    vertical-align: baseline;
+}
+.baizer-inline-diff.is-error { background: var(--background-modifier-error); }
+.baizer-inline-diff-new { color: var(--text-normal); white-space: pre-wrap; }
+.baizer-inline-diff-hint { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.baizer-inline-diff-actions { display: inline-flex; gap: 2px; }
+.baizer-inline-diff-btn {
+    display: inline-flex;
+    padding: 2px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-s);
+}
+.baizer-inline-diff-btn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.baizer-inline-diff-spinner {
+    width: 12px; height: 12px;
+    border: 2px solid var(--background-modifier-border);
+    border-top-color: var(--interactive-accent);
+    border-radius: 50%;
+    animation: baizer-spin 0.7s linear infinite;
+}
+@keyframes baizer-spin { to { transform: rotate(360deg); } }
 
