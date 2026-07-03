@@ -1,3 +1,15 @@
+/**
+ * video-transcription —— 音频转写（pi runtime 不覆盖的多模态旁路）。
+ *
+ * ⚠️ 这是全项目唯一有意保留的「非 pi runtime」LLM 调用点，属于显式例外：
+ * pi-ai 的 Model.input 只支持 ("text" | "image")，没有 audio 模态，
+ * UserMessage.content 也只接受 text/image 块，无法承载音频转写任务。
+ * 因此这里直接用 @google/generative-ai SDK（Gemini）或 OpenAI-compatible 的
+ * /audio/transcriptions 端点（Whisper），绕过 model-service 与 pi runtime。
+ *
+ * 不依赖 src/models 旧 provider 层——只用 ProviderConfig 读取凭证/端点。
+ * 若将来 pi-ai 支持 audio 输入，应将此并入统一 runtime。
+ */
 import { requestUrl } from 'obsidian';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ProviderConfig } from '../mcp/types';

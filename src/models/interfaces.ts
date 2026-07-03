@@ -1,14 +1,4 @@
 
-import { ProviderCapabilities } from '../runtime/provider-capabilities';
-
-export interface ModelConfig {
-    apiKey: string;
-    baseUrl?: string;
-    modelName: string;
-    systemPrompt?: string;
-    contextWindow?: number;
-}
-
 export interface ModelOption {
     value: string;
     label: string;
@@ -55,20 +45,19 @@ export interface ToolResult {
     response: any;
 }
 
-export interface GenerationResult {
-    text: string;
-    functionCalls?: ToolCall[];
-}
-
 export interface GenerationOptions {
     temperature?: number;
     maxTokens?: number;
+    /**
+     * @deprecated 保留字段以兼容调用方旧签名，但已不再消费。
+     * 无状态生成迁移到 pi completeSimple 后走原生 signal 硬中断；
+     * 超时应由调用方用 AbortSignal 表达，而非此毫秒数。
+     */
     timeoutMs?: number;
     skipGenerationPlan?: boolean;
     /**
-     * 软取消信号。当前非流式 provider 走 requestUrl/SDK，无法硬中断网络请求；
-     * 该 signal 仅用于让调用方在 abort 后立即解脱、丢弃结果（底层请求后台自然结束）。
-     * 由 ModelService.generate 消费，不会透传给 provider。
+     * 取消信号。无状态生成走 pi completeSimple，signal 直接透传给 pi 做原生硬中断
+     * （不再是旧的软取消——底层请求会真正被中止）。
      */
     signal?: AbortSignal;
 }
@@ -83,14 +72,3 @@ export type StreamEvent =
     | { type: 'done'; text: string; interrupted?: boolean }
     | { type: 'error'; message: string };
 
-export interface IModelProvider {
-    id: string;
-    name: string;
-
-    configure(config: ModelConfig): void;
-    getCapabilities(): ProviderCapabilities;
-    checkAvailability(): Promise<boolean>;
-    listModels?(): Promise<ModelOption[]>;
-
-    generateContent(prompt: string, systemPrompt?: string, options?: GenerationOptions): Promise<GenerationResult>;
-}

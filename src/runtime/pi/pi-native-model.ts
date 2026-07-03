@@ -10,7 +10,7 @@
  *   // 然后把 model 和 streamFn 传给 pi agentLoop。
  */
 
-import type { Model } from '@earendil-works/pi-ai';
+import type { AssistantMessage, Model } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 // streamSimple 只在运行期动态 import（与 pi-chat-runtime.ts 的 agentLoop 同模式），
 // 避免 ESM-only pi-ai 在 CJS 测试环境（tsconfig.test.json module=commonjs）下
@@ -131,6 +131,66 @@ export function buildOpenAICompatModel(
  *
  * @param apiKey - 用户配置的 API 密钥（来自 ProviderConfig.apiKey）
  */
+/**
+ * 无状态单次生成的可调参数。对齐 pi-ai SimpleStreamOptions 的子集：
+ * temperature/maxTokens 直接透传；signal 用 pi 原生硬中断（取代旧的 raceWithAbort 软取消）。
+ * reasoning 由 model.reasoning 决定，不在此处覆盖。
+ */
+export interface NativeCompleteOptions {
+  temperature?: number;
+  maxTokens?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * 无状态单次生成句柄：给定 prompt + 可选 systemPrompt，返回一段纯文本。
+ * 与会话型 StreamFn 并列，是无状态生成的 pi 原生出口（底层 completeSimple）。
+ */
+export type NativeCompleteFn = (
+  prompt: string,
+  systemPrompt?: string,
+  options?: NativeCompleteOptions,
+) => Promise<string>;
+
+/**
+ * 创建注入 apiKey 的无状态生成函数（对应 createNativeStreamFn 的一次性版本）。
+ *
+ * 底层用 pi-ai 的 completeSimple（Promise<AssistantMessage>），把 prompt 包成
+ * 单条 user 消息、systemPrompt 放进 Context.systemPrompt，最后抽出 AssistantMessage
+ * 里的 text 块拼接返回。无工具、无历史——纯「输入 prompt → 输出文本」。
+ *
+ * completeSimple 经动态 import 加载（与 createNativeStreamFn 同模式，规避 ESM-only 包
+ * 在 CJS 测试环境的加载问题）。
+ *
+ * @param model  - 由 buildGeminiModel / buildOpenAICompatModel 构造的 pi-ai Model
+ * @param apiKey - 用户配置的 API 密钥（不存入 Model，每次调用经 options 透传）
+ */
+export function createNativeCompleteFn(model: Model<any>, apiKey: string): NativeCompleteFn {
+  return async (prompt, systemPrompt, options) => {
+    const { completeSimple } = await import('@earendil-works/pi-ai');
+    const context = {
+      systemPrompt: systemPrompt ?? '',
+      messages: [{ role: 'user' as const, content: prompt, timestamp: Date.now() }],
+    };
+    const result: AssistantMessage = await completeSimple(model, context, {
+      apiKey,
+      ...(typeof options?.temperature === 'number' ? { temperature: options.temperature } : {}),
+      ...(typeof options?.maxTokens === 'number' ? { maxTokens: options.maxTokens } : {}),
+      ...(options?.signal ? { signal: options.signal } : {}),
+    });
+    return extractAssistantText(result);
+  };
+}
+
+/** 从 AssistantMessage 抽出所有 text 块并拼接（忽略 thinking / tool_call 块）。 */
+function extractAssistantText(message: AssistantMessage): string {
+  if (!message?.content?.length) return '';
+  return message.content
+    .filter((block): block is { type: 'text'; text: string } => (block as any)?.type === 'text')
+    .map(block => block.text)
+    .join('');
+}
+
 export function createNativeStreamFn(apiKey: string): StreamFn {
   // 返回一个与 StreamFn 签名完全兼容的闭包：
   // (model, context, options?) => AssistantMessageEventStream

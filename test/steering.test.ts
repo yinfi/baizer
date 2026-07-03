@@ -1,4 +1,4 @@
-import type { IModelProvider, StreamEvent, ToolDefinition, ToolResult } from '../src/models/interfaces';
+import type { StreamEvent, ToolDefinition, ToolResult } from '../src/models/interfaces';
 import type { ChatRuntimeDeps, NativeChatHandle, PreparedChatTurn } from '../src/runtime/runtime-types';
 import { SteeringController, filterPiToolsByActiveTools } from '../src/runtime/steering-controller';
 
@@ -154,25 +154,8 @@ function createDeps(options: {
     return eventsToPiStream(model, options.streamFactory(input, thisCall));
   };
   const nativeChatFactory = (): NativeChatHandle => ({ model, streamFn: streamFn as any });
-  const provider: IModelProvider = {
-    id: 'mock',
-    name: 'Mock',
-    configure() {
-      undefined;
-    },
-    getCapabilities() {
-      return { imageInput: false, customBaseUrl: false } as any;
-    },
-    async checkAvailability() {
-      return true;
-    },
-    async generateContent() {
-      return { text: '' };
-    },
-  };
   const deps = {
     sessionInputs,
-    provider,
     nativeChatFactory,
     memoryManager: null,
     skillRegistry: {

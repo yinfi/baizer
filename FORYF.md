@@ -1983,3 +1983,40 @@ UI 层：
 - 调整为统一到 parseBuiltinSkill（保留 sidecar），不用 pi loadSkills，避免丢数据，同时无需 ExecutionEnv 适配。
 - git rm --quiet 同步索引使 git ls-files 不再列已删文件。
 - 验证：build 通过；392 测试通过。唯一失败 memory-manager.test.ts 为 Stage 1 已确认的既有 memory 重构遗留，非本次范围。
+
+---
+### [2026-07-03 分析] pi-agent 动态列模型能力核查
+
+**1. 刚刚做了什么？**
+- 核查 `@earendil-works/pi-ai@0.75.5` 本地源码，确认 pi 是否支持运行时动态获取 provider 模型列表。结论：不支持。
+
+**2. 为什么要这么做？**
+- 验证 `model-catalog-service.ts` 剥离「列模型/探活」出 pi runtime 的架构决策是否成立。
+
+**3. 遇到了哪些问题？**
+- 无。证据明确：`getModels/getModel/getProviders` 全部从编译期常量 `models.generated.js`（538KB）查内存 Map，无任何运行时 REST 探测；provider 只引用 calculateCost/clampThinkingLevel。
+
+**4. 如何修复的？**
+- 无需修复。确认现有架构正确：pi 只做 LLM 推理，运行时列模型（尤其自定义 baseUrl 的 OpenAI-compat）必须走独立 REST 元数据层。可选优化方向：用 pi 的 getModel() 回填 contextWindow/能力位，减少 pi-native-model.ts 里的硬编码。
+
+---
+### [2026-07-03 06:15] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 完成 Baizer 向单一 pi-agent runtime 的全面迁移。无状态 `generate()` 从旧 `provider.generateContent()` 改走 pi `completeSimple`（新增 `createNativeCompleteFn`），连带 Guardian 快/深补全、knowledge 编译/本体发现、web-clipper/skill-generator 摘要、会话压缩摘要全部自动迁移。
+- 剥离 `model-catalog-service.ts`（列模型/探活/静态能力，纯 REST 无 LLM）与音频转写旁路（video-transcription 标注为 pi 不覆盖的多模态例外）。
+- 删除旧 `GeminiProvider`/`OpenAIProvider`、孤儿 `chatCompletionStream`、`IModelProvider`/`GenerationResult`/`ModelConfig` 类型、`ChatRuntimeDeps.provider`；移除 `raceWithAbort` 软取消，改用 pi 原生 signal 硬中断。
+- 更新 5 个测试的 provider mock，新增 completeFn 注入点。`npm run build` + `npm test`（82 文件全过）。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 消除双 LLM 路径（会话走 pi、无状态走旧 provider）带来的维护与行为漂移风险，收敛到单一 runtime。pi 无法承载的两项（动态列模型无 REST 探测、无 audio 模态）作为显式标注的旁路保留，而非隐性遗留。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- brand 测试遍历 `git ls-files` 读取所有跟踪文件，删除的 gemini.ts/openai.ts 仍被 git 跟踪导致 ENOENT。
+- base-chat-runtime.test.ts 有 7 处 `provider: {} as any` 作为 deps 字段，类型移除后触发 excess-property 报错。
+- tsc 对 typebox `.d.mts` 报解析错误（pi-ai 传递依赖的预存问题，非本次引入）。
+
+**4. 如何修复的？ (How was it fixed?)**
+- `git rm --cached` 登记两个 provider 文件的删除，使 `git ls-files` 不再列出。
+- 批量移除测试里的 `provider` deps 字段。
+- 确认 typebox 报错为预存、且不影响 src/test/main（这些目录 tsc 零错误），予以豁免。

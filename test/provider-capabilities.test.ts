@@ -22,13 +22,12 @@ async function test(name: string, fn: () => Promise<void>) {
 
 async function runTests() {
   console.log('=== Provider Capability Tests ===');
-  const { GeminiProvider } = await import('../src/models/gemini');
-  const { OpenAIProvider } = await import('../src/models/openai');
+  // 迁移后能力声明由 model-catalog-service 按 ProviderConfig.type 静态返回，
+  // 不再来自已删除的 GeminiProvider/OpenAIProvider 实例。
+  const { getProviderCapabilities } = await import('../src/services/model-catalog-service');
 
-  await test('Gemini provider declares image and thinking support', async () => {
-    const provider = new GeminiProvider();
-
-    expect(provider.getCapabilities()).toEqual({
+  await test('gemini config declares image and thinking support', async () => {
+    expect(getProviderCapabilities({ type: 'gemini' } as any)).toEqual({
       supportsThinking: true,
       supportsModelListing: true,
       supportsImageInput: true,
@@ -37,15 +36,23 @@ async function runTests() {
     });
   });
 
-  await test('OpenAI-compatible provider declares custom base url support', async () => {
-    const provider = new OpenAIProvider();
-
-    expect(provider.getCapabilities()).toEqual({
+  await test('openai-compatible config declares custom base url support', async () => {
+    expect(getProviderCapabilities({ type: 'openai-compatible' } as any)).toEqual({
       supportsThinking: true,
       supportsModelListing: true,
       supportsImageInput: false,
       supportsToolCalling: true,
       supportsCustomBaseUrl: true,
+    });
+  });
+
+  await test('missing config falls back to gemini capabilities', async () => {
+    expect(getProviderCapabilities(undefined)).toEqual({
+      supportsThinking: true,
+      supportsModelListing: true,
+      supportsImageInput: true,
+      supportsToolCalling: true,
+      supportsCustomBaseUrl: false,
     });
   });
 }

@@ -1,6 +1,6 @@
 import type { Model } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
-import type { ChatContextItem, IModelProvider, PriorChatMessage, StreamEvent, ToolDefinition } from '../models/interfaces';
+import type { ChatContextItem, PriorChatMessage, StreamEvent, ToolDefinition } from '../models/interfaces';
 import type { MemoryManager } from '../memory/memory-manager';
 import type { UserProfile } from '../memory/types';
 import type { ObsidianContextSnapshot } from '../services/obsidian-context-service';
@@ -38,7 +38,6 @@ export interface NativeChatHandle {
 export type NativeChatFactory = () => NativeChatHandle;
 
 export interface ChatRuntimeDeps {
-  provider: IModelProvider;
   /**
    * 原生 LLM 直连句柄工厂（Phase 2 接入点）。
    * 生产由 model-service 依据当前 ProviderConfig 构造（gemini→buildGeminiModel，

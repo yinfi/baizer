@@ -494,24 +494,18 @@ async function runTests() {
     ]);
   });
 
-  await test('getProviderCapabilities proxies the active provider capability declaration', async () => {
+  await test('getProviderCapabilities returns static capabilities for the active provider type', async () => {
     const service: any = Object.create(ModelService.prototype);
-    service.provider = {
-      getCapabilities: () => ({
-        supportsThinking: true,
-        supportsModelListing: true,
-        supportsImageInput: false,
-        supportsToolCalling: true,
-        supportsCustomBaseUrl: false,
-      }),
-    };
+    // openai-compatible：不支持图像输入、支持自定义 baseUrl（model-catalog 静态表）。
+    service.settings = { activeProvider: 'openai' };
+    service.getActiveProviderConfig = () => ({ type: 'openai-compatible' });
 
     expect(service.getProviderCapabilities()).toEqual({
       supportsThinking: true,
       supportsModelListing: true,
       supportsImageInput: false,
       supportsToolCalling: true,
-      supportsCustomBaseUrl: false,
+      supportsCustomBaseUrl: true,
     });
   });
 
@@ -521,11 +515,9 @@ async function runTests() {
 
     service.hasValidConfig = () => true;
     service.getActiveProviderConfig = () => ({ label: 'Test Provider' });
-    service.provider = {
-      generateContent: async (prompt: string, systemPrompt?: string) => {
-        calls.push({ prompt, systemPrompt });
-        return { text: '{"type":"none"}' };
-      },
+    service.buildNativeCompleteFn = () => async (prompt: string, systemPrompt?: string) => {
+      calls.push({ prompt, systemPrompt });
+      return '{"type":"none"}';
     };
     service.memoryManager = {
       getProfile: () => ({
@@ -569,11 +561,9 @@ async function runTests() {
 
     service.hasValidConfig = () => true;
     service.getActiveProviderConfig = () => ({ label: 'Test Provider' });
-    service.provider = {
-      generateContent: async (prompt: string, systemPrompt?: string, options?: any) => {
-        calls.push({ prompt, systemPrompt, options });
-        return { text: '{"type":"completion","suggestion":"raw continuation"}' };
-      },
+    service.buildNativeCompleteFn = () => async (prompt: string, systemPrompt?: string, options?: any) => {
+      calls.push({ prompt, systemPrompt, options });
+      return '{"type":"completion","suggestion":"raw continuation"}';
     };
     service.memoryManager = {
       getProfile: () => null,
@@ -613,11 +603,9 @@ async function runTests() {
 
     service.hasValidConfig = () => true;
     service.getActiveProviderConfig = () => ({ label: 'Test Provider' });
-    service.provider = {
-      generateContent: async (prompt: string, systemPrompt?: string, options?: any) => {
-        calls.push({ prompt, systemPrompt, options });
-        return { text: '{"type":"none"}' };
-      },
+    service.buildNativeCompleteFn = () => async (prompt: string, systemPrompt?: string, options?: any) => {
+      calls.push({ prompt, systemPrompt, options });
+      return '{"type":"none"}';
     };
     service.memoryManager = {
       getProfile: () => null,
@@ -647,10 +635,10 @@ async function runTests() {
       },
     );
 
+    // timeoutMs 已不再透传给生成层（pi 用原生 signal 硬中断），仅 temperature/maxTokens 保留。
     expect(calls[0].options).toEqual({
       temperature: 0.2,
       maxTokens: 64,
-      timeoutMs: 5000,
     });
   });
 
@@ -673,13 +661,9 @@ async function runTests() {
     service.modelListCache = new Map();
     service.modelListCacheTtlMs = 10 * 60 * 1000;
     service.getActiveProviderConfig = () => service.settings.providers.openai;
-    service.provider = {
-      listModels: async () => {
-        listModelsCalled = true;
-        return [];
-      },
-    };
 
+    // apiKey 为空 → getAvailableModels 的守卫直接跳过 model-catalog 的网络列模型，
+    // 回落到 fallback 列表。listModelsCalled 保持 false 即证明未触发任何网络查询。
     const models = await service.getAvailableModels(true);
 
     expect(listModelsCalled).toEqual(false);

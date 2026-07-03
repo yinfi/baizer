@@ -3,15 +3,14 @@ import { PluginSettings, ProviderConfig } from '../mcp/types';
 import { MemoryManager } from '../memory/memory-manager';
 import { MemoryMutationResult, MemoryView, MemoryViewRequest, UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
-import { GenerationOptions, IModelProvider, ModelOption, PriorChatMessage, ToolDefinition, StreamEvent } from '../models/interfaces';
-import { GeminiProvider } from '../models/gemini';
-import { OpenAIProvider } from '../models/openai';
+import { GenerationOptions, ModelOption, PriorChatMessage, ToolDefinition, StreamEvent } from '../models/interfaces';
 import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry, SkillSummary } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
-import { buildGeminiModel, buildOpenAICompatModel, createNativeStreamFn } from '../runtime/pi/pi-native-model';
+import { buildGeminiModel, buildOpenAICompatModel, createNativeStreamFn, createNativeCompleteFn, NativeCompleteFn } from '../runtime/pi/pi-native-model';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
+import * as modelCatalog from './model-catalog-service';
 import { SteeringController } from '../runtime/steering-controller';
 import { SessionStore, type PersistedSessionRef } from '../runtime/pi/session-store';
 import { createVaultFileAdapter } from '../runtime/pi/vault-session-fs';
@@ -27,7 +26,6 @@ import { OperationAuditLog } from './operation-audit-log';
 import { WorkspaceEditService } from './workspace-edit-service';
 
 export class ModelService {
-    private provider: IModelProvider;
     private memoryManager: MemoryManager | null = null;
     private readonly modelListCache = new Map<string, { timestamp: number; models: ModelOption[] }>();
     private readonly modelListCacheTtlMs = 10 * 60 * 1000;
@@ -118,33 +116,17 @@ export class ModelService {
         this.settings.sessionRef = ref;
     }
 
+    /**
+     * 初始化 provider 相关状态。迁移到 pi runtime 后不再持有 provider 实例——
+     * LLM 推理（会话 + 无状态）全部经 pi，provider 元数据（列模型/探活/能力）经
+     * model-catalog-service。此处仅按当前 config 是否有效重建 memoryManager。
+     */
     private initializeProvider() {
         const config = this.getActiveProviderConfig();
         if (!config) {
             logger.error(`Unknown provider: ${this.settings.activeProvider}`, null, 'ModelService');
-            this.provider = new GeminiProvider();
             return;
         }
-
-        switch (config.type) {
-            case 'gemini':
-                this.provider = new GeminiProvider();
-                break;
-            case 'openai-compatible':
-                this.provider = new OpenAIProvider();
-                break;
-            default:
-                logger.error(`Unknown provider type: ${config.type}`, null, 'ModelService');
-                this.provider = new GeminiProvider();
-        }
-
-        this.provider.configure({
-            apiKey: config.apiKey,
-            baseUrl: config.baseUrl,
-            modelName: config.model,
-            systemPrompt: this.settings.systemPrompt,
-            contextWindow: this.settings.contextWindow,
-        });
 
         if (this.hasValidConfig()) {
             this.memoryManager = new MemoryManager(this.app, this.buildMemoryOptions());
@@ -247,7 +229,9 @@ export class ModelService {
     }
 
     async checkAvailability(): Promise<boolean> {
-        return await this.provider.checkAvailability();
+        const config = this.getActiveProviderConfig();
+        if (!config) return false;
+        return await modelCatalog.checkAvailability(config);
     }
 
     async getAvailableModels(forceRefresh: boolean = false): Promise<ModelOption[]> {
@@ -266,9 +250,9 @@ export class ModelService {
         }
 
         let models: ModelOption[] = [];
-        if (config.apiKey?.trim() && typeof this.provider.listModels === 'function') {
+        if (config.apiKey?.trim()) {
             try {
-                models = await this.provider.listModels();
+                models = await modelCatalog.listModels(config);
             } catch (error: any) {
                 logger.warn(
                     `Failed to fetch model list for provider ${providerId}: ${error?.message || 'Unknown error'}`,
@@ -440,7 +424,9 @@ export class ModelService {
         }
 
         try {
-            const { skipGenerationPlan, signal, ...providerOptions } = options ?? {};
+            // timeoutMs 不再单独消费：pi 的无状态生成走原生 signal 硬中断，
+            // 旧的 requestUrl 超时语义由调用方用 AbortSignal 表达（见下）。
+            const { skipGenerationPlan, signal, timeoutMs, ...providerOptions } = options ?? {};
             if (signal?.aborted) {
                 throw new DOMException('Generation aborted', 'AbortError');
             }
@@ -453,17 +439,15 @@ export class ModelService {
                     userProfile ?? this.getUserProfile(),
                 )
                 : prompt;
-            const generation = this.provider.generateContent(
-                finalPrompt,
-                systemPrompt,
-                Object.keys(providerOptions).length > 0 ? providerOptions : undefined,
-            );
-            // 软取消：signal abort 时立即 reject，让调用方解脱。
-            // 底层 requestUrl/SDK 无法硬中断，请求会在后台自然结束、结果被丢弃。
-            const result = signal
-                ? await this.raceWithAbort(generation, signal)
-                : await generation;
-            if (!result.text?.trim()) {
+            // 无状态生成走 pi 原生 completeSimple（取代旧 provider.generateContent）。
+            // signal 直接透传给 pi 做硬中断，不再需要 raceWithAbort 软取消。
+            const complete = this.buildNativeCompleteFn();
+            const text = await complete(finalPrompt, systemPrompt, {
+                ...(typeof providerOptions.temperature === 'number' ? { temperature: providerOptions.temperature } : {}),
+                ...(typeof providerOptions.maxTokens === 'number' ? { maxTokens: providerOptions.maxTokens } : {}),
+                ...(signal ? { signal } : {}),
+            });
+            if (!text?.trim()) {
                 const config = this.getActiveProviderConfig();
                 logger.warn('Stateless generation returned empty text', 'ModelService.generate', {
                     source,
@@ -473,41 +457,15 @@ export class ModelService {
                     promptLength: finalPrompt.length,
                     hasSystemPrompt: !!systemPrompt,
                     maxTokens: providerOptions.maxTokens,
-                    timeoutMs: providerOptions.timeoutMs,
                 });
             }
-            return result.text;
+            return text;
         } catch (e: any) {
             // 软取消是正常流程，不当错误记录，避免日志噪音。
             if (e?.name === 'AbortError') throw e;
             logger.error('Stateless generation failed', e, 'ModelService.generate');
             throw e;
         }
-    }
-
-    /**
-     * 让一个 Promise 与 abort 信号竞速：signal abort 时立即以 AbortError reject。
-     * 底层请求无法硬中断，仍会在后台跑完，但其结果不再被调用方使用。
-     */
-    private raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-        return new Promise<T>((resolve, reject) => {
-            const onAbort = () => reject(new DOMException('Generation aborted', 'AbortError'));
-            if (signal.aborted) {
-                onAbort();
-                return;
-            }
-            signal.addEventListener('abort', onAbort, { once: true });
-            promise.then(
-                (value) => {
-                    signal.removeEventListener('abort', onAbort);
-                    resolve(value);
-                },
-                (error) => {
-                    signal.removeEventListener('abort', onAbort);
-                    reject(error);
-                },
-            );
-        });
     }
 
     async clearSession() {
@@ -577,7 +535,7 @@ export class ModelService {
     }
 
     getProviderCapabilities(): ProviderCapabilities {
-        return this.provider.getCapabilities();
+        return modelCatalog.getProviderCapabilities(this.getActiveProviderConfig());
     }
 
     async executeSlashSkillCommand(command: string, input: string): Promise<any> {
@@ -655,7 +613,6 @@ export class ModelService {
 
     createChatRuntime() {
         return createChatRuntime({
-            provider: this.provider,
             nativeChatFactory: () => this.buildNativeChatHandle(),
             memoryManager: this.memoryManager,
             toolRegistry: this.toolRegistry,
@@ -686,6 +643,22 @@ export class ModelService {
             model,
             streamFn: createNativeStreamFn(config.apiKey),
         };
+    }
+
+    /**
+     * 构造无状态生成函数（Phase 1）。与 buildNativeChatHandle 同源：依当前 ProviderConfig.type
+     * 造 model，用同一 apiKey 造 completeFn（底层 pi completeSimple）。
+     * 每次 generate() 调用一次，故 settings 运行期改动（切 provider/model/key）下次即生效。
+     */
+    private buildNativeCompleteFn(): NativeCompleteFn {
+        const config = this.getActiveProviderConfig();
+        if (!config) {
+            throw new Error(`Unknown provider: ${this.settings.activeProvider}`);
+        }
+        const model = config.type === 'gemini'
+            ? buildGeminiModel(config, this.settings.contextWindow, this.settings.thinkingLevel)
+            : buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
+        return createNativeCompleteFn(model, config.apiKey);
     }
 
     /**

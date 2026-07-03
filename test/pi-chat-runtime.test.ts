@@ -1,4 +1,4 @@
-import type { IModelProvider, StreamEvent, ToolDefinition, ToolResult } from '../src/models/interfaces';
+import type { StreamEvent, ToolDefinition, ToolResult } from '../src/models/interfaces';
 import type { ChatRuntimeDeps, NativeChatHandle, PreparedChatTurn } from '../src/runtime/runtime-types';
 
 function expect(actual: any) {
@@ -195,22 +195,6 @@ function createDeps(options: {
     return eventsToPiStream(model, options.streamFactory(input));
   };
   const nativeChatFactory = (): NativeChatHandle => ({ model, streamFn: streamFn as any });
-  const provider: IModelProvider = {
-    id: 'mock',
-    name: 'Mock',
-    configure() {
-      undefined;
-    },
-    getCapabilities() {
-      return { imageInput: false, customBaseUrl: false } as any;
-    },
-    async checkAvailability() {
-      return true;
-    },
-    async generateContent() {
-      return { text: '' };
-    },
-  };
   const skillRegistry = options.skillRegistry || {
     getSkillSummaryText: () => '',
     activateSkill: (name: string) => ({
@@ -224,7 +208,6 @@ function createDeps(options: {
     registryCalls,
     workspaceCalls,
     capturedReasoning: () => lastReasoning,
-    provider,
     nativeChatFactory,
     memoryManager: options.memoryManager || null,
     skillRegistry,

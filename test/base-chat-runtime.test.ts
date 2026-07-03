@@ -49,7 +49,6 @@ async function runTests() {
 
   await test('prepareTurn builds a prompt with memory, context, selection, and user request', async () => {
     const runtime = createChatRuntime({
-      provider: {} as any,
       memoryManager: {
         ready: async () => { },
         buildContext: () => '[Memory Context]',
@@ -81,7 +80,6 @@ async function runTests() {
   await test('runtime recalls relevant memory during prepareTurn', async () => {
     const memoryCalls: any[] = [];
     const runtime = createChatRuntime({
-      provider: {} as any,
       memoryManager: {
         ready: async () => undefined,
         buildContext: () => '',
@@ -118,7 +116,6 @@ async function runTests() {
 
   await test('prepareTurn activates the matched intent skill and scopes turn tools', async () => {
     const runtime = createChatRuntime({
-      provider: {} as any,
       memoryManager: null,
       toolRegistry: {
         getAllDefinitions: () => [
@@ -158,7 +155,6 @@ async function runTests() {
 
   await test('prepareTurn adds a file-operation contract for write requests', async () => {
     const runtime = createChatRuntime({
-      provider: {} as any,
       memoryManager: null,
       toolRegistry: {
         getAllDefinitions: () => [
@@ -186,7 +182,6 @@ async function runTests() {
 
   await test('prepareTurn constrains assistant-visible slash commands to registered commands', async () => {
     const runtime = createChatRuntime({
-      provider: {} as any,
       memoryManager: null,
       toolRegistry: {
         getAllDefinitions: () => [],
@@ -220,7 +215,6 @@ async function runTests() {
 
   await test('prepareTurn injects generation-plan metadata for rewrite flows', async () => {
     const runtime = createChatRuntime({
-      provider: {} as any,
       memoryManager: null,
       toolRegistry: {
         getAllDefinitions: () => [],
@@ -283,7 +277,6 @@ async function runTests() {
   });
 
   const makeContextRuntime = () => createChatRuntime({
-    provider: {} as any,
     memoryManager: null,
     toolRegistry: {
       getAllDefinitions: () => [],
