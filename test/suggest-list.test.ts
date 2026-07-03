@@ -43,19 +43,20 @@ async function runTests() {
     expect(list.isOpen()).toBe(true);
   });
 
-  await test('Enter 选中回填文本并触发 onApply', () => {
+  await test('Enter 选中 file 项:走 contextItem 分支并触发 onApply', () => {
     const container = new FakeEl();
     const applied: any[] = [];
     const list = new SuggestList({
       container: container as any,
-      provideItems: () => [{ label: 'Note', desc: 'Note.md', value: 'Note.md', source: 'local' }],
+      provideItems: () => [{ label: 'Note', desc: 'Note.md', value: 'Note.md', source: 'file', kind: 'file' }],
       onApply: (sel) => applied.push(sel),
     });
     list.handleInput('@No', 3);
     const handled = list.handleKeyDown({ key: 'Enter', preventDefault() {} } as any);
     expect(handled).toBe(true);
     expect(applied.length).toBe(1);
-    expect(applied[0].text).toBe('Note.md ');
+    expect(applied[0].contextItem.id).toBe('file:Note.md');
+    expect(applied[0].contextItem.type).toBe('file');
   });
 
   await test('无 trigger 时关闭', () => {
