@@ -9,9 +9,9 @@ import { IPlugin, PLUGIN_ID, PLUGIN_NAME, VIEW_TYPE_SHELL } from '../mcp/types';
 import { StreamEvent } from '../models/interfaces';
 import { buildCommandSuggestions, CommandSuggestion } from './command-suggestions';
 import { ContextController } from './controllers/context-controller';
-import { detectSuggestionTrigger, InputController, SuggestionType } from './controllers/input-controller';
+import { InputController, SuggestionType, SuggestionItem, SuggestionSelection } from './controllers/input-controller';
 import { StreamController } from './controllers/stream-controller';
-import { CommandDropdown } from './components/command-dropdown';
+import { SuggestList } from './components/suggest-list';
 import { ContextChips } from './components/context-chips';
 import { InputToolbar, ThinkingLevel } from './components/input-toolbar';
 import { AttachmentModal, AttachmentResult } from './components/attachment-modal';
@@ -46,8 +46,7 @@ export class ShellView extends ItemView {
     private inputEl: HTMLTextAreaElement;
     private suggestionContainer: HTMLElement;
     private currentSelection: string = "";
-    private inputController: InputController;
-    private commandDropdown: CommandDropdown | null = null;
+    private suggestList!: SuggestList;
     private inputToolbar: InputToolbar | null = null;
     private contextController: ContextController;
     private streamController: StreamController;
@@ -113,7 +112,7 @@ export class ShellView extends ItemView {
     };
 
     private handleKeyDownBound = async (e: KeyboardEvent) => {
-        if (this.inputController.getIsSuggesting() && this.commandDropdown?.handleKeyDown(e)) {
+        if (this.suggestList.handleKeyDown(e)) {
             return;
         }
 
@@ -164,7 +163,6 @@ export class ShellView extends ItemView {
             getCurrentNotePath: () => this.getCurrentNotePath(),
         });
         this.contextManager = new ContextManager();
-        this.inputController = new InputController();
         this.contextController = new ContextController({
             app: this.app,
             contextManager: this.contextManager,
@@ -289,10 +287,10 @@ export class ShellView extends ItemView {
 
         // Suggestion Popup
         this.suggestionContainer = this.createSuggestionContainer(inputContainer);
-        this.commandDropdown = new CommandDropdown(this.suggestionContainer, {
-            onNavigate: (dir) => this.navigateSuggestions(dir),
-            onSelect: (_item, index) => this.selectSuggestionAt(index),
-            onCancel: () => this.hideSuggestions(),
+        this.suggestList = new SuggestList({
+            container: this.suggestionContainer,
+            provideItems: (type, query) => this.buildSuggestionItems(type, query),
+            onApply: (selection) => this.applySuggestionSelection(selection),
         });
 
         // Input wrapper (contains the textarea)
@@ -365,25 +363,17 @@ export class ShellView extends ItemView {
 
     handleInput() {
         this.updateInputToolbarCapabilities();
-        const trigger = detectSuggestionTrigger(this.inputEl.value, this.inputEl.selectionStart);
-        if (trigger) {
-            this.showSuggestions(trigger.type, trigger.query);
-        } else {
-            this.hideSuggestions();
-        }
+        this.suggestList.handleInput(this.inputEl.value, this.inputEl.selectionStart);
     }
 
-    showSuggestions(type: SuggestionType, query: string) {
-        this.suggestionContainer.empty();
-        this.suggestionContainer.style.display = 'block';
-        let suggestions;
+    private buildSuggestionItems(type: SuggestionType, query: string): SuggestionItem[] {
         if (type === 'command') {
             const skillCommands = this.modelService.getSkillCommands().map(command => ({
                 command: command.command,
                 description: command.description,
             }));
             const skillCommandLabels = new Set(skillCommands.map(command => command.command));
-            suggestions = buildCommandSuggestions(
+            return buildCommandSuggestions(
                 this.localCommandSuggestions,
                 skillCommands,
                 query,
@@ -391,8 +381,9 @@ export class ShellView extends ItemView {
                 ...item,
                 source: skillCommandLabels.has(item.label) ? 'skill' as const : 'local' as const,
             }));
-        } else if (type === 'skill') {
-            suggestions = this.modelService.getSkillCommands()
+        }
+        if (type === 'skill') {
+            return this.modelService.getSkillCommands()
                 .filter(command =>
                     command.skillName.toLowerCase().includes(query.toLowerCase()) ||
                     command.command.toLowerCase().includes(query.toLowerCase()))
@@ -403,58 +394,22 @@ export class ShellView extends ItemView {
                     value: command.command,
                     source: 'skill' as const,
                 }));
-        } else {
-            const scopeSuggestions = this.buildContextScopeSuggestions(query);
-            const files = this.app.vault.getFiles();
-            const fileSuggestions = files
-                .filter(f => f.path.toLowerCase().includes(query.toLowerCase()))
-                .slice(0, 10)
-                .map(f => ({
-                    label: f.basename,
-                    desc: f.path,
-                    value: f.path,
-                    source: 'file' as const,
-                    kind: 'file' as const,
-                }));
-            suggestions = [...scopeSuggestions, ...fileSuggestions];
         }
-
-        this.inputController.setSuggestions(type, suggestions);
-
-        if (this.inputController.getSuggestions().length === 0) {
-            this.hideSuggestions();
-            return;
-        }
-
-        this.renderSuggestions();
+        const scopeSuggestions = this.buildContextScopeSuggestions(query);
+        const fileSuggestions = this.app.vault.getFiles()
+            .filter(f => f.path.toLowerCase().includes(query.toLowerCase()))
+            .slice(0, 10)
+            .map(f => ({
+                label: f.basename,
+                desc: f.path,
+                value: f.path,
+                source: 'file' as const,
+                kind: 'file' as const,
+            }));
+        return [...scopeSuggestions, ...fileSuggestions];
     }
 
-    renderSuggestions() {
-        const type = this.inputController.getSuggestionType();
-        if (!type) return;
-
-        this.commandDropdown?.update({
-            type,
-            items: this.inputController.getSuggestions(),
-            selectedIndex: this.inputController.getSelectedIndex(),
-        });
-    }
-
-    navigateSuggestions(dir: number) {
-        this.inputController.navigate(dir);
-        this.renderSuggestions();
-
-        // Scroll into view
-        const selectedEl = this.suggestionContainer.children[this.inputController.getSelectedIndex()] as HTMLElement;
-        if (selectedEl) {
-            selectedEl.scrollIntoView({ block: 'nearest' });
-        }
-    }
-
-    selectSuggestion() {
-        const selection = this.inputController.selectSuggestion(this.inputEl.value, this.inputEl.selectionStart);
-        if (!selection) return;
-
+    private applySuggestionSelection(selection: SuggestionSelection) {
         this.inputEl.value = selection.text;
         this.inputEl.selectionStart = this.inputEl.selectionEnd = selection.cursor;
         if (selection.contextItem) {
@@ -465,8 +420,6 @@ export class ShellView extends ItemView {
             this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
             void this.refreshKnowledgeStatusPanel();
         }
-
-        this.hideSuggestions();
         this.inputEl.focus();
     }
 
@@ -526,18 +479,6 @@ export class ShellView extends ItemView {
         return suggestions
             .filter(item => item.label.toLowerCase().includes(`@${normalized}`))
             .slice(0, 10);
-    }
-
-    private selectSuggestionAt(index: number) {
-        while (this.inputController.getSelectedIndex() !== index) {
-            this.inputController.navigate(1);
-        }
-        this.selectSuggestion();
-    }
-
-    hideSuggestions() {
-        this.inputController.hide();
-        this.commandDropdown?.hide();
     }
 
     // ==================== Chat Logic ====================
