@@ -9,7 +9,8 @@ import { ghostTextExtension, showGhostText, hideGhostText, showThinkingGhostText
 import { GuardianModal } from './src/ui/guardian-modal';
 import { requestGuardianResponse } from './src/ui/guardian-request';
 import { GuardianCompletionService, getGuardianAutoDelayMs, shouldScheduleDeepEscalation, GUARDIAN_WEAK_COMPLETION_REASON } from './src/ui/guardian-completion';
-import { selectionMenuExtension } from './src/ui/selection-menu';
+import { selectionMenuExtension, handleInlineDiffAccept, handleInlineDiffReject, handleInlineDiffRetry } from './src/ui/selection-menu';
+import { inlineDiffExtension } from './src/ui/selection-ai/inline-diff';
 import { KnowledgeRuntime } from './src/knowledge/runtime';
 import { ToolRegistry } from './src/skills/tool-registry';
 import { SkillRegistry } from './src/skills/skill-registry';
@@ -199,7 +200,12 @@ export default class BaizerPlugin extends Plugin {
             this.registerEditorExtension([
                 guardianGutterExtension(),
                 ghostTextExtension(),
-                selectionMenuExtension(this.app, this.modelService)
+                selectionMenuExtension(this.app, this.modelService),
+                inlineDiffExtension({
+                    onAccept: handleInlineDiffAccept,
+                    onReject: handleInlineDiffReject,
+                    onRetry: handleInlineDiffRetry,
+                }),
             ]);
             this.editorExtensionsRegistered = true;
         }
