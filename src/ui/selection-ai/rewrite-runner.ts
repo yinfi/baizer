@@ -39,7 +39,7 @@ export function runRewrite(
     .generate(
       prompt,
       undefined,          // systemPrompt
-      'guardian',         // source — 无状态改写，不走 shell 生成计划
+      'selection-menu',   // source — 本场景专用；配合 skipGenerationPlan 跳过生成计划包装
       undefined,          // obsidianContext
       undefined,          // userProfile
       { signal: ac.signal, skipGenerationPlan: true },
