@@ -1,10 +1,21 @@
-import { App, MarkdownRenderer, Component, Notice } from 'obsidian';
+import { App, MarkdownRenderer, Component, Notice, setIcon } from 'obsidian';
 import { EditorView, showTooltip } from '@codemirror/view';
 import { StateField, Extension, StateEffect, EditorState } from '@codemirror/state';
 import { ModelService } from '../services/model-service';
 import { ChatController } from './chat-controller';
-import { DiffModal } from './diff-modal';
 import { ChatMessage } from './types';
+import { SuggestList } from './components/suggest-list';
+import { SuggestionItem, SuggestionType } from './controllers/input-controller';
+import { SELECTION_ACTIONS, getAction, buildActionPrompt } from './selection-ai/action-registry';
+import { runRewrite, RewriteRequest } from './selection-ai/rewrite-runner';
+import { showInlineDiff, clearInlineDiff, InlineDiffState } from './selection-ai/inline-diff';
+
+// 模块级改写状态:inlineDiffExtension 的回调是全局单例、拿不到具体 view,
+// 故在此维护当前 view / modelService / request / controller,供导出的三个回调桥接函数使用。
+let rewriteView: EditorView | null = null;
+let activeModelService: ModelService | null = null;
+let currentRewriteRequest: RewriteRequest | null = null;
+let currentRewriteController: AbortController | null = null;
 
 type AiMenuMode = 'selection' | 'trigger';
 
@@ -174,6 +185,21 @@ function createChatPanel(
         view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
     };
 
+    const actionBar = container.createDiv({ cls: 'baizer-action-bar' });
+    for (const action of SELECTION_ACTIONS) {
+        const btn = actionBar.createEl('button', {
+            cls: 'baizer-action-btn',
+            attr: { type: 'button', title: action.label, 'aria-label': action.label },
+        });
+        setIcon(btn, action.icon);
+        btn.createSpan({ cls: 'baizer-action-label', text: action.label });
+        btn.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void runSelectionAction(view, state, context, action.id);
+        };
+    }
+
     const messageList = container.createDiv({ cls: 'guardian-message-list' });
     const renderMessages = () => {
         messageList.empty();
@@ -214,8 +240,39 @@ function createChatPanel(
         },
     });
 
+    const suggestContainer = inputWrapper.createDiv({ cls: 'baizer-suggest-container' });
+    suggestContainer.style.display = 'none';
+    const suggestList = new SuggestList({
+        container: suggestContainer,
+        provideItems: (type: SuggestionType, query: string): SuggestionItem[] => {
+            if (type !== 'file') return [];
+            return context.app.vault.getFiles()
+                .filter(f => f.path.toLowerCase().includes(query.toLowerCase()))
+                .slice(0, 10)
+                .map(f => ({ label: f.basename, desc: f.path, value: f.path, source: 'file' as const, kind: 'file' as const }));
+        },
+        onApply: (selection) => {
+            const fileItem = selection.contextItem;
+            if (fileItem && fileItem.type === 'file') {
+                // file 补全:selection.text 为空(内容在 contextItem),
+                // 选区对话框没有 context chip,改为在光标处把最近的 @token 替换为 [[path]] wikilink 文字
+                const cursor = textarea.selectionStart;
+                const before = textarea.value.slice(0, cursor).replace(/@\S*$/, `[[${fileItem.data}]] `);
+                const after = textarea.value.slice(cursor);
+                textarea.value = before + after;
+                textarea.selectionStart = textarea.selectionEnd = before.length;
+            } else {
+                textarea.value = selection.text;
+                textarea.selectionStart = textarea.selectionEnd = selection.cursor;
+            }
+            textarea.focus();
+        },
+    });
+    textarea.oninput = () => suggestList.handleInput(textarea.value, textarea.selectionStart);
+
     textarea.onkeydown = async (event) => {
         event.stopPropagation();
+        if (suggestList.handleKeyDown(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             state.controller.cleanup();
@@ -255,7 +312,23 @@ function createChatPanel(
     });
     applyBtn.onclick = () => {
         if (state.mode === 'selection') {
-            applySelectionReplacement(view, state, context);
+            const selectionText = view.state.doc.sliceString(state.from, state.to);
+            const lastAi = [...state.controller.getMessages()].reverse().find(m => m.role === 'ai');
+            if (!lastAi?.content) { new Notice('还没有可应用的 AI 回答。'); return; }
+            // 记录模块级改写上下文,供内联 diff 的 accept/reject 回调桥接使用。
+            // request 置空:这是「应用最后一条 AI 回答」,无对应改写动作可 retry(retry 将是 no-op)。
+            rewriteView = view;
+            activeModelService = context.modelService;
+            currentRewriteController?.abort();
+            currentRewriteController = null;
+            currentRewriteRequest = null;
+            showInlineDiff(view, {
+                from: state.from,
+                to: state.to,
+                oldText: selectionText,
+                newText: lastAi.content.trim(),
+                status: 'preview',
+            });
         } else {
             void applyTriggerInsertion(view, state, context);
         }
@@ -296,48 +369,78 @@ function buildContextItem(mode: AiMenuMode, targetText: string) {
     };
 }
 
-function applySelectionReplacement(
+/**
+ * 动作条按钮分流:改写类走内联 diff,只读类走对话框流式。
+ * 对话框不因执行动作而关闭。
+ */
+async function runSelectionAction(
     view: EditorView,
     state: Extract<SelectionMenuState, { type: 'chat' }>,
-    context: { app: App },
+    context: { app: App; modelService: ModelService },
+    actionId: string,
 ) {
-    const selectionText = view.state.doc.sliceString(state.from, state.to);
-    const preview = state.controller.buildSelectionRewritePreview(selectionText);
-    if (!preview) {
-        new Notice('No AI response to replace with.');
-        return;
-    }
-    if (!preview.newContent || preview.newContent.length === 0) {
-        new Notice('No proposed replacement is available yet.');
+    const action = getAction(actionId);
+    if (!action) return;
+    const targetText = getTargetText(view, state);
+    if (!targetText.trim()) { new Notice('请先选中文字。'); return; }
+
+    if (action.kind === 'readonly') {
+        // 只读类:走对话框既有流式通道(带 web_search + query_knowledge 工具)
+        await state.controller.processCommand(
+            buildActionPrompt(actionId, targetText),
+            [buildContextItem(state.mode, targetText)],
+            targetText,
+            'selection-menu',
+        );
         return;
     }
 
-    new DiffModal(context.app, preview.oldContent || '', preview.newContent || '', async () => {
-        const activeFile = context.app.workspace.getActiveFile();
-        // 锚点重定位：审阅期间文档可能被改动（后台写入/多窗口编辑），
-        // 冻结的 state.from/to 可能失效。apply 前用选区文本重新定位。
-        const target = relocateRange(view.state, state.from, state.to, selectionText);
-        if (!target) {
-            new Notice('选区在审阅期间发生了变化，无法定位原文本，已取消替换，请重新选择。');
-            view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
-            return;
-        }
-        await state.controller.applyPreviewedChange({
-            action: 'selection_rewrite',
-            target: activeFile?.path || 'current-selection',
-            previousContent: view.state.doc.toString(),
-            apply: () => {
-                view.dispatch({
-                    changes: {
-                        from: target.from,
-                        to: target.to,
-                        insert: preview.newContent || '',
-                    },
-                    effects: setSelectionMenuState.of({ type: 'hidden' }),
-                });
-            },
-        });
-    }).open();
+    // 改写类:generate() 一次性改写 → 内联 diff(不经对话框流式)
+    runRewriteAction(view, context, actionId, state.from, state.to, targetText);
+}
+
+/**
+ * 发起一次改写:记录模块级改写上下文,调 runRewrite(它自己推 loading/preview/error 三态),
+ * 存住返回的 controller 供 retry 使用。
+ */
+function runRewriteAction(
+    view: EditorView,
+    context: { app: App; modelService: ModelService },
+    actionId: string,
+    from: number,
+    to: number,
+    selectionText: string,
+) {
+    rewriteView = view;
+    activeModelService = context.modelService;
+    currentRewriteController?.abort(); // 中止上一次未决改写
+    currentRewriteRequest = { actionId, selection: selectionText, from, to };
+    currentRewriteController = runRewrite(view, context.modelService, currentRewriteRequest);
+}
+
+/**
+ * inline-diff 回调桥接(Task 7 在 main.ts 注册 inlineDiffExtension 时接上)。
+ * 因为 inlineDiffExtension 的回调是全局单例、拿不到具体 view,这里用模块级 rewriteView 转发。
+ */
+export function handleInlineDiffAccept(s: InlineDiffState) {
+    if (!rewriteView) return;
+    rewriteView.dispatch({ changes: { from: s.from, to: s.to, insert: s.newText } });
+    clearInlineDiff(rewriteView);
+    currentRewriteController = null;
+    currentRewriteRequest = null;
+}
+
+export function handleInlineDiffReject(_s: InlineDiffState) {
+    if (!rewriteView) return;
+    clearInlineDiff(rewriteView);
+    currentRewriteController = null;
+    currentRewriteRequest = null;
+}
+
+export function handleInlineDiffRetry(_s: InlineDiffState) {
+    if (!rewriteView || !activeModelService || !currentRewriteRequest) return;
+    currentRewriteController?.abort();
+    currentRewriteController = runRewrite(rewriteView, activeModelService, currentRewriteRequest);
 }
 
 /**
