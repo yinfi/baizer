@@ -84,6 +84,7 @@ const tests = [
   'test/knowledge/frontmatter-idempotent.test.ts',
   'test/throttle.test.ts',
   'test/action-registry.test.ts',
+  'test/suggest-list.test.ts',
 ];
 
 for (const testFile of tests) {
