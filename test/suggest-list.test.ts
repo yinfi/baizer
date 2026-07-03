@@ -48,7 +48,7 @@ async function runTests() {
     const applied: any[] = [];
     const list = new SuggestList({
       container: container as any,
-      provideItems: () => [{ label: 'Note', desc: 'Note.md', value: 'Note.md', source: 'file', kind: 'file' }],
+      provideItems: () => [{ label: 'Note', desc: 'Note.md', value: 'Note.md', source: 'local' }],
       onApply: (sel) => applied.push(sel),
     });
     list.handleInput('@No', 3);
