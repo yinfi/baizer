@@ -48,10 +48,10 @@ export function detectTranslateDirection(text: string): 'to-en' | 'to-zh' {
 export function buildActionPrompt(actionId: string, selection: string): string {
   const action = getAction(actionId);
   if (!action) throw new Error(`未知动作: ${actionId}`);
-  let prompt = action.promptTemplate.replace('{{selection}}', selection);
+  let prompt = action.promptTemplate.replace('{{selection}}', () => selection);
   if (action.id === 'translate') {
     const target = detectTranslateDirection(selection) === 'to-en' ? 'English' : '中文';
-    prompt = prompt.replace('{{target}}', target);
+    prompt = prompt.replace('{{target}}', () => target);
   }
   return prompt;
 }

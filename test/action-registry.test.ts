@@ -59,6 +59,11 @@ async function runTests() {
     expect(buildActionPrompt('translate', '你好')).toContain('English');
     expect(buildActionPrompt('translate', 'hello')).toContain('中文');
   });
+
+  await test('选区含 $& 等特殊模式时原样保留', () => {
+    const p = buildActionPrompt('improve', 'cost $& and $1 here');
+    expect(p).toContain('cost $& and $1 here');
+  });
 }
 
 runTests().catch((e) => { console.error(e); process.exit(1); });
