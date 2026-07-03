@@ -5,10 +5,10 @@ import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, ProviderConfig, PLUG
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
-import { ghostTextExtension, showGhostText, showDiagnosticGhostText } from './src/ui/ghost-text';
+import { ghostTextExtension, showGhostText, hideGhostText, showThinkingGhostText } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
 import { requestGuardianResponse } from './src/ui/guardian-request';
-import { GuardianCompletionService, getGuardianAutoDelayMs, shouldScheduleDeepEscalation } from './src/ui/guardian-completion';
+import { GuardianCompletionService, getGuardianAutoDelayMs, shouldScheduleDeepEscalation, GUARDIAN_WEAK_COMPLETION_REASON } from './src/ui/guardian-completion';
 import { selectionMenuExtension } from './src/ui/selection-menu';
 import { KnowledgeRuntime } from './src/knowledge/runtime';
 import { ToolRegistry } from './src/skills/tool-registry';
@@ -436,7 +436,6 @@ export default class BaizerPlugin extends Plugin {
                 sensitivity: this.settings.guardianSensitivity,
                 uiStyle: this.settings.guardianUIStyle,
             });
-            this.showGuardianDiagnosticGhost(editor, decision.reason || 'unknown');
             return;
         }
 
@@ -460,7 +459,6 @@ export default class BaizerPlugin extends Plugin {
     private async runAutoGuardianCheck(editor: any) {
         if (!this.settings.guardianAutoMode) {
             this.logGuardianAuto('auto skipped', { reason: 'auto-disabled' });
-            this.showGuardianDiagnosticGhost(editor, 'auto-disabled');
             return;
         }
 
@@ -485,7 +483,6 @@ export default class BaizerPlugin extends Plugin {
                 line: lineNumber,
                 ch: cursor.ch,
             });
-            this.showGuardianDiagnosticGhost(editor, 'guardian-paused');
             return;
         }
 
@@ -497,7 +494,6 @@ export default class BaizerPlugin extends Plugin {
                 line: lineNumber,
                 ch: cursor.ch,
             });
-            this.showGuardianDiagnosticGhost(editor, decision.reason || 'unknown');
             return;
         }
 
@@ -569,7 +565,6 @@ export default class BaizerPlugin extends Plugin {
             });
 
             if (result.type !== 'completion') {
-                this.showGuardianDiagnosticGhost(editor, result.reason);
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 // 快补无果:若属 A+B 类且用户停留,安排自动升级到深补全。
                 this.maybeScheduleEscalation(editor, result.reason);
@@ -582,7 +577,6 @@ export default class BaizerPlugin extends Plugin {
                     reason: 'stale-after-result',
                     totalElapsedMs: Date.now() - startedAt,
                 });
-                this.showGuardianDiagnosticGhost(editor, 'stale-after-result');
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
@@ -595,7 +589,6 @@ export default class BaizerPlugin extends Plugin {
                     resultLine: result.line,
                     currentLineCount,
                 }, 'warn');
-                this.showGuardianDiagnosticGhost(editor, 'line-out-of-bounds');
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
@@ -617,8 +610,16 @@ export default class BaizerPlugin extends Plugin {
                 suggestionLength: result.suggestion.length,
                 ghostVisible: this.shouldShowGuardianGhostText(),
                 gutterVisible: this.shouldShowGuardianGutter(),
+                weak: result.quality.weak,
+                weakReasons: result.quality.weak ? result.quality.weakReasons : undefined,
                 totalElapsedMs: Date.now() - startedAt,
             });
+
+            // P0:快补显示了「合规但平庸」的建议时,同样安排升级到深补——
+            // 深补若产出更好结果会覆盖 ghost text;停留确认+一锚点一次的护栏同样适用。
+            if (result.quality.weak) {
+                this.maybeScheduleEscalation(editor, GUARDIAN_WEAK_COMPLETION_REASON);
+            }
         } catch (error: any) {
             // 被单飞 abort（新输入触发了新请求）属正常丢弃，不显示为错误。
             if (error?.name === 'AbortError') {
@@ -630,7 +631,6 @@ export default class BaizerPlugin extends Plugin {
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
-            this.showGuardianDiagnosticGhost(editor, `error:${error?.message || 'unknown'}`);
             logger.error('Auto completion failed', error, 'Baizer Guardian', {
                 requestSeq,
                 activePath,
@@ -694,17 +694,23 @@ export default class BaizerPlugin extends Plugin {
                 this.guardianEscalatedAnchors.add(anchorKey);
             }
             this.logGuardianAuto('auto-escalate to deep', { reason, anchorKey });
-            void this.runDeepGuardianCheck(editor);
-        }, 1200);
+            void this.runDeepGuardianCheck(editor, 'escalation');
+            // 停留确认窗口从 1.2s 下调到 0.6s:正常写作节奏下更易满足「停在原地」,
+            // 显著提高深补触发率,同时仍能被打字/移位取消(见上方 anchorKey 二次确认)。
+        }, 600);
     }
 
     /**
-     * 深度补全(手动触发):读知识库正文+注入个性化+连接意图,允许更慢以换高质量。
-     * 与自动补全分离:独立单飞控制器,不被打字防抖 abort;手动语义下绕过 paused 闸门。
+     * 深度补全:读知识库正文+个人记忆+连接意图,允许更慢以换高质量。独立单飞控制器。
+     * 两种来源,反馈方式不同:
+     * - 'manual'(Mod+Shift+G):用户主动求结果 → Notice 反馈,不被随手打字 abort。
+     * - 'escalation'(快补无果/平庸自动升级):系统主动给 → 光标处「deep thinking…」ghost,
+     *   一打字即中断(abort 在途请求 + ghost 由 docChanged 自动清),无果给可见 ghost 回执。
      */
-    private async runDeepGuardianCheck(editor: any) {
+    private async runDeepGuardianCheck(editor: any, source: 'manual' | 'escalation' = 'manual') {
+        const isEscalation = source === 'escalation';
         if (!this.settings.enableGuardian) {
-            new Notice('Baizer Guardian 未启用，请先在设置中开启。');
+            if (!isEscalation) new Notice('Baizer Guardian 未启用，请先在设置中开启。');
             return;
         }
         const view = (editor as any).cm as EditorView;
@@ -713,7 +719,7 @@ export default class BaizerPlugin extends Plugin {
         const activePath = this.app.workspace.getActiveFile?.()?.path || '';
         const decision = this.guardianCompletionService.shouldRunAuto({ editor, activePath, mode: 'deep' });
         if (!decision.ok) {
-            new Notice(`深度补全跳过：${decision.reason || 'unknown'}`);
+            if (!isEscalation) new Notice(`深度补全跳过：${decision.reason || 'unknown'}`);
             return;
         }
 
@@ -738,7 +744,13 @@ export default class BaizerPlugin extends Plugin {
                 || (editor.getLine(requestLine) || '') !== requestLineText;
         };
 
-        const notice = new Notice('Baizer Guardian 正在深度补全…', 0);
+        // 进行中反馈:manual 用 Notice(醒目、不占正文);escalation 用光标处 ghost,
+        // 一打字即被 docChanged 自动清除,配合下方 signal.aborted 中断在途请求。
+        const notice = isEscalation ? null : new Notice('Baizer Guardian 正在深度补全…', 0);
+        if (isEscalation) {
+            const safeThinkingCh = Math.min(requestCh, requestLineText.length);
+            showThinkingGhostText(view, ' deep thinking…', lineNumber, safeThinkingCh);
+        }
         updateGuardianState(view, lineNumber, GuardianState.Thinking);
         try {
             const obsidianContext = await this.guardianContextService.collect({ includeBacklinks: true });
@@ -752,25 +764,35 @@ export default class BaizerPlugin extends Plugin {
                 signal: inflight.signal,
                 mode: 'deep',
             });
-            notice.hide();
+            notice?.hide();
             this.logGuardianAuto('deep completion returned', {
                 requestSeq,
+                source,
                 resultType: result.type,
                 reason: result.type === 'none' ? result.reason : undefined,
                 totalElapsedMs: Date.now() - startedAt,
             });
 
             if (result.type !== 'completion') {
-                new Notice(`深度补全：无建议（${result.reason}）`);
+                // 无果:escalation 静默清掉 thinking ghost(不留诊断文字),manual 用 Notice 告知。
+                if (isEscalation) {
+                    hideGhostText(view);
+                } else {
+                    new Notice(`深度补全：无建议（${result.reason}）`);
+                }
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
             if (isStale()) {
+                // 光标移动/打字使请求失效:清掉 escalation 的 thinking ghost(打字已自动清,
+                // 但纯光标移动不触发 docChanged,需主动清),避免残留。
+                if (isEscalation) hideGhostText(view);
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
             const currentLineCount = view.state.doc.lines;
             if (result.line > currentLineCount) {
+                if (isEscalation) hideGhostText(view);
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
@@ -783,12 +805,17 @@ export default class BaizerPlugin extends Plugin {
                 this.shouldShowGuardianGutter() ? GuardianState.HasSuggestion : GuardianState.Idle,
             );
         } catch (error: any) {
-            notice.hide();
+            notice?.hide();
             if (error?.name === 'AbortError') {
+                if (isEscalation) hideGhostText(view);
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
-            new Notice(`深度补全失败：${error?.message || 'unknown'}`);
+            if (isEscalation) {
+                hideGhostText(view);
+            } else {
+                new Notice(`深度补全失败：${error?.message || 'unknown'}`);
+            }
             logger.error('Deep completion failed', error, 'Baizer Guardian', { requestSeq, activePath });
             updateGuardianState(view, lineNumber, GuardianState.Error);
         } finally {
@@ -796,21 +823,6 @@ export default class BaizerPlugin extends Plugin {
                 this.guardianDeepInflight = null;
             }
         }
-    }
-
-    private showGuardianDiagnosticGhost(editor: any, reason: string) {
-        const view = (editor as any).cm as EditorView;
-        if (!view) return;
-        const cursor = editor.getCursor();
-        const lineNumber = cursor.line + 1;
-        const currentLine = editor.getLine(cursor.line) || '';
-        const safeCh = Math.min(cursor.ch, currentLine.length);
-        showDiagnosticGhostText(view, ` Guardian: ${reason}`, lineNumber, safeCh);
-        updateGuardianState(
-            view,
-            lineNumber,
-            this.shouldShowGuardianGutter() ? GuardianState.HasSuggestion : GuardianState.Idle,
-        );
     }
 
     private logGuardianAuto(message: string, metadata?: Record<string, any>, level: 'info' | 'warn' | 'debug' = 'info') {

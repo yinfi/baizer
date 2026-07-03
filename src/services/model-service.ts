@@ -491,6 +491,17 @@ export class ModelService {
         return this.memoryManager ? await this.memoryManager.getMemoryView(request) : null;
     }
 
+    /**
+     * 为 Guardian 深补召回相关个人记忆(observation/world,不含 experience 闲聊)。
+     * 走 Hindsight BM25 召回,与知识 wiki 节选互补:wiki 提供「笔记连接」,记忆提供「个人事实连接」。
+     * 无 memoryManager 或无命中时返回空串,调用方据此不注入。
+     */
+    async recallGuardianMemory(query: string, maxChars = 500): Promise<string> {
+        if (!this.memoryManager) return '';
+        if (!query.trim()) return '';
+        return await this.memoryManager.recallForPrompt({ query, source: 'guardian', maxChars });
+    }
+
     async updateProfile(updates: Partial<UserProfile>) {
         if (this.memoryManager) {
             await this.memoryManager.updateProfile(updates);

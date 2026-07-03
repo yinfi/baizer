@@ -1,3 +1,66 @@
+### [2026-07-03 15:30] Task Summary — 选中文字 AI 快捷菜单重做设计(brainstorming)
+
+**1. 刚刚做了什么？ (What was done?)**
+- 分析了当前"选中文字 → AI 润色"功能(`selection-menu.ts` / `diff-modal.ts` / `chat-controller.ts` / `styles.css`)的实现与问题。
+- 通过 brainstorming 逐题确认交互决策,产出并提交设计文档 `docs/superpowers/specs/2026-07-03-selection-ai-menu-design.md`。
+- 方向:废弃"选区绑迷你聊天窗",改为"选中即浮出图标动作条 + 内联 diff 预览一键应用";5 个改写动作走 generate() 非流式,1 个只读动作(解释/搜索)走 chatStream() 带联网+本地库,翻译中↔英自动互译,@ 内联触发保留。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 现功能本质是"绑在选区上的迷你聊天窗",高频操作每次都要手打指令(功能单一),350×400 固定浮层遮挡正文、视觉陈旧(丑)。病根是形态错了,不只是 CSS。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- "搜索"动作性质与其余五个不同(不产生替换文本),需单独澄清其含义。
+- AskUserQuestion 多次因缺 header/multiSelect 必填字段报参数校验错。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 澄清后确定"搜索"=解释/介绍选中文字(联网+本地库,只读可插入),据此把动作分成改写类/只读类两条通道。
+- 补齐 header 与 multiSelect 字段后重发问题;设计文档自检时修正臆测的 `createChatView` 为实际的 `createChatPanel`。
+
+---
+
+### [2026-07-03 14:50] Task Summary — 更新 CLAUDE.md 架构章节
+
+**1. 刚刚做了什么？ (What was done?)**
+- 重写 CLAUDE.md 的过时内容：Project Overview、Architecture（门面/Runtime/Skills&Tools/Knowledge/Memory 分层）、Key Patterns（6 条真实模式）、Shell Commands、Supported Tools。
+- 删除已不存在的引用（gemini-api.ts / mcp/tools.ts / ToolManager / `.obsidian/gemini-memory/`），替换为 pi-agent runtime 现状。
+- 保留仍准确的章节：Build Commands、Hotkeys、Notes for Development、Skill routing。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- CLAUDE.md 停留在 Gemini/MCP 时代，与最近提交（收敛到单一 pi-agent runtime、Hindsight 记忆、pi 原生 skill 激活）完全脱节，会误导后续开发。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 委托的后台探索代理只回状态行、不回传分析内容，其中一个被全局指令带偏去写 FORYF.md。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 放弃依赖代理输出，亲自直读约 15 个核心源文件还原架构；文档中的常量/工具名/目录（MEMORY_DIR、DEFAULT_WIKI_FOLDER、vault 工具名、plugin-ctrl 工具名）逐项 grep 核实后再落笔。
+
+---
+
+### [2026-07-03 10:30] Task Summary — Obsidian Baizer Skills 子系统完整架构分析
+
+**1. 刚刚做了什么？ (What was done?)**
+- 系统分析了 Obsidian Baizer 的 skills 子系统架构，按用户最初提出的 6 个问题进行深度解析：
+  1. **ToolRegistry vs SkillRegistry 区别与关系**：ToolRegistry = 原子工具注册表（无状态执行），SkillRegistry = 技能编排层（工具组合 + 指引 + 激活逻辑）。Skill 激活时从 ToolRegistry 获取工具定义白名单。
+  2. **Skill 从 SKILL.md 注册的三阶段**：阶段 1（解析）= parseBuiltinSkill → LoadedSkill，阶段 2（物化）= materializeBuiltins 写到 .obsidian 隐藏目录，阶段 3（激活）= activateSkill 格式化指引。
+  3. **"instructions 注入模式" 详解**：executor 为空时，Skill 即指引 prompt。formatSkillInvocation 包装完整 body → pi 模型读指引 → 自主决策工具调用 → 多轮交互（对比 direct 模式的快速确定）。
+  4. **pi-skill-source / skill-files 职责**：pi-skill-source = YAML 解析器（统一处理内置/用户/插件 skill），skill-files = 文件适配层（物化内置 skill 到真实文件）。物化原因：read_skill 工具需读磁盘，系统提示 location 指向真实路径。
+  5. **7 个内置 Skill 矩阵**：vault-ops（基础工具集）/ read-skill（通用读取） / web-search / web-clipper / knowledge / plugin-ctrl / json-canvas / obsidian-bases（各自工具集 + 操作指南）。
+  6. **plugin-watcher + PluginSkillGenerator 自动生成**：10s 轮询 → detectPluginChanges → 新增插件 → collectPluginInfo → LLM 生成指南 → 落盘注册。版本缓存避免重复生成，工具白名单（vault-ops + execute_plugin_command）。
+  7. **pi runtime 对接**（tool-adapter）：adaptToolDefinitionsToPi 推导执行模式 + 检查白名单 + 超时控制 → executeBaizerTool 转发给 ToolRegistry.execute → agentLoop 多轮推理。
+
+- 涵盖完整的架构图、数据流、关键签名、核心决策点、文件地图等，可直接用于设计文档和架构图绘制。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户需要深入理解 skills 子系统的 6 个核心问题，为后续的架构升级、扩展或重构提供完整的设计背景。第一性原理分析而非浅读代码，还原系统的真实模块职责与数据流。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 无重大阻塞。初期探索代理返回确认状态而非实际内容，改为直接读源码分析，确保完整性和准确性。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 通过 Grep + Read 多轮交叉验证，从 6 个关键文件切入（tool-registry / skill-registry / types / pi-skill-source / skill-files / pi-tool-adapter），逆向追踪调用关系与数据流，梳理出完整的三层架构（工具层 / 编排层 / 运行层）。
+
+---
+
 ---
 
 ### [2026-07-02 12:03] Task Summary — 安装外部 skill grill-me
@@ -2020,3 +2083,119 @@ UI 层：
 - `git rm --cached` 登记两个 provider 文件的删除，使 `git ls-files` 不再列出。
 - 批量移除测试里的 `provider` deps 字段。
 - 确认 typebox 报错为预存、且不影响 src/test/main（这些目录 tsc 零错误），予以豁免。
+
+### [2026-07-03 分析完成] Task Summary — Runtime 子系统架构分析
+
+**1. 刚刚做了什么？ (What was done?)**
+- 深度分析了 obsidian-cli 项目的 runtime 子系统，读取并还原了 12 个核心文件的职责与协作关系：
+  - runtime-factory.ts、runtime-types.ts、base-chat-runtime.ts、steering-controller.ts、provider-capabilities.ts
+  - pi-chat-runtime.ts、pi-native-model.ts、pi-tool-adapter.ts、pi-event-adapter.ts、pi-approval-policy.ts
+  - session-store.ts、vault-session-fs.ts
+- 输出结构化架构文档，明确了 7 个关键问题的答案：
+  1. runtime-factory 现在仅创建 PiChatRuntime（单一收敛，旧 provider 已删）
+  2. pi-chat-runtime 驱动 pi agentLoop，通过 streamFn 原生直连 LLM，支持多轮工具循环（≤10 turn）
+  3. pi-native-model 负责 ProviderConfig → pi Model 映射（处理 thinking level、凭证注入）
+  4. 三个 adapter 各司其职：tool 负责执行模式推断与权限检查、event 负责事件格式转换、approval 负责批准响应与质量守门
+  5. session-store 基于 JSONL 格式持久化会话到 vault `.obsidian/baizer-sessions/`，支持自动压缩与跨轮恢复
+  6. steering-controller 实现运行中补话队列与动态工具集过滤（无需重启）
+  7. base-chat-runtime 定义公共基类，处理 prompt 拼装、记忆、会话钩子
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户需要理解 runtime 子系统的模块职责与数据流，以便进行架构图绘制或代码评审
+- 提炼第一性原理：每个模块的职责边界、依赖方向、设计权衡
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 无阻塞。代码结构清晰，设计意图通过注释充分表达。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 用 parallel reads 批量读取关键文件，避免往返 I/O
+- 用 lsp_document_symbols 快速定位大文件的关键函数，避免全文加载
+- 交叉验证多文件间的调用关系，确保数据流准确
+
+---
+
+
+### [2026-07-03 16:55] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 系统性改进 Guardian 补全质量与深补触发（P0-P3 四档）：
+  - P0 让深补真能触发：`guardianAutoDeepEscalation` 默认改 `true`；升级触发从「快补无果」扩展到「快补平庸(weak)」；自动升级停留确认窗口 1.2s → 0.6s；新增 `weak-completion` 升级 reason。
+  - P1 让深补真的「深」：深补 prompt 与快补分家，深补放开到 2-4 句、~150-450 字符、鼓励展开论证/连接；`maxDeepSuggestionChars`(默认 500) 独立于 fast。
+  - P2 检索素材翻倍：深补新增 Hindsight 记忆召回(`recallGuardianMemory`, source=guardian)，与知识 wiki 节选并行叠加注入。
+  - P3 加正向质量信号：`evaluateSuggestion` 在硬拦截之外新增 weak 软信号(too-thin / vague-phrasing / no-new-information)，只对 fast 生效、不丢弃只降权、用于触发升级。
+- 涉及：`src/mcp/types.ts`、`src/ui/guardian-completion.ts`、`src/services/model-service.ts`、`src/settings.ts`、`main.ts`；新增 3 个针对性测试。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户反馈「深度补写没触发、质量一般」。根因分析：深补自动升级被默认关闭的开关卡死；升级只在完全无果时触发，平庸建议永远等不到深补；深补 prompt 复用「一句话」约束导致退化成「温度高一点的快补」；质检只有负向黑名单，挡不住「合规但空洞」。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 我最初误以为 Hindsight 是向量语义检索——实为 BM25 词法检索，且检索的是个人记忆而非 wiki 文章。据此把 P2 从「替换」改为「双路叠加」，语义更正确。
+- `evaluateSuggestion` 返回新增 weak 字段后，3 处用 `toEqual` 全等断言整对象的旧测试失败。
+- P3 的 too-thin 用字符数判断对中文偏严，把「能显著降低团队的协作成本」(11字)误判为太薄。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 旧测试断言从整对象全等改为分别断言 `.ok` / `.reasons`，不锁定新增可选字段。
+- too-thin 阈值改用 token 数(中文单字/英文单词)而非字符数，中英文统一；paragraph minTokens=4、list=2。
+- 全量 `tsc --skipLibCheck` 零错误、`npm run build` 通过、guardian 30 个测试全绿。
+
+---
+
+### [2026-07-03 17:30] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 给 Guardian 深补自动升级加可见反馈,解决「不知道有没有触发深补」:
+  - runDeepGuardianCheck 加 source 参数('manual'|'escalation'),按来源分流反馈。
+  - 手动深补(Mod+Shift+G):保持 Notice,不被随手打字 abort。
+  - 自动升级深补:光标处「Guardian: deep thinking…」ghost,一打字即自动清+abort;无果显示「deep-none:<reason>」回执。
+  - 新增 hideGhostText 导出,用于光标移动等非输入场景清 ghost。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户截图快补停在 explicit-none,无法判断深补是否触发。根因:自动升级深补无光标处反馈,静默跳过无提示。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- catch 块 notice.hide() 在 escalation(notice=null)会 NPE。
+- 多次 Edit 因格式问题未执行,反复中断。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 按 source 分流双路径。notice 改可空+notice?.hide()。全链路自查对齐,TSC 零错误、build 通过、30 测试全绿。
+
+---
+
+### [2026-07-03 18:10] Task Summary
+
+**1. 刚刚做了什么？**
+- 删除全部快补诊断 ghost(8 处 showGuardianDiagnosticGhost 调用+方法),原为测试用 Guardian: xxx 提示。
+- 深补 thinking ghost 去 Guardian: 前缀(改「 deep thinking…」)+ 逐字 shimmer 波动动效。
+- 深补无果静默清 ghost,不显示 deep-none 文字。
+- gutter 呼吸灯双速率:处理中快闪 0.7s、空闲慢闪 3s。
+- 涉及:main.ts、src/ui/ghost-text.ts、styles.css。
+
+**2. 为什么？**
+- 用户要求:删测试残留诊断;深补进行中要纯「deep thinking…」带波动;gutter 灯快/慢闪区分处理中/空闲。
+
+**3. 遇到问题？**
+- 逐字 shimmer 需 DOM 逐字拆 span + CSS nth-child 错开 delay。
+- 多次 Edit 因格式问题未执行,改规范格式后落地。
+
+**4. 如何修复？**
+- GhostTextWidget 加 variant:'thinking' 逐字包裹;CSS 加 breathe+shimmer+相位差;thinking pulse 1.5s→0.7s。TSC 零错误、build 通过、33 测试全绿。
+
+---
+
+### [2026-07-03 18:40] Task Summary
+
+**1. 刚刚做了什么？**
+- 修复补全插入的换行/空格分隔问题:模型返回「纯内容」被 trim 后裸插入,导致新段落/新句/英文词紧贴原文(如「profit andcash」)。
+- 新增 prependSeparator(guardian-completion.ts):按光标上下文补前导分隔符——列表新项换行+缩进、英文句末标点后补空格、英文词衔接补空格;中文全角标点后不补。
+- 补 3 情形专项测试。
+
+**2. 为什么？**
+- 用户反馈:需要换行/空格分隔的补全贴在原文后,要按格式需要补分隔符。
+
+**3. 遇到问题？**
+- prependSeparator 首版正则漏半角句号,导致英文句号后不补空格。测试立即暴露。
+
+**4. 如何修复？**
+- 正则加入半角句号;分隔符只在最终产出 prepend,质检基于无分隔符内容。TSC 零错误、build 通过、31 测试全绿。
+
+---

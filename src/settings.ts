@@ -1462,8 +1462,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('快补无果时自动深挖笔记')
-            .setDesc('当 AI 没有即时建议、而你停留在原地时，自动读取相关笔记尝试更深的补全。较慢、消耗更多 token，默认关闭。')
+            .setName('快补无果或平庸时自动深挖笔记')
+            .setDesc('当 AI 没有即时建议、或只给出平庸建议、而你停留在原地时，自动读取相关笔记与个人记忆尝试更深入的补全。较慢、消耗更多 token，默认开启。')
             .addToggle(toggle => toggle
                 .setValue(!!this.plugin.settings.guardianAutoDeepEscalation)
                 .onChange(async (value: boolean) => {

@@ -67,6 +67,7 @@ async function runTests() {
     getGuardianAutoDelayMs,
     shouldScheduleDeepEscalation,
     GUARDIAN_ESCALATION_REASONS,
+    GUARDIAN_WEAK_COMPLETION_REASON,
   } = await import('../src/ui/guardian-completion');
 
   await test('derives lower latency delay from higher sensitivity', () => {
@@ -178,9 +179,13 @@ async function runTests() {
     ].join(' ');
 
     expect(service.evaluateSuggestion('next action is to', context).ok).toBe(false);
-    expect(service.evaluateSuggestion(mediumContinuation, context)).toEqual({ ok: true, reasons: [] });
+    const medium = service.evaluateSuggestion(mediumContinuation, context);
+    expect(medium.ok).toBe(true);
+    expect(medium.reasons).toEqual([]);
     expect(service.evaluateSuggestion(tooLongContinuation, context).ok).toBe(false);
-    expect(service.evaluateSuggestion('collect three customer examples', context)).toEqual({ ok: true, reasons: [] });
+    const short = service.evaluateSuggestion('collect three customer examples', context);
+    expect(short.ok).toBe(true);
+    expect(short.reasons).toEqual([]);
   });
 
   await test('returns none when model response is stale after generation', async () => {
@@ -343,13 +348,16 @@ async function runTests() {
       activePath: 'Notes/current.md',
     });
 
-    expect(result).toEqual({
-      type: 'completion',
-      suggestion: 'cash flow changes',
-      line: 1,
-      ch: 10,
-      quality: { ok: true, reasons: [] },
-    });
+    expect(result.type).toBe('completion');
+    if (result.type === 'completion') {
+      // 光标前是「profit and」(以字母 d 结尾),补全首字符是字母 → 自动补前导空格,
+      // 避免插入后粘连成「profit andcash」。
+      expect(result.suggestion).toBe(' cash flow changes');
+      expect(result.line).toBe(1);
+      expect(result.ch).toBe(10);
+      expect(result.quality.ok).toBe(true);
+      expect(result.quality.reasons).toEqual([]);
+    }
   });
 
   await test('reports response preview when invalid json cannot be used', async () => {
@@ -509,7 +517,9 @@ async function runTests() {
     expect(service.evaluateSuggestion('……', base).reasons.join(',')).toContain('no-substance');
     expect(service.evaluateSuggestion('需要进一步评估', { ...base, cursorSuffix: '需要进一步评估后再决定' }).reasons.join(',')).toContain('duplicates-suffix');
     // 正常的实质补全不被这些规则误伤。
-    expect(service.evaluateSuggestion('能显著降低团队的协作成本', base)).toEqual({ ok: true, reasons: [] });
+    const substantive = service.evaluateSuggestion('能显著降低团队的协作成本', base);
+    expect(substantive.ok).toBe(true);
+    expect(substantive.reasons).toEqual([]);
   });
 
   await test('serves a repeated identical-context request from cache without calling the model again', async () => {
@@ -686,6 +696,82 @@ async function runTests() {
     expect(GUARDIAN_ESCALATION_REASONS.has('explicit-none')).toBe(true);
     expect(GUARDIAN_ESCALATION_REASONS.has('completion-timeout')).toBe(false);
     expect(GUARDIAN_ESCALATION_REASONS.has('stale')).toBe(false);
+  });
+
+  await test('P3: flags compliant-but-hollow fast completions as weak without rejecting them', () => {
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {} as any,
+    });
+    const base = {
+      currentLine: '这个方案',
+      cursorPrefix: '这个方案',
+      cursorSuffix: '',
+      markdownShape: 'paragraph',
+      localBlock: '这个方案',
+      mode: 'fast',
+    } as any;
+
+    // 空泛词堆砌:硬拦截过不掉(不重复、不套话开头),但信息量低 → 标记 weak。
+    const vague = service.evaluateSuggestion('这非常重要，值得关注，需要考虑方方面面', base);
+    expect(vague.ok).toBe(true);
+    expect(!!vague.weak).toBe(true);
+
+    // 实质续写:引入新信息,不 weak。
+    const substantive = service.evaluateSuggestion('能把上线周期从两周压缩到三天', base);
+    expect(substantive.ok).toBe(true);
+    expect(!!substantive.weak).toBe(false);
+
+    // deep 模式不做 weak 判定(深补已是终点,无处再升)。
+    const deepHollow = service.evaluateSuggestion('这非常重要，值得关注', { ...base, mode: 'deep' });
+    expect(!!deepHollow.weak).toBe(false);
+  });
+
+  await test('P0: weak-completion is an escalation reason so mediocre fast results can escalate', () => {
+    expect(GUARDIAN_WEAK_COMPLETION_REASON).toBe('weak-completion');
+    expect(GUARDIAN_ESCALATION_REASONS.has(GUARDIAN_WEAK_COMPLETION_REASON)).toBe(true);
+    expect(shouldScheduleDeepEscalation({ enabled: true, reason: GUARDIAN_WEAK_COMPLETION_REASON, alreadyEscalated: false })).toBe(true);
+  });
+
+  await test('P1: deep mode prompt lifts the one-sentence cap and invites development', async () => {
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {} as any,
+    });
+    const editor = createEditor(['我认为团队协作的关键在于']);
+    const fastCtx = await service.buildContext({ editor, obsidianContext: {} as any, mode: 'fast' });
+    const deepCtx = await service.buildContext({ editor, obsidianContext: {} as any, mode: 'deep' });
+
+    // 快补 prompt 保留「一句话/60-180」约束;深补去掉它、改为允许 2-4 句并展开。
+    expect(fastCtx.prompt).toContain('one complete sentence');
+    expect(fastCtx.prompt.includes('2 to 4 sentences')).toBe(false);
+    expect(deepCtx.prompt).toContain('2 to 4 sentences');
+    expect(deepCtx.prompt.includes('60-180 characters')).toBe(false);
+  });
+
+  await test('prepends a separator so completions do not stick to the text before the cursor', async () => {
+    const make = (suggestion: string) => new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: {
+        isGenerationConfigured: () => true,
+        generate: async () => `{"type":"completion","suggestion":${JSON.stringify(suggestion)}}`,
+      } as any,
+    });
+    const run = async (line: string, ch: number, suggestion: string) => {
+      const result = await make(suggestion).completeAuto({
+        editor: createEditor([line], { line: 0, ch }),
+        obsidianContext: {} as any,
+        activePath: 'Notes/current.md',
+      });
+      return result.type === 'completion' ? result.suggestion : `NONE:${(result as any).reason}`;
+    };
+
+    // 英文词衔接:光标前是字母 → 补前导空格,避免「andcash」。
+    expect(await run('profit and', 10, 'cash reserves grow')).toBe(' cash reserves grow');
+    // 中文段落:全角句末标点后接中文 → 不补空格(中文不用空格分词)。
+    expect(await run('这个方案很好。', 7, '下一步需要评估成本')).toBe('下一步需要评估成本');
+    // 英文句末标点后接新句 → 补空格。
+    expect(await run('It works.', 9, 'Next we ship it')).toBe(' Next we ship it');
   });
 }
 

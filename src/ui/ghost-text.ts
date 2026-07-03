@@ -10,6 +10,8 @@ export interface GhostTextSuggestion {
     replaceRange?: { from: number; to: number }; // Optional replacement range
     visible?: boolean;
     acceptable?: boolean;
+    // 视觉变体:'thinking' 用于深补进行中的波动动效 ghost(专属 class,与普通 ghost 区分)。
+    variant?: 'thinking';
 }
 
 // 更新 Ghost Text 的 Effect
@@ -17,15 +19,28 @@ export const setGhostText = StateEffect.define<GhostTextSuggestion | null>();
 
 // Ghost Text Widget
 class GhostTextWidget extends WidgetType {
-    constructor(private text: string) {
+    constructor(private text: string, private variant?: 'thinking') {
         super();
     }
 
     toDOM() {
         const span = document.createElement('span');
-        span.className = 'guardian-ghost-text';
-        span.textContent = this.text;
-        span.setAttribute('aria-label', 'Press Tab to accept suggestion');
+        span.className = this.variant === 'thinking'
+            ? 'guardian-ghost-text guardian-ghost-thinking'
+            : 'guardian-ghost-text';
+        if (this.variant === 'thinking') {
+            // 逐字包裹,让每个字符能带相位差地波动(shimmer),而非整体闪烁。
+            for (const ch of this.text) {
+                const charSpan = document.createElement('span');
+                charSpan.className = 'guardian-ghost-thinking-char';
+                // 空格用 &nbsp 语义:保留宽度但不参与发光。
+                charSpan.textContent = ch;
+                span.appendChild(charSpan);
+            }
+        } else {
+            span.textContent = this.text;
+        }
+        span.setAttribute('aria-label', this.variant === 'thinking' ? 'Deep completion in progress' : 'Press Tab to accept suggestion');
         return span;
     }
 
@@ -45,7 +60,7 @@ const ghostTextField = StateField.define<DecorationSet>({
         for (let effect of tr.effects) {
             if (effect.is(setGhostText)) {
                 if (effect.value) {
-                    const { text, line, ch, visible = true } = effect.value;
+                    const { text, line, ch, visible = true, variant } = effect.value;
                     if (!visible) {
                         return Decoration.none;
                     }
@@ -60,7 +75,7 @@ const ghostTextField = StateField.define<DecorationSet>({
                     const pos = Math.min(lineBlock.from + ch, lineBlock.to);
 
                     const widget = Decoration.widget({
-                        widget: new GhostTextWidget(text || ''),
+                        widget: new GhostTextWidget(text || '', variant),
                         side: 1
                     });
 
@@ -179,5 +194,19 @@ export function storeGhostText(view: EditorView, text: string, line: number, ch:
 export function showDiagnosticGhostText(view: EditorView, text: string, line: number, ch: number) {
     view.dispatch({
         effects: setGhostText.of({ text, line, ch, visible: true, acceptable: false })
+    });
+}
+
+// 深补进行中的波动 ghost:逐字 shimmer 动效,不可接受(acceptable:false),打字即由 docChanged 清除。
+export function showThinkingGhostText(view: EditorView, text: string, line: number, ch: number) {
+    view.dispatch({
+        effects: setGhostText.of({ text, line, ch, visible: true, acceptable: false, variant: 'thinking' })
+    });
+}
+
+// 主动清除当前 ghost(用于「光标移动等非输入场景」——输入已由 docChanged 自动清除)。
+export function hideGhostText(view: EditorView) {
+    view.dispatch({
+        effects: setGhostText.of(null)
     });
 }

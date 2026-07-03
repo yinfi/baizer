@@ -653,6 +653,14 @@ textarea.shell-input::placeholder {
 .guardian-gutter {
     width: 20px;
     padding-left: 4px;
+    background: transparent;
+}
+
+/* 去掉 CodeMirror 给 gutter 单元格(尤其当前行 activeLineGutter)的矩形背景高亮,
+   否则圆形呼吸灯背后会透出一层深色方块。 */
+.guardian-gutter .cm-gutterElement,
+.guardian-gutter .cm-activeLineGutter {
+    background: transparent !important;
 }
 
 .guardian-gutter-marker {
@@ -681,7 +689,8 @@ textarea.shell-input::placeholder {
 .guardian-gutter-marker.guardian-thinking {
     background: #00e676;
     box-shadow: 0 0 12px rgba(0, 230, 118, 0.8);
-    animation: guardian-pulse 1.5s ease-in-out infinite;
+    /* 处理中:快速闪烁(0.7s),与 idle 的慢闪(3s)形成明显对比。 */
+    animation: guardian-pulse 0.7s ease-in-out infinite;
 }
 
 .guardian-gutter-marker.guardian-has-suggestion {
@@ -727,6 +736,49 @@ textarea.shell-input::placeholder {
     pointer-events: none !important;
     user-select: none !important;
     opacity: 0.8 !important;
+}
+
+/* 深补进行中的波动 ghost:整体轻微呼吸,逐字 shimmer 扫光(每字带相位差)。 */
+.guardian-ghost-text.guardian-ghost-thinking {
+    animation: guardian-ghost-breathe 1.6s ease-in-out infinite;
+}
+
+.guardian-ghost-thinking-char {
+    display: inline-block;
+    animation: guardian-ghost-shimmer 1.2s ease-in-out infinite;
+}
+
+/* 逐字相位差:靠 nth-child 错开动画起点,形成从左到右的流动波浪。 */
+.guardian-ghost-thinking-char:nth-child(1) { animation-delay: 0s; }
+.guardian-ghost-thinking-char:nth-child(2) { animation-delay: 0.08s; }
+.guardian-ghost-thinking-char:nth-child(3) { animation-delay: 0.16s; }
+.guardian-ghost-thinking-char:nth-child(4) { animation-delay: 0.24s; }
+.guardian-ghost-thinking-char:nth-child(5) { animation-delay: 0.32s; }
+.guardian-ghost-thinking-char:nth-child(6) { animation-delay: 0.40s; }
+.guardian-ghost-thinking-char:nth-child(7) { animation-delay: 0.48s; }
+.guardian-ghost-thinking-char:nth-child(8) { animation-delay: 0.56s; }
+.guardian-ghost-thinking-char:nth-child(9) { animation-delay: 0.64s; }
+.guardian-ghost-thinking-char:nth-child(10) { animation-delay: 0.72s; }
+.guardian-ghost-thinking-char:nth-child(11) { animation-delay: 0.80s; }
+.guardian-ghost-thinking-char:nth-child(12) { animation-delay: 0.88s; }
+.guardian-ghost-thinking-char:nth-child(13) { animation-delay: 0.96s; }
+.guardian-ghost-thinking-char:nth-child(14) { animation-delay: 1.04s; }
+.guardian-ghost-thinking-char:nth-child(n+15) { animation-delay: 1.12s; }
+
+@keyframes guardian-ghost-breathe {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 0.95; }
+}
+
+@keyframes guardian-ghost-shimmer {
+    0%, 100% {
+        opacity: 0.45;
+        text-shadow: none;
+    }
+    50% {
+        opacity: 1;
+        text-shadow: 0 0 8px rgba(0, 230, 118, 0.9);
+    }
 }
 
 /* Guardian Selection & Chat Styles */

@@ -43,6 +43,10 @@ export type GuardianCompletionResult =
 export interface GuardianQualityDecision {
   ok: boolean;
   reasons: string[];
+  // 软信号:通过硬拦截、但内容空洞/信息量低的续写。ok 仍为 true(会照常显示),
+  // 但调用方据此把「合规但平庸」的快补也纳入深补升级触发,而非只在完全无果时升级。
+  weak?: boolean;
+  weakReasons?: string[];
 }
 
 interface GuardianEditorLike {
@@ -58,18 +62,23 @@ interface GuardianKnowledgeRuntimeLike {
 
 interface GuardianCompletionServiceDeps {
   settings: PluginSettings;
-  modelService: ModelService & { isGenerationConfigured?: () => boolean };
+  modelService: ModelService & {
+    isGenerationConfigured?: () => boolean;
+    recallGuardianMemory?: (query: string, maxChars?: number) => Promise<string>;
+  };
   knowledgeRuntime?: GuardianKnowledgeRuntimeLike | null;
   knowledgeTimeoutMs?: number;
   completionTimeoutMs?: number;
   deepKnowledgeTimeoutMs?: number;
   deepCompletionTimeoutMs?: number;
   cacheTtlMs?: number;
+  deepMaxSuggestionChars?: number;
+  deepMemoryTimeoutMs?: number;
   diagnostics?: (event: GuardianCompletionDiagnosticEvent) => void;
 }
 
 export interface GuardianCompletionDiagnosticEvent {
-  stage: 'build-context-start' | 'build-context-finished' | 'knowledge-start' | 'knowledge-finished' | 'knowledge-timeout' | 'deep-knowledge-start' | 'deep-knowledge-finished' | 'model-start' | 'model-finished' | 'completion-timeout' | 'response-parse-failed' | 'empty-response' | 'cache-hit';
+  stage: 'build-context-start' | 'build-context-finished' | 'knowledge-start' | 'knowledge-finished' | 'knowledge-timeout' | 'deep-knowledge-start' | 'deep-knowledge-finished' | 'deep-memory-start' | 'deep-memory-finished' | 'model-start' | 'model-finished' | 'completion-timeout' | 'response-parse-failed' | 'empty-response' | 'cache-hit';
   requestId?: number;
   activePath?: string;
   elapsedMs?: number;
@@ -119,7 +128,13 @@ export const GUARDIAN_ESCALATION_REASONS: ReadonlySet<string> = new Set([
   'explicit-none', 'repeats-input', 'duplicates-suffix', 'too-long',
   'filler-opening', 'no-substance', 'wrong-markdown-shape', 'meta-commentary',
   'low-quality', 'empty',
+  // P0:快补给出了「合规但平庸」的建议(evaluateSuggestion 判 weak),
+  // 语义同样是「浅层已尽力但此处值得更深」,故一并纳入升级触发。
+  'weak-completion',
 ]);
+
+// 快补成功但被判 weak 时,调用方以此 reason 走升级路径(见 GUARDIAN_ESCALATION_REASONS)。
+export const GUARDIAN_WEAK_COMPLETION_REASON = 'weak-completion';
 
 /**
  * 纯判定:快补无果后是否应「安排」自动升级到深补全。
@@ -339,11 +354,17 @@ export class GuardianCompletionService {
     }
     // 超长不再整条丢弃：截到最近的句子/子句边界，保留有用的前半段。
     // 模型常「首句到位、后面啰嗦」，截断比丢弃更能真正帮到写作。
-    if (suggestion.length > this.maxSuggestionChars()) {
-      suggestion = truncateToBoundary(suggestion, this.maxSuggestionChars());
+    const maxChars = this.maxSuggestionChars(context.mode);
+    if (suggestion.length > maxChars) {
+      suggestion = truncateToBoundary(suggestion, maxChars);
     }
     const quality = this.evaluateSuggestion(suggestion, context);
     if (!quality.ok) return { type: 'none', reason: quality.reasons[0] || 'low-quality' };
+
+    // 模型只返回「纯内容」,前导换行/空格已被 trim。根据光标上下文补回必要分隔符,
+    // 否则新段落/新列表项会紧贴原文(如「原文这是新段落」)。质检基于无分隔符的
+    // suggestion 判定(比较更准),分隔符只在最终产出时 prepend。
+    suggestion = prependSeparator(suggestion, context);
 
     this.writeCache(cacheKey, suggestion, quality);
 
@@ -356,7 +377,7 @@ export class GuardianCompletionService {
     };
   }
 
-  evaluateSuggestion(suggestion: string, context: Pick<GuardianCompletionContext, 'cursorPrefix' | 'cursorSuffix' | 'currentLine' | 'markdownShape' | 'localBlock'>): GuardianQualityDecision {
+  evaluateSuggestion(suggestion: string, context: Pick<GuardianCompletionContext, 'cursorPrefix' | 'cursorSuffix' | 'currentLine' | 'markdownShape' | 'localBlock' | 'mode'>): GuardianQualityDecision {
     const reasons: string[] = [];
     const trimmed = suggestion.trim();
     const normalizedSuggestion = normalizeForComparison(trimmed);
@@ -380,7 +401,7 @@ export class GuardianCompletionService {
     if (FILLER_OPENING.test(trimmed)) {
       reasons.push('filler-opening');
     }
-    if (trimmed.length > this.maxSuggestionChars()) {
+    if (trimmed.length > this.maxSuggestionChars(context.mode)) {
       reasons.push('too-long');
     }
     if (/\b(as an ai|作为ai|作为 AI|根据知识库|knowledge base)\b/i.test(trimmed)) {
@@ -393,22 +414,40 @@ export class GuardianCompletionService {
       reasons.push('wrong-markdown-shape');
     }
 
-    return { ok: reasons.length === 0, reasons };
+    // P3 正向质量信号:硬拦截之外,再判「合规但空洞」。仅对 fast 生效——
+    // 命中则 ok 仍为 true(照常显示),但标记 weak,让调用方把这类平庸快补也升级到深补。
+    // deep 不做此判断:深补已是终点,再降权无处可升,徒增无果率。
+    const weakReasons = reasons.length === 0 && context.mode !== 'deep'
+      ? detectWeakContinuation(trimmed, context)
+      : [];
+
+    return {
+      ok: reasons.length === 0,
+      reasons,
+      weak: weakReasons.length > 0,
+      weakReasons,
+    };
   }
 
   private buildPrompt(context: GuardianCompletionContext): string {
+    const deep = context.mode === 'deep';
     const lines = [
       '[Task]',
       'Continue the note at the cursor only when you are confident it genuinely helps. Return JSON: {"type":"completion","suggestion":"..."} or {"type":"none"}.',
       'Prefer {"type":"none"} whenever: the current sentence already reads as finished, the cursor sits mid-word, the intent is ambiguous, or the only continuation you can think of is generic filler.',
-      'When you do continue, write one focused, concrete continuation that advances the specific idea — usually one complete sentence, or one complete list item when in a list. Never pad with vague throat-clearing.',
       'Do not output reasoning, explanations, markdown fences, or commentary.',
-      'Target about 60-180 characters when the context supports it. Keep it focused enough to accept inline. Do not repeat text before or after the cursor.',
     ];
 
-    // 连接意图(仅 deep):有相关笔记时,鼓励做有依据、点出处的连接,而非平铺续写。
-    if (context.mode === 'deep') {
-      lines.push('When the relevant notes below genuinely connect to what is being written, prefer a continuation that surfaces that connection or insight (cite the note title), instead of a plain forward continuation. Only do this when the connection is real — never force it.');
+    if (deep) {
+      // 深补:放开篇幅,鼓励展开一个具体想法,而非复用「一句话」约束。
+      lines.push('This is a deep pass: the writer paused here wanting more than a quick continuation. Develop the specific idea concretely — you may write 2 to 4 sentences (or 2 to 3 list items when in a list) that add real substance: an argument, an example, a distinction, or a next step. Do not merely rephrase what is already written.');
+      lines.push('Aim for roughly 150 to 450 characters when the context supports it. Depth beats brevity here, but every sentence must earn its place — never pad to reach length.');
+      // 连接意图(仅 deep):有相关笔记/记忆时,鼓励做有依据、点出处的连接。
+      lines.push('When the relevant notes or memory below genuinely connect to what is being written, prefer a continuation that surfaces that connection or insight (cite the note title), instead of a plain forward continuation. Only do this when the connection is real — never force it.');
+    } else {
+      // 快补:亚秒级、可内联接受,保持一句话短续写。
+      lines.push('When you do continue, write one focused, concrete continuation that advances the specific idea — usually one complete sentence, or one complete list item when in a list. Never pad with vague throat-clearing.');
+      lines.push('Target about 60-180 characters when the context supports it. Keep it focused enough to accept inline. Do not repeat text before or after the cursor.');
     }
 
     lines.push('', `[Markdown Shape] ${context.markdownShape}`);
@@ -449,13 +488,7 @@ export class GuardianCompletionService {
     requestId?: number;
     activePath?: string;
   }): Promise<string> {
-    const runtime = this.deps.knowledgeRuntime;
     const deep = input.mode === 'deep';
-    // deep 读正文(更慢更值);fast 读元数据(亚秒级)。任一缺失则跳过。
-    const fetcher = deep
-      ? runtime?.getGuardianDeepKnowledgeContext
-      : runtime?.getGuardianKnowledgeContext;
-    if (!fetcher) return '';
 
     const signals = [
       input.currentHeading || '',
@@ -470,8 +503,34 @@ export class GuardianCompletionService {
 
     if (stripMarkdownPrefix(signals).length < 12) return '';
 
-    const startedAt = Date.now();
     const query = signals.slice(0, 600);
+
+    // deep:并行叠加两路素材——wiki 节选(笔记连接)+ Hindsight 记忆(个人事实连接)。
+    // 任一为空都不影响另一路;两路都空则整体为空,调用方据此不注入。
+    if (deep) {
+      const [wiki, memory] = await Promise.all([
+        this.fetchWikiKnowledge(query, input),
+        this.fetchGuardianMemory(query, input),
+      ]);
+      return [wiki, memory].filter(Boolean).join('\n\n');
+    }
+
+    return this.fetchWikiKnowledge(query, input);
+  }
+
+  /** wiki 知识召回(原 selectKnowledgeContext 主体):deep 读正文、fast 读元数据。 */
+  private async fetchWikiKnowledge(
+    query: string,
+    input: { mode: GuardianCompletionMode; requestId?: number; activePath?: string },
+  ): Promise<string> {
+    const runtime = this.deps.knowledgeRuntime;
+    const deep = input.mode === 'deep';
+    const fetcher = deep
+      ? runtime?.getGuardianDeepKnowledgeContext
+      : runtime?.getGuardianKnowledgeContext;
+    if (!fetcher) return '';
+
+    const startedAt = Date.now();
     // 知识超时:fast 放宽到 400ms(原 120 太苛刻,本地检索常被误丢);deep 给 2500ms 读文件。
     const timeoutMs = deep
       ? (this.deps.deepKnowledgeTimeoutMs ?? 2500)
@@ -524,6 +583,47 @@ export class GuardianCompletionService {
       });
     }
     return trimKnowledgeContext(raw);
+  }
+
+  /**
+   * Hindsight 记忆召回(仅 deep):把用户个人的 observation/world 记忆作为可连接素材,
+   * 与 wiki 节选互补。超时/无 memoryManager/无命中 → 空串,不阻塞 wiki 路径。
+   */
+  private async fetchGuardianMemory(
+    query: string,
+    input: { requestId?: number; activePath?: string },
+  ): Promise<string> {
+    const recall = this.deps.modelService.recallGuardianMemory;
+    if (!recall) return '';
+
+    const startedAt = Date.now();
+    const timeoutMs = this.deps.deepMemoryTimeoutMs ?? 1500;
+    this.emitDiagnostic({
+      stage: 'deep-memory-start',
+      requestId: input.requestId,
+      activePath: input.activePath,
+      contextLength: query.length,
+    });
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const raw = await Promise.race([
+      recall.call(this.deps.modelService, query, 500).catch(() => ''),
+      new Promise<string>((resolve) => {
+        timeoutHandle = setTimeout(() => resolve(''), timeoutMs);
+      }),
+    ]);
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+
+    this.emitDiagnostic({
+      stage: 'deep-memory-finished',
+      requestId: input.requestId,
+      activePath: input.activePath,
+      elapsedMs: Date.now() - startedAt,
+      knowledgeLength: raw.length,
+    });
+    if (!raw.trim()) return '';
+    // recallForPrompt 已带 [Relevant Memory] 头,原样透传给 prompt。
+    return raw.trim();
   }
 
   private emitDiagnostic(event: GuardianCompletionDiagnosticEvent): void {
@@ -581,9 +681,16 @@ export class GuardianCompletionService {
     return sensitivity >= 75 ? 1 : sensitivity >= 35 ? 2 : 3;
   }
 
-  private maxSuggestionChars(): number {
+  // 快补上限:亚秒级、可内联接受,保持短。deep 独立走 maxDeepSuggestionChars。
+  private maxSuggestionChars(mode: GuardianCompletionMode = 'fast'): number {
+    if (mode === 'deep') return this.maxDeepSuggestionChars();
     const sensitivity = clamp(this.deps.settings.guardianSensitivity ?? 50, 0, 100);
     return sensitivity >= 70 ? 220 : 280;
+  }
+
+  // 深补上限:允许展开 2-4 句/带出处的连接,故放宽到 ~500,不与 fast 共用。
+  private maxDeepSuggestionChars(): number {
+    return this.deps.deepMaxSuggestionChars ?? 500;
   }
 
   private getLineCount(editor: GuardianEditorLike, cursorLine: number): number {
@@ -774,6 +881,117 @@ function buildVoiceHint(profile?: UserProfile | null): string {
 // 空洞过渡词开头：中英文常见套话,补全以此起头几乎都是填充而非实质内容。
 // 用负向前瞻 (?![a-z]) 代替 \b——\b 基于 \w,对 CJK 字符无效。
 const FILLER_OPENING = /^\s*(?:总的来说|综上所述|综上|总而言之|总结一下|总结来说|一般来说|总体而言|众所周知|不言而喻|值得一提的是|需要注意的是|in conclusion|in summary|to sum up|overall|generally speaking|it is worth noting that|needless to say)(?![a-z])/i;
+
+// 通篇空泛词:整条续写几乎只由这类词构成时,是「说了等于没说」的平庸续写。
+const VAGUE_PHRASE = /(?:很重要|非常重要|至关重要|不可或缺|意义重大|值得关注|需要考虑|应该注意|方方面面|各种各样|等等|is important|very important|crucial|essential|matters a lot|worth considering|various aspects|and so on|among other things)/gi;
+
+/**
+ * P3 正向质量启发式:识别「通过硬拦截、但信息量低」的平庸续写。
+ * 这些内容语法正确、不重复、不套话开头,却没有推进具体想法——正是「质量一般」的主体。
+ * 返回命中的软信号原因(空则视为合格)。纯启发式、零 LLM 调用,不增延迟。
+ */
+function detectWeakContinuation(
+  trimmed: string,
+  context: Pick<GuardianCompletionContext, 'localBlock' | 'markdownShape'>,
+): string[] {
+  const weak: string[] = [];
+  const core = stripMarkdownPrefix(trimmed);
+  // 用 token 数(中文单字 / 英文单词)而非字符数衡量信息量:中英文密度差异大,
+  // 字符数会把「能显著降低团队的协作成本」(11 字、信息充足)误判为太薄。
+  const tokens = tokenizeWords(core);
+  const tokenCount = tokens.length;
+
+  // 1) 过短:token 太少,几乎无法承载一个完整想法。列表项放宽(短本就常见)。
+  const minTokens = context.markdownShape === 'list' || context.markdownShape === 'task' ? 2 : 4;
+  if (tokenCount > 0 && tokenCount < minTokens) weak.push('too-thin');
+
+  // 2) 空泛词占比过高:整条主要由「很重要/各方面/等等」这类词构成,说了等于没说。
+  const vagueHits = (core.match(VAGUE_PHRASE) || []).length;
+  if (vagueHits >= 2 || (tokenCount > 0 && tokenCount <= 12 && vagueHits >= 1)) {
+    weak.push('vague-phrasing');
+  }
+
+  // 3) 换句话说而非推进:续写用词几乎全落在局部块已有词汇内,没有引入任何新信息。
+  if (tokenCount >= 4 && isRephrasingOfBlock(core, context.localBlock)) {
+    weak.push('no-new-information');
+  }
+
+  return weak;
+}
+
+/**
+ * 判断续写是否只是把局部块已有内容「换个说法」:
+ * 续写切出的 token 若绝大多数(≥85%)已在局部块出现,则几乎没引入新信息。
+ * bigram 级判断成本高,这里用词级近似即可满足「降权而非丢弃」的用途。
+ */
+function isRephrasingOfBlock(suggestion: string, localBlock: string): boolean {
+  const blockTokens = new Set(tokenizeWords(localBlock));
+  if (blockTokens.size === 0) return false;
+  const sugTokens = tokenizeWords(suggestion);
+  if (sugTokens.length < 4) return false;
+  let seen = 0;
+  for (const token of sugTokens) {
+    if (blockTokens.has(token)) seen += 1;
+  }
+  return seen / sugTokens.length >= 0.85;
+}
+
+// 词级分词:CJK 按单字、拉丁按词,足够做「新信息」近似判断。
+function tokenizeWords(value: string): string[] {
+  const normalized = value.toLowerCase();
+  const latin = normalized.match(/[a-z0-9]+/g) || [];
+  const cjk = normalized.match(/[一-鿿]/g) || [];
+  return [...latin, ...cjk];
+}
+
+/**
+ * 根据光标上下文,给「纯内容」补全补回必要的前导分隔符(模型输出已被 trim)。
+ * 三种情形:
+ *  1) 列表/任务项且补全本身是「新条目」(以列表标记开头) → 换行 + 同级缩进。
+ *  2) 段落:光标前是英文句末标点(上一句已收尾,补的是新句) → 补空格;中文全角标点不补。
+ *  3) 英文词衔接:光标前是字母/数字、补全首字符也是字母/数字 → 补空格,避免粘连。
+ * 其余情况(词中续写、CJK 相邻、标点后紧接)不补,保持原样。
+ */
+function prependSeparator(
+  suggestion: string,
+  context: Pick<GuardianCompletionContext, 'cursorPrefix' | 'cursorSuffix' | 'markdownShape' | 'currentLine'>,
+): string {
+  if (!suggestion) return suggestion;
+  // suggestion 自身已带前导换行/空格(极少数模型会给)→ 尊重它,不重复补。
+  if (/^\s/.test(suggestion)) return suggestion;
+
+  const prefix = context.cursorPrefix ?? '';
+  const prevChar = prefix.slice(-1);
+  const firstChar = suggestion[0];
+
+  // 光标前为空(行首或空行):不需要分隔符。
+  if (!prevChar || !prevChar.trim()) return suggestion;
+
+  const shape = context.markdownShape;
+
+  // 情形 1:列表/任务项,且补全本身是「新条目」(以列表标记开头) → 换行接续。
+  // 若补全不带标记(续写当前项),则走后续的段落/词衔接逻辑。
+  if ((shape === 'list' || shape === 'task') && /^(?:[-*+]|\d+\.)\s/.test(suggestion)) {
+    const indent = context.currentLine.match(/^\s*/)?.[0] ?? '';
+    return `\n${indent}${suggestion}`;
+  }
+
+  // 句末标点含半角 . ! ? 与全角 。！？…(半角 . 之前漏了,导致英文句号后不补空格)。
+  const prevIsSentenceEnd = /[。！？.!?…]/.test(prevChar);
+  const prevIsLatin = /[a-zA-Z0-9]/.test(prevChar);
+  const firstIsLatin = /[a-zA-Z0-9]/.test(firstChar);
+
+  // 情形 2:句末标点后的新句。英文半角句末后接字母需空格,中文全角标点后不需要。
+  if (prevIsSentenceEnd) {
+    if (/[!?.]/.test(prevChar) && firstIsLatin) return ` ${suggestion}`;
+    return suggestion;
+  }
+
+  // 情形 3:英文词粘连——前一字符和补全首字符都是拉丁字母/数字 → 补空格。
+  if (prevIsLatin && firstIsLatin) return ` ${suggestion}`;
+
+  return suggestion;
+}
 
 // 句子结束标点（中英文）：截断时优先在此处断开,保留完整句。
 const SENTENCE_END = /[。！？!?…]/g;

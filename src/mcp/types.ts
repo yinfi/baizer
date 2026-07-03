@@ -171,7 +171,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     guardianAutoMode: true, // Default to true
     guardianSensitivity: 50,
     guardianUIStyle: 'hybrid',
-    guardianAutoDeepEscalation: false,
+    guardianAutoDeepEscalation: true,
     ignoredFolders: '',
     privacyMode: false,
 
