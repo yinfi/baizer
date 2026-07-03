@@ -181,6 +181,7 @@ function createChatPanel(
         attr: { type: 'button', title: 'Close' },
     });
     closeBtn.onclick = () => {
+        cleanupPendingRewrite(view);
         state.controller.cleanup();
         view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
     };
@@ -275,6 +276,7 @@ function createChatPanel(
         if (suggestList.handleKeyDown(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
+            cleanupPendingRewrite(view);
             state.controller.cleanup();
             view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
             return;
@@ -428,6 +430,14 @@ export function handleInlineDiffAccept(s: InlineDiffState) {
     clearInlineDiff(rewriteView);
     currentRewriteController = null;
     currentRewriteRequest = null;
+}
+
+/** 关闭对话框时清理未决的改写:中止请求 + 清掉内联 diff 装饰 + 复位模块级状态。 */
+function cleanupPendingRewrite(view: EditorView) {
+    currentRewriteController?.abort();
+    currentRewriteController = null;
+    currentRewriteRequest = null;
+    clearInlineDiff(view);
 }
 
 export function handleInlineDiffReject(_s: InlineDiffState) {
