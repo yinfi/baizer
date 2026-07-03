@@ -83,6 +83,7 @@ const tests = [
   'test/knowledge/watcher.test.ts',
   'test/knowledge/frontmatter-idempotent.test.ts',
   'test/throttle.test.ts',
+  'test/action-registry.test.ts',
 ];
 
 for (const testFile of tests) {
