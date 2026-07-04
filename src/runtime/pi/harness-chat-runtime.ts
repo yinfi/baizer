@@ -98,6 +98,11 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       },
     });
 
+    // 运行中 steering:把活跃 harness 登记进控制器,使 UI/ModelService 能对当前流
+    // 调用 Harness 原生 steer()/setActiveTools()。流结束时在 finally 里清除。
+    const activeRunController = this.deps.activeRunController ?? null;
+    activeRunController?.register(harness);
+
     // 事件桥接:Harness 原生事件 → StreamEvent,推入异步队列供本 generator 产出。
     const queue = createEventQueue<StreamEvent>();
     let approvalToolResultYielded = false;
@@ -176,6 +181,8 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     } finally {
       unsubscribe();
       signal?.removeEventListener('abort', onAbort);
+      // 仅当当前活跃引用仍是本轮 harness 时清除,避免误清刚启动的新流。
+      activeRunController?.clear(harness);
     }
 
     if (runError) {

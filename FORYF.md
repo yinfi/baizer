@@ -1,3 +1,29 @@
+### [2026-07-05 00:10] Task Summary — pi AgentHarness 重构阶段2(steering 交给 Harness)
+
+**1. 刚刚做了什么? (What was done?)**
+- 删除自造 SteeringController(110行,含 FIFO 队列 + filterPiToolsByActiveTools),改用 Harness 原生 steer()/setActiveTools()。
+- 新增极薄 ActiveRunController(73行):只持有「当前活跃 harness」引用;runtime 在 queryStream 启动时 register、结束时 clear;UI/ModelService 的补话/动态工具集直接转发给活跃 harness。
+- HarnessChatRuntime 接通 steering:register/clear 围绕 harness 生命周期(clear 仅当仍是当前引用,防竞态误清新流)。
+- ModelService steerActiveRun/setActiveTools/hasPendingSteering 路由到 ActiveRunController,门面签名不变,UI 调用点零改动。
+- 重写 steering.test.ts:6 个 ActiveRunController 单测 + 1 个 E2E(HarnessChatRuntime + registerApiProvider 接缝,验证 tool_result 时补话进后续 provider 轮);阶段0 标记 SKIP 的集成测试就此重建。
+- tsc 干净、build 通过、全量 83 测试通过。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 凡 pi 有的用 pi 的:AgentHarness 原生 steer() 就是把补话注入当前运行 harness 的下一轮,旧 SteeringController 是在底层 agentLoop 上重造这个能力。
+- 现状发现:阶段0/1 的 HarnessChatRuntime 根本没接 SteeringController,steering 在 harness 路径下当前失效——阶段2 顺带重新接通。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- Harness steer() 作用于「当前运行的 harness 实例」,而该实例在 queryStream 内局部创建;ModelService.steerActiveRun 需要拿到它。
+- hasPendingSteering 原语义是「队列有补话」,新架构无队列。
+- 并发竞态:新流启动后,旧流 finally 若无条件 clear 会误清新流的活跃引用。
+
+**4. 如何修复的? (How was it fixed?)**
+- 探针实测确认 harness.steer 在 tool_execution_end 事件里调用能进下一轮 provider 输入,据此设计 ActiveRunController 作为「活跃 harness holder」。
+- hasPendingSteering 改为 isActive()(有活跃 run);确认 src 内无消费方(UI 走 isRunActive),无回归。
+- clear(harness) 带引用比较,仅当传入的仍是当前活跃引用时才清。
+
+---
+
 ### [2026-07-04 23:20] Task Summary — pi AgentHarness 重构阶段1(session+compaction 交给 Harness)
 
 **1. 刚刚做了什么? (What was done?)**

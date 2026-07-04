@@ -9,7 +9,7 @@ import type { SkillRegistry } from '../skills/skill-registry';
 import type { ToolRegistry } from '../skills/tool-registry';
 import type { WorkspaceEditService } from '../services/workspace-edit-service';
 import type { HarnessSessionManager } from './pi/harness-session-manager';
-import type { SteeringController } from './steering-controller';
+import type { ActiveRunController } from './active-run-controller';
 
 /**
  * 一次 queryStream 运行所需的原生 LLM 直连句柄。
@@ -84,10 +84,11 @@ export interface ChatRuntimeDeps {
    */
   thinkingLevel?: string;
   /**
-   * 可选的运行中 steering 控制器。提供时，长任务运行中可通过它追加补话
-   * （下一轮纳入）或运行时调整可用工具集。不提供时退化为「无运行中 steering」。
+   * 可选的运行中 run 控制器。提供时,runtime 在 queryStream 启动时把活跃 harness 登记进去,
+   * 使 UI/ModelService 能对当前流调用 Harness 原生 steer()/setActiveTools()。
+   * 不提供时退化为「无运行中 steering」。
    */
-  steeringController?: SteeringController | null;
+  activeRunController?: ActiveRunController | null;
 }
 
 export interface ChatTurnRequest {

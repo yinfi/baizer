@@ -1,6 +1,6 @@
-import type { StreamEvent, ToolDefinition, ToolResult } from '../src/models/interfaces';
+import type { StreamEvent } from '../src/models/interfaces';
 import type { ChatRuntimeDeps, NativeChatHandle, PreparedChatTurn } from '../src/runtime/runtime-types';
-import { SteeringController, filterPiToolsByActiveTools } from '../src/runtime/steering-controller';
+import { ActiveRunController, type SteerableHarness } from '../src/runtime/active-run-controller';
 
 function expect(actual: any) {
   return {
@@ -30,231 +30,201 @@ async function test(name: string, fn: () => Promise<void> | void) {
   }
 }
 
-function createTurn(overrides: Partial<PreparedChatTurn> = {}): PreparedChatTurn {
+/** 记录 steer/setActiveTools 调用的假 harness。 */
+function createFakeHarness(): SteerableHarness & { steered: string[]; toolSets: string[][] } {
+  const steered: string[] = [];
+  const toolSets: string[][] = [];
   return {
-    prompt: 'User Request: do a long task',
-    tools: [
-      { name: 'read_note', description: 'Read note', parameters: { type: 'object', properties: {} } },
-      { name: 'web_search', description: 'Search web', parameters: { type: 'object', properties: {} } },
-      { name: 'use_skill', description: 'Use skill', parameters: { type: 'object', properties: {} } },
-    ],
-    userRequest: 'do a long task',
-    ...overrides,
+    steered,
+    toolSets,
+    async steer(text: string) { steered.push(text); },
+    async setActiveTools(names: string[]) { toolSets.push(names); },
   };
 }
 
-/**
- * 构造一个 deps，mock streamFn 记录每一轮收到的输入。
- * streamFactory 接收 (input, callIndex)，便于「第二轮才停」式的多轮编排。
- *
- * 走原生后注入点从 mock IChatSession 上移到 mock streamFn：
- * 每次 agentLoop 调 streamFn 时，从 llmContext.messages 还原本轮输入
- * （首轮=最后一条 user 文本；工具轮=末尾连续 toolResult 批次解包成 ToolResult[]），
- * 喂给 streamFactory，再把 StreamEvent[] 转成 pi 的 AssistantMessageEvent 流。
- */
-function deriveInput(messages: any[]): string | ToolResult[] {
-  const last = messages[messages.length - 1];
-  if (last?.role === 'toolResult') {
-    const batch: any[] = [];
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role !== 'toolResult') break;
-      batch.unshift(messages[i]);
-    }
-    return batch.map((message) => ({
-      id: message.toolCallId,
-      name: message.toolName,
-      response: message.details && Object.prototype.hasOwnProperty.call(message.details, 'baizerResponse')
-        ? message.details.baizerResponse
-        : message.content,
-    }));
-  }
-  const lastUser = [...messages].reverse().find((message) => message.role === 'user');
-  if (!lastUser) return '';
-  if (typeof lastUser.content === 'string') return lastUser.content;
-  if (Array.isArray(lastUser.content)) {
-    return lastUser.content.filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
-  }
-  return '';
+async function wait(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** 把 baizer StreamEvent[] 转成 pi 的 AssistantMessageEventStream（同步可迭代 + result()）。 */
+/** 把 StreamEvent[] 转成 pi 的 AssistantMessageEventStream(与 harness-chat-runtime.test 同款)。 */
 function eventsToPiStream(model: any, events: StreamEvent[]): any {
   const partial: any = {
-    role: 'assistant',
-    content: [],
-    api: model.api,
-    provider: model.provider,
-    model: model.id,
-    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-    stopReason: 'stop',
-    timestamp: Date.now(),
+    role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: 'stop', timestamp: Date.now(),
   };
-  const out: any[] = [];
-  let textIndex: number | undefined;
-  let textContent = '';
-  let hasToolCall = false;
-  let finalMessage: any;
-
-  out.push({ type: 'start', partial });
-  for (const event of events) {
-    if (event.type === 'text_delta') {
-      if (textIndex === undefined) {
-        textIndex = partial.content.length;
-        partial.content.push({ type: 'text', text: '' });
-        out.push({ type: 'text_start', contentIndex: textIndex, partial });
-      }
-      textContent += event.content || '';
-      partial.content[textIndex] = { type: 'text', text: textContent };
-      out.push({ type: 'text_delta', contentIndex: textIndex, delta: event.content || '', partial });
-    } else if (event.type === 'tool_call') {
-      hasToolCall = true;
-      const idx = partial.content.length;
-      const toolCall = { type: 'toolCall', id: event.id || `${event.name}_${idx}`, name: event.name, arguments: event.args || {} };
-      partial.content.push(toolCall);
-      out.push({ type: 'toolcall_start', contentIndex: idx, partial });
-      out.push({ type: 'toolcall_end', contentIndex: idx, toolCall, partial });
-    } else if (event.type === 'done') {
-      if (textIndex !== undefined) {
-        out.push({ type: 'text_end', contentIndex: textIndex, content: textContent, partial });
-      }
-      finalMessage = { ...partial, stopReason: hasToolCall ? 'toolUse' : 'stop' };
-      out.push({ type: 'done', reason: hasToolCall ? 'toolUse' : 'stop', message: finalMessage });
+  const out: any[] = [{ type: 'start', partial }];
+  let ti: number | undefined; let tc = ''; let hasTool = false; let final: any;
+  for (const e of events) {
+    if (e.type === 'text_delta') {
+      if (ti === undefined) { ti = partial.content.length; partial.content.push({ type: 'text', text: '' }); out.push({ type: 'text_start', contentIndex: ti, partial }); }
+      tc += e.content || ''; partial.content[ti] = { type: 'text', text: tc };
+      out.push({ type: 'text_delta', contentIndex: ti, delta: e.content || '', partial });
+    } else if (e.type === 'tool_call') {
+      hasTool = true; const i = partial.content.length;
+      const t = { type: 'toolCall', id: e.id || `${e.name}_${i}`, name: e.name, arguments: e.args || {} };
+      partial.content.push(t);
+      out.push({ type: 'toolcall_start', contentIndex: i, partial }, { type: 'toolcall_end', contentIndex: i, toolCall: t, partial });
+    } else if (e.type === 'done') {
+      if (ti !== undefined) out.push({ type: 'text_end', contentIndex: ti, content: tc, partial });
+      final = { ...partial, stopReason: hasTool ? 'toolUse' : 'stop' };
+      out.push({ type: 'done', reason: hasTool ? 'toolUse' : 'stop', message: final });
       break;
     }
   }
-  if (!finalMessage) {
-    finalMessage = { ...partial, stopReason: hasToolCall ? 'toolUse' : 'stop' };
-    out.push({ type: 'done', reason: hasToolCall ? 'toolUse' : 'stop', message: finalMessage });
-  }
+  if (!final) { final = { ...partial, stopReason: hasTool ? 'toolUse' : 'stop' }; out.push({ type: 'done', reason: hasTool ? 'toolUse' : 'stop', message: final }); }
+  return { async *[Symbol.asyncIterator]() { for (const e of out) yield e; }, result() { return Promise.resolve(final); } };
+}
 
+let mockSeq = 0;
+
+function createMockEnv(): any {
+  const ok = (v: any) => ({ ok: true, value: v });
+  const er = (c: string, m: string) => ({ ok: false, error: { code: c, message: m } });
   return {
-    async *[Symbol.asyncIterator]() {
-      for (const event of out) yield event;
-    },
-    result() {
-      return Promise.resolve(finalMessage);
-    },
+    cwd: '/', absolutePath: async (p: string) => ok(p), joinPath: async (a: string[]) => ok(a.join('/')),
+    readTextFile: async () => er('not_found', 'x'), readTextLines: async () => er('not_found', 'x'), readBinaryFile: async () => er('not_found', 'x'),
+    writeFile: async () => ok(undefined), appendFile: async () => ok(undefined), fileInfo: async () => er('not_found', 'x'),
+    listDir: async () => ok([]), canonicalPath: async (p: string) => ok(p), exists: async () => ok(false),
+    createDir: async () => ok(undefined), remove: async () => ok(undefined), createTempDir: async () => ok('/t'), createTempFile: async () => ok('/t/f'),
+    cleanup: async () => {}, exec: async () => er('shell_unavailable', 'x'),
   };
 }
 
-function createDeps(options: {
-  streamFactory: (input: string | ToolResult[], callIndex: number) => StreamEvent[];
-  steeringController?: SteeringController;
-  toolResults?: Record<string, any>;
-  onTurn?: (callIndex: number, input: string | ToolResult[]) => void;
-}): ChatRuntimeDeps & { sessionInputs: (string | ToolResult[])[] } {
-  const sessionInputs: (string | ToolResult[])[] = [];
-  let callIndex = 0;
-  const model = { id: 'mock-model', name: 'Mock', api: 'mock', provider: 'mock' } as any;
-  const streamFn = (_model: any, llmContext: any) => {
-    const thisCall = callIndex++;
-    const input = deriveInput(llmContext.messages || []);
-    sessionInputs.push(input);
-    options.onTurn?.(thisCall, input);
-    return eventsToPiStream(model, options.streamFactory(input, thisCall));
-  };
-  const nativeChatFactory = (): NativeChatHandle => ({ model, streamFn: streamFn as any });
-  const deps = {
-    sessionInputs,
-    nativeChatFactory,
-    memoryManager: null,
-    skillRegistry: {
-      getSkillSummaryText: () => '',
-      activateSkill: (name: string) => ({ skill: { name }, instructions: '', tools: [] }),
-    } as any,
-    workspaceEditService: {
-      executeWorkspaceTool: async () => ({ success: true }),
-    } as any,
-    toolRegistry: {
-      get: () => undefined,
-      getAllDefinitions: () => [],
-      execute: async (name: string) => options.toolResults?.[name] ?? { success: true, content: 'ok' },
-    } as any,
-    steeringController: options.steeringController,
-  };
-  return deps;
-}
+async function runE2ETests() {
+  // 端到端:运行中补话经 ActiveRunController → 活跃 harness.steer() 注入下一轮。
+  await test('mid-run steer via ActiveRunController is injected into a later provider turn', async () => {
+    const piAi: any = await import('@earendil-works/pi-ai');
+    const apiName = `steer-mock-${mockSeq++}`;
+    const lastInputs: string[] = [];
+    let call = 0;
+    const model = { id: 'm', name: 'm', api: apiName, provider: 'mock', baseUrl: '', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 100 } as any;
+    const streamSimple = (_m: any, ctx: any) => {
+      call++;
+      const msgs = ctx.messages || [];
+      const last = msgs[msgs.length - 1];
+      lastInputs.push(typeof last?.content === 'string' ? last.content : JSON.stringify(last?.content));
+      if (call === 1) return eventsToPiStream(model, [{ type: 'tool_call', id: 'c1', name: 'read_note', args: { path: 'A.md' } }, { type: 'done', text: '' }]);
+      return eventsToPiStream(model, [{ type: 'text_delta', content: 'final' }, { type: 'done', text: 'final' }]);
+    };
+    piAi.registerApiProvider({ api: apiName, stream: streamSimple, streamSimple }, 'steer-test');
 
-async function collect(stream: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> {
-  const events: StreamEvent[] = [];
-  for await (const event of stream) events.push(event);
-  return events;
-}
+    const controller = new ActiveRunController();
+    const deps: ChatRuntimeDeps = {
+      nativeChatFactory: (): NativeChatHandle => ({ model, getApiKey: () => 'k' }) as any,
+      harnessEnv: createMockEnv(),
+      activeRunController: controller,
+      memoryManager: null,
+      toolRegistry: {
+        get: () => undefined,
+        getAllDefinitions: () => [{ name: 'read_note', description: 'r', parameters: { type: 'object', properties: {} } }],
+        execute: async () => ({ success: true, content: 'A' }),
+      } as any,
+      skillRegistry: { getSkillSummaryText: () => '', activateSkill: () => null } as any,
+    };
 
-function isToolResultInput(input: string | ToolResult[]): input is ToolResult[] {
-  return Array.isArray(input);
+    const { HarnessChatRuntime } = await import('../src/runtime/pi/harness-chat-runtime');
+    const runtime = new HarnessChatRuntime(deps);
+    const turn: PreparedChatTurn = {
+      prompt: 'start task',
+      tools: [{ name: 'read_note', description: 'r', parameters: { type: 'object', properties: {} } }],
+      userRequest: 'start task',
+    };
+
+    // 消费流;在收到首个 tool_result 时通过 controller 补话(此时 runtime 已 register 活跃 harness)。
+    let steered = false;
+    const events: StreamEvent[] = [];
+    for await (const event of runtime.queryStream(turn)) {
+      events.push(event);
+      if (event.type === 'tool_result' && !steered) {
+        steered = true;
+        controller.steer('actually, summarize in Chinese');
+        await wait(0);
+      }
+    }
+
+    expect((events.at(-1) as any).type).toBe('done');
+    // 补话应作为独立 user 文本进入后续某一轮 provider 输入。
+    const injected = lastInputs.some(s => s.includes('actually, summarize in Chinese'));
+    expect(injected).toBe(true);
+    // 运行结束后控制器应已 clear(不再活跃)。
+    expect(controller.isActive()).toBe(false);
+  });
 }
 
 async function runTests() {
   console.log('=== Running Steering Tests ===');
 
-  await test('drainSteeringMessages returns queued user messages then clears', () => {
-    const controller = new SteeringController();
-    expect(controller.hasPendingSteering()).toBe(false);
-    controller.steer('focus on section 2');
-    controller.steer('keep it short');
-    expect(controller.hasPendingSteering()).toBe(true);
+  // ——— ActiveRunController 单元测试 ———
 
-    const drained = controller.drainSteeringMessages();
-    expect(drained.length).toBe(2);
-    expect(drained[0].role).toBe('user');
-    expect(drained[0].content).toBe('focus on section 2');
-    expect(drained[1].content).toBe('keep it short');
-    // 取出后队列清空。
-    expect(controller.hasPendingSteering()).toBe(false);
-    expect(controller.drainSteeringMessages().length).toBe(0);
+  await test('isActive reflects register/clear lifecycle', () => {
+    const controller = new ActiveRunController();
+    expect(controller.isActive()).toBe(false);
+    const harness = createFakeHarness();
+    controller.register(harness);
+    expect(controller.isActive()).toBe(true);
+    controller.clear(harness);
+    expect(controller.isActive()).toBe(false);
   });
 
-  await test('steer ignores blank text', () => {
-    const controller = new SteeringController();
+  await test('steer forwards trimmed text to the active harness', async () => {
+    const controller = new ActiveRunController();
+    const harness = createFakeHarness();
+    controller.register(harness);
+    controller.steer('  focus on section 2  ');
+    await wait(0);
+    expect(harness.steered).toEqual(['focus on section 2']);
+  });
+
+  await test('steer ignores blank text and no-op when idle', async () => {
+    const controller = new ActiveRunController();
+    const harness = createFakeHarness();
+    controller.register(harness);
     controller.steer('   ');
     controller.steer('');
-    expect(controller.hasPendingSteering()).toBe(false);
+    await wait(0);
+    expect(harness.steered).toEqual([]);
+
+    controller.clear();
+    controller.steer('nobody home');
+    await wait(0);
+    expect(harness.steered).toEqual([]);
   });
 
-  await test('reset clears queued steering and tool updates', () => {
-    const controller = new SteeringController();
-    controller.steer('hi');
-    controller.setActiveTools(['read_note']);
-    controller.reset();
-    expect(controller.hasPendingSteering()).toBe(false);
-    expect(controller.consumeActiveToolsUpdate()).toBe(null);
-  });
-
-  await test('consumeActiveToolsUpdate returns set once then null', () => {
-    const controller = new SteeringController();
-    expect(controller.consumeActiveToolsUpdate()).toBe(null);
+  await test('setActiveTools forwards names plus read_skill fallback', async () => {
+    const controller = new ActiveRunController();
+    const harness = createFakeHarness();
+    controller.register(harness);
     controller.setActiveTools(['read_note', 'web_search']);
-    const update = controller.consumeActiveToolsUpdate();
-    expect(update instanceof Set).toBe(true);
-    expect((update as Set<string>).has('read_note')).toBe(true);
-    // 消费后不再重复返回，直到下一次 setActiveTools。
-    expect(controller.consumeActiveToolsUpdate()).toBe(null);
+    await wait(0);
+    // read_skill 是 skill 激活的元能力,收窄工具集时必须保留。
+    expect(harness.toolSets.length).toBe(1);
+    const names = harness.toolSets[0].slice().sort();
+    expect(names).toEqual(['read_note', 'read_skill', 'web_search']);
   });
 
-  await test('filterPiToolsByActiveTools keeps read_skill plus active tools', () => {
-    const tools = [
-      { name: 'read_note' },
-      { name: 'web_search' },
-      { name: 'read_skill' },
-      { name: 'delete_note' },
-    ];
-    const filtered = filterPiToolsByActiveTools(tools, new Set(['read_note']));
-    // B 方案：read_skill 是 skill 激活的元能力，收窄工具集时必须保留。
-    expect(filtered.map(t => t.name)).toEqual(['read_note', 'read_skill']);
+  await test('setActiveTools is a no-op when idle', async () => {
+    const controller = new ActiveRunController();
+    controller.setActiveTools(['read_note']);
+    await wait(0);
+    // 无活跃 run,不应抛错;无可断言的副作用,仅验证不抛。
+    expect(true).toBe(true);
   });
 
-  // ————————————————————————————————————————————————————————————————
-  // 阶段2 待重写:以下 3 个「运行中 steering」端到端断言原本驱动已删除的 PiChatRuntime,
-  // 验证旧的 getSteeringMessages/prepareNextTurn 自造钩子。阶段2 会删掉 SteeringController、
-  // 改用 AgentHarness 原生 steer()/setActiveTools(),届时这些行为断言在 Harness 接缝上重建。
-  // 阶段0 只接入引擎、不接管 steering,故此处显式跳过而非伪造通过。
-  // ————————————————————————————————————————————————————————————————
-  console.log('  SKIP (phase 2) steering message injected after pending tool result');
-  console.log('  SKIP (phase 2) reset on new run drops pre-run steering');
-  console.log('  SKIP (phase 2) setActiveTools mid-run filters context.tools');
-  return;
+  await test('clear only clears when the passed harness is the active one', () => {
+    const controller = new ActiveRunController();
+    const first = createFakeHarness();
+    const second = createFakeHarness();
+    controller.register(first);
+    // 新流已启动(second 登记),旧流结束时用 first 调 clear 不应误清 second。
+    controller.register(second);
+    controller.clear(first);
+    expect(controller.isActive()).toBe(true);
+    controller.clear(second);
+    expect(controller.isActive()).toBe(false);
+  });
 
+  await runE2ETests();
 }
 
 runTests().catch((e) => {

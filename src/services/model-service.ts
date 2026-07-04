@@ -12,7 +12,7 @@ import { buildGeminiModel, buildOpenAICompatModel, createNativeCompleteFn, Nativ
 import { createHarnessExecutionEnv } from '../runtime/pi/harness-env';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import * as modelCatalog from './model-catalog-service';
-import { SteeringController } from '../runtime/steering-controller';
+import { ActiveRunController } from '../runtime/active-run-controller';
 import { HarnessSessionManager, type PersistedSessionRef } from '../runtime/pi/harness-session-manager';
 import { createVaultFileAdapter } from '../runtime/pi/vault-session-fs';
 import { computeContentHash } from '../knowledge/compiler';
@@ -49,11 +49,11 @@ export class ModelService {
      */
     private harnessEnv: unknown = null;
     /**
-     * 运行中 steering 控制器。承载长任务运行时的「补话」与「动态工具集」。
-     * 跨轮复用同一实例：每次 queryStream 启动时由 runtime 调用 reset() 清空遗留状态，
-     * 故运行期间 UI 调用 steer() 的窗口对齐当前流。
+     * 运行中 run 控制器。持有当前活跃的 AgentHarness,使「补话」与「动态工具集」
+     * 直接走 Harness 原生 steer()/setActiveTools()。跨轮复用同一实例:runtime 在每次
+     * queryStream 启动时 register 新 harness、结束时 clear,故 steer 窗口对齐当前流。
      */
-    private readonly steeringController = new SteeringController();
+    private readonly activeRunController = new ActiveRunController();
 
     constructor(
         private app: App,
@@ -630,7 +630,7 @@ export class ModelService {
             harnessEnv: this.harnessEnv,
             contextWindow: this.settings.contextWindow,
             thinkingLevel: this.settings.thinkingLevel,
-            steeringController: this.steeringController,
+            activeRunController: this.activeRunController,
         });
     }
 
@@ -673,23 +673,24 @@ export class ModelService {
     }
 
     /**
-     * 运行中补话入口：长任务运行时往 steering 队列追加一条用户指令，
-     * 不打断当前流，由正在运行的 agentLoop 在下一轮纳入。空白文本忽略。
+     * 运行中补话入口:把一条用户指令转发给当前活跃 harness 的原生 steer(),
+     * 不打断当前流,由 Harness 在下一轮纳入。无活跃 run 或空白文本时忽略。
      */
     public steerActiveRun(text: string): void {
-        this.steeringController.steer(text);
+        this.activeRunController.steer(text);
     }
 
     /**
-     * 运行时调整可用工具集：下一轮起 pi 只在这些工具内执行调用（read_skill 由 runtime 兜底保留）。
+     * 运行时调整可用工具集:转发给当前活跃 harness 的原生 setActiveTools()
+     * (read_skill 由控制器兜底保留)。无活跃 run 时忽略。
      */
     public setActiveTools(toolNames: string[]): void {
-        this.steeringController.setActiveTools(toolNames);
+        this.activeRunController.setActiveTools(toolNames);
     }
 
-    /** 当前是否有尚未纳入的补话。供 UI 显示「补话已排队」状态。 */
+    /** 当前是否有正在运行、可被补话的 run。供 UI 决定补话入口可用态。 */
     public hasPendingSteering(): boolean {
-        return this.steeringController.hasPendingSteering();
+        return this.activeRunController.isActive();
     }
 
     private isAbortError(error: any): boolean {
