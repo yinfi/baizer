@@ -8,7 +8,8 @@ import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry, SkillSummary } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
-import { buildGeminiModel, buildOpenAICompatModel, createNativeStreamFn, createNativeCompleteFn, NativeCompleteFn } from '../runtime/pi/pi-native-model';
+import { buildGeminiModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn } from '../runtime/pi/pi-native-model';
+import { createHarnessExecutionEnv } from '../runtime/pi/harness-env';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import * as modelCatalog from './model-catalog-service';
 import { SteeringController } from '../runtime/steering-controller';
@@ -41,6 +42,11 @@ export class ModelService {
      * 提供跨轮上下文与跨重启恢复；不可用时退化为旧的 UI 内存回灌行为。
      */
     private sessionStore: SessionStore | null = null;
+    /**
+     * pi AgentHarness 所需的完整 ExecutionEnv(FileSystem + NoopShell)。
+     * 与 sessionStore 同源(同一 vault adapter),vault 不可用时为 null。
+     */
+    private harnessEnv: unknown = null;
     /**
      * 运行中 steering 控制器。承载长任务运行时的「补话」与「动态工具集」。
      * 跨轮复用同一实例：每次 queryStream 启动时由 runtime 调用 reset() 清空遗留状态，
@@ -84,7 +90,8 @@ export class ModelService {
             return;
         }
         try {
-            this.sessionStore = new SessionStore(createVaultFileAdapter(adapter), {
+            const vaultAdapter = createVaultFileAdapter(adapter);
+            this.sessionStore = new SessionStore(vaultAdapter, {
                 loadRef: () => this.loadSessionRef(),
                 saveRef: (ref) => this.saveSessionRef(ref),
                 // 自动压缩阈值取当前模型的上下文窗口（settings 可运行期改动，故用 getter 取最新值）。
@@ -92,9 +99,12 @@ export class ModelService {
                 // 摘要用上层自己的 provider 生成（pi 的 compact() 会绕过 bridge，不复用）。
                 summarize: (prompt, systemPrompt) => this.summarizeForCompaction(prompt, systemPrompt),
             });
+            // Harness ExecutionEnv 与会话持久化同源(同一 vault adapter)。
+            this.harnessEnv = createHarnessExecutionEnv(vaultAdapter);
         } catch (error) {
             logger.warn('Failed to initialize SessionStore; falling back to in-memory history.', 'ModelService');
             this.sessionStore = null;
+            this.harnessEnv = null;
         }
     }
 
@@ -630,6 +640,7 @@ export class ModelService {
             skillRegistry: this.skillRegistry,
             workspaceEditService: this.workspaceEditService,
             sessionStore: this.sessionStore,
+            harnessEnv: this.harnessEnv,
             contextWindow: this.settings.contextWindow,
             thinkingLevel: this.settings.thinkingLevel,
             steeringController: this.steeringController,
@@ -652,7 +663,9 @@ export class ModelService {
             : buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
         return {
             model,
-            streamFn: createNativeStreamFn(config.apiKey),
+            // AgentHarness 通过 getApiKeyAndHeaders 按需取 key;取当前 provider 的最新 apiKey。
+            // (不再提供 streamFn:Harness 内部按 model.api 路由到 pi api-registry,不消费注入的 streamFn。)
+            getApiKey: () => this.getActiveProviderConfig()?.apiKey ?? '',
         };
     }
 

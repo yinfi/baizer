@@ -1,6 +1,6 @@
-import { PiChatRuntime } from './pi/pi-chat-runtime';
+import { HarnessChatRuntime } from './pi/harness-chat-runtime';
 import type { ChatRuntime, ChatRuntimeDeps } from './runtime-types';
 
 export function createChatRuntime(args: ChatRuntimeDeps): ChatRuntime {
-  return new PiChatRuntime(args);
+  return new HarnessChatRuntime(args);
 }

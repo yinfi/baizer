@@ -187,7 +187,6 @@ function isToolResultInput(input: string | ToolResult[]): input is ToolResult[] 
 
 async function runTests() {
   console.log('=== Running Steering Tests ===');
-  const { PiChatRuntime } = await import('../src/runtime/pi/pi-chat-runtime');
 
   await test('drainSteeringMessages returns queued user messages then clears', () => {
     const controller = new SteeringController();
@@ -245,156 +244,17 @@ async function runTests() {
     expect(filtered.map(t => t.name)).toEqual(['read_note', 'read_skill']);
   });
 
-  // 核心断言：运行中追加的 steering 消息被纳入后续轮次，
-  // 且不得吞掉尚未回传的工具结果（回归防护）。
-  // 编排：第 0 轮模型发起一个工具调用 -> 触发工具循环；
-  // 在工具结果到达前往 controller 塞一条补话。
-  // 期望：工具结果先作为 ToolResult[] 回传给 provider，补话随后作为独立 user 文本进入更晚一轮。
-  await test('steering message added mid-run is injected after the pending tool result is delivered', async () => {
-    const controller = new SteeringController();
-    // 按到达顺序记录每一轮 provider 收到的输入类型，用于断言「工具结果先、补话后」。
-    const inputLog: Array<{ kind: 'tool_result' | 'text'; value: string }> = [];
+  // ————————————————————————————————————————————————————————————————
+  // 阶段2 待重写:以下 3 个「运行中 steering」端到端断言原本驱动已删除的 PiChatRuntime,
+  // 验证旧的 getSteeringMessages/prepareNextTurn 自造钩子。阶段2 会删掉 SteeringController、
+  // 改用 AgentHarness 原生 steer()/setActiveTools(),届时这些行为断言在 Harness 接缝上重建。
+  // 阶段0 只接入引擎、不接管 steering,故此处显式跳过而非伪造通过。
+  // ————————————————————————————————————————————————————————————————
+  console.log('  SKIP (phase 2) steering message injected after pending tool result');
+  console.log('  SKIP (phase 2) reset on new run drops pre-run steering');
+  console.log('  SKIP (phase 2) setActiveTools mid-run filters context.tools');
+  return;
 
-    const deps = createDeps({
-      steeringController: controller,
-      toolResults: { read_note: { success: true, content: 'chapter text' } },
-      onTurn: (callIndex) => {
-        // 在第一轮（发起工具调用那轮）结束后、pi 轮询 steering 前补话。
-        if (callIndex === 0) {
-          controller.steer('actually, summarize in Chinese');
-        }
-      },
-      streamFactory: (input, callIndex) => {
-        if (callIndex === 0) {
-          // 首轮：模型请求一个工具，触发工具循环继续。
-          return [
-            { type: 'tool_call', id: 'call_1', name: 'read_note', args: { path: 'A.md' } },
-            { type: 'done', text: '' },
-          ];
-        }
-        // 后续轮：按类型记录输入。工具结果应先于补话到达。
-        if (isToolResultInput(input)) {
-          inputLog.push({ kind: 'tool_result', value: input.map(r => r.name).join(',') });
-        } else {
-          inputLog.push({ kind: 'text', value: input });
-        }
-        return [
-          { type: 'text_delta', content: 'Summary' },
-          { type: 'done', text: 'Summary' },
-        ];
-      },
-    });
-
-    const runtime = new PiChatRuntime(deps);
-    const events = await collect(runtime.queryStream(createTurn()));
-
-    // 流正常完成。
-    expect((events.at(-1) as any).type).toBe('done');
-
-    // 工具结果作为 ToolResult[] 真的回传给了 provider（read_note 的结果未被吞掉）。
-    const toolResultRoundIndex = inputLog.findIndex(e => e.kind === 'tool_result' && e.value.includes('read_note'));
-    expect(toolResultRoundIndex >= 0).toBe(true);
-
-    // 补话作为独立的 user 文本输入进入了后续某一轮。
-    const steeringRoundIndex = inputLog.findIndex(e => e.kind === 'text' && e.value === 'actually, summarize in Chinese');
-    expect(steeringRoundIndex >= 0).toBe(true);
-
-    // 关键顺序：工具结果先回传，补话才进入——证明工具循环契约未被 steering 破坏。
-    expect(toolResultRoundIndex < steeringRoundIndex).toBe(true);
-  });
-
-  await test('reset on new run drops steering queued before the run started', async () => {
-    const controller = new SteeringController();
-    // 在运行开始前就排队一条补话 —— 它应被 queryStream 启动时的 reset 清掉，
-    // 不污染本次运行（避免上一次残留泄漏到新流）。
-    controller.steer('stale instruction from before');
-    const seenInputs: string[] = [];
-
-    const deps = createDeps({
-      steeringController: controller,
-      streamFactory: (input) => {
-        if (!isToolResultInput(input)) seenInputs.push(input);
-        return [
-          { type: 'text_delta', content: 'Done' },
-          { type: 'done', text: 'Done' },
-        ];
-      },
-    });
-
-    const runtime = new PiChatRuntime(deps);
-    await collect(runtime.queryStream(createTurn()));
-
-    expect(seenInputs.includes('stale instruction from before')).toBe(false);
-  });
-
-  // 端到端断言：运行中 setActiveTools 后，pi 在下一轮真的只在收窄后的工具集内执行。
-  // 编排：第 0 轮模型调用 read_note（此时全工具可用，应成功）；
-  // 第 0 轮 turn 内通过 controller.setActiveTools(['read_note']) 收窄；
-  // 第 1 轮模型尝试调用 web_search —— 因 prepareNextTurn 已把 context.tools 过滤掉它，
-  // pi 应直接返回「Tool web_search not found」而非执行；第 2 轮收尾。
-  await test('setActiveTools mid-run filters pi context.tools so excluded tool is blocked next turn', async () => {
-    const controller = new SteeringController();
-    const executedTools: string[] = [];
-
-    const deps = createDeps({
-      steeringController: controller,
-      toolResults: {
-        read_note: { success: true, content: 'chapter text' },
-        web_search: { success: true, content: 'should never run' },
-      },
-      onTurn: (callIndex) => {
-        // 第 0 轮（首个 assistant 流）内收窄工具集；prepareNextTurn 在本轮 turn_end 后消费它。
-        if (callIndex === 0) {
-          controller.setActiveTools(['read_note']);
-        }
-      },
-      streamFactory: (_input, callIndex) => {
-        if (callIndex === 0) {
-          return [
-            { type: 'tool_call', id: 'c1', name: 'read_note', args: { path: 'A.md' } },
-            { type: 'done', text: '' },
-          ];
-        }
-        if (callIndex === 1) {
-          // 收窄后尝试调用被剔除的 web_search。
-          return [
-            { type: 'tool_call', id: 'c2', name: 'web_search', args: { q: 'x' } },
-            { type: 'done', text: '' },
-          ];
-        }
-        return [
-          { type: 'text_delta', content: 'final' },
-          { type: 'done', text: 'final' },
-        ];
-      },
-    });
-
-    // 包一层 toolRegistry.execute 以记录哪些工具真正被执行，证明 web_search 被短路、未执行。
-    const innerExecute = deps.toolRegistry.execute.bind(deps.toolRegistry);
-    deps.toolRegistry.execute = async (name: string, args: any) => {
-      executedTools.push(name);
-      return innerExecute(name, args);
-    };
-
-    const runtime = new PiChatRuntime(deps);
-    const events = await collect(runtime.queryStream(createTurn()));
-
-    // read_note 在收窄生效前的那一轮执行成功，无错误。
-    const readResult = events.find(e => e.type === 'tool_result' && (e as any).name === 'read_note');
-    expect(!!readResult).toBe(true);
-    expect((readResult as any).error).toBe(undefined);
-
-    // web_search 被收窄剔除：pi 直接报「not found」，工具体未被执行。
-    const searchResult = events.find(e => e.type === 'tool_result' && (e as any).name === 'web_search');
-    expect(!!searchResult).toBe(true);
-    expect(String((searchResult as any).error || '')).toContain('not found');
-
-    expect(executedTools.includes('read_note')).toBe(true);
-    expect(executedTools.includes('web_search')).toBe(false);
-
-    // 流正常收尾。
-    expect((events.at(-1) as any).type).toBe('done');
-  });
 }
 
 runTests().catch((e) => {

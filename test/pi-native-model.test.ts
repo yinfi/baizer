@@ -74,7 +74,7 @@ function makeOpenAIConfig(overrides: Partial<ProviderConfig> = {}): ProviderConf
 async function runTests() {
   console.log('=== Pi Native Model Tests ===');
 
-  const { buildGeminiModel, buildOpenAICompatModel, createNativeStreamFn } =
+  const { buildGeminiModel, buildOpenAICompatModel } =
     await import('../src/runtime/pi/pi-native-model');
 
   // (a) Gemini Model 字段正确性
@@ -212,11 +212,6 @@ async function runTests() {
     expect(model.contextWindow).toBe(50000);
   });
 
-  // createNativeStreamFn 结构验证（不实际调用网络）
-  await test('createNativeStreamFn 返回一个函数', () => {
-    const fn = createNativeStreamFn('test-key');
-    if (typeof fn !== 'function') throw new Error(`Expected function, got ${typeof fn}`);
-  });
 }
 
 runTests().catch((e) => {

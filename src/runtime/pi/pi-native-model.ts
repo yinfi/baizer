@@ -11,8 +11,7 @@
  */
 
 import type { AssistantMessage, Model } from '@earendil-works/pi-ai';
-import type { StreamFn } from '@earendil-works/pi-agent-core';
-// streamSimple 只在运行期动态 import（与 pi-chat-runtime.ts 的 agentLoop 同模式），
+// streamSimple 只在运行期动态 import（与 harness-chat-runtime.ts 的 AgentHarness 同模式），
 // 避免 ESM-only pi-ai 在 CJS 测试环境（tsconfig.test.json module=commonjs）下
 // 因 "No exports main defined" 错误而无法加载。
 import type { ProviderConfig } from '../../mcp/types';
@@ -189,83 +188,4 @@ function extractAssistantText(message: AssistantMessage): string {
     .filter((block): block is { type: 'text'; text: string } => (block as any)?.type === 'text')
     .map(block => block.text)
     .join('');
-}
-
-export function createNativeStreamFn(apiKey: string): StreamFn {
-  // 返回一个与 StreamFn 签名完全兼容的闭包：
-  // (model, context, options?) => AssistantMessageEventStream
-  //
-  // streamSimple 通过动态 import 加载（ESM-only 包在 CJS 上下文下需要此模式），
-  // 但 StreamFn 的返回值必须是同步的 AssistantMessageEventStream，不是 Promise。
-  // 解决方案：用 pi-provider-bridge 中同款的手动 push/pull stream 包装，
-  // 在后台 void 运行异步加载 + 调用，错误通过 stream 的 error 事件传出。
-  return (model, context, options) => {
-    // 用与 pi-provider-bridge 相同的动态 import 模式。
-    // 返回的 stream 是同步可迭代的，结果在异步加载完成后 push 进来。
-    const piAiPromise = import('@earendil-works/pi-ai');
-    let forwardedStream: any;
-    const queue: any[] = [];
-    const waiting: ((r: IteratorResult<any>) => void)[] = [];
-    let done = false;
-    let resolveFinal: (m: any) => void = () => undefined;
-    const finalPromise = new Promise<any>((res) => { resolveFinal = res; });
-
-    function push(event: any) {
-      if (done) return;
-      if (event.type === 'done' || event.type === 'error') {
-        done = true;
-        resolveFinal(event.type === 'done' ? event.message : event.error);
-      }
-      const waiter = waiting.shift();
-      if (waiter) waiter({ value: event, done: false });
-      else queue.push(event);
-    }
-
-    function end(result?: any) {
-      done = true;
-      if (result) resolveFinal(result);
-      while (waiting.length > 0) {
-        waiting.shift()?.({ value: undefined, done: true });
-      }
-    }
-
-    // 异步加载 pi-ai 并启动真实 stream，把事件转发到包装 stream
-    void piAiPromise.then(({ streamSimple }) => {
-      forwardedStream = streamSimple(model, context, { ...options, apiKey });
-      void (async () => {
-        try {
-          for await (const event of forwardedStream) {
-            push(event);
-          }
-          // 如果 forwardedStream 在 done 事件前耗尽，手动结束
-          if (!done) end();
-        } catch (e: any) {
-          // 把底层异常转成 error 事件，不让异常逃逸到调用方
-          push({ type: 'error', reason: 'error', error: { role: 'assistant', content: [], stopReason: 'error', errorMessage: e?.message || 'streamSimple failed' } as any });
-        }
-      })();
-    }).catch((e: any) => {
-      // import() 本身失败（罕见，但防御性处理）
-      push({ type: 'error', reason: 'error', error: { role: 'assistant', content: [], stopReason: 'error', errorMessage: e?.message || 'Failed to load pi-ai' } as any });
-    });
-
-    return {
-      async *[Symbol.asyncIterator]() {
-        while (true) {
-          if (queue.length > 0) {
-            yield queue.shift();
-          } else if (done) {
-            return;
-          } else {
-            const result = await new Promise<IteratorResult<any>>(resolve => waiting.push(resolve));
-            if (result.done) return;
-            yield result.value;
-          }
-        }
-      },
-      result() {
-        return finalPromise;
-      },
-    } as any;
-  };
 }

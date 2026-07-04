@@ -26,7 +26,16 @@ import type { SteeringController } from './steering-controller';
  */
 export interface NativeChatHandle {
   model: Model<any>;
-  streamFn: StreamFn;
+  /**
+   * @deprecated AgentHarness 内部按 model.api 路由到 pi api-registry,不再消费注入的 streamFn。
+   * 保留字段以兼容旧装配与测试;HarnessChatRuntime 忽略它。
+   */
+  streamFn?: StreamFn;
+  /**
+   * 取当前 provider 的 apiKey。AgentHarness 通过 getApiKeyAndHeaders 回调按需取值,
+   * 使运行期切换凭证下一轮即生效。生产由 model-service 提供。
+   */
+  getApiKey?: () => string | Promise<string>;
 }
 
 /**
@@ -46,6 +55,12 @@ export interface ChatRuntimeDeps {
    * 缺省时 PiChatRuntime.queryStream 会抛出明确错误（生产必须提供）。
    */
   nativeChatFactory?: NativeChatFactory;
+  /**
+   * pi AgentHarness 所需的完整 ExecutionEnv(FileSystem + Shell)。
+   * 生产由 model-service 用 createHarnessExecutionEnv(vault adapter) 构造;
+   * 无 vault(如纯单测)时可省略,此时 HarnessChatRuntime 会快速失败。
+   */
+  harnessEnv?: unknown;
   memoryManager: MemoryManager | null;
   toolRegistry: ToolRegistry;
   skillRegistry: SkillRegistry;

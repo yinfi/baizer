@@ -38,9 +38,9 @@ async function runTests() {
     } as any,
   };
 
-  await test('createChatRuntime returns a PiChatRuntime', () => {
+  await test('createChatRuntime returns a HarnessChatRuntime', () => {
     const runtime = createChatRuntime(deps);
-    expect(runtime.constructor.name).toBe('PiChatRuntime');
+    expect(runtime.constructor.name).toBe('HarnessChatRuntime');
   });
 }
 
