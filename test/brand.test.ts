@@ -38,6 +38,9 @@ test('tracked project text has no legacy branding', () => {
     .filter((path) => !path.startsWith('.omc/'))
     .filter((path) => !path.startsWith('.planning/'))
     .filter((path) => !path.startsWith('.worktrees/'))
+    // FORYF.md 是开发过程记录(非面向用户的产品文本),其历史条目会提及仓库目录名
+    // (客观路径,非产品旧品牌名),与 .planning/ 同属开发记录,一并豁免。
+    .filter((path) => path !== 'FORYF.md')
     .filter((path) => !path.endsWith('.png'));
 
   const oldBrandTerms = [
