@@ -193,18 +193,9 @@ async function runTests() {
         ],
       },
     };
-    (view as any).suggestionContainer = {
-      empty: () => {},
-      style: { display: 'none' },
-    };
-    (view as any).commandDropdown = {
-      update: () => {},
-      hide: () => {},
-    };
+    const items = (view as any).buildSuggestionItems('file', 'bac');
 
-    view.showSuggestions('file', 'bac');
-
-    expect((view as any).inputController.getSuggestions()).toEqual([
+    expect(items).toEqual([
       {
         label: '@backlinks',
         desc: 'Add notes linking to the current note',
@@ -252,18 +243,9 @@ async function runTests() {
         ],
       },
     };
-    (view as any).suggestionContainer = {
-      empty: () => {},
-      style: { display: 'none' },
-    };
-    (view as any).commandDropdown = {
-      update: () => {},
-      hide: () => {},
-    };
+    const items = (view as any).buildSuggestionItems('file', 'cur');
 
-    view.showSuggestions('file', 'cur');
-
-    expect((view as any).inputController.getSuggestions()).toEqual([
+    expect(items).toEqual([
       {
         label: '@current',
         desc: 'Add the current note',
