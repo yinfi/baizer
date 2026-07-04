@@ -801,81 +801,81 @@ async function runSelectionAction(
 }
 ```
 
-- [ ] **Step 4: 实现 runRewriteAction(执行改写 + 内联 diff + 接受/拒绝/重试)**
+- [ ] **Step 4: 实现 runRewriteAction(委托 rewrite-runner)**
+
+**注意:Task 5 的 rewrite-runner 实际实现比原计划更完善** —— 它导出 `runRewrite(view, modelService, req): AbortController`(内部自己推 loading/preview/error 三态,自带 AbortController)和 `makeRewriteCallbacks(view, modelService, getRequest, getController, setController): InlineDiffCallbacks`(收敛 accept/reject/retry)。因此本任务**不再需要**模块级 pending 桥接,也不需要 `relocateRange`(inline-diff 的 StateField 在 `docChanged` 时自动清除装饰,accept 只会在 from/to 仍有效时触发)。
+
+在 `selection-menu.ts` 顶部维护"当前改写请求 + controller"两个模块级变量,供 `makeRewriteCallbacks` 读写:
 
 ```ts
-async function runRewriteAction(
+import { runRewrite, makeRewriteCallbacks, RewriteRequest } from './selection-ai/rewrite-runner';
+
+let currentRewriteRequest: RewriteRequest | null = null;
+let currentRewriteController: AbortController | null = null;
+```
+
+`runRewriteAction` 只负责:记录当前 request、调 `runRewrite`、存住返回的 controller:
+
+```ts
+function runRewriteAction(
     view: EditorView,
-    state: Extract<SelectionMenuState, { type: 'chat' }>,
     context: { app: App; modelService: ModelService },
     actionId: string,
+    from: number,
+    to: number,
     selectionText: string,
 ) {
-    const from = state.from;
-    const to = state.to;
-    // loading 态
-    showInlineDiff(view, { from, to, oldText: selectionText, newText: '', status: 'loading' });
-
-    const result = await runRewrite(context.modelService, actionId, selectionText);
-    if (result.error === 'aborted') { clearInlineDiff(view); return; }
-    if (!result.ok) {
-        showInlineDiff(view, { from, to, oldText: selectionText, newText: '', status: 'error', message: result.error });
-        return;
-    }
-    // preview 态(inline-diff 的回调在 Task 7 注入,会调用下面的 accept/reject/retry)
-    showInlineDiff(view, { from, to, oldText: selectionText, newText: result.text, status: 'preview' });
-    // 记住当前 pending,供扩展回调消费(见 Task 7 的模块级 pending 状态)
-    setPendingRewrite({
-        view, actionId, context,
-        apply: async (s: InlineDiffState) => {
-            const target = relocateRange(view.state, s.from, s.to, s.oldText);
-            if (!target) {
-                clearInlineDiff(view);
-                new Notice('选区在改写期间发生了变化,已取消替换,请重新选择。');
-                return;
-            }
-            const activeFile = context.app.workspace.getActiveFile();
-            await state.controller.applyPreviewedChange({
-                action: 'selection_rewrite',
-                target: activeFile?.path || 'current-selection',
-                previousContent: view.state.doc.toString(),
-                apply: () => {
-                    view.dispatch({ changes: { from: target.from, to: target.to, insert: s.newText } });
-                    clearInlineDiff(view);
-                },
-            });
-        },
-        retry: () => { void runRewriteAction(view, state, context, actionId, selectionText); },
-    });
+    currentRewriteController?.abort(); // 中止上一次未决改写
+    currentRewriteRequest = { actionId, selection: selectionText, from, to };
+    currentRewriteController = runRewrite(view, context.modelService, currentRewriteRequest);
 }
 ```
 
-- [ ] **Step 5: 模块级 pending 桥接(inline-diff 回调 ↔ 当前改写)**
-
-inline-diff 的扩展回调是全局单例,需要一个模块级 pending 把"当前这次改写的 accept/reject/retry"接过去。在 `selection-menu.ts` 顶部加:
+对应地,`runSelectionAction` 里改写类分支改为:
 
 ```ts
-interface PendingRewrite {
-    view: EditorView;
-    actionId: string;
-    context: { app: App; modelService: ModelService };
-    apply: (s: InlineDiffState) => void | Promise<void>;
-    retry: () => void;
-}
-let pendingRewrite: PendingRewrite | null = null;
-function setPendingRewrite(p: PendingRewrite) { pendingRewrite = p; }
-
-/** 供 main.ts 注册 inlineDiffExtension 时作为回调转发。 */
-export function handleInlineDiffAccept(s: InlineDiffState) { void pendingRewrite?.apply(s); pendingRewrite = null; }
-export function handleInlineDiffReject(_s: InlineDiffState) {
-    if (pendingRewrite) { clearInlineDiff(pendingRewrite.view); pendingRewrite = null; }
-}
-export function handleInlineDiffRetry(_s: InlineDiffState) { pendingRewrite?.retry(); }
+    // 改写类:generate() 一次性改写 → 内联 diff
+    runRewriteAction(view, context, actionId, state.from, state.to, targetText);
 ```
+
+- [ ] **Step 5: 用 makeRewriteCallbacks 生成 inline-diff 回调并导出**
+
+不再需要 pending 桥接。导出一个函数,让 main.ts(Task 7)在注册 `inlineDiffExtension` 时拿到回调。因为回调需要 `view`,而 view 在 CM 扩展实例化时才有——`makeRewriteCallbacks` 第一个参数是 view,但 inlineDiffExtension 的回调注入是全局单例、拿不到具体 view。
+
+**解决**:inline-diff 的回调签名里,`InlineDiffState` 本身带 `from/to`,但没带 view。而 `runRewrite`/回调都需要 view。最简单的做法是让 selection-menu 导出三个转发函数,内部用一个模块级 `activeView`(在 `runRewriteAction` 时记录),再委托 `makeRewriteCallbacks` 的逻辑。为避免重复,直接在 selection-menu 里内联 accept/reject/retry:
+
+```ts
+let rewriteView: EditorView | null = null; // 在 runRewriteAction 里 set
+
+export function handleInlineDiffAccept(s: import('./selection-ai/inline-diff').InlineDiffState) {
+    if (!rewriteView) return;
+    rewriteView.dispatch({ changes: { from: s.from, to: s.to, insert: s.newText } });
+    clearInlineDiff(rewriteView);
+    currentRewriteController = null;
+    currentRewriteRequest = null;
+}
+export function handleInlineDiffReject(_s: import('./selection-ai/inline-diff').InlineDiffState) {
+    if (!rewriteView) return;
+    clearInlineDiff(rewriteView);
+    currentRewriteController = null;
+    currentRewriteRequest = null;
+}
+export function handleInlineDiffRetry(_s: import('./selection-ai/inline-diff').InlineDiffState) {
+    if (!rewriteView || !currentRewriteRequest) return;
+    currentRewriteController?.abort();
+    currentRewriteController = runRewrite(rewriteView, /* modelService */ activeModelService!, currentRewriteRequest);
+}
+```
+
+并在 `runRewriteAction` 开头设置 `rewriteView = view;`(以及一个模块级 `activeModelService = context.modelService`,供 retry 用)。
+
+**实现者注意**:上面这套"模块级 activeView/activeModelService + 导出三函数"是为了适配 inlineDiffExtension 的全局回调。如果你在实现时发现 `makeRewriteCallbacks` 能更干净地直接用(比如在 main.ts 侧拿到 view),优先用 `makeRewriteCallbacks`——它已实现好 onAccept(replace+clear)/onReject(clear)/onRetry(abort+rerun) 的正确逻辑。关键约束:**accept 时用 `view.dispatch({changes:{from:s.from,to:s.to,insert:s.newText}})` 替换,然后 clearInlineDiff;retry 时 abort 旧 controller 再 runRewrite。** 具体桥接方式你可按实际 view 可达性选最简洁的,但要在报告里说明你选了哪种。
 
 - [ ] **Step 6: textarea 挂 SuggestList**
 
-在 `createChatPanel` 里创建 `textarea` 之后,挂补全。先在 `inputWrapper` 下建一个补全容器,再 new SuggestList:
+在 `createChatPanel` 里创建 `textarea` 之后,挂补全。先在 `inputWrapper` 下建一个补全容器,再 new SuggestList。
+
+**重要(Task 2 实测结论):** file 类型补全(`source:'file', kind:'file'`)经过 `InputController.selectSuggestion` 走的是 **contextItem 分支** —— 回填的 `selection.text` 是**空串**(它把 `@token` 移除,真正内容在 `selection.contextItem` 里,供主输入框做成 context chip)。选区对话框**没有** context chip 机制,因此不能直接 `textarea.value = selection.text`(那会把输入清空)。这里改为:拿到 file contextItem 时,把文件路径以 `[[path]]` wikilink 文字插入 textarea 光标处;其余情况才用 `selection.text` 回填。
 
 ```ts
     const suggestContainer = inputWrapper.createDiv({ cls: 'baizer-suggest-container' });
@@ -890,12 +890,37 @@ export function handleInlineDiffRetry(_s: InlineDiffState) { pendingRewrite?.ret
                 .map(f => ({ label: f.basename, desc: f.path, value: f.path, source: 'file' as const, kind: 'file' as const }));
         },
         onApply: (selection) => {
-            textarea.value = selection.text;
-            textarea.selectionStart = textarea.selectionEnd = selection.cursor;
+            const fileItem = selection.contextItem;
+            if (fileItem && fileItem.type === 'file') {
+                // file 补全:selection.text 为空,改为在光标处插入 [[path]] wikilink
+                const cursor = textarea.selectionStart;
+                const link = `[[${fileItem.data}]] `;
+                const value = textarea.value;
+                textarea.value = value.slice(0, cursor) + link + value.slice(cursor);
+                const pos = cursor + link.length;
+                textarea.selectionStart = textarea.selectionEnd = pos;
+            } else {
+                textarea.value = selection.text;
+                textarea.selectionStart = textarea.selectionEnd = selection.cursor;
+            }
             textarea.focus();
         },
     });
 ```
+
+注意:上面用 `textarea.selectionStart` 作为插入点,但补全触发时 `@query` 这段还在 textarea 里(SuggestList 只在内部逻辑里剥离了 token,没改 textarea 值)。因此这里的简单插入会残留 `@query`。实现时用一个更稳的做法:在 SuggestList 的 `handleInput` 每次记录触发 token 的起止位并暴露给 `onApply`,或在 onApply 里用 `detectSuggestionTrigger` 重新定位当前 `@token` 的 from/to 后替换。**最简单可靠的落地方式**:onApply 里对 file 情况,直接用正则把光标前最近的 `@\S*` 替换为 `[[path]] `:
+
+```ts
+            if (fileItem && fileItem.type === 'file') {
+                const cursor = textarea.selectionStart;
+                const before = textarea.value.slice(0, cursor).replace(/@\S*$/, `[[${fileItem.data}]] `);
+                const after = textarea.value.slice(cursor);
+                textarea.value = before + after;
+                textarea.selectionStart = textarea.selectionEnd = before.length;
+            }
+```
+
+以后者为准实现。
 
 在 `textarea.onkeydown` 最前面加转发(Enter 选中要先于发送逻辑):
 
@@ -1170,41 +1195,18 @@ git commit -m "style(selection-ai): 动作条/补全/内联diff 视觉,统一 Ob
 
 ---
 
-## Task 9: 清理 DiffModal(若无其它引用)
+## Task 9: DiffModal 处理(执行期结论:不删除)
 
-**Files:**
-- 可能删除:`src/ui/diff-modal.ts`
-- Modify: `test/run-tests.ts`(若有 diff-modal 相关测试引用)
+**执行期核实结论(修正计划预设):** 计划原假设"DiffModal 仅被选区菜单引用,可删除"是**错的**。实际引用情况:
+- `DiffModal` 类仍被 `src/ui/shell-view.ts` 的 `reviewCodeBlock()`(:775)使用——这是 ShellView 主聊天的"整块代码审阅替换"功能,与选区菜单是不同特性。
+- `buildLineDiff` 仅在 diff-modal.ts 内部使用。
 
-- [ ] **Step 1: 检索 DiffModal 全项目引用**
+因此 **diff-modal.ts 必须保留,不删除任何东西**。选区菜单对 DiffModal 的解耦已在 Task 6 完成(移除了 import 与 `applySelectionReplacement` 里的 DiffModal 调用)。本任务退化为"验证解耦 + 全量回归",无删除动作。
 
-Run: `grep -rn "DiffModal\|diff-modal" src/ main.ts test/`
-Expected: 仅剩(或应仅剩)历史引用。若除已改的 `selection-menu.ts` 外无其它 `import`,则可删除。
-
-- [ ] **Step 2: 处理 buildLineDiff 的去留**
-
-`diff-modal.ts` 导出的 `buildLineDiff` 可能被 `change-preview` 或测试使用。先确认:
-
-Run: `grep -rn "buildLineDiff" src/ test/`
-若 `buildLineDiff` 被其它模块使用 → **不要删文件**,只删 `DiffModal` 类;把 `buildLineDiff` 及其辅助函数保留(或移到独立 `src/ui/diff/line-diff.ts` 并更新引用)。若无其它使用 → 整文件删除。
-
-- [ ] **Step 3: 执行删除或裁剪**
-
-根据 Step 1/2 结果二选一:
-- 无引用:`git rm src/ui/diff-modal.ts`
-- 有 `buildLineDiff` 引用:保留文件但删除 `DiffModal` 类与 `DiffRow`/`renderPane` 等仅服务弹窗的部分,或按需迁移。
-
-- [ ] **Step 4: 编译 + 全测**
-
-Run: `npm run build && npm test`
-Expected: 编译通过;所有测试(含新增两个)PASS。
-
-- [ ] **Step 5: 提交**
-
-```bash
-git add -A
-git commit -m "chore(selection-ai): 清理被内联 diff 取代的 DiffModal"
-```
+- [x] **Step 1: 核实引用** — 已完成:`grep -rn "DiffModal" src/` 显示 diff-modal.ts(定义)+ shell-view.ts:7,775(现役使用)。selection-menu.ts 已无引用。
+- [x] **Step 2: 结论** — DiffModal 仍有现役用户(reviewCodeBlock),保留文件。
+- [ ] **Step 3: 全量回归** — Run: `npm run build && npm test`;Expected: 编译通过,所有测试(含新增 action-registry、suggest-list)PASS。
+- [ ] **Step 4: 无需提交**(本任务无代码改动;若前序有遗留未提交的相关文件另行处理)。
 
 ---
 
