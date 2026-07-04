@@ -96,58 +96,62 @@ export abstract class BaseChatRuntime implements ChatRuntime {
         )
       : undefined;
 
-    let prompt = '';
+    // 阶段1:装饰(memory/context/skill/plan/契约)进 systemPrompt(每轮发送、不持久化);
+    // 干净的 userMessage 作为 prompt 交给 harness.prompt() 持久化,使跨轮历史保持干净。
+    let systemPrompt = '';
     if (request.systemPromptOverride) {
-      prompt += `[System Prompt Override]\n${request.systemPromptOverride}\n\n`;
+      systemPrompt += `[System Prompt Override]\n${request.systemPromptOverride}\n\n`;
     }
     if (memoryContext) {
-      prompt += `${memoryContext}\n\n`;
+      systemPrompt += `${memoryContext}\n\n`;
     }
-    prompt += `[Current Time: ${new Date().toLocaleString()} (${new Date().toLocaleDateString(undefined, { weekday: 'long' })})]\n`;
+    systemPrompt += `[Current Time: ${new Date().toLocaleString()} (${new Date().toLocaleDateString(undefined, { weekday: 'long' })})]\n`;
 
     // [B] 用户给出短确认/延续性回复（"需要"、"用第二个"等）且存在对话历史时，
     // 剔除自动注入的环境上下文（当前笔记/反链），避免它盖过对话意图把模型带偏。
     // 用户显式选择的上下文与编辑器选区始终保留。
+    // 阶段1:历史存在性由 request.hasPriorContext 提供(ModelService 从 Harness session 查询),
+    // 取代旧的 priorMessages.length 判断。
     const isContinuation = this.isContinuationMessage(request.userMessage)
-      && (request.priorMessages?.length ?? 0) > 0;
+      && request.hasPriorContext === true;
     const promptContextItems = isContinuation
       ? this.stripAmbientContext(request.contextItems)
       : request.contextItems;
 
-    prompt += `[Context: ${this.formatContextItems(promptContextItems)}]\n`;
-    // [A] 仅当 prompt 里仍带有自动注入的环境上下文时，附上"以对话为准"的定性说明。
+    systemPrompt += `[Context: ${this.formatContextItems(promptContextItems)}]\n`;
+    // [A] 仅当仍带有自动注入的环境上下文时，附上"以对话为准"的定性说明。
     if (this.hasAmbientContext(promptContextItems)) {
-      prompt += `${CONTEXT_DISCLAIMER}\n`;
+      systemPrompt += `${CONTEXT_DISCLAIMER}\n`;
     }
-    prompt += `${this.buildSlashCommandContract()}\n`;
+    systemPrompt += `${this.buildSlashCommandContract()}\n`;
     if (activeSkill) {
       // 强制 / 斜杠激活：直接注入 pi formatSkillInvocation 包装的完整指令。
-      prompt += `[Active Skill: ${activeSkill.skill.name}]\n`;
-      prompt += `[Skill Instructions]\n${activeSkill.instructions}\n`;
+      systemPrompt += `[Active Skill: ${activeSkill.skill.name}]\n`;
+      systemPrompt += `[Skill Instructions]\n${activeSkill.instructions}\n`;
     } else {
       // 自主发现（B 方案）：注入 pi 原生 skill 清单，模型按需 read_skill 拿完整正文。
       const skillList = this.deps.skillRegistry.getSkillSummaryText();
       if (skillList) {
-        prompt += `${skillList}\n`;
+        systemPrompt += `${skillList}\n`;
         // 覆盖 pi 清单里“读取 skill 文件”的原生措辞：本插件的 skill 存放于隐藏目录，
         // 普通文件读取工具够不到，必须用 read_skill(name)（name 取自上面清单）获取完整指令。
-        prompt += `[Skill Access] To load a skill's full instructions, call the read_skill tool with the skill's name (e.g. read_skill({"name":"web-search"})). Do not try to open the <location> path with file-reading tools — skill files live in a hidden folder those tools cannot access.\n`;
+        systemPrompt += `[Skill Access] To load a skill's full instructions, call the read_skill tool with the skill's name (e.g. read_skill({"name":"web-search"})). Do not try to open the <location> path with file-reading tools — skill files live in a hidden folder those tools cannot access.\n`;
       }
     }
     if (request.selection) {
-      prompt += `[Selected Text: ${request.selection}]\n`;
+      systemPrompt += `[Selected Text: ${request.selection}]\n`;
     }
     if (generationPlan) {
-      prompt += formatGenerationPlanBlock(generationPlan, writingProfile);
+      systemPrompt += formatGenerationPlanBlock(generationPlan, writingProfile);
     }
     if (isFileWriteRequest(request.userMessage)) {
-      prompt += '[File Operation Contract]\n';
-      prompt += `${FILE_OPERATION_CONTRACT_TEXT}\n`;
+      systemPrompt += '[File Operation Contract]\n';
+      systemPrompt += `${FILE_OPERATION_CONTRACT_TEXT}\n`;
     }
-    prompt += `User Request: ${request.userMessage}`;
 
     return {
-      prompt,
+      prompt: request.userMessage,
+      systemPrompt,
       tools: this.buildSkillModeTools(activeSkill),
       userRequest: request.userMessage,
       memoryContext,
@@ -158,7 +162,6 @@ export abstract class BaseChatRuntime implements ChatRuntime {
       generationPlan,
       writingProfile,
       systemPromptOverride: request.systemPromptOverride,
-      priorMessages: request.priorMessages,
     };
   }
 
@@ -294,24 +297,11 @@ If no listed command fits, suggest a plain-language request instead.
     };
   }
 
-  private extractUserRequest(prompt: string): string {
-    const marker = 'User Request: ';
-    const index = prompt.lastIndexOf(marker);
-    return index >= 0 ? prompt.slice(index + marker.length) : prompt;
-  }
 
   protected async retainCompletedTurn(turn: PreparedChatTurn, assistantMessage: string): Promise<void> {
-    const userRequest = turn.userRequest || this.extractUserRequest(turn.prompt);
-
-    // Session 持久化：把本轮 user/assistant 原文落盘到 JSONL，使跨轮上下文跨重启可恢复。
-    // 落盘失败不应阻断回答返回，仅记录告警。
-    if (this.deps.sessionStore) {
-      try {
-        await this.deps.sessionStore.appendTurn(userRequest, assistantMessage);
-      } catch {
-        // SessionStore 内部已记日志；这里吞掉以保证回答正常返回。
-      }
-    }
+    // 阶段1:会话持久化由 AgentHarness 完成(prompt() 已把 user/assistant 追加进 session),
+    // 此处不再自己落盘。仅保留把本轮原文交给长期记忆(Hindsight)——它与 session 正交。
+    const userRequest = turn.userRequest || turn.prompt;
 
     if (!this.deps.memoryManager) return;
 

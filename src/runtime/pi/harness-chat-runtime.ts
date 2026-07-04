@@ -66,13 +66,12 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       throw new Error('HarnessChatRuntime requires deps.harnessEnv (ExecutionEnv) to construct the AgentHarness');
     }
 
-    // 阶段0:内存会话,无持久化。阶段1 换 JsonlSessionRepo。
-    const repo = new (pi as any).InMemorySessionRepo();
-    const session = await repo.create({});
-
-    // 跨轮上下文:阶段0 沿用 UI 回灌的 priorMessages,预置进内存会话。
-    // 阶段1 起改由持久化会话派生。
-    await seedPriorMessages(session, turn, model);
+    // 阶段1:优先复用 sessionManager 持有的长生命持久化 session(跨轮上下文由 Harness
+    // 从它派生,跨重启可恢复)。无 sessionManager(纯单测)时退化为每轮全新内存会话。
+    const sessionManager = this.deps.sessionManager ?? null;
+    const session = sessionManager
+      ? await sessionManager.getSession()
+      : await new (pi as any).InMemorySessionRepo().create({});
 
     const reasoning = (this.deps.thinkingLevel ?? 'medium');
 
@@ -84,7 +83,8 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       session,
       model,
       tools,
-      systemPrompt: '',
+      // 装饰(memory/context/skill/plan/契约)作为 systemPrompt:每轮发送、不持久化进 session。
+      systemPrompt: turn.systemPrompt ?? '',
       thinkingLevel: reasoning,
       getApiKeyAndHeaders: async () => ({ apiKey: await getApiKey() }),
       // 审批:工具返回 approval_required 时,记录并请求本轮结束。
@@ -199,6 +199,10 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     fullResponseText = resolvePiFinalText(fileWriteState, fullResponseText);
     fullResponseText = this.applyGenerationQuality(turn, fullResponseText);
     await this.retainCompletedTurn(turn, fullResponseText);
+    // 本轮已落盘进 session;按真实 usage 判断是否超阈值,超了就压缩(失败静默降级)。
+    if (sessionManager) {
+      await sessionManager.maybeCompact(harness);
+    }
     yield { type: 'done', text: fullResponseText };
   }
 }
@@ -221,29 +225,6 @@ function resolveModelHandle(handle: any): { model: any; getApiKey: () => Promise
   }
   // 无显式 key(如测试用 mock provider,不校验 key):返回占位空串。
   return { model, getApiKey: async () => '' };
-}
-
-/** 把 UI 回灌的 priorMessages 预置进(内存)会话,作为跨轮历史前缀。 */
-async function seedPriorMessages(session: any, turn: PreparedChatTurn, model: any): Promise<void> {
-  const prior = turn.priorMessages;
-  if (!prior?.length) return;
-  const now = Date.now();
-  for (const message of prior) {
-    if (message.role === 'model') {
-      await session.appendMessage({
-        role: 'assistant',
-        content: [{ type: 'text', text: message.content }],
-        api: model.api,
-        provider: model.provider,
-        model: model.id,
-        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-        stopReason: 'stop',
-        timestamp: now,
-      });
-    } else {
-      await session.appendMessage({ role: 'user', content: message.content, timestamp: now });
-    }
-  }
 }
 
 /**

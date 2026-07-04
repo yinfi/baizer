@@ -323,6 +323,7 @@ async function runTests() {
 
     await controller.processCommand('Explain this', 'Selected Text:\nalpha' as any, 'alpha');
 
+    // 阶段1:UI 不再回灌 priorMessages,api.chat 调用收窄为干净的 4 参签名。
     expect(chatCalls).toEqual([[
       'Explain this',
       [{
@@ -334,10 +335,6 @@ async function runTests() {
       }],
       'alpha',
       'shell',
-      undefined,
-      undefined,
-      undefined,
-      [],
     ]]);
 
     controller.cleanup();
@@ -648,75 +645,10 @@ async function runTests() {
     controller.cleanup();
   });
 
-  await test('second turn forwards prior user and AI messages so the model keeps context', async () => {
-    const chatCalls: any[] = [];
-
-    const controller = new ChatController({
-      app: {} as any,
-      api: {
-        getSkillCommands: () => [],
-        executeSlashSkillCommand: async () => ({ success: true }),
-        chat: async (...args: any[]) => {
-          chatCalls.push(args);
-          return 'Method one: create the files. Method two: use absolute links.';
-        },
-        chatStream: async function* () { },
-        clearSession: async () => { },
-        getUserProfile: () => null,
-        updateProfile: async () => { },
-        getAvailableTools: () => [],
-      } as any,
-    });
-
-    await controller.processCommand('Why can the links not jump?');
-    await controller.processCommand('Use the second method');
-
-    // 第一轮没有历史
-    expect(chatCalls[0][7]).toEqual([]);
-    // 第二轮必须带上第一轮的 user 提问 + AI 回答，否则模型看不到"两个方法"
-    expect(chatCalls[1][7]).toEqual([
-      { role: 'user', content: 'Why can the links not jump?' },
-      { role: 'model', content: 'Method one: create the files. Method two: use absolute links.' },
-    ]);
-
-    controller.cleanup();
-  });
-
-  await test('interrupted AI replies are excluded from prior messages', async () => {
-    const chatCalls: any[] = [];
-
-    const controller = new ChatController({
-      app: {} as any,
-      api: {
-        getSkillCommands: () => [],
-        executeSlashSkillCommand: async () => ({ success: true }),
-        chat: async (...args: any[]) => {
-          chatCalls.push(args);
-          return 'ok';
-        },
-        chatStream: async function* () { },
-        clearSession: async () => { },
-        getUserProfile: () => null,
-        updateProfile: async () => { },
-        getAvailableTools: () => [],
-      } as any,
-    });
-
-    (controller as any).messages.push(
-      { id: 'u0', role: 'user', content: 'earlier question', timestamp: 1 },
-      { id: 'a0', role: 'ai', content: 'partial answer', timestamp: 2, metadata: { interrupted: true } },
-      { id: 's0', role: 'system', content: 'Session cleared.', timestamp: 3 },
-    );
-
-    await controller.processCommand('next question');
-
-    // 中断的 AI 回答和 system 消息都不应进入历史
-    expect(chatCalls[0][7]).toEqual([
-      { role: 'user', content: 'earlier question' },
-    ]);
-
-    controller.cleanup();
-  });
+  // 阶段1 移除:以下两个测试原本验证 UI 侧 buildPriorMessages 回灌跨轮历史(第 8 参 priorMessages)。
+  // 该机制已删除——跨轮上下文改由 Harness 持久化 session 维护,UI 不再构造/转发历史。
+  // 中断回答的过滤也随之下沉:Harness 只持久化真正完成的轮次。相应能力在 harness-session-manager
+  // 与 harness-chat-runtime 层验证,此处不再复测已删除的 UI 行为。
 
   await test('/edit sends the selected text through the unified slash-edit source', async () => {
     const messages: any[] = [];

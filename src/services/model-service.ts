@@ -3,7 +3,7 @@ import { PluginSettings, ProviderConfig } from '../mcp/types';
 import { MemoryManager } from '../memory/memory-manager';
 import { MemoryMutationResult, MemoryView, MemoryViewRequest, UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
-import { GenerationOptions, ModelOption, PriorChatMessage, ToolDefinition, StreamEvent } from '../models/interfaces';
+import { GenerationOptions, ModelOption, ToolDefinition, StreamEvent } from '../models/interfaces';
 import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry, SkillSummary } from '../skills/types';
@@ -13,7 +13,7 @@ import { createHarnessExecutionEnv } from '../runtime/pi/harness-env';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import * as modelCatalog from './model-catalog-service';
 import { SteeringController } from '../runtime/steering-controller';
-import { SessionStore, type PersistedSessionRef } from '../runtime/pi/session-store';
+import { HarnessSessionManager, type PersistedSessionRef } from '../runtime/pi/harness-session-manager';
 import { createVaultFileAdapter } from '../runtime/pi/vault-session-fs';
 import { computeContentHash } from '../knowledge/compiler';
 import { getFileWriteResultPath } from '../utils/file-operation-contract';
@@ -38,13 +38,14 @@ export class ModelService {
     private operationAuditLog: OperationAuditLog;
     private workspaceEditService: WorkspaceEditService;
     /**
-     * Session 持久化层。仅当 vault.adapter 可用时启用（桌面与移动端均有，测试 mock 可能缺失）。
-     * 提供跨轮上下文与跨重启恢复；不可用时退化为旧的 UI 内存回灌行为。
+     * Harness 会话生命周期管理器。仅当 vault.adapter 可用时启用(桌面与移动端均有,测试 mock 可能缺失)。
+     * 持有长生命持久化 session,交给每轮 Harness 复用;提供跨轮上下文、跨重启恢复与自动压缩。
+     * 不可用时退化为每轮全新内存会话(无持久化、无压缩)。
      */
-    private sessionStore: SessionStore | null = null;
+    private sessionManager: HarnessSessionManager | null = null;
     /**
      * pi AgentHarness 所需的完整 ExecutionEnv(FileSystem + NoopShell)。
-     * 与 sessionStore 同源(同一 vault adapter),vault 不可用时为 null。
+     * 与 sessionManager 同源(同一 vault adapter),vault 不可用时为 null。
      */
     private harnessEnv: unknown = null;
     /**
@@ -76,46 +77,37 @@ export class ModelService {
         });
         this.initializeProvider();
         this.setupErrorHandlers();
-        this.initializeSessionStore();
+        this.initializeSessionManager();
     }
 
     /**
-     * 构造 Session 持久化层。把会话引用存进插件 data（通过 settings.sessionRef），
-     * 实现跨重启恢复。vault.adapter 不可用时静默跳过（保持旧行为）。
+     * 构造 Harness 会话管理器 + ExecutionEnv(同源,同一 vault adapter)。
+     * 会话引用存进插件 data(settings.sessionRef),实现跨重启恢复。
+     * vault.adapter 不可用时静默跳过(退化为每轮全新内存会话)。
+     *
+     * 自动压缩阈值取当前模型上下文窗口(settings 可运行期改动,用 getter 取最新值);
+     * 摘要不再自己生成——pi 的 compact() 复用 Harness 的 provider(getApiKeyAndHeaders)。
      */
-    private initializeSessionStore() {
+    private initializeSessionManager() {
         const adapter = (this.app?.vault as any)?.adapter;
         if (!adapter || typeof adapter.read !== 'function' || typeof adapter.append !== 'function') {
-            this.sessionStore = null;
+            this.sessionManager = null;
+            this.harnessEnv = null;
             return;
         }
         try {
             const vaultAdapter = createVaultFileAdapter(adapter);
-            this.sessionStore = new SessionStore(vaultAdapter, {
+            this.sessionManager = new HarnessSessionManager(vaultAdapter, {
                 loadRef: () => this.loadSessionRef(),
                 saveRef: (ref) => this.saveSessionRef(ref),
-                // 自动压缩阈值取当前模型的上下文窗口（settings 可运行期改动，故用 getter 取最新值）。
                 contextWindow: () => this.settings.contextWindow ?? 0,
-                // 摘要用上层自己的 provider 生成（pi 的 compact() 会绕过 bridge，不复用）。
-                summarize: (prompt, systemPrompt) => this.summarizeForCompaction(prompt, systemPrompt),
             });
-            // Harness ExecutionEnv 与会话持久化同源(同一 vault adapter)。
             this.harnessEnv = createHarnessExecutionEnv(vaultAdapter);
         } catch (error) {
-            logger.warn('Failed to initialize SessionStore; falling back to in-memory history.', 'ModelService');
-            this.sessionStore = null;
+            logger.warn('Failed to initialize HarnessSessionManager; falling back to in-memory sessions.', 'ModelService');
+            this.sessionManager = null;
             this.harnessEnv = null;
         }
-    }
-
-    /**
-     * 为自动压缩生成摘要：用无状态 generate 直连当前 provider，
-     * 跳过生成计划装饰（摘要是纯文本压缩任务，不需要写作风格/上下文注入）。
-     */
-    private async summarizeForCompaction(prompt: string, systemPrompt?: string): Promise<string> {
-        return this.generate(prompt, systemPrompt, 'shell', undefined, null, {
-            skipGenerationPlan: true,
-        });
     }
 
     private loadSessionRef(): PersistedSessionRef | null {
@@ -345,7 +337,6 @@ export class ModelService {
         obsidianContext?: ObsidianContextSnapshot,
         userProfile?: UserProfile | null,
         systemPromptOverride?: string,
-        priorMessages?: PriorChatMessage[],
     ): Promise<string> {
         logger.info(`Processing chat message: ${userMessage.substring(0, 50)}...`, 'ModelService.chat');
 
@@ -359,7 +350,6 @@ export class ModelService {
 
         try {
             const runtime = this.createChatRuntime();
-            const resolvedPrior = await this.resolvePriorMessages(priorMessages);
             const preparedTurn = await runtime.prepareTurn({
                 userMessage,
                 contextItems,
@@ -368,7 +358,7 @@ export class ModelService {
                 obsidianContext,
                 userProfile: userProfile ?? this.getUserProfile(),
                 systemPromptOverride,
-                priorMessages: resolvedPrior,
+                ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory() } : {}),
             });
             return await runtime.query(preparedTurn);
         } catch (e: any) {
@@ -385,7 +375,6 @@ export class ModelService {
         obsidianContext?: ObsidianContextSnapshot,
         userProfile?: UserProfile | null,
         signal?: AbortSignal,
-        priorMessages?: PriorChatMessage[],
     ): AsyncGenerator<StreamEvent, void, unknown> {
         logger.info(`Processing streaming chat: ${userMessage.substring(0, 50)}...`, 'ModelService.chatStream');
 
@@ -399,7 +388,6 @@ export class ModelService {
             const resolvedSource = this.isAbortSignalValue(source) ? 'shell' : source;
             const resolvedSignal = this.isAbortSignalValue(source) ? source : signal;
             const runtime = this.createChatRuntime();
-            const resolvedPrior = await this.resolvePriorMessages(priorMessages);
             const preparedTurn = await runtime.prepareTurn({
                 userMessage,
                 contextItems,
@@ -407,7 +395,7 @@ export class ModelService {
                 source: resolvedSource,
                 obsidianContext,
                 userProfile: userProfile ?? this.getUserProfile(),
-                priorMessages: resolvedPrior,
+                ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory() } : {}),
             });
             for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
                 yield event;
@@ -482,11 +470,10 @@ export class ModelService {
         if (this.memoryManager) {
             await this.memoryManager.clearSession();
         }
-        // 与内存历史协调：/clear 时开一个新的持久会话文件（旧文件保留），
-        // 使跨轮上下文与内存会话保持一致。
-        if (this.sessionStore) {
+        // /clear 时开一个新的持久会话文件(旧文件保留),使 Harness 跨轮上下文从零开始。
+        if (this.sessionManager) {
             try {
-                await this.sessionStore.clearSession();
+                await this.sessionManager.clear();
             } catch (error) {
                 logger.warn('Failed to start a fresh persistent session on clear.', 'ModelService.clearSession');
             }
@@ -639,7 +626,7 @@ export class ModelService {
             toolRegistry: this.toolRegistry,
             skillRegistry: this.skillRegistry,
             workspaceEditService: this.workspaceEditService,
-            sessionStore: this.sessionStore,
+            sessionManager: this.sessionManager,
             harnessEnv: this.harnessEnv,
             contextWindow: this.settings.contextWindow,
             thinkingLevel: this.settings.thinkingLevel,
@@ -703,24 +690,6 @@ export class ModelService {
     /** 当前是否有尚未纳入的补话。供 UI 显示「补话已排队」状态。 */
     public hasPendingSteering(): boolean {
         return this.steeringController.hasPendingSteering();
-    }
-
-    /**
-     * 解析本轮的 priorMessages 来源：
-     * - 有 SessionStore 时，从持久会话派生（含压缩视图），作为跨轮上下文的唯一真相源；
-     *   UI 传入的 priorMessages 被忽略（UI 退化为纯渲染）。
-     * - 无 SessionStore 时，沿用 UI 回灌的 priorMessages（旧行为）。
-     */
-    private async resolvePriorMessages(
-        fallback?: PriorChatMessage[],
-    ): Promise<PriorChatMessage[] | undefined> {
-        if (!this.sessionStore) return fallback;
-        try {
-            return await this.sessionStore.buildPriorMessages();
-        } catch (error) {
-            logger.warn('Failed to derive prior messages from session; using UI fallback.', 'ModelService');
-            return fallback;
-        }
     }
 
     private isAbortError(error: any): boolean {

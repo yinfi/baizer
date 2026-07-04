@@ -1,3 +1,29 @@
+### [2026-07-04 23:20] Task Summary — pi AgentHarness 重构阶段1(session+compaction 交给 Harness)
+
+**1. 刚刚做了什么? (What was done?)**
+- 把会话从「每轮临时内存」升级为「长生命持久化」:AgentHarness 的 session 换成 ModelService 持有的 JsonlSessionRepo session,跨轮上下文由 Harness 自己派生。
+- 新增 HarnessSessionManager 取代 SessionStore(删除 399 行 + 其测试):ready/getSession/clear/maybeCompact/hasHistory + sessionRef 跨重启持久化。
+- 拆分 PreparedChatTurn:prompt=干净用户请求(持久化)、systemPrompt=装饰(memory/context/skill/plan/契约,每轮发送但不持久化)——保证 JSONL 历史干净。
+- 自动压缩:每轮后按真实 usage(pi estimateContextTokens)判 shouldCompact,超阈值调 harness.compact()(复用 Harness 的 provider,不再自己拼摘要)。
+- 删除 UI priorMessages 全链路(chat-controller.buildPriorMessages、chat/chatStream 的 priorMessages 参、resolvePriorMessages、seedPriorMessages);短确认门控改为注入 hasPriorContext(从 session.hasHistory 查询)。
+- tsc 类型检查干净、build 通过、全量 83 测试文件通过,并用集成探针端到端验证(跨轮上下文/落盘/干净历史/hasHistory)。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 凡 pi 有的用 pi 的:会话持久化、压缩、跨轮上下文都是 AgentHarness 原生能力,不该自己造。
+- 关键设计后果:harness.prompt() 原样持久化传入内容,故装饰必须移到 systemPrompt,否则历史会累积每轮装饰(相对旧 SessionStore 只存 userRequest 是回归)。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- harness.prompt() 不自动压缩,compact() 也不自检阈值(空时抛 "Nothing to compact")→ 必须自己 shouldCompact 后再调。
+- 短确认剔除环境上下文原本靠 priorMessages.length 判历史;阶段1 后 prepareTurn 收不到它。
+- 多个测试(base-chat-runtime 装饰断言、chat-controller 的 buildPriorMessages 测试)绑定旧行为而失败。
+
+**4. 如何修复的? (How was it fixed?)**
+- 探针实测确认 harness.prompt() 自动追加会话、全新 harness 实例复用同一 session 能看到历史、estimateContextTokens 用真实 usage、systemPrompt 不进消息流——据此定 Option A(每轮 harness 复用长生命 session)。
+- 历史门控经用户确认后用注入 hasPriorContext 保留(ModelService 从 session.hasHistory 查询),不改判定语义。
+- 装饰断言改指向 systemPrompt;删除 2 个已失去前提的 buildPriorMessages 测试并注明原因。
+
+---
+
 ### [2026-07-04 21:40] Task Summary — pi AgentHarness 重构阶段0(引擎接入,全量测试通过)
 
 **1. 刚刚做了什么? (What was done?)**

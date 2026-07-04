@@ -1,6 +1,6 @@
 ﻿import { App, MarkdownView } from 'obsidian';
 import { ModelService } from '../services/model-service';
-import { StreamEvent, PriorChatMessage } from '../models/interfaces';
+import { StreamEvent } from '../models/interfaces';
 import { logger } from '../utils/logger';
 import {
     buildFileWriteFailureMessage,
@@ -65,38 +65,6 @@ export class ChatController {
         return [...this.messages];
     }
 
-    /**
-     * 构造跨轮注入的历史：把已渲染的对话转成 provider 能消费的干净原文。
-     * - 只保留 user / ai 两类，丢弃 system（清空提示、错误、审批等不属于对话内容）。
-     * - ai -> model，对齐底层 provider 的角色命名。
-     * - 跳过被中断（interrupted）的残缺回答，避免污染上下文。
-     * @param excludeLastUser 为 true 时排除末尾那条刚加入的当前用户消息（API 会单独发送它）。
-     */
-    private buildPriorMessages(excludeLastUser: boolean): PriorChatMessage[] {
-        const source = this.messages.slice();
-        if (excludeLastUser) {
-            for (let i = source.length - 1; i >= 0; i--) {
-                if (source[i].role === 'user') {
-                    source.splice(i, 1);
-                    break;
-                }
-            }
-        }
-
-        const prior: PriorChatMessage[] = [];
-        for (const message of source) {
-            if (message.role === 'system') continue;
-            if (message.role === 'ai' && message.metadata?.interrupted) continue;
-            const content = message.content?.trim();
-            if (!content) continue;
-            prior.push({
-                role: message.role === 'ai' ? 'model' : 'user',
-                content: message.content,
-            });
-        }
-        return prior;
-    }
-
     public clearHistory() {
         this.messages = [];
         this.api.clearSession();
@@ -159,10 +127,10 @@ export class ChatController {
                 let lastWriteError = '';
                 const writeToolArgs = new Map<string, any[]>();
                 const bufferedTextEvents: StreamEvent[] = [];
-                const priorMessages = this.buildPriorMessages(true);
+                // 阶段1:跨轮上下文由 Harness session 维护,UI 不再回灌 priorMessages。
                 const stream = source === 'shell'
-                    ? this.api.chatStream(query, normalizedContext, selection, streamController.signal, undefined, undefined, undefined, priorMessages)
-                    : this.api.chatStream(query, normalizedContext, selection, source, undefined, undefined, streamController.signal, priorMessages);
+                    ? this.api.chatStream(query, normalizedContext, selection, streamController.signal)
+                    : this.api.chatStream(query, normalizedContext, selection, source, undefined, undefined, streamController.signal);
                 for await (const event of stream) {
                     if (event.type === 'tool_call' && this.isFileWriteTool(event.name)) {
                         attemptedFileWrite = true;
@@ -254,10 +222,10 @@ export class ChatController {
                     }
                 }
             } else {
-                const priorMessages = this.buildPriorMessages(true);
+                // 阶段1:跨轮上下文由 Harness session 维护,UI 不再回灌 priorMessages。
                 const response = source === 'shell'
-                    ? await this.api.chat(query, normalizedContext, selection, 'shell', undefined, undefined, undefined, priorMessages)
-                    : await this.api.chat(query, normalizedContext, selection, source, undefined, undefined, undefined, priorMessages);
+                    ? await this.api.chat(query, normalizedContext, selection, 'shell')
+                    : await this.api.chat(query, normalizedContext, selection, source);
                 this.addMessage('ai', response);
             }
         } catch (error: any) {

@@ -71,10 +71,11 @@ async function runTests() {
       selection: 'selected line',
     });
 
-    expect(prepared.prompt.includes('[Memory Context]')).toBe(true);
-    expect(prepared.prompt.includes('[Context: [Context (file): note.md]\nnote body]')).toBe(true);
-    expect(prepared.prompt.includes('[Selected Text: selected line]')).toBe(true);
-    expect(prepared.prompt.includes('User Request: Explain this')).toBe(true);
+    // 阶段1:装饰进 systemPrompt(每轮发送不持久化);干净 userMessage 作为 prompt。
+    expect(prepared.systemPrompt!.includes('[Memory Context]')).toBe(true);
+    expect(prepared.systemPrompt!.includes('[Context: [Context (file): note.md]\nnote body]')).toBe(true);
+    expect(prepared.systemPrompt!.includes('[Selected Text: selected line]')).toBe(true);
+    expect(prepared.prompt).toBe('Explain this');
   });
 
   await test('runtime recalls relevant memory during prepareTurn', async () => {
@@ -110,7 +111,7 @@ async function runTests() {
       source: 'shell',
     });
 
-    expect(turn.prompt).toContain('[Relevant Memory]');
+    expect(turn.systemPrompt).toContain('[Relevant Memory]');
     expect(memoryCalls[0].type).toBe('recallForPrompt');
   });
 
@@ -150,7 +151,7 @@ async function runTests() {
     expect((prepared as any).allowedToolNames).toEqual(['save_webpage']);
     // B 方案：use_skill 元工具已移除，激活 skill 时工具集只含该 skill 的工具子集。
     expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['save_webpage']);
-    expect(prepared.prompt.includes('Use save_webpage to save the requested page.')).toBe(true);
+    expect(prepared.systemPrompt!.includes('Use save_webpage to save the requested page.')).toBe(true);
   });
 
   await test('prepareTurn adds a file-operation contract for write requests', async () => {
@@ -175,9 +176,9 @@ async function runTests() {
       contextItems: [],
     });
 
-    expect(prepared.prompt.includes('[File Operation Contract]')).toBe(true);
-    expect(prepared.prompt.includes('must call an appropriate vault write tool')).toBe(true);
-    expect(prepared.prompt.includes('Do not provide copy-paste instructions')).toBe(true);
+    expect(prepared.systemPrompt!.includes('[File Operation Contract]')).toBe(true);
+    expect(prepared.systemPrompt!.includes('must call an appropriate vault write tool')).toBe(true);
+    expect(prepared.systemPrompt!.includes('Do not provide copy-paste instructions')).toBe(true);
   });
 
   await test('prepareTurn constrains assistant-visible slash commands to registered commands', async () => {
@@ -203,14 +204,14 @@ async function runTests() {
       contextItems: [],
     });
 
-    expect(prepared.prompt).toContain('[Slash Command Contract]');
-    expect(prepared.prompt).toContain('`/clear`');
-    expect(prepared.prompt).toContain('`/memory [overview|observations|search <query>|forget <field>]`');
-    expect(prepared.prompt.includes('/profile')).toBe(false);
-    expect(prepared.prompt.includes('/forget [field]')).toBe(false);
-    expect(prepared.prompt).toContain('`/save`');
-    expect(prepared.prompt).toContain('Do not mention or recommend slash commands that are not listed here');
-    expect(prepared.prompt).toContain('Do not invent generic commands like `/do` or `/ask`');
+    expect(prepared.systemPrompt).toContain('[Slash Command Contract]');
+    expect(prepared.systemPrompt).toContain('`/clear`');
+    expect(prepared.systemPrompt).toContain('`/memory [overview|observations|search <query>|forget <field>]`');
+    expect(prepared.systemPrompt!.includes('/profile')).toBe(false);
+    expect(prepared.systemPrompt!.includes('/forget [field]')).toBe(false);
+    expect(prepared.systemPrompt).toContain('`/save`');
+    expect(prepared.systemPrompt).toContain('Do not mention or recommend slash commands that are not listed here');
+    expect(prepared.systemPrompt).toContain('Do not invent generic commands like `/do` or `/ask`');
   });
 
   await test('prepareTurn injects generation-plan metadata for rewrite flows', async () => {
@@ -270,10 +271,10 @@ async function runTests() {
         'Improve clarity or structure beyond surface-level word swaps.',
       ],
     });
-    expect(prepared.prompt.includes('[Generation Plan]')).toBe(true);
-    expect(prepared.prompt.includes('Mode: rewrite')).toBe(true);
-    expect(prepared.prompt.includes('Target Shape: replacement')).toBe(true);
-    expect(prepared.prompt.includes('Return only the revised replacement text.')).toBe(true);
+    expect(prepared.systemPrompt!.includes('[Generation Plan]')).toBe(true);
+    expect(prepared.systemPrompt!.includes('Mode: rewrite')).toBe(true);
+    expect(prepared.systemPrompt!.includes('Target Shape: replacement')).toBe(true);
+    expect(prepared.systemPrompt!.includes('Return only the revised replacement text.')).toBe(true);
   });
 
   const makeContextRuntime = () => createChatRuntime({
@@ -303,18 +304,15 @@ async function runTests() {
     const prepared = await runtime.prepareTurn({
       userMessage: '需要',
       contextItems: [ambientNote()],
-      priorMessages: [
-        { role: 'user', content: '日记里的链接为什么点不动' },
-        { role: 'model', content: '可以改成 wikilink，要我帮你改吗' },
-      ],
+      hasPriorContext: true,
     } as any);
 
     // 当前笔记正文被剔除，模型不再被它带偏
-    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(false);
-    expect(prepared.prompt.includes('Daily/2026/2026-06-24.md')).toBe(false);
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(false);
+    expect(prepared.systemPrompt!.includes('Daily/2026/2026-06-24.md')).toBe(false);
     // 没有残留的环境上下文，就不该附定性说明
-    expect(prepared.prompt.includes('[Context Note]')).toBe(false);
-    expect(prepared.prompt.includes('User Request: 需要')).toBe(true);
+    expect(prepared.systemPrompt!.includes('[Context Note]')).toBe(false);
+    expect(prepared.prompt).toBe('需要');
   });
 
   await test('[B] "用第二个方法" is treated as a continuation and strips ambient context', async () => {
@@ -323,28 +321,25 @@ async function runTests() {
     const prepared = await runtime.prepareTurn({
       userMessage: '用第二个方法',
       contextItems: [ambientNote()],
-      priorMessages: [
-        { role: 'user', content: '链接点不动' },
-        { role: 'model', content: '方法一：建文件；方法二：改绝对路径' },
-      ],
+      hasPriorContext: true,
     } as any);
 
-    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(false);
-    expect(prepared.prompt.includes('User Request: 用第二个方法')).toBe(true);
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(false);
+    expect(prepared.prompt).toBe('用第二个方法');
   });
 
   await test('[B] continuation detection requires prior history', async () => {
     const runtime = makeContextRuntime();
 
-    // 没有历史时，"需要" 不应剔除上下文（可能就是针对当前笔记的首轮请求）
+    // 没有历史时(hasPriorContext 未置)，"需要" 不应剔除上下文（可能就是针对当前笔记的首轮请求）
     const prepared = await runtime.prepareTurn({
       userMessage: '需要',
       contextItems: [ambientNote()],
     } as any);
 
-    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(true);
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(true);
     // 保留了环境上下文，则附上定性说明
-    expect(prepared.prompt.includes('[Context Note]')).toBe(true);
+    expect(prepared.systemPrompt!.includes('[Context Note]')).toBe(true);
   });
 
   await test('[B] long substantive message keeps ambient context even with history', async () => {
@@ -353,14 +348,11 @@ async function runTests() {
     const prepared = await runtime.prepareTurn({
       userMessage: '需要你把当前这篇文章整体改写得更精炼一些',
       contextItems: [ambientNote()],
-      priorMessages: [
-        { role: 'user', content: '前面的问题' },
-        { role: 'model', content: '前面的回答' },
-      ],
+      hasPriorContext: true,
     } as any);
 
     // 实质性长请求不算确认，当前笔记上下文必须保留
-    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(true);
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(true);
   });
 
   await test('[A] explicit user-selected context is never stripped on confirmation', async () => {
@@ -378,16 +370,13 @@ async function runTests() {
           content: 'Explicitly attached project plan content.',
         },
       ],
-      priorMessages: [
-        { role: 'user', content: 'q' },
-        { role: 'model', content: 'a' },
-      ],
+      hasPriorContext: true,
     } as any);
 
     // 环境笔记被剔除
-    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(false);
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(false);
     // 用户显式附加的上下文必须保留
-    expect(prepared.prompt.includes('Explicitly attached project plan content.')).toBe(true);
+    expect(prepared.systemPrompt!.includes('Explicitly attached project plan content.')).toBe(true);
   });
 
   await test('[A] ambient context on a normal request carries the conversation-wins disclaimer', async () => {
@@ -398,9 +387,9 @@ async function runTests() {
       contextItems: [ambientNote()],
     } as any);
 
-    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(true);
-    expect(prepared.prompt.includes('[Context Note]')).toBe(true);
-    expect(prepared.prompt.includes('follow the conversation')).toBe(true);
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(true);
+    expect(prepared.systemPrompt!.includes('[Context Note]')).toBe(true);
+    expect(prepared.systemPrompt!.includes('follow the conversation')).toBe(true);
   });
 
   await test('[B] English continuation "go ahead with option 2" (5 words) strips ambient context', async () => {
@@ -409,15 +398,12 @@ async function runTests() {
     const prepared = await runtime.prepareTurn({
       userMessage: 'go ahead with option 2',
       contextItems: [ambientNote()],
-      priorMessages: [
-        { role: 'user', content: 'how do I fix the links?' },
-        { role: 'model', content: 'Option 1: wikilink. Option 2: absolute path.' },
-      ],
+      hasPriorContext: true,
     } as any);
 
     // "go ahead with option 2" = 5 词，命中 CONTINUATION_PATTERNS，环境上下文应被剔除
-    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(false);
-    expect(prepared.prompt.includes('User Request: go ahead with option 2')).toBe(true);
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(false);
+    expect(prepared.prompt).toBe('go ahead with option 2');
   });
 
   await test('[B] English long request (>5 words) keeps ambient context even with history', async () => {
@@ -426,14 +412,11 @@ async function runTests() {
     const prepared = await runtime.prepareTurn({
       userMessage: 'please rewrite the entire article to be more concise and clear',
       contextItems: [ambientNote()],
-      priorMessages: [
-        { role: 'user', content: 'previous question' },
-        { role: 'model', content: 'previous answer' },
-      ],
+      hasPriorContext: true,
     } as any);
 
     // 超过5词的英文实质请求，不是延续，环境上下文必须保留
-    expect(prepared.prompt.includes('AI digest body that should not hijack')).toBe(true);
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(true);
   });
 }
 

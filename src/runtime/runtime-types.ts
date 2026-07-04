@@ -1,6 +1,6 @@
 import type { Model } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
-import type { ChatContextItem, PriorChatMessage, StreamEvent, ToolDefinition } from '../models/interfaces';
+import type { ChatContextItem, StreamEvent, ToolDefinition } from '../models/interfaces';
 import type { MemoryManager } from '../memory/memory-manager';
 import type { UserProfile } from '../memory/types';
 import type { ObsidianContextSnapshot } from '../services/obsidian-context-service';
@@ -8,7 +8,7 @@ import type { GenerationPlan, GenerationSource, WritingProfile } from '../servic
 import type { SkillRegistry } from '../skills/skill-registry';
 import type { ToolRegistry } from '../skills/tool-registry';
 import type { WorkspaceEditService } from '../services/workspace-edit-service';
-import type { SessionStore } from './pi/session-store';
+import type { HarnessSessionManager } from './pi/harness-session-manager';
 import type { SteeringController } from './steering-controller';
 
 /**
@@ -66,11 +66,12 @@ export interface ChatRuntimeDeps {
   skillRegistry: SkillRegistry;
   workspaceEditService?: Pick<WorkspaceEditService, 'executeWorkspaceTool'> | null;
   /**
-   * 可选的 Session 持久化层。提供时，跨轮上下文（priorMessages）由 Session 维护，
-   * 轮次结束后在 retainCompletedTurn 钩子里把 user/assistant 落盘到 JSONL。
-   * 不提供时退化为旧行为（priorMessages 由 UI 回灌、仅内存）。
+   * Harness 会话生命周期管理器。提供时,每轮构造的 AgentHarness 复用它持有的
+   * 长生命持久化 session:跨轮上下文由 Harness 从 session 派生(不再 UI 回灌 priorMessages),
+   * 轮次结束后由它按真实 usage 判断并触发 harness.compact()。
+   * 不提供时(如纯单测)退化为每轮全新内存会话、无持久化、无压缩。
    */
-  sessionStore?: SessionStore | null;
+  sessionManager?: HarnessSessionManager | null;
   /**
    * 当前模型的上下文窗口（token）。透传给 pi 的 bridge model，
    * 使 pi agentLoop 内部的预算判定基于真实窗口而非硬编码常量。
@@ -98,12 +99,27 @@ export interface ChatTurnRequest {
   obsidianContext?: ObsidianContextSnapshot;
   userProfile?: UserProfile | null;
   systemPromptOverride?: string;
-  /** 上一轮起的干净对话原文，由 UI 层提供，用于跨轮上下文延续。 */
-  priorMessages?: PriorChatMessage[];
+  /**
+   * 本轮开始时会话是否已有跨轮历史。用于短确认/延续判定:
+   * 只有存在历史时,"需要"这类短确认才被当作延续上一轮而剔除环境上下文;
+   * 无历史时保留(可能是针对当前笔记的首轮请求)。
+   * 阶段1 起由 ModelService 从 Harness session 查询后注入(取代旧的 priorMessages.length 判断)。
+   */
+  hasPriorContext?: boolean;
 }
 
 export interface PreparedChatTurn {
+  /**
+   * 本轮发给模型的干净用户请求(= userRequest 原文)。
+   * 阶段1 起:它作为 harness.prompt() 的入参被持久化进 session,
+   * 故不再夹带装饰(装饰移到 systemPrompt)。跨轮历史因此保持干净。
+   */
   prompt: string;
+  /**
+   * 每轮发送但不持久化的系统提示(装饰):memory 召回、当前时间、上下文、
+   * skill 清单、slash 契约、生成计划、文件写入契约等。作为 Harness 的 systemPrompt。
+   */
+  systemPrompt?: string;
   tools: ToolDefinition[];
   userRequest?: string;
   memoryContext?: string;
@@ -114,8 +130,6 @@ export interface PreparedChatTurn {
   generationPlan?: GenerationPlan;
   writingProfile?: WritingProfile;
   systemPromptOverride?: string;
-  /** 跨轮注入的历史消息，使新会话携带跨轮上下文。 */
-  priorMessages?: PriorChatMessage[];
 }
 
 export interface ChatRuntime {

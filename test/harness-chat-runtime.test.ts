@@ -467,17 +467,22 @@ async function runTests() {
     expect(deps.capturedReasoning()).toBe('low');
   });
 
-  await test('seeds prior messages into the session as cross-turn context', async () => {
+  await test('passes turn.systemPrompt to the harness (decoration not persisted as a message)', async () => {
+    // 阶段1:装饰经 systemPrompt 每轮发送,不作为 user 消息持久化。
+    // provider 收到的 context 里应只有干净的 user prompt(装饰不在消息流中)。
     const deps = createDeps({
       streamFactory: () => [{ type: 'text_delta', content: 'ok' }, { type: 'done', text: 'ok' }],
     });
     const runtime = await makeRuntime(deps);
     await collect(runtime.queryStream(createTurn({
-      priorMessages: [{ role: 'user', content: 'earlier question' }, { role: 'model', content: 'earlier answer' }],
-    })));
-    // 首轮 provider 输入应含预置历史(context.messages 里有 earlier question/answer + 当前 prompt)。
-    // deriveInput 只取末条 user,故断言 sessionInputs[0] 为当前请求,历史进了 context。
+      prompt: 'clean user request',
+      systemPrompt: '[Memory Context] decoration that must not enter the message stream',
+    } as any)));
+    // 本轮只有一次 provider 调用,输入是干净的 user 请求;装饰不在 messages 里。
     expect(deps.sessionInputs.length).toBe(1);
+    const firstInput = deps.sessionInputs[0];
+    expect(typeof firstInput === 'string' && firstInput.includes('clean user request')).toBe(true);
+    expect(typeof firstInput === 'string' && firstInput.includes('decoration that must not enter')).toBe(false);
   });
 }
 

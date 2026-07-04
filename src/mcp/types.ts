@@ -83,7 +83,7 @@ export interface PluginSettings {
     // --- 💾 Session Persistence ---
     /**
      * 当前活跃会话的引用，用于跨重启恢复持久化的对话历史。
-     * 由 SessionStore 写入，结构与 PersistedSessionRef 对齐。运行期可选。
+     * 由 HarnessSessionManager 写入，结构与 PersistedSessionRef 对齐。运行期可选。
      */
     sessionRef?: {
         id: string;

@@ -9,7 +9,6 @@ const tests = [
   'test/permission-service.test.ts',
   'test/model-service.test.ts',
   'test/base-chat-runtime.test.ts',
-  'test/session-store.test.ts',
   'test/harness-chat-runtime.test.ts',
   'test/steering.test.ts',
   'test/pi-runtime-factory.test.ts',
