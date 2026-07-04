@@ -185,6 +185,11 @@ export class HarnessSessionManager {
       };
       if (!settings.enabled) return;
 
+      // 防呆:pi shouldCompact = tokens > (contextWindow - reserveTokens)。若用户配置的
+      // contextWindow 小于等于 reserveTokens,阈值为负/零,会让压缩每轮无意义触发。
+      // 此时直接跳过(这么小的窗口下压缩无收益,只会反复摘要极小上下文)。
+      if (contextWindow <= settings.reserveTokens) return;
+
       const entries = await this.session.getBranch();
       const messages = mod.buildSessionContext(entries).messages;
       const estimate = mod.estimateContextTokens(messages);

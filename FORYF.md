@@ -1,3 +1,24 @@
+### [2026-07-05 01:40] Task Summary — 跨阶段整体回归冒烟(抓到并修复 2 个真 bug)
+
+**1. 刚刚做了什么? (What was done?)**
+- 新增 test/cross-phase-smoke.test.ts:用真实运行时组件拼装(HarnessChatRuntime + HarnessSessionManager + ActiveRunController + PromptTemplateService),只在边界打桩(provider 用 pi registerApiProvider,vault 用内存 adapter)。6 场景一条链覆盖四个阶段。
+- 全量 86 测试文件通过、tsc 干净、build 通过。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 单元测试各测一阶段,但阶段间的真实拼装(session 长生命、装饰不落盘、steering 注入活跃 harness、用户命令加载)只有端到端跑才暴露。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- Bug1:HarnessExecutionEnv.fileInfo 对任何存在路径都返回 kind:'file',pi loadPromptTemplates 认不出目录 → 用户自定义命令在生产会静默不加载(阶段3 功能形同虚设)。
+- Bug2:maybeCompact 在 contextWindow <= reserveTokens(默认16384)时,pi shouldCompact 阈值(window-reserve)为负,压缩每轮假触发,反复摘要极小上下文。
+- 冒烟初版的压缩场景用 contextWindow:50「通过」了,但是因负阈值假触发这个错误原因通过的。
+
+**4. 如何修复的? (How was it fixed?)**
+- Bug1:fileInfo 先用 listDir 探测目录(有子项即目录),再回退文件判定;session 持久化路径不受影响(全量测试验证)。
+- Bug2:maybeCompact 加防呆——contextWindow <= reserveTokens 时直接跳过。
+- 承认「为错误原因通过的测试比没测试更糟」,改用真实 usage(新增 usageTokens 选项)+ window=reserve+margin 测 genuine 溢出,并加一条防呆场景断言小窗口下不假触发。
+
+---
+
 ### [2026-07-05 01:00] Task Summary — pi AgentHarness 重构阶段3(prompt-template 用户命令 + 编译并发,P1)
 
 **1. 刚刚做了什么? (What was done?)**

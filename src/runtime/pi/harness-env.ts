@@ -77,11 +77,31 @@ export class HarnessExecutionEnv {
   }
 
   async fileInfo(path: string): Promise<Result<FileInfo, FileError>> {
-    const existsResult = await this.fs.exists(path);
-    if (!existsResult.ok) return existsResult;
-    if (!existsResult.value) return err('not_found', `Path does not exist: ${path}`);
     const normalized = path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
     const name = normalized.slice(normalized.lastIndexOf('/') + 1);
+
+    // 先判目录:vault adapter 没有「路径是否目录」的直接 API,用 listDir 探测——
+    // 目录能列出内容(即便为空返回 ok),文件则通常返回错误或不作为目录看待。
+    // pi 的 loadPromptTemplates 依赖 fileInfo 正确区分 dir/file,故必须先探目录。
+    const listed = await this.fs.listDir(normalized);
+    if (listed.ok && Array.isArray(listed.value)) {
+      // listDir 成功且该路径下有子项,或该路径本身作为目录存在,视为目录。
+      const hasChildren = listed.value.length > 0;
+      const existsAsFile = await this.fs.exists(normalized);
+      // 有子项 → 一定是目录;无子项但存在 → 可能是空目录或文件,回退到文件判定。
+      if (hasChildren) {
+        return ok({ name, path: normalized, kind: 'directory', size: 0, mtimeMs: 0 });
+      }
+      // 无子项:若作为文件存在则报文件,否则报空目录(存在性由 exists 决定)。
+      if (existsAsFile.ok && existsAsFile.value) {
+        return ok({ name, path: normalized, kind: 'file', size: 0, mtimeMs: 0 });
+      }
+      return ok({ name, path: normalized, kind: 'directory', size: 0, mtimeMs: 0 });
+    }
+
+    const existsResult = await this.fs.exists(normalized);
+    if (!existsResult.ok) return existsResult;
+    if (!existsResult.value) return err('not_found', `Path does not exist: ${path}`);
     return ok({ name, path: normalized, kind: 'file', size: 0, mtimeMs: 0 });
   }
 
