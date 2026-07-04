@@ -372,10 +372,18 @@ export class ShellView extends ItemView {
                 command: command.command,
                 description: command.description,
             }));
-            const skillCommandLabels = new Set(skillCommands.map(command => command.command));
+            // 用户自定义命令(.obsidian/baizer-commands/*.md)并入 skill 通道一起展示。
+            const userCommands = (typeof (this.modelService as any).getUserCommandsSync === 'function'
+                ? (this.modelService as any).getUserCommandsSync()
+                : []).map((command: any) => ({
+                    command: command.command,
+                    description: command.description,
+                }));
+            const mergedSkillLike = [...skillCommands, ...userCommands];
+            const skillCommandLabels = new Set(mergedSkillLike.map(command => command.command));
             return buildCommandSuggestions(
                 this.localCommandSuggestions,
-                skillCommands,
+                mergedSkillLike,
                 query,
             ).map(item => ({
                 ...item,

@@ -312,8 +312,33 @@ export class ChatController {
                 await this.handleOpenFile(argStr);
                 break;
             default:
-                this.addMessage('system', `Unknown command: ${cmd}`);
+                await this.handleUserCommandOrUnknown(cmd, argStr);
         }
+    }
+
+    /**
+     * 内置命令未命中时,尝试用户自定义命令(.obsidian/baizer-commands/*.md)。
+     * 命中则把模板展开成 prompt 当作普通对话轮执行;未命中才报「未知命令」。
+     * 内置命令优先(本方法只在 switch 落到 default 时才调),满足冲突时内置优先的约定。
+     */
+    private async handleUserCommandOrUnknown(cmd: string, argStr: string) {
+        const execUser = (this.api as any).executeUserCommand;
+        if (typeof execUser === 'function') {
+            this.setResponding(true);
+            try {
+                const result = await execUser.call(this.api, cmd, argStr.trim());
+                if (result?.handled) {
+                    this.addMessage('ai', result.message ?? '');
+                    return;
+                }
+            } catch (error: any) {
+                this.handleError(error);
+                return;
+            } finally {
+                this.setResponding(false);
+            }
+        }
+        this.addMessage('system', `Unknown command: ${cmd}`);
     }
 
     private formatSlashCommandResult(result: any): string {
@@ -1054,6 +1079,17 @@ export class ChatController {
             help += `\n\n## Skill Commands\n\n`;
             help += skillCommands
                 .map((entry: any) => `- \`${entry.command}\` 鈥?${entry.description}`)
+                .join('\n');
+        }
+
+        // 用户自定义命令(.obsidian/baizer-commands/*.md)。同步快照,启动预热后有值。
+        const userCommands = typeof (this.api as any).getUserCommandsSync === 'function'
+            ? (this.api as any).getUserCommandsSync()
+            : [];
+        if (userCommands.length > 0) {
+            help += `\n\n## User Commands\n\n`;
+            help += userCommands
+                .map((entry: any) => `- \`${entry.command}\` - ${entry.description}`)
                 .join('\n');
         }
 

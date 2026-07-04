@@ -89,6 +89,11 @@ export interface ChatRuntimeDeps {
    * 不提供时退化为「无运行中 steering」。
    */
   activeRunController?: ActiveRunController | null;
+  /**
+   * 可选:返回用户自定义命令快照(同步),供 slash 契约把用户命令一并列给模型,
+   * 避免模型误以为这些命令不存在。由 ModelService 提供(读 PromptTemplateService 缓存)。
+   */
+  getUserCommandEntries?: () => Array<{ command: string; description: string }>;
 }
 
 export interface ChatTurnRequest {

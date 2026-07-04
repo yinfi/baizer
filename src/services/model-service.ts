@@ -13,6 +13,7 @@ import { createHarnessExecutionEnv } from '../runtime/pi/harness-env';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import * as modelCatalog from './model-catalog-service';
 import { ActiveRunController } from '../runtime/active-run-controller';
+import { PromptTemplateService } from '../runtime/pi/prompt-template-service';
 import { HarnessSessionManager, type PersistedSessionRef } from '../runtime/pi/harness-session-manager';
 import { createVaultFileAdapter } from '../runtime/pi/vault-session-fs';
 import { computeContentHash } from '../knowledge/compiler';
@@ -49,6 +50,11 @@ export class ModelService {
      */
     private harnessEnv: unknown = null;
     /**
+     * 用户自定义 slash 命令服务(基于 pi prompt-template)。与 harnessEnv 同源;
+     * 从 .obsidian/baizer-commands/*.md 加载,vault 不可用时为 null。
+     */
+    private promptTemplateService: PromptTemplateService | null = null;
+    /**
      * 运行中 run 控制器。持有当前活跃的 AgentHarness,使「补话」与「动态工具集」
      * 直接走 Harness 原生 steer()/setActiveTools()。跨轮复用同一实例:runtime 在每次
      * queryStream 启动时 register 新 harness、结束时 clear,故 steer 窗口对齐当前流。
@@ -78,6 +84,8 @@ export class ModelService {
         this.initializeProvider();
         this.setupErrorHandlers();
         this.initializeSessionManager();
+        // 预热用户命令缓存(异步,不阻塞构造),使 / 补全的同步路径尽快有值。
+        void this.reloadUserCommands();
     }
 
     /**
@@ -93,6 +101,7 @@ export class ModelService {
         if (!adapter || typeof adapter.read !== 'function' || typeof adapter.append !== 'function') {
             this.sessionManager = null;
             this.harnessEnv = null;
+            this.promptTemplateService = null;
             return;
         }
         try {
@@ -103,10 +112,13 @@ export class ModelService {
                 contextWindow: () => this.settings.contextWindow ?? 0,
             });
             this.harnessEnv = createHarnessExecutionEnv(vaultAdapter);
+            // 用户自定义命令服务与 harnessEnv 同源;懒加载模板(首次列命令/执行时读盘)。
+            this.promptTemplateService = new PromptTemplateService(this.harnessEnv);
         } catch (error) {
             logger.warn('Failed to initialize HarnessSessionManager; falling back to in-memory sessions.', 'ModelService');
             this.sessionManager = null;
             this.harnessEnv = null;
+            this.promptTemplateService = null;
         }
     }
 
@@ -537,6 +549,37 @@ export class ModelService {
         return this.skillRegistry.listCommandEntries();
     }
 
+    /**
+     * 用户自定义 slash 命令列表(来自 .obsidian/baizer-commands/*.md)。
+     * 供 / 补全与 slash 契约合并。vault 不可用时返回空。
+     */
+    async getUserCommands() {
+        if (!this.promptTemplateService) return [];
+        return this.promptTemplateService.listCommands();
+    }
+
+    /** 同步返回已加载的用户命令快照(供 / 补全等同步 UI 路径)。启动预热后有值。 */
+    getUserCommandsSync() {
+        return this.promptTemplateService ? this.promptTemplateService.listCommandsSync() : [];
+    }
+
+    /** 重新加载用户命令模板(用户新增/修改后调用)。 */
+    async reloadUserCommands(): Promise<void> {
+        if (this.promptTemplateService) await this.promptTemplateService.load();
+    }
+
+    /**
+     * 执行用户自定义命令:把模板按参数展开成 prompt,当作普通对话轮发送。
+     * 未找到模板返回 { success:false }(调用方回退到未知命令处理)。
+     */
+    async executeUserCommand(command: string, argsString: string): Promise<{ handled: boolean; message?: string }> {
+        if (!this.promptTemplateService) return { handled: false };
+        const prompt = await this.promptTemplateService.resolve(command, argsString);
+        if (prompt === null) return { handled: false };
+        const message = await this.chat(prompt, [], '');
+        return { handled: true, message };
+    }
+
     /** 返回所有 skill 摘要（含被禁用的），供设置页 🧩 Skills 区块列出并逐个开关。 */
     getSkillList(): SkillSummary[] {
         return this.skillRegistry.getAllSkillSummaries();
@@ -631,6 +674,7 @@ export class ModelService {
             contextWindow: this.settings.contextWindow,
             thinkingLevel: this.settings.thinkingLevel,
             activeRunController: this.activeRunController,
+            getUserCommandEntries: () => this.getUserCommandsSync().map(c => ({ command: c.command, description: c.description })),
         });
     }
 

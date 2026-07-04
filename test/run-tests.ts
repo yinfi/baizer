@@ -84,6 +84,8 @@ const tests = [
   'test/throttle.test.ts',
   'test/action-registry.test.ts',
   'test/suggest-list.test.ts',
+  'test/prompt-template-service.test.ts',
+  'test/knowledge/compile-concurrency.test.ts',
 ];
 
 for (const testFile of tests) {

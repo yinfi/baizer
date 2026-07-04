@@ -224,11 +224,18 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     const skillCommands = typeof (this.deps.skillRegistry as any).listCommandEntries === 'function'
       ? (this.deps.skillRegistry as any).listCommandEntries()
       : [];
+    const userCommands = typeof this.deps.getUserCommandEntries === 'function'
+      ? this.deps.getUserCommandEntries()
+      : [];
     const commands = [
       ...LOCAL_SLASH_COMMANDS,
       ...skillCommands.map((entry: any) => ({
         command: entry.command,
         description: entry.description || `Run ${entry.skillName || 'skill'} workflow`,
+      })),
+      ...userCommands.map((entry) => ({
+        command: entry.command,
+        description: entry.description || `Run the ${entry.command} command`,
       })),
     ];
     const unique = new Map<string, string>();

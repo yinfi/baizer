@@ -42,6 +42,8 @@ export interface CurrentCompiledSummary {
 
 export interface CompileAllPendingOptions {
   pendingReasons?: KnowledgePendingReason[];
+  /** 文件级并发上限(同时编译的文件数)。默认 3。避免打爆 provider 速率限制。 */
+  fileConcurrency?: number;
 }
 
 function asString(value: any): string | undefined {
@@ -675,9 +677,23 @@ export class KnowledgeCompiler {
   }
 
   /**
-   * 批量编译所有 pending 项
+   * 批量编译所有 pending 项(文件级并发)。
+   *
+   * 从「逐文件串行 await」改为「带全局上限的文件级并发」:大 vault 首次编译显著提速。
+   * 复用单篇内已验证的 Promise.allSettled 批处理模式(见 compileNote 长文 Map-Reduce)。
+   *
+   * 并发上限的两层含义(避免打爆 provider 速率限制):
+   * - fileConcurrency:同时编译的文件数(默认 3,保守)。
+   * - concurrency:单篇长文内 chunk 的并行度(默认 3)。
+   * 二者相乘是最坏情况的在途 LLM 调用数(3×3=9),故默认都取保守值,均可配。
+   *
+   * 计数在每个文件「落定时」累加(不按数组下标),保证并发下 success/failed 正确;
+   * onProgress 用共享计数器在完成时回调,呈现「已完成/总数」。
+   *
    * @param schema 可选的 ontology schema，整个 batch 使用同一份
    * @param schemaHash 可选的 schema 内容 hash
+   * @param concurrency 单篇长文内 chunk 的并行度(默认 3)
+   * @param options.fileConcurrency 文件级并发上限(默认 3)
    */
   async compileAllPending(
     maxBatch: number = 50,
@@ -695,23 +711,42 @@ export class KnowledgeCompiler {
     const pendingFiles = getFilesByKnowledgeStatus(this.app, 'pending')
       .filter((file) => !allowedReasons || allowedReasons.has(getPendingReason(this.app, file) as KnowledgePendingReason))
       .slice(0, maxBatch);
+
+    const total = pendingFiles.length;
+    const fileConcurrency = Math.max(1, options?.fileConcurrency ?? 3);
     let success = 0;
     let failed = 0;
+    let completed = 0;
 
-    for (let i = 0; i < pendingFiles.length; i++) {
-      const file = pendingFiles[i];
-      onProgress?.(i + 1, pendingFiles.length, file.path);
-      const currentSummary = await findCurrentCompiledSummary(this.app, file, this.wikiFolder, schemaHash);
-      if (currentSummary) {
-        await setKnowledgeStatus(this.app, file, 'done', {
-          source_id: currentSummary.sourceId,
-          compiled_at: currentSummary.compiledAt || new Date().toISOString(),
-          summary: currentSummary.path,
-        });
-        continue;
+    // 编译单个 pending 文件:命中已有摘要则跳过(计成功),否则走 compileNote。
+    // 计数与 onProgress 在此「落定时」处理,天然线程安全(单线程事件循环 + await 点原子)。
+    const compileOne = async (file: TFile): Promise<void> => {
+      try {
+        const currentSummary = await findCurrentCompiledSummary(this.app, file, this.wikiFolder, schemaHash);
+        if (currentSummary) {
+          // 已有当前摘要:仅标记 done 并跳过,不计入 success/failed(与旧串行行为一致)。
+          await setKnowledgeStatus(this.app, file, 'done', {
+            source_id: currentSummary.sourceId,
+            compiled_at: currentSummary.compiledAt || new Date().toISOString(),
+            summary: currentSummary.path,
+          });
+          return;
+        }
+        const result = await this.compileNote(file, schema, schemaHash, concurrency);
+        if (result) { success++; } else { failed++; }
+      } catch {
+        // compileNote 内部已处理并落 failed 状态;此处兜底计数,不让单文件异常中断整批。
+        failed++;
+      } finally {
+        completed++;
+        onProgress?.(completed, total, file.path);
       }
-      const result = await this.compileNote(file, schema, schemaHash, concurrency);
-      if (result) { success++; } else { failed++; }
+    };
+
+    // 文件级批处理:每批至多 fileConcurrency 个文件并发,批间等待(Promise.allSettled)。
+    for (let i = 0; i < pendingFiles.length; i += fileConcurrency) {
+      const batch = pendingFiles.slice(i, i + fileConcurrency);
+      await Promise.allSettled(batch.map((file) => compileOne(file)));
     }
 
     return { success, failed };

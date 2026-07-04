@@ -1,3 +1,27 @@
+### [2026-07-05 01:00] Task Summary — pi AgentHarness 重构阶段3(prompt-template 用户命令 + 编译并发,P1)
+
+**1. 刚刚做了什么? (What was done?)**
+- 轨道A(用户自定义 slash 命令):新增 PromptTemplateService,基于 pi 的 loadPromptTemplates + parseCommandArgs + substituteArgs,从 vault 隐藏目录 .obsidian/baizer-commands/*.md 加载模板。用户丢 .md 文件即可加命令,零代码。命令名=文件名,支持 $ARGUMENTS/$1/$2 参数替换。
+- 接入四处:ModelService(构造+预热+getUserCommands/executeUserCommand)、chat-controller(default 分支试用户命令,内置优先;/help 加 User Commands 段)、shell-view(/ 补全并入)、base-chat-runtime(slash 契约把用户命令列给模型)。
+- 轨道B(编译并发):compileAllPending 从逐文件串行改为带上限(fileConcurrency 默认3)的文件级并发,复用单篇内已验证的 Promise.allSettled 批处理;计数在文件落定时累加,保证并发下正确。
+- 新增测试:prompt-template-service.test.ts(7)、compile-concurrency.test.ts(5)。全量 85 测试文件通过、build 通过。
+
+**2. 为什么要这么做? (Why was it done?)**
+- P1 与运行时解耦:prompt-template 是 pi 已有但项目没用的能力,用它支撑用户自定义命令,契合 Obsidian「丢文件即扩展」的习惯;编译串行是大 vault 首次编译慢的直接原因。
+- 用户命令做成「模板展开→普通对话轮」的纯解析,不碰 Harness 生命周期,最小耦合。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- pi loadPromptTemplates 在无 frontmatter 时把 description 设为模板正文本身,直接显示会把整段正文塞进 / 补全,是噪音。
+- / 补全与 slash 契约是同步路径,但模板加载是异步(读盘)。
+- 编译并发重构初版把「跳过已编译笔记」误计为 success,改变了计数语义。
+
+**4. 如何修复的? (How was it fixed?)**
+- describeTemplate():仅当 description 存在且不等于正文时才采用,否则回退通用文案「Run the X command」。
+- PromptTemplateService 提供 listCommandsSync() 同步快照 + ModelService 构造时 void reloadUserCommands() 预热缓存,同步 UI 路径读缓存。
+- watcher.test 的既有 compileAllPending 测试抓到计数回归;改回「跳过不计入 success/failed」(与旧串行一致),并补 compile-concurrency.test 用 ProbeCompiler 覆盖并发峰值/计数/maxBatch/onProgress。
+
+---
+
 ### [2026-07-05 00:10] Task Summary — pi AgentHarness 重构阶段2(steering 交给 Harness)
 
 **1. 刚刚做了什么? (What was done?)**
