@@ -49,9 +49,19 @@ function sanitizeTitle(title: string): string {
   return clean;
 }
 
+/** 把任意字符串序列化为合法的 YAML 双引号标量，转义反斜杠与引号。 */
+function yamlQuote(value: string): string {
+  return `"${String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
 function buildFrontmatter(opts: { source: string; author?: string; tags: string[] }): string {
   const created = new Date().toISOString();
-  return `---\ncreated: ${created}\nsource: ${opts.source}\nauthor: ${opts.author || ''}\ntags: ${opts.tags.join(', ')}\n---\n\n`;
+  // source/author 可能含冒号、引号、中文等特殊字符（尤其 URL 与微信作者名），
+  // 全部走双引号标量，保证生成的 frontmatter 始终是合法 YAML，
+  // 避免后续 processFrontMatter 解析失败而触发 fixAndSetFrontmatter 回退路径。
+  // tags 用 YAML flow 数组，逐个引号化，杜绝含逗号/冒号的标签破坏结构。
+  const tags = opts.tags.map((t) => yamlQuote(t)).join(', ');
+  return `---\ncreated: ${created}\nsource: ${yamlQuote(opts.source)}\nauthor: ${yamlQuote(opts.author || '')}\ntags: [${tags}]\n---\n\n`;
 }
 
 async function ensureFolder(app: App, path: string): Promise<void> {

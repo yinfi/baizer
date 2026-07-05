@@ -161,28 +161,60 @@ async function fixAndSetFrontmatter(
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
 
   if (fmMatch) {
-    // 修复含冒号的值：给 "key: value: more" 格式的行加引号
-    const fixedFm = fmMatch[1].replace(
-      /^(\s*\w[\w\s]*?):\s*(.+:.+)$/gm,
-      (_, key, val) => `${key}: "${val.replace(/"/g, '\\"')}"`
+    let fmBody = fmMatch[1];
+
+    // 1) 先移除所有已存在的 knowledge_* 目标字段行，避免重复堆积。
+    //    历史 bug 会在每轮回退里 append 一份 knowledge_status 等，导致
+    //    同一文件出现几十个重复字段；这里统一清掉后由下方重新写入一份。
+    const KNOWLEDGE_KEYS = [
+      'knowledge_status',
+      'knowledge_source_id',
+      'knowledge_compiled_at',
+      'knowledge_summary',
+      'knowledge_error',
+      'knowledge_pending_reason',
+    ];
+    const knowledgeKeyRe = new RegExp(
+      `^\\s*(?:${KNOWLEDGE_KEYS.join('|')}):.*(?:\\r?\\n|$)`,
+      'gm'
+    );
+    fmBody = fmBody.replace(knowledgeKeyRe, '');
+
+    // 2) 修复「冒号后带空格」的非法标量值（key: value: more）——给值加引号。
+    //    幂等关键：仅当值尚未被双引号完整包裹时才加引号，绝不对已引号化的值
+    //    重复转义（旧实现每轮翻倍转义，把 frontmatter 撑成乱码的元凶）。
+    const fixedFm = fmBody.replace(
+      /^(\s*[\w-]+):[ \t]+(\S.*)$/gm,
+      (line, key, val) => {
+        const trimmed = val.trim();
+        // 已被双引号或单引号完整包裹：合法，保持原样（幂等）
+        if (/^"(?:[^"\\]|\\.)*"$/.test(trimmed) || /^'(?:[^']|'')*'$/.test(trimmed)) {
+          return line;
+        }
+        // 仅「冒号后紧跟空格」才是非法标量，需要加引号；否则（如 URL、时间戳）保持原样
+        if (!/:\s/.test(trimmed)) return line;
+        return `${key}: "${trimmed.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+      }
     );
     content = content.replace(fmMatch[1], fixedFm);
   }
 
-  // 构建要追加的 knowledge 字段
+  // 构建要写入的 knowledge 字段（此时旧的同名字段已被清除，只会有一份）
   const fields: string[] = [`knowledge_status: ${status}`];
   if (extra?.source_id) fields.push(`knowledge_source_id: "${extra.source_id}"`);
   if (extra?.compiled_at) fields.push(`knowledge_compiled_at: "${extra.compiled_at}"`);
   if (extra?.summary) fields.push(`knowledge_summary: "${extra.summary}"`);
-  if (extra?.error) fields.push(`knowledge_error: "${extra.error.replace(/"/g, '\\"')}"`);
+  if (extra?.error) fields.push(`knowledge_error: "${extra.error.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
   if (status === 'pending' && extra?.pending_reason) {
     fields.push(`knowledge_pending_reason: "${extra.pending_reason}"`);
   }
 
-  if (fmMatch) {
-    // 在现有 frontmatter 末尾追加
+  const refreshedMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (refreshedMatch) {
+    // 在现有 frontmatter 末尾追加（末尾可能因删除留下空行，join 时规整）
     const insertPoint = content.indexOf('\n---', 4);
-    content = content.slice(0, insertPoint) + '\n' + fields.join('\n') + content.slice(insertPoint);
+    const before = content.slice(0, insertPoint).replace(/\n+$/, '');
+    content = before + '\n' + fields.join('\n') + content.slice(insertPoint);
   } else {
     // 没有 frontmatter，创建新的
     content = '---\n' + fields.join('\n') + '\n---\n' + content;

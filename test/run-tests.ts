@@ -81,6 +81,7 @@ const tests = [
   'test/knowledge/types.test.ts',
   'test/knowledge/watcher.test.ts',
   'test/knowledge/frontmatter-idempotent.test.ts',
+  'test/knowledge/frontmatter-fallback.test.ts',
   'test/throttle.test.ts',
   'test/action-registry.test.ts',
   'test/suggest-list.test.ts',

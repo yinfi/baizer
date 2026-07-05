@@ -1,3 +1,46 @@
+### [2026-07-05 15:20] Task Summary — 清洗 5 个被 frontmatter 转义炸弹损坏的剪藏文件
+
+**1. 刚刚做了什么? (What was done?)**
+- 新增一次性清洗脚本 scripts/repair-clipping-frontmatter.mjs(独立 Node，用 yaml 包，不进插件 bundle)。默认 dry-run，--apply 才落盘，落盘前自动备份到 _repair_backup_<时间戳>/。
+- 靠「检测规则」而非硬编码文件名识别损坏文件，扫 299 篇 → 命中 5 个损坏文件，全部修复；重扫确认 0 残留；正文零改动；备份完整可回滚。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 代码根因修复只能保证「不再恶化」，已被历史 bug 撑成非法 YAML 的文件需单独还原。用户确认「清空全部 knowledge_ 字段」策略(对应摘要均不存在，交插件事后重新注册编译)。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 起初误判损坏范围：先说 9 个(grep 转义失误的噪声)、后修正为 4 个，脚本 dry-run 又靠检测规则多抓到第 5 个(坚果云同步，双块形态)——印证「检测规则优于硬编码文件名」。299 篇只是被反复 touch 写状态，真正 frontmatter 损坏的只有 5 个。
+- 三种损坏形态：A 转义炸弹(created/source 值嵌套几十层 \")、B 字段堆积(status×47/source_id×23，每轮回退新生成随机 id 并 append)、C 双 frontmatter 块(原始 fm 被挤进正文)。
+- 脚本首版 bug：把原始 `tags: []` 空数组按字符串抓取，yaml 又序列化成 `"[]"`；dry-run 时肉眼发现。
+- 所有受损文件的 source_id 对应摘要全部不存在(401 拦截，从没编译成功)，故清空重编安全、不留孤儿摘要。
+
+**4. 如何修复的? (How was it fixed?)**
+- 还原策略：从被炸的值里剥掉所有 \ 和 " 取回原始 ISO 时间戳/URL(已验证可靠)；合并多个 frontmatter 块，同名字段取首个；清空全部 knowledge_ 字段。
+- 修脚本 bug：新增 parseScalar，对 []/{}/flow 数组保留 YAML 原生类型，对含冒号值(如 "作者: 水青一木")按字符串处理并让 yaml.stringify 正确引号化，不误解析成 map。
+- 每个文件写盘前用 yaml.parse 自校验 frontmatter 合法；解析仍失败的文件不写盘、单列报告。dry-run 端到端验证后才 --apply。
+
+---
+
+### [2026-07-05 14:30] Task Summary — 修复知识库自动编译反复改写源文件(frontmatter 转义炸弹)
+
+**1. 刚刚做了什么? (What was done?)**
+- 修复 src/knowledge/frontmatter.ts 的 fixAndSetFrontmatter 回退路径:改为幂等(值已被引号包裹则跳过,只对「冒号后带空格」的非法裸标量加引号,绝不重复转义) + 写前清除所有已存在的 knowledge_* 字段避免重复堆积。
+- 修复 src/skills/builtin/web-clipper/executor.ts 的 buildFrontmatter:source/author 全部双引号标量化、tags 改 YAML flow 数组并逐个引号化,从源头产出合法 YAML。
+- 新增 test/knowledge/frontmatter-fallback.test.ts(3 用例:反复回退不放大转义/不堆重复字段/能修复历史损坏文件),注册进 run-tests。全量测试通过、tsc 干净。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 用户开启 knowledgeAutoCompile 后,Assets/网页剪藏 目录下文件被批量反复改写,frontmatter 撑成乱码(单文件出现 45 个重复 knowledge_status 字段、created/source 值嵌套几十层 \\\\")。根因是自动编译每轮都写 frontmatter 状态,而回退路径存在缺陷放大破坏。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 根因链三层叠加:(a) fixAndSetFrontmatter 的正则 /(.+:.+)/ 非幂等,对含冒号的值(URL/时间戳)无条件加引号且重复转义已有引号,每轮翻倍;(b) 剪藏 buildFrontmatter 产出 source: https://... 等含冒号裸值,首次就可能让 processFrontMatter 解析失败触发回退;(c) provider 返回 401 + runtime 补跑机制,让整批 299 篇每次开自动编译都被全量重写,把上述炸弹放大到肉眼可见。目录是不是剪藏无关,任何走过状态写入的源目录都会中招。
+- 现有测试的 mock 让 processFrontMatter 永远成功,回退路径零覆盖,炸弹长期潜伏。
+
+**4. 如何修复的? (How was it fixed?)**
+- 幂等回退:先用正则批量删除旧 knowledge_* 行再写一份(根治重复堆积);加引号前先判断值是否已被双/单引号完整包裹(已包裹则原样返回),只对「冒号后紧跟空格」的真非法标量处理,反斜杠也正确转义。
+- 源头合法化:buildFrontmatter 引入 yamlQuote 辅助,source/author/tags 全部合法引号化,断绝回退触发。
+- 补回退路径回归测试锁死:强制 processFrontMatter 抛错走回退,断言连续 5 轮写入后最长反斜杠串 < 3、knowledge_status 恰好 1 份、历史损坏文件可被恢复。
+
+---
+
 ### [2026-07-05 01:40] Task Summary — 跨阶段整体回归冒烟(抓到并修复 2 个真 bug)
 
 **1. 刚刚做了什么? (What was done?)**
@@ -2548,3 +2591,123 @@ UI 层：
 - 分两步实施：第一步两处样式规则块替换（旧 → 新），第二步末尾追加三组新样式，build 验证无误后 git add styles.css（工作区其他改动不纳入）提交。
 
 ---
+### [2026-07-05 00:40] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 核对一份"pi 迁移仍有本地协议残留"的分析（5 条：Skill 加载/Skill 激活/Prompt Template/工具错误语义/审批），逐条对照 pi 库 .d.ts 与项目源码验证真伪，输出结论与证据行号。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户要判断该分析是否正确，作为后续是否深度对接 pi AgentHarness 原生能力的决策依据。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 分析引用的文件名是 harness-chat-runtime.ts，与 CLAUDE.md 记载的 pi-chat-runtime.ts 不一致；实际目录中只有前者，说明 CLAUDE.md 文档已过时、分析比文档新。
+- P1 第一条措辞有偏差：分析说"Stage 3 没改完"，但代码显示 Stage 3 已完成，只是走了"用户 skill 也用自研 parseBuiltinSkill 统一解析"而非"改走 pi loadSkills"，pi-skill-source.ts:5-7 的注释预告方向与最终实现相反、已过时。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 并行读取 6 个源文件 + 2 个 pi .d.ts，逐条取证：确认 5 条判断全部成立（tool-registry.ts:76-78 return {error} 不 throw、pi-tool-adapter 不设 isError、afterToolCall hook terminate 等均核实）；仅修正 P1 第一条的因果表述（非"没改完"而是"注释过时+刻意自研统一"）。未改动任何代码，纯评估任务。
+
+---
+
+---
+### [2026-07-05 09:00] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 会话分叉/重试功能「完整分支树」方案的阶段A:per-conversation session 隔离。
+- HarnessSessionManager 从全局单 session 改为按 conversationId(=UI tab.id)管理 Map<id, session>,共享一个 JsonlSessionRepo;所有方法带可选 conversationId,缺省退化为内存临时会话。
+- ref 存储从 settings.sessionRef(单例)迁到 settings.sessionRefs(per-conversation),旧字段保留供迁移兜底。
+- conversationId 经 PreparedChatTurn 贯穿:ChatController(tab.id)→ModelService.chat/chatStream/clearSession→runtime。关 tab 时 releaseSession 释放内存态。
+- 新增 cross-phase-smoke 两个用例(会话隔离 + 临时会话无持久),全 86 测试文件通过,构建通过。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 完整分支树需要干净的 session 隔离语义作前提;旧版多 tab 共享单 session 会跨轮上下文串台,是隐患也是分叉的障碍。pi 引擎(navigateTree/fork/getBranch)已现成,工作量在 UI 隔离与 entry 映射。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 冒烟测试初次失败:验证跨轮上下文时只捕获了每次调用的 last message(providerInputs),无法区分「本轮输入」与「历史可见」,导致隔离用例误判。
+- chat-controller 单测断言 api.chat 的精确位置参数,末位新增 conversationId 后 4 参断言失配。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 新增 providerContexts 捕获完整 ctx.messages 序列化,隔离/临时会话断言改用它。
+- 更新受影响单测的期望参数(4→8 参,尾部 undefined),并同步修正 AbortSignal mock 的参数位以匹配真实签名。
+
+---
+### [2026-07-05 09:40] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 会话分叉/重试「完整分支树」方案的阶段B:entryId 锚定。
+- StreamEvent 的 done 事件新增 entryIds:{userEntryId?,assistantEntryId?}。
+- harness-chat-runtime 在 prompt 前记 preTurnLeafId,正常完成路径(压缩之前)从 session.getBranch() 切片提取本轮 user/assistant entryId,附到 done。仅持久会话捕获。
+- ChatMessage 新增 sessionEntryId;ChatController 与 shell-view 消费 done.entryIds,给 user/ai 消息(两处消息模型)打锚。conversation-store 靠 spread 天然持久化。
+- 冒烟新增 2 用例(done 带 entryIds 且可在会话树反查、临时会话不产出);全 86 测试文件通过,构建通过。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 阶段C 的分叉/重试(navigateTree 从某消息对应 entry 派生新分支)需要 UI 消息 ↔ pi 会话树 entry 的映射。阶段A 隔离了会话,阶段B 建立这层锚定,为 C 铺路。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 时机坑:maybeCompact 会 append compaction entry 并移动 leaf,若在压缩后取 entryId 则切片语义错乱。
+- 双消息模型:ChatController.messages 与 tab.state 的 ai 消息 id 不同,需分别锚定;UI/阶段C 以 tab.state 为权威源。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 把 extractTurnEntryIds 放在 maybeCompact 之前调用,并用 preTurnLeafId 切片精确定位本轮新增 entry。
+- 两处消费点都消费 done.entryIds:ChatController 回填自身 user + 新建 ai;shell-view 给 tab.state 最近未锚定 user 消息与新建 ai 消息打锚。
+
+---
+### [2026-07-05 10:30] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 会话分叉/重试「完整分支树」方案的阶段C:分支操作 + UI 投影,三阶段全部完成。
+- 新增 session-branch-projector(纯函数):pi 会话树当前分支 → ChatMessage[],user 消息附兄弟分支 {index,count,leafIds}。
+- HarnessSessionManager 加分支原语(getBranchEntries/moveToBranch/prepareForkAtUser);ModelService 加 getBranchProjection/switchBranch/prepareRetryFromUser。
+- message-renderer:ai 消息加「重试」按钮、user 消息加「编辑重问」+ 兄弟分支 < n/m > 导航条;shell-view 编排切换/重试/编辑(定位→截断→流式重跑→投影校正)。styles.css 配套样式。
+- 冒烟加 2 个分支引擎用例、message-renderer 加 4 个 UI 用例,全 86 测试文件通过,构建通过。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 完成 ChatGPT 式任意点分叉/重试:所有版本保留、可 < 1/2 > 切换。阶段A 隔离会话、B 建立 entry 锚定,C 在其上做分支操作与 UI 投影。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 原计划要造 BranchController + 调 navigateTree,但会引入分支摘要等额外语义,偏重。
+- 重跑后如何保证兄弟分支计数正确、原分支不丢。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 看穿 pi 语义:对 user 消息 navigateTree 本质=moveTo(parentId)。故核心原语收敛为 moveTo(entryId)+getBranch 重投影,重跑直接复用现有 chatStream(新 leaf 派生上下文自然生成兄弟),无需 BranchController。
+- forkAndRerun 流程:prepareRetryFromUser 定位分叉点 → UI 截断到该点 → processCommand 流式重跑 → getBranchProjection 重建 tab.state 校正兄弟计数;原分支因 moveTo 到 parent 后新回复成兄弟而完整保留。
+
+---
+### [2026-07-05 21:15] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 修正重试/分叉语义:重试=同一问题重生成、新答案换掉旧的、不保留旧分支;分叉/编辑=保留旧对话、另开兄弟分支可切换。
+- pi 是 append-only 树,用 label 标记作废(SUPERSEDED_LABEL)实现「换掉」:supersedeUserEntry 给旧 user entry 打标,projector 枚举兄弟时过滤,于是重试后有效兄弟只剩 1 条、多次重试不累积。
+- prepareRetryFromUser 加 supersede 选项;shell-view handleRetryMessage 传 true,分叉/编辑传 false。
+- 冒烟加「retry supersedes 不累积」用例,原用例改名 fork/edit;全 86 测试文件通过,构建通过,dist 已刷新。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户指出重试和分叉都产生新分支,不符直觉:重试应是同一问题换答案(答案层),而当时两者走同一 forkAndRerun 路径,都在 user 层留兄弟分支。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- pi 会话树 append-only,无法真正删除旧答案 entry。
+- 重试若直接 moveTo(user) 再 prompt 会重复追加一条相同 user 消息,又变成 user 层分支。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 不删 entry,改用 appendLabel 给旧问答分支打 superseded 标记;projector 从 getEntries 的 label entry 算出作废集并过滤兄弟,纯函数无需额外查询。重试=supersede 旧 user + 定位其 parent + 重跑,视觉上有效分支恒为 1;分叉不打标记故可累积切换。
+
+---
+### [2026-07-05 21:40] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 修复用户反馈的三个 bug:
+  1. 重试/切分支后界面翻出无关旧历史(显示 bug):投影裁剪只渲染可见窗口尾部。
+  2. /clear 不清屏:加 onClear 回调,清 tab.state + 重渲。
+  3. 频繁误报「No file was created」:写文件判定排除疑问/分析句。
+- 全 87 测试文件通过,dist 已刷新。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户实测反馈:分叉功能可用但有三处影响体验的问题。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 问题1根因隐蔽:持久 session(按 tab)累积了当前可见窗口之上、用户看不到的更早历史,重试后的「整体重投影」渲染 root→leaf 全量,把隐藏祖先翻了出来。
+- 问题3:isFileWriteRequest 纯关键词共现(文件+修改)把「文件被修改的原因是什么」误判为写请求。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 问题1:rebuildActiveTabFromProjection 加 skipLeading,切掉头部隐藏祖先;hiddenCount=操作前(全量投影长度−可见条数),该边界在操作前后不变,故操作前一次算好后传入。
+- 问题2:ChatController 加 onClear 回调,clearHistory 触发;shell-view handleTabClear 清 tab.state + resetStreamState + renderActiveTabMessages。
+- 问题3:加 INTERROGATIVE_TERMS(?/吗/什么/为什么/原因/如何/why/what/explain 等),命中即不判为写请求;补单测。
