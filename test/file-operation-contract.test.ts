@@ -40,6 +40,17 @@ async function runTests() {
     expect(isFileWriteRequest('Search the vault for canvas files')).toBe(false);
   });
 
+  await test('does not flag interrogative/analysis sentences that merely mention files+modify', () => {
+    // 修:关键词共现误判 —— 讨论/询问文件修改,不是要求写文件。
+    expect(isFileWriteRequest('我之前问的批量文件被修改的最可能原因是什么')).toBe(false);
+    expect(isFileWriteRequest('为什么这些笔记文件会被修改？')).toBe(false);
+    expect(isFileWriteRequest('文件被修改了吗')).toBe(false);
+    expect(isFileWriteRequest('Why was this file modified?')).toBe(false);
+    // 真·写请求仍应命中(无疑问信号)。
+    expect(isFileWriteRequest('帮我修改这个笔记文件')).toBe(true);
+    expect(isFileWriteRequest('更新当前笔记')).toBe(true);
+  });
+
   await test('classifies write tools consistently', () => {
     expect(isFileWriteToolName('create_file')).toBe(true);
     expect(isFileWriteToolName('update_note')).toBe(true);

@@ -112,6 +112,12 @@ export interface ChatTurnRequest {
    * 阶段1 起由 ModelService 从 Harness session 查询后注入(取代旧的 priorMessages.length 判断)。
    */
   hasPriorContext?: boolean;
+  /**
+   * 会话标识(= UI tab.id)。用于 per-conversation session 隔离(阶段A):
+   * runtime 用它向 sessionManager 取该会话专属的长生命 session,不同会话跨轮上下文互不可见。
+   * 缺省(undefined)时退化为每轮内存临时会话:无持久、无跨轮记忆(后台/一次性调用,如 file-back、/edit)。
+   */
+  conversationId?: string;
 }
 
 export interface PreparedChatTurn {
@@ -136,6 +142,8 @@ export interface PreparedChatTurn {
   generationPlan?: GenerationPlan;
   writingProfile?: WritingProfile;
   systemPromptOverride?: string;
+  /** 透传自 ChatTurnRequest,供 runtime 取该会话专属的持久 session(见 ChatTurnRequest.conversationId)。 */
+  conversationId?: string;
 }
 
 export interface ChatRuntime {

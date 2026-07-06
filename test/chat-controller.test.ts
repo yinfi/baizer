@@ -323,7 +323,9 @@ async function runTests() {
 
     await controller.processCommand('Explain this', 'Selected Text:\nalpha' as any, 'alpha');
 
-    // 阶段1:UI 不再回灌 priorMessages,api.chat 调用收窄为干净的 4 参签名。
+    // 阶段1:UI 不再回灌 priorMessages。阶段A:末位透传 conversationId
+    // (obsidianContext/userProfile/systemPromptOverride/conversationId 均为 undefined,
+    //  此 controller 未配置 conversationId)。
     expect(chatCalls).toEqual([[
       'Explain this',
       [{
@@ -335,6 +337,10 @@ async function runTests() {
       }],
       'alpha',
       'shell',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
     ]]);
 
     controller.cleanup();
@@ -601,7 +607,15 @@ async function runTests() {
         getSkillCommands: () => [],
         executeSlashSkillCommand: async () => ({ success: true }),
         chat: async () => 'fallback',
-        chatStream: async function* (_query: string, _context: any[], _selection: string, signal?: AbortSignal) {
+        chatStream: async function* (
+          _query: string,
+          _context: any[],
+          _selection: string,
+          _source?: any,
+          _obsidianContext?: any,
+          _userProfile?: any,
+          signal?: AbortSignal,
+        ) {
           if (!signal) {
             throw new Error('Expected chatStream to receive an AbortSignal');
           }

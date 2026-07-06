@@ -82,8 +82,8 @@ export interface PluginSettings {
 
     // --- 💾 Session Persistence ---
     /**
-     * 当前活跃会话的引用，用于跨重启恢复持久化的对话历史。
-     * 由 HarnessSessionManager 写入，结构与 PersistedSessionRef 对齐。运行期可选。
+     * @deprecated 阶段A 起改用 sessionRefs(per-conversation)。保留字段仅供旧数据迁移。
+     * 旧版全局单会话的引用。loadSettings 会把它迁移到 sessionRefs 的一个兜底键后不再写入。
      */
     sessionRef?: {
         id: string;
@@ -91,6 +91,18 @@ export interface PluginSettings {
         createdAt: string;
         cwd: string;
     } | null;
+
+    /**
+     * 每个会话(conversationId = UI tab.id)的 session 引用,用于跨重启分别恢复各自的对话历史。
+     * 由 HarnessSessionManager 经 saveRef 回调按 conversationId 写入,结构与 PersistedSessionRef 对齐。
+     * 阶段A(per-conversation session 隔离)引入,取代全局单例 sessionRef。
+     */
+    sessionRefs?: Record<string, {
+        id: string;
+        path: string;
+        createdAt: string;
+        cwd: string;
+    }>;
 
     // --- 🛡️ Guardian Behavior ---
     enableGuardian: boolean;

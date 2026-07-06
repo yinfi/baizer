@@ -19,9 +19,17 @@ import { PLUGIN_ID } from '../mcp/types';
 export interface ChatControllerOptions {
     app: App;
     api: ModelService;
+    /**
+     * 会话标识(= UI tab.id),用于 per-conversation session 隔离。
+     * 传下给 ModelService.chat/chatStream/clearSession,使不同 tab 的跨轮上下文互不可见。
+     * 缺省时退化为无持久会话(每轮内存临时会话)。
+     */
+    conversationId?: string;
     onMessageAdded?: (message: ChatMessage) => void;
     onStatusChanged?: (isResponding: boolean) => void;
     onStreamEvent?: (event: StreamEvent) => void;
+    /** /clear 时触发:宿主清空该 tab 的可见历史(tab.state)并重渲。 */
+    onClear?: () => void;
     onWorkspaceEdit?: (edit: WorkspaceEditSummary) => void;
     onWorkspaceEditUndone?: (edit: WorkspaceEditSummary) => void;
     onWorkspaceEditUndoFailed?: (message: string) => void;
@@ -30,11 +38,13 @@ export interface ChatControllerOptions {
 export class ChatController {
     private app: App;
     private api: ModelService;
+    private readonly conversationId?: string;
     private messages: ChatMessage[] = [];
     // private isResponding: boolean = false; // Unused
     private onMessageAdded?: (message: ChatMessage) => void;
     private onStatusChanged?: (isResponding: boolean) => void;
     private onStreamEvent?: (event: StreamEvent) => void;
+    private onClear?: () => void;
     private onWorkspaceEdit?: (edit: WorkspaceEditSummary) => void;
     private onWorkspaceEditUndone?: (edit: WorkspaceEditSummary) => void;
     private onWorkspaceEditUndoFailed?: (message: string) => void;
@@ -48,9 +58,11 @@ export class ChatController {
     constructor(options: ChatControllerOptions) {
         this.app = options.app;
         this.api = options.api;
+        this.conversationId = options.conversationId;
         this.onMessageAdded = options.onMessageAdded;
         this.onStatusChanged = options.onStatusChanged;
         this.onStreamEvent = options.onStreamEvent;
+        this.onClear = options.onClear;
         this.onWorkspaceEdit = options.onWorkspaceEdit;
         this.onWorkspaceEditUndone = options.onWorkspaceEditUndone;
         this.onWorkspaceEditUndoFailed = options.onWorkspaceEditUndoFailed;
@@ -67,7 +79,10 @@ export class ChatController {
 
     public clearHistory() {
         this.messages = [];
-        this.api.clearSession();
+        void this.api.clearSession(this.conversationId);
+        // 先让宿主清空该 tab 的可见历史(tab.state)并重渲,再追加「已清空」提示,
+        // 否则 tab.state 里的旧消息仍会留在屏幕上(/clear 不清屏的根因)。
+        this.onClear?.();
         this.addMessage('system', 'Session cleared.');
     }
 
@@ -112,11 +127,14 @@ export class ChatController {
 
         // 2. Normal Chat
         this.addMessage('user', query);
+        // 阶段B:记住本轮 user 消息 id,done 事件带回 entryIds 后回填 sessionEntryId 锚定。
+        const userMessageId = this.messages[this.messages.length - 1]?.id;
         this.setResponding(true);
         const streamController = new AbortController();
         this.activeStreamController = streamController;
         let fullText = '';
         let sawDone = false;
+        let turnEntryIds: { userEntryId?: string; assistantEntryId?: string } | undefined;
 
         try {
             if (this.onStreamEvent) {
@@ -129,8 +147,8 @@ export class ChatController {
                 const bufferedTextEvents: StreamEvent[] = [];
                 // 阶段1:跨轮上下文由 Harness session 维护,UI 不再回灌 priorMessages。
                 const stream = source === 'shell'
-                    ? this.api.chatStream(query, normalizedContext, selection, streamController.signal)
-                    : this.api.chatStream(query, normalizedContext, selection, source, undefined, undefined, streamController.signal);
+                    ? this.api.chatStream(query, normalizedContext, selection, 'shell', undefined, undefined, streamController.signal, this.conversationId)
+                    : this.api.chatStream(query, normalizedContext, selection, source, undefined, undefined, streamController.signal, this.conversationId);
                 for await (const event of stream) {
                     if (event.type === 'tool_call' && this.isFileWriteTool(event.name)) {
                         attemptedFileWrite = true;
@@ -189,6 +207,12 @@ export class ChatController {
                     if (event.type === 'done') {
                         sawDone = true;
                         fullText = approvalRequest ? '' : event.text;
+                        turnEntryIds = event.entryIds;
+                        // 回填 user 消息的 entry 锚定(ai 消息在下方创建时一并打)。
+                        if (turnEntryIds?.userEntryId && userMessageId) {
+                            const userMsg = this.messages.find(m => m.id === userMessageId);
+                            if (userMsg) userMsg.sessionEntryId = turnEntryIds.userEntryId;
+                        }
                     } else if (event.type === 'error') {
                         this.addMessage('system', `Error: ${event.message}`);
                         return;
@@ -215,6 +239,7 @@ export class ChatController {
                                 role: 'ai',
                                 content: fullText,
                                 timestamp: Date.now(),
+                                sessionEntryId: turnEntryIds?.assistantEntryId,
                                 metadata: sawDone ? undefined : { interrupted: true }
                             };
                             this.messages.push(msg);
@@ -224,8 +249,8 @@ export class ChatController {
             } else {
                 // 阶段1:跨轮上下文由 Harness session 维护,UI 不再回灌 priorMessages。
                 const response = source === 'shell'
-                    ? await this.api.chat(query, normalizedContext, selection, 'shell')
-                    : await this.api.chat(query, normalizedContext, selection, source);
+                    ? await this.api.chat(query, normalizedContext, selection, 'shell', undefined, undefined, undefined, this.conversationId)
+                    : await this.api.chat(query, normalizedContext, selection, source, undefined, undefined, undefined, this.conversationId);
                 this.addMessage('ai', response);
             }
         } catch (error: any) {

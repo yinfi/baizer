@@ -46,11 +46,40 @@ const FILE_TARGET_TERMS = [
   '\u5de5\u4f5c\u533a',
 ];
 
+// 疑问/分析类信号:命中则不判为写文件请求(用户在「讨论/询问文件」,而非「要求写文件」)。
+// 修掉「文件…被修改的原因是什么」这类被误判为写操作、进而误报「No file was created」的坑。
+const INTERROGATIVE_TERMS = [
+  '?',
+  '？', // 全角问号
+  '吗', // 吗
+  '呢', // 呢
+  '什么', // 什么
+  '为何', // 为何
+  '为什么', // 为什么
+  '原因', // 原因
+  '怎么', // 怎么
+  '怎样', // 怎样
+  '如何', // 如何
+  '是不是', // 是不是
+  '会不会', // 会不会
+  '可能', // 可能
+  '解释', // 解释
+  '区别', // 区别
+  'why',
+  'what',
+  'how ',
+  'explain',
+];
+
 export function isFileWriteRequest(message: string): boolean {
   const normalized = message.toLowerCase();
   const writeIntent = FILE_WRITE_INTENT_TERMS.some(term => normalized.includes(term));
   if (!writeIntent) return false;
-  return FILE_TARGET_TERMS.some(term => normalized.includes(term));
+  if (!FILE_TARGET_TERMS.some(term => normalized.includes(term))) return false;
+  // 关键词共现太粗:疑问/分析类句子(如"文件被修改的原因是什么")不是写请求,排除掉,
+  // 避免误注入文件写入契约 + 误报「No file was created」。
+  if (INTERROGATIVE_TERMS.some(term => normalized.includes(term))) return false;
+  return true;
 }
 
 export function isFileWriteToolName(name: string): boolean {

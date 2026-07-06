@@ -23,6 +23,14 @@ interface MessageRendererOptions {
   onFeedbackUp?: (message: ChatMessage) => void | Promise<void>;
   /** 点踩:用户不满意。reason 为用户在内联输入里填写的「哪里不好」。 */
   onFeedbackDown?: (message: ChatMessage, reason: string) => void | Promise<void>;
+  /** 重试(阶段C):对某条 ai 回复重新生成,产生兄弟分支。 */
+  onRetry?: (message: ChatMessage) => void | Promise<void>;
+  /** 编辑重问(阶段C):改写某条 user 消息文本后重跑,产生兄弟分支。 */
+  onEdit?: (message: ChatMessage, newText: string) => void | Promise<void>;
+  /** 分叉(阶段C):在 ai 回复底部操作栏触发,编辑对应问题后重跑,产生兄弟分支。 */
+  onFork?: (message: ChatMessage, newText: string) => void | Promise<void>;
+  /** 切换兄弟分支(阶段C):targetLeafId 为目标分支子树叶子 entry id。 */
+  onSwitchBranch?: (message: ChatMessage, targetLeafId: string) => void | Promise<void>;
   onReviewCodeBlock?: (content: string) => void | Promise<void>;
   onUndoWorkspaceEdit?: (editId: string) => void | Promise<void>;
   onInternalLinkClick?: (href: string) => void;
@@ -88,6 +96,7 @@ export class MessageRenderer {
         this.addActionToolbar(entry, message);
       } else if (message.role === 'user') {
         this.setText(entry, message.content);
+        this.addUserMessageControls(entry, message);
       } else {
         const status = this.parseSystemStatus(message.content);
         if (status) {
@@ -142,6 +151,19 @@ export class MessageRenderer {
       void this.copyMessage(message);
     });
 
+    // 重试(阶段C):对该 ai 回复重新生成,产生兄弟分支。仅在宿主接入且该消息已锚定会话树时可用。
+    if (this.options.onRetry && message.sessionEntryId) {
+      const retryButton = (toolbar as any).createEl('button', {
+        cls: 'shell-message-action-btn shell-retry-btn clickable-icon',
+        title: '重新生成(保留原回答为分支)',
+        attr: { 'aria-label': '重新生成' },
+      }) as HTMLElement;
+      setIcon(retryButton, 'refresh-cw');
+      retryButton.addEventListener('click', () => {
+        void this.options.onRetry?.(message);
+      });
+    }
+
     // 点赞:用户认可该回答 → 归档到知识库(onFeedbackUp 内部走 file-back)。
     // 仅在宿主接入归档通路时渲染,避免点了无反应的死按钮。
     if (this.options.onFeedbackUp) {
@@ -170,7 +192,177 @@ export class MessageRenderer {
       });
     }
 
+    // 分叉(阶段C):在底部操作栏直接给一个「分叉」入口——展开预填原问题的输入,
+    // 改写后从该问题重新提问,原问答保留为兄弟分支。放在 ai 操作栏是因为流结束时才渲染,
+    // 能拿到真实 entryId(user 消息在发送时渲染,拿不到);统一入口也更直观。
+    if (this.options.onFork && message.sessionEntryId) {
+      const forkButton = (toolbar as any).createEl('button', {
+        cls: 'shell-message-action-btn shell-fork-btn clickable-icon',
+        title: '分叉:编辑问题并重新生成(保留当前对话为分支)',
+        attr: { 'aria-label': '分叉' },
+      }) as HTMLElement;
+      setIcon(forkButton, 'git-branch');
+      forkButton.addEventListener('click', () => {
+        this.toggleForkInput(container, message);
+      });
+    }
+
+    // 兄弟分支导航条 `< n/m >`:该轮问答有多个分支时,在操作栏渲染切换控件。
+    if (this.options.onSwitchBranch && message.branch && message.branch.count > 1) {
+      this.renderBranchNav(toolbar, message);
+    }
+
     return toolbar;
+  }
+
+  /** 在操作栏内渲染兄弟分支 `< index/count >` 切换控件。 */
+  private renderBranchNav(toolbar: HTMLElement, message: ChatMessage) {
+    const branch = message.branch!;
+    const nav = (toolbar as any).createDiv({ cls: 'shell-branch-nav' }) as HTMLElement;
+    const prev = (nav as any).createEl('button', {
+      cls: 'shell-branch-prev clickable-icon',
+      attr: { type: 'button', title: '上一个分支', 'aria-label': '上一个分支' },
+    }) as HTMLElement;
+    setIcon(prev, 'chevron-left');
+    (nav as any).createSpan({ cls: 'shell-branch-count', text: `${branch.index + 1}/${branch.count}` });
+    const next = (nav as any).createEl('button', {
+      cls: 'shell-branch-next clickable-icon',
+      attr: { type: 'button', title: '下一个分支', 'aria-label': '下一个分支' },
+    }) as HTMLElement;
+    setIcon(next, 'chevron-right');
+
+    const go = (targetIndex: number) => {
+      if (targetIndex < 0 || targetIndex >= branch.count || targetIndex === branch.index) return;
+      const targetLeaf = branch.leafIds[targetIndex];
+      if (targetLeaf) void this.options.onSwitchBranch?.(message, targetLeaf);
+    };
+    prev.addEventListener('click', () => go(branch.index - 1));
+    next.addEventListener('click', () => go(branch.index + 1));
+  }
+
+  /** 分叉输入:预填原问题,提交 → onFork(message, newText);Esc / 再次点击收起。 */
+  private toggleForkInput(container: HTMLElement, message: ChatMessage) {
+    const existing = (container as any).querySelector?.('.shell-fork-box') as HTMLElement | null;
+    if (existing) {
+      (existing as any).remove?.();
+      return;
+    }
+
+    const box = (container as any).createDiv({ cls: 'shell-fork-box shell-edit-box' }) as HTMLElement;
+    const input = (box as any).createEl('textarea', {
+      cls: 'shell-edit-input',
+      attr: { 'aria-label': '编辑问题并重新提问' },
+    }) as HTMLTextAreaElement;
+    input.value = message.forkSourceText ?? '';
+    const submit = (box as any).createEl('button', {
+      cls: 'shell-edit-submit',
+      text: '重新提问',
+      attr: { type: 'button' },
+    }) as HTMLElement;
+
+    const commit = () => {
+      const text = (input.value || '').trim();
+      if (!text) { input.focus(); return; }
+      (box as any).remove?.();
+      void this.options.onFork?.(message, text);
+    };
+    submit.addEventListener('click', commit);
+    input.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        commit();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        (box as any).remove?.();
+      }
+    });
+    setTimeout(() => input.focus?.(), 0);
+  }
+
+  /**
+   * user 消息的分支控件(阶段C):编辑重问按钮 + 兄弟分支 `< index/count >` 导航条。
+   * 仅在该消息已锚定会话树(sessionEntryId)时渲染编辑;仅在有多个兄弟(branch.count>1)时渲染导航。
+   */
+  private addUserMessageControls(container: HTMLElement, message: ChatMessage) {
+    const branch = message.branch;
+    const canEdit = !!this.options.onEdit && !!message.sessionEntryId;
+    const canNavigate = !!this.options.onSwitchBranch && !!branch && branch.count > 1;
+    if (!canEdit && !canNavigate) return;
+
+    const bar = (container as any).createDiv({ cls: 'shell-user-actions shell-branch-bar' }) as HTMLElement;
+
+    if (canNavigate && branch) {
+      const nav = (bar as any).createDiv({ cls: 'shell-branch-nav' }) as HTMLElement;
+      const prev = (nav as any).createEl('button', {
+        cls: 'shell-branch-prev clickable-icon',
+        attr: { type: 'button', title: '上一个分支', 'aria-label': '上一个分支' },
+      }) as HTMLElement;
+      setIcon(prev, 'chevron-left');
+      (nav as any).createSpan({ cls: 'shell-branch-count', text: `${branch.index + 1}/${branch.count}` });
+      const next = (nav as any).createEl('button', {
+        cls: 'shell-branch-next clickable-icon',
+        attr: { type: 'button', title: '下一个分支', 'aria-label': '下一个分支' },
+      }) as HTMLElement;
+      setIcon(next, 'chevron-right');
+
+      const go = (targetIndex: number) => {
+        if (targetIndex < 0 || targetIndex >= branch.count || targetIndex === branch.index) return;
+        const targetLeaf = branch.leafIds[targetIndex];
+        if (targetLeaf) void this.options.onSwitchBranch?.(message, targetLeaf);
+      };
+      prev.addEventListener('click', () => go(branch.index - 1));
+      next.addEventListener('click', () => go(branch.index + 1));
+    }
+
+    if (canEdit) {
+      const editButton = (bar as any).createEl('button', {
+        cls: 'shell-message-action-btn shell-edit-btn clickable-icon',
+        attr: { type: 'button', title: '编辑并重新提问(保留原对话为分支)', 'aria-label': '编辑重问' },
+      }) as HTMLElement;
+      setIcon(editButton, 'pencil');
+      editButton.addEventListener('click', () => {
+        this.toggleEditInput(container, bar, message);
+      });
+    }
+  }
+
+  /** 编辑重问的内联输入:预填原文,提交 → onEdit(message, newText);Esc 收起。 */
+  private toggleEditInput(container: HTMLElement, bar: HTMLElement, message: ChatMessage) {
+    const existing = (container as any).querySelector?.('.shell-edit-box') as HTMLElement | null;
+    if (existing) {
+      (existing as any).remove?.();
+      return;
+    }
+
+    const box = (container as any).createDiv({ cls: 'shell-edit-box' }) as HTMLElement;
+    const input = (box as any).createEl('textarea', {
+      cls: 'shell-edit-input',
+      attr: { 'aria-label': '编辑消息内容' },
+    }) as HTMLTextAreaElement;
+    input.value = message.content;
+    const submit = (box as any).createEl('button', {
+      cls: 'shell-edit-submit',
+      text: '重新提问',
+      attr: { type: 'button' },
+    }) as HTMLElement;
+
+    const commit = () => {
+      const text = (input.value || '').trim();
+      if (!text) { input.focus(); return; }
+      (box as any).remove?.();
+      void this.options.onEdit?.(message, text);
+    };
+    submit.addEventListener('click', commit);
+    input.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        commit();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        (box as any).remove?.();
+      }
+    });
+    setTimeout(() => input.focus?.(), 0);
   }
 
   /**

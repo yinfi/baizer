@@ -70,7 +70,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     // 从它派生,跨重启可恢复)。无 sessionManager(纯单测)时退化为每轮全新内存会话。
     const sessionManager = this.deps.sessionManager ?? null;
     const session = sessionManager
-      ? await sessionManager.getSession()
+      ? await sessionManager.getSession(turn.conversationId)
       : await new (pi as any).InMemorySessionRepo().create({});
 
     const reasoning = (this.deps.thinkingLevel ?? 'medium');
@@ -159,6 +159,19 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     if (signal?.aborted) onAbort();
     else signal?.addEventListener('abort', onAbort, { once: true });
 
+    // 阶段B:prompt 前记下当前 leaf。prompt() 会把本轮 user 与 assistant 都 append 成 message entry,
+    // 本轮新增的 entry = preTurnLeafId 之后的部分。在 maybeCompact 改动 leaf 之前捕获才准确。
+    // 仅持久会话(有 sessionManager + conversationId)需要锚定;临时会话不追。
+    const canAnchorEntries = !!sessionManager && !!turn.conversationId;
+    let preTurnLeafId: string | null = null;
+    if (canAnchorEntries) {
+      try {
+        preTurnLeafId = await (session as any).getLeafId();
+      } catch {
+        preTurnLeafId = null;
+      }
+    }
+
     // 后台驱动一轮 prompt;完成/失败后标记队列结束。
     // 注:provider 错误不会 reject(见 subscribe 里 message_end 处理);此处 catch 仅兜底真正的抛错/中断。
     const runPromise = (async () => {
@@ -206,11 +219,56 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     fullResponseText = resolvePiFinalText(fileWriteState, fullResponseText);
     fullResponseText = this.applyGenerationQuality(turn, fullResponseText);
     await this.retainCompletedTurn(turn, fullResponseText);
+    // 阶段B:在压缩改动会话树之前提取本轮 entryId,供 UI 锚定(阶段C 分叉/重试用)。
+    const entryIds = canAnchorEntries
+      ? await extractTurnEntryIds(session, preTurnLeafId)
+      : undefined;
     // 本轮已落盘进 session;按真实 usage 判断是否超阈值,超了就压缩(失败静默降级)。
     if (sessionManager) {
-      await sessionManager.maybeCompact(harness);
+      await sessionManager.maybeCompact(harness, turn.conversationId);
     }
-    yield { type: 'done', text: fullResponseText };
+    yield entryIds ? { type: 'done', text: fullResponseText, entryIds } : { type: 'done', text: fullResponseText };
+  }
+}
+
+/**
+ * 提取本轮新增的 user / assistant entryId(阶段B)。
+ *
+ * pi 的 prompt() 把本轮 user 与 assistant 消息都 append 成 message entry;
+ * 分支是 root→leaf 顺序,故本轮新增 = preTurnLeafId 之后的部分。
+ * 从该切片里取第一条 role==='user' 作 userEntryId、最后一条 role==='assistant' 作 assistantEntryId。
+ *
+ * 必须在 maybeCompact 之前调用:压缩会 append compaction entry 并移动 leaf,之后切片语义就变了。
+ * 任何异常都吞掉(锚定是增强而非正确性前提),返回 undefined 让 UI 走无锚定降级。
+ */
+async function extractTurnEntryIds(
+  session: any,
+  preTurnLeafId: string | null,
+): Promise<{ userEntryId?: string; assistantEntryId?: string } | undefined> {
+  try {
+    const branch: any[] = await session.getBranch();
+    if (!Array.isArray(branch) || branch.length === 0) return undefined;
+
+    // 定位 preTurnLeafId 在分支中的位置;本轮新增 entry 在其之后。
+    // preTurnLeafId 为 null(会话首轮)时,整条分支都是本轮新增。
+    const startIndex = preTurnLeafId
+      ? branch.findIndex((entry) => entry?.id === preTurnLeafId) + 1
+      : 0;
+    const newEntries = branch.slice(startIndex);
+
+    let userEntryId: string | undefined;
+    let assistantEntryId: string | undefined;
+    for (const entry of newEntries) {
+      if (entry?.type !== 'message') continue;
+      const role = entry.message?.role;
+      if (role === 'user' && !userEntryId) userEntryId = entry.id;
+      if (role === 'assistant') assistantEntryId = entry.id;
+    }
+
+    if (!userEntryId && !assistantEntryId) return undefined;
+    return { userEntryId, assistantEntryId };
+  } catch {
+    return undefined;
   }
 }
 
