@@ -69,6 +69,17 @@ export type StreamEvent =
     | { type: 'tool_result'; name: string; result: any; error?: string }
     // 智能体一个工具循环回合的开始,用于把过程按「回合」分组展示(Step N)。
     | { type: 'step_boundary' }
-    | { type: 'done'; text: string; interrupted?: boolean }
+    | {
+        type: 'done';
+        text: string;
+        interrupted?: boolean;
+        /**
+         * 本轮落盘进 pi session 的 entry 标识(阶段B:entryId 锚定)。
+         * 供 UI 把 ChatMessage 锚定到会话树 entry,是阶段C 分叉/重试(navigateTree)的前提。
+         * 仅在持久会话(有 sessionManager + conversationId)且正常完成时出现;
+         * 临时会话、审批终止、中断等路径可能缺省。
+         */
+        entryIds?: { userEntryId?: string; assistantEntryId?: string };
+      }
     | { type: 'error'; message: string };
 

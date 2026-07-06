@@ -15,6 +15,8 @@ import * as modelCatalog from './model-catalog-service';
 import { ActiveRunController } from '../runtime/active-run-controller';
 import { PromptTemplateService } from '../runtime/pi/prompt-template-service';
 import { HarnessSessionManager, type PersistedSessionRef } from '../runtime/pi/harness-session-manager';
+import { projectBranchToMessages } from '../runtime/pi/session-branch-projector';
+import type { ChatMessage } from '../ui/types';
 import { createVaultFileAdapter } from '../runtime/pi/vault-session-fs';
 import { computeContentHash } from '../knowledge/compiler';
 import { getFileWriteResultPath } from '../utils/file-operation-contract';
@@ -107,8 +109,8 @@ export class ModelService {
         try {
             const vaultAdapter = createVaultFileAdapter(adapter);
             this.sessionManager = new HarnessSessionManager(vaultAdapter, {
-                loadRef: () => this.loadSessionRef(),
-                saveRef: (ref) => this.saveSessionRef(ref),
+                loadRef: (conversationId) => this.loadSessionRef(conversationId),
+                saveRef: (conversationId, ref) => this.saveSessionRef(conversationId, ref),
                 contextWindow: () => this.settings.contextWindow ?? 0,
             });
             this.harnessEnv = createHarnessExecutionEnv(vaultAdapter);
@@ -122,12 +124,26 @@ export class ModelService {
         }
     }
 
-    private loadSessionRef(): PersistedSessionRef | null {
-        return this.settings.sessionRef ?? null;
+    private loadSessionRef(conversationId: string): PersistedSessionRef | null {
+        const refs = this.settings.sessionRefs;
+        if (refs && refs[conversationId]) return refs[conversationId];
+        // 迁移兜底:旧版全局单例 sessionRef 归属到第一个来取的会话,取后清空避免重复认领。
+        if (this.settings.sessionRef) {
+            const legacy = this.settings.sessionRef;
+            this.settings.sessionRef = null;
+            (this.settings.sessionRefs ??= {})[conversationId] = legacy;
+            return legacy;
+        }
+        return null;
     }
 
-    private saveSessionRef(ref: PersistedSessionRef | null): void {
-        this.settings.sessionRef = ref;
+    private saveSessionRef(conversationId: string, ref: PersistedSessionRef | null): void {
+        const refs = (this.settings.sessionRefs ??= {});
+        if (ref) {
+            refs[conversationId] = ref;
+        } else {
+            delete refs[conversationId];
+        }
     }
 
     /**
@@ -349,6 +365,7 @@ export class ModelService {
         obsidianContext?: ObsidianContextSnapshot,
         userProfile?: UserProfile | null,
         systemPromptOverride?: string,
+        conversationId?: string,
     ): Promise<string> {
         logger.info(`Processing chat message: ${userMessage.substring(0, 50)}...`, 'ModelService.chat');
 
@@ -370,7 +387,8 @@ export class ModelService {
                 obsidianContext,
                 userProfile: userProfile ?? this.getUserProfile(),
                 systemPromptOverride,
-                ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory() } : {}),
+                conversationId,
+                ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory(conversationId) } : {}),
             });
             return await runtime.query(preparedTurn);
         } catch (e: any) {
@@ -387,6 +405,7 @@ export class ModelService {
         obsidianContext?: ObsidianContextSnapshot,
         userProfile?: UserProfile | null,
         signal?: AbortSignal,
+        conversationId?: string,
     ): AsyncGenerator<StreamEvent, void, unknown> {
         logger.info(`Processing streaming chat: ${userMessage.substring(0, 50)}...`, 'ModelService.chatStream');
 
@@ -407,7 +426,8 @@ export class ModelService {
                 source: resolvedSource,
                 obsidianContext,
                 userProfile: userProfile ?? this.getUserProfile(),
-                ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory() } : {}),
+                conversationId,
+                ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory(conversationId) } : {}),
             });
             for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
                 yield event;
@@ -478,17 +498,82 @@ export class ModelService {
         }
     }
 
-    async clearSession() {
+    async clearSession(conversationId?: string) {
         if (this.memoryManager) {
             await this.memoryManager.clearSession();
         }
-        // /clear 时开一个新的持久会话文件(旧文件保留),使 Harness 跨轮上下文从零开始。
-        if (this.sessionManager) {
+        // /clear 时为该会话开一个新的持久会话文件(旧文件保留),使 Harness 跨轮上下文从零开始。
+        // conversationId 缺省时无持久会话可清(临时会话本就每轮新建)。
+        if (this.sessionManager && conversationId) {
             try {
-                await this.sessionManager.clear();
+                await this.sessionManager.clear(conversationId);
             } catch (error) {
                 logger.warn('Failed to start a fresh persistent session on clear.', 'ModelService.clearSession');
             }
+        }
+    }
+
+    /** 释放某会话的内存态(关闭 tab 时调)。不删磁盘,持久 ref 保留,下次可恢复。 */
+    releaseSession(conversationId: string): void {
+        this.sessionManager?.release(conversationId);
+    }
+
+    // ---- 阶段C:会话分支操作(投影 / 切换 / 重跑定位)----
+
+    /**
+     * 取该会话当前活跃分支的投影(ChatMessage[])。无持久会话时返回 null(调用方用 UI 内存历史)。
+     * 供切换分支/重跑后重建 tab.state 与重渲。
+     */
+    async getBranchProjection(conversationId?: string): Promise<ChatMessage[] | null> {
+        if (!this.sessionManager || !conversationId) return null;
+        try {
+            const { branch, all } = await this.sessionManager.getBranchEntries(conversationId);
+            if (branch.length === 0) return null;
+            return projectBranchToMessages(branch as any, all as any);
+        } catch (e) {
+            logger.warn('Failed to project session branch.', 'ModelService.getBranchProjection');
+            return null;
+        }
+    }
+
+    /**
+     * 切换到某兄弟分支(其子树叶子为 targetLeafEntryId),返回切换后的新投影。
+     * 不发起生成,仅移动活跃 leaf + 重投影。失败(无会话/目标不存在)返回 null。
+     */
+    async switchBranch(conversationId: string, targetLeafEntryId: string): Promise<ChatMessage[] | null> {
+        if (!this.sessionManager) return null;
+        try {
+            const ok = await this.sessionManager.moveToBranch(conversationId, targetLeafEntryId);
+            if (!ok) return null;
+            return this.getBranchProjection(conversationId);
+        } catch (e) {
+            logger.warn('Failed to switch session branch.', 'ModelService.switchBranch');
+            return null;
+        }
+    }
+
+    /**
+     * 为「从某 user 消息重跑/编辑」定位:把活跃 leaf 移到该 user 消息之前。
+     * 之后调用方走正常 chatStream(带新文本或原文),新回复与原 user 成为兄弟分支,原分支保留。
+     * 返回是否定位成功;失败时调用方应放弃重跑。
+     */
+    async prepareRetryFromUser(
+        conversationId: string,
+        userEntryId: string,
+        options?: { supersede?: boolean },
+    ): Promise<boolean> {
+        if (!this.sessionManager) return false;
+        try {
+            // 重试语义(supersede=true):先给旧问答分支打作废标记,再定位到该 user 之前重跑。
+            // projector 会过滤掉作废分支,于是重试后有效兄弟只剩新的一条(旧答案被换掉,不留分支)。
+            // 分叉/编辑(supersede 缺省):不打标记,新回复与原分支成兄弟、可 < n/m > 切换。
+            if (options?.supersede) {
+                await this.sessionManager.supersedeUserEntry(conversationId, userEntryId);
+            }
+            return await this.sessionManager.prepareForkAtUser(conversationId, userEntryId);
+        } catch (e) {
+            logger.warn('Failed to prepare retry/fork position.', 'ModelService.prepareRetryFromUser');
+            return false;
         }
     }
 

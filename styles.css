@@ -788,20 +788,43 @@ textarea.shell-input::placeholder {
 }
 
 .guardian-selection-btn {
-    background-color: var(--interactive-accent);
-    color: var(--text-on-accent);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    /* 紫→蓝渐变:业界 AI「智能感」通用配色(Notion/Copilot/Gemini) */
+    background: linear-gradient(135deg, #7c5cff 0%, #4c8dff 100%);
+    color: #fff;
     border: none;
-    padding: 6px 12px;
-    border-radius: var(--radius-s);
+    padding: 5px 11px 5px 9px;
+    border-radius: 999px;
     font-size: var(--font-ui-small);
     font-weight: 600;
+    line-height: 1;
     cursor: pointer;
-    box-shadow: var(--shadow-s);
-    transition: background-color 0.15s ease;
+    box-shadow: 0 2px 8px rgba(76, 141, 255, 0.35);
+    transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
 }
 
 .guardian-selection-btn:hover {
-    background-color: var(--interactive-accent-hover);
+    filter: brightness(1.08);
+    box-shadow: 0 3px 12px rgba(124, 92, 255, 0.45);
+    transform: translateY(-1px);
+}
+
+.guardian-selection-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 5px rgba(76, 141, 255, 0.35);
+}
+
+/* 图标统一为白色、尺寸对齐文字 */
+.guardian-selection-btn .svg-icon {
+    width: 15px;
+    height: 15px;
+    color: #fff;
+}
+
+.guardian-selection-btn-label {
+    letter-spacing: 0.2px;
 }
 
 /* Guardian Chat View */
@@ -1273,6 +1296,102 @@ textarea.shell-input::placeholder {
 
 .shell-feedback-reason-submit {
     flex: 0 0 auto;
+    padding: 4px 10px;
+    font-size: var(--font-ui-small);
+    border-radius: 6px;
+    border: 1px solid var(--interactive-accent);
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    cursor: pointer;
+}
+
+/* ==================== 分支导航 / 编辑重问(阶段C)==================== */
+
+/* user 消息底部的分支操作条:分支切换 < n/m > + 编辑按钮。悬停显现,保持界面清爽。 */
+.shell-user-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 4px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.shell-entry.user:hover .shell-user-actions,
+.shell-entry.user:focus-within .shell-user-actions {
+    opacity: 1;
+}
+
+.shell-branch-nav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.shell-branch-nav .shell-branch-prev svg,
+.shell-branch-nav .shell-branch-next svg,
+.shell-user-actions .shell-message-action-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+.shell-branch-count {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    min-width: 28px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.shell-branch-prev,
+.shell-branch-next,
+.shell-user-actions .shell-message-action-btn {
+    background: transparent;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    cursor: pointer;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    transition: all 0.15s ease;
+}
+
+.shell-branch-prev:hover,
+.shell-branch-next:hover,
+.shell-user-actions .shell-message-action-btn:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.shell-edit-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+    width: 100%;
+}
+
+.shell-edit-input {
+    width: 100%;
+    min-height: 3em;
+    resize: vertical;
+    padding: 6px 8px;
+    font-size: var(--font-ui-small);
+    font-family: inherit;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+}
+
+.shell-edit-input:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+}
+
+.shell-edit-submit {
+    align-self: flex-end;
     padding: 4px 10px;
     font-size: var(--font-ui-small);
     border-radius: 6px;

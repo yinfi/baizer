@@ -116,12 +116,16 @@ async function buildStack(opts: {
   const apiName = `smoke-${Math.random().toString(36).slice(2, 8)}`;
   const model = { id: 'm', name: 'm', api: apiName, provider: 'mock', baseUrl: '', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: opts.contextWindow ?? 100000, maxTokens: 100 } as any;
   const providerInputs: string[] = [];
+  // 每次调用发给 provider 的「完整」上下文序列化(不止 last message),
+  // 用于验证跨轮上下文与会话隔离——只看 last message 无法区分「本轮输入」与「历史可见」。
+  const providerContexts: string[] = [];
   let call = 0;
   const streamSimple = (_m: any, ctx: any) => {
     const msgs = ctx.messages || [];
     const last = msgs[msgs.length - 1];
     const input = typeof last?.content === 'string' ? last.content : JSON.stringify(last?.content);
     providerInputs.push(input);
+    providerContexts.push(JSON.stringify(msgs));
     const events = opts.scripted(input, call);
     call++;
     return eventsToPiStream(model, events, opts.usageTokens ?? 2);
@@ -131,9 +135,11 @@ async function buildStack(opts: {
   const vault = createMemoryVault(opts.vaultSeed);
   const { createVaultFileAdapter } = await import('../src/runtime/pi/vault-session-fs');
   const vaultAdapter = createVaultFileAdapter(vault.adapter as any);
-  let savedRef: any = null;
+  const savedRefs = new Map<string, any>();
   const sessionManager = new HarnessSessionManager(vaultAdapter, {
-    loadRef: () => savedRef, saveRef: (r: any) => { savedRef = r; }, contextWindow: () => opts.contextWindow ?? 100000,
+    loadRef: (cid: string) => savedRefs.get(cid) ?? null,
+    saveRef: (cid: string, r: any) => { if (r) savedRefs.set(cid, r); else savedRefs.delete(cid); },
+    contextWindow: () => opts.contextWindow ?? 100000,
   });
   const harnessEnv = createHarnessExecutionEnv(vaultAdapter);
   const promptTemplateService = new PromptTemplateService(harnessEnv);
@@ -162,11 +168,13 @@ async function buildStack(opts: {
     return events;
   };
 
-  return { runtime, collect, providerInputs, vault, sessionManager, promptTemplateService, activeRunController, getCall: () => call };
+  return { runtime, collect, providerInputs, providerContexts, vault, sessionManager, promptTemplateService, activeRunController, getCall: () => call };
 }
 
+// 默认带一个 conversationId,使冒烟走「持久会话」路径(阶段1 的跨轮/持久化/压缩断言依赖它)。
+// 需要临时会话或多会话隔离的用例显式覆盖 conversationId。
 const cleanTurn = (prompt: string, extra: Partial<PreparedChatTurn> = {}): PreparedChatTurn => ({
-  prompt, tools: TOOL_DEFS, userRequest: prompt, ...extra,
+  prompt, tools: TOOL_DEFS, userRequest: prompt, conversationId: 'smoke-conv', ...extra,
 });
 
 async function runTests() {
@@ -194,7 +202,7 @@ async function runTests() {
     const jsonl = [...stack.vault.files.entries()].filter(([k]) => k.endsWith('.jsonl')).map(([, v]) => v).join('\n');
     assert(jsonl.includes('summarize A.md'), 'session jsonl missing clean user request');
     assert(!jsonl.includes('SECRET_DECORATION'), 'decoration leaked into persisted history (phase-1 regression)');
-    assert(!!stack.sessionManager.getRef(), 'sessionRef not persisted');
+    assert(!!stack.sessionManager.getRef('smoke-conv'), 'sessionRef not persisted');
   });
 
   // 阶段0:审批 terminate —— 写工具返回 approval_required 时本轮结束,不再发 provider 调用。
@@ -250,6 +258,200 @@ async function runTests() {
     assert(expanded === 'Please summarize: the Q3 report', `bad expansion: ${expanded}`);
     // slash 契约把用户命令列给模型(阶段3 接线)。
     assert(stack.promptTemplateService.listCommandsSync().length === 1, 'exactly one user command expected');
+  });
+
+  // 阶段A:per-conversation 隔离 —— 两个 conversationId 的跨轮上下文互不可见。
+  await test('phaseA: two conversations keep isolated cross-turn context', async () => {
+    const stack = await buildStack({
+      scripted: () => [{ type: 'text_delta', content: 'ok' }, { type: 'done', text: 'ok' }],
+    });
+    // 会话 A 轮1:写入一句只属于 A 的独特标记。
+    await stack.collect(cleanTurn('ALPHA_SECRET only in conversation A', { conversationId: 'conv-A' }));
+    // 会话 B 轮1:provider 看到的完整上下文里不应含 A 的标记(不同 session)。
+    await stack.collect(cleanTurn('what did I just say', { conversationId: 'conv-B' }));
+    const bFirstTurnCtx = stack.providerContexts[stack.providerContexts.length - 1];
+    assert(!bFirstTurnCtx.includes('ALPHA_SECRET'), 'conversation B leaked conversation A history (isolation broken)');
+
+    // 会话 A 轮2:完整上下文里仍应看到自己轮1的历史(同会话跨轮上下文保留)。
+    await stack.collect(cleanTurn('and again', { conversationId: 'conv-A' }));
+    const aSecondTurnCtx = stack.providerContexts[stack.providerContexts.length - 1];
+    assert(aSecondTurnCtx.includes('ALPHA_SECRET'), 'conversation A lost its own cross-turn context');
+
+    // 两个会话各自持久化了独立的 ref。
+    assert(!!stack.sessionManager.getRef('conv-A'), 'conv-A ref not persisted');
+    assert(!!stack.sessionManager.getRef('conv-B'), 'conv-B ref not persisted');
+    assert(stack.sessionManager.getRef('conv-A')!.path !== stack.sessionManager.getRef('conv-B')!.path,
+      'two conversations must map to different session files');
+  });
+
+  // 阶段B:entryId 锚定 —— done 事件带回本轮 user/assistant entryId,且能在会话树里反查到对应消息。
+  await test('phaseB: done event carries turn entryIds resolvable in the session tree', async () => {
+    const stack = await buildStack({
+      scripted: () => [{ type: 'text_delta', content: 'answer one' }, { type: 'done', text: 'answer one' }],
+    });
+    const events = await stack.collect(cleanTurn('ENTRY_ANCHOR_Q first question', { conversationId: 'conv-anchor' }));
+    const done: any = events.at(-1);
+    assert(done.type === 'done', 'last event should be done');
+    assert(!!done.entryIds, 'done event must carry entryIds for a persistent conversation');
+    assert(!!done.entryIds.userEntryId, 'missing userEntryId');
+    assert(!!done.entryIds.assistantEntryId, 'missing assistantEntryId');
+    assert(done.entryIds.userEntryId !== done.entryIds.assistantEntryId, 'user and assistant entryId must differ');
+
+    // 反查:两个 entryId 都能在会话分支里定位到对应 role 的 message。
+    const session: any = await stack.sessionManager.getSession('conv-anchor');
+    const branch: any[] = await session.getBranch();
+    const byId = (id: string) => branch.find((e) => e?.id === id);
+    const userEntry = byId(done.entryIds.userEntryId);
+    const asstEntry = byId(done.entryIds.assistantEntryId);
+    assert(userEntry?.type === 'message' && userEntry.message?.role === 'user', 'userEntryId does not resolve to a user message');
+    assert(asstEntry?.type === 'message' && asstEntry.message?.role === 'assistant', 'assistantEntryId does not resolve to an assistant message');
+
+    // 轮2:新一轮的 entryId 与轮1不同(锚定随轮推进,不复用旧 entry)。
+    const events2 = await stack.collect(cleanTurn('second question', { conversationId: 'conv-anchor' }));
+    const done2: any = events2.at(-1);
+    assert(!!done2.entryIds?.userEntryId, 'round 2 missing userEntryId');
+    assert(done2.entryIds.userEntryId !== done.entryIds.userEntryId, 'round 2 must anchor to a new user entry');
+  });
+
+  // 阶段B:临时会话(无 conversationId)不产出 entryIds(无处锚定)。
+  await test('phaseB: ephemeral turn yields no entryIds', async () => {
+    const stack = await buildStack({
+      scripted: () => [{ type: 'text_delta', content: 'ok' }, { type: 'done', text: 'ok' }],
+    });
+    const events = await stack.collect({ prompt: 'no anchor', tools: TOOL_DEFS, userRequest: 'no anchor' });
+    const done: any = events.at(-1);
+    assert(done.type === 'done', 'last event should be done');
+    assert(done.entryIds === undefined, 'ephemeral session must not emit entryIds');
+  });
+
+  // 阶段C:分叉/编辑产生兄弟分支;投影反映当前分支;切回旧分支恢复原回答。
+  await test('phaseC: fork/edit creates a sibling branch; projection + switch navigate between them', async () => {
+    const { projectBranchToMessages } = await import('../src/runtime/pi/session-branch-projector');
+    // 每次调用返回不同答案,便于区分两个分支。
+    const stack = await buildStack({
+      scripted: (_input, callIndex) => [
+        { type: 'text_delta', content: `answer#${callIndex}` },
+        { type: 'done', text: `answer#${callIndex}` },
+      ],
+    });
+    const cid = 'conv-branch';
+
+    // 轮1:Q1 → answer#0。记住 Q1 的 userEntryId。
+    const e1 = await stack.collect(cleanTurn('Q1 original question', { conversationId: cid }));
+    const done1: any = e1.at(-1);
+    const q1UserEntryId = done1.entryIds.userEntryId;
+    assert(!!q1UserEntryId, 'need Q1 userEntryId');
+    assert(done1.text === 'answer#0', 'round1 answer wrong');
+
+    // 定位到 Q1 之前 → 重跑(新文本模拟「编辑重问」)。新回复成为兄弟分支。
+    const okPos = await stack.sessionManager.prepareForkAtUser(cid, q1UserEntryId);
+    assert(okPos, 'prepareForkAtUser should succeed for a user entry');
+    const e2 = await stack.collect(cleanTurn('Q1 edited question', { conversationId: cid }));
+    const done2: any = e2.at(-1);
+    assert(done2.text === 'answer#1', 'retry answer wrong');
+    const q1bUserEntryId = done2.entryIds.userEntryId;
+    assert(q1bUserEntryId !== q1UserEntryId, 'edited turn must be a new user entry (sibling)');
+
+    // 当前分支投影:应是编辑后的分支(Q1 edited + answer#1),且 user 消息标记有 2 个兄弟。
+    const { branch, all } = await stack.sessionManager.getBranchEntries(cid);
+    const proj = projectBranchToMessages(branch as any, all as any);
+    const projText = proj.map(m => `${m.role}:${m.content}`).join(' | ');
+    assert(projText.includes('user:Q1 edited question'), `projection should show edited branch, got: ${projText}`);
+    assert(projText.includes('ai:answer#1'), 'projection should show retry answer');
+    assert(!projText.includes('answer#0'), 'current branch must not show the other sibling answer');
+    const userMsg = proj.find(m => m.role === 'user');
+    assert(userMsg?.branch?.count === 2, `user message should report 2 sibling branches, got ${userMsg?.branch?.count}`);
+    assert(userMsg!.branch!.leafIds.length === 2, 'branch must carry 2 sibling leaf ids');
+
+    // 切回原分支(第 0 个兄弟的叶子)→ 投影恢复到 Q1 original + answer#0。
+    const originalSiblingLeaf = userMsg!.branch!.leafIds[0];
+    const okSwitch = await stack.sessionManager.moveToBranch(cid, originalSiblingLeaf);
+    assert(okSwitch, 'moveToBranch should succeed');
+    const { branch: b2, all: a2 } = await stack.sessionManager.getBranchEntries(cid);
+    const proj2Text = projectBranchToMessages(b2 as any, a2 as any).map(m => `${m.role}:${m.content}`).join(' | ');
+    assert(proj2Text.includes('Q1 original question') && proj2Text.includes('answer#0'),
+      `switch back should restore original branch, got: ${proj2Text}`);
+    assert(!proj2Text.includes('answer#1'), 'after switching back, edited answer must not show');
+  });
+
+  // 阶段C:重试(supersede)换掉旧答案、不保留旧分支 —— 有效兄弟始终只剩 1 条(无 < n/m >)。
+  await test('phaseC: retry supersedes the old branch (no sibling accumulates)', async () => {
+    const { projectBranchToMessages } = await import('../src/runtime/pi/session-branch-projector');
+    const stack = await buildStack({
+      scripted: (_input, callIndex) => [
+        { type: 'text_delta', content: `answer#${callIndex}` },
+        { type: 'done', text: `answer#${callIndex}` },
+      ],
+    });
+    const cid = 'conv-retry';
+
+    // 轮1:Q → answer#0。
+    const e1 = await stack.collect(cleanTurn('Q retry test', { conversationId: cid }));
+    const q1UserEntryId = (e1.at(-1) as any).entryIds.userEntryId;
+
+    // 重试#1:supersede 旧问答 → 定位 → 用原文重跑 → answer#1。
+    await stack.sessionManager.supersedeUserEntry(cid, q1UserEntryId);
+    await stack.sessionManager.prepareForkAtUser(cid, q1UserEntryId);
+    const e2 = await stack.collect(cleanTurn('Q retry test', { conversationId: cid }));
+    assert((e2.at(-1) as any).text === 'answer#1', 'retry#1 answer wrong');
+
+    // 当前分支投影:只显示新答案,且 user 消息无 branch(有效兄弟仅 1 条 → 不显示 < n/m >)。
+    let { branch, all } = await stack.sessionManager.getBranchEntries(cid);
+    let proj = projectBranchToMessages(branch as any, all as any);
+    let projText = proj.map(m => `${m.role}:${m.content}`).join(' | ');
+    assert(projText.includes('answer#1') && !projText.includes('answer#0'),
+      `retry should show only the new answer, got: ${projText}`);
+    const userMsgAfter1 = proj.find(m => m.role === 'user');
+    assert(!userMsgAfter1?.branch, `retry must NOT leave a switchable sibling, got branch: ${JSON.stringify(userMsgAfter1?.branch)}`);
+
+    // 重试#2:再来一次 —— 仍应只剩 1 条有效分支(不累积)。
+    const q2UserEntryId = (e2.at(-1) as any).entryIds.userEntryId;
+    await stack.sessionManager.supersedeUserEntry(cid, q2UserEntryId);
+    await stack.sessionManager.prepareForkAtUser(cid, q2UserEntryId);
+    const e3 = await stack.collect(cleanTurn('Q retry test', { conversationId: cid }));
+    assert((e3.at(-1) as any).text === 'answer#2', 'retry#2 answer wrong');
+
+    ({ branch, all } = await stack.sessionManager.getBranchEntries(cid));
+    proj = projectBranchToMessages(branch as any, all as any);
+    projText = proj.map(m => `${m.role}:${m.content}`).join(' | ');
+    assert(projText.includes('answer#2') && !projText.includes('answer#0') && !projText.includes('answer#1'),
+      `second retry should show only the latest answer, got: ${projText}`);
+    assert(!proj.find(m => m.role === 'user')?.branch, 'repeated retries must not accumulate sibling branches');
+  });
+
+  // 阶段C:编辑首条 user 消息 → moveTo(parentId=null) 回到 root,不残留旧首条。
+  await test('phaseC: editing the first user message forks from root', async () => {
+    const stack = await buildStack({
+      scripted: (_input, callIndex) => [{ type: 'done', text: `a${callIndex}` }],
+    });
+    const cid = 'conv-first';
+    const e1 = await stack.collect(cleanTurn('FIRST original', { conversationId: cid }));
+    const firstUserEntryId = (e1.at(-1) as any).entryIds.userEntryId;
+
+    const ok = await stack.sessionManager.prepareForkAtUser(cid, firstUserEntryId);
+    assert(ok, 'prepareForkAtUser on first message should succeed (moveTo root)');
+    await stack.collect(cleanTurn('FIRST edited', { conversationId: cid }));
+
+    const { branch, all } = await stack.sessionManager.getBranchEntries(cid);
+    const { projectBranchToMessages } = await import('../src/runtime/pi/session-branch-projector');
+    const proj = projectBranchToMessages(branch as any, all as any);
+    const users = proj.filter(m => m.role === 'user');
+    // 当前分支只应有编辑后的首条(原首条在另一条从 root 出发的兄弟分支上)。
+    assert(users.length === 1 && users[0].content === 'FIRST edited',
+      `edited-first branch should contain only the edited first message, got: ${JSON.stringify(users.map(u => u.content))}`);
+    assert(users[0].branch?.count === 2, 'first message should now have 2 root-level sibling branches');
+  });
+
+  // 阶段A:conversationId 缺省 → 临时会话,无跨轮记忆、无持久 ref。
+  await test('phaseA: undefined conversationId yields ephemeral, non-persistent session', async () => {
+    const stack = await buildStack({
+      scripted: () => [{ type: 'text_delta', content: 'ok' }, { type: 'done', text: 'ok' }],
+    });
+    await stack.collect({ prompt: 'EPHEMERAL_MARK turn one', tools: TOOL_DEFS, userRequest: 'EPHEMERAL_MARK turn one' });
+    await stack.collect({ prompt: 'turn two', tools: TOOL_DEFS, userRequest: 'turn two' });
+    const secondCtx = stack.providerContexts[stack.providerContexts.length - 1];
+    assert(!secondCtx.includes('EPHEMERAL_MARK'), 'ephemeral session must not carry cross-turn context');
+    assert(stack.sessionManager.getRef() === null, 'ephemeral session must not persist a ref');
   });
 
   // 阶段1:自动压缩 —— 真实累积 token 超过 (contextWindow - reserveTokens) 时触发 harness.compact()。

@@ -486,6 +486,133 @@ async function runTests() {
     reviewButton?.click();
     expect(reviewed).toEqual(['const answer = 42;']);
   });
+
+  // 阶段C:ai 消息的重试按钮 —— 仅在已锚定会话树(sessionEntryId)且宿主接入 onRetry 时渲染。
+  await test('renders retry button only for anchored ai messages', async () => {
+    const retried: string[] = [];
+    const renderer = new MessageRenderer({
+      app: {}, component: {},
+      renderMarkdown: (_app, md, el: any) => { el.textContent = md; },
+      onRetry: (m) => { retried.push(m.id); },
+    });
+
+    // 未锚定:不渲染重试按钮。
+    const c1 = new FakeElement();
+    await renderer.renderMessage(c1 as any, { id: 'a1', role: 'ai', content: 'ans', timestamp: 1 });
+    expect(!!c1.querySelector('.shell-retry-btn')).toBe(false);
+
+    // 已锚定:渲染并点击回调。
+    const c2 = new FakeElement();
+    await renderer.renderMessage(c2 as any, { id: 'a2', role: 'ai', content: 'ans', timestamp: 1, sessionEntryId: 'e-a2' });
+    const retryBtn = c2.querySelector('.shell-retry-btn');
+    expect(!!retryBtn).toBe(true);
+    retryBtn?.click();
+    expect(retried).toEqual(['a2']);
+  });
+
+  // 阶段C:ai 操作栏的分叉按钮 —— 展开预填源问题的输入,提交回调带新文本。
+  await test('fork button on ai toolbar prefills source question and submits new text', async () => {
+    const forked: Array<{ id: string; text: string }> = [];
+    const renderer = new MessageRenderer({
+      app: {}, component: {},
+      renderMarkdown: (_app, md, el: any) => { el.textContent = md; },
+      onFork: (m, text) => { forked.push({ id: m.id, text }); },
+    });
+
+    // 未锚定:不渲染分叉按钮。
+    const c1 = new FakeElement();
+    await renderer.renderMessage(c1 as any, { id: 'a1', role: 'ai', content: 'ans', timestamp: 1 });
+    expect(!!c1.querySelector('.shell-fork-btn')).toBe(false);
+
+    // 已锚定:渲染分叉按钮,点开预填源问题,改写后提交。
+    const c2 = new FakeElement();
+    await renderer.renderMessage(c2 as any, {
+      id: 'a2', role: 'ai', content: 'ans', timestamp: 1,
+      sessionEntryId: 'e-a2', forkSourceText: '原始问题',
+    });
+    const forkBtn = c2.querySelector('.shell-fork-btn');
+    expect(!!forkBtn).toBe(true);
+    forkBtn?.click();
+    const input = c2.querySelector('.shell-edit-input');
+    expect(input?.value).toBe('原始问题');
+    input!.value = '改写后的问题';
+    c2.querySelector('.shell-edit-submit')?.click();
+    expect(forked).toEqual([{ id: 'a2', text: '改写后的问题' }]);
+  });
+
+  // 阶段C:ai 操作栏的兄弟分支导航 —— branch.count>1 时渲染 < n/m >,点击切换回调带目标 leaf。
+  await test('branch nav on ai toolbar switches siblings', async () => {
+    const switched: Array<{ id: string; leaf: string }> = [];
+    const renderer = new MessageRenderer({
+      app: {}, component: {},
+      renderMarkdown: (_app, md, el: any) => { el.textContent = md; },
+      onSwitchBranch: (m, leaf) => { switched.push({ id: m.id, leaf }); },
+    });
+    const container = new FakeElement();
+    await renderer.renderMessage(container as any, {
+      id: 'a1', role: 'ai', content: 'ans', timestamp: 1, sessionEntryId: 'e-a1',
+      branch: { index: 1, count: 2, leafIds: ['leaf-0', 'leaf-1'] },
+    });
+    expect(container.querySelector('.shell-branch-count')?.textContent).toBe('2/2');
+    container.querySelector('.shell-branch-prev')?.click();
+    expect(switched).toEqual([{ id: 'a1', leaf: 'leaf-0' }]);
+  });
+
+  // 阶段C:user 消息的兄弟分支导航条 —— count>1 时渲染 < n/m >,点击切换回调带目标 leaf。
+  await test('renders branch navigation for user messages with siblings', async () => {
+    const switched: Array<{ id: string; leaf: string }> = [];
+    const renderer = new MessageRenderer({
+      app: {}, component: {},
+      onSwitchBranch: (m, leaf) => { switched.push({ id: m.id, leaf }); },
+    });
+
+    const container = new FakeElement();
+    await renderer.renderMessage(container as any, {
+      id: 'u1', role: 'user', content: 'Q', timestamp: 1, sessionEntryId: 'e-u1',
+      branch: { index: 1, count: 2, leafIds: ['leaf-0', 'leaf-1'] },
+    });
+
+    const count = container.querySelector('.shell-branch-count');
+    expect(count?.textContent).toBe('2/2');
+    // 当前 index=1,点上一个 → 切到 index 0 的 leaf-0。
+    container.querySelector('.shell-branch-prev')?.click();
+    expect(switched).toEqual([{ id: 'u1', leaf: 'leaf-0' }]);
+  });
+
+  // 阶段C:无兄弟(count<=1)的 user 消息不渲染导航条。
+  await test('omits branch navigation when a user message has no siblings', async () => {
+    const renderer = new MessageRenderer({
+      app: {}, component: {},
+      onSwitchBranch: () => { },
+    });
+    const container = new FakeElement();
+    await renderer.renderMessage(container as any, {
+      id: 'u1', role: 'user', content: 'Q', timestamp: 1, sessionEntryId: 'e-u1',
+    });
+    expect(!!container.querySelector('.shell-branch-nav')).toBe(false);
+  });
+
+  // 阶段C:编辑重问 —— 点编辑展开预填输入,提交回调带新文本。
+  await test('edit flow expands a prefilled input and submits new text', async () => {
+    const edited: Array<{ id: string; text: string }> = [];
+    const renderer = new MessageRenderer({
+      app: {}, component: {},
+      onEdit: (m, text) => { edited.push({ id: m.id, text }); },
+    });
+    const container = new FakeElement();
+    await renderer.renderMessage(container as any, {
+      id: 'u1', role: 'user', content: 'original', timestamp: 1, sessionEntryId: 'e-u1',
+    });
+
+    const editBtn = container.querySelector('.shell-edit-btn');
+    expect(!!editBtn).toBe(true);
+    editBtn?.click();
+    const input = container.querySelector('.shell-edit-input');
+    expect(input?.value).toBe('original'); // 预填原文
+    input!.value = 'revised question';
+    container.querySelector('.shell-edit-submit')?.click();
+    expect(edited).toEqual([{ id: 'u1', text: 'revised question' }]);
+  });
 }
 
 runTests().catch((e) => {

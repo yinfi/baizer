@@ -709,12 +709,21 @@ export class ShellView extends ItemView {
         }
 
         if (this.streamContainer) {
-            this.getMessageRenderer().addActionToolbar(this.streamContainer, {
-                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                role: 'ai',
-                content: this.streamAccumulatedText,
-                timestamp: Date.now(),
-            });
+            // 阶段C:用 tab.state 里刚落盘的真实 ai 消息(已带 assistantEntryId)渲染操作栏,
+            // 而非临时空壳——否则 sessionEntryId 缺失,重试按钮的显示条件永不满足。
+            // handleTabStreamEvent 在 done 时已先把 entryId 写进 tab.state,此处取最后一条 ai 消息即可。
+            const activeMessages = this.tabManager.getActiveTab()?.state.getMessages() ?? [];
+            const lastAiMessage = [...activeMessages].reverse().find(m => m.role === 'ai');
+            // 就近填充分叉源问题文本:该 ai 回复紧邻其前的 user 消息原文,供底部「分叉」输入预填。
+            const toolbarMessage: ChatMessage = lastAiMessage
+                ? { ...lastAiMessage, forkSourceText: this.findPrecedingUserMessage(lastAiMessage)?.content }
+                : {
+                    id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                    role: 'ai',
+                    content: this.streamAccumulatedText,
+                    timestamp: Date.now(),
+                };
+            this.getMessageRenderer().addActionToolbar(this.streamContainer, toolbarMessage);
         }
 
         this.streamContainer = null;
@@ -757,6 +766,10 @@ export class ShellView extends ItemView {
                 onFeedbackDown: async (message, reason) => {
                     await this.chatController.recordNegativeFeedback(message.id, reason);
                 },
+                onRetry: (message) => this.handleRetryMessage(message),
+                onEdit: (message, newText) => this.handleEditMessage(message, newText),
+                onFork: (message, newText) => this.handleForkFromAi(message, newText),
+                onSwitchBranch: (message, targetLeafId) => this.handleSwitchBranch(message, targetLeafId),
                 onReviewCodeBlock: (content) => this.reviewCodeBlock(content),
                 onUndoWorkspaceEdit: (editId) => this.chatController.undoWorkspaceEdit(editId),
                 onInternalLinkClick: (href) => {
@@ -1481,6 +1494,8 @@ export class ShellView extends ItemView {
         const session = this.tabSessions.get(id);
         session?.chatController.cleanup();
         this.tabSessions.delete(id);
+        // 释放该会话的 pi session 内存态(磁盘文件与持久 ref 保留,再次打开可恢复)。
+        this.modelService.releaseSession(id);
         this.hideHistoryMenu();
 
         if (wasActive) {
@@ -1528,9 +1543,11 @@ export class ShellView extends ItemView {
         const chatController = new ChatController({
             app: this.app,
             api: this.modelService,
+            conversationId: id,
             onMessageAdded: (msg) => this.handleTabMessageAdded(id, msg),
             onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
             onStreamEvent: (event) => this.handleTabStreamEvent(id, event),
+            onClear: () => this.handleTabClear(id),
             onWorkspaceEdit: (edit) => this.handleTabWorkspaceEdit(id, edit),
             onWorkspaceEditUndone: (edit) => this.handleTabWorkspaceEditUndone(id, edit),
             onWorkspaceEditUndoFailed: (message) => this.handleWorkspaceEditUndoFailed(id, message),
@@ -1554,6 +1571,16 @@ export class ShellView extends ItemView {
         }
     }
 
+    /** /clear:清空该 tab 的可见历史(tab.state)并重渲(修 /clear 不清屏)。 */
+    private handleTabClear(tabId: TabId) {
+        const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
+        tab?.state.clearMessages();
+        if (this.tabManager.getActiveTab()?.id === tabId) {
+            this.resetStreamState();
+            this.renderActiveTabMessages();
+        }
+    }
+
     private handleTabStatusChanged(tabId: TabId, isResponding: boolean) {
         this.tabManager.markStreaming(tabId, isResponding);
         if (this.tabManager.getActiveTab()?.id === tabId) {
@@ -1564,14 +1591,29 @@ export class ShellView extends ItemView {
     private handleTabStreamEvent(tabId: TabId, event: StreamEvent) {
         if (event.type === 'done') {
             const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
-            if (tab && event.text) {
-                tab.state.addMessage({
-                    id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                    role: 'ai',
-                    content: event.text,
-                    timestamp: Date.now(),
-                    metadata: event.interrupted ? { interrupted: true } : undefined,
-                });
+            if (tab) {
+                // 阶段B:把本轮 entryId 锚定到 tab.state 的消息(阶段C 分叉/重试的定位依据)。
+                // user entry 打到最近一条尚未锚定的 user 消息;assistant entry 打到本轮新建的 ai 消息。
+                const entryIds = event.entryIds;
+                if (entryIds?.userEntryId) {
+                    const messages = tab.state.getMessages();
+                    for (let i = messages.length - 1; i >= 0; i--) {
+                        if (messages[i].role === 'user' && !messages[i].sessionEntryId) {
+                            tab.state.updateMessage(messages[i].id, { sessionEntryId: entryIds.userEntryId });
+                            break;
+                        }
+                    }
+                }
+                if (event.text) {
+                    tab.state.addMessage({
+                        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                        role: 'ai',
+                        content: event.text,
+                        timestamp: Date.now(),
+                        sessionEntryId: entryIds?.assistantEntryId,
+                        metadata: event.interrupted ? { interrupted: true } : undefined,
+                    });
+                }
             }
         }
 
@@ -1811,6 +1853,132 @@ export class ShellView extends ItemView {
         return this.app.workspace.getActiveFile()?.path;
     }
 
+    // ---- 阶段C:分支操作(切换 / 重试 / 编辑重问)----
+
+    /**
+     * 用会话分支投影重建当前 tab 的 state 并重渲。
+     * skipLeading:切掉投影头部的「隐藏祖先」条数——持久 session(按 tab)可能累积了当前
+     * 可见窗口之上、用户看不到的更早历史,全量 root→leaf 投影会把它们翻出来。只渲染尾部窗口。
+     */
+    private rebuildActiveTabFromProjection(messages: ChatMessage[], skipLeading = 0) {
+        const tab = this.tabManager.getActiveTab();
+        if (!tab) return;
+        const windowed = skipLeading > 0 ? messages.slice(skipLeading) : messages;
+        tab.state.clearMessages();
+        for (const message of windowed) {
+            tab.state.addMessage(message);
+        }
+        this.renderActiveTabMessages();
+    }
+
+    /** 切换到某兄弟分支:纯投影切换,不发起生成。保持当前可见窗口(不翻出隐藏祖先)。 */
+    private async handleSwitchBranch(_message: ChatMessage, targetLeafId: string) {
+        const cid = this.tabManager.getActiveTab()?.id;
+        if (!cid) return;
+        // 切换前先算「隐藏祖先」条数 = 全量投影长度 − 当前可见条数。该边界在切换前后不变。
+        const visibleBefore = this.tabManager.getActiveTab()?.state.getMessages().length ?? 0;
+        const before = await this.modelService.getBranchProjection(cid);
+        const hiddenCount = before ? Math.max(0, before.length - visibleBefore) : 0;
+
+        const projection = await this.modelService.switchBranch(cid, targetLeafId);
+        if (projection) {
+            this.rebuildActiveTabFromProjection(projection, hiddenCount);
+        } else {
+            new Notice('无法切换分支。');
+        }
+    }
+
+    /** 从某条 ai 回复分叉:用新文本重跑它对应的 user 提问,产生兄弟分支。 */
+    private async handleForkFromAi(aiMessage: ChatMessage, newText: string) {
+        const cid = this.tabManager.getActiveTab()?.id;
+        if (!cid) return;
+        const userMessage = this.findPrecedingUserMessage(aiMessage);
+        if (!userMessage?.sessionEntryId) {
+            new Notice('无法定位要分叉的问题。');
+            return;
+        }
+        await this.forkAndRerun(cid, userMessage.sessionEntryId, newText);
+    }
+
+    /** 重试某条 ai 回复:定位到它对应的 user 消息之前,用原文重跑,产生兄弟分支。 */
+    private async handleRetryMessage(aiMessage: ChatMessage) {
+        const cid = this.tabManager.getActiveTab()?.id;
+        if (!cid) return;
+        const userMessage = this.findPrecedingUserMessage(aiMessage);
+        if (!userMessage?.sessionEntryId) {
+            new Notice('无法定位要重试的问题。');
+            return;
+        }
+        // 重试:同一问题重生成,新答案换掉旧的、不保留旧分支(supersede=true)。
+        await this.forkAndRerun(cid, userMessage.sessionEntryId, userMessage.content, true);
+    }
+
+    /** 编辑重问某条 user 消息:定位到它之前,用新文本重跑,产生兄弟分支。 */
+    private async handleEditMessage(userMessage: ChatMessage, newText: string) {
+        const cid = this.tabManager.getActiveTab()?.id;
+        if (!cid || !userMessage.sessionEntryId) {
+            new Notice('无法编辑该消息。');
+            return;
+        }
+        await this.forkAndRerun(cid, userMessage.sessionEntryId, newText);
+    }
+
+    /**
+     * 分支重跑的公共流程:
+     * 1. prepareRetryFromUser 把会话 leaf 移到目标 user 消息之前(定位分叉点);
+     * 2. 把 UI 历史截断到该 user 之前(丢弃旧问答的渲染,新一轮从此处长出);
+     * 3. 走正常 processCommand(text) 流式重跑,新回复与原问答成为兄弟分支;
+     * 4. 完成后用投影校正 tab.state,使兄弟导航条 `< n/m >` 计数正确。
+     */
+    private async forkAndRerun(conversationId: string, userEntryId: string, text: string, supersede = false) {
+        // 先算「隐藏祖先」条数 = 操作前全量投影长度 − 当前可见条数。持久 session(按 tab)可能累积了
+        // 当前可见窗口之上、用户看不到的更早历史;最终重投影须切掉这段头部,只渲染可见窗口。
+        // 该边界在整个重跑过程中不变(重跑只在窗口内增删),故此处一次算好。
+        const visibleBefore = this.tabManager.getActiveTab()?.state.getMessages().length ?? 0;
+        const beforeProjection = await this.modelService.getBranchProjection(conversationId);
+        const hiddenCount = beforeProjection ? Math.max(0, beforeProjection.length - visibleBefore) : 0;
+
+        const positioned = await this.modelService.prepareRetryFromUser(conversationId, userEntryId, { supersede });
+        if (!positioned) {
+            new Notice('无法定位分叉点,已取消重跑。');
+            return;
+        }
+
+        // UI 截断:移除目标 user 消息及其之后的所有消息(它们属于旧分支,重渲时由投影恢复计数)。
+        const tab = this.tabManager.getActiveTab();
+        if (tab) {
+            const messages = tab.state.getMessages();
+            const cutIndex = messages.findIndex(m => m.sessionEntryId === userEntryId);
+            if (cutIndex >= 0) {
+                for (let i = messages.length - 1; i >= cutIndex; i--) {
+                    tab.state.removeMessage(messages[i].id);
+                }
+            }
+            this.renderActiveTabMessages();
+        }
+
+        // 流式重跑;processCommand 会追加新的 user 消息并流式渲染 ai 回复。
+        await this.processCommand(text);
+
+        // 校正:重跑后用投影重建,确保分叉点 user 消息带上正确的兄弟计数与切换目标;
+        // 切掉隐藏祖先头部,避免把可见窗口之上的旧历史翻出来渲染到界面。
+        const projection = await this.modelService.getBranchProjection(conversationId);
+        if (projection) {
+            this.rebuildActiveTabFromProjection(projection, hiddenCount);
+        }
+    }
+
+    /** 找到某条 ai 消息在当前 tab 历史中紧邻其前的 user 消息(重试时用它的原始提问)。 */
+    private findPrecedingUserMessage(aiMessage: ChatMessage): ChatMessage | null {
+        const messages = this.tabManager.getActiveTab()?.state.getMessages() ?? [];
+        const aiIndex = messages.findIndex(m => m.id === aiMessage.id);
+        if (aiIndex < 0) return null;
+        for (let i = aiIndex - 1; i >= 0; i--) {
+            if (messages[i].role === 'user') return messages[i];
+        }
+        return null;
+    }
+
     private renderActiveTabMessages() {
         if (!this.outputContainer) return;
 
@@ -1828,9 +1996,29 @@ export class ShellView extends ItemView {
             return;
         }
 
-        for (const message of messages) {
-            this.appendMessage(message);
+        for (let i = 0; i < messages.length; i++) {
+            const message = messages[i];
+            // ai 消息就近继承其前一条 user 的分支信息与原文,供底部「分叉 / < n/m >」渲染。
+            // (projector 把 branch 挂在 user 消息上;分叉入口在 ai 操作栏,故此处桥接。)
+            if (message.role === 'ai') {
+                const prevUser = this.findPrecedingUserInList(messages, i);
+                this.appendMessage({
+                    ...message,
+                    branch: message.branch ?? prevUser?.branch,
+                    forkSourceText: message.forkSourceText ?? prevUser?.content,
+                });
+            } else {
+                this.appendMessage(message);
+            }
         }
+    }
+
+    /** 在给定消息数组中,找到 index 之前紧邻的一条 user 消息。 */
+    private findPrecedingUserInList(messages: ChatMessage[], index: number): ChatMessage | null {
+        for (let i = index - 1; i >= 0; i--) {
+            if (messages[i].role === 'user') return messages[i];
+        }
+        return null;
     }
 
     private resetStreamState() {

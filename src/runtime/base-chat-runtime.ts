@@ -162,6 +162,7 @@ export abstract class BaseChatRuntime implements ChatRuntime {
       generationPlan,
       writingProfile,
       systemPromptOverride: request.systemPromptOverride,
+      conversationId: request.conversationId,
     };
   }
 
