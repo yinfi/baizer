@@ -20,6 +20,7 @@ import { KnowledgeStatusPanel } from './components/knowledge-status-panel';
 import { ThinkingRenderer } from './renderers/thinking-renderer';
 import { ToolRenderer } from './renderers/tool-renderer';
 import { MessageRenderer } from './renderers/message-renderer';
+import { findBlockBoundary } from './renderers/stream-block-splitter';
 import { ConversationSnapshot, ChatMessage } from './types';
 import { WorkspaceEditSummary } from '../services/workspace-edit-service';
 import { TabBar } from './tabs/tab-bar';
@@ -79,8 +80,14 @@ export class ShellView extends ItemView {
     private streamContainer: HTMLElement | null = null;
     private streamTimeline: HTMLElement | null = null;
     private streamContent: HTMLElement | null = null;
-    /** 流式途中承载纯文本的节点。增量只往这里追加新增片段,避免每帧整段重渲染(O(n²))。 */
-    private streamPlainTextEl: HTMLElement | null = null;
+    /** 流式增量渲染:已渲染的稳定块容器。每个已闭合的 Markdown 块渲染进独立子节点后冻结,不再重渲。 */
+    private streamStableEl: HTMLElement | null = null;
+    /** 流式增量渲染:尾部未闭合内容的纯文本节点。块一旦闭合(遇到围栏外空行)即晋升进 streamStableEl。 */
+    private streamTailEl: HTMLElement | null = null;
+    /** 流式增量渲染:闪烁光标,始终位于尾部之后。 */
+    private streamCursorEl: HTMLElement | null = null;
+    /** 已晋升为稳定块的文本前缀长度(streamAccumulatedText 的字符数),尾部从此处开始。 */
+    private streamRenderedLen = 0;
     private streamAccumulatedText: string = '';
     private streamNodeCount = 0;
     /** 智能体工具循环回合数(step_boundary 计数),用于时间线「Step N」分组标签。 */
@@ -646,9 +653,12 @@ export class ShellView extends ItemView {
         this.thinkingRenderer?.appendThinking(narration);
         this.streamNodeCount = this.getStreamNodeCount();
         this.streamAccumulatedText = '';
-        if (this.streamPlainTextEl) {
-            this.streamPlainTextEl.textContent = '';
-        }
+        // 回复区整体腾空:置空三段结构指针,下一帧 renderStreamContent 会重建,
+        // 让下一轮正文从头开始块级渲染,不残留上一轮的稳定块。
+        this.streamStableEl = null;
+        this.streamTailEl = null;
+        this.streamCursorEl = null;
+        this.streamRenderedLen = 0;
     }
 
     /**
@@ -664,24 +674,51 @@ export class ShellView extends ItemView {
     }
 
     /**
-     * 流式途中只做轻量纯文本同步:把累计文本写进一个纯文本节点,不跑 Markdown 渲染。
-     * 完整 Markdown 渲染推迟到 finalizeStream() 一次性完成,避免每帧 empty()+整段重渲的 O(n²)。
+     * 流式途中的块级增量 Markdown 渲染(方案2)。
+     *
+     * 把累计文本按 Markdown「块边界」切成两段:
+     *  - 已闭合的块(切分点之前):渲染成 HTML,追加进 streamStableEl 后冻结,后续增量不再触碰。
+     *  - 尾部未闭合内容(切分点之后):作为纯文本写进 streamTailEl,块一旦闭合再晋升。
+     *
+     * 这样每帧只渲染「新闭合的那几个块」而非整段,总开销≈O(n),避免旧方案里
+     * 「结束才渲染」的原始 Markdown 观感,也避免「每帧整段重渲」的 O(n²) 卡顿。
      */
     private renderStreamContent() {
         if (!this.streamContent) return;
 
-        if (!this.streamPlainTextEl) {
+        // 首帧:建立稳定块容器 + 尾部纯文本 + 光标三段结构。
+        if (!this.streamTailEl) {
             this.streamContent.empty();
-            this.streamPlainTextEl = this.streamContent.createDiv({ cls: 'shell-stream-plaintext' });
-            const cursor = document.createElement('span');
-            cursor.className = 'shell-stream-cursor';
-            this.streamContent.appendChild(cursor);
+            this.streamStableEl = this.streamContent.createDiv({ cls: 'shell-stream-stable' });
+            this.streamTailEl = this.streamContent.createDiv({ cls: 'shell-stream-plaintext' });
+            this.streamCursorEl = document.createElement('span');
+            this.streamCursorEl.className = 'shell-stream-cursor';
+            this.streamContent.appendChild(this.streamCursorEl);
+            this.streamRenderedLen = 0;
         }
 
-        // 仅更新文本内容(浏览器只 diff 这一个文本节点),开销与累计长度线性、与帧数无关。
-        this.streamPlainTextEl.textContent = this.streamAccumulatedText;
+        // 在「尚未晋升的尾部」里找一个安全切分点(围栏外的空行边界)。
+        const pending = this.streamAccumulatedText.slice(this.streamRenderedLen);
+        const splitInPending = findBlockBoundary(pending);
+        if (splitInPending > 0) {
+            const closedChunk = pending.slice(0, splitInPending);
+            // 晋升:把新闭合的块渲染进独立子节点,追加到稳定容器,永不重渲。
+            void this.appendStableBlock(closedChunk);
+            this.streamRenderedLen += splitInPending;
+        }
+
+        // 尾部只做纯文本更新(浏览器只 diff 这一个文本节点),开销与尾部长度线性。
+        this.streamTailEl.textContent = this.streamAccumulatedText.slice(this.streamRenderedLen);
         this.scrollToEnd();
     }
+
+    /** 把一段已闭合的 Markdown 文本渲染进一个新的稳定块节点并追加,冻结不再重渲。 */
+    private async appendStableBlock(markdown: string) {
+        if (!this.streamStableEl) return;
+        const blockEl = this.streamStableEl.createDiv({ cls: 'shell-stream-block' });
+        await this.getMessageRenderer().renderAiContent(blockEl, markdown);
+    }
+
 
     private finalizeStream() {
         this.debouncedRenderStream.flush();
@@ -729,7 +766,10 @@ export class ShellView extends ItemView {
         this.streamContainer = null;
         this.streamTimeline = null;
         this.streamContent = null;
-        this.streamPlainTextEl = null;
+        this.streamStableEl = null;
+        this.streamTailEl = null;
+        this.streamCursorEl = null;
+        this.streamRenderedLen = 0;
         this.streamAccumulatedText = '';
         this.streamNodeCount = 0;
         this.streamStepCount = 0;
@@ -2028,7 +2068,10 @@ export class ShellView extends ItemView {
         this.streamContainer = null;
         this.streamTimeline = null;
         this.streamContent = null;
-        this.streamPlainTextEl = null;
+        this.streamStableEl = null;
+        this.streamTailEl = null;
+        this.streamCursorEl = null;
+        this.streamRenderedLen = 0;
         this.streamAccumulatedText = '';
         this.streamNodeCount = 0;
         this.streamStepCount = 0;
