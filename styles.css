@@ -625,10 +625,10 @@ textarea.shell-input::placeholder {
     display: inline-block;
     width: 8px;
     height: 8px;
-    background-color: #00e676;
+    background-color: var(--color-green);
     border-radius: 50%;
     margin-right: 8px;
-    box-shadow: 0 0 8px rgba(0, 230, 118, 0.6);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--color-green) 60%, transparent);
     animation: shell-pulse 1.5s infinite ease-in-out;
 }
 
@@ -673,29 +673,29 @@ textarea.shell-input::placeholder {
 }
 
 .guardian-gutter-marker.guardian-idle {
-    background: #00e676;
-    box-shadow: 0 0 8px rgba(0, 230, 118, 0.4);
+    background: var(--color-green);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--color-green) 40%, transparent);
     animation: guardian-pulse-slow 3s ease-in-out infinite;
     opacity: 0.6;
 }
 
 .guardian-gutter-marker.guardian-paused {
-    background: #ff5252;
-    box-shadow: 0 0 8px rgba(255, 82, 82, 0.4);
+    background: var(--color-red);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--color-red) 40%, transparent);
     animation: guardian-pulse-slow 3s ease-in-out infinite;
     opacity: 0.6;
 }
 
 .guardian-gutter-marker.guardian-thinking {
-    background: #00e676;
-    box-shadow: 0 0 12px rgba(0, 230, 118, 0.8);
+    background: var(--color-green);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--color-green) 80%, transparent);
     /* 处理中:快速闪烁(0.7s),与 idle 的慢闪(3s)形成明显对比。 */
     animation: guardian-pulse 0.7s ease-in-out infinite;
 }
 
 .guardian-gutter-marker.guardian-has-suggestion {
-    background: #00e676;
-    box-shadow: 0 0 16px rgba(0, 230, 118, 1);
+    background: var(--color-green);
+    box-shadow: 0 0 16px color-mix(in srgb, var(--color-green) 100%, transparent);
 }
 
 @keyframes guardian-pulse {
@@ -728,14 +728,16 @@ textarea.shell-input::placeholder {
 
 .cm-line .guardian-ghost-text,
 .guardian-ghost-text {
-    color: #00e676 !important;
-    background: rgba(0, 230, 118, 0.15) !important;
-    padding: 0 4px !important;
-    border-radius: 3px !important;
-    font-style: italic !important;
-    pointer-events: none !important;
-    user-select: none !important;
-    opacity: 0.8 !important;
+    /* color/background 保留 !important:CM6 的 .cm-content 与语法高亮/选区层会强制这两项,
+       非 !important 顶不过。其余属性 CM 不设默认值,靠 .cm-line 后代特异性即可生效。 */
+    color: var(--color-green) !important;
+    background: color-mix(in srgb, var(--color-green) 15%, transparent) !important;
+    padding: 0 4px;
+    border-radius: 3px;
+    font-style: italic;
+    pointer-events: none;
+    user-select: none;
+    opacity: 0.8;
 }
 
 /* 深补进行中的波动 ghost:整体轻微呼吸,逐字 shimmer 扫光(每字带相位差)。 */
@@ -777,7 +779,7 @@ textarea.shell-input::placeholder {
     }
     50% {
         opacity: 1;
-        text-shadow: 0 0 8px rgba(0, 230, 118, 0.9);
+        text-shadow: 0 0 8px color-mix(in srgb, var(--color-green) 90%, transparent);
     }
 }
 
@@ -791,9 +793,9 @@ textarea.shell-input::placeholder {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    /* 紫→蓝渐变:业界 AI「智能感」通用配色(Notion/Copilot/Gemini) */
-    background: linear-gradient(135deg, #7c5cff 0%, #4c8dff 100%);
-    color: #fff;
+    /* 跟随主题强调色:换主题自动协调,不再用固定紫蓝渐变割裂于插件其余部分。 */
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
     border: none;
     padding: 5px 11px 5px 9px;
     border-radius: 999px;
@@ -801,26 +803,26 @@ textarea.shell-input::placeholder {
     font-weight: 600;
     line-height: 1;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(76, 141, 255, 0.35);
-    transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+    transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease;
 }
 
 .guardian-selection-btn:hover {
-    filter: brightness(1.08);
-    box-shadow: 0 3px 12px rgba(124, 92, 255, 0.45);
+    background: var(--interactive-accent-hover);
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--interactive-accent) 45%, transparent);
     transform: translateY(-1px);
 }
 
 .guardian-selection-btn:active {
     transform: translateY(0);
-    box-shadow: 0 1px 5px rgba(76, 141, 255, 0.35);
+    box-shadow: 0 1px 5px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
 }
 
-/* 图标统一为白色、尺寸对齐文字 */
+/* 图标尺寸对齐文字,颜色随强调色前景 */
 .guardian-selection-btn .svg-icon {
     width: 15px;
     height: 15px;
-    color: #fff;
+    color: var(--text-on-accent);
 }
 
 .guardian-selection-btn-label {
@@ -1568,11 +1570,24 @@ textarea.shell-input::placeholder {
     min-height: 1em;
 }
 
-/* 流式途中的纯文本节点:保留原始 Markdown 的换行与空白,完成后会被替换为渲染好的 Markdown。 */
+/* 流式途中已闭合块的容器:块级增量渲染后的稳定区,内部每个 .shell-stream-block 是一段已渲染 Markdown。 */
+.shell-stream-stable {
+    display: block;
+}
+
+/* 流式途中的纯文本尾部节点:承载尚未闭合的最后一块,保留原始 Markdown 的换行与空白,块闭合后晋升为渲染结果。 */
 .shell-stream-plaintext {
     display: inline;
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+/* 稳定块首尾去掉外边距,避免与 Markdown 段落自带 margin 叠加成过大间距。 */
+.shell-stream-block > :first-child {
+    margin-top: 0;
+}
+.shell-stream-block > :last-child {
+    margin-bottom: 0;
 }
 
 .shell-stream-cursor {
@@ -1600,8 +1615,8 @@ textarea.shell-input::placeholder {
     --baizer-surface-muted: color-mix(in srgb, var(--background-secondary) 82%, var(--background-primary));
     --baizer-border: color-mix(in srgb, var(--background-modifier-border) 86%, transparent);
     --baizer-border-strong: color-mix(in srgb, var(--background-modifier-border) 68%, var(--text-muted));
-    --baizer-shadow: 0 12px 30px rgba(31, 70, 110, 0.10);
-    --baizer-soft-shadow: 0 8px 22px rgba(31, 70, 110, 0.06);
+    --baizer-shadow: 0 12px 30px rgba(0, 0, 0, 0.10);
+    --baizer-soft-shadow: 0 8px 22px rgba(0, 0, 0, 0.06);
     --baizer-radius-l: 8px;
     --baizer-radius-m: 8px;
     --baizer-radius-s: 6px;
@@ -1882,7 +1897,7 @@ textarea.shell-input::placeholder {
 .shell-knowledge-status-badge.is-stale,
 .shell-knowledge-status-badge.is-pending,
 .shell-knowledge-status-badge.is-processing {
-    color: #8b5e00;
+    color: color-mix(in srgb, var(--color-yellow) 62%, var(--text-normal));
     background: color-mix(in srgb, var(--color-yellow) 16%, transparent);
     border: 1px solid color-mix(in srgb, var(--color-yellow) 26%, transparent);
 }
@@ -1974,14 +1989,8 @@ textarea.shell-input::placeholder {
     color: var(--text-normal);
 }
 
-.shell-entry.ai {
-    margin: 0;
-    padding: 10px 12px;
-    border: 1px solid var(--baizer-border);
-    border-radius: 15px 15px 15px 6px;
-    background: var(--baizer-surface);
-    box-shadow: var(--baizer-soft-shadow);
-}
+/* 注:.shell-entry.ai 的气泡样式统一由下方 `.baizer-shell-view .shell-entry.ai`
+   scoped 规则接管(无边框/透明底)。此处第二代气泡块已删,避免特异性冲突。 */
 
 .shell-entry.system {
     align-self: center;
@@ -2034,14 +2043,8 @@ textarea.shell-input::placeholder {
     min-width: 0;
 }
 
-.shell-input-container {
-    gap: 6px;
-    padding: 8px;
-    border: 1px solid var(--baizer-border);
-    border-radius: var(--baizer-radius-l);
-    background: var(--baizer-surface);
-    box-shadow: var(--baizer-shadow);
-}
+/* 注:.shell-input-container 基础样式由下方 `.baizer-shell-view .shell-input-container`
+   scoped 规则接管(padding/gap 归零 + 圆角 10px)。此处第二代块已删。 */
 
 .shell-input-top-actions {
     position: absolute;
@@ -2324,7 +2327,7 @@ textarea.shell-input {
     border-radius: var(--baizer-radius-m);
     display: grid;
     place-items: center;
-    color: #8b5e00;
+    color: color-mix(in srgb, var(--color-yellow) 62%, var(--text-normal));
     background: color-mix(in srgb, var(--color-yellow) 18%, transparent);
     font-weight: 800;
 }
@@ -3013,7 +3016,7 @@ textarea.shell-input {
 }
 
 .baizer-settings-badge.is-warning {
-    color: #8b5e00;
+    color: color-mix(in srgb, var(--color-yellow) 62%, var(--text-normal));
     background: color-mix(in srgb, var(--color-yellow) 18%, transparent);
 }
 
@@ -3089,7 +3092,7 @@ textarea.shell-input {
 }
 
 .baizer-settings-inline-note.is-warning {
-    color: #8b5e00;
+    color: color-mix(in srgb, var(--color-yellow) 62%, var(--text-normal));
     background: color-mix(in srgb, var(--color-yellow) 16%, transparent);
 }
 
@@ -3259,7 +3262,7 @@ textarea.shell-input {
 
 .baizer-settings-provider-card-icon.is-warning {
     background: color-mix(in srgb, var(--color-yellow) 16%, transparent);
-    color: #a87600;
+    color: color-mix(in srgb, var(--color-yellow) 62%, var(--text-normal));
 }
 
 .baizer-settings-provider-card-meta {
@@ -3403,28 +3406,8 @@ textarea.shell-input {
     }
 }
 
-@media (max-width: 1280px) {
-    .baizer-settings-nav-list {
-        overflow-x: auto;
-        flex-wrap: nowrap;
-        padding-bottom: 4px;
-    }
-
-    .baizer-settings-nav-item {
-        min-width: 164px;
-    }
-}
-
-@media (max-width: 840px) {
-    .baizer-settings-detail-row {
-        grid-template-columns: 1fr;
-        gap: 10px;
-    }
-
-    .baizer-settings-detail-label {
-        padding-top: 0;
-    }
-}
+/* 注:上方 @container(1280/840) 已覆盖设置页响应式。原 @media 兜底版为逐字重复,
+   Obsidian(Chromium 105+)支持容器查询,故删除冗余 media 版。 */
 
 /* ==========================================================================
    Baizer - Chat-first Sidebar Polish
@@ -4047,35 +4030,7 @@ textarea.shell-input {
     }
 }
 
-@media (max-width: 560px) {
-    .baizer-settings-hero {
-        grid-template-columns: 1fr;
-        grid-template-areas: "title" "subtitle" "search";
-    }
-
-    .baizer-settings-section-summary,
-    .baizer-settings-provider-card-main,
-    .baizer-settings-connection-detail-grid,
-    .baizer-settings-detail-row,
-    .baizer-settings-preset-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .baizer-settings-section-copy {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 2px;
-    }
-
-    .baizer-settings-section-meta {
-        justify-content: flex-start;
-    }
-
-    .baizer-settings-section-description,
-    .baizer-settings-subtitle {
-        white-space: normal;
-    }
-}
+/* 注:上方 @container(560) 已覆盖此断点的设置页栅格塌陷。原 @media 版逐字重复,已删。 */
 
 /* ===== File Attachment Modal ===== */
 .baizer-attachment-modal .baizer-attachment-hint {
