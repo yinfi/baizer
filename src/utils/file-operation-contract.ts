@@ -46,6 +46,27 @@ const FILE_TARGET_TERMS = [
   '\u5de5\u4f5c\u533a',
 ];
 
+// 记忆/规则/偏好类信号:命中则不判为写文件请求。
+// 用户在「陈述以后的规则」(如「记住:以后创建文件时放到 X 目录」),而非「现在要写一个文件」。
+// 这类指令记忆若被误判为写请求,会注入写契约 → 模型正确地不写文件 → 系统误报「No file was created」。
+const MEMORY_DIRECTIVE_TERMS = [
+  '记住',
+  '以后',
+  '今后',
+  '总是',
+  '每次',
+  '默认',
+  '习惯',
+  '规则',
+  '偏好',
+  'remember',
+  'from now on',
+  'always ',
+  'never ',
+  'by default',
+  'as a rule',
+];
+
 // 疑问/分析类信号:命中则不判为写文件请求(用户在「讨论/询问文件」,而非「要求写文件」)。
 // 修掉「文件…被修改的原因是什么」这类被误判为写操作、进而误报「No file was created」的坑。
 const INTERROGATIVE_TERMS = [
@@ -79,6 +100,9 @@ export function isFileWriteRequest(message: string): boolean {
   // 关键词共现太粗:疑问/分析类句子(如"文件被修改的原因是什么")不是写请求,排除掉,
   // 避免误注入文件写入契约 + 误报「No file was created」。
   if (INTERROGATIVE_TERMS.some(term => normalized.includes(term))) return false;
+  // 记忆/规则/偏好类陈述(如"记住:以后创建文件时放到 X 目录")是在定规则,不是现在要写文件。
+  // 命中记忆语气则不判为写请求,避免注入写契约后模型不写文件、系统误报「No file was created」。
+  if (MEMORY_DIRECTIVE_TERMS.some(term => normalized.includes(term))) return false;
   return true;
 }
 

@@ -51,6 +51,16 @@ async function runTests() {
     expect(isFileWriteRequest('更新当前笔记')).toBe(true);
   });
 
+  await test('does not flag memory/rule statements that merely mention creating files', () => {
+    // 修:记忆/规则陈述被误判为写请求 → 注入写契约 → 模型不写文件 → 误报「No file was created」。
+    expect(isFileWriteRequest('记住：以后不要随便创建一级目录，创建文件时根据情况自动分类')).toBe(false);
+    expect(isFileWriteRequest('以后新建笔记默认放到 study 目录')).toBe(false);
+    expect(isFileWriteRequest('总是把收集的资料保存到 Assets 文件夹')).toBe(false);
+    expect(isFileWriteRequest('Remember to always save notes into the work folder')).toBe(false);
+    // 真·当次写请求仍应命中(无记忆语气)。
+    expect(isFileWriteRequest('帮我创建一个笔记文件')).toBe(true);
+  });
+
   await test('classifies write tools consistently', () => {
     expect(isFileWriteToolName('create_file')).toBe(true);
     expect(isFileWriteToolName('update_note')).toBe(true);
