@@ -138,7 +138,11 @@ function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
         const btn = document.createElement('button');
         btn.className = 'guardian-selection-btn';
         btn.type = 'button';
-        btn.textContent = state.mode === 'selection' ? 'AI' : '@ AI';
+        // ✨ sparkle 图标 = AI 操作的业界通用符号(Notion/Cursor/Gemini),
+        // 取代旧的纯文字「AI」/「@ AI」(@ 与「文件提及」语义冲突,且灰块难辨识)。
+        setIcon(btn, 'sparkles');
+        btn.createSpan({ cls: 'guardian-selection-btn-label', text: 'AI' });
+        btn.setAttribute('aria-label', state.mode === 'selection' ? 'Ask AI about selection' : 'Ask AI to insert here');
         btn.title = state.mode === 'selection' ? 'Ask AI about selection' : 'Ask AI to insert here';
         btn.onclick = (event) => {
             event.preventDefault();
