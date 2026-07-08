@@ -1,7 +1,8 @@
-import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, TextComponent } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, TextComponent, debounce, Debouncer } from 'obsidian';
 import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 import { OntologyUpdateMode } from './knowledge/types';
+import { t } from './i18n/zh';
 
 export type SettingsSectionId =
     | 'overview'
@@ -208,7 +209,7 @@ export function getSettingsFallbackCss(): string {
     font-weight: var(--font-medium);
     white-space: nowrap;
 }
-.baizer-settings-badge.is-warning { color: #8b5e00; background: color-mix(in srgb, var(--color-yellow) 18%, transparent); }
+.baizer-settings-badge.is-warning { color: var(--text-warning); background: color-mix(in srgb, var(--color-yellow) 18%, transparent); }
 .baizer-settings-badge.is-danger { color: var(--text-error); background: color-mix(in srgb, var(--text-error) 12%, transparent); }
 .baizer-settings-badge.is-muted { color: var(--text-muted); background: color-mix(in srgb, var(--background-modifier-border) 65%, transparent); }
 .baizer-settings-badge.is-accent { color: var(--text-accent); background: color-mix(in srgb, var(--interactive-accent) 14%, transparent); }
@@ -364,7 +365,7 @@ export function getSettingsFallbackCss(): string {
 .baizer-settings-advanced summary { padding: 8px 10px; cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-small); font-weight: var(--font-semibold); }
 .baizer-settings-advanced-body { padding: 0 10px 10px; }
 .baizer-settings-inline-note { padding: 10px 12px; border-radius: 8px; font-size: var(--font-ui-small); }
-.baizer-settings-inline-note.is-warning { color: #8b5e00; background: color-mix(in srgb, var(--color-yellow) 16%, transparent); }
+.baizer-settings-inline-note.is-warning { color: var(--text-warning); background: color-mix(in srgb, var(--color-yellow) 16%, transparent); }
 .baizer-settings-inline-note.is-success { color: var(--color-green); background: color-mix(in srgb, var(--color-green) 10%, transparent); }
 .baizer-settings-inline-note.is-danger { color: var(--text-error); background: color-mix(in srgb, var(--text-error) 12%, transparent); }
 .baizer-settings-inline-note.is-accent { color: var(--text-accent); background: color-mix(in srgb, var(--interactive-accent) 10%, transparent); }
@@ -426,17 +427,17 @@ function ensureSettingsFallbackStyles(): void {
 }
 
 const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
-    { id: 'overview', title: 'Overview', description: 'Configuration health and actions that need attention.', keywords: ['overview', 'health', 'risk', 'status'] },
-    { id: 'connection', title: 'Connection', description: 'Provider, API key, endpoint, model, and connection tests.', keywords: ['provider', 'api key', 'base url', 'model', 'connection', 'openai', 'gemini', 'deepseek', 'qwen'] },
-    { id: 'behavior', title: 'Behavior', description: 'Context budget, system prompt, and runtime behavior.', keywords: ['behavior', 'runtime', 'context window', 'token', 'system prompt', 'persona', 'prompt', 'thinking', 'reasoning'] },
-    { id: 'memory', title: 'Memory', description: 'Memory retention, recall, search, and deletion.', keywords: ['memory', 'hindsight', 'recall', 'forget', 'profile', 'privacy', 'observation'] },
-    { id: 'permissions', title: 'Permissions', description: 'Vault write scope, file operations, plugin control, and confirmations.', keywords: ['permissions', 'file creation', 'file modification', 'plugin control', 'confirm'] },
-    { id: 'skills', title: 'Skills', description: 'Enable or disable individual skills (availability, separate from permissions).', keywords: ['skills', 'skill', 'enable', 'disable', 'workflow', 'available'] },
-    { id: 'capture', title: 'Capture', description: 'Inbox, clipping storage, WeChat import, and URL capture.', keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper'] },
-    { id: 'knowledge', title: 'Knowledge', description: 'Source folders, output folder, compile state, and ontology.', keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema'] },
-    { id: 'guardian', title: 'Guardian', description: 'Inline writing assistance, trigger mode, and ignored folders.', keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity'] },
-    { id: 'appearance', title: 'Appearance', description: 'Workbench theme, font size, and opacity.', keywords: ['appearance', 'theme', 'font', 'opacity', 'terminal', 'workbench'] },
-    { id: 'plugin-skills', title: 'Plugin Skills', description: 'Skill generation, excluded plugins, and startup scanning.', keywords: ['plugin', 'skills', 'generator', 'exclude', 'startup'] },
+    { id: 'overview', title: t('Overview'), description: t('Configuration health and actions that need attention.'), keywords: ['overview', 'health', 'risk', 'status', '概览'] },
+    { id: 'connection', title: t('Connection'), description: t('Provider, API key, endpoint, model, and connection tests.'), keywords: ['provider', 'api key', 'base url', 'model', 'connection', 'openai', 'gemini', 'deepseek', 'qwen', '连接', '服务商'] },
+    { id: 'behavior', title: t('Behavior'), description: t('Context budget, system prompt, and runtime behavior.'), keywords: ['behavior', 'runtime', 'context window', 'token', 'system prompt', 'persona', 'prompt', 'thinking', 'reasoning', '行为'] },
+    { id: 'memory', title: t('Memory'), description: t('Memory retention, recall, search, and deletion.'), keywords: ['memory', 'hindsight', 'recall', 'forget', 'profile', 'privacy', 'observation', '记忆'] },
+    { id: 'permissions', title: t('Permissions'), description: t('Vault write scope, file operations, plugin control, and confirmations.'), keywords: ['permissions', 'file creation', 'file modification', 'plugin control', 'confirm', '权限'] },
+    { id: 'skills', title: t('Skills'), description: t('Enable or disable individual skills (availability, separate from permissions).'), keywords: ['skills', 'skill', 'enable', 'disable', 'workflow', 'available', '技能'] },
+    { id: 'capture', title: t('Capture'), description: t('Inbox, clipping storage, WeChat import, and URL capture.'), keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper', '采集', '微信'] },
+    { id: 'knowledge', title: t('Knowledge'), description: t('Source folders, output folder, compile state, and ontology.'), keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema', '知识'] },
+    { id: 'guardian', title: t('Guardian'), description: t('Inline writing assistance, trigger mode, and ignored folders.'), keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity'] },
+    { id: 'appearance', title: t('Appearance'), description: t('Workbench theme, font size, and opacity.'), keywords: ['appearance', 'theme', 'font', 'opacity', 'terminal', 'workbench', '外观'] },
+    { id: 'plugin-skills', title: t('Plugin Skills'), description: t('Skill generation, excluded plugins, and startup scanning.'), keywords: ['plugin', 'skills', 'generator', 'exclude', 'startup', '插件'] },
 ];
 
 function normalizeSearchQuery(query: string): string {
@@ -629,6 +630,12 @@ export class SettingTab extends PluginSettingTab {
     private memoryActiveTab: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = 'overview';
     private memoryLoading = false;
     private memoryError = '';
+    // textarea 逐击键写盘代价高：包一层 400ms debounce，末尾触发一次落盘。
+    private debouncedPersist: Debouncer<[], Promise<void>> = debounce(
+        () => this.persistSettings(),
+        400,
+        false,
+    );
 
     constructor(app: App, plugin: IPlugin) {
         super(app, plugin);
@@ -699,6 +706,12 @@ export class SettingTab extends PluginSettingTab {
         }
     }
 
+    hide(): void {
+        // 面板关闭时立即落盘 debounce 里未触发的最后一次 textarea 编辑，避免丢改。
+        this.debouncedPersist.run();
+        super.hide();
+    }
+
     display(): void {
         const token = ++this.renderToken;
         const { containerEl } = this;
@@ -716,7 +729,7 @@ export class SettingTab extends PluginSettingTab {
         const hero = containerEl.createDiv({ cls: 'baizer-settings-hero' });
         hero.createEl('h2', { text: `${PLUGIN_NAME} Configuration`, cls: 'baizer-settings-title' });
         hero.createEl('p', {
-            text: 'A cleaner control center for provider setup, runtime behavior, and plugin capabilities.',
+            text: t('A cleaner control center for provider setup, runtime behavior, and plugin capabilities.'),
             cls: 'baizer-settings-subtitle',
         });
 
@@ -725,8 +738,8 @@ export class SettingTab extends PluginSettingTab {
             cls: 'baizer-settings-search',
             attr: {
                 type: 'search',
-                placeholder: 'Search settings',
-                'aria-label': 'Search settings',
+                placeholder: t('Search settings'),
+                'aria-label': t('Search settings'),
             },
         }) as HTMLInputElement;
         searchInput.value = this.searchQuery;
@@ -739,8 +752,8 @@ export class SettingTab extends PluginSettingTab {
     private renderMain(containerEl: HTMLElement, visibleSections: SettingsSectionId[], token: number): void {
         if (!visibleSections.length) {
             const empty = containerEl.createDiv({ cls: 'baizer-settings-empty-state' });
-            empty.createEl('h3', { text: 'No matching settings' });
-            empty.createEl('p', { text: 'Try searching by provider, prompt, permissions, or knowledge.' });
+            empty.createEl('h3', { text: t('No matching settings') });
+            empty.createEl('p', { text: t('Try searching by provider, prompt, permissions, or knowledge.') });
             return;
         }
 
@@ -820,7 +833,7 @@ export class SettingTab extends PluginSettingTab {
     private renderOverviewSection(containerEl: HTMLElement): void {
         const actions = getSettingsOverviewActions(this.plugin.settings);
         if (!actions.length) {
-            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-success', text: 'No immediate configuration actions.' });
+            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-success', text: t('No immediate configuration actions.') });
             return;
         }
 
@@ -845,8 +858,8 @@ export class SettingTab extends PluginSettingTab {
     private renderMemorySection(containerEl: HTMLElement): void {
         const toolbar = containerEl.createDiv({ cls: 'baizer-memory-toolbar' });
         new Setting(toolbar)
-            .setName('Privacy Mode')
-            .setDesc('When enabled, new conversation turns are not retained as Hindsight memory.')
+            .setName(t('Privacy Mode'))
+            .setDesc(t('When enabled, new conversation turns are not retained as Hindsight memory.'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.privacyMode)
                 .onChange(async (value: boolean) => {
@@ -864,7 +877,7 @@ export class SettingTab extends PluginSettingTab {
         });
 
         const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
-        this.createActionButton(actions, this.memoryLoading ? 'Refreshing...' : 'Refresh', async () => {
+        this.createActionButton(actions, this.memoryLoading ? t('Refreshing...') : t('Refresh'), async () => {
             await this.refreshMemoryView();
         }, 'default', this.memoryLoading);
 
@@ -882,7 +895,7 @@ export class SettingTab extends PluginSettingTab {
         mode: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = this.memoryActiveTab
     ): Promise<void> {
         if (typeof this.plugin.modelService?.getMemoryView !== 'function') {
-            this.memoryError = 'Memory service is not available.';
+            this.memoryError = t('Memory service is not available.');
             this.display();
             return;
         }
@@ -897,7 +910,7 @@ export class SettingTab extends PluginSettingTab {
                 limit: 25,
             });
         } catch (error: any) {
-            this.memoryError = error?.message || 'Failed to load memory.';
+            this.memoryError = error?.message || t('Failed to load memory.');
         } finally {
             this.memoryLoading = false;
             this.display();
@@ -921,13 +934,13 @@ export class SettingTab extends PluginSettingTab {
         const row = containerEl.createDiv({ cls: 'baizer-memory-search' });
         const input = row.createEl('input', {
             cls: 'baizer-settings-search',
-            attr: { type: 'search', placeholder: 'Search memories' },
+            attr: { type: 'search', placeholder: t('Search memories') },
         }) as HTMLInputElement;
         input.value = this.memorySearchQuery;
         input.addEventListener('input', () => {
             this.memorySearchQuery = input.value;
         });
-        this.createActionButton(row, 'Search', async () => {
+        this.createActionButton(row, t('Search'), async () => {
             this.memoryActiveTab = 'search';
             await this.refreshMemoryView('search');
         }, 'accent', !this.memorySearchQuery.trim());
@@ -936,11 +949,11 @@ export class SettingTab extends PluginSettingTab {
     private renderMemoryTabs(containerEl: HTMLElement): void {
         const tabs = containerEl.createDiv({ cls: 'baizer-memory-tabs' });
         const entries: Array<[typeof this.memoryActiveTab, string]> = [
-            ['overview', 'Overview'],
-            ['observations', 'Observations'],
-            ['facts', 'Facts'],
-            ['recent', 'Recent'],
-            ['search', 'Search Results'],
+            ['overview', t('Overview')],
+            ['observations', t('Observations')],
+            ['facts', t('Facts')],
+            ['recent', t('Recent')],
+            ['search', t('Search Results')],
         ];
         for (const [id, label] of entries) {
             const button = tabs.createEl('button', {
@@ -966,7 +979,7 @@ export class SettingTab extends PluginSettingTab {
         if (records.length === 0) {
             list.createDiv({
                 cls: 'baizer-settings-empty-state',
-                text: this.memoryLoading ? 'Loading memory...' : 'No memories to show.',
+                text: this.memoryLoading ? t('Loading memory...') : t('No memories to show.'),
             });
             return;
         }
@@ -975,13 +988,13 @@ export class SettingTab extends PluginSettingTab {
             const row = list.createDiv({ cls: 'baizer-memory-row' });
             const meta = row.createDiv({ cls: 'baizer-memory-row-meta' });
             meta.createSpan({ cls: `baizer-memory-type is-${record.type}`, text: record.type });
-            meta.createSpan({ text: `confidence ${Number(record.confidence || 0).toFixed(2)}` });
-            meta.createSpan({ text: `updated ${new Date(record.updatedAt || record.mentionedAt).toLocaleString()}` });
+            meta.createSpan({ text: `${t('confidence')} ${Number(record.confidence || 0).toFixed(2)}` });
+            meta.createSpan({ text: `${t('updated')} ${new Date(record.updatedAt || record.mentionedAt).toLocaleString('zh-CN')}` });
             row.createDiv({ cls: 'baizer-memory-row-text', text: this.truncateSettingMemoryText(record.text || '', 260) });
             if (record.tags?.length) {
-                row.createDiv({ cls: 'baizer-memory-row-tags', text: `tags: ${record.tags.join(', ')}` });
+                row.createDiv({ cls: 'baizer-memory-row-tags', text: `${t('tags')}: ${record.tags.join(', ')}` });
             }
-            this.createActionButton(row, 'Delete', async () => {
+            this.createActionButton(row, t('Delete'), async () => {
                 this.confirmDeleteMemoryRecord(record.id);
             }, 'danger');
         }
@@ -990,9 +1003,9 @@ export class SettingTab extends PluginSettingTab {
     private renderMemoryDangerZone(containerEl: HTMLElement): void {
         const zone = containerEl.createDiv({ cls: 'baizer-memory-danger' });
         const copy = zone.createDiv({ cls: 'baizer-memory-danger-copy' });
-        copy.createDiv({ cls: 'baizer-settings-panel-title', text: 'Danger Zone' });
-        copy.createDiv({ cls: 'baizer-settings-inline-hint', text: 'Clear all remembered Hindsight memory.' });
-        this.createActionButton(zone, 'Clear Memory', async () => {
+        copy.createDiv({ cls: 'baizer-settings-panel-title', text: t('Danger Zone') });
+        copy.createDiv({ cls: 'baizer-settings-inline-hint', text: t('Clear all remembered Hindsight memory.') });
+        this.createActionButton(zone, t('Clear Memory'), async () => {
             this.confirmClearAllMemory();
         }, 'danger');
     }
@@ -1005,8 +1018,8 @@ export class SettingTab extends PluginSettingTab {
     private confirmDeleteMemoryRecord(id: string): void {
         new MemoryConfirmModal(
             this.app,
-            'Delete Memory',
-            'Delete this remembered Hindsight memory record?',
+            t('Delete Memory'),
+            t('Delete this remembered Hindsight memory record?'),
             async () => {
                 await this.deleteMemoryRecord(id);
             },
@@ -1016,8 +1029,8 @@ export class SettingTab extends PluginSettingTab {
     private confirmClearAllMemory(): void {
         new MemoryConfirmModal(
             this.app,
-            'Clear Memory',
-            'Clear all remembered Hindsight memory and legacy profile fields?',
+            t('Clear Memory'),
+            t('Clear all remembered Hindsight memory and legacy profile fields?'),
             async () => {
                 await this.clearAllMemory();
             },
@@ -1026,23 +1039,23 @@ export class SettingTab extends PluginSettingTab {
 
     private async deleteMemoryRecord(id: string): Promise<void> {
         if (typeof this.plugin.modelService?.deleteMemoryById !== 'function') {
-            new Notice('Memory deletion is not available.');
+            new Notice(t('Memory deletion is not available.'));
             return;
         }
 
         const result = await this.plugin.modelService.deleteMemoryById(id);
-        new Notice(result?.message || `Deleted memory: ${id}`);
+        new Notice(result?.message || `${t('Deleted memory')}: ${id}`);
         await this.refreshMemoryView();
     }
 
     private async clearAllMemory(): Promise<void> {
         if (typeof this.plugin.modelService?.forgetMemory !== 'function') {
-            new Notice('Memory clearing is not available.');
+            new Notice(t('Memory clearing is not available.'));
             return;
         }
 
         const result = await this.plugin.modelService.forgetMemory('all');
-        new Notice(result?.message || 'Cleared all remembered Hindsight memory.');
+        new Notice(result?.message || t('Cleared all remembered Hindsight memory.'));
         await this.refreshMemoryView();
     }
 
@@ -1051,14 +1064,14 @@ export class SettingTab extends PluginSettingTab {
         const activeConfig = this.getActiveConfig();
 
         if (!activeConfig) {
-            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-warning', text: 'No active provider found.' });
+            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-warning', text: t('No active provider found.') });
             return;
         }
 
         const shell = containerEl.createDiv({ cls: 'baizer-settings-provider-shell' });
         const toolbar = shell.createDiv({ cls: 'baizer-settings-provider-toolbar' });
-        toolbar.createDiv({ cls: 'baizer-settings-panel-title', text: 'Providers' });
-        this.createActionButton(toolbar, '+ Add', async () => {
+        toolbar.createDiv({ cls: 'baizer-settings-panel-title', text: t('Providers') });
+        this.createActionButton(toolbar, t('+ Add'), async () => {
             new AddProviderModal(this.app, async (label, baseUrl) => {
                 const key = `custom-${Date.now()}`;
                 settings.providers[key] = {
@@ -1122,12 +1135,12 @@ export class SettingTab extends PluginSettingTab {
         const grid = detail.createDiv({ cls: 'baizer-settings-connection-detail-grid' });
         const basic = grid.createDiv({ cls: 'baizer-settings-connection-card' });
         basic.createDiv({ cls: 'baizer-settings-connection-card-header' })
-            .createEl('h4', { text: 'Basic', cls: 'baizer-settings-connection-card-title' });
+            .createEl('h4', { text: t('Basic'), cls: 'baizer-settings-connection-card-title' });
 
-        this.renderConnectionField(basic, 'Provider Name', (valueEl) => {
+        this.renderConnectionField(basic, t('Provider Name'), (valueEl) => {
             const input = valueEl.createEl('input', {
                 cls: 'baizer-settings-detail-input',
-                attr: { type: 'text', value: activeConfig.label, 'aria-label': 'Provider name' },
+                attr: { type: 'text', value: activeConfig.label, 'aria-label': t('Provider name') },
             }) as HTMLInputElement;
             input.addEventListener('change', async () => {
                 activeConfig.label = input.value.trim() || activeConfig.label;
@@ -1137,13 +1150,13 @@ export class SettingTab extends PluginSettingTab {
             });
         });
 
-        this.renderConnectionField(basic, 'Protocol', (valueEl) => {
+        this.renderConnectionField(basic, t('Protocol'), (valueEl) => {
             const select = valueEl.createEl('select', {
                 cls: 'baizer-settings-detail-input',
-                attr: { 'aria-label': 'Provider protocol' },
+                attr: { 'aria-label': t('Provider protocol') },
             }) as HTMLSelectElement;
-            select.createEl('option', { value: 'gemini', text: 'Gemini API' });
-            select.createEl('option', { value: 'openai-compatible', text: 'OpenAI-compatible' });
+            select.createEl('option', { value: 'gemini', text: t('Gemini API') });
+            select.createEl('option', { value: 'openai-compatible', text: t('OpenAI-compatible') });
             select.value = activeConfig.type;
             select.addEventListener('change', async () => {
                 activeConfig.type = select.value as ProviderConfig['type'];
@@ -1156,15 +1169,15 @@ export class SettingTab extends PluginSettingTab {
             });
         });
 
-        this.renderConnectionField(basic, 'Model', (valueEl) => {
+        this.renderConnectionField(basic, t('Model'), (valueEl) => {
             const select = valueEl.createEl('select', {
                 cls: 'baizer-settings-detail-input',
-                attr: { 'aria-label': 'Model' },
+                attr: { 'aria-label': t('Model') },
             }) as HTMLSelectElement;
             if (activeConfig.model) {
                 select.createEl('option', { value: activeConfig.model, text: activeConfig.model });
             } else {
-                select.createEl('option', { value: '__empty__', text: 'Select a model' });
+                select.createEl('option', { value: '__empty__', text: t('Select a model') });
             }
             this.loadDynamicModelSelect(select, token).catch(() => undefined);
             select.value = activeConfig.model || '__empty__';
@@ -1180,17 +1193,17 @@ export class SettingTab extends PluginSettingTab {
 
         const credentials = grid.createDiv({ cls: 'baizer-settings-connection-card' });
         credentials.createDiv({ cls: 'baizer-settings-connection-card-header' })
-            .createEl('h4', { text: 'Credentials', cls: 'baizer-settings-connection-card-title' });
+            .createEl('h4', { text: t('Credentials'), cls: 'baizer-settings-connection-card-title' });
 
-        this.renderConnectionField(credentials, 'API Endpoint', (valueEl) => {
+        this.renderConnectionField(credentials, t('API Endpoint'), (valueEl) => {
             const supportsCustomBaseUrl = this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl;
             const input = valueEl.createEl('input', {
                 cls: 'baizer-settings-detail-input',
                 attr: {
                     type: 'text',
                     placeholder: 'https://api.openai.com/v1',
-                    value: supportsCustomBaseUrl ? activeConfig.baseUrl : (activeConfig.baseUrl || 'Default Gemini endpoint'),
-                    'aria-label': 'API endpoint',
+                    value: supportsCustomBaseUrl ? activeConfig.baseUrl : (activeConfig.baseUrl || t('Default Gemini endpoint')),
+                    'aria-label': t('API endpoint'),
                     disabled: supportsCustomBaseUrl ? undefined : 'true',
                 },
             }) as HTMLInputElement;
@@ -1201,7 +1214,7 @@ export class SettingTab extends PluginSettingTab {
             });
         });
 
-        this.renderConnectionField(credentials, 'API Key', (valueEl) => {
+        this.renderConnectionField(credentials, t('API Key'), (valueEl) => {
             const keyRow = valueEl.createDiv({ cls: 'baizer-settings-detail-secret' });
             const input = keyRow.createEl('input', {
                 cls: 'baizer-settings-detail-input',
@@ -1211,7 +1224,7 @@ export class SettingTab extends PluginSettingTab {
                     value: activeConfig.apiKey,
                     autocomplete: 'off',
                     spellcheck: 'false',
-                    'aria-label': 'API key',
+                    'aria-label': t('API key'),
                 },
             }) as HTMLInputElement;
             input.addEventListener('change', async () => {
@@ -1221,12 +1234,12 @@ export class SettingTab extends PluginSettingTab {
             });
 
             const secretActions = keyRow.createDiv({ cls: 'baizer-settings-detail-secret-actions' });
-            this.createActionButton(secretActions, this.revealApiKey ? 'Hide' : 'Reveal', async () => {
+            this.createActionButton(secretActions, this.revealApiKey ? t('Hide') : t('Reveal'), async () => {
                 this.revealApiKey = !this.revealApiKey;
                 this.openSectionIds.add('connection');
                 this.display();
             });
-            this.createActionButton(secretActions, 'Clear', async () => {
+            this.createActionButton(secretActions, t('Clear'), async () => {
                 activeConfig.apiKey = '';
                 this.revealApiKey = false;
                 this.resetConnectionTestStatus();
@@ -1236,28 +1249,28 @@ export class SettingTab extends PluginSettingTab {
             }, 'danger');
         });
 
-        this.renderConnectionField(credentials, 'Test', (valueEl) => {
+        this.renderConnectionField(credentials, t('Test'), (valueEl) => {
             const actions = valueEl.createDiv({ cls: 'baizer-settings-actions' });
-            this.createActionButton(actions, this.connectionTestStatus.state === 'testing' ? 'Testing...' : 'Run test', async () => {
+            this.createActionButton(actions, this.connectionTestStatus.state === 'testing' ? t('Testing...') : t('Run test'), async () => {
                 const label = activeConfig.label || 'AI provider';
                 if (!activeConfig.apiKey.trim()) {
-                    this.connectionTestStatus = { state: 'error', message: `No API key configured for ${label}.` };
+                    this.connectionTestStatus = { state: 'error', message: `${label}${t(': no API key configured.')}` };
                     this.openSectionIds.add('connection');
                     this.display();
                     return;
                 }
 
                 try {
-                    this.connectionTestStatus = { state: 'testing', message: `Testing connection to ${label}...` };
+                    this.connectionTestStatus = { state: 'testing', message: `${t('Testing connection to')} ${label}...` };
                     this.openSectionIds.add('connection');
                     this.display();
                     await this.plugin.modelService.updateSettings(this.plugin.settings);
                     const success = await this.plugin.modelService.checkAvailability();
                     this.connectionTestStatus = success
-                        ? { state: 'success', message: `Connection successful for ${label}.` }
-                        : { state: 'error', message: 'Connection failed. Check API key, base URL, and model.' };
+                        ? { state: 'success', message: `${label}${t(': connection successful.')}` }
+                        : { state: 'error', message: t('Connection failed. Check API key, base URL, and model.') };
                 } catch (error: any) {
-                    this.connectionTestStatus = { state: 'error', message: `Connection failed: ${error.message}` };
+                    this.connectionTestStatus = { state: 'error', message: `${t('Connection failed')}: ${error.message}` };
                 }
 
                 this.openSectionIds.add('connection');
@@ -1265,27 +1278,44 @@ export class SettingTab extends PluginSettingTab {
             }, 'primary', this.connectionTestStatus.state === 'testing');
 
             const deletion = getProviderDeletionState(settings);
-            this.createActionButton(actions, deletion.label, async () => {
+            // T16: 删除是破坏性操作，从 Run test 旁挤开——推到行尾并靠视觉分隔线归入独立 Danger Zone。
+            // 只改 settings.ts，故用内联样式实现隔离，不依赖 styles.css。
+            const dangerZone = valueEl.createDiv({ cls: 'baizer-settings-danger-zone' });
+            dangerZone.style.marginLeft = 'auto';
+            dangerZone.style.marginTop = 'var(--size-4-2)';
+            dangerZone.style.paddingTop = 'var(--size-4-2)';
+            dangerZone.style.borderTop = '1px solid var(--background-modifier-border)';
+            const deleteBtn = this.createActionButton(dangerZone, t(deletion.label), () => {
                 if (!deletion.canDelete) return;
-                const deletedProviderId = settings.activeProvider;
-                delete settings.providers[deletedProviderId];
-                if (BUILTIN_PROVIDER_KEYS.includes(deletedProviderId)) {
-                    settings.deletedProviderIds = Array.from(new Set([...(settings.deletedProviderIds || []), deletedProviderId]));
-                }
-                settings.activeProvider = settings.providers.gemini ? 'gemini' : Object.keys(settings.providers)[0];
-                this.revealApiKey = false;
-                this.resetConnectionTestStatus();
-                this.openSectionIds.add('connection');
-                await this.persistSettings();
-                new Notice('Provider deleted');
-                this.display();
+                // T12: 删除 Provider 前用 MemoryConfirmModal 二次确认，避免误触即毁配置。
+                const targetLabel = settings.providers[settings.activeProvider]?.label || settings.activeProvider;
+                new MemoryConfirmModal(
+                    this.app,
+                    t('Delete Provider'),
+                    `${t('Delete provider')} "${targetLabel}"? ${t('This removes its configuration from this workspace.')}`,
+                    async () => {
+                        const deletedProviderId = settings.activeProvider;
+                        delete settings.providers[deletedProviderId];
+                        if (BUILTIN_PROVIDER_KEYS.includes(deletedProviderId)) {
+                            settings.deletedProviderIds = Array.from(new Set([...(settings.deletedProviderIds || []), deletedProviderId]));
+                        }
+                        settings.activeProvider = settings.providers.gemini ? 'gemini' : Object.keys(settings.providers)[0];
+                        this.revealApiKey = false;
+                        this.resetConnectionTestStatus();
+                        this.openSectionIds.add('connection');
+                        await this.persistSettings();
+                        new Notice(t('Provider deleted'));
+                        this.display();
+                    },
+                ).open();
             }, 'danger', !deletion.canDelete);
+            deleteBtn.addClass('baizer-settings-danger-action');
 
             const status = getConnectionTestStatusPresentation(this.connectionTestStatus);
             if (status) {
                 valueEl.createDiv({ cls: `baizer-settings-inline-note is-${status.tone}`, text: status.label });
             }
-            valueEl.createDiv({ cls: 'baizer-settings-inline-hint', text: getProviderDeletionState(settings).helperText });
+            valueEl.createDiv({ cls: 'baizer-settings-inline-hint', text: t(getProviderDeletionState(settings).helperText) });
         });
     }
 
@@ -1305,7 +1335,7 @@ export class SettingTab extends PluginSettingTab {
         const currentModel = config?.model || '';
 
         select.innerHTML = '';
-        select.createEl('option', { value: '__loading__', text: 'Loading models...' });
+        select.createEl('option', { value: '__loading__', text: t('Loading models...') });
         select.value = '__loading__';
         select.disabled = true;
 
@@ -1316,12 +1346,12 @@ export class SettingTab extends PluginSettingTab {
             select.innerHTML = '';
             const options: ModelOption[] = models.length > 0
                 ? models
-                : [{ value: currentModel, label: `${currentModel} (Current)` }];
+                : [{ value: currentModel, label: `${currentModel} (${t('Current')})` }];
 
             options.forEach(option => select.createEl('option', { value: option.value, text: option.label }));
 
             if (currentModel && !options.some(option => option.value === currentModel)) {
-                select.createEl('option', { value: currentModel, text: `${currentModel} (Current)` });
+                select.createEl('option', { value: currentModel, text: `${currentModel} (${t('Current')})` });
             }
 
             select.value = currentModel || options[0]?.value || '';
@@ -1331,11 +1361,11 @@ export class SettingTab extends PluginSettingTab {
 
             select.innerHTML = '';
             if (currentModel) {
-                select.createEl('option', { value: currentModel, text: `${currentModel} (Current)` });
+                select.createEl('option', { value: currentModel, text: `${currentModel} (${t('Current')})` });
                 select.value = currentModel;
                 select.disabled = false;
             } else {
-                select.createEl('option', { value: '__failed__', text: 'Model list unavailable' });
+                select.createEl('option', { value: '__failed__', text: t('Model list unavailable') });
                 select.value = '__failed__';
                 select.disabled = true;
             }
@@ -1344,8 +1374,8 @@ export class SettingTab extends PluginSettingTab {
 
     private renderRuntimeSection(containerEl: HTMLElement): void {
         new Setting(containerEl)
-            .setName('Context Window Limit')
-            .setDesc('Limit token usage. Higher values allow reading larger files but cost more.')
+            .setName(t('Context Window Limit'))
+            .setDesc(t('Limit token usage. Higher values allow reading larger files but cost more.'))
             .addSlider(slider => slider
                 .setLimits(10000, 1000000, 10000)
                 .setValue(this.plugin.settings.contextWindow)
@@ -1356,15 +1386,15 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Thinking Level')
-            .setDesc('Controls how much reasoning the model uses. Lower = fewer tokens; higher = better results on complex tasks.')
+            .setName(t('Thinking Level'))
+            .setDesc(t('Controls how much reasoning the model uses. Lower = fewer tokens; higher = better results on complex tasks.'))
             .addDropdown(drop => drop
-                .addOption('off', 'Off (no thinking)')
-                .addOption('minimal', 'Minimal')
-                .addOption('low', 'Low')
-                .addOption('medium', 'Medium (default)')
-                .addOption('high', 'High')
-                .addOption('xhigh', 'X-High (select models only)')
+                .addOption('off', t('Off (no thinking)'))
+                .addOption('minimal', t('Minimal'))
+                .addOption('low', t('Low'))
+                .addOption('medium', t('Medium (default)'))
+                .addOption('high', t('High'))
+                .addOption('xhigh', t('X-High (select models only)'))
                 .setValue(this.plugin.settings.thinkingLevel ?? 'medium')
                 .onChange(async (value: PluginSettings['thinkingLevel']) => {
                     this.plugin.settings.thinkingLevel = value;
@@ -1372,8 +1402,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Customize System Prompt')
-            .setDesc('Override the default AI personality.')
+            .setName(t('Customize System Prompt'))
+            .setDesc(t('Override the default AI personality.'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.customizePrompt)
                 .onChange(async (value: boolean) => {
@@ -1386,15 +1416,15 @@ export class SettingTab extends PluginSettingTab {
             new Setting(containerEl)
                 .setClass('baizer-full-width-textarea')
                 .addTextArea(text => text
-                    .setPlaceholder('You are a helpful assistant...')
+                    .setPlaceholder(t('You are a helpful assistant...'))
                     .setValue(this.plugin.settings.systemPrompt)
-                    .onChange(async (value: string) => {
+                    .onChange((value: string) => {
                         this.plugin.settings.systemPrompt = value;
-                        await this.persistSettings();
+                        this.debouncedPersist();
                     }));
 
             const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
-            this.createActionButton(actions, 'Restore Default Prompt', async () => {
+            this.createActionButton(actions, t('Restore Default Prompt'), async () => {
                 this.plugin.settings.systemPrompt = DEFAULT_SETTINGS.systemPrompt;
                 await this.persistSettings();
                 this.display();
@@ -1404,8 +1434,8 @@ export class SettingTab extends PluginSettingTab {
 
     private renderGuardianSection(containerEl: HTMLElement): void {
         new Setting(containerEl)
-            .setName('Enable Guardian')
-            .setDesc('Allow AI to passively analyze text and offer suggestions.')
+            .setName(t('Enable Guardian'))
+            .setDesc(t('Allow AI to passively analyze text and offer suggestions.'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableGuardian)
                 .onChange(async (value: boolean) => {
@@ -1417,8 +1447,8 @@ export class SettingTab extends PluginSettingTab {
         if (!this.plugin.settings.enableGuardian) return;
 
         new Setting(containerEl)
-            .setName('Auto Mode')
-            .setDesc('Automatically analyze text after 5 seconds of inactivity.')
+            .setName(t('Auto Mode'))
+            .setDesc(t('Automatically analyze text after 5 seconds of inactivity.'))
             .addToggle(toggle => toggle
                 .setValue(!!this.plugin.settings.guardianAutoMode)
                 .onChange(async (value: boolean) => {
@@ -1427,18 +1457,18 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Manual Mode Hotkey')
-            .setDesc('Open the Obsidian hotkey settings for Guardian.')
+            .setName(t('Manual Mode Hotkey'))
+            .setDesc(t('Open the Obsidian hotkey settings for Guardian.'))
             .addButton(btn => btn
-                .setButtonText('Configure Hotkey')
+                .setButtonText(t('Configure Hotkey'))
                 .onClick(() => {
                     (this.app as any).setting.openTabById('hotkeys');
                     (this.app as any).setting.activeTab.setQuery('Guardian: Manual Trigger');
                 }));
 
         new Setting(containerEl)
-            .setName('Guardian Sensitivity')
-            .setDesc('Low (manual) to high (copilot style).')
+            .setName(t('Guardian Sensitivity'))
+            .setDesc(t('Low (manual) to high (copilot style).'))
             .addSlider(slider => slider
                 .setLimits(0, 100, 25)
                 .setValue(this.plugin.settings.guardianSensitivity)
@@ -1449,12 +1479,12 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('UI Style')
-            .setDesc('Choose how suggestions appear in the editor.')
+            .setName(t('UI Style'))
+            .setDesc(t('Choose how suggestions appear in the editor.'))
             .addDropdown(drop => drop
-                .addOption('ghost', 'Ghost Text (Inline)')
-                .addOption('gutter', 'Gutter Dot (Subtle)')
-                .addOption('hybrid', 'Hybrid (Both)')
+                .addOption('ghost', t('Ghost Text (Inline)'))
+                .addOption('gutter', t('Gutter Dot (Subtle)'))
+                .addOption('hybrid', t('Hybrid (Both)'))
                 .setValue(this.plugin.settings.guardianUIStyle)
                 .onChange(async (value: 'ghost' | 'gutter' | 'hybrid') => {
                     this.plugin.settings.guardianUIStyle = value;
@@ -1472,45 +1502,45 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Ignored Folders')
-            .setDesc('Path patterns to ignore, one per line.')
+            .setName(t('Ignored Folders'))
+            .setDesc(t('Path patterns to ignore, one per line.'))
             .setClass('baizer-full-width-textarea')
             .addTextArea(text => text
                 .setPlaceholder('Private/\nSecrets/\nTemplates/')
                 .setValue(this.plugin.settings.ignoredFolders)
-                .onChange(async (value: string) => {
+                .onChange((value: string) => {
                     this.plugin.settings.ignoredFolders = value;
-                    await this.persistSettings();
+                    this.debouncedPersist();
                 }));
     }
 
     private renderPermissionsSection(containerEl: HTMLElement): void {
         const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
         panel.createDiv({ cls: 'baizer-settings-panel-header' })
-            .createEl('h4', { text: 'Permission presets', cls: 'baizer-settings-panel-title' });
+            .createEl('h4', { text: t('Permission presets'), cls: 'baizer-settings-panel-title' });
         const presetGrid = panel.createDiv({ cls: 'baizer-settings-panel-body' }).createDiv({ cls: 'baizer-settings-preset-grid' });
-        this.renderPermissionPreset(presetGrid, 'read-only', 'Read only', 'Read and analyze notes without writing to the vault.');
-        this.renderPermissionPreset(presetGrid, 'configured-folders', 'Scoped write', 'Write only inside explicitly configured folders.');
-        this.renderPermissionPreset(presetGrid, 'automation', 'Automation', 'Allow scoped writes with fewer repeated confirmations.');
-        this.renderPermissionPreset(presetGrid, 'open', 'Open access', 'Allow full-vault writes and plugin control.');
+        this.renderPermissionPreset(presetGrid, 'read-only', t('Read only'), t('Read and analyze notes without writing to the vault.'));
+        this.renderPermissionPreset(presetGrid, 'configured-folders', t('Scoped write'), t('Write only inside explicitly configured folders.'));
+        this.renderPermissionPreset(presetGrid, 'automation', t('Automation'), t('Allow scoped writes with fewer repeated confirmations.'));
+        this.renderPermissionPreset(presetGrid, 'open', t('Open access'), t('Allow full-vault writes and plugin control.'));
 
         const summaryPanel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
         summaryPanel.createDiv({ cls: 'baizer-settings-panel-header' })
-            .createEl('h4', { text: 'Effective permissions', cls: 'baizer-settings-panel-title' });
+            .createEl('h4', { text: t('Effective permissions'), cls: 'baizer-settings-panel-title' });
         this.renderEffectivePermissions(summaryPanel.createDiv({ cls: 'baizer-settings-panel-body' }));
 
         const advanced = containerEl.createEl('details', { cls: 'baizer-settings-advanced' });
-        advanced.createEl('summary', { text: 'Advanced permission switches' });
+        advanced.createEl('summary', { text: t('Advanced permission switches') });
         const advancedBody = advanced.createDiv({ cls: 'baizer-settings-advanced-body' });
 
         new Setting(advancedBody)
-            .setName('Vault Write Scope')
-            .setDesc('Choose how broadly AI can write inside your vault.')
+            .setName(t('Vault Write Scope'))
+            .setDesc(t('Choose how broadly AI can write inside your vault.'))
             .addDropdown(drop => drop
-                .addOption('read-only', 'Read Only')
-                .addOption('current-note', 'Current Note')
-                .addOption('configured-folders', 'Configured Folders')
-                .addOption('all-vault', 'All Vault')
+                .addOption('read-only', t('Read Only'))
+                .addOption('current-note', t('Current Note'))
+                .addOption('configured-folders', t('Configured Folders'))
+                .addOption('all-vault', t('All Vault'))
                 .setValue(this.plugin.settings.vaultWriteScope)
                 .onChange(async (value: VaultWriteScope) => {
                     this.plugin.settings.vaultWriteScope = value;
@@ -1520,24 +1550,24 @@ export class SettingTab extends PluginSettingTab {
 
         if (this.plugin.settings.vaultWriteScope === 'configured-folders') {
             new Setting(advancedBody)
-                .setName('Writable Folders')
-                .setDesc('One vault folder per line. AI can create or modify files only inside these folders.')
+                .setName(t('Writable Folders'))
+                .setDesc(t('One vault folder per line. AI can create or modify files only inside these folders.'))
                 .setClass('baizer-full-width-textarea')
                 .addTextArea(text => text
                     .setPlaceholder('Projects/\nInbox/')
                     .setValue(this.plugin.settings.vaultWriteAllowedFolders.join('\n'))
-                    .onChange(async (value: string) => {
+                    .onChange((value: string) => {
                         this.plugin.settings.vaultWriteAllowedFolders = value
                             .split(/\r?\n/)
                             .map(item => item.trim())
                             .filter(Boolean);
-                        await this.persistSettings();
+                        this.debouncedPersist();
                     }));
         }
 
         new Setting(advancedBody)
-            .setName('Allow File Creation')
-            .setDesc('Allow note and file creation after the selected write scope is satisfied.')
+            .setName(t('Allow File Creation'))
+            .setDesc(t('Allow note and file creation after the selected write scope is satisfied.'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.allowFileCreation)
                 .onChange(async (value: boolean) => {
@@ -1547,8 +1577,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(advancedBody)
-            .setName('Allow File Modification')
-            .setDesc('Allow note and file modification after the selected write scope is satisfied.')
+            .setName(t('Allow File Modification'))
+            .setDesc(t('Allow note and file modification after the selected write scope is satisfied.'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.allowFileModification)
                 .onChange(async (value: boolean) => {
@@ -1558,25 +1588,57 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(advancedBody)
-            .setName('Allow Plugin Control')
-            .setDesc('Let AI execute commands from other plugins.')
+            .setName(t('Allow Plugin Control'))
+            .setDesc(t('Let AI execute commands from other plugins.'))
             .setClass('gemini-danger-setting')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.allowPluginControl)
                 .onChange(async (value: boolean) => {
-                    if (value) new Notice('Permission granted: AI can now control your plugins.');
-                    this.plugin.settings.allowPluginControl = value;
+                    // T12: 开启插件控制会放权 AI 执行其它插件命令，属提权操作，需二次确认。
+                    if (value) {
+                        new MemoryConfirmModal(
+                            this.app,
+                            t('Allow Plugin Control'),
+                            t('Grant AI permission to execute commands from other plugins? This can trigger destructive plugin actions on your behalf.'),
+                            async () => {
+                                this.plugin.settings.allowPluginControl = true;
+                                new Notice(t('Permission granted: AI can now control your plugins.'));
+                                await this.persistSettings();
+                                this.display();
+                            },
+                        ).open();
+                        // 取消或未确认前，UI 回退到原值（关闭）。
+                        toggle.setValue(false);
+                        return;
+                    }
+                    this.plugin.settings.allowPluginControl = false;
                     await this.persistSettings();
                     this.display();
                 }));
 
         new Setting(advancedBody)
-            .setName('Confirm Executions')
-            .setDesc('Always ask for confirmation before writing files or running commands.')
+            .setName(t('Confirm Executions'))
+            .setDesc(t('Always ask for confirmation before writing files or running commands.'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.confirmExecutions)
                 .onChange(async (value: boolean) => {
-                    this.plugin.settings.confirmExecutions = value;
+                    // T12: 关闭执行确认等于让 AI 无阻写盘/跑命令，属降低安全档位，需二次确认。
+                    if (!value) {
+                        new MemoryConfirmModal(
+                            this.app,
+                            t('Disable Execution Confirmation'),
+                            t('Turn off confirmation? AI will write files and run commands without asking each time.'),
+                            async () => {
+                                this.plugin.settings.confirmExecutions = false;
+                                await this.persistSettings();
+                                this.display();
+                            },
+                        ).open();
+                        // 取消或未确认前，UI 回退到原值（开启）。
+                        toggle.setValue(true);
+                        return;
+                    }
+                    this.plugin.settings.confirmExecutions = true;
                     await this.persistSettings();
                     this.display();
                 }));
@@ -1585,14 +1647,14 @@ export class SettingTab extends PluginSettingTab {
     private renderSkillsSection(containerEl: HTMLElement): void {
         containerEl.createDiv({
             cls: 'baizer-settings-inline-note',
-            text: 'Enable or disable individual skills. This controls availability only — a skill being on does not bypass the read/write permissions above.',
+            text: t('Enable or disable individual skills. This controls availability only — a skill being on does not bypass the read/write permissions above.'),
         });
 
         const skills = typeof this.plugin.modelService?.getSkillList === 'function'
             ? this.plugin.modelService.getSkillList()
             : [];
         if (!skills.length) {
-            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-muted', text: 'No skills registered.' });
+            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-muted', text: t('No skills registered.') });
             return;
         }
 
@@ -1677,12 +1739,12 @@ export class SettingTab extends PluginSettingTab {
     private renderEffectivePermissions(parent: HTMLElement): void {
         const list = parent.createEl('ul', { cls: 'baizer-settings-summary-list' });
         const rows: Array<[string, string]> = [
-            ['Write scope', this.plugin.settings.vaultWriteScope],
-            ['Writable folders', this.plugin.settings.vaultWriteScope === 'configured-folders' ? (this.plugin.settings.vaultWriteAllowedFolders.join(', ') || 'Not configured') : 'Not applicable'],
-            ['File creation', this.plugin.settings.allowFileCreation ? 'Allowed' : 'Blocked'],
-            ['File modification', this.plugin.settings.allowFileModification ? 'Allowed' : 'Blocked'],
-            ['Plugin control', this.plugin.settings.allowPluginControl ? 'Allowed' : 'Blocked'],
-            ['Execution confirmation', this.plugin.settings.confirmExecutions ? 'Required' : 'Automatic'],
+            [t('Write scope'), this.plugin.settings.vaultWriteScope],
+            [t('Writable folders'), this.plugin.settings.vaultWriteScope === 'configured-folders' ? (this.plugin.settings.vaultWriteAllowedFolders.join(', ') || t('Not configured')) : t('Not applicable')],
+            [t('File creation'), this.plugin.settings.allowFileCreation ? t('Allowed') : t('Blocked')],
+            [t('File modification'), this.plugin.settings.allowFileModification ? t('Allowed') : t('Blocked')],
+            [t('Plugin control'), this.plugin.settings.allowPluginControl ? t('Allowed') : t('Blocked')],
+            [t('Execution confirmation'), this.plugin.settings.confirmExecutions ? t('Required') : t('Automatic')],
         ];
         for (const [label, value] of rows) {
             const item = list.createEl('li');
@@ -1690,23 +1752,23 @@ export class SettingTab extends PluginSettingTab {
             item.createSpan({ text: value });
         }
         if (this.plugin.settings.allowPluginControl || !this.plugin.settings.confirmExecutions || this.plugin.settings.vaultWriteScope === 'all-vault') {
-            parent.createDiv({ cls: 'baizer-settings-inline-note is-danger', text: 'Current permissions are broad. Keep this enabled only when automation requires it.' });
+            parent.createDiv({ cls: 'baizer-settings-inline-note is-danger', text: t('Current permissions are broad. Keep this enabled only when automation requires it.') });
         }
     }
 
     private renderAppearanceSection(containerEl: HTMLElement): void {
         const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
         panel.createDiv({ cls: 'baizer-settings-panel-header' })
-            .createEl('h4', { text: 'Workbench', cls: 'baizer-settings-panel-title' });
+            .createEl('h4', { text: t('Workbench'), cls: 'baizer-settings-panel-title' });
         const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
 
         new Setting(body)
-            .setName('Theme Style')
-            .setDesc('Adjust the terminal look and feel.')
+            .setName(t('Theme Style'))
+            .setDesc(t('Adjust the terminal look and feel.'))
             .addDropdown(drop => drop
-                .addOption('hacker-green', 'Hacker Green')
-                .addOption('cyberpunk', 'Cyberpunk Neon')
-                .addOption('obsidian-native', 'Obsidian Native')
+                .addOption('hacker-green', t('Hacker Green'))
+                .addOption('cyberpunk', t('Cyberpunk Neon'))
+                .addOption('obsidian-native', t('Obsidian Native'))
                 .setValue(this.plugin.settings.terminalTheme)
                 .onChange(async (value: 'hacker-green' | 'cyberpunk' | 'obsidian-native') => {
                     this.plugin.settings.terminalTheme = value;
@@ -1715,8 +1777,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(body)
-            .setName('Font Size')
-            .setDesc('Workbench text size.')
+            .setName(t('Font Size'))
+            .setDesc(t('Workbench text size.'))
             .addSlider(slider => slider
                 .setLimits(12, 24, 1)
                 .setValue(this.plugin.settings.terminalFontSize)
@@ -1728,8 +1790,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(body)
-            .setName('Background Opacity')
-            .setDesc('Workbench panel opacity.')
+            .setName(t('Background Opacity'))
+            .setDesc(t('Workbench panel opacity.'))
             .addSlider(slider => slider
                 .setLimits(0.5, 1.0, 0.05)
                 .setValue(this.plugin.settings.terminalOpacity)
@@ -1741,14 +1803,14 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         const sample = body.createDiv({ cls: 'baizer-settings-sample-line' });
-        sample.createEl('strong', { text: 'Preview' });
+        sample.createEl('strong', { text: t('Preview') });
         sample.createSpan({ text: this.plugin.settings.terminalTheme + ' / ' + this.plugin.settings.terminalFontSize + 'px / ' + Math.round(this.plugin.settings.terminalOpacity * 100) + '%' });
     }
 
     private renderCaptureSection(containerEl: HTMLElement): void {
         new Setting(containerEl)
-            .setName('WeChat Inbox Path')
-            .setDesc('The file to monitor for new WeChat links.')
+            .setName(t('WeChat Inbox Path'))
+            .setDesc(t('The file to monitor for new WeChat links.'))
             .addText(text => text
                 .setPlaceholder('Inbox.md')
                 .setValue(this.plugin.settings.wechatInboxPath)
@@ -1758,8 +1820,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('WeChat Storage Path')
-            .setDesc('The folder to store saved articles.')
+            .setName(t('WeChat Storage Path'))
+            .setDesc(t('The folder to store saved articles.'))
             .addText(text => text
                 .setPlaceholder('Clippings')
                 .setValue(this.plugin.settings.wechatStoragePath)
@@ -1769,40 +1831,40 @@ export class SettingTab extends PluginSettingTab {
                 }));
         const mobileSchemeTemplate = 'obsidian://baizer-clip?text=<encoded-share-text>';
         new Setting(containerEl)
-            .setName('Mobile WeChat Capture')
-            .setDesc('Use this URL scheme from iOS Shortcuts or Android automation. Fallback command: Baizer: Save URL from clipboard.')
+            .setName(t('Mobile WeChat Capture'))
+            .setDesc(t('Use this URL scheme from iOS Shortcuts or Android automation. Fallback command: Baizer: Save URL from clipboard.'))
             .addButton(btn => btn
-                .setButtonText('Copy URL Scheme')
+                .setButtonText(t('Copy URL Scheme'))
                 .onClick(async () => {
                     await globalThis.navigator?.clipboard?.writeText?.(mobileSchemeTemplate);
-                    new Notice('Baizer mobile capture URL scheme copied.');
+                    new Notice(t('Baizer mobile capture URL scheme copied.'));
                 }));
     }
 
     private renderKnowledgeSection(containerEl: HTMLElement): void {
         const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
         panel.createDiv({ cls: 'baizer-settings-panel-header' })
-            .createEl('h4', { text: 'Knowledge Compile', cls: 'baizer-settings-panel-title' });
+            .createEl('h4', { text: t('Knowledge Compile'), cls: 'baizer-settings-panel-title' });
         const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
 
         new Setting(body)
-            .setName('Source Folders')
-            .setDesc('Folders to watch, one per line.')
+            .setName(t('Source Folders'))
+            .setDesc(t('Folders to watch, one per line.'))
             .setClass('baizer-full-width-textarea')
             .addTextArea(text => text
                 .setPlaceholder('Clippings\nReading Notes')
                 .setValue((this.plugin.settings.knowledgeSourceFolders || []).join('\n'))
-                .onChange(async (value: string) => {
+                .onChange((value: string) => {
                     this.plugin.settings.knowledgeSourceFolders = value
                         .split('\n')
                         .map(entry => entry.trim())
                         .filter(entry => entry.length > 0);
-                    await this.persistSettings();
+                    this.debouncedPersist();
                 }));
 
         new Setting(body)
-            .setName('Wiki Output Folder')
-            .setDesc('The folder where compiled wiki pages are stored.')
+            .setName(t('Wiki Output Folder'))
+            .setDesc(t('The folder where compiled wiki pages are stored.'))
             .addText(text => text
                 .setPlaceholder('Knowledge Wiki')
                 .setValue(this.plugin.settings.knowledgeWikiFolder)
@@ -1812,8 +1874,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(body)
-            .setName('Auto Compile')
-            .setDesc('Compile notes automatically when watched folders change.')
+            .setName(t('Auto Compile'))
+            .setDesc(t('Compile notes automatically when watched folders change.'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.knowledgeAutoCompile)
                 .onChange(async (value: boolean) => {
@@ -1822,8 +1884,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(body)
-            .setName('Max Compile Batch')
-            .setDesc('Maximum number of notes to compile in a single batch.')
+            .setName(t('Max Compile Batch'))
+            .setDesc(t('Maximum number of notes to compile in a single batch.'))
             .addSlider(slider => slider
                 .setLimits(1, 200, 1)
                 .setValue(this.plugin.settings.knowledgeMaxCompileBatch)
@@ -1835,58 +1897,58 @@ export class SettingTab extends PluginSettingTab {
 
         const ontologyStatusEl = containerEl.createDiv({
             cls: 'baizer-settings-inline-note',
-            text: 'Ontology status: loading...',
+            text: t('Ontology status: loading...'),
         });
         void this.refreshOntologyStatus(ontologyStatusEl);
 
         const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
-        this.createActionButton(actions, 'Open ontology', async () => {
+        this.createActionButton(actions, t('Open ontology'), async () => {
             const runtime = (this.plugin as any).knowledgeRuntime;
             if (!runtime?.openOntologyFile) {
-                new Notice('Knowledge runtime is not available.');
+                new Notice(t('Knowledge runtime is not available.'));
                 return;
             }
             await runtime.openOntologyFile();
             await this.refreshOntologyStatus(ontologyStatusEl);
         });
-        this.createActionButton(actions, 'Discover', async () => {
+        this.createActionButton(actions, t('Discover'), async () => {
             const runtime = (this.plugin as any).knowledgeRuntime;
             if (!runtime?.discoverOntology) {
-                new Notice('Knowledge runtime is not available.');
+                new Notice(t('Knowledge runtime is not available.'));
                 return;
             }
             const path = await runtime.discoverOntology();
-            new Notice(path ? 'Ontology schema created: ' + path : 'Ontology schema was not created.');
+            new Notice(path ? t('Ontology schema created') + ': ' + path : t('Ontology schema was not created.'));
             await this.refreshOntologyStatus(ontologyStatusEl);
         }, 'accent');
-        this.createActionButton(actions, 'Preview', async () => {
+        this.createActionButton(actions, t('Preview'), async () => {
             const runtime = (this.plugin as any).knowledgeRuntime;
             if (!runtime?.discoverOntologyPreview) {
-                new Notice('Knowledge runtime is not available.');
+                new Notice(t('Knowledge runtime is not available.'));
                 return;
             }
             const preview = await runtime.discoverOntologyPreview();
             if (preview.content) console.log('[Baizer] Ontology preview:\n', preview.content);
             new Notice(preview.message);
         });
-        this.createActionButton(actions, 'Mark stale pending', async () => {
+        this.createActionButton(actions, t('Mark stale pending'), async () => {
             const runtime = (this.plugin as any).knowledgeRuntime;
             if (!runtime?.markOntologyStaleFilesPending) {
-                new Notice('Knowledge runtime is not available.');
+                new Notice(t('Knowledge runtime is not available.'));
                 return;
             }
             const count = await runtime.markOntologyStaleFilesPending();
-            new Notice('Marked ' + count + ' stale notes pending.');
+            new Notice(`${t('Marked stale notes pending')}: ${count}`);
             await this.refreshOntologyStatus(ontologyStatusEl);
         });
 
         const advanced = containerEl.createEl('details', { cls: 'baizer-settings-advanced' });
-        advanced.createEl('summary', { text: 'Ontology advanced settings' });
+        advanced.createEl('summary', { text: t('Ontology advanced settings') });
         const advancedBody = advanced.createDiv({ cls: 'baizer-settings-advanced-body' });
 
         new Setting(advancedBody)
-            .setName('Enable Ontology Schema')
-            .setDesc('Use Knowledge Wiki/_ontology.md to add stable categories and entity extraction to future compiles.')
+            .setName(t('Enable Ontology Schema'))
+            .setDesc(t('Use Knowledge Wiki/_ontology.md to add stable categories and entity extraction to future compiles.'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.knowledgeOntologyEnabled !== false)
                 .onChange(async (value: boolean) => {
@@ -1895,12 +1957,12 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(advancedBody)
-            .setName('Ontology Update Mode')
-            .setDesc('Manual never discovers automatically. Suggest reports readiness without writing. Auto creates a missing schema when thresholds are met.')
+            .setName(t('Ontology Update Mode'))
+            .setDesc(t('Manual never discovers automatically. Suggest reports readiness without writing. Auto creates a missing schema when thresholds are met.'))
             .addDropdown(drop => drop
-                .addOption('manual', 'Manual')
-                .addOption('suggest', 'Suggest (recommended)')
-                .addOption('auto', 'Auto create when missing')
+                .addOption('manual', t('Manual'))
+                .addOption('suggest', t('Suggest (recommended)'))
+                .addOption('auto', t('Auto create when missing'))
                 .setValue(this.plugin.settings.knowledgeOntologyUpdateMode || 'suggest')
                 .onChange(async (value: OntologyUpdateMode) => {
                     this.plugin.settings.knowledgeOntologyUpdateMode = value;
@@ -1908,8 +1970,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(advancedBody)
-            .setName('Minimum Articles')
-            .setDesc('Minimum compiled wiki articles required before ontology discovery can run.')
+            .setName(t('Minimum Articles'))
+            .setDesc(t('Minimum compiled wiki articles required before ontology discovery can run.'))
             .addText(text => text
                 .setPlaceholder('10')
                 .setValue(String(this.plugin.settings.knowledgeOntologyMinArticles ?? 10))
@@ -1919,8 +1981,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(advancedBody)
-            .setName('Minimum Topic Frequency')
-            .setDesc('A topic must appear this many times before it can influence ontology discovery.')
+            .setName(t('Minimum Topic Frequency'))
+            .setDesc(t('A topic must appear this many times before it can influence ontology discovery.'))
             .addText(text => text
                 .setPlaceholder('3')
                 .setValue(String(this.plugin.settings.knowledgeOntologyMinTopicFrequency ?? 3))
@@ -1930,8 +1992,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(advancedBody)
-            .setName('Minimum Concept Frequency')
-            .setDesc('A concept must appear this many times before it can influence ontology discovery.')
+            .setName(t('Minimum Concept Frequency'))
+            .setDesc(t('A concept must appear this many times before it can influence ontology discovery.'))
             .addText(text => text
                 .setPlaceholder('2')
                 .setValue(String(this.plugin.settings.knowledgeOntologyMinConceptFrequency ?? 2))
@@ -1941,8 +2003,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(advancedBody)
-            .setName('Auto Recompile Stale Articles')
-            .setDesc('Automatically recompile affected notes after ontology changes. Keep off if you want to review stale notes first.')
+            .setName(t('Auto Recompile Stale Articles'))
+            .setDesc(t('Automatically recompile affected notes after ontology changes. Keep off if you want to review stale notes first.'))
             .addToggle(toggle => toggle
                 .setValue(!!this.plugin.settings.knowledgeOntologyAutoRecompileStale)
                 .onChange(async (value: boolean) => {
@@ -1981,12 +2043,12 @@ export class SettingTab extends PluginSettingTab {
     private renderPluginSkillsSection(containerEl: HTMLElement): void {
         const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
         panel.createDiv({ cls: 'baizer-settings-panel-header' })
-            .createEl('h4', { text: 'Generation', cls: 'baizer-settings-panel-title' });
+            .createEl('h4', { text: t('Generation'), cls: 'baizer-settings-panel-title' });
         const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
 
         new Setting(body)
-            .setName('Auto-generate plugin skills')
-            .setDesc('Generate AI skills for installed plugins on startup.')
+            .setName(t('Auto-generate plugin skills'))
+            .setDesc(t('Generate AI skills for installed plugins on startup.'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.autoGeneratePluginSkills)
                 .onChange(async (value: boolean) => {
@@ -1996,8 +2058,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(body)
-            .setName('Excluded plugins')
-            .setDesc('Plugin IDs to exclude from skill generation, comma-separated.')
+            .setName(t('Excluded plugins'))
+            .setDesc(t('Plugin IDs to exclude from skill generation, comma-separated.'))
             .addText(text => text
                 .setPlaceholder('plugin-id-1, plugin-id-2')
                 .setValue(this.plugin.settings.pluginSkillExcludeList.join(', '))
@@ -2011,10 +2073,10 @@ export class SettingTab extends PluginSettingTab {
 
         const list = body.createEl('ul', { cls: 'baizer-settings-skill-list' });
         const autoItem = list.createEl('li');
-        autoItem.createEl('strong', { text: 'Startup scan' });
-        autoItem.createSpan({ text: this.plugin.settings.autoGeneratePluginSkills ? 'Enabled' : 'Off' });
+        autoItem.createEl('strong', { text: t('Startup scan') });
+        autoItem.createSpan({ text: this.plugin.settings.autoGeneratePluginSkills ? t('Enabled') : t('Off') });
         const excludeItem = list.createEl('li');
-        excludeItem.createEl('strong', { text: 'Excluded plugins' });
+        excludeItem.createEl('strong', { text: t('Excluded plugins') });
         excludeItem.createSpan({ text: String(this.plugin.settings.pluginSkillExcludeList.length) });
     }
 
@@ -2057,14 +2119,14 @@ class MemoryConfirmModal extends Modal {
 
         const actions = contentEl.createDiv({ cls: 'baizer-memory-confirm-actions' });
         const cancel = actions.createEl('button', {
-            text: 'Cancel',
+            text: t('Cancel'),
             cls: 'baizer-settings-action is-default',
             attr: { type: 'button' },
         });
         cancel.addEventListener('click', () => this.close());
 
         const confirm = actions.createEl('button', {
-            text: 'Confirm',
+            text: t('Confirm'),
             cls: 'baizer-settings-action is-danger',
             attr: { type: 'button' },
         });
@@ -2089,23 +2151,23 @@ class AddProviderModal extends Modal {
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.createEl('h3', { text: 'Add OpenAI Compatible Provider' });
+        contentEl.createEl('h3', { text: t('Add OpenAI Compatible Provider') });
 
         let labelValue = '';
         let baseUrlValue = '';
 
         new Setting(contentEl)
-            .setName('Provider Name')
-            .setDesc('Display name (for example: SiliconFlow, Groq, Ollama)')
+            .setName(t('Provider Name'))
+            .setDesc(t('Display name (for example: SiliconFlow, Groq, Ollama)'))
             .addText(text => text
-                .setPlaceholder('My Provider')
+                .setPlaceholder(t('My Provider'))
                 .onChange((value: string) => {
                     labelValue = value;
                 }));
 
         new Setting(contentEl)
-            .setName('Base URL')
-            .setDesc('API endpoint URL')
+            .setName(t('Base URL'))
+            .setDesc(t('API endpoint URL'))
             .addText(text => text
                 .setPlaceholder('https://api.example.com/v1')
                 .onChange((value: string) => {
@@ -2114,15 +2176,15 @@ class AddProviderModal extends Modal {
 
         new Setting(contentEl)
             .addButton(btn => btn
-                .setButtonText('Add')
+                .setButtonText(t('Add'))
                 .setCta()
                 .onClick(() => {
                     if (!labelValue.trim()) {
-                        new Notice('Please enter a provider name');
+                        new Notice(t('Please enter a provider name'));
                         return;
                     }
                     if (!baseUrlValue.trim()) {
-                        new Notice('Please enter a base URL');
+                        new Notice(t('Please enter a base URL'));
                         return;
                     }
                     this.onSubmit(labelValue.trim(), baseUrlValue.trim());

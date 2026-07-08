@@ -60,6 +60,13 @@ class GuardianDotMarker extends GutterMarker {
         super();
     }
 
+    // CM 用 eq() 判断能否复用已有 marker 的 DOM。state 是唯一影响渲染的字段
+    // (view 恒为 null,点击在 gutter 的 domEventHandlers 里处理),所以只比较 state。
+    // 状态未变时返回 true → CM 跳过 toDOM,避免快速打字时 gutter 反复重绘。
+    eq(other: GutterMarker): boolean {
+        return other instanceof GuardianDotMarker && other.state === this.state;
+    }
+
     toDOM() {
         const dot = document.createElement('div');
         dot.className = `guardian-gutter-marker guardian-${this.state}`;
@@ -95,13 +102,21 @@ class GuardianDotMarker extends GutterMarker {
     }
 }
 
+// 字段值携带缓存:set 是实际的 RangeSet,effectiveState/from 记录上次构建时的
+// 判定状态与行起始偏移。缓存随字段值走 → 每个编辑器实例天然隔离,不会互相污染。
+interface GuardianMarkerState {
+    set: RangeSet<GutterMarker>;
+    effectiveState: GuardianState;
+    from: number;
+}
+
 // StateField to manage Gutter Markers (Follows Cursor)
-const guardianMarkerField = StateField.define<RangeSet<GutterMarker>>({
+const guardianMarkerField = StateField.define<GuardianMarkerState>({
     create() {
-        return RangeSet.empty;
+        return { set: RangeSet.empty, effectiveState: GuardianState.Idle, from: -1 };
     },
 
-    update(markers, tr) {
+    update(prev, tr) {
         // Always recalculate based on current state and cursor position
         const isEnabled = tr.state.field(guardianModeField);
         const localState = tr.state.field(guardianLineStateField);
@@ -118,6 +133,12 @@ const guardianMarkerField = StateField.define<RangeSet<GutterMarker>>({
         // Get cursor line
         const selection = tr.state.selection.main;
         const lineBlock = tr.state.doc.lineAt(selection.head);
+
+        // 短路:判定状态与目标行都没变时,无需重建 RangeSet。
+        // 用 tr.changes 映射旧 set 的位置(文档变更时保持位置正确),再回填新的 from。
+        if (effectiveState === prev.effectiveState && lineBlock.from === prev.from) {
+            return { set: prev.set.map(tr.changes), effectiveState, from: lineBlock.from };
+        }
 
         // Create marker
         // Note: We need access to the view to dispatch events from the marker. 
@@ -140,7 +161,11 @@ const guardianMarkerField = StateField.define<RangeSet<GutterMarker>>({
         // Better: The `gutter` extension allows `domEventHandlers`. We can handle clicks there!
 
         const marker = new GuardianDotMarker(effectiveState, null as any); // View will be handled in domEventHandlers
-        return RangeSet.of([marker.range(lineBlock.from)]);
+        return {
+            set: RangeSet.of([marker.range(lineBlock.from)]),
+            effectiveState,
+            from: lineBlock.from
+        };
     }
 });
 
@@ -152,7 +177,7 @@ export function guardianGutterExtension() {
         guardianMarkerField,
         gutter({
             class: 'guardian-gutter',
-            markers: (view) => view.state.field(guardianMarkerField),
+            markers: (view) => view.state.field(guardianMarkerField).set,
             domEventHandlers: {
                 mousedown(view, line, event) {
                     const target = event.target as HTMLElement;

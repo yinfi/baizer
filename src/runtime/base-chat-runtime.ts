@@ -105,7 +105,7 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     if (memoryContext) {
       systemPrompt += `${memoryContext}\n\n`;
     }
-    systemPrompt += `[Current Time: ${new Date().toLocaleString()} (${new Date().toLocaleDateString(undefined, { weekday: 'long' })})]\n`;
+    systemPrompt += `[Current Time: ${new Date().toLocaleString('zh-CN')} (${new Date().toLocaleDateString('zh-CN', { weekday: 'long' })})]\n`;
 
     // [B] 用户给出短确认/延续性回复（"需要"、"用第二个"等）且存在对话历史时，
     // 剔除自动注入的环境上下文（当前笔记/反链），避免它盖过对话意图把模型带偏。

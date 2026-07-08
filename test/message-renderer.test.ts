@@ -181,6 +181,10 @@ class FakeElement {
 
 async function runTests() {
   console.log('=== Message Renderer Tests ===');
+  // i18n 引入后,t() 在中文机器 locale 下会把 [System] 等译成中文。这些是消息渲染的
+  // 结构性断言,与语言无关,固定英文 locale 以保证在任意机器上确定性通过。
+  const { setLocaleForTesting } = await import('../src/i18n/zh');
+  setLocaleForTesting(false);
   const { MessageRenderer } = await import('../src/ui/renderers/message-renderer');
   const { CodeBlockRenderer } = await import('../src/ui/renderers/code-block-renderer');
 

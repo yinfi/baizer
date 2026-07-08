@@ -1,4 +1,5 @@
 import { App, Modal, Notice, setIcon } from 'obsidian';
+import { t } from '../../i18n/zh';
 
 /** 单个待附加文件的读取结果。data 为文件名（展示用），content 为读出的文本。 */
 export interface AttachmentResult {
@@ -63,10 +64,10 @@ export class AttachmentModal extends Modal {
         modalEl.addClass('baizer-attachment-modal');
         contentEl.empty();
 
-        contentEl.createEl('h2', { text: 'Add file attachment' });
+        contentEl.createEl('h2', { text: t('Add file attachment') });
         contentEl.createEl('p', {
             cls: 'baizer-attachment-hint',
-            text: 'Attach local text files as context. Binary files (images, PDFs) are not supported.',
+            text: t('Attach local text files as context. Binary files (images, PDFs) are not supported.'),
         });
 
         // 拖放 + 点击选择区
@@ -75,7 +76,7 @@ export class AttachmentModal extends Modal {
         setIcon(dropIcon, 'file-plus');
         dropZone.createSpan({
             cls: 'baizer-attachment-dropzone-text',
-            text: 'Click to choose files, or drop them here',
+            text: t('Click to choose files, or drop them here'),
         });
 
         // 隐藏的原生 file input —— 浏览器 API，移动端兼容，不碰 Node fs。
@@ -110,11 +111,11 @@ export class AttachmentModal extends Modal {
 
         // 底部操作按钮
         const actions = contentEl.createDiv({ cls: 'baizer-attachment-actions' });
-        const cancelBtn = actions.createEl('button', { text: 'Cancel' });
+        const cancelBtn = actions.createEl('button', { text: t('Cancel') });
         cancelBtn.addEventListener('click', () => this.close());
 
         this.confirmButton = actions.createEl('button', {
-            text: 'Attach',
+            text: t('Attach'),
             cls: 'mod-cta',
         }) as HTMLButtonElement;
         this.confirmButton.addEventListener('click', () => this.submit());
@@ -125,22 +126,22 @@ export class AttachmentModal extends Modal {
     private async ingestFiles(files: File[]) {
         for (const file of files) {
             if (this.pending.has(file.name)) {
-                new Notice(`"${file.name}" is already added.`);
+                new Notice(`"${file.name}" ${t('is already added.')}`);
                 continue;
             }
             if (!isTextFile(file.name)) {
-                new Notice(`"${file.name}" is not a supported text file.`);
+                new Notice(`"${file.name}" ${t('is not a supported text file.')}`);
                 continue;
             }
             if (file.size > MAX_FILE_BYTES) {
-                new Notice(`"${file.name}" is too large (max ${formatBytes(MAX_FILE_BYTES)}).`);
+                new Notice(`"${file.name}" ${t('is too large. Max')} ${formatBytes(MAX_FILE_BYTES)}.`);
                 continue;
             }
             try {
                 const content = await this.readAsText(file);
                 this.pending.set(file.name, { name: file.name, content, size: file.size });
             } catch (err) {
-                new Notice(`Failed to read "${file.name}".`);
+                new Notice(`${t('Failed to read')} "${file.name}".`);
             }
         }
         this.renderList();
@@ -163,7 +164,7 @@ export class AttachmentModal extends Modal {
         if (this.pending.size === 0) {
             this.listEl.createDiv({
                 cls: 'baizer-attachment-empty',
-                text: 'No files selected yet.',
+                text: t('No files selected yet.'),
             });
             return;
         }
@@ -178,7 +179,7 @@ export class AttachmentModal extends Modal {
 
             const removeBtn = row.createEl('button', {
                 cls: 'baizer-attachment-row-remove clickable-icon',
-                attr: { 'aria-label': 'Remove file', title: 'Remove file' },
+                attr: { 'aria-label': t('Remove file'), title: t('Remove file') },
             });
             setIcon(removeBtn, 'x');
             removeBtn.addEventListener('click', () => {
@@ -193,13 +194,13 @@ export class AttachmentModal extends Modal {
         if (!this.confirmButton) return;
         const count = this.pending.size;
         this.confirmButton.disabled = count === 0;
-        this.confirmButton.setText(count > 0 ? `Attach ${count} file${count > 1 ? 's' : ''}` : 'Attach');
+        this.confirmButton.setText(count > 0 ? `${t('Attach')} ${count} ${t('file(s)')}` : t('Attach'));
     }
 
     private submit() {
         const results = Array.from(this.pending.values());
         if (results.length === 0) {
-            new Notice('Please choose at least one file.');
+            new Notice(t('Please choose at least one file.'));
             return;
         }
         this.close();

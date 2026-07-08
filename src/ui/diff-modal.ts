@@ -1,4 +1,5 @@
 import { Modal, App, ButtonComponent } from 'obsidian';
+import { t } from '../i18n/zh';
 
 type DiffRow = {
     type: 'added' | 'removed' | 'unchanged';
@@ -21,29 +22,29 @@ export class DiffModal extends Modal {
 
         const header = contentEl.createDiv({ cls: 'baizer-diff-modal-header' });
         const copy = header.createDiv({ cls: 'baizer-diff-modal-copy' });
-        copy.createEl('h2', { text: 'Review Changes' });
-        copy.createDiv({ cls: 'baizer-diff-modal-subtitle', text: 'Compare current content with the proposed replacement before applying.' });
+        copy.createEl('h2', { text: t('Review Changes') });
+        copy.createDiv({ cls: 'baizer-diff-modal-subtitle', text: t('Compare current content with the proposed replacement before applying.') });
 
         const summary = contentEl.createDiv({ cls: 'baizer-diff-summary' });
-        this.renderStat(summary, 'Current', this.countLines(this.original));
-        this.renderStat(summary, 'Proposed', this.countLines(this.modified));
-        this.renderStat(summary, 'Changed', this.countChangedLines());
+        this.renderStat(summary, t('Current'), this.countLines(this.original));
+        this.renderStat(summary, t('Proposed'), this.countLines(this.modified));
+        this.renderStat(summary, t('Changed'), this.countChangedLines());
 
         const diffContainer = contentEl.createDiv({ cls: 'diff-container baizer-diff-unified' });
         this.renderUnifiedDiff(diffContainer);
 
         const paneContainer = contentEl.createDiv({ cls: 'baizer-diff-panes' });
-        this.renderPane(paneContainer, 'Current', this.original, 'baizer-diff-pane-old');
-        this.renderPane(paneContainer, 'Proposed', this.modified, 'baizer-diff-pane-new');
+        this.renderPane(paneContainer, t('Current'), this.original, 'baizer-diff-pane-old');
+        this.renderPane(paneContainer, t('Proposed'), this.modified, 'baizer-diff-pane-new');
 
         const buttonContainer = contentEl.createDiv({ cls: 'diff-actions' });
 
         new ButtonComponent(buttonContainer)
-            .setButtonText('Cancel')
+            .setButtonText(t('Cancel'))
             .onClick(() => this.close());
 
         new ButtonComponent(buttonContainer)
-            .setButtonText('Apply Changes')
+            .setButtonText(t('Apply Changes'))
             .setCta()
             .onClick(() => {
                 this.onApply();
@@ -61,7 +62,7 @@ export class DiffModal extends Modal {
         const pane = container.createDiv({ cls: `baizer-diff-pane ${toneClass}` });
         pane.createDiv({ cls: 'baizer-diff-pane-title', text: label });
         if (content.length === 0) {
-            pane.createDiv({ cls: 'baizer-diff-empty', text: 'No content.' });
+            pane.createDiv({ cls: 'baizer-diff-empty', text: t('No content.') });
             return;
         }
         const pre = pane.createEl('pre', { cls: 'baizer-diff-pane-code' });
@@ -71,7 +72,7 @@ export class DiffModal extends Modal {
     private renderUnifiedDiff(container: HTMLElement) {
         const rows = buildLineDiff(this.original, this.modified);
         if (rows.length === 0) {
-            container.createDiv({ cls: 'baizer-diff-empty', text: 'No line-level changes.' });
+            container.createDiv({ cls: 'baizer-diff-empty', text: t('No line-level changes.') });
             return;
         }
 

@@ -557,6 +557,11 @@ export class ChatController {
         const targetMsg = this.messages.find(m => m.id === messageId && m.role === 'ai');
         if (!targetMsg) return;
 
+        // 若当前仍有活动流,先取消,避免「改进重答」与旧流并存产生孤儿流。
+        if (this.isRunActive()) {
+            this.cancelActiveStream();
+        }
+
         const userInput = this.deriveFileBackSourceQuery(messageId);
         const trimmedReason = reason.trim();
 

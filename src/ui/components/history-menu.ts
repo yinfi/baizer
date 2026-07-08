@@ -1,3 +1,5 @@
+import { t } from '../../i18n/zh';
+
 interface HistoryMenuItem {
   id: string;
   title: string;
@@ -52,7 +54,7 @@ export class HistoryMenu {
     if (this.items.length === 0) {
       this.containerEl.createDiv({
         cls: 'baizer-history-empty',
-        text: 'No saved conversations yet.',
+        text: t('No saved conversations yet.'),
       });
       return;
     }
@@ -63,8 +65,8 @@ export class HistoryMenu {
       value: this.filterQuery,
       attr: {
         type: 'search',
-        placeholder: 'Search conversations or notes',
-        'aria-label': 'Search conversations',
+        placeholder: t('Search conversations or notes'),
+        'aria-label': t('Search conversations'),
       },
     }) as HTMLInputElement;
     searchInput.addEventListener('input', (event: Event) => {
@@ -100,7 +102,7 @@ export class HistoryMenu {
     if (filteredItems.length === 0) {
       list.createDiv({
         cls: 'baizer-history-empty',
-        text: 'No matching conversations.',
+        text: t('No matching conversations.'),
       });
       return;
     }
@@ -135,7 +137,7 @@ export class HistoryMenu {
 
   private formatTimestamp(value: number): string {
     if (!Number.isFinite(value)) return '';
-    return new Date(value).toLocaleString();
+    return new Date(value).toLocaleString('zh-CN');
   }
 
   private buildGroups(items: HistoryMenuItem[]) {
@@ -151,10 +153,10 @@ export class HistoryMenu {
     const older = items.filter(item => !item.pinnedAt && item.updatedAt < recentThreshold);
 
     return [
-      { title: 'Pinned', items: this.sortItems(pinned, true) },
-      { title: 'Today', items: this.sortItems(today) },
-      { title: 'Recent', items: this.sortItems(recent) },
-      { title: 'Older', items: this.sortItems(older) },
+      { title: t('Pinned'), items: this.sortItems(pinned, true) },
+      { title: t('Today'), items: this.sortItems(today) },
+      { title: t('Recent'), items: this.sortItems(recent) },
+      { title: t('Older'), items: this.sortItems(older) },
     ].filter(group => group.items.length > 0);
   }
 
@@ -177,7 +179,7 @@ export class HistoryMenu {
     const body = row.createDiv({ cls: 'baizer-history-body' });
     body.createSpan({ cls: 'baizer-history-title', text: item.title });
     const meta = body.createDiv({ cls: 'baizer-history-meta' });
-    meta.createSpan({ cls: 'baizer-history-provider', text: item.providerId || 'Unknown provider' });
+    meta.createSpan({ cls: 'baizer-history-provider', text: item.providerId || t('Unknown provider') });
     if (item.modelId) {
       meta.createSpan({ cls: 'baizer-history-model', text: item.modelId });
     }
@@ -187,15 +189,16 @@ export class HistoryMenu {
     meta.createSpan({ cls: 'baizer-history-updated', text: this.formatTimestamp(item.updatedAt) });
 
     const actions = row.createDiv({ cls: 'baizer-history-actions' });
+    const pinLabel = item.pinnedAt ? t('Unpin') : t('Pin');
     const pinButton = actions.createEl('button', {
       cls: 'baizer-history-pin clickable-icon',
-      text: item.pinnedAt ? 'Unpin' : 'Pin',
-      attr: { 'aria-label': `${item.pinnedAt ? 'Unpin' : 'Pin'} ${item.title}` },
+      text: pinLabel,
+      attr: { 'aria-label': `${pinLabel} ${item.title}` },
     });
     const deleteButton = actions.createEl('button', {
       cls: 'baizer-history-delete clickable-icon',
-      text: 'Delete',
-      attr: { 'aria-label': `Delete ${item.title}` },
+      text: t('Delete'),
+      attr: { 'aria-label': `${t('Delete')} ${item.title}` },
     });
 
     row.addEventListener('click', () => {

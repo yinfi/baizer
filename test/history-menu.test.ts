@@ -126,6 +126,10 @@ class FakeElement {
 
 async function runTests() {
   console.log('=== History Menu Tests ===');
+  // i18n 引入后，t() 会在中文机器 locale 下返回中文。这些是分组/渲染的结构性断言，
+  // 与语言无关，固定英文 locale 以保证在任意机器上确定性通过。
+  const { setLocaleForTesting } = await import('../src/i18n/zh');
+  setLocaleForTesting(false);
   const { HistoryMenu } = await import('../src/ui/components/history-menu');
 
   await test('renders saved conversations and wires open and delete callbacks', () => {
