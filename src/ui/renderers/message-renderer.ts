@@ -2,6 +2,7 @@ import { App, MarkdownRenderer, setIcon } from 'obsidian';
 import { renderApprovalCard } from '../approval-card';
 import { ChatMessage } from '../types';
 import { CodeBlockRenderer } from './code-block-renderer';
+import { t } from '../../i18n/zh';
 
 type MarkdownRender = (
   app: App,
@@ -103,14 +104,14 @@ export class MessageRenderer {
           this.renderSystemStatus(entry, status);
         } else if (this.isCancelledSystemMessage(message.content)) {
           (entry as any).addClass?.('shell-system-cancelled') ?? entry.classList.add('shell-system-cancelled');
-          this.setText(entry, `[System] ${message.content}`);
+          this.setText(entry, `${t('[System]')} ${message.content}`);
         } else {
-          this.setText(entry, `[System] ${message.content}`);
+          this.setText(entry, `${t('[System]')} ${message.content}`);
         }
       }
     } catch (error) {
       this.options.onRenderError?.(error);
-      this.setText(entry, 'Error rendering message');
+      this.setText(entry, t('Error rendering message'));
     }
 
     this.options.onScrollRequest?.();
@@ -174,6 +175,9 @@ export class MessageRenderer {
       }) as HTMLElement;
       setIcon(upButton, 'thumbs-up');
       upButton.addEventListener('click', () => {
+        // 点赞归档是一次性动作:点击后立即禁用,防止重复触发多次归档。
+        if ((upButton as HTMLButtonElement).disabled) return;
+        (upButton as HTMLButtonElement).disabled = true;
         (upButton as any).addClass?.('active') ?? upButton.classList.add('active');
         void this.options.onFeedbackUp?.(message);
       });
@@ -398,12 +402,16 @@ export class MessageRenderer {
       attr: { type: 'button' },
     }) as HTMLElement;
 
+    let committed = false;
     const commit = () => {
       const reason = (input.value || '').trim();
       if (!reason) {
         input.focus();
         return;
       }
+      // 防 Enter + 按钮 click 双触发:提交一次后置位,后续触发直接忽略。
+      if (committed) return;
+      committed = true;
       (box as any).remove?.();
       void this.options.onFeedbackDown?.(message, reason);
     };

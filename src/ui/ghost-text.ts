@@ -1,6 +1,7 @@
 import { EditorView, Decoration, DecorationSet, WidgetType, keymap } from '@codemirror/view';
 import { StateField, StateEffect, Extension } from '@codemirror/state';
 import { EditorSelection } from '@codemirror/state';
+import { t } from '../i18n/zh';
 
 // Ghost Text 建议
 export interface GhostTextSuggestion {
@@ -16,6 +17,38 @@ export interface GhostTextSuggestion {
 
 // 更新 Ghost Text 的 Effect
 export const setGhostText = StateEffect.define<GhostTextSuggestion | null>();
+
+// ghost 是 pointer-events:none 的装饰,读屏不会自动读到。用一个视觉隐藏的 aria-live 区
+// 在 ghost 出现/消失时播报,让盲用户也知道「有可接受的补全 / 深补进行中」。
+let ghostLiveRegion: HTMLElement | null = null;
+
+function getGhostLiveRegion(): HTMLElement | null {
+    if (typeof document === 'undefined') return null;
+    if (ghostLiveRegion && document.body.contains(ghostLiveRegion)) return ghostLiveRegion;
+    const region = document.createElement('div');
+    region.className = 'baizer-visually-hidden';
+    region.setAttribute('aria-live', 'polite');
+    region.setAttribute('role', 'status');
+    document.body.appendChild(region);
+    ghostLiveRegion = region;
+    return region;
+}
+
+function announceGhost(suggestion: GhostTextSuggestion | null): void {
+    const region = getGhostLiveRegion();
+    if (!region) return;
+    if (!suggestion || suggestion.visible === false) {
+        region.textContent = '';
+        return;
+    }
+    if (suggestion.variant === 'thinking') {
+        region.textContent = t('Deep completion in progress');
+    } else if (suggestion.acceptable === false) {
+        region.textContent = '';
+    } else {
+        region.textContent = `${t('AI suggestion available, press Tab to accept:')} ${suggestion.text}`;
+    }
+}
 
 // Ghost Text Widget
 class GhostTextWidget extends WidgetType {
@@ -40,7 +73,7 @@ class GhostTextWidget extends WidgetType {
         } else {
             span.textContent = this.text;
         }
-        span.setAttribute('aria-label', this.variant === 'thinking' ? 'Deep completion in progress' : 'Press Tab to accept suggestion');
+        span.setAttribute('aria-label', this.variant === 'thinking' ? t('Deep completion in progress') : t('Press Tab to accept suggestion'));
         return span;
     }
 
@@ -91,7 +124,19 @@ const ghostTextField = StateField.define<DecorationSet>({
             return Decoration.none;
         }
 
-        // 3. Otherwise map existing decorations
+        // 3. 光标移动(箭头键/点击)离开装饰所在行时清除 ghost text。
+        //    仅在本 transaction 显式设置了新选区(tr.selection)时判定,避免误清。
+        if (tr.selection) {
+            const suggestion = tr.startState.field(ghostTextStateField, false);
+            if (suggestion && suggestion.visible !== false) {
+                const cursorLine = tr.state.doc.lineAt(tr.newSelection.main.head).number;
+                if (cursorLine !== suggestion.line) {
+                    return Decoration.none;
+                }
+            }
+        }
+
+        // 4. Otherwise map existing decorations
         return decorations.map(tr.changes);
     },
 
@@ -104,10 +149,22 @@ const ghostTextStateField = StateField.define<GhostTextSuggestion | null>({
     update(value, tr) {
         for (let effect of tr.effects) {
             if (effect.is(setGhostText)) {
+                announceGhost(effect.value);
                 return effect.value;
             }
         }
-        if (tr.docChanged) return null;
+        if (tr.docChanged) {
+            if (value) announceGhost(null);
+            return null;
+        }
+        // 光标移动离开装饰所在行时,清空 suggestion 数据(与 ghostTextField 装饰同步清除)。
+        if (tr.selection && value && value.visible !== false) {
+            const cursorLine = tr.state.doc.lineAt(tr.newSelection.main.head).number;
+            if (cursorLine !== value.line) {
+                announceGhost(null);
+                return null;
+            }
+        }
         return value;
     }
 });
@@ -119,10 +176,12 @@ function acceptGhostTextReal(view: EditorView): boolean {
 
     const { text, replaceRange, line, ch } = suggestion;
     if (suggestion.acceptable === false) {
+        // thinking/diagnostic 类 ghost 不可接受:清除装饰后返回 false,
+        // 把 Tab 放行给原生缩进处理,避免 Tab 在这类 ghost 可见时被吞掉。
         view.dispatch({
             effects: setGhostText.of(null)
         });
-        return true;
+        return false;
     }
 
     // Calculate insert position if not replacing

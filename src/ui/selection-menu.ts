@@ -8,6 +8,7 @@ import { SuggestList } from './components/suggest-list';
 import { SuggestionItem, SuggestionType } from './controllers/input-controller';
 import { SELECTION_ACTIONS, getAction, buildActionPrompt } from './selection-ai/action-registry';
 import { runRewrite, RewriteRequest } from './selection-ai/rewrite-runner';
+import { t } from '../i18n/zh';
 import { showInlineDiff, clearInlineDiff, InlineDiffState } from './selection-ai/inline-diff';
 
 // 模块级改写状态:inlineDiffExtension 的回调是全局单例、拿不到具体 view,
@@ -178,11 +179,11 @@ function createChatPanel(
     container.className = `guardian-chat-view is-${state.mode}`;
 
     const header = container.createDiv({ cls: 'guardian-chat-header' });
-    header.createSpan({ text: state.mode === 'selection' ? 'Selection AI' : 'Inline AI' });
+    header.createSpan({ text: state.mode === 'selection' ? t('Selection AI') : t('Inline AI') });
     const closeBtn = header.createEl('button', {
         text: 'x',
         cls: 'guardian-close-btn',
-        attr: { type: 'button', title: 'Close' },
+        attr: { type: 'button', title: t('Close'), 'aria-label': t('Close') },
     });
     closeBtn.onclick = () => {
         cleanupPendingRewrite(view);
@@ -231,7 +232,7 @@ function createChatPanel(
 
     const statusContainer = container.createDiv({ cls: 'guardian-status-bar' });
     statusContainer.style.display = 'none';
-    statusContainer.setText('Thinking...');
+    statusContainer.setText(t('Thinking...'));
     (state.controller as any).onStatusChanged = (isResponding: boolean) => {
         statusContainer.style.display = isResponding ? 'block' : 'none';
     };
@@ -240,7 +241,8 @@ function createChatPanel(
     const textarea = inputWrapper.createEl('textarea', {
         cls: 'guardian-chat-input',
         attr: {
-            placeholder: state.mode === 'selection' ? 'Ask about this selection...' : 'Ask what to insert...',
+            placeholder: state.mode === 'selection' ? t('Ask about this selection...') : t('Ask what to insert...'),
+            'aria-label': state.mode === 'selection' ? t('Ask about this selection...') : t('Ask what to insert...'),
             rows: '2',
         },
     });
@@ -249,6 +251,7 @@ function createChatPanel(
     suggestContainer.style.display = 'none';
     const suggestList = new SuggestList({
         container: suggestContainer,
+        hostInput: textarea,
         provideItems: (type: SuggestionType, query: string): SuggestionItem[] => {
             if (type !== 'file') return [];
             return context.app.vault.getFiles()
@@ -287,6 +290,8 @@ function createChatPanel(
         }
 
         if (event.key !== 'Enter' || event.shiftKey) return;
+        // IME 组合输入中按 Enter 只确认候选词,不提交(与主输入框一致)。
+        if (event.isComposing) return;
         event.preventDefault();
 
         const text = textarea.value.trim();
@@ -304,16 +309,16 @@ function createChatPanel(
 
     const actions = container.createDiv({ cls: 'guardian-chat-actions' });
     const copyBtn = actions.createEl('button', {
-        text: state.mode === 'selection' ? 'Copy' : 'Copy line',
+        text: state.mode === 'selection' ? t('Copy') : t('Copy line'),
         attr: { type: 'button' },
     });
     copyBtn.onclick = () => {
         void navigator.clipboard.writeText(getTargetText(view, state));
-        new Notice('Copied.');
+        new Notice(t('Copied.'));
     };
 
     const applyBtn = actions.createEl('button', {
-        text: state.mode === 'selection' ? 'Replace' : 'Insert',
+        text: state.mode === 'selection' ? t('Replace') : t('Insert'),
         attr: { type: 'button' },
     });
     applyBtn.onclick = () => {
@@ -495,7 +500,7 @@ async function applyTriggerInsertion(
 ) {
     const response = getLastAiResponse(state.controller);
     if (!response) {
-        new Notice('No AI response to insert.');
+        new Notice(t('No AI response to insert.'));
         return;
     }
 
