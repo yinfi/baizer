@@ -78,9 +78,27 @@ class FakeElement {
   }
 
   click() {
-    for (const handler of this.listeners.click || []) {
-      handler();
+    // 模拟真实 DOM 的事件冒泡:从自身沿 parentElement 向上,依次触发各级 click 监听,
+    // 并携带 event.target(恒为被点击的原始节点)。这样才能正确驱动挂在祖先容器上的
+    // 事件委托监听(如 outputContainer 上的 think-summary 折叠委托)。
+    const event: any = { target: this, preventDefault() {} };
+    let node: FakeElement | null = this;
+    while (node) {
+      for (const handler of node.listeners.click || []) {
+        handler(event);
+      }
+      node = node.parentElement;
     }
+  }
+
+  closest(selector: string): FakeElement | null {
+    const className = selector.startsWith('.') ? selector.slice(1) : selector;
+    let node: FakeElement | null = this;
+    while (node) {
+      if (node.hasClass(className)) return node;
+      node = node.parentElement;
+    }
+    return null;
   }
 
   addClass(name: string) {
@@ -467,6 +485,9 @@ async function runTests() {
       getElementById: () => null,
     };
     (view as any).outputContainer = output;
+    // 折叠交互经 outputContainer 事件委托,由 ensureStreamContainer→ensureTimelineDelegation
+    // 幂等绑定(不依赖 onOpen 完整走过)。FakeElement.click 会沿 parentElement 冒泡并带 target,
+    // 故此处无需手挂监听——若手挂会与生产委托双重触发,toggle 两次相互抵消。
     (view as any).getMessageRenderer = () => ({
       renderAiContent: async () => undefined,
       addActionToolbar: () => undefined,
