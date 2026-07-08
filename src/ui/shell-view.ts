@@ -83,8 +83,6 @@ export class ShellView extends ItemView {
     private lastActivityTime: number = Date.now();
     private heartbeatIntervalMs: number = 30000; // 30s check
     private isResponding: boolean = false;
-    private modelSelectEl: HTMLSelectElement | null = null;
-    private providerSelectEl: HTMLSelectElement | null = null;
     private modelLoadRequestId: number = 0;
     private unsubscribeProvider: (() => void) | null = null;
 
@@ -344,9 +342,7 @@ export class ShellView extends ItemView {
         // 4. Input Controls (below the textarea)
         const inputControls = inputContainer.createDiv({ cls: 'shell-input-controls' });
         this.inputToolbar = new InputToolbar(inputControls, {
-            onProviderChange: (id) => this.handleProviderChange(id),
-            onUnavailableProvider: (id) => this.handleUnavailableProvider(id),
-            onModelChange: (id) => this.handleModelChange(id),
+            onModelSelect: (providerId, modelId) => this.handleModelSelect(providerId, modelId),
             onThinkingChange: (level) => this.handleThinkingChange(level),
             onAttach: () => this.handleAttachFiles(),
             onSend: async () => {
@@ -358,9 +354,6 @@ export class ShellView extends ItemView {
             },
             onStop: () => this.stopActiveResponse(),
         });
-        this.providerSelectEl = this.inputToolbar.getProviderSelectEl();
-        this.modelSelectEl = this.inputToolbar.getModelSelectEl();
-        this.refreshInputToolbarProviders();
         this.refreshInputToolbarThinking();
         void this.refreshInputToolbarModels();
         this.updateInputToolbarCapabilities();
@@ -377,7 +370,6 @@ export class ShellView extends ItemView {
 
         // Register provider change listener for cross-UI sync
         this.unsubscribeProvider = this.modelService.onProviderChanged(() => {
-            this.refreshInputToolbarProviders();
             void this.refreshInputToolbarModels(true);
             this.updateInputToolbarCapabilities();
             this.updatePlaceholder();
@@ -1417,44 +1409,30 @@ export class ShellView extends ItemView {
         }
     }
 
-    private refreshInputToolbarProviders() {
-        const settings = this.getPluginInstance()?.settings;
-        if (!settings?.providers || !this.inputToolbar) return;
-
-        this.inputToolbar.updateProviders(
-            Object.entries(settings.providers).map(([id, config]) => ({
-                id,
-                label: config.label,
-                configured: !!config.apiKey,
-            })),
-            settings.activeProvider || 'gemini',
-        );
-    }
-
     private async refreshInputToolbarModels(forceRefresh: boolean = false) {
         const settings = this.getPluginInstance()?.settings;
         if (!settings?.providers || !this.inputToolbar) return;
 
-        const config = settings.providers[settings.activeProvider];
-        if (!config) return;
+        const activeProviderId = settings.activeProvider || 'gemini';
+        const activeModelId = settings.providers[activeProviderId]?.model || '';
 
         const requestId = ++this.modelLoadRequestId;
         this.inputToolbar.updateModels({
             loading: true,
-            providerLabel: config.label,
-            models: [],
-            activeModelId: '',
+            groups: [],
+            activeProviderId,
+            activeModelId,
         });
 
         try {
-            const models = await this.modelService.getAvailableModels(forceRefresh);
+            const groups = await this.modelService.getAllProviderModels(forceRefresh);
             if (requestId !== this.modelLoadRequestId) return;
 
             this.inputToolbar.updateModels({
                 loading: false,
-                providerLabel: config.label,
-                models,
-                activeModelId: config.model || '',
+                groups,
+                activeProviderId,
+                activeModelId,
             });
         } catch (error: any) {
             if (requestId !== this.modelLoadRequestId) return;
@@ -1464,9 +1442,9 @@ export class ShellView extends ItemView {
             );
             this.inputToolbar.updateModels({
                 loading: false,
-                providerLabel: config.label,
-                models: [],
-                activeModelId: '',
+                groups: [],
+                activeProviderId,
+                activeModelId,
             });
         }
     }
@@ -1481,24 +1459,35 @@ export class ShellView extends ItemView {
         });
     }
 
-    private async handleProviderChange(id: string) {
+    /**
+     * 合并下拉的唯一切换入口:选中的模型带着它所属 provider。
+     * 若切换了 provider 先 switchProvider(会重建 runtime/清缓存),再 switchModel 落地模型;
+     * 未换 provider 则只 switchModel。避免了旧「provider 与 model 两个下拉各自 onChange」的时序问题。
+     */
+    private async handleModelSelect(providerId: string, modelId: string) {
         const plugin = this.getPluginInstance();
-        const config = plugin?.settings?.providers?.[id];
+        const config = plugin?.settings?.providers?.[providerId];
         if (!config?.apiKey) {
-            this.handleUnavailableProvider(id);
+            this.handleUnavailableProvider(providerId);
             return;
         }
 
-        await this.modelService.switchProvider(id, plugin ? () => plugin.saveSettings() : undefined);
+        const saveFn = plugin ? () => plugin.saveSettings() : undefined;
+        const providerChanged = providerId !== this.getActiveProviderId();
+        if (providerChanged) {
+            await this.modelService.switchProvider(providerId, saveFn);
+        }
+        await this.modelService.switchModel(modelId, saveFn);
+
         const activeTab = this.tabManager.getActiveTab();
         if (activeTab) {
             this.tabManager.updateTab(activeTab.id, {
-                providerId: id,
-                modelId: plugin?.settings?.providers?.[id]?.model || '',
+                providerId,
+                modelId,
                 currentNote: this.getCurrentNotePath(),
             });
         }
-        new Notice(`Switched to ${config.label}`);
+        new Notice(providerChanged ? `Switched to ${config.label} · ${modelId}` : `Switched to ${modelId}`);
     }
 
     private handleUnavailableProvider(id: string) {
@@ -1509,21 +1498,7 @@ export class ShellView extends ItemView {
         this.app.setting.open();
         // @ts-ignore - activate plugin settings tab
         this.app.setting.openTabById(PLUGIN_ID);
-        this.refreshInputToolbarProviders();
-    }
-
-    private async handleModelChange(modelId: string) {
-        const plugin = this.getPluginInstance();
-        await this.modelService.switchModel(modelId, plugin ? () => plugin.saveSettings() : undefined);
-        const activeTab = this.tabManager.getActiveTab();
-        if (activeTab) {
-            this.tabManager.updateTab(activeTab.id, {
-                providerId: this.getActiveProviderId(),
-                modelId,
-                currentNote: this.getCurrentNotePath(),
-            });
-        }
-        new Notice(`Switched to ${modelId}`);
+        void this.refreshInputToolbarModels();
     }
 
     private async handleThinkingChange(level: ThinkingLevel) {
@@ -1638,7 +1613,6 @@ export class ShellView extends ItemView {
     }
 
     public async updateModelSelector(forceRefresh: boolean = false) {
-        this.refreshInputToolbarProviders();
         await this.refreshInputToolbarModels(forceRefresh);
     }
 
@@ -2025,7 +1999,6 @@ export class ShellView extends ItemView {
             await this.modelService.switchModel(modelId, plugin ? () => plugin.saveSettings() : undefined);
         }
 
-        this.refreshInputToolbarProviders();
         await this.refreshInputToolbarModels(true);
         this.handleStatusChange(tab.isStreaming);
         this.updatePlaceholder();

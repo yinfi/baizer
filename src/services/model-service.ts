@@ -269,13 +269,47 @@ export class ModelService {
         const config = this.getActiveProviderConfig();
         if (!config) return [];
 
+        const models = await this.fetchModelsForProvider(providerId, config, forceRefresh);
+        return this.ensureModelInList(models, config.model || '');
+    }
+
+    /**
+     * 列出所有「已配置(有 apiKey)」provider 的模型,按 settings.providers 顺序分组返回。
+     * 供底部合并下拉(provider 作 optgroup 标题)使用。并发抓取,单个 provider 失败不影响其余。
+     */
+    async getAllProviderModels(forceRefresh: boolean = false): Promise<
+        Array<{ providerId: string; providerLabel: string; models: ModelOption[] }>
+    > {
+        const entries = Object.entries(this.settings.providers)
+            .filter(([, config]) => config.apiKey?.trim());
+
+        const groups = await Promise.all(
+            entries.map(async ([providerId, config]) => {
+                let models = await this.fetchModelsForProvider(providerId, config, forceRefresh);
+                // 当前选中的模型置顶保证一定可选中(即便该 provider 抓取失败只剩 fallback)。
+                if (providerId === this.settings.activeProvider) {
+                    models = this.ensureModelInList(models, config.model || '');
+                }
+                return { providerId, providerLabel: config.label, models };
+            })
+        );
+
+        return groups.filter(group => group.models.length > 0);
+    }
+
+    /** 抓取单个 provider 的模型列表(带缓存 + fallback 兜底),不做「当前模型置顶」——由调用方按需处理。 */
+    private async fetchModelsForProvider(
+        providerId: string,
+        config: ProviderConfig,
+        forceRefresh: boolean,
+    ): Promise<ModelOption[]> {
         const cacheKey = `${providerId}:${config.baseUrl}:${(config.apiKey || '').slice(0, 8)}`;
         const now = Date.now();
 
         if (!forceRefresh) {
             const cached = this.modelListCache.get(cacheKey);
             if (cached && now - cached.timestamp < this.modelListCacheTtlMs) {
-                return this.ensureCurrentModelInList(cached.models);
+                return cached.models;
             }
         }
 
@@ -295,7 +329,7 @@ export class ModelService {
             models = this.getFallbackModels(providerId);
         }
 
-        const normalized = this.ensureCurrentModelInList(this.normalizeModelOptions(models));
+        const normalized = this.normalizeModelOptions(models);
         this.modelListCache.set(cacheKey, { timestamp: now, models: normalized });
         return normalized;
     }
@@ -347,14 +381,14 @@ export class ModelService {
         return Array.from(deduped.values());
     }
 
-    private ensureCurrentModelInList(options: ModelOption[]): ModelOption[] {
-        const currentModel = this.getActiveProviderConfig()?.model || '';
-        if (!currentModel) return options;
+    /** 确保指定模型 id 出现在列表里(不在则以「(Current)」标注置顶),避免下拉选不中已保存的模型。 */
+    private ensureModelInList(options: ModelOption[], modelId: string): ModelOption[] {
+        if (!modelId) return options;
 
-        const exists = options.some(option => option.value === currentModel);
+        const exists = options.some(option => option.value === modelId);
         if (exists) return options;
 
-        return [{ value: currentModel, label: `${currentModel} (Current)` }, ...options];
+        return [{ value: modelId, label: `${modelId} (Current)` }, ...options];
     }
 
     async chat(

@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, TextComponent, debounce, Debouncer } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, TextComponent, debounce, Debouncer, setIcon } from 'obsidian';
 import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 import { OntologyUpdateMode } from './knowledge/types';
@@ -372,6 +372,114 @@ export function getSettingsFallbackCss(): string {
 .baizer-settings-inline-hint { color: var(--text-muted); font-size: var(--font-smallest); }
 .baizer-full-width-textarea textarea { width: 100%; min-height: 110px; resize: vertical; }
 .gemini-danger-setting { border-left: 3px solid color-mix(in srgb, var(--text-error) 75%, transparent); padding-left: 10px; }
+
+/* ===== 记忆(Hindsight)面板 ===== */
+.baizer-memory-toolbar { display: flex; flex-direction: column; gap: 8px; }
+.baizer-memory-toolbar-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.baizer-memory-path {
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--background-modifier-border) 45%, transparent);
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    font-family: var(--font-monospace);
+}
+.baizer-memory-toolbar-actions { display: flex; gap: 8px; align-items: center; }
+.baizer-memory-search { display: flex; gap: 8px; align-items: center; }
+.baizer-memory-search .baizer-settings-search { flex: 1 1 auto; }
+.baizer-memory-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.baizer-memory-tab {
+    min-height: 28px;
+    padding: 0 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    cursor: pointer;
+    transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+.baizer-memory-tab:hover { color: var(--text-normal); border-color: color-mix(in srgb, var(--interactive-accent) 40%, var(--background-modifier-border)); }
+.baizer-memory-tab.is-active {
+    color: var(--text-on-accent);
+    background: var(--interactive-accent);
+    border-color: var(--interactive-accent);
+}
+.baizer-memory-list { display: flex; flex-direction: column; gap: 8px; }
+.baizer-memory-row {
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--background-primary-alt) 96%, var(--background-secondary));
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 120ms ease;
+}
+.baizer-memory-row:hover { border-color: color-mix(in srgb, var(--background-modifier-border) 100%, transparent); }
+.baizer-memory-row-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+.baizer-memory-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.baizer-memory-type {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    font-weight: var(--font-medium);
+    text-transform: capitalize;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
+}
+.baizer-memory-type.is-world { color: var(--text-accent); background: color-mix(in srgb, var(--interactive-accent) 15%, transparent); }
+.baizer-memory-type.is-experience { color: var(--color-green); background: color-mix(in srgb, var(--color-green) 14%, transparent); }
+.baizer-memory-type.is-observation { color: var(--text-warning); background: color-mix(in srgb, var(--color-yellow) 16%, transparent); }
+.baizer-memory-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--background-modifier-border) 40%, transparent);
+}
+.baizer-memory-confidence { color: var(--text-faint); font-size: var(--font-smallest); }
+.baizer-memory-row-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.baizer-memory-time { color: var(--text-faint); font-size: var(--font-smallest); white-space: nowrap; }
+.baizer-memory-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+    opacity: .55;
+    transition: color 120ms ease, background-color 120ms ease, opacity 120ms ease;
+}
+.baizer-memory-delete:hover { color: var(--text-error); background: color-mix(in srgb, var(--text-error) 12%, transparent); opacity: 1; }
+.baizer-memory-delete .svg-icon { width: 15px; height: 15px; }
+.baizer-memory-row-text {
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
 @container (max-width: 560px) {
     .baizer-settings-hero {
         grid-template-columns: 1fr;
@@ -871,20 +979,24 @@ export class SettingTab extends PluginSettingTab {
                     await this.refreshMemoryView();
                 }));
 
-        toolbar.createDiv({
+        // 工具栏底行:左侧数据目录芯片,右侧「刷新 + 清除全部」操作组。
+        // 清除全部从原本列表最底部上移至此 —— 避免高危操作被埋在长列表里(用户反馈「藏在数据中」)。
+        const toolbarFooter = toolbar.createDiv({ cls: 'baizer-memory-toolbar-footer' });
+        toolbarFooter.createSpan({
             cls: 'baizer-memory-path',
             text: `Data folder: ${MEMORY_DIR}`,
         });
-
-        const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
-        this.createActionButton(actions, this.memoryLoading ? t('Refreshing...') : t('Refresh'), async () => {
+        const toolbarActions = toolbarFooter.createDiv({ cls: 'baizer-memory-toolbar-actions' });
+        this.createActionButton(toolbarActions, this.memoryLoading ? t('Refreshing...') : t('Refresh'), async () => {
             await this.refreshMemoryView();
         }, 'default', this.memoryLoading);
+        this.createActionButton(toolbarActions, t('Clear Memory'), async () => {
+            this.confirmClearAllMemory();
+        }, 'danger');
 
         this.renderMemorySearch(containerEl);
         this.renderMemoryTabs(containerEl);
         this.renderMemoryList(containerEl);
-        this.renderMemoryDangerZone(containerEl);
 
         if (!this.memoryView && !this.memoryLoading) {
             void this.refreshMemoryView();
@@ -986,28 +1098,34 @@ export class SettingTab extends PluginSettingTab {
 
         for (const record of records) {
             const row = list.createDiv({ cls: 'baizer-memory-row' });
-            const meta = row.createDiv({ cls: 'baizer-memory-row-meta' });
-            meta.createSpan({ cls: `baizer-memory-type is-${record.type}`, text: record.type });
-            meta.createSpan({ text: `${t('confidence')} ${Number(record.confidence || 0).toFixed(2)}` });
-            meta.createSpan({ text: `${t('updated')} ${new Date(record.updatedAt || record.mentionedAt).toLocaleString('zh-CN')}` });
-            row.createDiv({ cls: 'baizer-memory-row-text', text: this.truncateSettingMemoryText(record.text || '', 260) });
-            if (record.tags?.length) {
-                row.createDiv({ cls: 'baizer-memory-row-tags', text: `${t('tags')}: ${record.tags.join(', ')}` });
-            }
-            this.createActionButton(row, t('Delete'), async () => {
-                this.confirmDeleteMemoryRecord(record.id);
-            }, 'danger');
-        }
-    }
 
-    private renderMemoryDangerZone(containerEl: HTMLElement): void {
-        const zone = containerEl.createDiv({ cls: 'baizer-memory-danger' });
-        const copy = zone.createDiv({ cls: 'baizer-memory-danger-copy' });
-        copy.createDiv({ cls: 'baizer-settings-panel-title', text: t('Danger Zone') });
-        copy.createDiv({ cls: 'baizer-settings-inline-hint', text: t('Clear all remembered Hindsight memory.') });
-        this.createActionButton(zone, t('Clear Memory'), async () => {
-            this.confirmClearAllMemory();
-        }, 'danger');
+            // 头部:左侧「类型 badge + 标签 chips + 置信度」,右侧「时间 + 删除图标」。
+            // 删除按钮收成右上角的图标按钮 —— 不再是每行一个刺眼的红色文字块,悬停时才凸显。
+            const head = row.createDiv({ cls: 'baizer-memory-row-head' });
+            const headMeta = head.createDiv({ cls: 'baizer-memory-row-meta' });
+            headMeta.createSpan({ cls: `baizer-memory-type is-${record.type}`, text: record.type });
+            for (const tag of record.tags || []) {
+                headMeta.createSpan({ cls: 'baizer-memory-tag', text: tag });
+            }
+            headMeta.createSpan({
+                cls: 'baizer-memory-confidence',
+                text: `${t('confidence')} ${Number(record.confidence || 0).toFixed(2)}`,
+            });
+
+            const headActions = head.createDiv({ cls: 'baizer-memory-row-actions' });
+            headActions.createSpan({
+                cls: 'baizer-memory-time',
+                text: new Date(record.updatedAt || record.mentionedAt).toLocaleString('zh-CN'),
+            });
+            const deleteBtn = headActions.createEl('button', {
+                cls: 'baizer-memory-delete',
+                attr: { type: 'button', title: t('Delete'), 'aria-label': t('Delete') },
+            });
+            setIcon(deleteBtn, 'trash-2');
+            deleteBtn.addEventListener('click', () => this.confirmDeleteMemoryRecord(record.id));
+
+            row.createDiv({ cls: 'baizer-memory-row-text', text: this.truncateSettingMemoryText(record.text || '', 260) });
+        }
     }
 
     private truncateSettingMemoryText(text: string, max: number): string {

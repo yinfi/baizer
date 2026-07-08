@@ -554,11 +554,6 @@ textarea.shell-input::placeholder {
     opacity: 0.7;
 }
 
-.shell-provider-select {
-    flex: 0 0 124px;
-    max-width: 124px;
-}
-
 .shell-main-model-select {
     flex: 1 1 auto;
     min-width: 0;
@@ -794,9 +789,21 @@ textarea.shell-input::placeholder {
 }
 
 /* Guardian Selection & Chat Styles */
-.guardian-selection-tooltip {
+/* CM6 的 showTooltip 会给宿主元素套上 .cm-tooltip,Obsidian 默认给它加灰底/边框/内边距/阴影。
+ * 用组合选择器提升特异度,把这层默认 chrome 全部中和 —— 外观完全交给内部的胶囊按钮/聊天卡片自己负责。 */
+.cm-tooltip.guardian-selection-tooltip {
     z-index: 200;
     pointer-events: auto;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+    border-radius: 0;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    /* CM 会用 max-width 收窄气泡,按钮态不需要,交给 is-chat 单独约束 */
+    max-width: none;
 }
 
 .guardian-selection-btn {
@@ -2823,7 +2830,7 @@ textarea.shell-input {
     color: var(--text-muted);
 }
 
-.guardian-selection-tooltip {
+.cm-tooltip.guardian-selection-tooltip {
     z-index: 1000;
     max-width: min(340px, calc(100vw - 64px));
 }
@@ -3750,19 +3757,25 @@ textarea.shell-input {
 
 .baizer-shell-view .shell-model-select-container {
     min-width: 0;
-    display: grid;
-    grid-template-columns: minmax(72px, 88px) minmax(0, 1fr) minmax(64px, 76px);
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
     gap: 6px;
-    overflow: hidden;
 }
 
-.baizer-shell-view .shell-provider-select,
-.baizer-shell-view .shell-main-model-select,
-.baizer-shell-view .shell-thinking-select {
-    width: 100%;
-    max-width: none;
+/* 两个下拉恒在同一行、绝不换行,空间不足时一起等比压缩(min-width:0 解除 flex 默认最小内容宽度)。
+ * 只要还能点到即可,文字过长由基类的 ellipsis 处理;model 权重更高,占更多剩余空间。 */
+.baizer-shell-view .shell-main-model-select {
+    flex: 3 1 0;
+    width: auto;
     min-width: 0;
-    flex: none;
+    max-width: none;
+}
+.baizer-shell-view .shell-thinking-select {
+    flex: 2 1 0;
+    width: auto;
+    min-width: 0;
+    max-width: none;
 }
 
 .baizer-shell-view .shell-model-select {
@@ -3806,13 +3819,6 @@ textarea.shell-input {
     color: var(--text-error);
     background: color-mix(in srgb, var(--text-error) 12%, var(--baizer-surface-muted));
     border-color: color-mix(in srgb, var(--text-error) 36%, var(--baizer-border));
-}
-
-/* 窄侧栏下 provider/model/thinking 三列进一步压缩,按输入控件条容器宽度触发。 */
-@container (max-width: 320px) {
-    .baizer-shell-view .shell-model-select-container {
-        grid-template-columns: minmax(60px, 76px) minmax(0, 1fr) minmax(54px, 64px);
-    }
 }
 
 /* tab 标题在 header 内,不在输入控件容器作用域,仍按视口宽度收窄。 */

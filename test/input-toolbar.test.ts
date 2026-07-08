@@ -124,88 +124,77 @@ async function runTests() {
   console.log('=== Input Toolbar Tests ===');
   const { InputToolbar } = await import('../src/ui/components/input-toolbar');
 
-  await test('renders provider selector and calls provider change callback', () => {
-    const changes: string[] = [];
-    const unavailable: string[] = [];
+  await test('renders grouped models with optgroup per provider', () => {
     const root = new FakeElement();
     const toolbar = new InputToolbar(root as any, {
-      onProviderChange: id => changes.push(id),
-      onUnavailableProvider: id => unavailable.push(id),
-      onModelChange: () => { },
+      onModelSelect: () => { },
     });
-
-    toolbar.updateProviders([
-      { id: 'gemini', label: 'Gemini', configured: true },
-      { id: 'openai', label: 'OpenAI', configured: true },
-    ], 'gemini');
-
-    const select = toolbar.getProviderSelectEl() as any as FakeElement;
-    expect(select.children.map(option => option.textContent)).toEqual(['Gemini', 'OpenAI']);
-
-    select.value = 'openai';
-    select.change();
-
-    expect(changes).toEqual(['openai']);
-    expect(unavailable).toEqual([]);
-  });
-
-  await test('calls unavailable provider callback and restores active selection', () => {
-    const unavailable: string[] = [];
-    const root = new FakeElement();
-    const toolbar = new InputToolbar(root as any, {
-      onProviderChange: () => { throw new Error('should not switch unavailable provider'); },
-      onUnavailableProvider: id => unavailable.push(id),
-      onModelChange: () => { },
-    });
-
-    toolbar.updateProviders([
-      { id: 'gemini', label: 'Gemini', configured: true },
-      { id: 'openai', label: 'OpenAI', configured: false },
-    ], 'gemini');
-
-    const select = toolbar.getProviderSelectEl() as any as FakeElement;
-    select.value = 'openai';
-    select.change();
-
-    expect(unavailable).toEqual(['openai']);
-    expect(select.value).toBe('gemini');
-  });
-
-  await test('renders model loading state and model change callback', () => {
-    const modelChanges: string[] = [];
-    const root = new FakeElement();
-    const toolbar = new InputToolbar(root as any, {
-      onProviderChange: () => { },
-      onUnavailableProvider: () => { },
-      onModelChange: id => modelChanges.push(id),
-    });
-
-    toolbar.updateModels({ loading: true, providerLabel: 'Gemini', models: [], activeModelId: '' });
-    let modelSelect = toolbar.getModelSelectEl() as any as FakeElement;
-    expect(modelSelect.disabled).toBe(true);
-    expect(modelSelect.children[0].textContent).toBe('Loading Gemini models...');
 
     toolbar.updateModels({
       loading: false,
-      providerLabel: 'Gemini',
-      models: [{ value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' }],
+      groups: [
+        { providerId: 'gemini', providerLabel: 'Gemini', models: [{ value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' }] },
+        { providerId: 'deepseek', providerLabel: 'DeepSeek', models: [{ value: 'deepseek-chat', label: 'DeepSeek Chat' }] },
+      ],
+      activeProviderId: 'gemini',
       activeModelId: 'gemini-2.5-flash',
     });
-    modelSelect = toolbar.getModelSelectEl() as any as FakeElement;
-    modelSelect.value = 'gemini-2.5-flash';
-    modelSelect.selectedIndex = 0;
+
+    const modelSelect = toolbar.getModelSelectEl() as any as FakeElement;
+    // 两个 optgroup,label 为 provider 名。
+    expect(modelSelect.children.map(group => group.attributes.label)).toEqual(['Gemini', 'DeepSeek']);
+    // 每个 optgroup 下有对应模型 option。
+    expect(modelSelect.children[0].children[0].textContent).toBe('Gemini 2.5 Flash');
+    expect(modelSelect.children[1].children[0].textContent).toBe('DeepSeek Chat');
+    expect(modelSelect.disabled).toBe(false);
+  });
+
+  await test('decodes provider+model on selection and calls onModelSelect', () => {
+    const selections: Array<[string, string]> = [];
+    const root = new FakeElement();
+    const toolbar = new InputToolbar(root as any, {
+      onModelSelect: (providerId, modelId) => { selections.push([providerId, modelId]); },
+    });
+
+    toolbar.updateModels({
+      loading: false,
+      groups: [
+        { providerId: 'gemini', providerLabel: 'Gemini', models: [{ value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' }] },
+        { providerId: 'deepseek', providerLabel: 'DeepSeek', models: [{ value: 'deepseek-chat', label: 'DeepSeek Chat' }] },
+      ],
+      activeProviderId: 'gemini',
+      activeModelId: 'gemini-2.5-flash',
+    });
+
+    const modelSelect = toolbar.getModelSelectEl() as any as FakeElement;
+    // 选中另一个 provider 组下的模型,value 编码为 "providerId modelId"。
+    modelSelect.value = 'deepseek deepseek-chat';
     modelSelect.change();
 
-    expect(modelSelect.disabled).toBe(false);
-    expect(modelChanges).toEqual(['gemini-2.5-flash']);
+    expect(selections).toEqual([['deepseek', 'deepseek-chat']]);
+  });
+
+  await test('renders loading and empty states', () => {
+    const root = new FakeElement();
+    const toolbar = new InputToolbar(root as any, {
+      onModelSelect: () => { },
+    });
+
+    toolbar.updateModels({ loading: true, groups: [], activeProviderId: 'gemini', activeModelId: '' });
+    let modelSelect = toolbar.getModelSelectEl() as any as FakeElement;
+    expect(modelSelect.disabled).toBe(true);
+    expect(modelSelect.children[0].textContent).toBe('Loading models...');
+
+    toolbar.updateModels({ loading: false, groups: [], activeProviderId: 'gemini', activeModelId: '' });
+    modelSelect = toolbar.getModelSelectEl() as any as FakeElement;
+    expect(modelSelect.disabled).toBe(true);
+    expect(modelSelect.children[0].textContent).toBe('No models available');
   });
 
   await test('disables attach button while responding and send button when empty', () => {
     const root = new FakeElement();
     const toolbar = new InputToolbar(root as any, {
-      onProviderChange: () => { },
-      onUnavailableProvider: () => { },
-      onModelChange: () => { },
+      onModelSelect: () => { },
     });
 
     // 空输入且未响应：发送按钮禁用，附件按钮可用（与图片能力无关）。
@@ -221,9 +210,7 @@ async function runTests() {
   await test('renders action controls as icon buttons with stable accessible names', () => {
     const root = new FakeElement();
     new InputToolbar(root as any, {
-      onProviderChange: () => { },
-      onUnavailableProvider: () => { },
-      onModelChange: () => { },
+      onModelSelect: () => { },
     });
 
     const attachButton = root.querySelector('.shell-attach-btn') as any as FakeElement;
@@ -244,11 +231,9 @@ async function runTests() {
     const events: string[] = [];
     const root = new FakeElement();
     const toolbar = new InputToolbar(root as any, {
-      onProviderChange: () => { },
-      onUnavailableProvider: () => { },
-      onModelChange: () => { },
-      onSend: () => events.push('send'),
-      onStop: () => events.push('stop'),
+      onModelSelect: () => { },
+      onSend: () => { events.push('send'); },
+      onStop: () => { events.push('stop'); },
     });
 
     toolbar.updateCapabilities({ supportsImageInput: true, isResponding: false, canSend: true });

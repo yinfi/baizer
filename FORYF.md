@@ -1,3 +1,194 @@
+### [2026-07-09 00:05] Task Summary — 底部下拉禁止换行改为等比压缩
+
+**1. 刚刚做了什么? (What was done?)**
+- styles.css:.shell-model-select-container 的 flex-wrap 从 wrap 改 nowrap;两个下拉从 flex:1 1 140px(model,min-width:120px)/flex:0 1 auto(thinking,max-width:88px) 改为 model flex:3 1 0 + thinking flex:2 1 0,均 min-width:0、max-width:none;删除整个 @container(max-width:320px) 块(它强制两者各 flex:1 1 100% 独占整行,与不换行矛盾)。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 用户反馈(图9):model/thinking 换行成两行、太宽。要求恒在一行、可压缩、只要能点到即可。根因是上一版的 flex-wrap:wrap + model min-width:120px 撑着不缩,空间不足即换行;窄屏规则更直接强制各占整行。改为 nowrap + min-width:0(解除 flex 默认最小内容宽度)+ flex-basis:0 等比分配,两者按 3:2 权重一起压缩,文字超长由基类 ellipsis 兜底。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 无。基础层(非 scoped)的 .shell-*-select 特异度低于 .baizer-shell-view 作用域,不冲突;容器基础层无 flex-wrap 默认 nowrap,安全。
+
+**4. 如何修复的? (How was it fixed?)**
+- 纯 CSS 改动,build 通过。
+
+---
+### [2026-07-08 23:45] Task Summary — provider+model 合并为单个分组下拉(三控件→两控件)
+
+**1. 刚刚做了什么? (What was done?)**
+- 需求(参考图8):把底部 provider / model / thinking 三个下拉合并为两个 —— provider 与 model 合成单个原生 <select>,provider 作 <optgroup> 分组标题(CLAUDE/CODEX 形态),模型列于其下,选中模型即隐含切到对应 provider。
+- input-toolbar.ts:删除独立 providerSelectEl 及 onProviderChange/onModelChange/updateProviders API;新增 encodeModelValue/decodeModelValue(providerId+modelId 以空格拼进 option.value)、ModelGroup 类型、updateModels 渲染 optgroup、单一回调 onModelSelect(providerId,modelId)。
+- model-service.ts:抽出 fetchModelsForProvider(单 provider,带缓存+fallback);新增 getAllProviderModels(并发拉取所有已配置 provider,分组返回);getAvailableModels 复用;ensureCurrentModelInList 泛化为 ensureModelInList(options,modelId)。
+- shell-view.ts:handleProviderChange+handleModelChange 合并为 handleModelSelect(变了 provider 先 switchProvider 再 switchModel);refreshInputToolbarModels 改用 getAllProviderModels 渲染分组;删除 refreshInputToolbarProviders 及 3 处死调用、write-only 的 providerSelectEl/modelSelectEl 字段。
+- styles.css:删除死类 .shell-provider-select(基础层+作用域层+窄屏);模型下拉保持 flex:1 1 140px+min-width:120px,thinking 紧凑;窄屏(≤320px)两者各独占整行。
+- test/input-toolbar.test.ts:按新 API 重写(optgroup 分组渲染 / value 解码 / loading+empty 态)。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 用户反馈:窄侧栏压缩后 provider 的 model 和 think 都没了(旧三列 grid 中 model 列 minmax(0,1fr) 下限为0被压没)。合并成分组下拉后信息密度更高、更接近图8参考,且原生 optgroup 天然 a11y/跨平台。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 关键 bug:MODEL_VALUE_SEP 分隔符被写入了不可见的 NUL 字节(U+0000)——注释本想用 NUL,落笔混入真实 NUL。encode/decode 用 NUL 自洽,但测试硬编码空格导致 decode 失配(测出 providerId=''),且 Edit 工具因不可见字节反复匹配失败。
+
+**4. 如何修复的? (How was it fixed?)**
+- grep -naP '\\x00' 定位到仅第29行含 NUL → sed -i '29s/\\x00/ /' 替换为 ASCII 空格 → od -c 确认字节 → grep -rlP 复查 src 全目录无 NUL。分隔符改普通空格安全(providerId 是 settings key 无空格,indexOf 取首个空格切分,modelId 含空格也不影响)。全量 563 测试 PASS/0 FAIL、build 通过、tsc 对 src 零错误。
+
+---
+### [2026-07-08 23:05] Task Summary — 行内 AI 面板被侧栏遮挡修复
+
+**1. 刚刚做了什么? (What was done?)**
+- selection-menu.ts:import 补 tooltips;在 selectionMenuExtension 返回的扩展数组里加 tooltips({ parent: document.body, position: 'fixed', tooltipSpace: view => view.dom.getBoundingClientRect() })。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 根因:CM6 tooltip(选区/行内 AI 面板都走 showTooltip)默认挂在编辑器 DOM 内、以整窗判定可用空间。编辑器被右侧 Workbench 侧栏挤窄时,面板向右溢出编辑器边界,被靠后的侧栏兄弟节点盖住(跨 DOM 子树,z-index 无效);且 CM 按整窗算空间(窗口比编辑器宽)故不自动左移。三开关对症:提到 body 顶层脱离兄弟遮挡 + fixed 视口定位免 overflow 裁剪 + tooltipSpace 限定编辑器自身矩形令其按编辑器宽度自动左移避让。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 顾虑 tooltips() 是全局 facet,parent:body 会否波及其他 tooltip / ghost-text。核实 ghost-text 不用 showTooltip,本扩展仅本插件编辑器注册,无冲突。
+
+**4. 如何修复的? (How was it fixed?)**
+- build 通过;tsc 确认 src 零错误(8 个报错全在 node_modules/typebox 依赖,预先存在无关)。
+
+---
+### [2026-07-08 22:40] Task Summary — 底部模型选择框被压缩修复
+
+**1. 刚刚做了什么? (What was done?)**
+- styles.css:把 .baizer-shell-view .shell-model-select-container 从 CSS grid(3 列 minmax)改为 flex + flex-wrap;三个下拉重设 flex:provider/thinking 固定紧凑(max-width 112/88px、可缩不增),模型名 flex:1 1 140px + min-width 120px(优先增长、有下限保护)。
+- 窄屏 @container(max-width:320px):从改 grid-template-columns 改为让模型名 flex-basis:100% 独占整行,provider/thinking 落下一行 flex:1 1 0 均分。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 根因:grid 模板 `minmax(72px,88px) minmax(0,1fr) minmax(64px,76px)` —— provider/thinking 两列有固定下限撑着,唯独中间 model 列是 minmax(0,1fr) 弹性且下限为 0。侧栏一窄,剩余空间被前后固定列吃光,model 被压到只剩一个字。设计是反的:模型名最重要最长,却被分到唯一可牺牲列;provider 仅 3 字母却占 88px。改为把增长优先权 + 最小宽度给模型名,空间不足时整块换行而非压字。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 容器改 flex 后,原窄屏规则仍用 grid-template-columns(对 flex 容器无效)成了死代码。
+
+**4. 如何修复的? (How was it fixed?)**
+- 用 flex 语义重写窄屏规则(模型名 100% 独占行 + 另两项均分下一行)。基类 557-571 行的 flex:0 0 124px 特异度低于 .baizer-shell-view 作用域,不冲突。build 通过。
+
+---
+### [2026-07-08 22:10] Task Summary — 设置页记忆面板样式重构
+
+**1. 刚刚做了什么? (What was done?)**
+- settings.ts DOM:① 「清除记忆」从列表最底部的独立危险区上移到顶部工具栏(与刷新并排),删除 renderMemoryDangerZone;② 单条记录重构为卡片:头部左侧=类型 badge + 标签 chips + 置信度,右侧=时间 + 右上角 trash-2 图标删除按钮(取代原每行红色文字块);正文独立成段。
+- settings.ts CSS:在 getSettingsFallbackCss() 补齐此前完全缺失的全套 .baizer-memory-* 规则(toolbar/path 芯片/胶囊 tab/记录卡片/type badge 三色/tag chip/图标删除按钮 hover 变红)。
+- 导入 setIcon;确认 record.type 取值 world/experience/observation 与 badge 三色一一对应。build 通过。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 根因:DOM 里 .baizer-memory-* 类结构规整,但样式表里一条都没定义,全靠浏览器默认渲染 → meta span 零间距挤成一坨、type 退化成纯文字、记录无卡片分隔像流水账、每行红色删除按钮噪音大;「清除全部」埋在长列表底部要滚两屏(用户反馈「藏在数据中」)。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- setIcon 未在 settings.ts 导入(原文件只导了 App/Setting 等)。
+
+**4. 如何修复的? (How was it fixed?)**
+- 在 obsidian 导入行补 setIcon;删除后核对无 renderMemoryDangerZone / baizer-memory-row-tags / baizer-memory-danger 孤儿引用。
+
+---
+### [2026-07-08 21:30] Task Summary — 选区 AI 按钮外层灰框修复
+
+**1. 刚刚做了什么? (What was done?)**
+- styles.css:把 `.guardian-selection-tooltip` 的两处规则都改为 `.cm-tooltip.guardian-selection-tooltip` 组合选择器;第一处新增中和外层默认外观(background/border/box-shadow/padding/margin/border-radius/backdrop-filter 全清,max-width:none);窄屏那处同步提升特异度以保留聊天面板宽度约束。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 选区按钮经 CM6 `showTooltip` 挂载,CM 会给宿主 dom 自动加 `.cm-tooltip` 类,Obsidian 主题对其有默认灰底/边框/内边距/阴影。此前从未中和,导致蓝色胶囊按钮外套了一层丑陋灰色磨砂方框(截图最扎眼处)。单类选择器特异度不足以稳压主题默认,故用双类组合。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 第一处设 `max-width:none` 会盖掉窄屏那条单类 `max-width` 规则,导致窄屏聊天面板宽度约束失效。
+
+**4. 如何修复的? (How was it fixed?)**
+- 把窄屏那条规则也提升为 `.cm-tooltip.guardian-selection-tooltip` 双类,恢复同等特异度。build 通过。
+
+---
+### [2026-07-08 20:15] Task Summary — T8 可访问性(ARIA/键盘导航/焦点/aria-live,横切7文件)
+
+**1. 刚刚做了什么? (What was done?)**
+- command-dropdown.ts:listbox 加唯一 id + 每 option 加 id;选中项 scrollIntoView({block:'nearest'});暴露 getListboxId/getActiveOptionId。
+- suggest-list.ts:新增 hostInput 选项,构造时给宿主挂 role=combobox/aria-autocomplete/aria-controls,render 时置 aria-expanded=true + aria-activedescendant,hide 时复位。combobox 关联统一收敛到这里。
+- shell-view.ts:主 textarea 加 aria-label='Send a message to AI';SuggestList 构造移到 textarea 之后并传 hostInput;流式回复区 aria-live 由常驻 polite 改为流中 off、finalizeStream 时切 polite(整段播报一次);新增 historyMenuTriggerEl,hideHistoryMenu 仅在菜单可见时把焦点还给触发按钮。
+- tab-bar.ts:漫游 tabindex(活跃 0/其余 -1)+ ArrowLeft/Right 组内移焦(role=tab 之间循环)+ Enter/Space 激活。
+- selection-menu.ts:选区 textarea 加 aria-label,SuggestList 传 hostInput。
+- ghost-text.ts:body 下建 visually-hidden aria-live 区(announceGhost),在 ghostTextStateField.update 的 set/clear/docChanged/光标离行各路径播报「有可接受补全 / 深补进行中」。
+- styles.css:feedback-bar 加 :focus-within + @media(hover:none) 常驻显示;新增 .baizer-visually-hidden 工具类(承载 ghost live 区)。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 屏幕阅读器需要知道输入框用途、当前选中的补全项、tab 切换;键盘用户需能在 tab bar/建议列表导航;Esc 关菜单后焦点不该掉到 body;流式逐字增量若常驻 polite 会让读屏读碎片,故流中关、结束播一次;触屏无 hover 无法唤出反馈条。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 计划写于旧架构(主输入框直连 CommandDropdown)。现已抽出 SuggestList 包裹 CommandDropdown 且被主输入框与选区对话框共用,故 combobox ARIA 改为在 SuggestList 通过 hostInput 统一实现,而非直改 CommandDropdown 宿主。多数 ARIA(aria-live/aria-expanded/history 项 role/多数按钮 aria-label/ghost widget aria-label)已被链A预先加好,本次只补真正缺失项。
+- 全量测试有 1 红:`ShellView keeps completed thinking summary expandable after stream cleanup` 报 `IntersectionObserver is not defined`——是 T13/T14 虚拟化链未提交的 shell-view 代码缺测试环境 polyfill,非 T8 引入(我的改动不碰 observer)。
+
+**4. 如何修复的? (How was it fixed?)**
+- 按当前真实架构落地(SuggestList/hostInput 路线)。`npm run build` 通过;tsc 仅 node_modules/typebox 报错(既有环境问题,src 零错)。红测试根因归属 T13/T14 链,已在给 team-lead 的汇报中标明,不属 T8 修复范围。
+
+---
+
+### [2026-07-08 16:30] Task Summary — styles.css 样式体系修复(T5/T6/T7/T4/T9/T11)
+
+**1. 刚刚做了什么? (What was done?)**
+- T5 规则冲突清理:删 `.baizer-shell-view` 里被 L1612 覆盖的 `background-color`/`font-family`;删被完全覆盖的第一代 `.shell-title` 旧块(把其独有的 `margin:0` 迁到保留块);三处 `font-weight:750`(`.shell-title`/`.suggestion-icon`/`.shell-approval-title`)统一改 `700`;`--baizer-radius-l` 8px→12px 与 radius-m(8px) 拉开档次。
+- T6 过渡收敛:在 `.baizer-shell-view` 变量块新增 `--baizer-transition-fast:120ms ease` / `--baizer-transition-base:200ms ease`,把散落的 0.1s/0.12s/0.15s/140ms/120ms 按交互类型替换(hover/焦点→fast,opacity 淡入→base);0.3s guardian gutter 动画保留;补 `.theme-dark .shell-suggestions` 深阴影(0 -4px 12px rgba(0,0,0,0.45))。
+- T7 硬编码替换:Guardian 模态 7 处 px 字号→`--font-ui-medium/--font-ui-smaller/--font-ui-small/--font-smallest`;`.suggestion-item` 13px→`--font-ui-small`;三处浮层圆角(history-menu/history-search/suggestions)→`--baizer-radius-m`/`--baizer-radius-s`;Guardian 输入框/按钮 4px→`--radius-s`。
+- T4 容器查询响应式:`.shell-change-preview-card` 加 `container-type` + `@media 700`→`@container 480`;`.baizer-shell-view .shell-input-controls` 加 `container-type` + model select `@media 380`→`@container 320`(拆出 header 内 tab-title 规则仍走 @media);`.shell-approval-fact-value` nowrap→`overflow-wrap:anywhere`;`.context-chip-action-row` 加 `max-width:min(220px,calc(100% - 16px))`+flex-wrap;`.baizer-history-note` 220px→100%。
+- T9 触摸目标:`.baizer-tab-badge` 加 `position:relative` + 居中透明 `::after`(44x44 命中区),视觉尺寸不变。
+- T11 Guardian idle/paused 去动画:移除 `guardian-pulse-slow` 动画改静态 opacity+scale(0.9)+:hover scale(1.1);删除已成孤儿的 `@keyframes guardian-pulse-slow`;thinking/has-suggestion 动画保留。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 静默覆盖的重复规则(font/bg/title)增加维护成本且易改错处;token 三档语义化后过渡与圆角一处可调、全局一致。
+- 侧栏宽度≠视口宽度,原 `@media` 对侧栏无效,改容器查询才能按组件自身宽度塌陷。
+- 硬编码 px 字号不跟随 Obsidian 字号设置;常驻呼吸动画分散注意且耗电,静止态本应静止。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- Guardian 模态字号跨 10–16px,若仅用计划列的三个 var 会扭曲视觉,故额外引入 `--font-ui-smaller`(12px)/`--font-ui-medium`(15px)两个标准 Obsidian 变量映射 header 与关闭键。
+- 部分元素(选区 tooltip/设置页/附件模态)挂在 `.baizer-shell-view` 作用域外,transition token 不级联,按仓库既有约定(如 `var(--baizer-radius-m,8px)`)补 fallback 值。
+- `@media(max-width:380px)` 原块捆绑了 model-select 与 header tab-title 两条无关规则,拆分:前者转 @container,后者留 @media。
+
+**4. 如何修复的? (How was it fixed?)**
+- 全部按选择器名+属性内容定位真实位置(非快照行号)后精确改;完成后 `node` 校验大括号 619/619 平衡,grep 确认无残留 `font-weight:750`/孤儿 `guardian-pulse-slow`;`npm run build` 通过无报错。
+
+---
+
+### [2026-07-07] Task Summary — 修复三个连锁 bug(retry/fork消失 + 不回答只报错 + copy无响应)
+
+**1. 刚刚做了什么? (What was done?)**
+- 定位并修复根因 #2:`isFileWriteRequest`(src/utils/file-operation-contract.ts)把"记住:以后创建文件时放到X目录"这类指令记忆误判为写请求。新增 MEMORY_DIRECTIVE_TERMS 记忆语气词表(记住/以后/今后/总是/每次/默认/习惯/规则/偏好/remember/from now on/always/never/by default/as a rule),命中则不判为写请求。
+- 加针对性测试(记忆/规则陈述不判为写请求 + 真·写请求仍命中);完整测试套件 88 文件全过;重新构建刷进 dist/main.js(16:05)。
+- 提交 713b049(仅 file-operation-contract.ts + 其测试,内聚提交)。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 用户报三个 bug,但它们是同一根因的连锁:#2 误判 → 注入写契约 → 模型正确地不写文件 → 系统用 buildFileWriteFailureMessage 顶替真实回答("No file was created...")。这条合成 system 消息无 sessionEntryId 且内容非真实回答 → #1 retry/fork 渲染条件(message.sessionEntryId)不满足而消失、#3 copy 复制到空/警告文本而看似无响应。修根因 #2,三者一起恢复。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 首次怀疑是自己今天的构建引入回归(会话前旧 dist 是 7/6 19:16,今天两次 build 首次把"流式块级渲染"送进运行环境)。取证 git show 7700a05 确认它只碰流式三段结构、未动操作栏锚定/写契约 → 排除自身回归,确认是既有 bug。
+- 编辑词表时误写入损坏占位符 `'\u9 ed8认'`,读回文件发现并修正为"默认"。
+- 多个 PostToolUse hook 误报"Edit/Command failed",但读回文件内容 + 显式查退出码(exit 0)证实操作全部成功——不轻信 hook 单方面报错,以实际落盘/退出码为准。
+- 测试日志有 localStorage.setItem 噪声(测试环境缺 DOM),非失败,末尾"Executed 88 test files successfully"为准。
+
+**4. 如何修复的? (How was it fixed?)**
+- 在 isFileWriteRequest 的疑问词排除之后,加一道记忆语气排除:`if (MEMORY_DIRECTIVE_TERMS.some(...)) return false`。精准修掉指令记忆误判,不影响"帮我创建X文件"这类真·当次写请求(该类不含记忆语气词)。
+- 诚实边界:代码级 + 88 文件测试 + 新测试均通过,但真实 Obsidian 里的点击验证(重载插件后发记忆陈述应正常回答、retry/fork/copy 恢复)需用户确认,我无法在真实 app 内代为点击。
+
+---
+
+### [2026-07-06] Task Summary — styles.css 界面评审后的清理与视觉打磨
+
+**1. 刚刚做了什么? (What was done?)**
+- 第一批·删死代码:删除被 scoped 规则完全覆盖的 `.shell-entry.ai` 第二代气泡(原 1990-1997)、`.shell-input-container` 第二代(原 2050-2057);删除与 `@container` 逐字重复的 `@media` 查询三处(1280/840/560)。文件 4305 → 4246 行。
+- 第二批·硬编码色换主题变量:20 处十六进制/rgba 全部映射到 Obsidian 主题变量。`#00e676`→`--color-green`、`#ff5252`→`--color-red`、5 处土黄警告文字(`#8b5e00`/`#a87600`)→`color-mix(--color-yellow 62%, --text-normal)`、蓝色阴影 `rgba(31,70,110)`→中性黑。重扫确认 0 残留。
+- 第三批·视觉打磨:选区按钮紫蓝渐变(`#7c5cff→#4c8dff`)换 `--interactive-accent` 单色 + `--text-on-accent` 前景;`.guardian-ghost-text` 的 7 个 `!important` 降到 2 个(仅 color/background 保留)。
+- 验证:`npm run build` 通过;CSS 花括号平衡 619/619。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 根因不是审美,是三代 AI 迭代各自加样式、从不删旧,导致特异性军备竞赛(`.shell-entry.ai` 被定义 3 次且互相矛盾)。硬编码色绕过主题变量系统,浅色主题下荧光绿/紫渐变突兀且不跟随主题。先清理死代码+统一颜色来源,让后续任何调整都可预测。
+- 用户明确选择「清理+视觉打磨」范围,状态色选「换成跟随主题的绿」。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 用户 invoke 的是 `/design-consultation`(从零搭建设计系统),但真实需求是评审现有界面——按真实需求走,没跑那套从零流程。
+- 土黄文字不能直接用 `--color-yellow`(偏亮,浅底看不清),原作者手写深土黄正是为此;用 `color-mix` 压深并混入文字色兼顾主题跟随与可读性。
+- `@media`/`@container` 重复块疑似「渐进增强兜底」,动手前确认 Obsidian(Chromium 105+)支持容器查询才删,非盲删。
+
+**4. 如何修复的? (How was it fixed?)**
+- 全部改动集中在 `styles.css` 单文件(渐变确认写在 CSS 非 TS 内联)。删除段用注释替代整段留空以保留可追溯性。
+- 诚实标注:esbuild 只打包 main.js,styles.css 不经构建,故 build 通过≠CSS 无语法错,额外用括号平衡校验兜底。视觉观感需在 Obsidian 深/浅主题下人工确认(本环境无法运行 Obsidian)。
+
+---
+
 ### [2026-07-05 15:20] Task Summary — 清洗 5 个被 frontmatter 转义炸弹损坏的剪藏文件
 
 **1. 刚刚做了什么? (What was done?)**
@@ -2711,3 +2902,83 @@ UI 层：
 - 问题1:rebuildActiveTabFromProjection 加 skipLeading,切掉头部隐藏祖先;hiddenCount=操作前(全量投影长度−可见条数),该边界在操作前后不变,故操作前一次算好后传入。
 - 问题2:ChatController 加 onClear 回调,clearHistory 触发;shell-view handleTabClear 清 tab.state + resetStreamState + renderActiveTabMessages。
 - 问题3:加 INTERROGATIVE_TERMS(?/吗/什么/为什么/原因/如何/why/what/explain 等),命中即不判为写请求;补单测。
+
+---
+### [2026-07-06 16:50] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 实现流式 Markdown 块级增量渲染(方案2):流式途中已闭合的 Markdown 块即时渲染为预览样式并冻结,只有正在流入的最后一块保持原始文本。
+- 新增 `src/ui/renderers/stream-block-splitter.ts`(纯函数 `findBlockBoundary`)+ 9 个单元测试;重写 `shell-view.ts` 的 `renderStreamContent`,DOM 改为稳定块容器+尾部+光标三段结构;`styles.css` 补充稳定块样式。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 原设计流式途中只写纯文本、结束才整段渲染 Markdown,导致流式过程全程显示原始 `#`/`**`/```` ``` ````等符号。原因是 Obsidian 的 MarkdownRenderer.render 语义是「清空+整段重渲」,每帧重渲是 O(n²)。方案2 按块边界切分,每块只渲一次,开销≈O(n),兼顾体验与性能。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 关键风险是切分点选择:代码围栏内的空行、未闭合围栏、行内 markdown 若被提前切分会渲染成错误 HTML。
+
+**4. 如何修复的？ (How was it fixed?)**
+- `findBlockBoundary` 只取「代码围栏之外的最后一个空行」作为安全切分点,围栏内空行不切、未闭合围栏绝不切、行内 markdown 天然留尾部;`finalizeStream` 保留结束时全量重渲作为正确性兜底。88 个测试文件全绿,生产构建通过。
+
+---
+### [2026-07-08 09:55] Task Summary
+
+**1. 刚刚做了什么? (What was done?)**
+- 应要求创建并运行了一个 UI/交互多专家审查 workflow(`.claude/workflows/ui-review.mjs`),5 阶段:Recon 建图(6 张)→ 9 位专家并行审查 → 独立 verifier 对抗性验证 → 综合报告 → planner 修复计划。
+- 覆盖维度:视觉设计、窄侧栏响应式、交互流程/状态反馈、可访问性 A11y、输入与补全、CM6/Guardian 内联、生命周期/性能、设置面板配置页、国际化。
+- 产出 17 个修复任务落盘至 `.omc/plans/ui-fix-plan.md`(带文件/行号/验收/依赖图/执行批次),另有 5 条 PLAUSIBLE 待确认项。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 用户以 ultracode 模式要求对整个项目 UI 做系统性多视角审查;多专家分维度 + 对抗性验证能避免单一视角遗漏与 AI 臆测式建议。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 首次运行失败:agent 的 agentType 用了裸名(designer/code-reviewer/planner/verifier),而环境要求全限定名 `oh-my-claudecode:*`。
+- workflow 返回的综合报告正文被压缩为 "Task complete.",完整报告仅存于子代理 transcript;修复计划则正常落盘。
+
+**4. 如何修复的? (How was it fixed?)**
+- 用 sed 给全部 11 处 agentType 加 `oh-my-claudecode:` 前缀,语法校验后用 resumeFromRunId 复用 Recon 缓存续跑,第二次成功(26 agent/25 分钟)。
+- 从 `.omc/plans/ui-fix-plan.md` 读取完整修复计划,确认其已吸收所有 CONFIRMED 结论,报告正文缺失不影响可执行产物。
+
+---
+
+---
+### [2026-07-08 12:40] Task Summary
+
+**1. 刚刚做了什么? (What was done?)**
+- 按 .omc/plans/ui-fix-plan.md 执行全部 17 个 UI 修复任务,派 4 个 executor 子代理(链A/B/C + 2个单任务)分文件域并行 + 串行收尾。
+- 完成:T1-T17 全部。含 IME 输入/Tab 键/并发安全/粘贴URL修复、窄侧栏容器查询响应式、样式 token 规范化、可访问性(ARIA/键盘/焦点/aria-live)、设置面板安全加固、Guardian Gutter 性能、DOM 虚拟化、i18n 基础设施(src/i18n/)+ 全量中文化。
+- 全量 npm test 通过、npm run build 通过。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 用户要求按审查产出的修复计划落地。用文件独占域切分执行链,避免多代理并行改同一文件冲突;横切任务(T8可访问性/T15国际化)按依赖串行。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 子代理 agentType 需全限定名(oh-my-claudecode:*),首次误用裸名。
+- 计划行号是审查快照,多处偏移,要求子代理按代码内容定位。
+- 收尾一个测试(thinking summary 折叠)持续失败:先是 IntersectionObserver 未定义,补 polyfill 后变断言失败。
+- 多个子代理完成后反复发 idle 心跳造成噪音。
+
+**4. 如何修复的? (How was it fixed?)**
+- sed 批量加 agentType 前缀 + resumeFromRunId 复用缓存续跑。
+- 根因分析测试失败:T13 把折叠交互改成 outputContainer 事件委托,但委托在 onOpen 注册、测试跳过了 onOpen;且 chainB 在测试里手挂了一份委托,与生产委托双重触发导致 toggle 两次抵消。修法=把委托抽成幂等方法 ensureTimelineDelegation()(onOpen + ensureStreamContainer 都调),给 FakeElement 补冒泡+event.target+closest,删除测试里冗余的手挂委托。这也顺带修了移动端旧 webview 缺 API 的真实健壮性。
+- 完成的子代理用 shutdown_request 关闭。
+
+---
+
+---
+### [2026-07-08 16:20] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 用 ultracode workflow 建立分析团队,对配置页面(src/settings.ts + styles.css)做全方位审查:6 维度并行(视觉/便利性/功能性/可访问性/信息架构文案/前端实现质量)→ 对抗验证 → 综合报告
+- 产出带 P0/P1/P2 优先级的改进方案,每项含问题+定位(file:line)+方案+成本
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 用户要求全方位分析配置页面并给改进方案;多维度并行+对抗验证能保证发现全面且剔除误报,避免单视角遗漏或假阳性
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- workflow 的综合 agent 只回 "Task complete." 未吐报告;视觉、便利性两个维度的验证 agent 因 "Connection closed mid-response" 中断
+- 6 维度审查里多条高优发现指向同一根因(this.display() 整页重建),需跨维度去重
+
+**4. 如何修复的？ (How was it fixed?)**
+- 从 journal.jsonl 导出全部 11 条已完成 agent 结果,自己整合报告
+- 对两个中断维度的独有发现(嵌套高级块塌陷/样式真相源/破坏性操作确认不一致)用 Grep 直接核对真实代码补验证
+- 最终归纳出根因 this.display() 全量重建,派生出搜索失焦/滑块重建/CSS 三处并存三大 P0

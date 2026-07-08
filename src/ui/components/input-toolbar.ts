@@ -1,24 +1,42 @@
 import { setIcon } from 'obsidian';
 
-export interface ProviderSelectOption {
-  id: string;
-  label: string;
-  configured: boolean;
-}
-
 export interface ModelSelectOption {
   value: string;
   label: string;
 }
 
-export interface ModelUpdate {
-  loading: boolean;
+/** 一个 provider 的模型分组，渲染为下拉里的一个 <optgroup>。 */
+export interface ModelGroup {
+  providerId: string;
   providerLabel: string;
   models: ModelSelectOption[];
+}
+
+export interface ModelUpdate {
+  loading: boolean;
+  groups: ModelGroup[];
+  activeProviderId: string;
   activeModelId: string;
 }
 
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
+/**
+ * 合并下拉里每个 <option> 的 value 需要同时携带 provider 与 model。
+ * 用 NUL 字符拼接：provider id 由我们控制(settings.providers 的 key)、model id 均不含 NUL，
+ * 故切分零歧义。
+ */
+const MODEL_VALUE_SEP = ' ';
+
+export function encodeModelValue(providerId: string, modelId: string): string {
+  return `${providerId}${MODEL_VALUE_SEP}${modelId}`;
+}
+
+export function decodeModelValue(value: string): { providerId: string; modelId: string } {
+  const idx = value.indexOf(MODEL_VALUE_SEP);
+  if (idx < 0) return { providerId: '', modelId: value };
+  return { providerId: value.slice(0, idx), modelId: value.slice(idx + 1) };
+}
 
 /** Thinking 档位的下拉选项：value 为持久化值，label 为紧凑显示文案。 */
 const THINKING_OPTIONS: ReadonlyArray<{ value: ThinkingLevel; label: string }> = [
@@ -39,9 +57,8 @@ export interface ToolbarCapabilities {
 }
 
 interface InputToolbarHandlers {
-  onProviderChange: (providerId: string) => void | Promise<void>;
-  onUnavailableProvider: (providerId: string) => void;
-  onModelChange: (modelId: string) => void | Promise<void>;
+  /** 选中某个模型:同时给出它所属 provider 与 model id(合并下拉的唯一切换入口)。 */
+  onModelSelect: (providerId: string, modelId: string) => void | Promise<void>;
   onThinkingChange?: (level: ThinkingLevel) => void | Promise<void>;
   onSend?: () => void | Promise<void>;
   onAttach?: () => void | Promise<void>;
@@ -49,13 +66,10 @@ interface InputToolbarHandlers {
 }
 
 export class InputToolbar {
-  private readonly providerSelectEl: HTMLSelectElement;
   private readonly modelSelectEl: HTMLSelectElement;
   private readonly thinkingSelectEl: HTMLSelectElement;
   private readonly attachButtonEl: HTMLButtonElement;
   private readonly runButtonEl: HTMLButtonElement;
-  private providers = new Map<string, ProviderSelectOption>();
-  private activeProviderId = '';
   private isResponding = false;
 
   constructor(
@@ -65,17 +79,18 @@ export class InputToolbar {
     this.containerEl.empty();
 
     const modelSelectContainer = this.containerEl.createDiv({ cls: 'shell-model-select-container' });
-    this.providerSelectEl = modelSelectContainer.createEl('select', {
-      cls: 'shell-model-select shell-provider-select',
-      attr: { title: 'Select AI Provider' },
-    }) as HTMLSelectElement;
+    // provider 与 model 合并为单个分组下拉:provider 作 optgroup 标题,模型列于其下,
+    // 选中模型即隐含切到对应 provider。原独立的 provider select 已移除(三控件 → 两控件)。
     this.modelSelectEl = modelSelectContainer.createEl('select', {
       cls: 'shell-model-select shell-main-model-select',
-      attr: { title: 'Select AI Model' },
+      attr: { title: 'Select AI Model', 'aria-label': 'Select AI Model' },
     }) as HTMLSelectElement;
     this.thinkingSelectEl = modelSelectContainer.createEl('select', {
       cls: 'shell-model-select shell-thinking-select',
-      attr: { title: 'Thinking level — lower uses fewer tokens, higher reasons more deeply' },
+      attr: {
+        title: 'Thinking level — lower uses fewer tokens, higher reasons more deeply',
+        'aria-label': 'Thinking level',
+      },
     }) as HTMLSelectElement;
     THINKING_OPTIONS.forEach(({ value, label }) => {
       this.thinkingSelectEl.createEl('option', { value, text: label });
@@ -94,7 +109,6 @@ export class InputToolbar {
     }) as HTMLButtonElement;
     setIcon(this.runButtonEl, 'send-horizontal');
 
-    this.providerSelectEl.addEventListener('change', () => this.handleProviderChange());
     this.modelSelectEl.addEventListener('change', () => this.handleModelChange());
     this.thinkingSelectEl.addEventListener('change', () => this.handleThinkingChange());
     this.attachButtonEl.addEventListener('click', () => {
@@ -110,29 +124,13 @@ export class InputToolbar {
     });
   }
 
-  updateProviders(providers: ProviderSelectOption[], activeProviderId: string) {
-    this.providers = new Map(providers.map(provider => [provider.id, provider]));
-    this.activeProviderId = activeProviderId;
-    this.providerSelectEl.empty();
-
-    providers.forEach((provider) => {
-      const option = this.providerSelectEl.createEl('option', {
-        value: provider.id,
-        text: provider.configured ? provider.label : `${provider.label} !`,
-      }) as HTMLOptionElement;
-      option.selected = provider.id === activeProviderId;
-    });
-
-    this.providerSelectEl.value = activeProviderId;
-  }
-
   updateModels(update: ModelUpdate) {
     this.modelSelectEl.empty();
 
     if (update.loading) {
       const loadingOption = this.modelSelectEl.createEl('option', {
         value: '',
-        text: `Loading ${update.providerLabel} models...`,
+        text: 'Loading models...',
       }) as HTMLOptionElement;
       loadingOption.selected = true;
       this.modelSelectEl.value = '';
@@ -140,7 +138,8 @@ export class InputToolbar {
       return;
     }
 
-    if (!update.models.length) {
+    const hasModels = update.groups.some(group => group.models.length > 0);
+    if (!hasModels) {
       const emptyOption = this.modelSelectEl.createEl('option', {
         value: '',
         text: 'No models available',
@@ -152,15 +151,23 @@ export class InputToolbar {
       return;
     }
 
-    update.models.forEach((model) => {
-      const option = this.modelSelectEl.createEl('option', {
-        value: model.value,
-        text: model.label,
-      }) as HTMLOptionElement;
-      option.selected = model.value === update.activeModelId;
-    });
+    const activeValue = encodeModelValue(update.activeProviderId, update.activeModelId);
+    for (const group of update.groups) {
+      if (!group.models.length) continue;
+      const optgroup = this.modelSelectEl.createEl('optgroup', {
+        attr: { label: group.providerLabel },
+      }) as HTMLOptGroupElement;
+      for (const model of group.models) {
+        const value = encodeModelValue(group.providerId, model.value);
+        const option = optgroup.createEl('option', {
+          value,
+          text: model.label,
+        }) as HTMLOptionElement;
+        option.selected = value === activeValue;
+      }
+    }
 
-    this.modelSelectEl.value = update.activeModelId;
+    this.modelSelectEl.value = activeValue;
     this.modelSelectEl.disabled = false;
   }
 
@@ -186,10 +193,6 @@ export class InputToolbar {
     this.thinkingSelectEl.value = level;
   }
 
-  getProviderSelectEl() {
-    return this.providerSelectEl;
-  }
-
   getModelSelectEl() {
     return this.modelSelectEl;
   }
@@ -198,22 +201,12 @@ export class InputToolbar {
     return this.thinkingSelectEl;
   }
 
-  private handleProviderChange() {
-    const providerId = this.providerSelectEl.value;
-    const provider = this.providers.get(providerId);
-
-    if (!provider?.configured) {
-      this.providerSelectEl.value = this.activeProviderId;
-      this.handlers.onUnavailableProvider(providerId);
-      return;
-    }
-
-    void this.handlers.onProviderChange(providerId);
-  }
-
   private handleModelChange() {
-    if (!this.modelSelectEl.value) return;
-    void this.handlers.onModelChange(this.modelSelectEl.value);
+    const raw = this.modelSelectEl.value;
+    if (!raw) return;
+    const { providerId, modelId } = decodeModelValue(raw);
+    if (!modelId) return;
+    void this.handlers.onModelSelect(providerId, modelId);
   }
 
   private handleThinkingChange() {

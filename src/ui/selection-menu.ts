@@ -1,5 +1,5 @@
 import { App, MarkdownRenderer, Component, Notice, setIcon } from 'obsidian';
-import { EditorView, showTooltip } from '@codemirror/view';
+import { EditorView, showTooltip, tooltips } from '@codemirror/view';
 import { StateField, Extension, StateEffect, EditorState } from '@codemirror/state';
 import { ModelService } from '../services/model-service';
 import { ChatController } from './chat-controller';
@@ -111,6 +111,15 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
 export function selectionMenuExtension(app: App, modelService: ModelService): Extension {
     return [
         selectionMenuField,
+        // Tooltip 定位:默认挂在编辑器 DOM 内、以整窗判定可用空间 —— 编辑器被 Workbench 侧栏挤窄时,
+        // 面板会向右溢出编辑器并被靠后的侧栏兄弟节点盖住(跨 DOM 子树,z-index 压不住)。
+        // 三个开关对症:提到 body 顶层脱离兄弟遮挡 + fixed 视口定位不被 overflow 裁剪 +
+        // tooltipSpace 限定为编辑器自身矩形,令 CM 按编辑器宽度自动左移避让,不再伸进侧栏区域。
+        tooltips({
+            parent: document.body,
+            position: 'fixed',
+            tooltipSpace: (view) => view.dom.getBoundingClientRect(),
+        }),
         EditorView.updateListener.of((update) => {
             pluginContextMap.set(update.view, { app, modelService });
         }),
