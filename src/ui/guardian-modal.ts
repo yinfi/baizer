@@ -1,4 +1,5 @@
 import { App, Modal, Setting, Notice } from 'obsidian';
+import { t } from '../i18n/zh';
 
 export class GuardianModal extends Modal {
     result: string;
@@ -12,13 +13,13 @@ export class GuardianModal extends Modal {
     onOpen() {
         const { contentEl } = this;
 
-        contentEl.createEl('h2', { text: 'Guardian Manual Trigger' });
+        contentEl.createEl('h2', { text: t('Guardian Manual Trigger') });
 
         new Setting(contentEl)
-            .setName('Instruction')
-            .setDesc('What should I do with the current context?')
+            .setName(t('Instruction'))
+            .setDesc(t('What should I do with the current context?'))
             .addText(text => text
-                .setPlaceholder('e.g. Translate to English, Summarize, Fix grammar...')
+                .setPlaceholder(t('e.g. Translate to English, Summarize, Fix grammar...'))
                 .setValue('')
                 .onChange(value => {
                     this.result = value;
@@ -31,7 +32,7 @@ export class GuardianModal extends Modal {
 
         new Setting(contentEl)
             .addButton(btn => btn
-                .setButtonText('Submit')
+                .setButtonText(t('Submit'))
                 .setCta()
                 .onClick(() => {
                     this.submit();
@@ -40,7 +41,7 @@ export class GuardianModal extends Modal {
 
     submit() {
         if (!this.result) {
-            new Notice('Please enter an instruction.');
+            new Notice(t('Please enter an instruction.'));
             return;
         }
         this.close();
