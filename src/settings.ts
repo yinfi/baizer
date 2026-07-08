@@ -1287,6 +1287,28 @@ export class SettingTab extends PluginSettingTab {
             });
         });
 
+        // 仅 OpenAI 兼容协议下暴露 API 端点方言选择（Chat Completions / Responses）。
+        // Gemini 无此概念，隐藏该字段。缺省视为 completions。
+        if (activeConfig.type === 'openai-compatible') {
+            this.renderConnectionField(basic, t('API endpoint'), (valueEl) => {
+                const select = valueEl.createEl('select', {
+                    cls: 'baizer-settings-detail-input',
+                    attr: { 'aria-label': t('API endpoint') },
+                }) as HTMLSelectElement;
+                select.createEl('option', { value: 'completions', text: t('Chat Completions (/chat/completions)') });
+                select.createEl('option', { value: 'responses', text: t('Responses (/responses)') });
+                select.value = activeConfig.apiFlavor ?? 'completions';
+                select.addEventListener('change', async () => {
+                    activeConfig.apiFlavor = select.value as NonNullable<ProviderConfig['apiFlavor']>;
+                    this.resetConnectionTestStatus();
+                    this.openSectionIds.add('connection');
+                    await this.plugin.modelService.updateSettings(this.plugin.settings);
+                    await this.persistSettings();
+                    this.display();
+                });
+            });
+        }
+
         this.renderConnectionField(basic, t('Model'), (valueEl) => {
             const select = valueEl.createEl('select', {
                 cls: 'baizer-settings-detail-input',

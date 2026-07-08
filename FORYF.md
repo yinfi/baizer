@@ -1,3 +1,26 @@
+### [2026-07-08 16:55] Task Summary — 支持 OpenAI Responses API（cch 供应商聊天失败修复）
+
+**1. 刚刚做了什么? (What was done?)**
+- 方案 B：ProviderConfig 新增可选字段 `apiFlavor?: 'completions' | 'responses'`（types.ts），缺省 = completions，对现有 4 个内置 provider 零影响。
+- pi-native-model.ts:buildOpenAICompatModel 依 apiFlavor 决定 pi provider：'responses'→`api:'openai-responses'`（打 /responses），否则 'openai-completions'（打 /chat/completions）；返回类型放宽为 `Model<'openai-completions' | 'openai-responses'>`。
+- settings.ts:renderActiveProviderDetail 在 type='openai-compatible' 时新增「API 端点」下拉（Chat Completions / Responses），写入 config.apiFlavor；i18n 补两个 option 中文文案。
+- test/pi-native-model.test.ts 增加 4 条断言（缺省/completions/responses/responses+baseUrl 保留）；全部通过，tsc 项目源码零错误。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 根因：测试连接探 `/models`（listOpenAICompatModels，纯 REST 列模型），实际聊天经 buildOpenAICompatModel 硬编码 `api:'openai-completions'` 打 `/chat/completions`。cch 后端只认 `/responses`，三端点错位 → 测试通、聊天报 provider 无法使用。
+- pi-ai 把 completions / responses 当两个独立 provider（types.d.ts KnownApi），且内置注册了 openai-responses。方案 B 用一个方言字段精确对应「同一 OpenAI 兼容族、不同端点」，改动面最小、getProviderCapabilities 等无需触碰。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 返回类型标注为 `Model<'openai-completions'>`，改 api 后对象字面量无法收窄到联合分支报错。
+- npm run build 用 esbuild 不做类型检查；单独 tsc 时 node_modules/typebox 报大量预存 TS1139 等错误，干扰判断。
+
+**4. 如何修复的? (How was it fixed?)**
+- 返回类型改为 `Model<'openai-completions' | 'openai-responses'>`（api: TApi 正好匹配计算出的联合值）。
+- tsc 输出用 `grep -vE '^node_modules/'` 过滤，确认项目源码零错误；打包仍由 esbuild 产出 main.js。
+- 确认两个 pi provider 都以 model.baseUrl 作 OpenAI SDK baseURL、端点路径由 SDK 追加，故 baseUrl 语义一致，无需为 responses 改拼接逻辑。
+
+---
+
 ### [2026-07-09 00:05] Task Summary — 底部下拉禁止换行改为等比压缩
 
 **1. 刚刚做了什么? (What was done?)**

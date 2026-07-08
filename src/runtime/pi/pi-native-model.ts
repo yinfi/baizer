@@ -90,15 +90,22 @@ export function buildOpenAICompatModel(
   config: ProviderConfig,
   contextWindow?: number,
   thinkingLevel?: string,
-): Model<'openai-completions'> {
+): Model<'openai-completions' | 'openai-responses'> {
   // 用户没有配置 baseUrl 时回落到 OpenAI 官方端点
   const baseUrl = config.baseUrl?.trim() || 'https://api.openai.com';
+
+  // 依 apiFlavor 选择 pi provider：
+  // - 'responses'          → 'openai-responses'   → OpenAI SDK client.responses.create（/responses）
+  // - 'completions'/缺省   → 'openai-completions'  → client.chat.completions.create（/chat/completions）
+  // 两个 provider 都以 model.baseUrl 作为 OpenAI SDK 的 baseURL，端点路径由 SDK 自动追加，
+  // 故 baseUrl 语义一致，无需为 responses 单独处理拼接。
+  const api = config.apiFlavor === 'responses' ? 'openai-responses' : 'openai-completions';
 
   return {
     id: config.model,
     name: config.model,
-    // openai-completions：pi 用此值路由到 OpenAI-compatible completions provider
-    api: 'openai-completions',
+    // 依 apiFlavor 路由到 pi 的 completions / responses provider
+    api,
     provider: 'openai',
     baseUrl,
     // 同 Gemini：thinkingLevel !== 'off' 时开启 reasoning

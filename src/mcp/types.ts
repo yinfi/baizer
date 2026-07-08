@@ -25,12 +25,24 @@ declare module "obsidian" {
 // --- Provider 配置 ---
 export type ProviderType = 'gemini' | 'openai-compatible';
 
+/**
+ * OpenAI 兼容协议下的具体 API 端点方言。
+ * - 'completions'（默认）: /v1/chat/completions —— 传统 Chat Completions API
+ * - 'responses'         : /v1/responses        —— OpenAI Responses API
+ * 二者在 pi-ai 里是两个独立 provider（openai-completions / openai-responses），
+ * baseUrl 语义一致（都由 OpenAI SDK 追加端点路径），只是请求端点不同。
+ * 仅对 type='openai-compatible' 有意义；缺省视为 'completions'，故不影响现有 provider。
+ */
+export type OpenAIApiFlavor = 'completions' | 'responses';
+
 export interface ProviderConfig {
     type: ProviderType;
     label: string;
     apiKey: string;
     baseUrl: string;
     model: string;
+    /** OpenAI 兼容协议的 API 端点方言；缺省 = 'completions'。见 OpenAIApiFlavor。 */
+    apiFlavor?: OpenAIApiFlavor;
 }
 
 export const DEFAULT_PROVIDERS: Record<string, ProviderConfig> = {

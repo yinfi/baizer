@@ -124,6 +124,35 @@ async function runTests() {
     expect(model.provider).toBe('openai');
   });
 
+  await test('buildOpenAICompatModel: apiFlavor 缺省 → api=openai-completions', () => {
+    // 不设 apiFlavor（现有 4 个内置 provider 的形态）应保持 completions，确保零回归
+    const model = buildOpenAICompatModel(makeOpenAIConfig(), 100000, 'medium');
+    expect(model.api).toBe('openai-completions');
+  });
+
+  await test("buildOpenAICompatModel: apiFlavor='completions' → api=openai-completions", () => {
+    const model = buildOpenAICompatModel(makeOpenAIConfig({ apiFlavor: 'completions' }), 100000, 'medium');
+    expect(model.api).toBe('openai-completions');
+  });
+
+  await test("buildOpenAICompatModel: apiFlavor='responses' → api=openai-responses", () => {
+    // cch 这类只认 /responses 的后端：apiFlavor='responses' 时必须路由到 pi 的 responses provider
+    const model = buildOpenAICompatModel(makeOpenAIConfig({ apiFlavor: 'responses' }), 100000, 'medium');
+    expect(model.api).toBe('openai-responses');
+    expect(model.provider).toBe('openai');
+  });
+
+  await test("buildOpenAICompatModel: apiFlavor='responses' 保留 baseUrl 与 thinking 映射", () => {
+    const model = buildOpenAICompatModel(
+      makeOpenAIConfig({ apiFlavor: 'responses', baseUrl: 'https://cch.example.com/v1' }),
+      100000,
+      'high',
+    );
+    expect(model.baseUrl).toBe('https://cch.example.com/v1');
+    expect(model.reasoning).toBe(true);
+    expect(model.thinkingLevelMap!.high).toBe('high');
+  });
+
   await test('buildOpenAICompatModel: 自定义 baseUrl 生效', () => {
     const model = buildOpenAICompatModel(
       makeOpenAIConfig({ baseUrl: 'https://api.deepseek.com' }),

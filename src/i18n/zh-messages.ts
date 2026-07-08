@@ -98,6 +98,8 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Provider protocol': '服务商协议',
     'Model': '模型',
     'API endpoint': 'API 端点',
+    'Chat Completions (/chat/completions)': 'Chat Completions（/chat/completions）',
+    'Responses (/responses)': 'Responses（/responses）',
     'API key': 'API Key',
     ': no API key configured.': '：未配置 API Key。',
     'Testing connection to': '正在测试连接到',
