@@ -8,6 +8,7 @@ import { DiffModal } from './diff-modal';
 import { IPlugin, PLUGIN_ID, PLUGIN_NAME, VIEW_TYPE_SHELL } from '../mcp/types';
 import { StreamEvent } from '../models/interfaces';
 import { buildCommandSuggestions, CommandSuggestion } from './command-suggestions';
+import { t } from '../i18n/zh';
 import { ContextController } from './controllers/context-controller';
 import { InputController, SuggestionType, SuggestionItem, SuggestionSelection } from './controllers/input-controller';
 import { StreamController } from './controllers/stream-controller';
@@ -58,9 +59,21 @@ export class ShellView extends ItemView {
     private tabBar: TabBar | null = null;
     private tabBarContainerEl: HTMLElement | null = null;
     private tabSessions = new Map<TabId, ShellTabSession>();
+    // 每个 tab 一棵独立消息子树,挂在 outputContainer 下;切换时切 display 而非全量重建。
+    private tabContainers = new Map<TabId, HTMLElement>();
+    // think-summary 折叠交互的事件委托是否已绑定到 outputContainer(幂等标记,防重复绑定)。
+    private timelineDelegationBound = false;
+    // 后台(非活动)tab 收到新消息/流事件时标脏,切回时强制重建以补齐 DOM。
+    private dirtyTabs = new Set<TabId>();
+    // T14 消息 DOM 虚拟化:监听每条消息 entry,滚出视口+缓冲区即脱水为等高占位,滚入再挂回。
+    private messageObserver: IntersectionObserver | null = null;
+    // 脱水态 entry → 其被摘下的子树(等高占位期间寄存于此,滚入时挂回)。WeakMap 随节点回收自动清理。
+    private dehydratedEntries = new WeakMap<HTMLElement, DocumentFragment>();
     private conversationController: ConversationController;
     private historyMenu: HistoryMenu | null = null;
     private historyMenuContainerEl: HTMLElement | null = null;
+    /** 触发历史菜单的按钮:菜单关闭(Esc/点外部)后把焦点还给它,不让焦点掉到 body。 */
+    private historyMenuTriggerEl: HTMLElement | null = null;
     private knowledgeStatusPanel: KnowledgeStatusPanel | null = null;
     private knowledgeStatusContainerEl: HTMLElement | null = null;
     private excludedCurrentNotePath: string | null = null;
@@ -98,6 +111,11 @@ export class ShellView extends ItemView {
         () => this.renderStreamContent(),
         { wait: 100 }
     );
+    /** metadataCache changed 高频事件的合并刷新,避免批量文件操作触发连续面板刷新。 */
+    private readonly debouncedRefreshKnowledgeStatus = debounce(
+        () => { void this.refreshKnowledgeStatusPanel(); },
+        { wait: 500 }
+    );
     private readonly localCommandSuggestions: CommandSuggestion[] = [
         { label: '/clear', desc: 'Clear session history' },
         { label: '/memory', desc: 'View, search, and forget Hindsight memory' },
@@ -124,8 +142,10 @@ export class ShellView extends ItemView {
         }
 
         if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault(); // Prevent newline
+            // IME 组合输入中(如中文候选词确认)按 Enter 只应确认候选词,不触发提交。
+            // 必须在 preventDefault 之前判定并放行,否则会吞掉 IME 的确认键。
             if (e.isComposing) return;
+            e.preventDefault(); // Prevent newline
 
             const query = this.inputEl.value.trim();
             if (!query) return;
@@ -251,6 +271,9 @@ export class ShellView extends ItemView {
 
         // 2. Output Area (Scrollable)
         this.outputContainer = container.createDiv({ cls: 'shell-output-area' });
+        // think-summary 折叠交互采用事件委托(避免每轮流式在 summary 上累积监听器)。
+        // 抽成幂等方法,onOpen 与流式入口都会确保绑定,不依赖初始化路径是否完整走过。
+        this.ensureTimelineDelegation();
 
         this.tabBar = new TabBar(this.tabBarContainerEl, {
             onTabClick: (id) => {
@@ -287,18 +310,12 @@ export class ShellView extends ItemView {
             })
         );
         this.registerEvent(
-            this.app.metadataCache.on('changed', () => {
-                void this.refreshKnowledgeStatusPanel();
-            })
+            // 批量文件操作会高频触发 changed;debounce 500ms 合并,避免连续刷新知识状态面板。
+            this.app.metadataCache.on('changed', this.debouncedRefreshKnowledgeStatus)
         );
 
         // Suggestion Popup
         this.suggestionContainer = this.createSuggestionContainer(inputContainer);
-        this.suggestList = new SuggestList({
-            container: this.suggestionContainer,
-            provideItems: (type, query) => this.buildSuggestionItems(type, query),
-            onApply: (selection) => this.applySuggestionSelection(selection),
-        });
 
         // Input wrapper (contains the textarea)
         const inputWrapper = inputContainer.createDiv({ cls: 'shell-input-wrapper' });
@@ -307,6 +324,7 @@ export class ShellView extends ItemView {
             cls: 'shell-input',
             attr: {
                 placeholder: 'Ask AI... (/ commands, @ context)',
+                'aria-label': t('Send a message to AI'),
                 spellcheck: 'false',
                 autocomplete: 'off',
                 rows: '1'
@@ -314,6 +332,14 @@ export class ShellView extends ItemView {
         });
         // Set provider-specific placeholder.
         this.updatePlaceholder();
+
+        // 补全挂载器须在 textarea 之后构造:hostInput 指向 textarea,自动维护 combobox 的 ARIA 关联。
+        this.suggestList = new SuggestList({
+            container: this.suggestionContainer,
+            provideItems: (type, query) => this.buildSuggestionItems(type, query),
+            onApply: (selection) => this.applySuggestionSelection(selection),
+            hostInput: this.inputEl,
+        });
 
         // 4. Input Controls (below the textarea)
         const inputControls = inputContainer.createDiv({ cls: 'shell-input-controls' });
@@ -546,8 +572,41 @@ export class ShellView extends ItemView {
     }
 
     appendMessage(msg: ChatMessage) {
-        void this.getMessageRenderer().renderMessage(this.outputContainer, msg);
+        void this.getMessageRenderer()
+            .renderMessage(this.getActiveMessageContainer(), msg)
+            .then((entry) => this.observeMessageEntry(entry));
         this.updateActivity();
+    }
+
+    /**
+     * 当前活动 tab 的消息子树容器(挂在 outputContainer 下,每个 tab 一棵)。
+     * 不存在则惰性创建。消息、加载指示、流容器都写入此容器,
+     * 使切换 tab 时能通过 display 切换整棵子树、避免全量重建 DOM。
+     */
+    private getActiveMessageContainer(): HTMLElement {
+        const activeId = this.tabManager.getActiveTab()?.id;
+        if (activeId == null) return this.outputContainer;
+        let el = this.tabContainers.get(activeId);
+        if (!el) {
+            el = this.outputContainer.createDiv({ cls: 'shell-tab-messages' });
+            this.tabContainers.set(activeId, el);
+        }
+        return el;
+    }
+
+    /** 只显示当前活动 tab 的子树,隐藏其余;并清理已关闭 tab 的残留子树。 */
+    private showOnlyActiveContainer() {
+        const activeId = this.tabManager.getActiveTab()?.id;
+        for (const [id, node] of this.tabContainers) {
+            if (!this.tabManager.getAllTabs().some(t => t.id === id)) {
+                this.unobserveContainerEntries(node);
+                node.remove();
+                this.tabContainers.delete(id);
+                this.dirtyTabs.delete(id);
+                continue;
+            }
+            node.style.display = id === activeId ? '' : 'none';
+        }
     }
 
     private scrollToEnd() {
@@ -557,13 +616,88 @@ export class ShellView extends ItemView {
         }, 50);
     }
 
+    // ==================== T14: 消息 DOM 虚拟化 ====================
+
+    /**
+     * 惰性创建 IntersectionObserver。root 为滚动容器 outputContainer,
+     * rootMargin 上下各留一屏缓冲(不在视口边缘就脱水,避免快速滚动露白)。
+     */
+    private ensureMessageObserver(): IntersectionObserver | null {
+        // 运行时兜底:某些旧 webview(含 Obsidian 移动端老环境)与测试环境没有 IntersectionObserver。
+        // 此时优雅降级为「不虚拟化」——所有消息保持正常渲染,只是不做脱水/复水,不抛错。
+        if (typeof IntersectionObserver === 'undefined') return null;
+        if (this.messageObserver) return this.messageObserver;
+        this.messageObserver = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    const el = entry.target as HTMLElement;
+                    if (entry.isIntersecting) {
+                        this.rehydrateEntry(el);
+                    } else {
+                        this.dehydrateEntry(el);
+                    }
+                }
+            },
+            {
+                root: this.outputContainer,
+                // 上下各扩一屏:进入缓冲区就提前 rehydrate,滚出一屏才 dehydrate。
+                rootMargin: '150% 0px 150% 0px',
+                threshold: 0,
+            },
+        );
+        return this.messageObserver;
+    }
+
+    /** 登记一条消息 entry 到虚拟化观察。正在写入的活动流容器不纳入(避免脱水未完成的流)。 */
+    private observeMessageEntry(entry: HTMLElement) {
+        if (!entry || entry === this.streamContainer) return;
+        // observer 不可用(旧 webview / 测试环境)时直接跳过观察,消息照常留在 DOM 里正常渲染。
+        this.ensureMessageObserver()?.observe(entry);
+    }
+
+    /**
+     * 脱水:把 entry 的实际内容摘进 fragment 寄存,并锁定其当前高度为 minHeight 占位。
+     * 已脱水 / 高度未知(0)则跳过,避免误折叠。
+     */
+    private dehydrateEntry(el: HTMLElement) {
+        if (this.dehydratedEntries.has(el)) return;
+        const height = el.offsetHeight;
+        if (height <= 0) return; // 不可见(display:none 的后台 tab 或尚未布局)——不处理
+        const fragment = document.createDocumentFragment();
+        while (el.firstChild) fragment.appendChild(el.firstChild);
+        el.style.minHeight = `${height}px`;
+        el.classList.add('shell-entry-dehydrated');
+        this.dehydratedEntries.set(el, fragment);
+    }
+
+    /** 复水:把寄存的子树挂回 entry,撤销占位高度。 */
+    private rehydrateEntry(el: HTMLElement) {
+        const fragment = this.dehydratedEntries.get(el);
+        if (!fragment) return;
+        el.appendChild(fragment);
+        el.style.minHeight = '';
+        el.classList.remove('shell-entry-dehydrated');
+        this.dehydratedEntries.delete(el);
+    }
+
+    /** 解除对某容器下所有消息 entry 的观察,并把仍处于脱水态的 entry 先复水(否则内容随 empty 丢失)。 */
+    private unobserveContainerEntries(container: HTMLElement) {
+        if (!this.messageObserver) return;
+        const entries = container.querySelectorAll('.shell-entry');
+        entries.forEach((node) => {
+            const el = node as HTMLElement;
+            this.rehydrateEntry(el); // 若在脱水态,先挂回内容再解除观察
+            this.messageObserver?.unobserve(el);
+        });
+    }
+
     handleStatusChange(isResponding: boolean) {
         this.isResponding = isResponding;
         this.updateInputToolbarCapabilities();
         if (isResponding) {
             // Show loading indicator (instance-scoped to avoid cross-view collisions)
             if (!this.loadingIndicatorEl) {
-                const loadingDiv = this.outputContainer.createDiv({ cls: 'shell-entry system' });
+                const loadingDiv = this.getActiveMessageContainer().createDiv({ cls: 'shell-entry system' });
                 loadingDiv.setAttribute('role', 'status');
                 loadingDiv.setAttribute('aria-live', 'polite');
                 loadingDiv.createSpan({ cls: 'shell-loading' });
@@ -583,13 +717,36 @@ export class ShellView extends ItemView {
         this.streamController.handleEvent(event);
     }
 
+    // think-summary 折叠交互的事件委托:在 outputContainer 上挂一对监听,通过
+    // closest('.shell-think-summary') 匹配。幂等——重复调用只绑定一次。
+    private ensureTimelineDelegation() {
+        if (this.timelineDelegationBound || !this.outputContainer) return;
+        this.timelineDelegationBound = true;
+        this.outputContainer.addEventListener('click', (event) => {
+            const summary = (event.target as HTMLElement | null)?.closest('.shell-think-summary') as HTMLElement | null;
+            if (!summary) return;
+            const timeline = summary.closest('.shell-think-timeline') as HTMLElement | null;
+            if (timeline) this.toggleStreamTimeline(timeline);
+        });
+        this.outputContainer.addEventListener('keydown', (event: KeyboardEvent) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            const summary = (event.target as HTMLElement | null)?.closest('.shell-think-summary') as HTMLElement | null;
+            if (!summary) return;
+            const timeline = summary.closest('.shell-think-timeline') as HTMLElement | null;
+            if (!timeline) return;
+            event.preventDefault();
+            this.toggleStreamTimeline(timeline);
+        });
+    }
+
     private ensureStreamContainer() {
+        this.ensureTimelineDelegation();
         if (this.streamContainer) return;
 
         this.loadingIndicatorEl?.remove();
         this.loadingIndicatorEl = null;
 
-        this.streamContainer = this.outputContainer.createDiv({ cls: 'shell-entry ai shell-stream-container' });
+        this.streamContainer = this.getActiveMessageContainer().createDiv({ cls: 'shell-entry ai shell-stream-container' });
         this.streamTimeline = this.streamContainer.createDiv({ cls: 'shell-think-timeline' });
         const streamTimeline = this.streamTimeline;
         this.thinkingRenderer = new ThinkingRenderer(streamTimeline);
@@ -605,18 +762,13 @@ export class ShellView extends ItemView {
         summary.setAttribute('role', 'button');
         summary.setAttribute('tabindex', '0');
         summary.setAttribute('aria-expanded', 'true');
-        summary.addEventListener('click', () => {
-            this.toggleStreamTimeline(streamTimeline);
-        });
-        summary.addEventListener('keydown', (event: KeyboardEvent) => {
-            if (event.key !== 'Enter' && event.key !== ' ') return;
-            event.preventDefault();
-            this.toggleStreamTimeline(streamTimeline);
-        });
+        // \u6298\u53E0\u4EA4\u4E92\u7531 outputContainer \u4E0A\u7684\u4E8B\u4EF6\u59D4\u6258\u7EDF\u4E00\u5904\u7406(\u89C1 onOpen \u4E2D\u7684\u59D4\u6258\u76D1\u542C),
+        // \u6B64\u5904\u4E0D\u518D\u6302 per-summary \u76D1\u542C,\u907F\u514D\u957F\u5BF9\u8BDD\u7D2F\u79EF\u76D1\u542C\u5668\u3002
 
         this.streamContent = this.streamContainer.createDiv({ cls: 'shell-response-content' });
-        // 流式回复区声明为礼貌型 live region,读屏会随增量文本播报 AI 回复进展。
-        this.streamContent.setAttribute('aria-live', 'polite');
+        // 流式途中关闭 live 播报:逐字增量会让读屏疯狂读碎片。改为流结束(finalizeStream)时
+        // 临时切到 polite 让读屏把完成的整段回复播报一次。
+        this.streamContent.setAttribute('aria-live', 'off');
         this.streamContent.setAttribute('aria-atomic', 'false');
         this.streamAccumulatedText = '';
         this.streamNodeCount = 0;
@@ -726,6 +878,8 @@ export class ShellView extends ItemView {
         this.thinkingRenderer?.finalizeCurrentThinking();
 
         if (this.streamContent && this.streamAccumulatedText) {
+            // 流结束:把回复区切回 polite,让读屏把完成的整段回复播报一次(流式途中是 off)。
+            this.streamContent.setAttribute('aria-live', 'polite');
             this.streamContent.empty();
             this.getMessageRenderer().renderAiContent(
                 this.streamContent,
@@ -763,6 +917,10 @@ export class ShellView extends ItemView {
             this.getMessageRenderer().addActionToolbar(this.streamContainer, toolbarMessage);
         }
 
+        // 流结束:该容器已定型为一条普通 ai 消息,纳入虚拟化观察。
+        // 先记引用,待 streamContainer 置空后再 observe(observeMessageEntry 会跳过「当前活动流容器」)。
+        const finalizedStreamEl = this.streamContainer;
+
         this.streamContainer = null;
         this.streamTimeline = null;
         this.streamContent = null;
@@ -776,6 +934,8 @@ export class ShellView extends ItemView {
         this.pendingStepDivider = false;
         this.thinkingRenderer = null;
         this.toolRenderer = null;
+        // streamContainer 已置空,此时 observe 该定型消息容器不会被「活动流」守卫拦下。
+        if (finalizedStreamEl) this.observeMessageEntry(finalizedStreamEl);
         void this.persistActiveTab();
     }
 
@@ -915,6 +1075,12 @@ export class ShellView extends ItemView {
             session.chatController.cleanup();
         }
         this.tabSessions.clear();
+        // 清理 per-tab 消息子树引用(DOM 随 contentEl 一并销毁,此处仅释放 Map 引用)。
+        this.tabContainers.clear();
+        this.dirtyTabs.clear();
+        // 断开消息虚拟化观察,避免视图关闭后 observer 泄漏。
+        this.messageObserver?.disconnect();
+        this.messageObserver = null;
         if (this.inputEl) {
             this.inputEl.removeEventListener('input', this.handleInputBound);
             this.inputEl.removeEventListener('keydown', this.handleKeyDownBound);
@@ -956,6 +1122,9 @@ export class ShellView extends ItemView {
                 timestamp: Date.now()
             });
             this.isResponding = false;
+            // 心跳超时判定为卡死后,主动中止底层流,避免僵尸流在后台继续、
+            // 与用户随后发起的新提交并存。
+            this.chatController?.cancelActiveStream();
         }
     }
 
@@ -1047,7 +1216,7 @@ export class ShellView extends ItemView {
 
     private createHeaderActions(container: HTMLElement) {
         const actions = container.createDiv({ cls: 'shell-header-buttons' });
-        this.createHeaderActionButton(actions, 'Search history', 'search', 'shell-history-btn', (event) => {
+        this.historyMenuTriggerEl = this.createHeaderActionButton(actions, 'Search history', 'search', 'shell-history-btn', (event) => {
             event.stopPropagation();
             void this.toggleHistoryMenu();
         });
@@ -1160,12 +1329,15 @@ export class ShellView extends ItemView {
     }
 
     private async handlePaste(e: ClipboardEvent) {
-        const items = e.clipboardData?.items;
-        if (!items) return;
+        const clipboard = e.clipboardData;
+        if (!clipboard) return;
 
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            if (item.type.indexOf('image') !== -1) {
+        // 图像粘贴:先扫描 items,命中图像即拦截并转 base64 context。
+        const items = clipboard.items;
+        if (items) {
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.type.indexOf('image') === -1) continue;
                 if (!this.modelService.getProviderCapabilities().supportsImageInput) {
                     new Notice('The active provider does not support image context.');
                     return;
@@ -1186,23 +1358,25 @@ export class ShellView extends ItemView {
                     };
                     reader.readAsDataURL(blob);
                 }
-            } else if (item.type === 'text/plain') {
-                // Check if it's a URL
-                item.getAsString((text) => {
-                    if (this.isValidUrl(text)) {
-                        const type = (text.includes('youtube.com') || text.includes('youtu.be'))
-                            ? 'youtube'
-                            : 'url';
-                        this.contextManager.addContext({
-                            id: Date.now().toString(),
-                            type,
-                            data: text,
-                            summary: text
-                        });
-                        this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
-                    }
-                });
+                return;
             }
+        }
+
+        // 文本粘贴:同步读取纯文本。若是合法 URL 则同步 preventDefault + 加 chip,
+        // 否则不拦截,交给浏览器默认粘贴(避免 URL 既进 textarea 又进 chip 的重复)。
+        const text = clipboard.getData('text/plain').trim();
+        if (text && this.isValidUrl(text)) {
+            e.preventDefault();
+            const type = (text.includes('youtube.com') || text.includes('youtu.be'))
+                ? 'youtube'
+                : 'url';
+            this.contextManager.addContext({
+                id: Date.now().toString(),
+                type,
+                data: text,
+                summary: text
+            });
+            this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
         }
     }
 
@@ -1469,7 +1643,10 @@ export class ShellView extends ItemView {
     }
 
     private clearChat() {
-        this.outputContainer.empty();
+        // 只清空当前活动 tab 的子树(其余 tab 子树保留)。
+        const activeContainer = this.getActiveMessageContainer();
+        this.unobserveContainerEntries(activeContainer);
+        activeContainer.empty();
         const activeTab = this.tabManager.getActiveTab();
         activeTab?.state.clearMessages();
         if (activeTab) {
@@ -1520,7 +1697,14 @@ export class ShellView extends ItemView {
             await this.syncProviderStateForTab(activeTab);
         }
         this.resetStreamState();
-        this.renderActiveTabMessages();
+        // 目标 tab 子树已渲染且未被后台消息标脏 → 只切 display,零重建(核心性能收益)。
+        // 否则(首次打开 / 后台有新消息)全量重建该子树。
+        const cached = this.tabContainers.get(id);
+        if (cached && !this.dirtyTabs.has(id)) {
+            this.showOnlyActiveContainer();
+        } else {
+            this.renderActiveTabMessages();
+        }
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
@@ -1536,6 +1720,14 @@ export class ShellView extends ItemView {
         this.tabSessions.delete(id);
         // 释放该会话的 pi session 内存态(磁盘文件与持久 ref 保留,再次打开可恢复)。
         this.modelService.releaseSession(id);
+        // 移除该 tab 的消息子树,避免关闭后 DOM 残留。
+        const closedContainer = this.tabContainers.get(id);
+        if (closedContainer) {
+            this.unobserveContainerEntries(closedContainer);
+            closedContainer.remove();
+        }
+        this.tabContainers.delete(id);
+        this.dirtyTabs.delete(id);
         this.hideHistoryMenu();
 
         if (wasActive) {
@@ -1608,6 +1800,8 @@ export class ShellView extends ItemView {
             this.appendMessage(msg);
         } else {
             this.tabManager.markAttention(tabId, true);
+            // 后台 tab 有新消息:标脏,切回时强制重建以补齐 DOM。
+            this.dirtyTabs.add(tabId);
         }
     }
 
@@ -1661,6 +1855,8 @@ export class ShellView extends ItemView {
             this.handleStreamEvent(event);
         } else {
             this.tabManager.markAttention(tabId, true);
+            // 后台 tab 有流事件(done 时会落 ai 消息):标脏,切回时重建。
+            this.dirtyTabs.add(tabId);
         }
     }
 
@@ -1685,6 +1881,8 @@ export class ShellView extends ItemView {
             }
         } else {
             this.tabManager.markAttention(tabId, true);
+            // 后台 tab 的工作区编辑消息:标脏,切回时重建。
+            this.dirtyTabs.add(tabId);
         }
     }
 
@@ -1739,7 +1937,10 @@ export class ShellView extends ItemView {
     }
 
     private hideHistoryMenu() {
+        // 仅当菜单当前可见时才还原焦点:避免 init/unload 等场景无谓抢焦点。
+        const wasOpen = this.historyMenuContainerEl?.style.display === 'block';
         this.historyMenu?.hide();
+        if (wasOpen) this.historyMenuTriggerEl?.focus();
     }
 
     private async openConversationFromHistory(id: string) {
@@ -2019,11 +2220,24 @@ export class ShellView extends ItemView {
         return null;
     }
 
+    /**
+     * 渲染当前活动 tab 的消息。
+     * 每个 tab 一棵独立 DOM 子树:只清空并重建「当前活动 tab」这一棵,其余子树保留、切 display 隐藏。
+     * 由此切换 tab 时若目标子树已存在且未标脏,switchTab 走 display 切换、完全不进本方法,避免全量重建。
+     */
     private renderActiveTabMessages() {
         if (!this.outputContainer) return;
 
-        this.outputContainer.empty();
         const activeTab = this.tabManager.getActiveTab();
+        const activeId = activeTab?.id;
+        // 只重建当前活动子树:取容器、清空它(而非清空整个 outputContainer)。
+        const container = this.getActiveMessageContainer();
+        // 清空前解除对旧 entry 的观察,避免 observer 持有已脱离文档的节点。
+        this.unobserveContainerEntries(container);
+        container.empty();
+        if (activeId != null) this.dirtyTabs.delete(activeId);
+        this.showOnlyActiveContainer();
+
         const messages = activeTab?.state.getMessages() ?? [];
 
         if (messages.length === 0) {

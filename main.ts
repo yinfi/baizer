@@ -694,10 +694,17 @@ export default class BaizerPlugin extends Plugin {
             if (stillThere !== anchorKey) return;
             if (this.guardianEscalatedAnchors.has(anchorKey)) return;
             this.guardianEscalatedAnchors.add(anchorKey);
-            // 限制 set 体积,避免长会话无限增长。
+            // 限制 set 体积,避免长会话无限增长。超限时只淘汰最旧的一半
+            // (Set 保留插入顺序,迭代即最旧优先),保留最近约 100 条——
+            // 避免整体 clear() 让近期已升级的锚点重新变得可升级(重复烧钱)。
             if (this.guardianEscalatedAnchors.size > 200) {
-                this.guardianEscalatedAnchors.clear();
-                this.guardianEscalatedAnchors.add(anchorKey);
+                const dropCount = this.guardianEscalatedAnchors.size - 100;
+                let dropped = 0;
+                for (const oldest of this.guardianEscalatedAnchors) {
+                    if (dropped >= dropCount) break;
+                    this.guardianEscalatedAnchors.delete(oldest);
+                    dropped++;
+                }
             }
             this.logGuardianAuto('auto-escalate to deep', { reason, anchorKey });
             void this.runDeepGuardianCheck(editor, 'escalation');
