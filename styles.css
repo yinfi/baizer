@@ -19,9 +19,9 @@
     flex-direction: column !important;
     height: 100% !important;
     width: 100%;
-    background-color: var(--background-primary);
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
     overflow: hidden;
+    /* 背景与字体统一由下方 `Refined Sidebar System` 段的 `.baizer-shell-view` 变量块接管
+       (background: linear-gradient / font-family: var(--font-interface)),此处不再重复声明。 */
 }
 
 /* 1. Header */
@@ -42,11 +42,8 @@
     gap: var(--size-2-1);
 }
 
-.shell-title {
-    font-size: var(--font-ui-medium);
-    font-weight: var(--font-medium);
-    margin: 0;
-}
+/* 注:.shell-title 的样式统一由下方 `Refined Sidebar System` 段的 `.shell-title` 接管
+   (color/font-size/font-weight/line-height + margin)。此处第一代块已删,避免静默覆盖。 */
 
 .shell-header-buttons {
     display: flex;
@@ -77,6 +74,7 @@
 }
 
 .baizer-tab-badge {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -91,7 +89,18 @@
     font-weight: var(--font-medium);
     cursor: pointer;
     user-select: none;
-    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+    transition: background-color var(--baizer-transition-fast), border-color var(--baizer-transition-fast), color var(--baizer-transition-fast);
+}
+
+/* 触摸命中区扩到 >=44x44:居中透明伪元素,不改变徽标视觉尺寸,不占布局。 */
+.baizer-tab-badge::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: max(100%, 44px);
+    height: 44px;
 }
 
 .baizer-tab-badge:hover {
@@ -131,7 +140,7 @@
     z-index: 20;
     padding: 8px;
     border: 1px solid var(--background-modifier-border);
-    border-radius: 8px;
+    border-radius: var(--baizer-radius-m);
     background: var(--background-primary);
     box-shadow: var(--shadow-s);
 }
@@ -150,7 +159,7 @@
     height: 30px;
     padding: 0 10px;
     border: 1px solid var(--background-modifier-border);
-    border-radius: 6px;
+    border-radius: var(--baizer-radius-s);
     background: var(--background-secondary);
     color: var(--text-normal);
     font-size: var(--font-ui-small);
@@ -230,7 +239,7 @@
 }
 
 .baizer-history-note {
-    max-width: 220px;
+    max-width: 100%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -411,7 +420,7 @@
     padding: var(--size-2-1) var(--size-4-1);
     border-radius: var(--radius-s);
     cursor: pointer;
-    transition: all 0.1s ease-in-out;
+    transition: all var(--baizer-transition-fast);
     border: 1px solid var(--background-modifier-border);
     background: var(--background-primary);
 }
@@ -457,7 +466,7 @@
 
 .shell-input-container:focus-within {
     box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
-    transition: box-shadow 0.15s ease-in-out;
+    transition: box-shadow var(--baizer-transition-fast);
 }
 
 .shell-input-wrapper {
@@ -576,7 +585,7 @@ textarea.shell-input::placeholder {
     right: 12px;
     background: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
-    border-radius: 6px;
+    border-radius: var(--baizer-radius-m);
     box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
     max-height: 200px;
     overflow-y: auto;
@@ -586,6 +595,11 @@ textarea.shell-input::placeholder {
     margin-bottom: 8px;
 }
 
+/* 暗色下 rgba(0,0,0,0.2) 阴影几乎不可辨,加深到 0.45 让建议弹窗与底部输入框分层清晰。 */
+.theme-dark .shell-suggestions {
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.45);
+}
+
 .suggestion-item {
     padding: 8px 12px;
     cursor: pointer;
@@ -593,7 +607,7 @@ textarea.shell-input::placeholder {
     align-items: center;
     gap: 8px;
     color: var(--text-normal);
-    font-size: 13px;
+    font-size: var(--font-ui-small);
 }
 
 .suggestion-item:hover,
@@ -672,18 +686,26 @@ textarea.shell-input::placeholder {
     transition: all 0.3s ease;
 }
 
+/* idle/paused 是静止态:去掉持续呼吸动画(常驻动画分散注意、耗电),
+   改为静态低透明度圆点,仅在 :hover 时微放大给出可交互反馈。 */
 .guardian-gutter-marker.guardian-idle {
     background: var(--color-green);
     box-shadow: 0 0 8px color-mix(in srgb, var(--color-green) 40%, transparent);
-    animation: guardian-pulse-slow 3s ease-in-out infinite;
     opacity: 0.6;
+    transform: scale(0.9);
 }
 
 .guardian-gutter-marker.guardian-paused {
     background: var(--color-red);
     box-shadow: 0 0 8px color-mix(in srgb, var(--color-red) 40%, transparent);
-    animation: guardian-pulse-slow 3s ease-in-out infinite;
     opacity: 0.6;
+    transform: scale(0.9);
+}
+
+.guardian-gutter-marker.guardian-idle:hover,
+.guardian-gutter-marker.guardian-paused:hover {
+    opacity: 0.9;
+    transform: scale(1.1);
 }
 
 .guardian-gutter-marker.guardian-thinking {
@@ -712,19 +734,7 @@ textarea.shell-input::placeholder {
     }
 }
 
-@keyframes guardian-pulse-slow {
-
-    0%,
-    100% {
-        transform: scale(0.8);
-        opacity: 0.4;
-    }
-
-    50% {
-        transform: scale(1.1);
-        opacity: 0.8;
-    }
-}
+/* 注:guardian-pulse-slow 曾用于 idle/paused 呼吸,现两态改为静态,keyframe 已删(死代码)。 */
 
 .cm-line .guardian-ghost-text,
 .guardian-ghost-text {
@@ -792,36 +802,37 @@ textarea.shell-input::placeholder {
 .guardian-selection-btn {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     /* 跟随主题强调色:换主题自动协调,不再用固定紫蓝渐变割裂于插件其余部分。 */
     background: var(--interactive-accent);
     color: var(--text-on-accent);
     border: none;
-    padding: 5px 11px 5px 9px;
+    padding: 3px 9px 3px 8px;
     border-radius: 999px;
-    font-size: var(--font-ui-small);
+    font-size: var(--font-ui-smaller);
     font-weight: 600;
     line-height: 1;
     cursor: pointer;
-    box-shadow: 0 2px 8px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
-    transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease;
+    box-shadow: 0 1px 4px color-mix(in srgb, var(--interactive-accent) 28%, transparent);
+    /* 选区 tooltip 挂在 body 下,不在 .baizer-shell-view 作用域内,故带 fallback。 */
+    transition: transform var(--baizer-transition-fast, 120ms ease), box-shadow var(--baizer-transition-fast, 120ms ease), background-color var(--baizer-transition-fast, 120ms ease);
 }
 
 .guardian-selection-btn:hover {
     background: var(--interactive-accent-hover);
-    box-shadow: 0 3px 12px color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--interactive-accent) 40%, transparent);
     transform: translateY(-1px);
 }
 
 .guardian-selection-btn:active {
     transform: translateY(0);
-    box-shadow: 0 1px 5px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--interactive-accent) 28%, transparent);
 }
 
-/* 图标尺寸对齐文字,颜色随强调色前景 */
+/* 图标略小于文字,视觉重心落在 AI 标签上,整体更紧凑精致 */
 .guardian-selection-btn .svg-icon {
-    width: 15px;
-    height: 15px;
+    width: 13px;
+    height: 13px;
     color: var(--text-on-accent);
 }
 
@@ -849,7 +860,7 @@ textarea.shell-input::placeholder {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 12px;
+    font-size: var(--font-ui-smaller);
     font-weight: 600;
     color: var(--text-muted);
 }
@@ -859,7 +870,7 @@ textarea.shell-input::placeholder {
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    font-size: 16px;
+    font-size: var(--font-ui-medium);
     padding: 0 4px;
 }
 
@@ -877,7 +888,7 @@ textarea.shell-input::placeholder {
 }
 
 .guardian-message {
-    font-size: 13px;
+    font-size: var(--font-ui-small);
     line-height: 1.5;
     word-wrap: break-word;
 }
@@ -903,14 +914,14 @@ textarea.shell-input::placeholder {
 
 .guardian-message.system {
     align-self: center;
-    font-size: 11px;
+    font-size: var(--font-smallest);
     color: var(--text-muted);
     font-style: italic;
 }
 
 .guardian-status-bar {
     padding: 4px 12px;
-    font-size: 10px;
+    font-size: var(--font-smallest);
     color: var(--text-muted);
     background: var(--background-primary);
     border-top: 1px solid var(--background-modifier-border);
@@ -926,9 +937,9 @@ textarea.shell-input::placeholder {
     width: 100%;
     background: var(--background-primary);
     border: 1px solid var(--background-modifier-border);
-    border-radius: 4px;
+    border-radius: var(--radius-s);
     padding: 8px;
-    font-size: 13px;
+    font-size: var(--font-ui-small);
     resize: none;
     min-height: 40px;
     max-height: 100px;
@@ -949,12 +960,12 @@ textarea.shell-input::placeholder {
 }
 
 .guardian-chat-actions button {
-    font-size: 11px;
+    font-size: var(--font-smallest);
     padding: 4px 8px;
     background: transparent;
     border: 1px solid var(--background-modifier-border);
     color: var(--text-muted);
-    border-radius: 4px;
+    border-radius: var(--radius-s);
     cursor: pointer;
 }
 
@@ -998,7 +1009,7 @@ textarea.shell-input::placeholder {
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: pointer;
-    transition: all 0.1s ease-in-out;
+    transition: all var(--baizer-transition-fast);
     position: relative;
 }
 
@@ -1061,7 +1072,7 @@ textarea.shell-input::placeholder {
     border-radius: 4px;
     cursor: pointer;
     font-family: var(--font-interface);
-    transition: opacity 0.2s;
+    transition: opacity var(--baizer-transition-base);
     z-index: 5;
 }
 
@@ -1123,11 +1134,19 @@ textarea.shell-input::placeholder {
     gap: 4px;
     margin-top: 4px;
     opacity: 0;
-    transition: opacity 0.2s ease;
+    transition: opacity var(--baizer-transition-base);
 }
 
-.shell-entry.ai:hover .shell-feedback-bar {
+.shell-entry.ai:hover .shell-feedback-bar,
+.shell-entry.ai:focus-within .shell-feedback-bar {
     opacity: 1;
+}
+
+/* 触屏/无悬停设备无法 hover 出反馈条,常驻显示保证可复制/点赞点踩可达。 */
+@media (hover: none) {
+    .shell-feedback-bar {
+        opacity: 1;
+    }
 }
 
 .shell-feedback-btn {
@@ -1139,7 +1158,7 @@ textarea.shell-input::placeholder {
     color: var(--text-muted);
     display: flex;
     align-items: center;
-    transition: all 0.15s ease;
+    transition: all var(--baizer-transition-fast);
 }
 
 .shell-feedback-btn:hover {
@@ -1194,6 +1213,8 @@ textarea.shell-input::placeholder {
     border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-s);
     background: var(--background-primary);
+    /* 侧栏宽度不等于视口宽度,用容器查询按卡片自身宽度塌陷双列 diff,而非全局媒体查询。 */
+    container-type: inline-size;
 }
 
 .shell-change-preview-summary {
@@ -1231,7 +1252,7 @@ textarea.shell-input::placeholder {
     font-size: var(--font-smaller);
 }
 
-@media (max-width: 700px) {
+@container (max-width: 480px) {
     .shell-change-preview-content {
         grid-template-columns: 1fr;
     }
@@ -1248,7 +1269,7 @@ textarea.shell-input::placeholder {
     padding: var(--size-2-1) var(--size-4-2);
     cursor: pointer;
     font-size: var(--font-ui-small);
-    transition: background-color 0.15s ease, border-color 0.15s ease;
+    transition: background-color var(--baizer-transition-fast), border-color var(--baizer-transition-fast);
 }
 
 .shell-approval-confirm {
@@ -1316,7 +1337,7 @@ textarea.shell-input::placeholder {
     align-items: center;
     margin-top: 4px;
     opacity: 0;
-    transition: opacity 0.2s ease;
+    transition: opacity var(--baizer-transition-base);
 }
 
 .shell-entry.user:hover .shell-user-actions,
@@ -1356,7 +1377,7 @@ textarea.shell-input::placeholder {
     color: var(--text-muted);
     display: flex;
     align-items: center;
-    transition: all 0.15s ease;
+    transition: all var(--baizer-transition-fast);
 }
 
 .shell-branch-prev:hover,
@@ -1444,7 +1465,7 @@ textarea.shell-input::placeholder {
 
 .baizer-thinking-caret {
     display: inline-block;
-    transition: transform 0.15s ease;
+    transition: transform var(--baizer-transition-fast);
 }
 
 .baizer-thinking-block.is-collapsed .baizer-thinking-caret {
@@ -1465,7 +1486,7 @@ textarea.shell-input::placeholder {
 }
 
 .shell-think-summary .think-toggle {
-    transition: transform 0.15s ease;
+    transition: transform var(--baizer-transition-fast);
     font-size: 10px;
 }
 
@@ -1617,9 +1638,13 @@ textarea.shell-input::placeholder {
     --baizer-border-strong: color-mix(in srgb, var(--background-modifier-border) 68%, var(--text-muted));
     --baizer-shadow: 0 12px 30px rgba(0, 0, 0, 0.10);
     --baizer-soft-shadow: 0 8px 22px rgba(0, 0, 0, 0.06);
-    --baizer-radius-l: 8px;
+    --baizer-radius-l: 12px;
     --baizer-radius-m: 8px;
     --baizer-radius-s: 6px;
+    /* 过渡时长两档:fast 用于按钮/悬停等即时反馈,base 用于弹层淡入、opacity 等较大位移。
+       Guardian gutter 呼吸灯(0.3s)是节奏语义,单独保留不并入。 */
+    --baizer-transition-fast: 120ms ease;
+    --baizer-transition-base: 200ms ease;
     gap: 12px;
     padding: 14px;
     background: linear-gradient(180deg, color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary)), var(--background-secondary));
@@ -1664,9 +1689,10 @@ textarea.shell-input::placeholder {
 }
 
 .shell-title {
+    margin: 0;
     color: var(--text-normal);
     font-size: var(--font-ui-medium);
-    font-weight: 750;
+    font-weight: 700;
     line-height: 1.1;
 }
 
@@ -1729,7 +1755,7 @@ textarea.shell-input::placeholder {
     max-width: 180px;
     padding: 0 7px 0 5px;
     cursor: pointer;
-    transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+    transition: border-color var(--baizer-transition-fast), background-color var(--baizer-transition-fast), box-shadow var(--baizer-transition-fast);
 }
 
 .shell-knowledge-status-strip::before {
@@ -2159,7 +2185,7 @@ textarea.shell-input {
     place-items: center;
     background: var(--baizer-surface-muted);
     color: var(--text-accent);
-    font-weight: 750;
+    font-weight: 700;
 }
 
 .suggestion-copy {
@@ -2265,6 +2291,9 @@ textarea.shell-input {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    /* 防止动作弹层溢出侧栏右边界:窄侧栏时按容器宽度收口并允许换行。 */
+    max-width: min(220px, calc(100% - 16px));
+    flex-wrap: wrap;
     padding: 4px;
     border: 1px solid var(--baizer-border);
     border-radius: 999px;
@@ -2346,7 +2375,7 @@ textarea.shell-input {
 .shell-approval-title {
     color: var(--text-normal);
     font-size: var(--font-ui-small);
-    font-weight: 750;
+    font-weight: 700;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
@@ -2388,9 +2417,8 @@ textarea.shell-input {
 .shell-approval-fact-value {
     min-width: 0;
     color: var(--text-normal);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* 长路径在窄侧栏换行显示,不再单行截断丢失尾部信息。 */
+    overflow-wrap: anywhere;
 }
 
 .shell-approval-preconditions {
@@ -2928,7 +2956,7 @@ textarea.shell-input {
     color: var(--text-normal);
     text-align: left;
     cursor: pointer;
-    transition: border-color 140ms ease, background-color 140ms ease;
+    transition: border-color var(--baizer-transition-fast, 120ms ease), background-color var(--baizer-transition-fast, 120ms ease);
 }
 
 .baizer-settings-nav-item:hover {
@@ -3186,7 +3214,7 @@ textarea.shell-input {
     background: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary));
     color: var(--text-normal);
     cursor: pointer;
-    transition: border-color 140ms ease, background-color 140ms ease;
+    transition: border-color var(--baizer-transition-fast, 120ms ease), background-color var(--baizer-transition-fast, 120ms ease);
 }
 
 .baizer-settings-provider-card:hover {
@@ -3716,6 +3744,8 @@ textarea.shell-input {
     min-height: 47px;
     padding: 7px;
     border-top: 1px solid var(--baizer-border);
+    /* model select 三列的压缩按控件条自身宽度触发,不看视口。 */
+    container-type: inline-size;
 }
 
 .baizer-shell-view .shell-model-select-container {
@@ -3778,11 +3808,15 @@ textarea.shell-input {
     border-color: color-mix(in srgb, var(--text-error) 36%, var(--baizer-border));
 }
 
-@media (max-width: 380px) {
+/* 窄侧栏下 provider/model/thinking 三列进一步压缩,按输入控件条容器宽度触发。 */
+@container (max-width: 320px) {
     .baizer-shell-view .shell-model-select-container {
         grid-template-columns: minmax(60px, 76px) minmax(0, 1fr) minmax(54px, 64px);
     }
+}
 
+/* tab 标题在 header 内,不在输入控件容器作用域,仍按视口宽度收窄。 */
+@media (max-width: 380px) {
     .baizer-shell-view .baizer-tab-active-title {
         max-width: 150px;
     }
@@ -4051,7 +4085,7 @@ textarea.shell-input {
     background: var(--baizer-surface-muted, var(--background-secondary));
     color: var(--text-muted);
     cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+    transition: border-color var(--baizer-transition-fast, 120ms ease), background var(--baizer-transition-fast, 120ms ease), color var(--baizer-transition-fast, 120ms ease);
 }
 
 .baizer-attachment-dropzone:hover {
@@ -4139,6 +4173,20 @@ textarea.shell-input {
     margin-top: 16px;
 }
 
+/* 视觉隐藏但对读屏可见:承载 aria-live 播报文本(如 ghost text 补全提示)。
+   不用 display:none / visibility:hidden —— 那会让读屏一并忽略。 */
+.baizer-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
 /* ==================== Reduced Motion ====================
  * 尊重系统「减少动态效果」偏好:关闭所有持续动画(流式光标闪烁、思考/知识脉冲等),
  * 并把过渡压到几乎瞬时,避免前庭敏感用户被动画困扰。前庭安全:仅去动效,不改布局。 */
@@ -4180,7 +4228,7 @@ textarea.shell-input {
     color: var(--text-muted);
     font-size: var(--font-ui-smaller);
     cursor: pointer;
-    transition: background 0.12s ease, color 0.12s ease;
+    transition: background var(--baizer-transition-fast, 120ms ease), color var(--baizer-transition-fast, 120ms ease);
 }
 .baizer-action-btn:hover {
     background: var(--background-modifier-hover);
