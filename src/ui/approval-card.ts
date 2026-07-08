@@ -2,6 +2,41 @@ import { ChangePreview } from './diff/change-preview';
 import { renderChangePreviewCard } from './components/change-preview-card';
 import { setIcon } from 'obsidian';
 
+// rename_note 工具同时承担「重命名」和「移动」两件事(底层都是 vault.rename)。
+// 审批卡需按 oldPath/newPath 的父目录是否变化来区分,否则用户看到的「rename」文案
+// 与实际发生的「移动到某目录」不符(截图问题 1)。
+function parentDir(path: string): string {
+  const norm = String(path ?? '').replace(/\\/g, '/');
+  const idx = norm.lastIndexOf('/');
+  return idx >= 0 ? norm.slice(0, idx) : '';
+}
+
+interface RenameInfo {
+  isMove: boolean;
+  oldPath: string;
+  newPath: string;
+}
+
+function describeRename(request: ApprovalRequest): RenameInfo {
+  const oldPath = String(request.args?.oldPath ?? request.target ?? '');
+  const newPath = String(request.args?.newPath ?? '');
+  // 父目录变了 = 移动(含「移动并改名」);父目录不变仅文件名变 = 纯重命名。
+  return { isMove: parentDir(oldPath) !== parentDir(newPath), oldPath, newPath };
+}
+
+function isRenameRequest(request: ApprovalRequest): boolean {
+  return request.preview?.kind === 'note-rename' || request.action?.toLowerCase().includes('rename');
+}
+
+// 只有「有新内容可在编辑器里预览」的操作才提供 🎯 聚焦预览按钮。
+// 移动/重命名/删除/插件命令没有可预览的正文,点了只会弹「无预览」(截图问题 2)。
+function previewSupportsEditorPreview(preview?: ChangePreview): boolean {
+  if (!preview) return true; // 未知预览类型:保守保留按钮
+  return preview.kind !== 'note-rename'
+    && preview.kind !== 'note-delete'
+    && preview.kind !== 'plugin-command';
+}
+
 export interface ApprovalRequest {
   action: string;
   target: string;
@@ -32,9 +67,20 @@ export function renderApprovalCard(
   copy.createDiv({ cls: 'shell-approval-message', text: request.message });
   copy.createDiv({ cls: 'shell-approval-risk', text: `${capitalize(risk)} risk` });
 
+  const isRename = isRenameRequest(request);
+
   const facts = card.createDiv({ cls: 'shell-approval-facts' });
-  renderFact(facts, 'Action', request.action, 'shell-approval-action-value');
-  renderFact(facts, 'Target', request.target, 'shell-approval-target-value');
+  if (isRename) {
+    // 移动/重命名:一处「操作 + 从 → 到」即可说清,不再重复 Action/Target 两行 +
+    // 内嵌预览子卡(对 rename 只是重复 summary 和同一路径)。仅去重,不动卡片结构。
+    const info = describeRename(request);
+    renderFact(facts, '操作', info.isMove ? '移动' : '重命名', 'shell-approval-action-value');
+    renderFact(facts, '从', info.oldPath, 'shell-approval-target-value');
+    renderFact(facts, '到', info.newPath, 'shell-approval-newpath-value');
+  } else {
+    renderFact(facts, 'Action', request.action, 'shell-approval-action-value');
+    renderFact(facts, 'Target', request.target, 'shell-approval-target-value');
+  }
 
   if (request.preview?.preconditions?.length) {
     const preconditions = card.createDiv({ cls: 'shell-approval-preconditions' });
@@ -43,7 +89,7 @@ export function renderApprovalCard(
     }
   }
 
-  if (request.preview) {
+  if (request.preview && !isRename) {
     renderChangePreviewCard(card, request.preview);
   }
 
@@ -59,7 +105,7 @@ export function renderApprovalCard(
     }
   };
 
-  if (handlers.onFocusPreview) {
+  if (handlers.onFocusPreview && previewSupportsEditorPreview(request.preview)) {
     buttons.push(createIconButton(actions, 'shell-approval-focus-preview', 'locate-fixed', 'Show editor preview', setIconFn, () => {
       if (pending) return;
       void handlers.onFocusPreview?.();
@@ -133,6 +179,9 @@ function getApproveLabel(request: ApprovalRequest) {
   const action = request.action.toLowerCase();
   if (action.includes('delete') || action.includes('remove')) return 'Approve delete';
   if (action.includes('create')) return 'Approve create';
+  if (isRenameRequest(request)) {
+    return describeRename(request).isMove ? 'Approve move' : 'Approve rename';
+  }
   if (action.includes('edit') || action.includes('modify') || action.includes('update') || action.includes('replace')) {
     return 'Approve edit';
   }
@@ -143,6 +192,9 @@ function getApprovalTitle(request: ApprovalRequest) {
   const action = request.action.toLowerCase();
   if (action.includes('delete') || action.includes('remove')) return '\u9700\u8981\u5ba1\u6279\uff1a\u5220\u9664\u5185\u5bb9';
   if (action.includes('create')) return '\u9700\u8981\u5ba1\u6279\uff1a\u521b\u5efa\u5185\u5bb9';
+  if (isRenameRequest(request)) {
+    return describeRename(request).isMove ? '\u9700\u8981\u5ba1\u6279\uff1a\u79fb\u52a8\u6587\u4ef6' : '\u9700\u8981\u5ba1\u6279\uff1a\u91cd\u547d\u540d\u6587\u4ef6';
+  }
   if (action.includes('edit') || action.includes('modify') || action.includes('update') || action.includes('replace')) {
     return '\u9700\u8981\u5ba1\u6279\uff1a\u4fee\u6539\u5f53\u524d\u7b14\u8bb0';
   }

@@ -391,6 +391,75 @@ async function runTests() {
     expect(calls).toEqual(['focus']);
   });
 
+  // rename_note 同时是「重命名」和「移动」:父目录变了 = 移动。审批卡必须显示去向(从→到)、
+  // 文案说「移动」、且不渲染对移动无意义的 🎯 聚焦预览按钮(截图三问)。
+  await test('renderApprovalCard renders a move as 操作/从/到 without a dead preview button', async () => {
+    const container = new FakeElement();
+    const calls: string[] = [];
+
+    renderApprovalCard(
+      container as any,
+      {
+        action: 'rename_note',
+        target: 'AI开发指南.md',
+        args: { oldPath: 'AI开发指南.md', newPath: 'study/AI/AI开发指南.md' },
+        message: 'Approval required to rename note: AI开发指南.md',
+        preview: {
+          kind: 'note-rename',
+          target: 'AI开发指南.md',
+          summary: 'Rename note',
+          risk: 'medium',
+          supportsPartialApply: false,
+          undoable: true,
+        },
+      },
+      {
+        onApprove: () => { calls.push('approve'); },
+        onCancel: () => { calls.push('cancel'); },
+        onFocusPreview: () => { calls.push('focus'); },
+      },
+    );
+
+    expect(container.querySelector('.shell-approval-title')?.textContent).toBe('需要审批：移动文件');
+    expect(container.querySelector('.shell-approval-action-value')?.textContent).toBe('移动');
+    expect(container.querySelector('.shell-approval-target-value')?.textContent).toBe('AI开发指南.md');
+    expect(container.querySelector('.shell-approval-newpath-value')?.textContent).toBe('study/AI/AI开发指南.md');
+    expect(container.querySelector('.shell-approval-confirm')?.attributes.title).toBe('Approve move');
+    // 移动无正文可在编辑器预览:🎯 按钮不渲染,只剩 取消 + 确认。
+    expect(container.querySelectorAll('.shell-approval-icon-btn').length).toBe(2);
+    expect(!!container.querySelector('.shell-approval-focus-preview')).toBe(false);
+    // rename 不再嵌入重复 summary+路径的预览子卡。
+    expect(!!container.querySelector('.shell-change-preview-card')).toBe(false);
+  });
+
+  // 父目录不变、仅文件名变 = 纯重命名:文案区分于「移动」。
+  await test('renderApprovalCard labels a same-folder rename as 重命名', async () => {
+    const container = new FakeElement();
+
+    renderApprovalCard(
+      container as any,
+      {
+        action: 'rename_note',
+        target: 'notes/draft.md',
+        args: { oldPath: 'notes/draft.md', newPath: 'notes/final.md' },
+        message: 'Approval required to rename note: notes/draft.md',
+        preview: {
+          kind: 'note-rename',
+          target: 'notes/draft.md',
+          summary: 'Rename note',
+          risk: 'medium',
+          supportsPartialApply: false,
+          undoable: true,
+        },
+      },
+      { onApprove: () => { }, onCancel: () => { } },
+    );
+
+    expect(container.querySelector('.shell-approval-title')?.textContent).toBe('需要审批：重命名文件');
+    expect(container.querySelector('.shell-approval-action-value')?.textContent).toBe('重命名');
+    expect(container.querySelector('.shell-approval-confirm')?.attributes.title).toBe('Approve rename');
+  });
+
   await test('renderApprovalCard exposes risk target action and concrete approve label', async () => {
     const container = new FakeElement();
 

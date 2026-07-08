@@ -3005,3 +3005,50 @@ UI 层：
 - 从 journal.jsonl 导出全部 11 条已完成 agent 结果,自己整合报告
 - 对两个中断维度的独有发现(嵌套高级块塌陷/样式真相源/破坏性操作确认不一致)用 Grep 直接核对真实代码补验证
 - 最终归纳出根因 this.display() 全量重建,派生出搜索失焦/滑块重建/CSS 三处并存三大 P0
+
+---
+### [2026-07-08 17:45] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 报告落盘 docs/settings-review.md,并按 P0/P1/P2 全量重构配置页面
+- P0-1 局部刷新架构(display 只建骨架 + renderAccordion 局部重绘,搜索不再失焦)
+- P0-2 新增 provider 自动模型写回;P0-3 saveSettingsLight + 滑块 debounce(不再每格重建 LLM 客户端)
+- P0-4 删除 styles.css 旧设计死选择器 + 合并重复的 page/hero 真相源 + 修复文案截断
+- P1 全做:破坏性操作二次确认、搜索自动展开、嵌套高级展开态记忆、硬编码文案 i18n、aria-live、记忆 tab 语义
+- P2 大部分:chevron 图标化、reduced-motion 覆盖、focus-visible、Guardian 中文关键词
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 根因是 this.display() 整页重建,派生出搜索失焦/滑块卡顿/焦点丢失三大痛点;先做局部刷新地基,其余搭车修复,符合第一性原理(改根因不打补丁)
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- settings-state.test.ts 未固定 locale,i18n 改动导致断言从中文/英文错配而失败
+- zh-messages 新增 'Off'/'Model' 与已有键重复,esbuild 报 duplicate-object-key
+- styles.css 旧选择器与 accordion 新选择器交错,死块中夹着 live 规则,盲删有回归风险
+
+**4. 如何修复的？ (How was it fixed?)**
+- 测试头部加 setLocaleForTesting(false) 固定英文,并同步更新受影响断言
+- 删除重复的 i18n 键,复用已有条目
+- 先 grep 逐个验证选择器在 src 中 0 引用,只删有干净边界的连续死块,保留交错的 live 规则;最终 build 零警告、tsc 零错误、88 测试文件全通过
+
+---
+### [2026-07-08 19:10] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 修复审批卡三个问题(截图反馈)。改 `src/ui/approval-card.ts` + 补 `test/approval-flow.test.ts` 2 个用例。
+- 问题1(文案不对):`rename_note` 底层是 `vault.rename`,同时承担「重命名」和「移动」。审批卡此前一律显示 rename、且只显示 oldPath 看不到去向。现按 oldPath/newPath 父目录是否变化区分「移动/重命名」,facts 改为「操作 / 从 / 到」三行,标题与确认按钮文案对应(移动文件/重命名文件、Approve move/rename)。
+- 问题2(废按钮):🎯 聚焦预览按钮改为仅在有可预览正文时渲染;note-rename/note-delete/plugin-command 无正文,点了只会弹「无预览」,现不再渲染。移动/删除卡只剩 取消+确认 两个按钮。
+- 问题3(样式丑):按用户选择「保持现结构,仅去重」。rename 场景去掉重复的 Action/Target 两行 + 内嵌预览子卡(对 rename 只是重复 summary 和同一路径)。复用现有 `.shell-approval-fact` 网格,无需新增 CSS。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 审批的本质是让用户在执行前看清「将发生什么」。移动文件时去向(newPath)是最关键信息,却只在执行后的系统消息里才出现——审批时反而看不到,信息颠倒。根因是 buildApprovalResponse 只把 oldPath 当 target、UI 层无 rename 分支。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- 现有测试对按钮数量(3)、facts 的 class 名有硬断言,改动需保证 create/update/delete 路径的既有断言不回归。
+- getApprovalTitle/getApproveLabel 仅收 action 字符串,无法区分移动/重命名——需让其内部调用 describeRename 读 args。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 只改 approval-card.ts 一个文件:新增 parentDir/describeRename/isRenameRequest/previewSupportsEditorPreview 辅助函数,主渲染函数按 isRename 走专用 facts 且跳过内嵌子卡,🎯 按钮加 previewSupportsEditorPreview 门控。
+- vault-ops.ts 的 rename 载荷未动:其 message(display:none)与 summary(rename 不再渲染子卡)都不上屏。
+- 新增 2 个测试锁住移动/重命名两条路径;全量 approval-flow(10)+message-renderer(16)测试通过,npm run build 通过。
+
+---
