@@ -13,10 +13,14 @@ interface CommandDropdownHandlers {
   onCancel: () => void;
 }
 
+let dropdownIdCounter = 0;
+
 export class CommandDropdown {
   private items: SuggestionItem[] = [];
   private selectedIndex = 0;
   private type: SuggestionType = 'command';
+  /** listbox 唯一 id,用于宿主 textarea 的 aria-controls / 每个 option 的 id 前缀。 */
+  private readonly listboxId = `baizer-suggest-listbox-${++dropdownIdCounter}`;
 
   constructor(
     private readonly containerEl: HTMLElement,
@@ -36,12 +40,16 @@ export class CommandDropdown {
 
     this.containerEl.style.display = 'block';
     this.setAttribute(this.containerEl, 'role', 'listbox');
+    this.setAttribute(this.containerEl, 'id', this.listboxId);
 
+    let selectedEl: HTMLElement | null = null;
     this.items.forEach((item, index) => {
+      const isSelected = index === this.selectedIndex;
       const el = this.containerEl.createDiv({
-        cls: `suggestion-item${index === this.selectedIndex ? ' is-selected' : ''}`,
-        attr: { role: 'option', 'aria-selected': String(index === this.selectedIndex) },
+        cls: `suggestion-item${isSelected ? ' is-selected' : ''}`,
+        attr: { role: 'option', id: this.getOptionId(index), 'aria-selected': String(isSelected) },
       });
+      if (isSelected) selectedEl = el;
       const icon = el.createSpan({ cls: 'suggestion-icon' });
       setIcon(icon, this.getIconName(item));
       const copy = el.createDiv({ cls: 'suggestion-copy' });
@@ -53,6 +61,26 @@ export class CommandDropdown {
       el.createSpan({ cls: 'suggestion-source', text: item.source || this.getDefaultSource() });
       el.addEventListener('click', () => this.handlers.onSelect(item, index));
     });
+
+    // 键盘上下移动选中项时,把选中项滚进可视区,避免高亮跑到视口外看不见。
+    if (selectedEl && typeof (selectedEl as HTMLElement).scrollIntoView === 'function') {
+      (selectedEl as HTMLElement).scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  /** listbox 容器 id(供宿主 aria-controls 指向)。 */
+  getListboxId(): string {
+    return this.listboxId;
+  }
+
+  /** 当前选中 option 的 id(供宿主 aria-activedescendant 指向);无候选时返回 null。 */
+  getActiveOptionId(): string | null {
+    if (this.items.length === 0) return null;
+    return this.getOptionId(this.selectedIndex);
+  }
+
+  private getOptionId(index: number): string {
+    return `${this.listboxId}-option-${index}`;
   }
 
   handleKeyDown(event: KeyboardEvent): boolean {

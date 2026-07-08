@@ -13,6 +13,9 @@ export interface SuggestListOptions {
   provideItems: (type: SuggestionType, query: string) => SuggestionItem[];
   /** 选中一项后:text 是回填后的完整输入,cursor 是新光标位,contextItem 可选。 */
   onApply: (selection: SuggestionSelection) => void;
+  /** 可选的宿主输入框(textarea/input):挂上后自动维护 combobox 的 ARIA 关联属性
+   *  (role=combobox / aria-expanded / aria-controls / aria-activedescendant),读屏才能播报候选。 */
+  hostInput?: HTMLElement;
 }
 
 /**
@@ -32,6 +35,14 @@ export class SuggestList {
       onSelect: (_item, index) => this.selectAt(index),
       onCancel: () => this.hide(),
     });
+    // 宿主输入框声明为 combobox,并指向候选 listbox(初始收起)。
+    const host = this.options.hostInput;
+    if (host) {
+      host.setAttribute('role', 'combobox');
+      host.setAttribute('aria-autocomplete', 'list');
+      host.setAttribute('aria-expanded', 'false');
+      host.setAttribute('aria-controls', this.dropdown.getListboxId());
+    }
   }
 
   handleInput(value: string, cursor: number) {
@@ -58,6 +69,11 @@ export class SuggestList {
   hide() {
     this.controller.hide();
     this.dropdown.hide();
+    const host = this.options.hostInput;
+    if (host) {
+      host.setAttribute('aria-expanded', 'false');
+      host.removeAttribute('aria-activedescendant');
+    }
   }
 
   private navigate(dir: number) {
@@ -82,5 +98,12 @@ export class SuggestList {
       items: this.controller.getSuggestions(),
       selectedIndex: this.controller.getSelectedIndex(),
     });
+    const host = this.options.hostInput;
+    if (host) {
+      host.setAttribute('aria-expanded', 'true');
+      const activeId = this.dropdown.getActiveOptionId();
+      if (activeId) host.setAttribute('aria-activedescendant', activeId);
+      else host.removeAttribute('aria-activedescendant');
+    }
   }
 }
