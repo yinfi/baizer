@@ -355,6 +355,13 @@ export default class BaizerPlugin extends Plugin {
         this.guardianCompletionService = this.createGuardianCompletionService();
     }
 
+    // 轻量落盘：只写 data.json，不重建 provider / guardian / knowledge。
+    // 用于纯 UI 字段（外观主题/字号/不透明度），这些字段不被上述子系统消费，
+    // 无需承担 updateSettings 的 cleanup()+initializeProvider()+modelListCache.clear() 开销（P0-3）。
+    async saveSettingsLight() {
+        await this.saveData(this.settings);
+    }
+
     private createGuardianCompletionService(): GuardianCompletionService {
         return new GuardianCompletionService({
             settings: this.settings,

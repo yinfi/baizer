@@ -9,6 +9,7 @@ import {
   readSummaryFrontmatter,
   setKnowledgeStatus,
   ensureSourceId,
+  isKnowledgeIgnoredPath,
 } from './frontmatter';
 import { computeContentHash } from './compiler';
 
@@ -32,6 +33,7 @@ export function shouldEnqueueFile(
 ): boolean {
   if (!filePath.endsWith('.md')) return false;
   if (filePath.startsWith(wikiFolder + '/')) return false;
+  if (isKnowledgeIgnoredPath(filePath)) return false;
   return isInWatchedFolder(filePath, watchedFolders);
 }
 

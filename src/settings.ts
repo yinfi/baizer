@@ -543,7 +543,7 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     { id: 'skills', title: t('Skills'), description: t('Enable or disable individual skills (availability, separate from permissions).'), keywords: ['skills', 'skill', 'enable', 'disable', 'workflow', 'available', '技能'] },
     { id: 'capture', title: t('Capture'), description: t('Inbox, clipping storage, WeChat import, and URL capture.'), keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper', '采集', '微信'] },
     { id: 'knowledge', title: t('Knowledge'), description: t('Source folders, output folder, compile state, and ontology.'), keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema', '知识'] },
-    { id: 'guardian', title: t('Guardian'), description: t('Inline writing assistance, trigger mode, and ignored folders.'), keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity'] },
+    { id: 'guardian', title: t('Guardian'), description: t('Inline writing assistance, trigger mode, and ignored folders.'), keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity', '守护', '行内补全', '幽灵文本', '灵敏度', '补全'] },
     { id: 'appearance', title: t('Appearance'), description: t('Workbench theme, font size, and opacity.'), keywords: ['appearance', 'theme', 'font', 'opacity', 'terminal', 'workbench', '外观'] },
     { id: 'plugin-skills', title: t('Plugin Skills'), description: t('Skill generation, excluded plugins, and startup scanning.'), keywords: ['plugin', 'skills', 'generator', 'exclude', 'startup', '插件'] },
 ];
@@ -585,32 +585,35 @@ export function getSettingsSectionStatuses(
     const statuses: Partial<Record<SettingsSectionId, SettingsSectionStatus>> = {};
     const activeConfig = settings.providers[settings.activeProvider];
 
+    // P1-4: 分区状态徽章统一走 i18n(此前全为裸英文,中文环境与已译标题混排)。
     if (!activeConfig?.apiKey?.trim()) {
-        statuses.connection = { label: 'Needs key', tone: 'warning' };
+        statuses.connection = { label: t('Needs key'), tone: 'warning' };
     } else if (!BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider)) {
-        statuses.connection = { label: 'Custom', tone: 'accent' };
+        statuses.connection = { label: t('Custom provider'), tone: 'accent' };
     }
 
     if (!settings.enableGuardian) {
-        statuses.guardian = { label: 'Off', tone: 'muted' };
+        statuses.guardian = { label: t('Off'), tone: 'muted' };
     }
 
     if (settings.privacyMode) {
-        statuses.memory = { label: 'Private', tone: 'accent' };
+        statuses.memory = { label: t('Private'), tone: 'accent' };
     }
 
     if (settings.allowPluginControl || !settings.confirmExecutions || settings.vaultWriteScope === 'all-vault') {
-        statuses.permissions = { label: 'Risk', tone: 'danger' };
+        // 'Risk' 过泛,细化为「权限偏宽」更自解释。
+        statuses.permissions = { label: t('Broad access'), tone: 'danger' };
     }
 
     if (!settings.autoGeneratePluginSkills) {
-        statuses['plugin-skills'] = { label: 'Off', tone: 'muted' };
+        statuses['plugin-skills'] = { label: t('Off'), tone: 'muted' };
     }
 
     const overviewActions = getSettingsOverviewActions(settings);
     if (overviewActions.length > 0) {
         statuses.overview = {
-            label: overviewActions.length + ' actions',
+            // 用占位模板而非拼接英文单复数。
+            label: t('{n} to review').replace('{n}', String(overviewActions.length)),
             tone: overviewActions.some(action => action.tone === 'danger') ? 'danger' : 'warning',
         };
     }
@@ -621,13 +624,14 @@ export function getSettingsSectionStatuses(
 export function getSettingsOverviewActions(settings: PluginSettings): SettingsOverviewAction[] {
     const actions: SettingsOverviewAction[] = [];
 
+    // P1-4: \u6982\u89C8\u884C\u52A8\u9879\u6B64\u524D\u786C\u7F16\u7801\u4E2D\u6587,\u82F1\u6587\u73AF\u5883\u65E0\u6CD5\u56DE\u9000\u3002\u6539\u8D70 t()\u3002
     if (settings.allowPluginControl || !settings.confirmExecutions || settings.vaultWriteScope === 'all-vault') {
-        actions.push({ label: '\u6743\u9650\u8FC7\u5BBD', sectionId: 'permissions', tone: 'danger' });
+        actions.push({ label: t('Permissions too broad'), sectionId: 'permissions', tone: 'danger' });
     }
 
     for (const [_providerId, provider] of Object.entries(settings.providers || {})) {
         if (!provider.apiKey?.trim()) {
-            actions.push({ label: provider.label + ' \u7F3A\u5C11 API Key', sectionId: 'connection', tone: 'warning' });
+            actions.push({ label: `${provider.label} ${t('missing API key')}`, sectionId: 'connection', tone: 'warning' });
         }
     }
 
@@ -679,11 +683,14 @@ export function getProviderCardMeta(settings: PluginSettings, providerId: string
         throw new Error(`Unknown provider: ${providerId}`);
     }
 
+    // P1-4: 服务商卡片文案走 i18n(连接卡片是配置主战场,此前成片英文与已译字段标签混排)。
     const protocolLabel = config.type === 'gemini' ? 'Gemini API' : 'OpenAI-compatible';
     const hasApiKey = !!config.apiKey?.trim();
-    const rawEndpoint = config.baseUrl?.trim() || 'Default provider endpoint';
+    const rawEndpoint = config.baseUrl?.trim() || t('Default provider endpoint');
     const endpointSummary = rawEndpoint.replace(/^https?:\/\//, '');
-    const modelSummary = config.model?.trim() ? `Model: ${config.model.trim()}` : 'Model: Not selected';
+    const modelSummary = config.model?.trim()
+        ? `${t('Model')}: ${config.model.trim()}`
+        : `${t('Model')}: ${t('Not selected')}`;
 
     return {
         id: providerId,
@@ -691,10 +698,10 @@ export function getProviderCardMeta(settings: PluginSettings, providerId: string
         protocolLabel,
         endpointSummary,
         modelSummary,
-        statusLabel: hasApiKey ? 'Key configured' : 'No API key',
+        statusLabel: hasApiKey ? t('Key configured') : t('No API key'),
         statusTone: hasApiKey ? 'success' : 'warning',
         isActive: settings.activeProvider === providerId,
-        compactMeta: config.model?.trim() ? `Model: ${config.model.trim()}` : 'Model: Not selected',
+        compactMeta: modelSummary,
         protocolGlyph: config.type === 'gemini' ? '◈' : '◎',
         statusGlyph: hasApiKey ? '●' : '!',
     };
@@ -730,6 +737,12 @@ export class SettingTab extends PluginSettingTab {
     plugin: IPlugin;
     private renderToken = 0;
     private openSectionIds = new Set<SettingsSectionId>();
+    // 分区内「高级」details 的展开态：与 openSectionIds 同理，避免局部重绘后塌回折叠（P1-3）。
+    private openAdvanced = new Set<string>();
+    // 首次打开面板时默认展开哪些分区一次性种子，避免新用户看到一堆全折叠的标题（P1-2）。
+    private didInitExpand = false;
+    // P0-1 局部刷新：display() 只建一次骨架（hero+搜索），accordionHost 内容由 renderAccordion() 单独重绘。
+    private accordionHost: HTMLElement | null = null;
     private searchQuery = '';
     private revealApiKey = false;
     private connectionTestStatus: ConnectionTestStatus = { state: 'idle', message: '' };
@@ -741,6 +754,13 @@ export class SettingTab extends PluginSettingTab {
     // textarea 逐击键写盘代价高：包一层 400ms debounce，末尾触发一次落盘。
     private debouncedPersist: Debouncer<[], Promise<void>> = debounce(
         () => this.persistSettings(),
+        400,
+        false,
+    );
+    // 纯 UI 字段（外观主题/字号/不透明度）落盘：无需重建 provider/guardian/knowledge，走轻量保存 + debounce，
+    // 避免拖动滑块时每格都重建 LLM 客户端（P0-3）。
+    private debouncedPersistLight: Debouncer<[], Promise<void>> = debounce(
+        () => this.persistSettingsLight(),
         400,
         false,
     );
@@ -761,6 +781,15 @@ export class SettingTab extends PluginSettingTab {
 
     private async persistSettings(): Promise<void> {
         await this.plugin.saveSettings();
+    }
+
+    // 仅落盘纯 UI 字段：不触发 provider/guardian/knowledge 重建（见 saveSettingsLight）。
+    private async persistSettingsLight(): Promise<void> {
+        if (typeof this.plugin.saveSettingsLight === 'function') {
+            await this.plugin.saveSettingsLight();
+        } else {
+            await this.plugin.saveSettings();
+        }
     }
 
     private resetConnectionTestStatus(): void {
@@ -815,27 +844,37 @@ export class SettingTab extends PluginSettingTab {
     }
 
     hide(): void {
-        // 面板关闭时立即落盘 debounce 里未触发的最后一次 textarea 编辑，避免丢改。
+        // 面板关闭时立即落盘 debounce 里未触发的最后一次编辑，避免丢改。
         this.debouncedPersist.run();
+        this.debouncedPersistLight.run();
+        this.accordionHost = null;
         super.hide();
     }
 
+    // display() 现在只负责构建「骨架」：hero（标题+搜索）+ 一个持久的 accordion 宿主容器。
+    // 骨架只在面板首次打开时建一次；内容更新一律走 renderAccordion()，因此搜索框与 hero 永不被销毁，
+    // 输入焦点与光标自然保留（P0-1，修复搜索框每敲一字失焦的核心缺陷）。
     display(): void {
-        const token = ++this.renderToken;
         const { containerEl } = this;
         ensureSettingsFallbackStyles();
         containerEl.empty();
 
-        const visibleSections = this.getVisibleSections();
+        // 首次打开：给新用户默认展开 overview + connection，避免面对一堆全折叠标题（P1-2）。
+        if (!this.didInitExpand) {
+            this.didInitExpand = true;
+            this.openSectionIds.add('overview');
+            this.openSectionIds.add('connection');
+        }
 
         const root = containerEl.createDiv({ cls: 'baizer-settings-page' });
         this.renderHeader(root);
-        this.renderMain(root, visibleSections, token);
+        this.accordionHost = root.createDiv({ cls: 'baizer-settings-accordion-host' });
+        this.renderAccordion();
     }
 
     private renderHeader(containerEl: HTMLElement): void {
         const hero = containerEl.createDiv({ cls: 'baizer-settings-hero' });
-        hero.createEl('h2', { text: `${PLUGIN_NAME} Configuration`, cls: 'baizer-settings-title' });
+        hero.createEl('h2', { text: `${PLUGIN_NAME} ${t('Configuration')}`, cls: 'baizer-settings-title' });
         hero.createEl('p', {
             text: t('A cleaner control center for provider setup, runtime behavior, and plugin capabilities.'),
             cls: 'baizer-settings-subtitle',
@@ -851,21 +890,40 @@ export class SettingTab extends PluginSettingTab {
             },
         }) as HTMLInputElement;
         searchInput.value = this.searchQuery;
+        // 只更新查询并局部重绘手风琴；搜索框本身不重建，焦点不丢。
         searchInput.addEventListener('input', () => {
             this.searchQuery = searchInput.value;
-            this.display();
+            this.renderAccordion();
         });
     }
 
-    private renderMain(containerEl: HTMLElement, visibleSections: SettingsSectionId[], token: number): void {
+    // 局部刷新入口：只重绘 accordion 宿主内的内容，不触碰 hero/搜索框。
+    // 所有 section 内的 onChange/click 现在都调用它（而非整页 display()），从而保留焦点与其它分区的展开态。
+    private renderAccordion(): void {
+        const host = this.accordionHost;
+        if (!host) {
+            // 骨架尚未建立（理论上不会发生），退回整页构建。
+            this.display();
+            return;
+        }
+        const token = ++this.renderToken;
+        host.empty();
+
+        const visibleSections = this.getVisibleSections();
         if (!visibleSections.length) {
-            const empty = containerEl.createDiv({ cls: 'baizer-settings-empty-state' });
+            const empty = host.createDiv({ cls: 'baizer-settings-empty-state' });
             empty.createEl('h3', { text: t('No matching settings') });
             empty.createEl('p', { text: t('Try searching by provider, prompt, permissions, or knowledge.') });
             return;
         }
 
-        const accordion = containerEl.createDiv({ cls: 'baizer-settings-accordion' });
+        // 搜索命中时自动展开命中的分区，让用户一步看到目标设置（P1-2）。
+        // 仅在有查询时生效，避免污染用户手动折叠的偏好。
+        if (normalizeSearchQuery(this.searchQuery)) {
+            visibleSections.forEach(id => this.openSectionIds.add(id));
+        }
+
+        const accordion = host.createDiv({ cls: 'baizer-settings-accordion' });
         const statuses = getSettingsSectionStatuses(this.plugin.settings);
         const renderableSections = new Set(getRenderableSettingsSections(visibleSections, this.openSectionIds));
 
@@ -877,7 +935,8 @@ export class SettingTab extends PluginSettingTab {
             card.addEventListener('toggle', () => {
                 if (card.open) {
                     this.openSectionIds.add(sectionId);
-                    if (!renderableSections.has(sectionId)) this.display();
+                    // 首次展开某未渲染分区时，局部重绘即可注入其内容（不再整页重建）。
+                    if (!renderableSections.has(sectionId)) this.renderAccordion();
                     return;
                 }
                 this.openSectionIds.delete(sectionId);
@@ -891,7 +950,9 @@ export class SettingTab extends PluginSettingTab {
             if (status) {
                 metaEl.createSpan({ cls: 'baizer-settings-badge is-' + status.tone, text: status.label });
             }
-            summary.createSpan({ cls: 'baizer-settings-section-chevron', text: '>' });
+            // chevron 纯装饰：改用图标并 aria-hidden，避免读屏朗读「大于号」（P2）。
+            const chevron = summary.createSpan({ cls: 'baizer-settings-section-chevron', attr: { 'aria-hidden': 'true' } });
+            setIcon(chevron, 'chevron-right');
 
             if (renderableSections.has(sectionId)) {
                 const content = card.createDiv({ cls: 'baizer-settings-section-content' });
@@ -938,6 +999,17 @@ export class SettingTab extends PluginSettingTab {
         }
     }
 
+    // P1-3: 让分区内嵌套的「高级」details 记住展开态。局部重绘(renderAccordion)会重建这些节点,
+    // 若不持久化,任何 toggle 都会让高级块塌回折叠——最典型的是切换 Vault Write Scope 后,
+    // 新出现的 Writable Folders 必填项反被折叠隐藏。用 openAdvanced 集合按 key 记忆。
+    private trackAdvancedDetails(details: HTMLDetailsElement, key: string): void {
+        details.open = this.openAdvanced.has(key);
+        details.addEventListener('toggle', () => {
+            if (details.open) this.openAdvanced.add(key);
+            else this.openAdvanced.delete(key);
+        });
+    }
+
     private renderOverviewSection(containerEl: HTMLElement): void {
         const actions = getSettingsOverviewActions(this.plugin.settings);
         if (!actions.length) {
@@ -947,18 +1019,19 @@ export class SettingTab extends PluginSettingTab {
 
         for (const action of actions) {
             const row = containerEl.createDiv({ cls: 'baizer-settings-task' });
-            const copy = row.createSpan();
+            const sectionTitle = getSectionMeta(action.sectionId).title;
+            const copy = row.createSpan({ cls: 'baizer-settings-task-copy' });
+            // 正文只说问题;分区标题交给右侧跳转按钮承载,不再重复渲染两遍(P1-2 引导语义清晰化)。
             copy.createEl('strong', { text: action.label });
-            copy.createEl('br');
-            copy.appendText(getSectionMeta(action.sectionId).title);
+            // 跳转按钮:用真正的 action 样式(而非静态徽章),带明确动作动词与 aria-label,可供性清晰(P2)。
             const button = row.createEl('button', {
-                text: getSectionMeta(action.sectionId).title,
-                cls: 'baizer-settings-badge is-' + action.tone,
-                attr: { type: 'button' },
+                text: `${t('Go to')} ${sectionTitle}`,
+                cls: 'baizer-settings-action is-' + (action.tone === 'danger' ? 'danger' : 'accent'),
+                attr: { type: 'button', 'aria-label': `${t('Go to')} ${sectionTitle}` },
             });
             button.addEventListener('click', () => {
                 this.openSectionIds.add(action.sectionId);
-                this.display();
+                this.renderAccordion();
             });
         }
     }
@@ -984,7 +1057,7 @@ export class SettingTab extends PluginSettingTab {
         const toolbarFooter = toolbar.createDiv({ cls: 'baizer-memory-toolbar-footer' });
         toolbarFooter.createSpan({
             cls: 'baizer-memory-path',
-            text: `Data folder: ${MEMORY_DIR}`,
+            text: `${t('Data folder')}: ${MEMORY_DIR}`,
         });
         const toolbarActions = toolbarFooter.createDiv({ cls: 'baizer-memory-toolbar-actions' });
         this.createActionButton(toolbarActions, this.memoryLoading ? t('Refreshing...') : t('Refresh'), async () => {
@@ -1008,13 +1081,13 @@ export class SettingTab extends PluginSettingTab {
     ): Promise<void> {
         if (typeof this.plugin.modelService?.getMemoryView !== 'function') {
             this.memoryError = t('Memory service is not available.');
-            this.display();
+            this.renderAccordion();
             return;
         }
 
         this.memoryLoading = true;
         this.memoryError = '';
-        this.display();
+        this.renderAccordion();
         try {
             this.memoryView = await this.plugin.modelService.getMemoryView({
                 mode,
@@ -1025,7 +1098,7 @@ export class SettingTab extends PluginSettingTab {
             this.memoryError = error?.message || t('Failed to load memory.');
         } finally {
             this.memoryLoading = false;
-            this.display();
+            this.renderAccordion();
         }
     }
 
@@ -1046,20 +1119,32 @@ export class SettingTab extends PluginSettingTab {
         const row = containerEl.createDiv({ cls: 'baizer-memory-search' });
         const input = row.createEl('input', {
             cls: 'baizer-settings-search',
-            attr: { type: 'search', placeholder: t('Search memories') },
+            // P1-6: 补 aria-label(此前只有 placeholder,与顶部主搜索不一致)。
+            attr: { type: 'search', placeholder: t('Search memories'), 'aria-label': t('Search memories') },
         }) as HTMLInputElement;
         input.value = this.memorySearchQuery;
+        const runSearch = () => {
+            if (!this.memorySearchQuery.trim()) return;
+            this.memoryActiveTab = 'search';
+            void this.refreshMemoryView('search');
+        };
         input.addEventListener('input', () => {
             this.memorySearchQuery = input.value;
         });
-        this.createActionButton(row, t('Search'), async () => {
-            this.memoryActiveTab = 'search';
-            await this.refreshMemoryView('search');
-        }, 'accent', !this.memorySearchQuery.trim());
+        // P1-6: 支持回车提交,不必把手从键盘移到鼠标去点按钮。
+        input.addEventListener('keydown', (e: KeyboardEvent) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                runSearch();
+            }
+        });
+        // 按钮常开(空查询在 runSearch 内部拦截),避免输入后禁用态因不重渲染而无法更新。
+        this.createActionButton(row, t('Search'), async () => runSearch(), 'accent');
     }
 
     private renderMemoryTabs(containerEl: HTMLElement): void {
-        const tabs = containerEl.createDiv({ cls: 'baizer-memory-tabs' });
+        // P1-6: 语义化为 tablist / tab,选中态用 aria-selected 表达(不再只靠颜色)。
+        const tabs = containerEl.createDiv({ cls: 'baizer-memory-tabs', attr: { role: 'tablist' } });
         const entries: Array<[typeof this.memoryActiveTab, string]> = [
             ['overview', t('Overview')],
             ['observations', t('Observations')],
@@ -1068,10 +1153,15 @@ export class SettingTab extends PluginSettingTab {
             ['search', t('Search Results')],
         ];
         for (const [id, label] of entries) {
+            const selected = this.memoryActiveTab === id;
             const button = tabs.createEl('button', {
                 text: label,
-                cls: `baizer-memory-tab${this.memoryActiveTab === id ? ' is-active' : ''}`,
-                attr: { type: 'button' },
+                cls: `baizer-memory-tab${selected ? ' is-active' : ''}`,
+                attr: {
+                    type: 'button',
+                    role: 'tab',
+                    'aria-selected': selected ? 'true' : 'false',
+                },
             });
             button.addEventListener('click', () => {
                 this.memoryActiveTab = id;
@@ -1082,11 +1172,17 @@ export class SettingTab extends PluginSettingTab {
 
     private renderMemoryList(containerEl: HTMLElement): void {
         if (this.memoryError) {
-            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-warning', text: this.memoryError });
+            // P1-5: 错误也是异步结果,用 role=alert 让读屏立即播报。
+            containerEl.createDiv({
+                cls: 'baizer-settings-inline-note is-warning',
+                text: this.memoryError,
+                attr: { role: 'alert', 'aria-live': 'assertive' },
+            });
             return;
         }
 
-        const list = containerEl.createDiv({ cls: 'baizer-memory-list' });
+        // P1-5: 记忆加载/结果是异步变化,标记为 status 区,读屏可感知「加载中/无记忆」。
+        const list = containerEl.createDiv({ cls: 'baizer-memory-list', attr: { role: 'status', 'aria-live': 'polite' } });
         const records = this.getVisibleMemoryRecords();
         if (records.length === 0) {
             list.createDiv({
@@ -1204,7 +1300,7 @@ export class SettingTab extends PluginSettingTab {
                 this.openSectionIds.add('connection');
                 await this.persistSettings();
                 this.revealApiKey = false;
-                this.display();
+                this.renderAccordion();
             }).open();
         }, 'accent');
 
@@ -1238,7 +1334,7 @@ export class SettingTab extends PluginSettingTab {
                 await this.plugin.modelService.switchProvider(providerId, () => this.persistSettings());
                 this.revealApiKey = false;
                 this.openSectionIds.add('connection');
-                this.display();
+                this.renderAccordion();
             });
 
             if (meta.isActive) {
@@ -1264,7 +1360,7 @@ export class SettingTab extends PluginSettingTab {
                 activeConfig.label = input.value.trim() || activeConfig.label;
                 this.openSectionIds.add('connection');
                 await this.persistSettings();
-                this.display();
+                this.renderAccordion();
             });
         });
 
@@ -1283,7 +1379,7 @@ export class SettingTab extends PluginSettingTab {
                 this.openSectionIds.add('connection');
                 await this.plugin.modelService.updateSettings(this.plugin.settings);
                 await this.persistSettings();
-                this.display();
+                this.renderAccordion();
             });
         });
 
@@ -1304,7 +1400,7 @@ export class SettingTab extends PluginSettingTab {
                     this.openSectionIds.add('connection');
                     await this.plugin.modelService.updateSettings(this.plugin.settings);
                     await this.persistSettings();
-                    this.display();
+                    this.renderAccordion();
                 });
             });
         }
@@ -1327,7 +1423,7 @@ export class SettingTab extends PluginSettingTab {
                 this.resetConnectionTestStatus();
                 this.openSectionIds.add('connection');
                 await this.plugin.modelService.switchModel(value, () => this.persistSettings());
-                this.display();
+                this.renderAccordion();
             });
         });
 
@@ -1377,15 +1473,24 @@ export class SettingTab extends PluginSettingTab {
             this.createActionButton(secretActions, this.revealApiKey ? t('Hide') : t('Reveal'), async () => {
                 this.revealApiKey = !this.revealApiKey;
                 this.openSectionIds.add('connection');
-                this.display();
+                this.renderAccordion();
             });
-            this.createActionButton(secretActions, t('Clear'), async () => {
-                activeConfig.apiKey = '';
-                this.revealApiKey = false;
-                this.resetConnectionTestStatus();
-                this.openSectionIds.add('connection');
-                await this.persistSettings();
-                this.display();
+            this.createActionButton(secretActions, t('Clear'), () => {
+                if (!activeConfig.apiKey.trim()) return;
+                // P1-1: 清空 API Key 不可逆（需重去服务商后台复制），与删除 Provider 等操作一致做二次确认。
+                new MemoryConfirmModal(
+                    this.app,
+                    t('Clear API Key'),
+                    t('Clear the API key for this provider? You will need to paste it again to reconnect.'),
+                    async () => {
+                        activeConfig.apiKey = '';
+                        this.revealApiKey = false;
+                        this.resetConnectionTestStatus();
+                        this.openSectionIds.add('connection');
+                        await this.persistSettings();
+                        this.renderAccordion();
+                    },
+                ).open();
             }, 'danger');
         });
 
@@ -1396,14 +1501,14 @@ export class SettingTab extends PluginSettingTab {
                 if (!activeConfig.apiKey.trim()) {
                     this.connectionTestStatus = { state: 'error', message: `${label}${t(': no API key configured.')}` };
                     this.openSectionIds.add('connection');
-                    this.display();
+                    this.renderAccordion();
                     return;
                 }
 
                 try {
                     this.connectionTestStatus = { state: 'testing', message: `${t('Testing connection to')} ${label}...` };
                     this.openSectionIds.add('connection');
-                    this.display();
+                    this.renderAccordion();
                     await this.plugin.modelService.updateSettings(this.plugin.settings);
                     const success = await this.plugin.modelService.checkAvailability();
                     this.connectionTestStatus = success
@@ -1414,7 +1519,7 @@ export class SettingTab extends PluginSettingTab {
                 }
 
                 this.openSectionIds.add('connection');
-                this.display();
+                this.renderAccordion();
             }, 'primary', this.connectionTestStatus.state === 'testing');
 
             const deletion = getProviderDeletionState(settings);
@@ -1445,7 +1550,7 @@ export class SettingTab extends PluginSettingTab {
                         this.openSectionIds.add('connection');
                         await this.persistSettings();
                         new Notice(t('Provider deleted'));
-                        this.display();
+                        this.renderAccordion();
                     },
                 ).open();
             }, 'danger', !deletion.canDelete);
@@ -1453,7 +1558,12 @@ export class SettingTab extends PluginSettingTab {
 
             const status = getConnectionTestStatusPresentation(this.connectionTestStatus);
             if (status) {
-                valueEl.createDiv({ cls: `baizer-settings-inline-note is-${status.tone}`, text: status.label });
+                // P1-5: 连接测试「测试中→成功/失败」是异步结果,加 aria-live 让读屏播报;失败用 assertive。
+                valueEl.createDiv({
+                    cls: `baizer-settings-inline-note is-${status.tone}`,
+                    text: status.label,
+                    attr: { role: 'status', 'aria-live': status.tone === 'danger' ? 'assertive' : 'polite' },
+                });
             }
             valueEl.createDiv({ cls: 'baizer-settings-inline-hint', text: t(getProviderDeletionState(settings).helperText) });
         });
@@ -1474,7 +1584,7 @@ export class SettingTab extends PluginSettingTab {
         const config = this.getActiveConfig();
         const currentModel = config?.model || '';
 
-        select.innerHTML = '';
+        select.empty();
         select.createEl('option', { value: '__loading__', text: t('Loading models...') });
         select.value = '__loading__';
         select.disabled = true;
@@ -1483,7 +1593,7 @@ export class SettingTab extends PluginSettingTab {
             const models = await this.plugin.modelService.getAvailableModels(forceRefresh);
             if (token !== this.renderToken) return;
 
-            select.innerHTML = '';
+            select.empty();
             const options: ModelOption[] = models.length > 0
                 ? models
                 : [{ value: currentModel, label: `${currentModel} (${t('Current')})` }];
@@ -1494,12 +1604,21 @@ export class SettingTab extends PluginSettingTab {
                 select.createEl('option', { value: currentModel, text: `${currentModel} (${t('Current')})` });
             }
 
-            select.value = currentModel || options[0]?.value || '';
+            const resolved = currentModel || options[0]?.value || '';
+            select.value = resolved;
             select.disabled = false;
+
+            // P0-2: 新增/自定义 provider 的 model 为空时，下拉「视觉上」显示了第一个模型，
+            // 但 config.model 仍是空——赋 select.value 不触发 change，也不落盘。
+            // 这里主动把自动选中的模型写回 config 并持久化，避免用户看到「已选模型」的假象、
+            // 而 Run test / 对话却拿空模型发请求。仅当真实拿到了模型列表(非仅回退当前值)时写回。
+            if (!currentModel && resolved && resolved !== '__failed__' && resolved !== '__loading__' && models.length > 0) {
+                await this.plugin.modelService.switchModel(resolved, () => this.persistSettings());
+            }
         } catch {
             if (token !== this.renderToken) return;
 
-            select.innerHTML = '';
+            select.empty();
             if (currentModel) {
                 select.createEl('option', { value: currentModel, text: `${currentModel} (${t('Current')})` });
                 select.value = currentModel;
@@ -1520,9 +1639,10 @@ export class SettingTab extends PluginSettingTab {
                 .setLimits(10000, 1000000, 10000)
                 .setValue(this.plugin.settings.contextWindow)
                 .setDynamicTooltip()
-                .onChange(async (value: number) => {
+                .onChange((value: number) => {
                     this.plugin.settings.contextWindow = value;
-                    await this.persistSettings();
+                    // 滑块拖动逐格触发：debounce 落盘，避免一次拖动几十次写盘 + 重建 provider（P0-3）。
+                    this.debouncedPersist();
                 }));
 
         new Setting(containerEl)
@@ -1549,7 +1669,7 @@ export class SettingTab extends PluginSettingTab {
                 .onChange(async (value: boolean) => {
                     this.plugin.settings.customizePrompt = value;
                     await this.persistSettings();
-                    this.display();
+                    this.renderAccordion();
                 }));
 
         if (this.plugin.settings.customizePrompt) {
@@ -1564,10 +1684,18 @@ export class SettingTab extends PluginSettingTab {
                     }));
 
             const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
-            this.createActionButton(actions, t('Restore Default Prompt'), async () => {
-                this.plugin.settings.systemPrompt = DEFAULT_SETTINGS.systemPrompt;
-                await this.persistSettings();
-                this.display();
+            this.createActionButton(actions, t('Restore Default Prompt'), () => {
+                // P1-1: 恢复默认会覆盖用户自定义的系统提示词且不可撤销，做二次确认。
+                new MemoryConfirmModal(
+                    this.app,
+                    t('Restore Default Prompt'),
+                    t('Replace your custom system prompt with the default? Your current prompt will be lost.'),
+                    async () => {
+                        this.plugin.settings.systemPrompt = DEFAULT_SETTINGS.systemPrompt;
+                        await this.persistSettings();
+                        this.renderAccordion();
+                    },
+                ).open();
             });
         }
     }
@@ -1581,7 +1709,7 @@ export class SettingTab extends PluginSettingTab {
                 .onChange(async (value: boolean) => {
                     this.plugin.settings.enableGuardian = value;
                     await this.persistSettings();
-                    this.display();
+                    this.renderAccordion();
                 }));
 
         if (!this.plugin.settings.enableGuardian) return;
@@ -1613,9 +1741,9 @@ export class SettingTab extends PluginSettingTab {
                 .setLimits(0, 100, 25)
                 .setValue(this.plugin.settings.guardianSensitivity)
                 .setDynamicTooltip()
-                .onChange(async (value: number) => {
+                .onChange((value: number) => {
                     this.plugin.settings.guardianSensitivity = value;
-                    await this.persistSettings();
+                    this.debouncedPersist();
                 }));
 
         new Setting(containerEl)
@@ -1632,8 +1760,8 @@ export class SettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('快补无果或平庸时自动深挖笔记')
-            .setDesc('当 AI 没有即时建议、或只给出平庸建议、而你停留在原地时，自动读取相关笔记与个人记忆尝试更深入的补全。较慢、消耗更多 token，默认开启。')
+            .setName(t('Auto deep-dive when fast completion is empty or weak'))
+            .setDesc(t('When AI has no immediate suggestion or only a mediocre one while you stay put, it reads related notes and personal memory to attempt a deeper completion. Slower, uses more tokens, on by default.'))
             .addToggle(toggle => toggle
                 .setValue(!!this.plugin.settings.guardianAutoDeepEscalation)
                 .onChange(async (value: boolean) => {
@@ -1671,6 +1799,7 @@ export class SettingTab extends PluginSettingTab {
 
         const advanced = containerEl.createEl('details', { cls: 'baizer-settings-advanced' });
         advanced.createEl('summary', { text: t('Advanced permission switches') });
+        this.trackAdvancedDetails(advanced, 'permissions-advanced');
         const advancedBody = advanced.createDiv({ cls: 'baizer-settings-advanced-body' });
 
         new Setting(advancedBody)
@@ -1685,7 +1814,7 @@ export class SettingTab extends PluginSettingTab {
                 .onChange(async (value: VaultWriteScope) => {
                     this.plugin.settings.vaultWriteScope = value;
                     await this.persistSettings();
-                    this.display();
+                    this.renderAccordion();
                 }));
 
         if (this.plugin.settings.vaultWriteScope === 'configured-folders') {
@@ -1713,7 +1842,7 @@ export class SettingTab extends PluginSettingTab {
                 .onChange(async (value: boolean) => {
                     this.plugin.settings.allowFileCreation = value;
                     await this.persistSettings();
-                    this.display();
+                    this.renderAccordion();
                 }));
 
         new Setting(advancedBody)
@@ -1724,7 +1853,7 @@ export class SettingTab extends PluginSettingTab {
                 .onChange(async (value: boolean) => {
                     this.plugin.settings.allowFileModification = value;
                     await this.persistSettings();
-                    this.display();
+                    this.renderAccordion();
                 }));
 
         new Setting(advancedBody)
@@ -1744,7 +1873,7 @@ export class SettingTab extends PluginSettingTab {
                                 this.plugin.settings.allowPluginControl = true;
                                 new Notice(t('Permission granted: AI can now control your plugins.'));
                                 await this.persistSettings();
-                                this.display();
+                                this.renderAccordion();
                             },
                         ).open();
                         // 取消或未确认前，UI 回退到原值（关闭）。
@@ -1753,7 +1882,7 @@ export class SettingTab extends PluginSettingTab {
                     }
                     this.plugin.settings.allowPluginControl = false;
                     await this.persistSettings();
-                    this.display();
+                    this.renderAccordion();
                 }));
 
         new Setting(advancedBody)
@@ -1771,7 +1900,7 @@ export class SettingTab extends PluginSettingTab {
                             async () => {
                                 this.plugin.settings.confirmExecutions = false;
                                 await this.persistSettings();
-                                this.display();
+                                this.renderAccordion();
                             },
                         ).open();
                         // 取消或未确认前，UI 回退到原值（开启）。
@@ -1780,7 +1909,7 @@ export class SettingTab extends PluginSettingTab {
                     }
                     this.plugin.settings.confirmExecutions = true;
                     await this.persistSettings();
-                    this.display();
+                    this.renderAccordion();
                 }));
     }
 
@@ -1842,8 +1971,21 @@ export class SettingTab extends PluginSettingTab {
         button.createEl('br');
         button.createSpan({ text: desc });
         button.addEventListener('click', async () => {
+            // P1-1: 提权预设(open=开插件控制+全库写; automation=关执行确认)与单独开关保持一致的二次确认,
+            // 避免一键预设静默绕过 allowPluginControl / confirmExecutions 的破坏性警告。
+            const escalates = id === 'open' || id === 'automation';
+            if (escalates) {
+                const message = id === 'open'
+                    ? t('Open access grants full-vault writes and plugin control. AI can trigger destructive plugin actions on your behalf. Continue?')
+                    : t('Automation turns off per-action confirmation. AI will write files without asking each time. Continue?');
+                new MemoryConfirmModal(this.app, title, message, async () => {
+                    await this.applyPermissionPreset(id);
+                    this.renderAccordion();
+                }).open();
+                return;
+            }
             await this.applyPermissionPreset(id);
-            this.display();
+            this.renderAccordion();
         });
     }
 
@@ -1902,6 +2044,17 @@ export class SettingTab extends PluginSettingTab {
             .createEl('h4', { text: t('Workbench'), cls: 'baizer-settings-panel-title' });
         const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
 
+        // 底部预览行的值 span 引用：外观字段变更时只更新这一行文本，
+        // 不再整页/整区重绘（P0-3：拖动滑块每格重建会中断拖拽手势）。
+        const sample = body.createDiv({ cls: 'baizer-settings-sample-line' });
+        const updatePreview = () => {
+            previewValue.setText(
+                this.plugin.settings.terminalTheme + ' / '
+                + this.plugin.settings.terminalFontSize + 'px / '
+                + Math.round(this.plugin.settings.terminalOpacity * 100) + '%'
+            );
+        };
+
         new Setting(body)
             .setName(t('Theme Style'))
             .setDesc(t('Adjust the terminal look and feel.'))
@@ -1910,10 +2063,11 @@ export class SettingTab extends PluginSettingTab {
                 .addOption('cyberpunk', t('Cyberpunk Neon'))
                 .addOption('obsidian-native', t('Obsidian Native'))
                 .setValue(this.plugin.settings.terminalTheme)
-                .onChange(async (value: 'hacker-green' | 'cyberpunk' | 'obsidian-native') => {
+                .onChange((value: 'hacker-green' | 'cyberpunk' | 'obsidian-native') => {
                     this.plugin.settings.terminalTheme = value;
-                    await this.persistSettings();
-                    this.display();
+                    updatePreview();
+                    // 纯 UI 字段：debounce 轻量落盘，不重建 provider/guardian/knowledge。
+                    this.debouncedPersistLight();
                 }));
 
         new Setting(body)
@@ -1923,10 +2077,10 @@ export class SettingTab extends PluginSettingTab {
                 .setLimits(12, 24, 1)
                 .setValue(this.plugin.settings.terminalFontSize)
                 .setDynamicTooltip()
-                .onChange(async (value: number) => {
+                .onChange((value: number) => {
                     this.plugin.settings.terminalFontSize = value;
-                    await this.persistSettings();
-                    this.display();
+                    updatePreview();
+                    this.debouncedPersistLight();
                 }));
 
         new Setting(body)
@@ -1936,15 +2090,15 @@ export class SettingTab extends PluginSettingTab {
                 .setLimits(0.5, 1.0, 0.05)
                 .setValue(this.plugin.settings.terminalOpacity)
                 .setDynamicTooltip()
-                .onChange(async (value: number) => {
+                .onChange((value: number) => {
                     this.plugin.settings.terminalOpacity = value;
-                    await this.persistSettings();
-                    this.display();
+                    updatePreview();
+                    this.debouncedPersistLight();
                 }));
 
-        const sample = body.createDiv({ cls: 'baizer-settings-sample-line' });
         sample.createEl('strong', { text: t('Preview') });
-        sample.createSpan({ text: this.plugin.settings.terminalTheme + ' / ' + this.plugin.settings.terminalFontSize + 'px / ' + Math.round(this.plugin.settings.terminalOpacity * 100) + '%' });
+        const previewValue = sample.createSpan();
+        updatePreview();
     }
 
     private renderCaptureSection(containerEl: HTMLElement): void {
@@ -2030,9 +2184,9 @@ export class SettingTab extends PluginSettingTab {
                 .setLimits(1, 200, 1)
                 .setValue(this.plugin.settings.knowledgeMaxCompileBatch)
                 .setDynamicTooltip()
-                .onChange(async (value: number) => {
+                .onChange((value: number) => {
                     this.plugin.settings.knowledgeMaxCompileBatch = value;
-                    await this.persistSettings();
+                    this.debouncedPersist();
                 }));
 
         const ontologyStatusEl = containerEl.createDiv({
@@ -2084,6 +2238,7 @@ export class SettingTab extends PluginSettingTab {
 
         const advanced = containerEl.createEl('details', { cls: 'baizer-settings-advanced' });
         advanced.createEl('summary', { text: t('Ontology advanced settings') });
+        this.trackAdvancedDetails(advanced, 'ontology-advanced');
         const advancedBody = advanced.createDiv({ cls: 'baizer-settings-advanced-body' });
 
         new Setting(advancedBody)
@@ -2156,7 +2311,7 @@ export class SettingTab extends PluginSettingTab {
     private async refreshOntologyStatus(statusEl: HTMLElement): Promise<void> {
         const runtime = (this.plugin as any).knowledgeRuntime;
         if (!runtime?.getOntologyStatus) {
-            statusEl.textContent = 'Ontology status: Knowledge runtime is not available.';
+            statusEl.textContent = t('Ontology status: Knowledge runtime is not available.');
             return;
         }
 
@@ -2168,15 +2323,19 @@ export class SettingTab extends PluginSettingTab {
             const counts = runtime.getStatusService
                 ? await runtime.getStatusService().getGlobalCounts()
                 : null;
+            // 局部重绘会替换掉旧的 statusEl；异步回来时若该节点已脱离文档,放弃写入,避免向已卸载节点做无效写(P0-2 一致性)。
+            if (!statusEl.isConnected) return;
+            // P1-4: 状态串走 i18n,枚举值仍保留原值(供进阶用户识别),但前缀/字段名中文化。
             const parts = [
-                `Ontology status: ${status.kind}`,
-                `path: ${status.path}`,
+                `${t('Ontology')}: ${status.kind}`,
             ];
-            if (readiness) parts.push(`discovery: ${readiness.kind}`);
-            if (counts) parts.push(`stale notes: ${counts.stale}`);
-            statusEl.textContent = parts.join(' | ');
+            if (readiness) parts.push(`${t('discovery')}: ${readiness.kind}`);
+            if (counts) parts.push(`${t('stale notes')}: ${counts.stale}`);
+            statusEl.textContent = parts.join('  ·  ');
+            statusEl.title = `${t('path')}: ${status.path}`;
         } catch (e: any) {
-            statusEl.textContent = `Ontology status unavailable: ${e.message}`;
+            if (!statusEl.isConnected) return;
+            statusEl.textContent = `${t('Ontology status unavailable')}: ${e.message}`;
         }
     }
 
@@ -2194,7 +2353,7 @@ export class SettingTab extends PluginSettingTab {
                 .onChange(async (value: boolean) => {
                     this.plugin.settings.autoGeneratePluginSkills = value;
                     await this.persistSettings();
-                    this.display();
+                    this.renderAccordion();
                 }));
 
         new Setting(body)

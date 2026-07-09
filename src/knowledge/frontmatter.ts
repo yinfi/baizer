@@ -17,6 +17,16 @@ export interface KnowledgeFrontmatter {
   knowledge_pending_reason?: KnowledgePendingReason;
 }
 
+/**
+ * 判断路径是否应被知识系统忽略（不扫描、不入队、不改写 frontmatter）。
+ * 目前排除修复脚本 repair-clipping-frontmatter.mjs 落盘前生成的备份目录
+ * （_repair_backup_<时间戳>/）——这些是「保留乱码原样」的坏文件备份，
+ * 若被当成待编译笔记去写 frontmatter，既会污染备份、又会因 YAML 非法反复告警。
+ */
+export function isKnowledgeIgnoredPath(path: string): boolean {
+  return path.split('/').some(seg => seg.startsWith('_repair_backup_'));
+}
+
 /** 生成 ksrc_xxx 格式的 source ID */
 export function generateSourceId(): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -288,6 +298,9 @@ export function getUnregisteredFiles(
   for (const file of files) {
     // 排除 wiki 目录
     if (file.path.startsWith(wikiFolder + '/')) continue;
+
+    // 排除修复脚本的备份目录（坏文件原样保留，不应扫描/改写）
+    if (isKnowledgeIgnoredPath(file.path)) continue;
 
     // 必须在监听目录内
     const inWatched = watchedFolders.some(f => {

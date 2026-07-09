@@ -270,4 +270,6 @@ export interface IPlugin extends Plugin {
     settings: PluginSettings;
     modelService: any;
     saveSettings(): Promise<void>;
+    // 轻量落盘：仅写盘，不重建 provider/guardian/knowledge（纯 UI 字段用）。
+    saveSettingsLight?(): Promise<void>;
 }
