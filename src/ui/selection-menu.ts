@@ -7,19 +7,11 @@ import { ChatMessage } from './types';
 import { SuggestList } from './components/suggest-list';
 import { SuggestionItem, SuggestionType } from './controllers/input-controller';
 import { SELECTION_ACTIONS, getAction, buildActionPrompt } from './selection-ai/action-registry';
-import { runRewrite, RewriteRequest } from './selection-ai/rewrite-runner';
 import { SelectionContextBuilder } from './selection-ai/selection-context-builder';
 import { FloatingPanel } from './selection-ai/floating-panel';
 import { t } from '../i18n/zh';
-import { showInlineDiff, clearInlineDiff, InlineDiffState } from './selection-ai/inline-diff';
 
-// 模块级改写状态:inlineDiffExtension 的回调是全局单例、拿不到具体 view,
-// 故在此维护当前 view / modelService / request / controller,供导出的三个回调桥接函数使用。
-let rewriteView: EditorView | null = null;
-let activeModelService: ModelService | null = null;
-let currentRewriteRequest: RewriteRequest | null = null;
-let currentRewriteController: AbortController | null = null;
-// 只读浮窗单例:同一时刻只允许一个「解释」浮窗,开新窗前销毁旧窗,避免多开堆叠。
+// 浮窗单例:同一时刻只允许一个选区 AI 浮窗,开新窗前销毁旧窗,避免多开堆叠。
 let activeExplainPanel: FloatingPanel | null = null;
 
 type AiMenuMode = 'selection' | 'trigger';
@@ -124,14 +116,12 @@ export function selectionMenuExtension(
     });
     return [
         selectionMenuField,
-        // Tooltip 定位:默认挂在编辑器 DOM 内、以整窗判定可用空间 —— 编辑器被 Workbench 侧栏挤窄时,
-        // 面板会向右溢出编辑器并被靠后的侧栏兄弟节点盖住(跨 DOM 子树,z-index 压不住)。
-        // 三个开关对症:提到 body 顶层脱离兄弟遮挡 + fixed 视口定位不被 overflow 裁剪 +
-        // tooltipSpace 限定为编辑器自身矩形,令 CM 按编辑器宽度自动左移避让,不再伸进侧栏区域。
+        // Tooltip 定位:挂 body 顶层脱离兄弟遮挡 + fixed 视口定位不被 overflow 裁剪。
+        // 不再把 tooltipSpace 限死为编辑器矩形——那会让选区靠右时工具条被强制左移/下移避让,
+        // 脱离选区(实测漂到编辑器右侧空白)。用整个视口作可用空间,令工具条正常贴 pos(选区末尾)。
         tooltips({
             parent: document.body,
             position: 'fixed',
-            tooltipSpace: (view) => view.dom.getBoundingClientRect(),
         }),
         EditorView.updateListener.of((update) => {
             pluginContextMap.set(update.view, { app, modelService, contextBuilder });
@@ -224,29 +214,24 @@ async function onToolClick(
     const selection = view.state.doc.sliceString(state.from, state.to);
     if (!selection.trim()) { new Notice(t('Please select some text first.')); return; }
 
-    if (action.kind === 'rewrite') {
-        rewriteView = view;
-        activeModelService = context.modelService;
-        currentRewriteController?.abort();
-        currentRewriteRequest = {
-            actionId,
-            selection,
-            from: state.from,
-            to: state.to,
-            contextBuilder: context.contextBuilder,
-            actionContext: action.context,
-        };
-        currentRewriteController = runRewrite(view, context.modelService, currentRewriteRequest);
-    } else {
-        void openExplainPanel(view, context, state, action, selection);
-    }
+    // 所有动作(改写/解释)统一走浮窗流式,不再区分 inline diff。
+    openPanel(view, context, state, action, selection);
 
-    // 动作已发起,隐藏工具条:改写类后续 UI 由内联 diff 承载,只读类由浮窗承载。
+    // 动作已发起,隐藏工具条(后续 UI 由浮窗承载)。
     view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
 }
 
-/** 弹可拖拽缩放浮窗,用 ChatController 驱动流式;首轮 prompt 预装配上下文。 */
-async function openExplainPanel(
+/** 把选区文本截断成一行意图文案(超长省略),用于浮窗顶部展示。 */
+function truncateForIntent(text: string, max = 40): string {
+    const oneLine = text.replace(/\s+/g, ' ').trim();
+    return oneLine.length > max ? oneLine.slice(0, max) + '…' : oneLine;
+}
+
+/**
+ * 弹可拖拽缩放浮窗,用 ChatController 驱动流式(thinking→结果)。
+ * 显示层:顶部意图=「动作名:选中文字」;真实 prompt(动作模板+装配上下文)只发给模型、不显示。
+ */
+function openPanel(
     view: EditorView,
     context: PluginContext,
     state: Extract<SelectionMenuState, { type: 'toolbar' }>,
@@ -258,29 +243,33 @@ async function openExplainPanel(
 
     const controller = new ChatController({ app: context.app, api: context.modelService });
     const coords = view.coordsAtPos(state.to);
+    const intent = `${t(action.label)}:${truncateForIntent(selection)}`;
     const panel = new FloatingPanel({
         app: context.app,
-        title: t(action.label),
+        intent,
         anchor: { x: coords?.left ?? 200, y: coords?.bottom ?? 200 },
         onClose: () => { controller.cleanup(); if (activeExplainPanel === panel) activeExplainPanel = null; },
-        onSubmit: (text) => { void controller.processCommand(text, [], selection, 'selection-menu'); },
-        onReplace: () => {
-            const lastAi = [...controller.getMessages()].reverse().find(m => m.role === 'ai');
-            if (!lastAi?.content) { new Notice(t('No AI response to apply yet.')); return; }
-            // 解释流式期间用户可能已编辑文档,原偏移会错位。用选区快照重定位,
-            // 找不到则中止替换(绝不盲写),提示用户手动复制。
+        // 追问:清屏后把用户输入当普通对话发(带选区作上下文)。
+        onSubmit: (text) => { panel.beginTurn(); void controller.processCommand(text, [], selection, 'selection-menu'); },
+        onReplace: (resultText) => {
+            // 流式期间用户可能已编辑文档,原偏移会错位。用选区快照重定位,
+            // 找不到则中止替换(绝不盲写),提示手动复制。
             const target = relocateRange(view.state, state.from, state.to, selection);
             if (!target) { new Notice(t('Selection changed; cannot replace. Please copy manually.')); return; }
-            view.dispatch({ changes: { from: target.from, to: target.to, insert: lastAi.content.trim() } });
+            view.dispatch({ changes: { from: target.from, to: target.to, insert: resultText } });
             panel.destroy();
         },
     });
-    (controller as any).onMessageAdded = () => panel.renderMessages(controller.getMessages());
+    // ChatController 的流事件转发进浮窗渲染(thinking 折叠 + 流式正文)。
+    (controller as any).onStreamEvent = (event: any) => panel.handleStreamEvent(event);
     activeExplainPanel = panel;
 
+    // 首轮:动作模板 + 装配上下文 = 真实 prompt(发模型);displayText=intent(不进消息流,仅占位)。
     const basePrompt = buildActionPrompt(action.id, selection);
-    const prompt = await context.contextBuilder.build(action.context, selection, basePrompt);
-    void controller.processCommand(prompt, [], selection, 'selection-menu');
+    void (async () => {
+        const prompt = await context.contextBuilder.build(action.context, selection, basePrompt);
+        void controller.processCommand(prompt, [], selection, 'selection-menu', intent);
+    })();
 }
 
 function createChatPanel(
@@ -299,25 +288,9 @@ function createChatPanel(
         attr: { type: 'button', title: t('Close'), 'aria-label': t('Close') },
     });
     closeBtn.onclick = () => {
-        cleanupPendingRewrite(view);
         state.controller.cleanup();
         view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
     };
-
-    const actionBar = container.createDiv({ cls: 'baizer-action-bar' });
-    for (const action of SELECTION_ACTIONS) {
-        const btn = actionBar.createEl('button', {
-            cls: 'baizer-action-btn',
-            attr: { type: 'button', title: t(action.label), 'aria-label': t(action.label) },
-        });
-        setIcon(btn, action.icon);
-        btn.createSpan({ cls: 'baizer-action-label', text: t(action.label) });
-        btn.onclick = (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            void runSelectionAction(view, state, context, action.id);
-        };
-    }
 
     const messageList = container.createDiv({ cls: 'guardian-message-list' });
     const renderMessages = () => {
@@ -396,7 +369,6 @@ function createChatPanel(
         if (suggestList.handleKeyDown(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
-            cleanupPendingRewrite(view);
             state.controller.cleanup();
             view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
             return;
@@ -422,7 +394,7 @@ function createChatPanel(
 
     const actions = container.createDiv({ cls: 'guardian-chat-actions' });
     const copyBtn = actions.createEl('button', {
-        text: state.mode === 'selection' ? t('Copy') : t('Copy line'),
+        text: t('Copy line'),
         attr: { type: 'button' },
     });
     copyBtn.onclick = () => {
@@ -431,31 +403,11 @@ function createChatPanel(
     };
 
     const applyBtn = actions.createEl('button', {
-        text: state.mode === 'selection' ? t('Replace') : t('Insert'),
+        text: t('Insert'),
         attr: { type: 'button' },
     });
     applyBtn.onclick = () => {
-        if (state.mode === 'selection') {
-            const selectionText = view.state.doc.sliceString(state.from, state.to);
-            const lastAi = [...state.controller.getMessages()].reverse().find(m => m.role === 'ai');
-            if (!lastAi?.content) { new Notice(t('No AI response to apply yet.')); return; }
-            // 记录模块级改写上下文,供内联 diff 的 accept/reject 回调桥接使用。
-            // request 置空:这是「应用最后一条 AI 回答」,无对应改写动作可 retry(retry 将是 no-op)。
-            rewriteView = view;
-            activeModelService = context.modelService;
-            currentRewriteController?.abort();
-            currentRewriteController = null;
-            currentRewriteRequest = null;
-            showInlineDiff(view, {
-                from: state.from,
-                to: state.to,
-                oldText: selectionText,
-                newText: lastAi.content.trim(),
-                status: 'preview',
-            });
-        } else {
-            void applyTriggerInsertion(view, state, context);
-        }
+        void applyTriggerInsertion(view, state, context);
     };
 
     setTimeout(() => textarea.focus(), 50);
@@ -491,93 +443,6 @@ function buildContextItem(mode: AiMenuMode, targetText: string) {
             ? `Selected Text:\n${targetText}`
             : `Line Context:\n${targetText}`,
     };
-}
-
-/**
- * 动作条按钮分流:改写类走内联 diff,只读类走对话框流式。
- * 对话框不因执行动作而关闭。
- */
-async function runSelectionAction(
-    view: EditorView,
-    state: Extract<SelectionMenuState, { type: 'chat' }>,
-    context: { app: App; modelService: ModelService },
-    actionId: string,
-) {
-    const action = getAction(actionId);
-    if (!action) return;
-    const targetText = getTargetText(view, state);
-    if (!targetText.trim()) { new Notice(t('Please select some text first.')); return; }
-
-    if (action.kind === 'readonly') {
-        // 只读类:走对话框既有流式通道(带 web_search + query_knowledge 工具)
-        await state.controller.processCommand(
-            buildActionPrompt(actionId, targetText),
-            [buildContextItem(state.mode, targetText)],
-            targetText,
-            'selection-menu',
-        );
-        return;
-    }
-
-    // 改写类:generate() 一次性改写 → 内联 diff(不经对话框流式)
-    runRewriteAction(view, context, actionId, state.from, state.to, targetText);
-}
-
-/**
- * 发起一次改写:记录模块级改写上下文,调 runRewrite(它自己推 loading/preview/error 三态),
- * 存住返回的 controller 供 retry 使用。
- */
-function runRewriteAction(
-    view: EditorView,
-    context: { app: App; modelService: ModelService },
-    actionId: string,
-    from: number,
-    to: number,
-    selectionText: string,
-) {
-    rewriteView = view;
-    activeModelService = context.modelService;
-    currentRewriteController?.abort(); // 中止上一次未决改写
-    currentRewriteRequest = { actionId, selection: selectionText, from, to };
-    currentRewriteController = runRewrite(view, context.modelService, currentRewriteRequest);
-}
-
-/**
- * inline-diff 回调桥接(Task 7 在 main.ts 注册 inlineDiffExtension 时接上)。
- * 因为 inlineDiffExtension 的回调是全局单例、拿不到具体 view,这里用模块级 rewriteView 转发。
- */
-export function handleInlineDiffAccept(s: InlineDiffState) {
-    if (!rewriteView) return;
-    // 预览期间用户可能编辑了文档,s.from/s.to 是发起改写时的快照偏移,可能已错位。
-    // 用原文快照 s.oldText 重定位;找不到则中止(绝不盲写),仅清掉装饰。
-    const target = s.oldText ? relocateRange(rewriteView.state, s.from, s.to, s.oldText) : { from: s.from, to: s.to };
-    if (target) {
-        rewriteView.dispatch({ changes: { from: target.from, to: target.to, insert: s.newText } });
-    }
-    clearInlineDiff(rewriteView);
-    currentRewriteController = null;
-    currentRewriteRequest = null;
-}
-
-/** 关闭对话框时清理未决的改写:中止请求 + 清掉内联 diff 装饰 + 复位模块级状态。 */
-function cleanupPendingRewrite(view: EditorView) {
-    currentRewriteController?.abort();
-    currentRewriteController = null;
-    currentRewriteRequest = null;
-    clearInlineDiff(view);
-}
-
-export function handleInlineDiffReject(_s: InlineDiffState) {
-    if (!rewriteView) return;
-    clearInlineDiff(rewriteView);
-    currentRewriteController = null;
-    currentRewriteRequest = null;
-}
-
-export function handleInlineDiffRetry(_s: InlineDiffState) {
-    if (!rewriteView || !activeModelService || !currentRewriteRequest) return;
-    currentRewriteController?.abort();
-    currentRewriteController = runRewrite(rewriteView, activeModelService, currentRewriteRequest);
 }
 
 /**

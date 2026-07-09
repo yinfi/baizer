@@ -4091,8 +4091,21 @@ textarea.shell-input {
 .baizer-fp-title { font-size: 13px; font-weight: 600; color: var(--text-normal); }
 .baizer-fp-close { border: none; background: transparent; color: var(--text-muted); cursor: pointer; display: inline-flex; }
 .baizer-fp-messages { flex: 1; overflow-y: auto; padding: 12px; font-size: 14px; line-height: 1.6; }
-.baizer-fp-msg.user { color: var(--text-muted); margin-bottom: 8px; }
-.baizer-fp-msg.ai { color: var(--text-normal); margin-bottom: 12px; }
+/* 顶部干净意图行(动作名:选中文字),非真实 prompt */
+.baizer-fp-intent {
+    font-size: 13px; font-weight: 600; color: var(--text-normal);
+    padding-bottom: 8px; margin-bottom: 8px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* thinking 折叠时间线容器(复用 shell 的 ThinkingRenderer 节点) */
+.baizer-fp-timeline { margin-bottom: 6px; }
+/* "思考中…" 状态行:出结果或结束后隐藏 */
+.baizer-fp-status { color: var(--text-muted); font-size: 12px; margin-bottom: 6px; }
+/* 流式正文(Markdown 渲染) */
+.baizer-fp-answer { color: var(--text-normal); }
+.baizer-fp-answer > :first-child { margin-top: 0; }
+.baizer-fp-answer > :last-child { margin-bottom: 0; }
 .baizer-fp-footer {
     display: flex; gap: 6px; align-items: flex-end;
     padding: 8px 12px; border-top: 1px solid var(--background-modifier-border);

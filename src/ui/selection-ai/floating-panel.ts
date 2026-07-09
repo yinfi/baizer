@@ -1,4 +1,7 @@
 import { App, MarkdownRenderer, Component, Notice, setIcon } from 'obsidian';
+import { StreamController } from '../controllers/stream-controller';
+import { ThinkingRenderer } from '../renderers/thinking-renderer';
+import { StreamEvent } from '../../models/interfaces';
 
 export interface PanelRect { left: number; top: number; width: number; height: number; }
 
@@ -33,11 +36,11 @@ export function savePanelRect(rect: PanelRect, storage: Pick<Storage, 'setItem'>
 
 export interface FloatingPanelOptions {
   app: App;
-  title: string;
+  intent: string;                     // 顶部干净意图(如「解释:作为空间根目录」),非真实 prompt
   anchor: { x: number; y: number };   // 选区屏幕坐标,用于首次定位
   onClose: () => void;
-  onSubmit: (text: string) => void;   // 追问
-  onReplace: () => void;              // 用最后一条 AI 回答替换选区
+  onSubmit: (text: string) => void;   // 追问(text 是用户新输入,由调用方决定如何发)
+  onReplace: (resultText: string) => void;  // 用当前结果正文替换选区
 }
 
 /**
@@ -46,8 +49,14 @@ export interface FloatingPanelOptions {
  */
 export class FloatingPanel {
   private root: HTMLElement;
-  private messageList: HTMLElement;
+  private body: HTMLElement;          // 滚动区:thinking 时间线 + 正文
+  private timeline: HTMLElement;      // thinking 折叠时间线容器
+  private answerEl: HTMLElement;      // 流式正文容器
+  private statusEl: HTMLElement;      // "思考中…" 状态行
   private component = new Component();
+  private stream: StreamController;
+  private thinkingRenderer: ThinkingRenderer | null = null;
+  private answerText = '';            // 累积的正文(供替换/复制)
   private onDragMove?: (e: MouseEvent) => void;
   private onDragUp?: () => void;
   private onResizeMove?: (e: MouseEvent) => void;
@@ -57,9 +66,55 @@ export class FloatingPanel {
     this.root = document.body.createDiv({ cls: 'baizer-floating-panel' });
     this.applyRect(this.resolveInitialRect());
     this.buildHeader();
-    this.messageList = this.root.createDiv({ cls: 'baizer-fp-messages' });
+
+    this.body = this.root.createDiv({ cls: 'baizer-fp-messages' });
+    // 顶部意图行(干净文案,非真实 prompt)
+    this.body.createDiv({ cls: 'baizer-fp-intent', text: this.opts.intent });
+    this.timeline = this.body.createDiv({ cls: 'baizer-fp-timeline' });
+    this.statusEl = this.body.createDiv({ cls: 'baizer-fp-status', text: '思考中…' });
+    this.answerEl = this.body.createDiv({ cls: 'baizer-fp-answer' });
+
     this.buildFooter();
     this.buildResizeHandle();
+
+    // 复用 shell 的流式分发:thinking→时间线折叠,text_delta→正文累积重渲。
+    this.stream = new StreamController({
+      onThinking: (c) => { this.ensureThinking(); this.thinkingRenderer?.appendThinking(c); this.scrollToEnd(); },
+      onToolCall: () => { /* 选区场景一般无工具调用;忽略以保持面板简洁 */ },
+      onToolResult: () => { /* 同上 */ },
+      onTextDelta: (c) => { this.thinkingRenderer?.finalizeCurrentThinking(); this.answerText += c; this.renderAnswer(); this.scrollToEnd(); },
+      onDone: () => { this.thinkingRenderer?.finalizeCurrentThinking(); this.statusEl.style.display = 'none'; this.scrollToEnd(); },
+      onError: (m) => { this.statusEl.style.display = 'none'; this.answerText += `\n\n> ⚠ ${m}`; this.renderAnswer(); },
+    });
+  }
+
+  private ensureThinking() {
+    if (!this.thinkingRenderer) this.thinkingRenderer = new ThinkingRenderer(this.timeline);
+  }
+
+  private renderAnswer() {
+    this.answerEl.empty();
+    void MarkdownRenderer.render(this.opts.app, this.answerText, this.answerEl, '', this.component);
+  }
+
+  private scrollToEnd() {
+    this.body.scrollTop = this.body.scrollHeight;
+  }
+
+  /** 接收 ChatController 转发的流事件。 */
+  handleStreamEvent(event: StreamEvent) {
+    this.stream.handleEvent(event);
+  }
+
+  /** 新一轮开始:清空上轮正文与 thinking、恢复状态行(追问时用)。 */
+  beginTurn() {
+    this.thinkingRenderer?.dispose();
+    this.thinkingRenderer = null;
+    this.timeline.empty();
+    this.answerText = '';
+    this.answerEl.empty();
+    this.statusEl.style.display = '';
+    this.scrollToEnd();
   }
 
   private resolveInitialRect(): PanelRect {
@@ -143,24 +198,16 @@ export class FloatingPanel {
       }
     };
     const replace = footer.createEl('button', { text: '替换', attr: { type: 'button' } });
-    replace.onclick = () => this.opts.onReplace();
+    replace.onclick = () => {
+      if (!this.answerText.trim()) { new Notice('还没有可应用的结果。'); return; }
+      this.opts.onReplace(this.answerText.trim());
+    };
     const copy = footer.createEl('button', { text: '复制', attr: { type: 'button' } });
     copy.onclick = () => {
-      const last = this.messageList.querySelector('.baizer-fp-msg.ai:last-child');
-      void navigator.clipboard.writeText(last?.textContent || '');
+      if (!this.answerText.trim()) { new Notice('还没有可复制的结果。'); return; }
+      void navigator.clipboard.writeText(this.answerText.trim());
       new Notice('已复制');
     };
-  }
-
-  /** 渲染一批消息(role: 'user' | 'ai')。调用方每次流式更新后重渲。 */
-  renderMessages(messages: Array<{ role: string; content: string }>) {
-    this.messageList.empty();
-    for (const m of messages) {
-      const el = this.messageList.createDiv({ cls: `baizer-fp-msg ${m.role}` });
-      if (m.role === 'ai') void MarkdownRenderer.render(this.opts.app, m.content, el, '', this.component);
-      else el.setText(m.content);
-    }
-    this.messageList.scrollTop = this.messageList.scrollHeight;
   }
 
   destroy() {
@@ -168,6 +215,7 @@ export class FloatingPanel {
     if (this.onDragUp) window.removeEventListener('mouseup', this.onDragUp);
     if (this.onResizeMove) window.removeEventListener('mousemove', this.onResizeMove);
     if (this.onResizeUp) window.removeEventListener('mouseup', this.onResizeUp);
+    this.thinkingRenderer?.dispose();
     this.component.unload();
     this.root.remove();
     this.opts.onClose();

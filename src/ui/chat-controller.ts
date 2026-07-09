@@ -116,6 +116,7 @@ export class ChatController {
         context: any[] | string = [],
         selection: string = '',
         source: 'shell' | 'selection-menu' = 'shell',
+        displayText?: string,
     ) {
         if (!query.trim()) return;
         const normalizedContext = this.normalizeContextItems(context);
@@ -127,7 +128,9 @@ export class ChatController {
         }
 
         // 2. Normal Chat
-        this.addMessage('user', query);
+        // 显示层与 prompt 层分离:query 是发给模型的完整 prompt(可能已装配上下文),
+        // displayText 是给用户看的干净意图(如「解释:xxx」)。缺省时二者一致(shell 场景)。
+        this.addMessage('user', displayText ?? query);
         // 阶段B:记住本轮 user 消息 id,done 事件带回 entryIds 后回填 sessionEntryId 锚定。
         const userMessageId = this.messages[this.messages.length - 1]?.id;
         this.setResponding(true);
