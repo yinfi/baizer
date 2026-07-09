@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view';
 import { ModelService } from '../../services/model-service';
-import { buildActionPrompt } from './action-registry';
+import { buildActionPrompt, SelectionActionContext } from './action-registry';
+import { SelectionContextBuilder } from './selection-context-builder';
 import { showInlineDiff, clearInlineDiff, InlineDiffCallbacks } from './inline-diff';
 import { t } from '../../i18n/zh';
 
@@ -9,6 +10,8 @@ export interface RewriteRequest {
   selection: string;
   from: number;
   to: number;
+  contextBuilder?: SelectionContextBuilder;   // 有则先装配上下文
+  actionContext?: SelectionActionContext;      // 该动作声明的上下文需求
 }
 
 /**
@@ -34,38 +37,47 @@ export function runRewrite(
     status: 'loading',
   });
 
-  const prompt = buildActionPrompt(req.actionId, req.selection);
+  const basePrompt = buildActionPrompt(req.actionId, req.selection);
 
-  modelService
-    .generate(
-      prompt,
-      undefined,          // systemPrompt
-      'selection-menu',   // source — 本场景专用；配合 skipGenerationPlan 跳过生成计划包装
-      undefined,          // obsidianContext
-      undefined,          // userProfile
-      { signal: ac.signal, skipGenerationPlan: true },
-    )
-    .then((newText) => {
-      if (ac.signal.aborted) return;
-      showInlineDiff(view, {
-        from: req.from,
-        to: req.to,
-        oldText: req.selection,
-        newText: newText.trim(),
-        status: 'preview',
+  // 先按动作声明装配上下文(笔记/知识库/记忆),再发起一次性改写。
+  // build 内部对每个源做超时兜底、绝不 reject,故装配失败只是退化为裸 prompt。
+  void (async () => {
+    const prompt = req.contextBuilder && req.actionContext
+      ? await req.contextBuilder.build(req.actionContext, req.selection, basePrompt)
+      : basePrompt;
+    if (ac.signal.aborted) return;
+
+    modelService
+      .generate(
+        prompt,
+        undefined,          // systemPrompt
+        'selection-menu',   // source — 本场景专用；配合 skipGenerationPlan 跳过生成计划包装
+        undefined,          // obsidianContext
+        undefined,          // userProfile
+        { signal: ac.signal, skipGenerationPlan: true },
+      )
+      .then((newText) => {
+        if (ac.signal.aborted) return;
+        showInlineDiff(view, {
+          from: req.from,
+          to: req.to,
+          oldText: req.selection,
+          newText: newText.trim(),
+          status: 'preview',
+        });
+      })
+      .catch((err: Error) => {
+        if (ac.signal.aborted) return;
+        showInlineDiff(view, {
+          from: req.from,
+          to: req.to,
+          oldText: req.selection,
+          newText: '',
+          status: 'error',
+          message: err.message || t('Rewrite failed'),
+        });
       });
-    })
-    .catch((err: Error) => {
-      if (ac.signal.aborted) return;
-      showInlineDiff(view, {
-        from: req.from,
-        to: req.to,
-        oldText: req.selection,
-        newText: '',
-        status: 'error',
-        message: err.message || t('Rewrite failed'),
-      });
-    });
+  })();
 
   return ac;
 }
