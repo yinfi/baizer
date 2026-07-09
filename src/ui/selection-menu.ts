@@ -19,6 +19,8 @@ let rewriteView: EditorView | null = null;
 let activeModelService: ModelService | null = null;
 let currentRewriteRequest: RewriteRequest | null = null;
 let currentRewriteController: AbortController | null = null;
+// 只读浮窗单例:同一时刻只允许一个「解释」浮窗,开新窗前销毁旧窗,避免多开堆叠。
+let activeExplainPanel: FloatingPanel | null = null;
 
 type AiMenuMode = 'selection' | 'trigger';
 
@@ -238,6 +240,9 @@ async function onToolClick(
     } else {
         void openExplainPanel(view, context, state, action, selection);
     }
+
+    // 动作已发起,隐藏工具条:改写类后续 UI 由内联 diff 承载,只读类由浮窗承载。
+    view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
 }
 
 /** 弹可拖拽缩放浮窗,用 ChatController 驱动流式;首轮 prompt 预装配上下文。 */
@@ -248,13 +253,16 @@ async function openExplainPanel(
     action: { id: string; label: string; context: any },
     selection: string,
 ) {
+    // 单例:开新浮窗前销毁上一个,避免多开堆叠。
+    activeExplainPanel?.destroy();
+
     const controller = new ChatController({ app: context.app, api: context.modelService });
     const coords = view.coordsAtPos(state.to);
     const panel = new FloatingPanel({
         app: context.app,
         title: t(action.label),
         anchor: { x: coords?.left ?? 200, y: coords?.bottom ?? 200 },
-        onClose: () => controller.cleanup(),
+        onClose: () => { controller.cleanup(); if (activeExplainPanel === panel) activeExplainPanel = null; },
         onSubmit: (text) => { void controller.processCommand(text, [], selection, 'selection-menu'); },
         onReplace: () => {
             const lastAi = [...controller.getMessages()].reverse().find(m => m.role === 'ai');
@@ -268,6 +276,7 @@ async function openExplainPanel(
         },
     });
     (controller as any).onMessageAdded = () => panel.renderMessages(controller.getMessages());
+    activeExplainPanel = panel;
 
     const basePrompt = buildActionPrompt(action.id, selection);
     const prompt = await context.contextBuilder.build(action.context, selection, basePrompt);
@@ -539,7 +548,12 @@ function runRewriteAction(
  */
 export function handleInlineDiffAccept(s: InlineDiffState) {
     if (!rewriteView) return;
-    rewriteView.dispatch({ changes: { from: s.from, to: s.to, insert: s.newText } });
+    // 预览期间用户可能编辑了文档,s.from/s.to 是发起改写时的快照偏移,可能已错位。
+    // 用原文快照 s.oldText 重定位;找不到则中止(绝不盲写),仅清掉装饰。
+    const target = s.oldText ? relocateRange(rewriteView.state, s.from, s.to, s.oldText) : { from: s.from, to: s.to };
+    if (target) {
+        rewriteView.dispatch({ changes: { from: target.from, to: target.to, insert: s.newText } });
+    }
     clearInlineDiff(rewriteView);
     currentRewriteController = null;
     currentRewriteRequest = null;
