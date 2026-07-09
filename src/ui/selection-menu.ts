@@ -8,6 +8,8 @@ import { SuggestList } from './components/suggest-list';
 import { SuggestionItem, SuggestionType } from './controllers/input-controller';
 import { SELECTION_ACTIONS, getAction, buildActionPrompt } from './selection-ai/action-registry';
 import { runRewrite, RewriteRequest } from './selection-ai/rewrite-runner';
+import { SelectionContextBuilder } from './selection-ai/selection-context-builder';
+import { FloatingPanel } from './selection-ai/floating-panel';
 import { t } from '../i18n/zh';
 import { showInlineDiff, clearInlineDiff, InlineDiffState } from './selection-ai/inline-diff';
 
@@ -17,15 +19,26 @@ let rewriteView: EditorView | null = null;
 let activeModelService: ModelService | null = null;
 let currentRewriteRequest: RewriteRequest | null = null;
 let currentRewriteController: AbortController | null = null;
+// 只读浮窗单例:同一时刻只允许一个「解释」浮窗,开新窗前销毁旧窗,避免多开堆叠。
+let activeExplainPanel: FloatingPanel | null = null;
 
 type AiMenuMode = 'selection' | 'trigger';
 
+// selection 场景:选中即出横向工具条(toolbar),点动作直接分流(改写→内联 diff / 只读→浮窗)。
+// trigger 场景(@ 行内插入):保留旧的 button→chat 迷你对话框,不在本次改造范围。
 type SelectionMenuState =
     | { type: 'hidden' }
-    | { type: 'button'; mode: AiMenuMode; from: number; to: number }
-    | { type: 'chat'; mode: AiMenuMode; from: number; to: number; controller: ChatController };
+    | { type: 'toolbar'; mode: 'selection'; from: number; to: number }
+    | { type: 'button'; mode: 'trigger'; from: number; to: number }
+    | { type: 'chat'; mode: 'trigger'; from: number; to: number; controller: ChatController };
 
-const pluginContextMap = new WeakMap<EditorView, { app: App; modelService: ModelService }>();
+interface PluginContext {
+    app: App;
+    modelService: ModelService;
+    contextBuilder: SelectionContextBuilder;
+}
+
+const pluginContextMap = new WeakMap<EditorView, PluginContext>();
 
 export const setSelectionMenuState = StateEffect.define<SelectionMenuState>();
 
@@ -53,23 +66,13 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
 
         const selection = tr.newSelection.main;
         if (!selection.empty) {
+            // 选区非空 → 横向工具条(选中即出,无中间 AI 按钮态)。
             const next: SelectionMenuState = {
-                type: state.type === 'chat'
-                    && state.mode === 'selection'
-                    && state.from === selection.from
-                    && state.to === selection.to
-                    ? 'chat'
-                    : 'button',
+                type: 'toolbar',
                 mode: 'selection',
                 from: selection.from,
                 to: selection.to,
-                ...(state.type === 'chat'
-                    && state.mode === 'selection'
-                    && state.from === selection.from
-                    && state.to === selection.to
-                    ? { controller: state.controller }
-                    : {}),
-            } as SelectionMenuState;
+            };
             cleanupPreviousController(state, next);
             return next;
         }
@@ -108,7 +111,17 @@ const selectionMenuField = StateField.define<SelectionMenuState>({
     }),
 });
 
-export function selectionMenuExtension(app: App, modelService: ModelService): Extension {
+export function selectionMenuExtension(
+    app: App,
+    modelService: ModelService,
+    knowledgeRuntime: { getGuardianDeepKnowledgeContext(q: string): Promise<string> } | null,
+    contextService: { collect(): Promise<any> } | null,
+): Extension {
+    const contextBuilder = new SelectionContextBuilder({
+        knowledgeRuntime,
+        modelService,   // recallGuardianMemory 在 ModelService 上
+        contextService,
+    });
     return [
         selectionMenuField,
         // Tooltip 定位:默认挂在编辑器 DOM 内、以整窗判定可用空间 —— 编辑器被 Workbench 侧栏挤窄时,
@@ -121,7 +134,7 @@ export function selectionMenuExtension(app: App, modelService: ModelService): Ex
             tooltipSpace: (view) => view.dom.getBoundingClientRect(),
         }),
         EditorView.updateListener.of((update) => {
-            pluginContextMap.set(update.view, { app, modelService });
+            pluginContextMap.set(update.view, { app, modelService, contextBuilder });
         }),
     ];
 }
@@ -144,16 +157,34 @@ function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
     dom.className = `guardian-selection-tooltip is-${state.type}`;
     if (state.type === 'hidden' || !context) return { dom };
 
+    // selection 场景:横向工具条,点动作直接分流。
+    if (state.type === 'toolbar') {
+        const bar = dom.createDiv({ cls: 'baizer-selection-toolbar' });
+        for (const action of SELECTION_ACTIONS) {
+            const btn = bar.createEl('button', {
+                cls: 'baizer-selection-tool',
+                attr: { type: 'button', title: t(action.label), 'aria-label': t(action.label) },
+            });
+            setIcon(btn, action.icon);
+            btn.createSpan({ cls: 'baizer-selection-tool-label', text: t(action.label) });
+            btn.onclick = (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void onToolClick(view, context, state, action.id);
+            };
+        }
+        return { dom };
+    }
+
+    // trigger 场景(@ 行内插入):保留旧的迷你对话框。
     if (state.type === 'button') {
         const btn = document.createElement('button');
         btn.className = 'guardian-selection-btn';
         btn.type = 'button';
-        // ✨ sparkle 图标 = AI 操作的业界通用符号(Notion/Cursor/Gemini),
-        // 取代旧的纯文字「AI」/「@ AI」(@ 与「文件提及」语义冲突,且灰块难辨识)。
         setIcon(btn, 'sparkles');
         btn.createSpan({ cls: 'guardian-selection-btn-label', text: 'AI' });
-        btn.setAttribute('aria-label', state.mode === 'selection' ? 'Ask AI about selection' : 'Ask AI to insert here');
-        btn.title = state.mode === 'selection' ? 'Ask AI about selection' : 'Ask AI to insert here';
+        btn.setAttribute('aria-label', 'Ask AI to insert here');
+        btn.title = 'Ask AI to insert here';
         btn.onclick = (event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -177,6 +208,79 @@ function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
 
     dom.appendChild(createChatPanel(view, state, context));
     return { dom };
+}
+
+/**
+ * 工具条点击分流:改写类走内联 diff(prompt 带上下文),只读类弹浮窗对话。
+ */
+async function onToolClick(
+    view: EditorView,
+    context: PluginContext,
+    state: Extract<SelectionMenuState, { type: 'toolbar' }>,
+    actionId: string,
+) {
+    const action = getAction(actionId);
+    if (!action) return;
+    const selection = view.state.doc.sliceString(state.from, state.to);
+    if (!selection.trim()) { new Notice(t('Please select some text first.')); return; }
+
+    if (action.kind === 'rewrite') {
+        rewriteView = view;
+        activeModelService = context.modelService;
+        currentRewriteController?.abort();
+        currentRewriteRequest = {
+            actionId,
+            selection,
+            from: state.from,
+            to: state.to,
+            contextBuilder: context.contextBuilder,
+            actionContext: action.context,
+        };
+        currentRewriteController = runRewrite(view, context.modelService, currentRewriteRequest);
+    } else {
+        void openExplainPanel(view, context, state, action, selection);
+    }
+
+    // 动作已发起,隐藏工具条:改写类后续 UI 由内联 diff 承载,只读类由浮窗承载。
+    view.dispatch({ effects: setSelectionMenuState.of({ type: 'hidden' }) });
+}
+
+/** 弹可拖拽缩放浮窗,用 ChatController 驱动流式;首轮 prompt 预装配上下文。 */
+async function openExplainPanel(
+    view: EditorView,
+    context: PluginContext,
+    state: Extract<SelectionMenuState, { type: 'toolbar' }>,
+    action: { id: string; label: string; context: any },
+    selection: string,
+) {
+    // 单例:开新浮窗前销毁上一个,避免多开堆叠。
+    activeExplainPanel?.destroy();
+
+    const controller = new ChatController({ app: context.app, api: context.modelService });
+    const coords = view.coordsAtPos(state.to);
+    const panel = new FloatingPanel({
+        app: context.app,
+        title: t(action.label),
+        anchor: { x: coords?.left ?? 200, y: coords?.bottom ?? 200 },
+        onClose: () => { controller.cleanup(); if (activeExplainPanel === panel) activeExplainPanel = null; },
+        onSubmit: (text) => { void controller.processCommand(text, [], selection, 'selection-menu'); },
+        onReplace: () => {
+            const lastAi = [...controller.getMessages()].reverse().find(m => m.role === 'ai');
+            if (!lastAi?.content) { new Notice(t('No AI response to apply yet.')); return; }
+            // 解释流式期间用户可能已编辑文档,原偏移会错位。用选区快照重定位,
+            // 找不到则中止替换(绝不盲写),提示用户手动复制。
+            const target = relocateRange(view.state, state.from, state.to, selection);
+            if (!target) { new Notice(t('Selection changed; cannot replace. Please copy manually.')); return; }
+            view.dispatch({ changes: { from: target.from, to: target.to, insert: lastAi.content.trim() } });
+            panel.destroy();
+        },
+    });
+    (controller as any).onMessageAdded = () => panel.renderMessages(controller.getMessages());
+    activeExplainPanel = panel;
+
+    const basePrompt = buildActionPrompt(action.id, selection);
+    const prompt = await context.contextBuilder.build(action.context, selection, basePrompt);
+    void controller.processCommand(prompt, [], selection, 'selection-menu');
 }
 
 function createChatPanel(
@@ -444,7 +548,12 @@ function runRewriteAction(
  */
 export function handleInlineDiffAccept(s: InlineDiffState) {
     if (!rewriteView) return;
-    rewriteView.dispatch({ changes: { from: s.from, to: s.to, insert: s.newText } });
+    // 预览期间用户可能编辑了文档,s.from/s.to 是发起改写时的快照偏移,可能已错位。
+    // 用原文快照 s.oldText 重定位;找不到则中止(绝不盲写),仅清掉装饰。
+    const target = s.oldText ? relocateRange(rewriteView.state, s.from, s.to, s.oldText) : { from: s.from, to: s.to };
+    if (target) {
+        rewriteView.dispatch({ changes: { from: target.from, to: target.to, insert: s.newText } });
+    }
     clearInlineDiff(rewriteView);
     currentRewriteController = null;
     currentRewriteRequest = null;

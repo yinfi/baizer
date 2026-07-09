@@ -201,7 +201,12 @@ export default class BaizerPlugin extends Plugin {
             this.registerEditorExtension([
                 guardianGutterExtension(),
                 ghostTextExtension(),
-                selectionMenuExtension(this.app, this.modelService),
+                selectionMenuExtension(
+                    this.app,
+                    this.modelService,
+                    this.knowledgeRuntime,
+                    this.guardianContextService,
+                ),
                 inlineDiffExtension({
                     onAccept: handleInlineDiffAccept,
                     onReject: handleInlineDiffReject,

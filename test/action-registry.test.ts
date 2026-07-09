@@ -64,6 +64,41 @@ async function runTests() {
     const p = buildActionPrompt('improve', 'cost $& and $1 here');
     expect(p).toContain('cost $& and $1 here');
   });
+
+  await test('每个动作声明 context 需求(三个布尔源)', () => {
+    for (const a of SELECTION_ACTIONS) {
+      if (!a.context || typeof a.context !== 'object') {
+        throw new Error(`action ${a.id} 缺 context 声明`);
+      }
+    }
+  });
+
+  await test('分级表符合设计:校对/摘要不注入任何源', () => {
+    const fix = getAction('fix')!.context;
+    expect(!!fix.activeNote || !!fix.knowledge || !!fix.memory).toBe(false);
+    const sum = getAction('summarize')!.context;
+    expect(!!sum.activeNote || !!sum.knowledge || !!sum.memory).toBe(false);
+  });
+
+  await test('分级表符合设计:扩写/解释全量注入', () => {
+    for (const id of ['expand', 'explain']) {
+      const c = getAction(id)!.context;
+      expect(c.activeNote).toBe(true);
+      expect(c.knowledge).toBe(true);
+      expect(c.memory).toBe(true);
+    }
+  });
+
+  await test('分级表符合设计:翻译仅知识库(术语)、润色笔记+记忆', () => {
+    const tr = getAction('translate')!.context;
+    expect(tr.knowledge).toBe(true);
+    expect(!!tr.activeNote).toBe(false);
+    expect(!!tr.memory).toBe(false);
+    const im = getAction('improve')!.context;
+    expect(im.activeNote).toBe(true);
+    expect(im.memory).toBe(true);
+    expect(!!im.knowledge).toBe(false);
+  });
 }
 
 runTests().catch((e) => { console.error(e); process.exit(1); });
