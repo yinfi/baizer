@@ -86,6 +86,7 @@ const tests = [
   'test/throttle.test.ts',
   'test/action-registry.test.ts',
   'test/selection-context-builder.test.ts',
+  'test/floating-panel.test.ts',
   'test/i18n-locale.test.ts',
   'test/suggest-list.test.ts',
   'test/prompt-template-service.test.ts',
