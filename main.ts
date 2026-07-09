@@ -2,6 +2,7 @@ import { Plugin, Notice, MarkdownView, TFile } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
 import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, ProviderConfig, PLUGIN_NAME, mergeProviderDefaults } from './src/mcp/types';
+import { setLocale, Locale } from './src/i18n/zh';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
@@ -343,6 +344,9 @@ export default class BaizerPlugin extends Plugin {
         if (!this.settings.providers[this.settings.activeProvider]) {
             this.settings.activeProvider = Object.keys(this.settings.providers)[0] || 'gemini';
         }
+
+        // 应用用户设定的界面语言（默认 'auto' 跟随系统），供 t() 全局生效。
+        setLocale(this.settings.language ?? 'auto');
     }
 
     async saveSettings() {
@@ -360,6 +364,21 @@ export default class BaizerPlugin extends Plugin {
     // 无需承担 updateSettings 的 cleanup()+initializeProvider()+modelListCache.clear() 开销（P0-3）。
     async saveSettingsLight() {
         await this.saveData(this.settings);
+    }
+
+    // 切换界面语言：设定 locale → 轻量落盘（语言是纯 UI 字段，无需重建 provider/guardian/knowledge）
+    // → 重渲染所有打开的 ShellView，让文案即时切换、无需重启。设置面板自身由调用方负责重绘。
+    async applyLanguageChange(locale: Locale) {
+        this.settings.language = locale;
+        setLocale(locale);
+        await this.saveSettingsLight();
+        const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_SHELL);
+        for (const leaf of leaves) {
+            const view = leaf.view;
+            if (view instanceof ShellView) {
+                await view.rerender();
+            }
+        }
     }
 
     private createGuardianCompletionService(): GuardianCompletionService {

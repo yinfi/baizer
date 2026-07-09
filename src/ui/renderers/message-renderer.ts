@@ -144,8 +144,8 @@ export class MessageRenderer {
     const toolbar = (container as any).createDiv({ cls: 'shell-feedback-bar shell-message-actions' }) as HTMLElement;
     const copyButton = (toolbar as any).createEl('button', {
       cls: 'shell-message-action-btn shell-copy-btn clickable-icon',
-      title: 'Copy message',
-      attr: { 'aria-label': 'Copy message' },
+      title: t('Copy message'),
+      attr: { 'aria-label': t('Copy message') },
     }) as HTMLElement;
     setIcon(copyButton, 'copy');
     copyButton.addEventListener('click', () => {
@@ -156,8 +156,8 @@ export class MessageRenderer {
     if (this.options.onRetry && message.sessionEntryId) {
       const retryButton = (toolbar as any).createEl('button', {
         cls: 'shell-message-action-btn shell-retry-btn clickable-icon',
-        title: '重新生成(保留原回答为分支)',
-        attr: { 'aria-label': '重新生成' },
+        title: t('Regenerate (keep original answer as a branch)'),
+        attr: { 'aria-label': t('Regenerate') },
       }) as HTMLElement;
       setIcon(retryButton, 'refresh-cw');
       retryButton.addEventListener('click', () => {
@@ -170,8 +170,8 @@ export class MessageRenderer {
     if (this.options.onFeedbackUp) {
       const upButton = (toolbar as any).createEl('button', {
         cls: 'shell-feedback-btn shell-thumbs-up clickable-icon',
-        title: '认可并保存到知识库',
-        attr: { 'aria-label': '认可并保存到知识库' },
+        title: t('Approve and save to knowledge base'),
+        attr: { 'aria-label': t('Approve and save to knowledge base') },
       }) as HTMLElement;
       setIcon(upButton, 'thumbs-up');
       upButton.addEventListener('click', () => {
@@ -187,8 +187,8 @@ export class MessageRenderer {
     if (this.options.onFeedbackDown) {
       const downButton = (toolbar as any).createEl('button', {
         cls: 'shell-feedback-btn shell-thumbs-down clickable-icon',
-        title: '不满意,告诉 AI 哪里需要改进',
-        attr: { 'aria-label': '不满意,告诉 AI 哪里需要改进' },
+        title: t('Not satisfied — tell AI what to improve'),
+        attr: { 'aria-label': t('Not satisfied — tell AI what to improve') },
       }) as HTMLElement;
       setIcon(downButton, 'thumbs-down');
       downButton.addEventListener('click', () => {
@@ -202,8 +202,8 @@ export class MessageRenderer {
     if (this.options.onFork && message.sessionEntryId) {
       const forkButton = (toolbar as any).createEl('button', {
         cls: 'shell-message-action-btn shell-fork-btn clickable-icon',
-        title: '分叉:编辑问题并重新生成(保留当前对话为分支)',
-        attr: { 'aria-label': '分叉' },
+        title: t('Fork: edit the question and regenerate (keep current conversation as a branch)'),
+        attr: { 'aria-label': t('Fork') },
       }) as HTMLElement;
       setIcon(forkButton, 'git-branch');
       forkButton.addEventListener('click', () => {
@@ -225,13 +225,13 @@ export class MessageRenderer {
     const nav = (toolbar as any).createDiv({ cls: 'shell-branch-nav' }) as HTMLElement;
     const prev = (nav as any).createEl('button', {
       cls: 'shell-branch-prev clickable-icon',
-      attr: { type: 'button', title: '上一个分支', 'aria-label': '上一个分支' },
+      attr: { type: 'button', title: t('Previous branch'), 'aria-label': t('Previous branch') },
     }) as HTMLElement;
     setIcon(prev, 'chevron-left');
     (nav as any).createSpan({ cls: 'shell-branch-count', text: `${branch.index + 1}/${branch.count}` });
     const next = (nav as any).createEl('button', {
       cls: 'shell-branch-next clickable-icon',
-      attr: { type: 'button', title: '下一个分支', 'aria-label': '下一个分支' },
+      attr: { type: 'button', title: t('Next branch'), 'aria-label': t('Next branch') },
     }) as HTMLElement;
     setIcon(next, 'chevron-right');
 
@@ -255,12 +255,12 @@ export class MessageRenderer {
     const box = (container as any).createDiv({ cls: 'shell-fork-box shell-edit-box' }) as HTMLElement;
     const input = (box as any).createEl('textarea', {
       cls: 'shell-edit-input',
-      attr: { 'aria-label': '编辑问题并重新提问' },
+      attr: { 'aria-label': t('Edit the question and ask again') },
     }) as HTMLTextAreaElement;
     input.value = message.forkSourceText ?? '';
     const submit = (box as any).createEl('button', {
       cls: 'shell-edit-submit',
-      text: '重新提问',
+      text: t('Ask again'),
       attr: { type: 'button' },
     }) as HTMLElement;
 
@@ -299,13 +299,13 @@ export class MessageRenderer {
       const nav = (bar as any).createDiv({ cls: 'shell-branch-nav' }) as HTMLElement;
       const prev = (nav as any).createEl('button', {
         cls: 'shell-branch-prev clickable-icon',
-        attr: { type: 'button', title: '上一个分支', 'aria-label': '上一个分支' },
+        attr: { type: 'button', title: t('Previous branch'), 'aria-label': t('Previous branch') },
       }) as HTMLElement;
       setIcon(prev, 'chevron-left');
       (nav as any).createSpan({ cls: 'shell-branch-count', text: `${branch.index + 1}/${branch.count}` });
       const next = (nav as any).createEl('button', {
         cls: 'shell-branch-next clickable-icon',
-        attr: { type: 'button', title: '下一个分支', 'aria-label': '下一个分支' },
+        attr: { type: 'button', title: t('Next branch'), 'aria-label': t('Next branch') },
       }) as HTMLElement;
       setIcon(next, 'chevron-right');
 
@@ -321,7 +321,7 @@ export class MessageRenderer {
     if (canEdit) {
       const editButton = (bar as any).createEl('button', {
         cls: 'shell-message-action-btn shell-edit-btn clickable-icon',
-        attr: { type: 'button', title: '编辑并重新提问(保留原对话为分支)', 'aria-label': '编辑重问' },
+        attr: { type: 'button', title: t('Edit and ask again (keep original conversation as a branch)'), 'aria-label': t('Edit and ask again') },
       }) as HTMLElement;
       setIcon(editButton, 'pencil');
       editButton.addEventListener('click', () => {
@@ -341,12 +341,12 @@ export class MessageRenderer {
     const box = (container as any).createDiv({ cls: 'shell-edit-box' }) as HTMLElement;
     const input = (box as any).createEl('textarea', {
       cls: 'shell-edit-input',
-      attr: { 'aria-label': '编辑消息内容' },
+      attr: { 'aria-label': t('Edit message content') },
     }) as HTMLTextAreaElement;
     input.value = message.content;
     const submit = (box as any).createEl('button', {
       cls: 'shell-edit-submit',
-      text: '重新提问',
+      text: t('Ask again'),
       attr: { type: 'button' },
     }) as HTMLElement;
 
@@ -392,13 +392,13 @@ export class MessageRenderer {
       cls: 'shell-feedback-reason-input',
       attr: {
         type: 'text',
-        placeholder: '哪里不好?AI 会据此改进并重新回答',
-        'aria-label': '反馈:哪里需要改进',
+        placeholder: t('What was wrong? AI will improve and answer again'),
+        'aria-label': t('Feedback: what to improve'),
       },
     }) as HTMLInputElement;
     const submit = (box as any).createEl('button', {
       cls: 'shell-feedback-reason-submit',
-      text: '改进重答',
+      text: t('Improve answer'),
       attr: { type: 'button' },
     }) as HTMLElement;
 
@@ -506,8 +506,8 @@ export class MessageRenderer {
       cls: 'clickable-icon shell-workspace-edit-undo',
       attr: {
         type: 'button',
-        title: `Undo ${edit.path}`,
-        'aria-label': `Undo ${edit.path}`,
+        title: `${t('Undo')} ${edit.path}`,
+        'aria-label': `${t('Undo')} ${edit.path}`,
       },
     }) as HTMLElement;
     setIcon(undoButton, 'undo-2');

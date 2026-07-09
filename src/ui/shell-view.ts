@@ -1085,6 +1085,18 @@ export class ShellView extends ItemView {
         }
     }
 
+    // 语言切换后重建视图，让 t() 文案即时刷新。
+    // 走 onClose→onOpen 完整生命周期而非裸调 onOpen：onClose 精确拆除 onOpen 注册的
+    // 事件/心跳/订阅，避免重复 registerEvent 与 interval 泄漏；tabManager 在构造函数创建，
+    // 跨此周期存活，会话/标签页得以还原。流式进行中则跳过，避免打断输出。
+    async rerender(): Promise<void> {
+        if (this.isResponding || this.tabManager.getAllTabs().some(tab => tab.isStreaming)) {
+            return;
+        }
+        await this.onClose();
+        await this.onOpen();
+    }
+
     // ==================== Heartbeat Monitoring ====================
 
     private startHeartbeat() {
@@ -1533,7 +1545,7 @@ export class ShellView extends ItemView {
         try {
             const models = await this.modelService.getAvailableModels(forceRefresh);
 
-            // 鐢ㄦ埛鍦ㄨ姹傛湡闂村垏鎹簡 provider锛屼涪寮冩棫璇锋眰缁撴灉
+            // 用户在请求期间切换了 provider，丢弃旧请求结果
             if (requestId !== this.modelLoadRequestId) return;
 
             selectEl.empty();
@@ -2098,7 +2110,7 @@ export class ShellView extends ItemView {
         if (projection) {
             this.rebuildActiveTabFromProjection(projection, hiddenCount);
         } else {
-            new Notice('无法切换分支。');
+            new Notice(t('Cannot switch branch.'));
         }
     }
 
@@ -2108,7 +2120,7 @@ export class ShellView extends ItemView {
         if (!cid) return;
         const userMessage = this.findPrecedingUserMessage(aiMessage);
         if (!userMessage?.sessionEntryId) {
-            new Notice('无法定位要分叉的问题。');
+            new Notice(t('Cannot locate the question to fork.'));
             return;
         }
         await this.forkAndRerun(cid, userMessage.sessionEntryId, newText);
@@ -2120,7 +2132,7 @@ export class ShellView extends ItemView {
         if (!cid) return;
         const userMessage = this.findPrecedingUserMessage(aiMessage);
         if (!userMessage?.sessionEntryId) {
-            new Notice('无法定位要重试的问题。');
+            new Notice(t('Cannot locate the question to retry.'));
             return;
         }
         // 重试:同一问题重生成,新答案换掉旧的、不保留旧分支(supersede=true)。
@@ -2131,7 +2143,7 @@ export class ShellView extends ItemView {
     private async handleEditMessage(userMessage: ChatMessage, newText: string) {
         const cid = this.tabManager.getActiveTab()?.id;
         if (!cid || !userMessage.sessionEntryId) {
-            new Notice('无法编辑该消息。');
+            new Notice(t('Cannot edit this message.'));
             return;
         }
         await this.forkAndRerun(cid, userMessage.sessionEntryId, newText);
@@ -2154,7 +2166,7 @@ export class ShellView extends ItemView {
 
         const positioned = await this.modelService.prepareRetryFromUser(conversationId, userEntryId, { supersede });
         if (!positioned) {
-            new Notice('无法定位分叉点,已取消重跑。');
+            new Notice(t('Cannot locate the fork point; rerun cancelled.'));
             return;
         }
 

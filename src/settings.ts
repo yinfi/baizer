@@ -2,7 +2,7 @@ import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, TextC
 import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 import { OntologyUpdateMode } from './knowledge/types';
-import { t } from './i18n/zh';
+import { t, getLocale, Locale } from './i18n/zh';
 
 export type SettingsSectionId =
     | 'overview'
@@ -534,7 +534,10 @@ function ensureSettingsFallbackStyles(): void {
     doc.head?.appendChild(styleEl);
 }
 
-const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
+// 惰性求值：t() 依赖当前 locale，必须在调用时（而非模块加载时）求值，
+// 否则切换语言后分区标题/描述不会更新（模块级常量会冻结初次 t() 结果）。
+function getSettingsSections(): SettingsSectionMeta[] {
+    return [
     { id: 'overview', title: t('Overview'), description: t('Configuration health and actions that need attention.'), keywords: ['overview', 'health', 'risk', 'status', '概览'] },
     { id: 'connection', title: t('Connection'), description: t('Provider, API key, endpoint, model, and connection tests.'), keywords: ['provider', 'api key', 'base url', 'model', 'connection', 'openai', 'gemini', 'deepseek', 'qwen', '连接', '服务商'] },
     { id: 'behavior', title: t('Behavior'), description: t('Context budget, system prompt, and runtime behavior.'), keywords: ['behavior', 'runtime', 'context window', 'token', 'system prompt', 'persona', 'prompt', 'thinking', 'reasoning', '行为'] },
@@ -544,9 +547,10 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     { id: 'capture', title: t('Capture'), description: t('Inbox, clipping storage, WeChat import, and URL capture.'), keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper', '采集', '微信'] },
     { id: 'knowledge', title: t('Knowledge'), description: t('Source folders, output folder, compile state, and ontology.'), keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema', '知识'] },
     { id: 'guardian', title: t('Guardian'), description: t('Inline writing assistance, trigger mode, and ignored folders.'), keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity', '守护', '行内补全', '幽灵文本', '灵敏度', '补全'] },
-    { id: 'appearance', title: t('Appearance'), description: t('Workbench theme, font size, and opacity.'), keywords: ['appearance', 'theme', 'font', 'opacity', 'terminal', 'workbench', '外观'] },
+    { id: 'appearance', title: t('Appearance'), description: t('Workbench theme, font size, and opacity.'), keywords: ['appearance', 'theme', 'font', 'opacity', 'terminal', 'workbench', 'language', 'locale', '外观', '语言'] },
     { id: 'plugin-skills', title: t('Plugin Skills'), description: t('Skill generation, excluded plugins, and startup scanning.'), keywords: ['plugin', 'skills', 'generator', 'exclude', 'startup', '插件'] },
-];
+    ];
+}
 
 function normalizeSearchQuery(query: string): string {
     return query.trim().toLowerCase();
@@ -560,9 +564,10 @@ function clampInteger(value: string, min: number, max: number, fallback: number)
 
 export function getMatchingSettingsSections(query: string): SettingsSectionId[] {
     const normalized = normalizeSearchQuery(query);
-    if (!normalized) return SETTINGS_SECTIONS.map(section => section.id);
+    const sections = getSettingsSections();
+    if (!normalized) return sections.map(section => section.id);
 
-    return SETTINGS_SECTIONS
+    return sections
         .filter(section => {
             const haystack = [section.title, section.description, ...section.keywords]
                 .join(' ')
@@ -726,7 +731,7 @@ export function getConnectionTestStatusPresentation(
 }
 
 function getSectionMeta(id: SettingsSectionId): SettingsSectionMeta {
-    const section = SETTINGS_SECTIONS.find(candidate => candidate.id === id);
+    const section = getSettingsSections().find(candidate => candidate.id === id);
     if (!section) {
         throw new Error(`Unknown settings section: ${id}`);
     }
@@ -2054,6 +2059,27 @@ export class SettingTab extends PluginSettingTab {
                 + Math.round(this.plugin.settings.terminalOpacity * 100) + '%'
             );
         };
+
+        // 语言选择：切换后即时生效（重绘设置面板 + 所有打开的 ShellView），无需重启。
+        new Setting(body)
+            .setName(t('Language'))
+            .setDesc(t('Interface language. Follow system uses your device language.'))
+            .addDropdown(drop => drop
+                .addOption('auto', t('Follow system'))
+                .addOption('en', 'English')
+                .addOption('zh', '中文')
+                .setValue(getLocale())
+                .onChange(async (value: string) => {
+                    const locale = value as Locale;
+                    if (typeof this.plugin.applyLanguageChange === 'function') {
+                        await this.plugin.applyLanguageChange(locale);
+                    } else {
+                        this.plugin.settings.language = locale;
+                        await this.persistSettingsLight();
+                    }
+                    // 设置面板自身即时重绘：分区标题/描述/各控件文案随新语言刷新。
+                    this.renderAccordion();
+                }));
 
         new Setting(body)
             .setName(t('Theme Style'))

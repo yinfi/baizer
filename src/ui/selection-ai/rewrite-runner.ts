@@ -2,6 +2,7 @@ import { EditorView } from '@codemirror/view';
 import { ModelService } from '../../services/model-service';
 import { buildActionPrompt } from './action-registry';
 import { showInlineDiff, clearInlineDiff, InlineDiffCallbacks } from './inline-diff';
+import { t } from '../../i18n/zh';
 
 export interface RewriteRequest {
   actionId: string;
@@ -62,7 +63,7 @@ export function runRewrite(
         oldText: req.selection,
         newText: '',
         status: 'error',
-        message: err.message || '改写失败',
+        message: err.message || t('Rewrite failed'),
       });
     });
 

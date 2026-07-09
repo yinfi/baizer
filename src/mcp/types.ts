@@ -1,5 +1,6 @@
 import { Plugin } from "obsidian";
 import { OntologyUpdateMode } from "../knowledge/types";
+import { Locale } from "../i18n/zh";
 
 // ===== 品牌配置 — 改名只需改这里 =====
 export const PLUGIN_ID = 'baizer';
@@ -146,6 +147,10 @@ export interface PluginSettings {
     terminalFontSize: number;
     terminalOpacity: number;
 
+    // --- 🌐 Language ---
+    // 界面语言：'auto' 跟随系统，'en' 英文，'zh' 中文。仅影响面向用户的 UI 文案，不影响 LLM prompt。
+    language: Locale;
+
     // --- 🧠 System Prompt ---
     customizePrompt: boolean;
     systemPrompt: string;
@@ -216,6 +221,9 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     terminalFontSize: 14,
     terminalOpacity: 0.95,
 
+    // Language（保持跟随系统，老用户零感知）
+    language: 'auto',
+
     // Prompt
     customizePrompt: false,
     systemPrompt: `You are Baizer, an AI knowledge workbench inside Obsidian. Be concise. Output valid Markdown.
@@ -272,4 +280,6 @@ export interface IPlugin extends Plugin {
     saveSettings(): Promise<void>;
     // 轻量落盘：仅写盘，不重建 provider/guardian/knowledge（纯 UI 字段用）。
     saveSettingsLight?(): Promise<void>;
+    // 切换界面语言：设定 locale、落盘并即时重渲染所有打开的 ShellView。
+    applyLanguageChange?(locale: Locale): Promise<void>;
 }

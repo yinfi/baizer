@@ -1,3 +1,32 @@
+### [2026-07-09 11:39] Task Summary — 多语言支持（英/中，手动选择 + 即时生效）
+
+**1. 刚刚做了什么? (What was done?)**
+- i18n 核心（`src/i18n/zh.ts`）：从「`navigator.language` 一次性冻结」改为 `Locale = 'auto'|'en'|'zh'` 驱动；新增 `setLocale/getLocale/resolveLocale`，`setLocaleForTesting` 保留为薄包装（测试零改动）。
+- 新增设置字段 `language`（`src/mcp/types.ts`，默认 `'auto'` 跟随系统）；Appearance 分区加语言下拉（跟随系统/English/中文），并补搜索关键词。
+- 即时生效：消灭 `settings.ts` 里唯一的模块级 `t()` 冻结点（`SETTINGS_SECTIONS` → `getSettingsSections()` 惰性求值）；`main.ts` 新增 `applyLanguageChange()`，切换后轻量落盘并遍历所有 `ShellView` 调 `rerender()`（走 onClose→onOpen 完整生命周期，流式中跳过）。
+- 翻译覆盖审计：把绕过 `t()` 的硬编码 UI 文案全部外化（approval-card / message-renderer / selection-ai / selection-menu / shell-view Notice / chat-controller 命令反馈），新增 ~80 条英文 key→中文映射入 `zh-messages.ts`。
+- 顺手修复 `chat-controller.ts`(34 处)+`shell-view.ts`(1 处)磁盘上的 GBK↔UTF-8 乱码。
+- 新增 `test/i18n-locale.test.ts`（5 用例）；适配 message-renderer / approval-flow 测试的过时断言。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 项目已有 i18n（英文原文为 key），「多语言支持」真正缺的是用户可控性（原来只能被系统语言锁死）与切换即时生效。以第一性原理只补这两点，不引入过度设计的 locale 注册表（范围锁英+中）。
+- 乱码是既有损坏（git HEAD 即存在），用户确认顺手修复。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 乱码是 GBK↔UTF-8 双重编码，62 行含 `?` 替换符（信息已丢失，无法机械还原）；Edit 无法稳定匹配损坏字节。
+- 模块级 `SETTINGS_SECTIONS` 在加载时冻结 `t()`，切换语言不更新。
+- `ShellView` 裸调 `onOpen()` 会重复 `registerEvent` + 泄漏心跳/订阅。
+- 运行机器是中文系统：依赖硬编码文案的测试在文案走 `t()` 后返回中文，断言失败。
+
+**4. 如何修复的? (How was it fixed?)**
+- 乱码：写一次性 Python 脚本按行号精确覆盖（区分 注释/prompt 还原中文、用户文案外化为 `t()`），保留 CRLF+BOM；用完删除。
+- 冻结点：改惰性函数，`t()` 调用时求值。
+- 重渲染：`rerender()` 走 `onClose()→onOpen()` 完整周期（onClose 精确拆除 onOpen 注册项，`tabManager` 在构造函数创建、跨周期存活），流式中忽略。
+- 测试：给 message-renderer/approval-flow 加 `setLocaleForTesting(false)` 固定英文并更新为英文断言；i18n 测试的 `auto` 用例改为「中/英之一」不硬编码方向。
+- 验证：`tsc --noEmit --skipLibCheck` 零错误、`npm run build` 通过、全量 89 个测试文件通过。
+
+---
+
 ### [2026-07-08 16:55] Task Summary — 支持 OpenAI Responses API（cch 供应商聊天失败修复）
 
 **1. 刚刚做了什么? (What was done?)**

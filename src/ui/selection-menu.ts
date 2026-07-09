@@ -204,10 +204,10 @@ function createChatPanel(
     for (const action of SELECTION_ACTIONS) {
         const btn = actionBar.createEl('button', {
             cls: 'baizer-action-btn',
-            attr: { type: 'button', title: action.label, 'aria-label': action.label },
+            attr: { type: 'button', title: t(action.label), 'aria-label': t(action.label) },
         });
         setIcon(btn, action.icon);
-        btn.createSpan({ cls: 'baizer-action-label', text: action.label });
+        btn.createSpan({ cls: 'baizer-action-label', text: t(action.label) });
         btn.onclick = (event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -334,7 +334,7 @@ function createChatPanel(
         if (state.mode === 'selection') {
             const selectionText = view.state.doc.sliceString(state.from, state.to);
             const lastAi = [...state.controller.getMessages()].reverse().find(m => m.role === 'ai');
-            if (!lastAi?.content) { new Notice('还没有可应用的 AI 回答。'); return; }
+            if (!lastAi?.content) { new Notice(t('No AI response to apply yet.')); return; }
             // 记录模块级改写上下文,供内联 diff 的 accept/reject 回调桥接使用。
             // request 置空:这是「应用最后一条 AI 回答」,无对应改写动作可 retry(retry 将是 no-op)。
             rewriteView = view;
@@ -402,7 +402,7 @@ async function runSelectionAction(
     const action = getAction(actionId);
     if (!action) return;
     const targetText = getTargetText(view, state);
-    if (!targetText.trim()) { new Notice('请先选中文字。'); return; }
+    if (!targetText.trim()) { new Notice(t('Please select some text first.')); return; }
 
     if (action.kind === 'readonly') {
         // 只读类:走对话框既有流式通道(带 web_search + query_knowledge 工具)

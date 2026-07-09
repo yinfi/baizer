@@ -142,6 +142,10 @@ function createWorkspaceApp() {
 
 async function runTests() {
   console.log('=== Approval Flow Tests ===');
+  // 审批卡文案已走 t()。这些是结构性断言(按钮 title/aria),与语言无关,
+  // 固定英文 locale 以保证在中文机器上也确定性通过。
+  const { setLocaleForTesting } = await import('../src/i18n/zh');
+  setLocaleForTesting(false);
   const { ChatController } = await import('../src/ui/chat-controller');
   const { renderApprovalCard } = await import('../src/ui/approval-card');
 
@@ -420,8 +424,8 @@ async function runTests() {
       },
     );
 
-    expect(container.querySelector('.shell-approval-title')?.textContent).toBe('需要审批：移动文件');
-    expect(container.querySelector('.shell-approval-action-value')?.textContent).toBe('移动');
+    expect(container.querySelector('.shell-approval-title')?.textContent).toBe('Approval needed: move file');
+    expect(container.querySelector('.shell-approval-action-value')?.textContent).toBe('Move');
     expect(container.querySelector('.shell-approval-target-value')?.textContent).toBe('AI开发指南.md');
     expect(container.querySelector('.shell-approval-newpath-value')?.textContent).toBe('study/AI/AI开发指南.md');
     expect(container.querySelector('.shell-approval-confirm')?.attributes.title).toBe('Approve move');
@@ -455,8 +459,8 @@ async function runTests() {
       { onApprove: () => { }, onCancel: () => { } },
     );
 
-    expect(container.querySelector('.shell-approval-title')?.textContent).toBe('需要审批：重命名文件');
-    expect(container.querySelector('.shell-approval-action-value')?.textContent).toBe('重命名');
+    expect(container.querySelector('.shell-approval-title')?.textContent).toBe('Approval needed: rename file');
+    expect(container.querySelector('.shell-approval-action-value')?.textContent).toBe('Rename');
     expect(container.querySelector('.shell-approval-confirm')?.attributes.title).toBe('Approve rename');
   });
 
@@ -523,7 +527,7 @@ async function runTests() {
       },
     );
 
-    expect(container.querySelector('.shell-approval-title')?.textContent).toBe('需要审批：修改当前笔记');
+    expect(container.querySelector('.shell-approval-title')?.textContent).toBe('Approval needed: modify current note');
     expect(container.querySelector('.shell-change-preview-diff-count')?.textContent).toContain('changed lines');
     expect(!!container.querySelector('.shell-change-preview-diff-line-removed')).toBe(true);
     expect(!!container.querySelector('.shell-change-preview-diff-line-added')).toBe(true);

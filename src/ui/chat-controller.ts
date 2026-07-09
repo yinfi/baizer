@@ -2,6 +2,7 @@
 import { ModelService } from '../services/model-service';
 import { StreamEvent } from '../models/interfaces';
 import { logger } from '../utils/logger';
+import { t } from '../i18n/zh';
 import {
     buildFileWriteFailureMessage,
     getFileWriteError,
@@ -50,7 +51,7 @@ export class ChatController {
     private onWorkspaceEditUndoFailed?: (message: string) => void;
     private activeStreamController: AbortController | null = null;
 
-    // 鏂囦欢鎼滅储缂撳瓨
+    // 文件搜索缓存
     private fileSearchCache: { term: string; results: any[]; timestamp: number } | null = null;
     private readonly FILE_SEARCH_CACHE_TTL = 5000; // 5绉掔紦瀛?
     private fileSearchCacheCleanupTimer: number | null = null;
@@ -67,10 +68,10 @@ export class ChatController {
         this.onWorkspaceEditUndone = options.onWorkspaceEditUndone;
         this.onWorkspaceEditUndoFailed = options.onWorkspaceEditUndoFailed;
 
-        // 璁剧疆瀹氭椂鍣ㄦ竻鐞嗚繃鏈熺殑鏂囦欢鎼滅储缂撳瓨
+        // 设置定时器清理过期的文件搜索缓存
         this.fileSearchCacheCleanupTimer = window.setInterval(() => {
             this.cleanupExpiredFileSearchCache();
-        }, 60000); // 姣?0绉掓鏌ヤ竴娆?
+        }, 60000); // 每 60 秒检查一次
     }
 
     public getMessages(): ChatMessage[] {
@@ -86,7 +87,7 @@ export class ChatController {
         this.addMessage('system', 'Session cleared.');
     }
 
-    // 娓呯悊杩囨湡鐨勬枃浠舵悳绱㈢紦瀛?
+        // 清理过期的文件搜索缓存
     private cleanupExpiredFileSearchCache() {
         if (this.fileSearchCache) {
             const now = Date.now();
@@ -97,16 +98,16 @@ export class ChatController {
         }
     }
 
-    // 娓呯悊璧勬簮锛堝湪缁勪欢鍗歌浇鏃惰皟鐢級
+        // 清理资源（在组件卸载时调用）
     public cleanup() {
         this.activeStreamController?.abort();
         this.activeStreamController = null;
-        // 娓呯悊鏂囦欢鎼滅储缂撳瓨瀹氭椂鍣?
+        // 清理文件搜索缓存定时器
         if (this.fileSearchCacheCleanupTimer !== null) {
             window.clearInterval(this.fileSearchCacheCleanupTimer);
             this.fileSearchCacheCleanupTimer = null;
         }
-        // 娓呯┖缂撳瓨
+        // 清空缓存
         this.fileSearchCache = null;
     }
 
@@ -225,7 +226,7 @@ export class ChatController {
                         fullText = '';
                     }
                 }
-                // 娴佸紡妯″紡涓嬪彧璁板綍鍒板巻鍙诧紝涓嶈Е鍙?appendMessage锛圲I 宸查€氳繃 stream 浜嬩欢娓叉煋锛?
+        // 流式模式下只记录到历史，不触发 appendMessage（UI 已通过 stream 事件渲染）
                 if (!approvalRequest) {
                     if (isWriteRequest && !successfulFileWrite) {
                         this.addMessage(
@@ -305,7 +306,7 @@ export class ChatController {
                 this.addMessage('system', `## Available Tools\n\n${toolsList}`);
                 break;
             case '/file-back':
-                // 鍚庡彴鎵ц锛屼笉闃诲涓绘祦绋?
+        // 后台执行，不阻塞主流程
                 this.runFileBackInBackground(argStr.trim());
                 break;
             case '/wiki:compile':
@@ -590,12 +591,12 @@ export class ChatController {
     }
 
     private async handleOpenFile(searchTerm: string) {
-        // 妫€鏌ョ紦瀛?
+        // 检查缓存
         const now = Date.now();
         if (this.fileSearchCache &&
             this.fileSearchCache.term === searchTerm &&
             now - this.fileSearchCache.timestamp < this.FILE_SEARCH_CACHE_TTL) {
-            // 浣跨敤缂撳瓨缁撴灉
+            // 使用缓存结果
             const matches = this.fileSearchCache.results;
             if (matches.length === 0) {
                 this.addMessage('system', `No files found matching "${searchTerm}"`);
@@ -609,14 +610,14 @@ export class ChatController {
             return;
         }
 
-        // 鎵ц鎼滅储
+        // 执行搜索
         const files = this.app.vault.getFiles();
         const matches = files.filter(f =>
             f.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
             f.basename.toLowerCase().includes(searchTerm.toLowerCase())
         );
 
-        // 缂撳瓨缁撴灉
+        // 缓存结果
         this.fileSearchCache = {
             term: searchTerm,
             results: matches,
@@ -741,8 +742,8 @@ export class ChatController {
     }
 
     /**
-     * 鍚庡彴鎵ц file-back锛屼笉闃诲 UI
-     * 鎵嬪姩妯″紡锛堭煈嶆寜閽級鍜岃嚜鍔ㄦā寮忓叡鐢?
+     * 后台执行 file-back，不阻塞 UI
+     * 手动模式（👍 按钮）和自动模式共用
      */
     private async runFileBackInBackground(msgId: string) {
         const targetMsg = this.messages.find(m => m.id === msgId && m.role === 'ai');
@@ -766,7 +767,7 @@ export class ChatController {
             }
         }
 
-        const fileBackPrompt = `鐢ㄦ埛瀵逛互涓嬪洖绛旂偣璧烇紝璇峰皢鍏跺綊妗ｅ埌鐭ヨ瘑搴撱€備娇鐢?file_back_knowledge 宸ュ叿锛屾彁鍙栨爣棰樺拰鏍稿績鍐呭锛屽苟鎻愬彇鐩稿叧鐨?topics 涓婚鏍囩銆俓n\n鍥炵瓟鍐呭锛歕n${targetMsg.content}`;
+        const fileBackPrompt = `用户对以下回答点赞，请将其归档到知识库。使用 file_back_knowledge 工具，提取标题和核心内容，并提取相关的 topics 主题标签。\n\n回答内容：\n${targetMsg.content}`;
         this.api.chat(fileBackPrompt, [], '').then(() => {
             this.addMessage('system', 'Archived to the knowledge wiki.');
         }).catch((error: any) => {
@@ -813,15 +814,15 @@ export class ChatController {
     }
 
     /**
-     * 鑷姩 file-back 宸茬Щ闄わ細鏀逛负 AI 鍦?query_knowledge 娴佺▼涓嚜涓诲垽鏂槸鍚﹁皟鐢?file_back_knowledge
-     * 鎵嬪姩妯″紡淇濈暀锛氱敤鎴风偣璧烇紙馃憤锛夋椂閫氳繃 /file-back 鍛戒护瑙﹀彂
+     * 自动 file-back 已移除：改为 AI 在 query_knowledge 流程中自主判断是否调用 file_back_knowledge
+     * 手动模式保留：用户点赞（👍）时通过 /file-back 命令触发
      */
 
     /**
-     * /wiki:compile [path] 鈥?缂栬瘧绗旇鍒扮煡璇?wiki
-     * 鏃犲弬鏁帮細缂栬瘧褰撳墠绗旇 + 鎵€鏈?pending
-     * 鏂囦欢璺緞锛氱紪璇戞寚瀹氭枃浠?
-     * 鐩綍璺緞锛氭壂鎻忕洰褰曚笅鎵€鏈?.md 娉ㄥ唽骞剁紪璇?
+     * /wiki:compile [path] — 编译笔记到知识 wiki
+     * 无参数：编译当前笔记 + 所有 pending
+     * 文件路径：编译指定文件
+     * 目录路径：扫描目录下所有 .md 注册并编译
      */
     private async handleMemory(input: string, legacyCommand?: '/profile') {
         const trimmed = input.trim();
@@ -1011,7 +1012,7 @@ export class ChatController {
 
     private async handleNewNote(argStr: string) {
         if (!argStr.trim()) {
-            this.addMessage('system', '鐢ㄦ硶: `/new <title>` 鎴?`/new <title> <content>`');
+            this.addMessage('system', t('Usage: `/new <title>` or `/new <title> <content>`'));
             return;
         }
         const firstNewline = argStr.indexOf('\n');
@@ -1022,15 +1023,15 @@ export class ChatController {
         try {
             const existing = this.app.vault.getAbstractFileByPath(path);
             if (existing) {
-                this.addMessage('system', `鏂囦欢宸插瓨鍦? ${path}`);
+                this.addMessage('system', `${t('File already exists:')} ${path}`);
                 return;
             }
             const file = await this.app.vault.create(path, content);
             const leaf = this.app.workspace.getLeaf(false);
             await leaf.openFile(file);
-            this.addMessage('system', `宸插垱寤哄苟鎵撳紑: [[${path}]]`);
+            this.addMessage('system', `${t('Created and opened:')} [[${path}]]`);
         } catch (e: any) {
-            this.addMessage('system', `鍒涘缓澶辫触: ${e.message}`);
+            this.addMessage('system', `${t('Failed to create:')} ${e.message}`);
         }
     }
 
@@ -1050,7 +1051,7 @@ export class ChatController {
 
         this.setResponding(true);
         try {
-            const prompt = `璇锋牴鎹互涓嬫寚浠や慨鏀规枃鏈紝鍙繑鍥炰慨鏀瑰悗鐨勬枃鏈紝涓嶈瑙ｉ噴銆俓n\n鎸囦护: ${instruction}\n\n鍘熸枃:\n${selection}`;
+            const prompt = `请根据以下指令修改文本，只返回修改后的文本，不要解释。\n\n指令: ${instruction}\n\n原文:\n${selection}`;
             const result = await this.api.chat(
                 instruction,
                 [],
@@ -1059,7 +1060,7 @@ export class ChatController {
             );
             this.addMessage('ai', result);
         } catch (e: any) {
-            this.addMessage('system', `缂栬緫澶辫触: ${e.message}`);
+            this.addMessage('system', `${t('Edit failed:')} ${e.message}`);
         } finally {
             this.setResponding(false);
         }
@@ -1067,16 +1068,16 @@ export class ChatController {
 
     private async handleSave(url: string) {
         if (!url.trim()) {
-            this.addMessage('system', '鐢ㄦ硶: `/save <url>`\n鏀寔: 缃戦〉銆乊ouTube銆丅ilibili銆佸井淇″叕浼楀彿');
+            this.addMessage('system', t('Usage: `/save <url>`\nSupported: web pages, YouTube, Bilibili, WeChat articles'));
             return;
         }
         this.setResponding(true);
         try {
-            const prompt = `璇蜂娇鐢?save_webpage 宸ュ叿淇濆瓨杩欎釜閾炬帴: ${url.trim()}`;
+            const prompt = `请使用 save_webpage 工具保存这个链接: ${url.trim()}`;
             const result = await this.api.chat(prompt, [], '');
             this.addMessage('ai', result);
         } catch (e: any) {
-            this.addMessage('system', `淇濆瓨澶辫触: ${e.message}`);
+            this.addMessage('system', `${t('Save failed:')} ${e.message}`);
         } finally {
             this.setResponding(false);
         }
@@ -1102,13 +1103,13 @@ export class ChatController {
 
         let help = `## Shell Commands\n\n`;
         help += localCommands
-            .map((entry) => `- \`${entry.command}\` 鈥?${entry.description}`)
+            .map((entry) => `- \`${entry.command}\` — ${entry.description}`)
             .join('\n');
 
         if (skillCommands.length > 0) {
             help += `\n\n## Skill Commands\n\n`;
             help += skillCommands
-                .map((entry: any) => `- \`${entry.command}\` 鈥?${entry.description}`)
+                .map((entry: any) => `- \`${entry.command}\` — ${entry.description}`)
                 .join('\n');
         }
 
@@ -1163,29 +1164,29 @@ export class ChatController {
         this.setResponding(true);
         try {
             if (!path) {
-                // 鏃犲弬鏁帮細缂栬瘧褰撳墠绗旇 + 鎵€鏈?pending
+            // 无参数：编译当前笔记 + 所有 pending
                 const activeFile = this.app.workspace.getActiveFile();
                 if (activeFile) {
-                    this.addMessage('system', `缂栬瘧: ${activeFile.path}...`);
+                    this.addMessage('system', `${t('Compiling:')} ${activeFile.path}...`);
                     const r = await runtime.compileByPath(activeFile.path);
-                    this.addMessage('system', `瀹屾垚: 娉ㄥ唽 ${r.registered}锛屾垚鍔?${r.success}锛屽け璐?${r.failed}`);
+                    this.addMessage('system', `${t('Done: registered')} ${r.registered}, ${t('succeeded')} ${r.success}, ${t('failed')} ${r.failed}`);
                 }
-                // 鍐嶇紪璇戞墍鏈?pending锛屽甫杩涘害鍥炶皟閬垮厤 heartbeat 璇姤
+                    // 再编译所有 pending，带进度回调避免 heartbeat 误报
                 const maxBatch = runtime.settings.knowledgeMaxCompileBatch || 50;
                 const result = await runtime.compiler.compileAllPending(maxBatch, (current: number, total: number, noteId: string) => {
-                    this.addMessage('system', `[${current}/${total}] 缂栬瘧: ${noteId}`);
+                    this.addMessage('system', `[${current}/${total}] ${t('Compiling:')} ${noteId}`);
                 });
                 if (result.success > 0) {
                     await runtime.indexer.rebuildIndex();
                 }
-                this.addMessage('system', `鎵归噺缂栬瘧瀹屾垚: ${result.success} 鎴愬姛, ${result.failed} 澶辫触`);
+                this.addMessage('system', `${t('Batch compile done:')} ${result.success} ${t('succeeded')}, ${result.failed} ${t('failed')}`);
             } else {
-                this.addMessage('system', `缂栬瘧: ${path}...`);
+                this.addMessage('system', `${t('Compiling:')} ${path}...`);
                 const r = await runtime.compileByPath(path);
-                this.addMessage('system', `瀹屾垚: 娉ㄥ唽 ${r.registered}锛屾垚鍔?${r.success}锛屽け璐?${r.failed}`);
+                this.addMessage('system', `${t('Done: registered')} ${r.registered}, ${t('succeeded')} ${r.success}, ${t('failed')} ${r.failed}`);
             }
         } catch (e: any) {
-            this.addMessage('system', `缂栬瘧澶辫触: ${e.message}`);
+            this.addMessage('system', `${t('Compile failed:')} ${e.message}`);
         } finally {
             this.setResponding(false);
         }

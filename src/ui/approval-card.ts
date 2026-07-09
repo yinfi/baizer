@@ -1,6 +1,7 @@
 import { ChangePreview } from './diff/change-preview';
 import { renderChangePreviewCard } from './components/change-preview-card';
 import { setIcon } from 'obsidian';
+import { t } from '../i18n/zh';
 
 // rename_note 工具同时承担「重命名」和「移动」两件事(底层都是 vault.rename)。
 // 审批卡需按 oldPath/newPath 的父目录是否变化来区分,否则用户看到的「rename」文案
@@ -65,7 +66,7 @@ export function renderApprovalCard(
   const copy = header.createDiv({ cls: 'shell-approval-copy' });
   copy.createDiv({ cls: 'shell-approval-title', text: getApprovalTitle(request) });
   copy.createDiv({ cls: 'shell-approval-message', text: request.message });
-  copy.createDiv({ cls: 'shell-approval-risk', text: `${capitalize(risk)} risk` });
+  copy.createDiv({ cls: 'shell-approval-risk', text: `${t(capitalize(risk))} ${t('risk')}` });
 
   const isRename = isRenameRequest(request);
 
@@ -74,12 +75,12 @@ export function renderApprovalCard(
     // 移动/重命名:一处「操作 + 从 → 到」即可说清,不再重复 Action/Target 两行 +
     // 内嵌预览子卡(对 rename 只是重复 summary 和同一路径)。仅去重,不动卡片结构。
     const info = describeRename(request);
-    renderFact(facts, '操作', info.isMove ? '移动' : '重命名', 'shell-approval-action-value');
-    renderFact(facts, '从', info.oldPath, 'shell-approval-target-value');
-    renderFact(facts, '到', info.newPath, 'shell-approval-newpath-value');
+    renderFact(facts, t('Operation'), info.isMove ? t('Move') : t('Rename'), 'shell-approval-action-value');
+    renderFact(facts, t('From'), info.oldPath, 'shell-approval-target-value');
+    renderFact(facts, t('To'), info.newPath, 'shell-approval-newpath-value');
   } else {
-    renderFact(facts, 'Action', request.action, 'shell-approval-action-value');
-    renderFact(facts, 'Target', request.target, 'shell-approval-target-value');
+    renderFact(facts, t('Action'), request.action, 'shell-approval-action-value');
+    renderFact(facts, t('Target'), request.target, 'shell-approval-target-value');
   }
 
   if (request.preview?.preconditions?.length) {
@@ -106,12 +107,12 @@ export function renderApprovalCard(
   };
 
   if (handlers.onFocusPreview && previewSupportsEditorPreview(request.preview)) {
-    buttons.push(createIconButton(actions, 'shell-approval-focus-preview', 'locate-fixed', 'Show editor preview', setIconFn, () => {
+    buttons.push(createIconButton(actions, 'shell-approval-focus-preview', 'locate-fixed', t('Show editor preview'), setIconFn, () => {
       if (pending) return;
       void handlers.onFocusPreview?.();
     }));
   }
-  const cancelButton = createIconButton(actions, 'shell-approval-cancel', 'x', 'Cancel', setIconFn, () => {
+  const cancelButton = createIconButton(actions, 'shell-approval-cancel', 'x', t('Cancel'), setIconFn, () => {
     if (pending) return;
     setPending();
     void handlers.onCancel();
@@ -177,29 +178,29 @@ function inferRisk(request: ApprovalRequest): 'low' | 'medium' | 'high' {
 
 function getApproveLabel(request: ApprovalRequest) {
   const action = request.action.toLowerCase();
-  if (action.includes('delete') || action.includes('remove')) return 'Approve delete';
-  if (action.includes('create')) return 'Approve create';
+  if (action.includes('delete') || action.includes('remove')) return t('Approve delete');
+  if (action.includes('create')) return t('Approve create');
   if (isRenameRequest(request)) {
-    return describeRename(request).isMove ? 'Approve move' : 'Approve rename';
+    return describeRename(request).isMove ? t('Approve move') : t('Approve rename');
   }
   if (action.includes('edit') || action.includes('modify') || action.includes('update') || action.includes('replace')) {
-    return 'Approve edit';
+    return t('Approve edit');
   }
-  return 'Approve action';
+  return t('Approve action');
 }
 
 function getApprovalTitle(request: ApprovalRequest) {
   const action = request.action.toLowerCase();
-  if (action.includes('delete') || action.includes('remove')) return '\u9700\u8981\u5ba1\u6279\uff1a\u5220\u9664\u5185\u5bb9';
-  if (action.includes('create')) return '\u9700\u8981\u5ba1\u6279\uff1a\u521b\u5efa\u5185\u5bb9';
+  if (action.includes('delete') || action.includes('remove')) return t('Approval needed: delete content');
+  if (action.includes('create')) return t('Approval needed: create content');
   if (isRenameRequest(request)) {
-    return describeRename(request).isMove ? '\u9700\u8981\u5ba1\u6279\uff1a\u79fb\u52a8\u6587\u4ef6' : '\u9700\u8981\u5ba1\u6279\uff1a\u91cd\u547d\u540d\u6587\u4ef6';
+    return describeRename(request).isMove ? t('Approval needed: move file') : t('Approval needed: rename file');
   }
   if (action.includes('edit') || action.includes('modify') || action.includes('update') || action.includes('replace')) {
-    return '\u9700\u8981\u5ba1\u6279\uff1a\u4fee\u6539\u5f53\u524d\u7b14\u8bb0';
+    return t('Approval needed: modify current note');
   }
-  if (action.includes('plugin')) return '\u9700\u8981\u5ba1\u6279\uff1a\u6267\u884c\u63d2\u4ef6\u64cd\u4f5c';
-  return '\u9700\u8981\u5ba1\u6279\uff1a\u786e\u8ba4\u64cd\u4f5c';
+  if (action.includes('plugin')) return t('Approval needed: run plugin command');
+  return t('Approval needed: confirm operation');
 }
 
 function capitalize(value: string) {

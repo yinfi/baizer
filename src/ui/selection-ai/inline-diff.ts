@@ -1,6 +1,7 @@
 import { EditorView, Decoration, DecorationSet, WidgetType } from '@codemirror/view';
 import { StateField, StateEffect, Extension, Range } from '@codemirror/state';
 import { setIcon } from 'obsidian';
+import { t } from '../../i18n/zh';
 
 export interface InlineDiffState {
   from: number;
@@ -42,7 +43,7 @@ class NewTextWidget extends WidgetType {
       wrap.appendChild(spinner);
       const hint = document.createElement('span');
       hint.className = 'baizer-inline-diff-hint';
-      hint.textContent = '正在改写…';
+      hint.textContent = t('Rewriting…');
       wrap.appendChild(hint);
       return wrap;
     }
@@ -51,9 +52,9 @@ class NewTextWidget extends WidgetType {
       wrap.classList.add('is-error');
       const hint = document.createElement('span');
       hint.className = 'baizer-inline-diff-hint';
-      hint.textContent = this.state.message || '改写失败';
+      hint.textContent = this.state.message || t('Rewrite failed');
       wrap.appendChild(hint);
-      this.addButton(wrap, 'rotate-ccw', '重试', () => callbacks?.onRetry(this.state));
+      this.addButton(wrap, 'rotate-ccw', t('Retry'), () => callbacks?.onRetry(this.state));
       return wrap;
     }
 
@@ -64,9 +65,9 @@ class NewTextWidget extends WidgetType {
     const bar = document.createElement('span');
     bar.className = 'baizer-inline-diff-actions';
     wrap.appendChild(bar);
-    this.addButton(bar, 'check', '接受', () => callbacks?.onAccept(this.state));
-    this.addButton(bar, 'x', '拒绝', () => callbacks?.onReject(this.state));
-    this.addButton(bar, 'rotate-ccw', '重试', () => callbacks?.onRetry(this.state));
+    this.addButton(bar, 'check', t('Accept'), () => callbacks?.onAccept(this.state));
+    this.addButton(bar, 'x', t('Reject'), () => callbacks?.onReject(this.state));
+    this.addButton(bar, 'rotate-ccw', t('Retry'), () => callbacks?.onRetry(this.state));
     return wrap;
   }
 

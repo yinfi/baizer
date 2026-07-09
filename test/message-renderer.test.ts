@@ -367,7 +367,7 @@ async function runTests() {
 
     const upBtn = container.querySelector('.shell-thumbs-up');
     expect(!!upBtn).toBe(true);
-    expect(upBtn?.getAttribute('title')).toBe('认可并保存到知识库');
+    expect(upBtn?.getAttribute('title')).toBe('Approve and save to knowledge base');
     // 未提供 onFeedbackDown 时不渲染点踩。
     expect(!!container.querySelector('.shell-thumbs-down')).toBe(false);
 
