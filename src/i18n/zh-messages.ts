@@ -335,5 +335,41 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Deep completion in progress': '深度补全进行中',
     'Press Tab to accept suggestion': '按 Tab 接受建议',
     'AI suggestion available, press Tab to accept:': 'AI 建议可用,按 Tab 接受:',
+
+    // ── 配置页审查改进新增文案(P1-4 i18n 补齐 / 状态徽章 / 确认框 / 概览)──
+    'Configuration': '配置',
+    // 分区状态徽章
+    'Needs key': '待填 Key',
+    'Custom provider': '自定义服务商',
+    'Private': '隐私模式',
+    'Broad access': '权限偏宽',
+    '{n} to review': '{n} 项待处理',
+    // 概览行动项
+    'Permissions too broad': '权限过宽',
+    'missing API key': '缺少 API Key',
+    'Go to': '前往',
+    // 服务商卡片('Model' 已在上文定义,此处不重复)
+    'Default provider endpoint': '默认服务商端点',
+    'Not selected': '未选择',
+    'Key configured': '已配置 Key',
+    'No API key': '未配置 API Key',
+    // 记忆
+    'Data folder': '数据目录',
+    // Guardian 深挖开关
+    'Auto deep-dive when fast completion is empty or weak': '快补无果或平庸时自动深挖笔记',
+    'When AI has no immediate suggestion or only a mediocre one while you stay put, it reads related notes and personal memory to attempt a deeper completion. Slower, uses more tokens, on by default.': '当 AI 没有即时建议、或只给出平庸建议、而你停留在原地时,自动读取相关笔记与个人记忆尝试更深入的补全。较慢、消耗更多 token,默认开启。',
+    // 破坏性操作二次确认(P1-1)
+    'Clear API Key': '清空 API Key',
+    'Clear the API key for this provider? You will need to paste it again to reconnect.': '清空该服务商的 API Key?重新连接时需要再次粘贴。',
+    'Replace your custom system prompt with the default? Your current prompt will be lost.': '用默认系统提示词覆盖你的自定义内容?当前提示词将丢失。',
+    'Open access grants full-vault writes and plugin control. AI can trigger destructive plugin actions on your behalf. Continue?': '「完全放开」将授予全库写入与插件控制,AI 可代你触发破坏性的插件操作。继续?',
+    'Automation turns off per-action confirmation. AI will write files without asking each time. Continue?': '「自动化」将关闭逐次确认,AI 写文件时不再每次询问。继续?',
+    // 本体状态(P1-4)
+    'Ontology status: Knowledge runtime is not available.': '本体状态:知识库运行时不可用。',
+    'Ontology': '本体',
+    'discovery': '发现',
+    'stale notes': '待重编译笔记',
+    'path': '路径',
+    'Ontology status unavailable': '本体状态不可用',
 };
 

@@ -2867,35 +2867,45 @@ textarea.shell-input {
    Baizer - Settings
    ========================================================================== */
 
+/* P0-4: 单一真相源 —— 合并原先分处两段、相互覆盖的 page/hero/title/subtitle 定义。
+   取最终生效值(compact accordion 版),不再依赖样式表插入顺序。 */
 .baizer-settings-page {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 10px;
     padding-bottom: 24px;
     container-type: inline-size;
 }
 
 .baizer-settings-hero {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+    grid-template-areas: "title search" "subtitle search";
+    column-gap: 12px;
+    row-gap: 4px;
+    align-items: center;
 }
 
 .baizer-settings-title {
+    grid-area: title;
     margin: 0;
     font-size: var(--font-ui-large);
     font-weight: var(--font-semibold);
 }
 
 .baizer-settings-subtitle {
+    grid-area: subtitle;
+    min-width: 0;
     margin: 0;
     color: var(--text-muted);
-    max-width: 76ch;
+    /* P2: 去掉单行 nowrap+ellipsis —— 此前副标题在常规宽度下被截断到不可读。允许换行。 */
 }
 
 .baizer-settings-search-row {
+    grid-area: search;
     display: flex;
     align-items: center;
+    min-width: 0;
 }
 
 .baizer-settings-search {
@@ -2916,90 +2926,7 @@ textarea.shell-input {
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 40%, transparent);
 }
 
-.baizer-settings-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 0;
-    min-width: 0;
-}
-
-.baizer-settings-nav-header {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 0 2px;
-}
-
-.baizer-settings-nav-title {
-    color: var(--text-muted);
-    font-size: var(--font-smallest);
-    font-weight: var(--font-medium);
-    text-transform: uppercase;
-}
-
-.baizer-settings-nav-kicker {
-    color: var(--text-faint);
-    font-size: var(--font-smallest);
-}
-
-.baizer-settings-nav-list {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 10px;
-    min-width: 0;
-}
-
-.baizer-settings-nav-item {
-    display: block;
-    flex: 0 0 auto;
-    min-width: 148px;
-    max-width: 100%;
-    padding: 0;
-    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--background-secondary) 88%, transparent);
-    color: var(--text-normal);
-    text-align: left;
-    cursor: pointer;
-    transition: border-color var(--baizer-transition-fast, 120ms ease), background-color var(--baizer-transition-fast, 120ms ease);
-}
-
-.baizer-settings-nav-item:hover {
-    background: color-mix(in srgb, var(--background-modifier-hover) 72%, var(--background-secondary));
-    border-color: var(--background-modifier-border-hover);
-}
-
-.baizer-settings-nav-item.is-active {
-    background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
-    border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 14%, transparent);
-}
-
-.baizer-settings-nav-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 10px 12px;
-}
-
-.baizer-settings-nav-copy {
-    min-width: 0;
-}
-
-.baizer-settings-nav-label {
-    font-size: var(--font-ui-small);
-    font-weight: var(--font-semibold);
-}
-
-.baizer-settings-main {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-}
+/* P0-4: 删除旧「左侧 nav 导航 + main 双栏」设计的死选择器(当前 DOM 为 accordion,src 中 0 引用)。 */
 
 .baizer-settings-section-card {
     padding: 0;
@@ -3009,16 +2936,6 @@ textarea.shell-input {
     overflow: hidden;
 }
 
-.baizer-settings-section-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 0;
-    padding: 16px 18px 14px;
-    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
-}
-
 .baizer-settings-section-copy {
     min-width: 0;
 }
@@ -3026,11 +2943,6 @@ textarea.shell-input {
 .baizer-settings-section-title {
     margin: 0;
     font-size: var(--font-ui-large);
-}
-
-.baizer-settings-section-description {
-    margin: 6px 0 0;
-    color: var(--text-muted);
 }
 
 .baizer-settings-section-content {
@@ -3101,6 +3013,16 @@ textarea.shell-input {
     transform: none;
 }
 
+/* P2: 为配置页自定义交互元素补齐键盘焦点样式,与 shell 视图 T8 焦点规范对齐。 */
+.baizer-settings-action:focus-visible,
+.baizer-settings-preset:focus-visible,
+.baizer-settings-provider-card-main:focus-visible,
+.baizer-memory-tab:focus-visible,
+.baizer-memory-delete:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--background-modifier-border-focus, var(--interactive-accent));
+}
+
 .baizer-settings-action.is-primary {
     border-color: color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border));
     background: color-mix(in srgb, var(--interactive-accent) 11%, var(--background-secondary));
@@ -3155,53 +3077,7 @@ textarea.shell-input {
     color: var(--text-faint);
 }
 
-.baizer-settings-workspace {
-    display: grid;
-    grid-template-columns: minmax(0, 3fr) minmax(0, 7fr);
-    gap: 16px;
-    align-items: stretch;
-}
-
-.baizer-settings-workspace-panel {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
-    border-radius: 14px;
-    background: color-mix(in srgb, var(--background-primary-alt) 96%, var(--background-secondary));
-    overflow: hidden;
-}
-
-.baizer-settings-workspace-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px 14px;
-    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
-}
-
-.baizer-settings-workspace-header.is-detail {
-    padding-bottom: 14px;
-}
-
-.baizer-settings-workspace-copy {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.baizer-settings-workspace-title {
-    color: var(--text-normal);
-    font-size: var(--font-ui-small);
-    font-weight: var(--font-semibold);
-}
-
-.baizer-settings-workspace-subtitle {
-    color: var(--text-muted);
-    font-size: var(--font-smallest);
-}
+/* P0-4: 删除旧「双栏 workspace」设计的死选择器(当前 DOM 为 accordion,src 中 0 引用)。 */
 
 .baizer-settings-provider-list {
     display: flex;
@@ -3235,69 +3111,10 @@ textarea.shell-input {
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
 }
 
-.baizer-settings-provider-card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-}
-
-.baizer-settings-provider-card-identity {
-    min-width: 0;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-}
-
-.baizer-settings-provider-card-statuses {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 6px;
-    flex-shrink: 0;
-}
-
 .baizer-settings-provider-card-title {
     font-size: 1.05em;
     font-weight: var(--font-semibold);
     line-height: 1.2;
-}
-
-.baizer-settings-provider-card-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    min-height: 20px;
-    padding: 0;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--background-modifier-border) 45%, transparent);
-    color: var(--text-muted);
-    font-size: 11px;
-    font-weight: var(--font-medium);
-    line-height: 1;
-}
-
-.baizer-settings-provider-card-icon.is-protocol {
-    background: color-mix(in srgb, var(--background-modifier-border) 32%, transparent);
-    color: var(--text-faint);
-}
-
-.baizer-settings-provider-card-icon.is-active {
-    background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
-    color: var(--text-accent);
-}
-
-.baizer-settings-provider-card-icon.is-success {
-    background: color-mix(in srgb, var(--color-green) 14%, transparent);
-    color: var(--color-green);
-}
-
-.baizer-settings-provider-card-icon.is-warning {
-    background: color-mix(in srgb, var(--color-yellow) 16%, transparent);
-    color: color-mix(in srgb, var(--color-yellow) 62%, var(--text-normal));
 }
 
 .baizer-settings-provider-card-meta {
@@ -3308,17 +3125,6 @@ textarea.shell-input {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-.baizer-settings-provider-summary {
-    padding: 0 12px 12px;
-    color: var(--text-muted);
-    font-size: var(--font-smallest);
-}
-
-.baizer-settings-detail-body {
-    display: flex;
-    flex-direction: column;
 }
 
 .baizer-settings-detail-row {
@@ -3385,12 +3191,7 @@ textarea.shell-input {
     flex-wrap: wrap;
 }
 
-.baizer-settings-detail-actions {
-    padding: 12px 14px 0;
-}
-
-.baizer-settings-empty-state,
-.baizer-settings-empty-nav {
+.baizer-settings-empty-state {
     padding: 20px;
     border: 1px dashed var(--background-modifier-border);
     border-radius: 12px;
@@ -3416,18 +3217,6 @@ textarea.shell-input {
 .gemini-danger-setting {
     border-left: 3px solid color-mix(in srgb, var(--text-error) 75%, transparent);
     padding-left: 10px;
-}
-
-@container (max-width: 1280px) {
-    .baizer-settings-nav-list {
-        overflow-x: auto;
-        flex-wrap: nowrap;
-        padding-bottom: 4px;
-    }
-
-    .baizer-settings-nav-item {
-        min-width: 164px;
-    }
 }
 
 @container (max-width: 840px) {
@@ -3888,44 +3677,8 @@ textarea.shell-input {
     color: var(--text-faint);
 }
 
-/* Baizer settings compact accordion overrides */
-.baizer-settings-page {
-    gap: 10px;
-    padding-bottom: 24px;
-    container-type: inline-size;
-}
-
-.baizer-settings-hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
-    grid-template-areas: "title search" "subtitle search";
-    column-gap: 12px;
-    row-gap: 4px;
-    align-items: center;
-}
-
-.baizer-settings-title {
-    grid-area: title;
-    margin: 0;
-    font-size: var(--font-ui-large);
-}
-
-.baizer-settings-subtitle {
-    grid-area: subtitle;
-    min-width: 0;
-    margin: 0;
-    color: var(--text-muted);
-    max-width: none;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.baizer-settings-search-row {
-    grid-area: search;
-    min-width: 0;
-}
-
+/* Baizer settings compact accordion overrides
+   (P0-4: page/hero/title/subtitle/search-row 的重复定义已上移合并到单一真相源,此处仅保留 grid 布局下搜索框占满列宽。) */
 .baizer-settings-search {
     width: 100%;
 }
@@ -3972,9 +3725,11 @@ textarea.shell-input {
     margin: 0;
     color: var(--text-muted);
     font-size: var(--font-smallest);
-    white-space: nowrap;
+    /* P2: 此前单行 nowrap+ellipsis 在常规宽度下把分区描述截成几个字。改为最多 2 行,超出才省略。 */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .baizer-settings-section-meta {
@@ -4201,7 +3956,10 @@ textarea.shell-input {
     .baizer-shell-view *::before,
     .baizer-shell-view *::after,
     .guardian-selection-tooltip *,
-    .baizer-attachment-modal * {
+    .baizer-attachment-modal *,
+    .baizer-settings-page *,
+    .baizer-settings-page *::before,
+    .baizer-settings-page *::after {
         animation-duration: 0.001ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.001ms !important;

@@ -1,4 +1,5 @@
 ﻿import { DEFAULT_SETTINGS, PluginSettings, mergeProviderDefaults } from '../src/mcp/types';
+import { setLocaleForTesting } from '../src/i18n/zh';
 import {
   getConnectionTestStatusPresentation,
   getProviderCardMeta,
@@ -10,6 +11,9 @@ import {
   getSettingsOverviewActions,
   getRenderableSettingsSections,
 } from '../src/settings';
+
+// 断言用英文原文 key(t() 在非中文环境返回原文),固定 locale 保证与运行环境无关。
+setLocaleForTesting(false);
 
 function cloneSettings(): PluginSettings {
   return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -63,7 +67,7 @@ async function runTests() {
 
     const statuses = getSettingsSectionStatuses(settings);
 
-    expect(statuses.connection).toEqual({ label: 'Custom', tone: 'accent' });
+    expect(statuses.connection).toEqual({ label: 'Custom provider', tone: 'accent' });
   });
 
   await test('marks Guardian as off only when disabled', () => {
@@ -101,7 +105,7 @@ async function runTests() {
 
     const statuses = getSettingsSectionStatuses(settings);
 
-    expect(statuses.permissions).toEqual({ label: 'Risk', tone: 'danger' });
+    expect(statuses.permissions).toEqual({ label: 'Broad access', tone: 'danger' });
   });
 
   await test('marks permissions as risky when vault-wide writes are enabled', () => {
@@ -112,7 +116,7 @@ async function runTests() {
 
     const statuses = getSettingsSectionStatuses(settings);
 
-    expect(statuses.permissions).toEqual({ label: 'Risk', tone: 'danger' });
+    expect(statuses.permissions).toEqual({ label: 'Broad access', tone: 'danger' });
   });
 
   await test('enables provider deletion for built-in providers when alternatives remain', () => {
@@ -292,10 +296,10 @@ async function runTests() {
     settings.allowPluginControl = true;
 
     expect(getSettingsOverviewActions(settings)).toEqual([
-      { label: '权限过宽', sectionId: 'permissions', tone: 'danger' },
-      { label: 'Google Gemini 缺少 API Key', sectionId: 'connection', tone: 'warning' },
-      { label: 'OpenAI 缺少 API Key', sectionId: 'connection', tone: 'warning' },
-      { label: 'Qwen 缺少 API Key', sectionId: 'connection', tone: 'warning' },
+      { label: 'Permissions too broad', sectionId: 'permissions', tone: 'danger' },
+      { label: 'Google Gemini missing API key', sectionId: 'connection', tone: 'warning' },
+      { label: 'OpenAI missing API key', sectionId: 'connection', tone: 'warning' },
+      { label: 'Qwen missing API key', sectionId: 'connection', tone: 'warning' },
     ]);
   });
 
