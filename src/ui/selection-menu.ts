@@ -259,7 +259,11 @@ async function openExplainPanel(
         onReplace: () => {
             const lastAi = [...controller.getMessages()].reverse().find(m => m.role === 'ai');
             if (!lastAi?.content) { new Notice(t('No AI response to apply yet.')); return; }
-            view.dispatch({ changes: { from: state.from, to: state.to, insert: lastAi.content.trim() } });
+            // 解释流式期间用户可能已编辑文档,原偏移会错位。用选区快照重定位,
+            // 找不到则中止替换(绝不盲写),提示用户手动复制。
+            const target = relocateRange(view.state, state.from, state.to, selection);
+            if (!target) { new Notice(t('Selection changed; cannot replace. Please copy manually.')); return; }
+            view.dispatch({ changes: { from: target.from, to: target.to, insert: lastAi.content.trim() } });
             panel.destroy();
         },
     });

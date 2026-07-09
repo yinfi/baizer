@@ -450,6 +450,7 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Reject': '拒绝',
     'No AI response to apply yet.': '还没有可应用的 AI 回答。',
     'Please select some text first.': '请先选中文字。',
+    'Selection changed; cannot replace. Please copy manually.': '选区已变化,无法替换,请手动复制。',
 
     // ── ShellView 分支/重试提示(Notice)──
     'Cannot switch branch.': '无法切换分支。',
