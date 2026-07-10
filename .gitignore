@@ -37,3 +37,7 @@ Thumbs.db
 
 # OMC 运行时状态（会话/HUD/state，不入库）
 .omc/
+
+# 项目私有/个人文件,不入库
+CLAUDE.md
+FORYF.md
