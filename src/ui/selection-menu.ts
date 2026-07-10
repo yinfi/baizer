@@ -147,6 +147,13 @@ function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
     dom.className = `guardian-selection-tooltip is-${state.type}`;
     if (state.type === 'hidden' || !context) return { dom };
 
+    // 防重:同一文档在运行时可能同时存在多个 CM 实例(链接面板 / 同笔记多标签 / 隐藏后台编辑器)。
+    // 它们都注册了本扩展,选区被 Obsidian 同步后各自的 field 都看到非空选区、各弹一个工具条;
+    // 又因 tooltip 被 parent 到 document.body + position:fixed,非当前实例也会显示在视口,
+    // 造成"两个工具条"。选区在语义上只属于用户此刻聚焦的那个编辑器 —— DOM 焦点唯一,
+    // 只让 hasFocus 的实例渲染,其余返回空节点。(隐藏后台实例天然无焦点,一并被挡掉。)
+    if (!view.hasFocus) return { dom };
+
     // selection 场景:横向工具条,点动作直接分流。
     if (state.type === 'toolbar') {
         const bar = dom.createDiv({ cls: 'baizer-selection-toolbar' });
