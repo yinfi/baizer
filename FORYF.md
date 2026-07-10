@@ -1,3 +1,41 @@
+### [2026-07-10 11:15] Task Summary — 重做 ribbon 图标 + Side-Shell 头部(design-shotgun)
+
+**1. 刚刚做了什么? (What was done?)**
+- Ribbon 图标:`main.ts` 用 `addIcon('baizer-bz', ...)` 注册自定义 BZ 字标(描边圆角方 + 填充 BZ 文字),替换原 `'terminal'` 系统图标(与命令面板 `>_` 撞脸)。
+- 头部(方案 V1「作用域胶囊」):`shell-view.ts` 把静态 `"Ready - current note scoped"` 换成绿点胶囊 `.shell-scope-pill`,绑定真实活动笔记(`getActiveFile` + `excludedCurrentNotePath`),在 file-open/作用域增删三处同步;新增 `updateScopePill()`;`styles.css` 加胶囊样式、品牌块 36→30px;i18n 补 `'No note in scope'`。
+- 先用 design-shotgun 流程出对比板(真实 SVG+CSS,按侧栏 290px 渲染),用户选定 icon C + header V1。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 原图标复用 lucide `terminal`,视觉上与系统命令面板无法区分;原头部状态文案技术化且看不出作用于哪篇笔记。
+- design-shotgun 引擎只产 Web 位图 mock,而 Obsidian ribbon 是矢量 SVG、头部是受 token 约束的窄栏 DOM,故保留其「多方案→对比→迭代」闭环但换成手写真实 SVG/CSS,输出即可直接出货。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 裸 `tsc --noEmit` 报一堆 `node_modules/typebox` 的 `.d.mts` 解析错;i18n 首版误用中文作 key(该项目约定英文 key→中文 value),会导致英文 locale 下也显示中文。
+
+**4. 如何修复的? (How was it fixed?)**
+- typebox 报错是 tsc 默认未继承项目 `skipLibCheck:true`;改用 `tsc --noEmit -p tsconfig.json` 后本项目代码零错误。i18n 改用英文 key `'No note in scope'` 并在 `zh-messages.ts` 补中文映射。18px 双描边字母易糊,故字母用填充、外框用描边复刻头部品牌块观感。
+
+---
+
+### [2026-07-10 15:00] Task Summary — Memory 模块架构评审（对照设计目标）
+
+**1. 刚刚做了什么? (What was done?)**
+- 对 `src/memory/**`（7 文件 ~1535 行）+ 全部消费方（base-chat-runtime / model-service / chat-controller / settings / guardian-completion）做架构评审，判断是否达成其声称的设计目标。
+- 用 workflow 并行跑 4 维度评审（检索质量 / 沉淀与合成 / 持久化与并发 / API·迁移·遗留），每维度再过一遍对抗性验证器逐条核对真实代码（8 agent，全 CONFIRMED/PLAUSIBLE/REJECTED 判定）。
+- 结论：骨架通，但三项高阶能力打折——「语义」实为纯词法 BM25、「合成」实为字符串拼接、「并发安全」实为无保护。纯分析，未改代码。
+
+**2. 为什么要这么做? (Why was it done?)**
+- 用户要求以第一性原理判断"是否真正达到设计目标"，而非罗列代码风格。对抗验证是为了防止单视角假阳性（事实上纠偏了我"内存 last-write-wins 丢更新"的错误措辞——JS 单线程下不成立，真实风险是磁盘级写竞争）。
+
+**3. 遇到了哪些问题? (Issues encountered?)**
+- 高风险项：非原子写 + readJson 解析失败静默回退 `[]` + retain 覆盖 → 移动端 mid-write 崩溃可致全部记忆永久静默丢失；迁移链路绕过 sanitizeMemoryText 且 privacyMode 不拦迁移（隐私缺口）。
+- 设计偏离：retainTurn 每轮原文转储违反记忆库自身 directive；consolidate 触发计数器为易失内存字段，重载归零。
+
+**4. 如何修复的? (How was it fixed?)**
+- 本轮仅评审未改。建议优先级：①持久化健壮性(原子写+写队列+读失败不覆盖) ②迁移脱敏+privacyMode 覆盖迁移 ③retain 质量门槛/consolidate 真归纳 ④检索"语义"落差(补轻量语义 或 修正文案)。等待用户确认是否出补丁。
+
+---
+
 ### [2026-07-09 11:39] Task Summary — 多语言支持（英/中，手动选择 + 即时生效）
 
 **1. 刚刚做了什么? (What was done?)**
@@ -3079,5 +3117,24 @@ UI 层：
 - 只改 approval-card.ts 一个文件:新增 parentDir/describeRename/isRenameRequest/previewSupportsEditorPreview 辅助函数,主渲染函数按 isRename 走专用 facts 且跳过内嵌子卡,🎯 按钮加 previewSupportsEditorPreview 门控。
 - vault-ops.ts 的 rename 载荷未动:其 message(display:none)与 summary(rename 不再渲染子卡)都不上屏。
 - 新增 2 个测试锁住移动/重命名两条路径;全量 approval-flow(10)+message-renderer(16)测试通过,npm run build 通过。
+
+---
+
+---
+### [2026-07-09 12:15] Task Summary
+
+**1. 刚刚做了什么？ (What was done?)**
+- 对 `feat/selection-menu-optimization` 分支(选中弹框功能优化,7 commits)做了完整代码审查,只审查不改代码。通读 selection-menu.ts / floating-panel.ts / selection-context-builder.ts / rewrite-runner.ts / action-registry.ts / inline-diff.ts / obsidian-context-service.ts,并跑通 3 个新测试(action-registry 11 / context-builder 6 / floating-panel 4 全 PASS)。
+- 产出分级审查报告:1 Critical(选区陈旧偏移导致 onReplace/accept 静默写错位置,且现成防错位函数 relocateRange 从未被调用)、3 Important(chat 路径 mode==='selection' 类型收窄后成永假死分支 / 只读浮窗可无限多开无单例护栏 / 工具条 tooltip 点击后不消失)、4 Minor。结论:方向正确,但需先修 C1 才可合并。
+
+**2. 为什么要这么做？ (Why was it done?)**
+- 这是合并前的最终质量门禁。重点排查内存泄漏、AbortController 竞态、浮窗多开、异步预取期间选区漂移、上下文装配降级、死代码与文件职责。
+
+**3. 遇到了哪些问题？ (Issues encountered?)**
+- tsc --noEmit 报大量 node_modules/typebox .d.mts 解析错——确认是预存噪声,项目走 esbuild 构建,与本次改动无关。
+- 后台命令在本环境会自动脱离,改用直接同步跑三个新测试文件确认通过。
+
+**4. 如何修复的？ (How was it fixed?)**
+- 本任务仅审查,未改动任何代码。核心发现已作为报告返回:C1 的修复成本极低——仓库里已有 relocateRange(快照比对+就近重定位+找不到则中止)但零引用,接上即可;I2/I3/I4 建议同 PR 内随 chat 路径单模简化一并清理。
 
 ---

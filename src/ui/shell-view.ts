@@ -58,6 +58,9 @@ export class ShellView extends ItemView {
     private tabManager: TabManager;
     private tabBar: TabBar | null = null;
     private tabBarContainerEl: HTMLElement | null = null;
+    // 头部作用域胶囊:显示当前作用笔记名(绿点=已作用/灰=无作用域)。
+    private scopePillEl: HTMLElement | null = null;
+    private scopePillNameEl: HTMLElement | null = null;
     private tabSessions = new Map<TabId, ShellTabSession>();
     // 每个 tab 一棵独立消息子树,挂在 outputContainer 下;切换时切 display 而非全量重建。
     private tabContainers = new Map<TabId, HTMLElement>();
@@ -254,7 +257,12 @@ export class ShellView extends ItemView {
         headerIdentity.createDiv({ cls: 'shell-brand-mark', text: 'BZ' });
         const headerCopy = headerIdentity.createDiv({ cls: 'shell-header-copy' });
         headerCopy.createEl('h1', { text: PLUGIN_NAME, cls: 'shell-title' });
-        headerCopy.createDiv({ cls: 'shell-header-state', text: 'Ready - current note scoped' });
+        // 作用域胶囊:绿点 + 当前作用笔记名,替代原静态 "Ready - current note scoped"。
+        const scopePill = headerCopy.createDiv({ cls: 'shell-scope-pill' });
+        scopePill.createSpan({ cls: 'shell-scope-dot' });
+        this.scopePillNameEl = scopePill.createSpan({ cls: 'shell-scope-name' });
+        this.scopePillEl = scopePill;
+        this.updateScopePill();
         this.tabBarContainerEl = headerTitle.createDiv({ cls: 'shell-tab-bar-container' });
         this.createHeaderActions(header);
 
@@ -305,6 +313,7 @@ export class ShellView extends ItemView {
                 const contextContainer = this.getContextChipsContainer();
                 if (contextContainer) this.renderContextChips(contextContainer);
                 void this.refreshKnowledgeStatusPanel();
+                this.updateScopePill();
             })
         );
         this.registerEvent(
@@ -448,6 +457,7 @@ export class ShellView extends ItemView {
         if (selection.contextItem) {
             if (selection.contextItem.type === 'scope' && selection.contextItem.scope === 'current') {
                 this.excludedCurrentNotePath = null;
+                this.updateScopePill();
             }
             this.contextManager.addContext(selection.contextItem);
             this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
@@ -1291,6 +1301,27 @@ export class ShellView extends ItemView {
         const contextContainer = this.getContextChipsContainer();
         if (contextContainer) this.renderContextChips(contextContainer);
         if (this.knowledgeStatusContainerEl) this.knowledgeStatusContainerEl.empty();
+        this.updateScopePill();
+    }
+
+    /**
+     * 刷新头部作用域胶囊:当前有活动笔记且未被排除 → 绿点 + 笔记名(去 .md);
+     * 否则 → 灰点 + "未作用于笔记"。作用域来源与上下文注入一致(getActiveFile + excludedCurrentNotePath)。
+     */
+    private updateScopePill() {
+        if (!this.scopePillEl || !this.scopePillNameEl) return;
+        const activePath = this.app.workspace?.getActiveFile?.()?.path ?? null;
+        const scoped = !!activePath && activePath !== this.excludedCurrentNotePath;
+        if (scoped) {
+            const base = activePath!.split('/').pop() ?? activePath!;
+            const name = base.replace(/\.md$/i, '');
+            this.scopePillNameEl.setText(name);
+            this.scopePillEl.setAttribute('title', `当前作用于:${activePath}`);
+        } else {
+            this.scopePillNameEl.setText(t('No note in scope'));
+            this.scopePillEl.setAttribute('title', t('No note in scope'));
+        }
+        this.scopePillEl.toggleClass('is-scoped', scoped);
     }
 
     private prepareSelectionEdit() {

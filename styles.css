@@ -1676,8 +1676,8 @@ textarea.shell-input::placeholder {
 
 .shell-brand-mark {
     flex: 0 0 auto;
-    width: 36px;
-    height: 36px;
+    width: 30px;
+    height: 30px;
     border-radius: var(--baizer-radius-m);
     display: grid;
     place-items: center;
@@ -1703,10 +1703,43 @@ textarea.shell-input::placeholder {
     line-height: 1.1;
 }
 
-.shell-header-state {
+/* 头部作用域胶囊:绿点 + 当前作用笔记名。窄栏内单行省略,可点(title 显示完整路径)。 */
+.shell-scope-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 2px 9px 2px 8px;
+    border: 1px solid var(--baizer-border);
+    border-radius: 999px;
+    background: var(--baizer-surface);
     color: var(--text-muted);
     font-size: var(--font-smallest);
     line-height: 1.2;
+}
+
+.shell-scope-dot {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-faint);
+}
+
+.shell-scope-pill.is-scoped {
+    color: var(--text-normal);
+}
+
+.shell-scope-pill.is-scoped .shell-scope-dot {
+    background: var(--color-green);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--color-green) 60%, transparent);
+}
+
+.shell-scope-name {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .shell-header-buttons .clickable-icon,

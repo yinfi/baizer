@@ -1,4 +1,4 @@
-import { Plugin, Notice, MarkdownView, TFile } from 'obsidian';
+import { Plugin, Notice, MarkdownView, TFile, addIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
 import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, ProviderConfig, PLUGIN_NAME, mergeProviderDefaults } from './src/mcp/types';
@@ -145,8 +145,11 @@ export default class BaizerPlugin extends Plugin {
             console.log('[Baizer] View type already registered, skipping.');
         }
 
-        // Add ribbon icon for quick access to Baizer
-        this.addRibbonIcon('terminal', `Open ${PLUGIN_NAME}`, (evt: MouseEvent) => {
+        // Add ribbon icon for quick access to Baizer.
+        // 用自定义 BZ 字标(描边圆角方 + 填充字),避免复用系统 'terminal'(>_) 与命令面板撞脸;
+        // 18px 下双描边字母易糊,故字母用填充、外框用描边,复刻头部品牌块观感。
+        addIcon('baizer-bz', `<g fill="none" stroke="currentColor" stroke-width="8" stroke-linejoin="round"><rect x="8" y="8" width="84" height="84" rx="20"/></g><text x="50" y="50" fill="currentColor" font-family="-apple-system,'Segoe UI',sans-serif" font-size="46" font-weight="800" text-anchor="middle" dominant-baseline="central" letter-spacing="-2">BZ</text>`);
+        this.addRibbonIcon('baizer-bz', `Open ${PLUGIN_NAME}`, (evt: MouseEvent) => {
             this.activateView();
         });
 

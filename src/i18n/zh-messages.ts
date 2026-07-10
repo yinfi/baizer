@@ -334,6 +334,7 @@ export const ZH_MESSAGES: Record<string, string> = {
 
     // ── 可访问性 aria 文案(T8:读屏播报 / 无障碍标签)──
     'Send a message to AI': '向 AI 发送消息',
+    'No note in scope': '未作用于笔记',
     'New chat': '新建对话',
     'Deep completion in progress': '深度补全进行中',
     'Press Tab to accept suggestion': '按 Tab 接受建议',
