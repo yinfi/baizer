@@ -166,6 +166,10 @@ export class ModelService {
     private buildMemoryOptions() {
         return {
             privacyMode: this.settings.privacyMode === true,
+            // 注入无状态生成回调,供记忆沉淀/合成走 LLM 提炼(避免 MemoryManager 反向依赖 ModelService)。
+            // 用箭头函数捕获 this,并显式跳过 generationPlan(记忆提炼是纯文本任务,不需要写作策略装饰)。
+            generate: (prompt: string, systemPrompt?: string) =>
+                this.generate(prompt, systemPrompt, 'shell', undefined, null, { skipGenerationPlan: true }),
         };
     }
 
@@ -255,6 +259,8 @@ export class ModelService {
         if (!this.memoryManager) return;
         await this.memoryManager.ready();
         await this.memoryManager.clearSession();
+        // 排空在途后台沉淀并确保 memories.json 落盘,避免设置变更重建实例时丢在途写。
+        await this.memoryManager.flush();
         await this.memoryManager.save();
     }
 

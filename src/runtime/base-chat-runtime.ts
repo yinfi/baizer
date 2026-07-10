@@ -313,7 +313,9 @@ If no listed command fits, suggest a plain-language request instead.
 
     if (!this.deps.memoryManager) return;
 
-    await this.deps.memoryManager.retainTurn({
+    // fire-and-forget:记忆沉淀走后台(可能含 LLM 提炼),不阻塞对话回合返回。
+    // MemoryManager 内部追踪在途任务,设置变更/卸载时经 flush() 排空。
+    void this.deps.memoryManager.retainTurn({
       userMessage: userRequest,
       assistantMessage,
       source: turn.generationPlan?.source || 'shell',

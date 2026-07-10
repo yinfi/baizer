@@ -74,6 +74,8 @@ export class HindsightRetriever {
       .map((entry) => entry.record);
 
     const selected = this.applyBudget(ranked, maxRecords, maxChars);
+    // 更新访问元数据:store 内部已把磁盘落盘 fire-and-forget(void scheduleWrite),
+    // 这里 await 的只是廉价的内存计数更新,不阻塞在磁盘 I/O 上,同时保证读到最新计数。
     await this.store.markMemoriesAccessed(selected.map((record) => record.id), now);
     return {
       records: selected,

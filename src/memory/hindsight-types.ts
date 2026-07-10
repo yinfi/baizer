@@ -86,6 +86,19 @@ export function normalizeMemoryText(value: string): string {
   return value.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+/**
+ * 记忆入库前的密钥脱敏。纯函数、无副作用,供 retain 热路径与迁移导入共用,
+ * 确保任何写入 memories.json 的文本都不残留 token/key/password。
+ */
+export function sanitizeMemoryText(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/\bsk-[A-Za-z0-9_-]{6,}\b/g, '[REDACTED]')
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{10,}\b/g, '[REDACTED]')
+    .replace(/\b(api\s*key|token|password|secret)\s*(?:is|=|:)\s*([^\s,;]+)/gi, '$1 is [REDACTED]');
+}
+
 export function tokenizeMemoryText(value: string): string[] {
   return normalizeMemoryText(value)
     .split(/[^a-z0-9\u4e00-\u9fff_.:/-]+/i)

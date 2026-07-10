@@ -11,6 +11,8 @@ import {
     createMemoryId,
     DEFAULT_MEMORY_BANK_ID,
     normalizeMemoryText,
+    sanitizeMemoryText,
+    tokenizeForRetrieval,
     RetainTurnInput,
     RetainLessonInput,
 } from './hindsight-types';
@@ -18,9 +20,16 @@ import { HindsightConsolidator } from './hindsight-consolidator';
 import { importPreviousMemoryFiles, migrateLegacyMemory } from './hindsight-migration';
 import { HindsightRetriever } from './hindsight-retriever';
 import { HindsightStore } from './hindsight-store';
+import { logger } from '../utils/logger';
 
 interface MemoryManagerOptions {
     privacyMode?: boolean;
+    /**
+     * 无状态 LLM 生成回调(由 ModelService 注入,避免循环依赖)。
+     * 提供时 retain/consolidate 走 LLM 提炼精炼记忆(符合"偏好可复用记忆而非原始转储"的 directive);
+     * 缺省或调用失败时回退到纯规则沉淀。
+     */
+    generate?: (prompt: string, systemPrompt?: string) => Promise<string>;
 }
 
 type ForgetMemoryField = 'name' | 'profession' | 'expertise' | 'preferences' | 'workflows' | 'projects' | 'goals' | 'all';
@@ -31,7 +40,8 @@ export class MemoryManager {
     private hindsightStore: HindsightStore;
     private hindsightRetriever: HindsightRetriever;
     private hindsightConsolidator: HindsightConsolidator;
-    private retainedUserTurns = 0;
+    // 后台沉淀任务集合:retain 走 fire-and-forget,flush 时 await 排空,插件卸载前不丢在途写。
+    private pendingRetains = new Set<Promise<void>>();
 
     private readonly MEMORY_DIR = MEMORY_DIR;
     private readonly PROFILE_FILE = 'user-profile.json';
@@ -43,15 +53,20 @@ export class MemoryManager {
         this.userProfile = { ...DEFAULT_USER_PROFILE };
         this.hindsightStore = new HindsightStore(app);
         this.hindsightRetriever = new HindsightRetriever(this.hindsightStore);
-        this.hindsightConsolidator = new HindsightConsolidator(this.hindsightStore);
+        this.hindsightConsolidator = new HindsightConsolidator(this.hindsightStore, options.generate);
         this.initPromise = this.initialize();
     }
 
     private async initialize() {
         await this.hindsightStore.ready();
-        await importPreviousMemoryFiles(this.app, this.hindsightStore);
+        // 隐私模式语义是「这台机器不沉淀我的数据」,把旧数据搬进新库与之冲突,故整体跳过迁移导入。
+        if (!this.options.privacyMode) {
+            await importPreviousMemoryFiles(this.app, this.hindsightStore);
+        }
         await this.loadProfile();
-        await migrateLegacyMemory(this.app, this.hindsightStore);
+        if (!this.options.privacyMode) {
+            await migrateLegacyMemory(this.app, this.hindsightStore);
+        }
     }
 
     async ready(): Promise<void> {
@@ -60,6 +75,16 @@ export class MemoryManager {
 
     async clearSession() {
         await this.ready();
+    }
+
+    /** 排空所有在途后台沉淀并确保落盘。设置变更/插件卸载前调用,避免丢在途写。 */
+    async flush(): Promise<void> {
+        await this.ready();
+        // 反复排空:await 期间可能又有新的 retain 入队。
+        while (this.pendingRetains.size > 0) {
+            await Promise.all([...this.pendingRetains]);
+        }
+        await this.hindsightStore.flush();
     }
 
     async recallForPrompt(input: {
@@ -119,19 +144,99 @@ export class MemoryManager {
         };
     }
 
+    /**
+     * 沉淀一轮对话。fire-and-forget:不阻塞对话回合,后台 LLM 提炼(失败回退纯规则)。
+     * 调用方无需 await;需要确保落盘时(设置变更/卸载)调 flush()。
+     */
     async retainTurn(input: RetainTurnInput): Promise<void> {
-        await this.ready();
         if (this.options.privacyMode) return;
+        const task = this.retainTurnAsync(input)
+            .catch((e) => logger.warn('retainTurn failed', 'MemoryManager', { error: String(e) }));
+        const tracked = task.finally(() => { this.pendingRetains.delete(tracked); });
+        this.pendingRetains.add(tracked);
+        // 返回被追踪的任务:调用方可选择 await(测试/需确定性落盘时)或忽略(对话热路径 fire-and-forget)。
+        return tracked;
+    }
 
+    private async retainTurnAsync(input: RetainTurnInput): Promise<void> {
+        await this.ready();
         const now = input.now ?? Date.now();
-        const records = this.buildTurnMemories(input, now);
+
+        // 成本闸门:LLM 提炼不是每轮都跑。仅当本轮"可能含可复用信息"时才付费调用 LLM,
+        // 否则直接走零成本规则路径(纯闲聊问答规则路径也不会入库)。判据:
+        //   - 用户消息 looksDurable(含偏好/项目/目标/自我陈述信号),或
+        //   - 本轮发生了工具操作(有实际动作,值得记结果)。
+        const userText = sanitizeMemoryText(input.userMessage.trim());
+        const hadToolAction = Array.isArray(input.toolResults) && input.toolResults.length > 0;
+        const worthDistilling = (!!userText && this.looksDurable(userText)) || hadToolAction;
+
+        // 优先 LLM 提炼精炼记忆(符合 directive:可复用记忆而非原始转储);未配置/不值得/失败回退纯规则。
+        let records = worthDistilling ? await this.distillTurnMemories(input, now) : null;
+        if (records === null) {
+            records = this.buildTurnMemories(input, now);
+        }
         if (records.length === 0) return;
 
-        await this.hindsightStore.upsertMemories(records);
-        this.retainedUserTurns += 1;
-        if (this.retainedUserTurns % 5 === 0) {
+        await this.upsertDeduped(records, now);
+
+        const counter = await this.bumpConsolidateCounter();
+        if (counter % 5 === 0) {
             await this.hindsightConsolidator.consolidate({ now });
         }
+    }
+
+    /**
+     * LLM 沉淀:把 user+assistant 一轮提炼成 0-N 条精炼、可复用的记忆(每条一句话)。
+     * 未注入 generate 时返回 null(交给规则回退);LLM 失败/空结果也返回 null。
+     */
+    private async distillTurnMemories(input: RetainTurnInput, now: number): Promise<any[] | null> {
+        const generate = this.options.generate;
+        if (typeof generate !== 'function') return null;
+
+        const userText = sanitizeMemoryText(input.userMessage.trim());
+        const assistantText = sanitizeMemoryText(input.assistantMessage.trim());
+        if (!userText && !assistantText) return [];
+
+        const system = '你是记忆提炼器。从一轮对话中提取"未来可复用的持久事实/偏好/决策",'
+            + '忽略寒暄与一次性问答。每条一行,不超过 40 字,以 JSON 数组字符串返回(如 ["用户偏好X","决定采用Y"]);'
+            + '无值得记忆的内容返回 []。不要输出任何解释。';
+        const prompt = `用户: ${userText.slice(0, 800)}\n助手: ${assistantText.slice(0, 800)}`;
+
+        let raw: string;
+        try {
+            raw = await generate(prompt, system);
+        } catch {
+            return null;
+        }
+
+        const lines = this.parseDistilledLines(raw);
+        if (lines.length === 0) return [];
+
+        return lines.map((line) => this.createMemoryRecord({
+            type: this.looksDurable(line) ? 'world' : 'experience',
+            text: line,
+            sourceKind: 'chat',
+            tags: this.tagsForText(line),
+            now,
+            confidence: 0.7,
+        }));
+    }
+
+    /** 解析 LLM 返回:优先当 JSON 数组,失败则按行切分;去空、去长、限量。 */
+    private parseDistilledLines(raw: string): string[] {
+        const text = (raw || '').trim();
+        if (!text) return [];
+        let items: string[] = [];
+        try {
+            const parsed = JSON.parse(text);
+            if (Array.isArray(parsed)) items = parsed.map((x) => String(x));
+        } catch {
+            items = text.split('\n');
+        }
+        return items
+            .map((line) => sanitizeMemoryText(line.replace(/^[-*\d.\s]+/, '').trim()))
+            .filter((line) => line.length >= 2)
+            .slice(0, 5);
     }
 
     /**
@@ -146,10 +251,10 @@ export class MemoryManager {
         if (this.options.privacyMode) return null;
 
         const now = input.now ?? Date.now();
-        const reason = this.sanitizeMemoryText(input.reason.trim());
+        const reason = sanitizeMemoryText(input.reason.trim());
         if (!reason) return null;
 
-        const userInput = this.sanitizeMemoryText(input.userInput.trim());
+        const userInput = sanitizeMemoryText(input.userInput.trim());
         const topic = userInput ? this.truncateForLesson(userInput, 80) : '';
         // 教训文本:把「场景」与「应避免什么」拼成一句可复用的指令。
         const lessonText = topic
@@ -224,12 +329,19 @@ export class MemoryManager {
         };
     }
 
+    /**
+     * 纯规则沉淀(LLM 未配置或失败时的回退)。质量门槛,避免原始转储:
+     * - 用户消息:仅当 looksDurable(含偏好/项目/目标/自我陈述等信号)才存,存为 world;普通问答流水账不入库。
+     * - 助手输出:仅当本轮有工具操作(toolResults,有实际动作发生)或用户消息 durable 时才存;否则丢弃闲聊回答。
+     */
     private buildTurnMemories(input: RetainTurnInput, now: number) {
         const records = [];
-        const userText = this.sanitizeMemoryText(input.userMessage.trim());
-        if (userText) {
+        const userText = sanitizeMemoryText(input.userMessage.trim());
+        const userDurable = !!userText && this.looksDurable(userText);
+
+        if (userDurable) {
             records.push(this.createMemoryRecord({
-                type: this.looksDurable(userText) ? 'world' : 'experience',
+                type: 'world',
                 text: this.memoryTextForUserMessage(userText),
                 sourceKind: 'chat',
                 tags: this.tagsForText(userText),
@@ -237,8 +349,9 @@ export class MemoryManager {
             }));
         }
 
-        const assistantText = this.sanitizeMemoryText(input.assistantMessage.trim());
-        if (assistantText) {
+        const assistantText = sanitizeMemoryText(input.assistantMessage.trim());
+        const hadToolAction = Array.isArray(input.toolResults) && input.toolResults.length > 0;
+        if (assistantText && (hadToolAction || userDurable)) {
             records.push(this.createMemoryRecord({
                 type: 'experience',
                 text: `Assistant outcome: ${assistantText.slice(0, 400)}`,
@@ -250,6 +363,54 @@ export class MemoryManager {
         }
 
         return records;
+    }
+
+    /**
+     * 去重写入:与库内"同 tag 集且文本高相似(token Jaccard ≥ 0.8)"的记录视为同一条,
+     * 只更新其 mentionedAt(+可选 accessCount),不新增;否则正常 upsert。避免近义改写句无限堆叠。
+     */
+    private async upsertDeduped(records: any[], now: number): Promise<void> {
+        const existing = await this.hindsightStore.listMemoriesRaw(DEFAULT_MEMORY_BANK_ID);
+        const toWrite: any[] = [];
+
+        for (const record of records) {
+            const dup = existing.find((e) =>
+                e.type === record.type
+                && this.sameTagSet(e.tags, record.tags)
+                && this.tokenJaccard(e.normalizedText, record.normalizedText) >= 0.8);
+            if (dup) {
+                // 命中重复:刷新时近度,复用旧 id/累积计数,写回旧记录。
+                toWrite.push({ ...dup, mentionedAt: now, updatedAt: now });
+            } else {
+                toWrite.push(record);
+            }
+        }
+        await this.hindsightStore.upsertMemories(toWrite);
+    }
+
+    private sameTagSet(a: string[], b: string[]): boolean {
+        if (a.length !== b.length) return false;
+        const setA = new Set(a);
+        return b.every((tag) => setA.has(tag));
+    }
+
+    /**
+     * 两段文本的 token Jaccard 相似度(交集/并集),用于近义去重。
+     * 用 tokenizeForRetrieval(CJK bigram + latin token),使中文也能按子串重叠度量相似,
+     * 而非退化成"整串完全相等才去重"。
+     */
+    private tokenJaccard(a: string, b: string): number {
+        const ta = new Set(tokenizeForRetrieval(a));
+        const tb = new Set(tokenizeForRetrieval(b));
+        if (ta.size === 0 && tb.size === 0) return 1;
+        let inter = 0;
+        for (const t of ta) if (tb.has(t)) inter += 1;
+        const union = ta.size + tb.size - inter;
+        return union === 0 ? 0 : inter / union;
+    }
+
+    private async bumpConsolidateCounter(): Promise<number> {
+        return this.hindsightStore.bumpConsolidateCounter();
     }
 
     private shouldForgetHindsightMemory(memory: any, field: ForgetMemoryField): boolean {
@@ -293,16 +454,6 @@ export class MemoryManager {
     private matchesNameMemory(text: string): boolean {
         return /\b(?:my name is|i am named|i'm named|named|call me)\b/i.test(text)
             || /(?:我叫|叫我|我的名字是)/i.test(text);
-    }
-
-    private sanitizeMemoryText(text: string): string {
-        if (!text) return '';
-
-        return text
-            .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
-            .replace(/\bsk-[A-Za-z0-9_-]{6,}\b/g, '[REDACTED]')
-            .replace(/\bgh[pousr]_[A-Za-z0-9_]{10,}\b/g, '[REDACTED]')
-            .replace(/\b(api\s*key|token|password|secret)\s*(?:is|=|:)\s*([^\s,;]+)/gi, '$1 is [REDACTED]');
     }
 
     private createMemoryRecord(input: {

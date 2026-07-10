@@ -45,6 +45,12 @@ function createApp(existing: Record<string, string> = {}) {
     mkdir: async (path: string) => {
       files[path] = '';
     },
+    remove: async (path: string) => { delete files[path]; },
+    rename: async (from: string, to: string) => {
+      files[to] = files[from];
+      writes[to] = files[from];
+      delete files[from];
+    },
   };
   return { app: { vault: { adapter } } as unknown as App, files, writes };
 }
@@ -485,6 +491,83 @@ async function runTests() {
     const result = await retriever.recall({ query: '部署流程', maxRecords: 2, now: 3000 });
 
     expect(result.records[0].id).toBe('mem_neg');
+  });
+
+  // ---- 持久化健壮性(第1项)----
+
+  await test('store writes atomically via tmp+rename (no direct write to main file)', async () => {
+    const { app, files } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemory(makeMemory({ id: 'mem_atomic', text: 'Atomic write memory.' }));
+    await store.flush();
+
+    // 主文件存在且内容有效,tmp 已被 rename 消费掉(不残留)。
+    const main = files['.obsidian/baizer-memory/memories.json'];
+    expect(typeof main === 'string' && main.includes('Atomic write memory.')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(files, '.obsidian/baizer-memory/memories.json.tmp')).toBe(false);
+  });
+
+  await test('corrupted main file falls back to .bak instead of clearing', async () => {
+    const memPath = '.obsidian/baizer-memory/memories.json';
+    const bakPath = '.obsidian/baizer-memory/memories.json.bak';
+    const goodRecord = makeMemory({ id: 'mem_bak', text: 'Backed up memory.' });
+    const { app } = createApp({});
+    // 预置:损坏的主文件 + 完好的 .bak。
+    (app.vault.adapter as any).write(memPath, '{ this is corrupted json');
+    (app.vault.adapter as any).write(bakPath, JSON.stringify([goodRecord]));
+
+    const store = new HindsightStore(app);
+    await store.ready();
+    const memories = await store.listMemories();
+    expect(memories.length).toBe(1);
+    expect(memories[0].id).toBe('mem_bak');
+  });
+
+  await test('corrupted main file with no backup enters read-only mode (does not overwrite)', async () => {
+    const memPath = '.obsidian/baizer-memory/memories.json';
+    const { app, files } = createApp({});
+    (app.vault.adapter as any).write(memPath, '{ broken');
+
+    const store = new HindsightStore(app);
+    await store.ready();
+    // 只读降级:写入被拒,损坏的原文件字节保持不变。
+    await store.upsertMemory(makeMemory({ id: 'mem_x', text: 'should not persist' }));
+    await store.flush();
+    expect(files[memPath]).toBe('{ broken');
+  });
+
+  await test('bumpConsolidateCounter persists across store reloads', async () => {
+    const { app, files } = createApp();
+    const store1 = new HindsightStore(app);
+    await store1.ready();
+    await store1.bumpConsolidateCounter();
+    await store1.bumpConsolidateCounter();
+
+    // 用同一份磁盘(files)重建 store,计数应从 2 继续而非归零。
+    const store2 = new HindsightStore(app);
+    await store2.ready();
+    const next = await store2.bumpConsolidateCounter();
+    expect(next).toBe(3);
+    expect(files['.obsidian/baizer-memory/migration-state.json'].includes('"consolidateTurnCounter": 3')).toBe(true);
+  });
+
+  await test('consolidator prefers LLM summary when generate is provided', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemories([
+      makeMemory({ id: 'm1', type: 'world', text: 'User writes Obsidian plugins.', normalizedText: 'user writes obsidian plugins.', mentionedAt: 1000 }),
+      makeMemory({ id: 'm2', type: 'experience', text: 'User debugged the memory layer today.', normalizedText: 'user debugged the memory layer today.', mentionedAt: 2000 }),
+    ]);
+
+    const { HindsightConsolidator } = await import('../src/memory/hindsight-consolidator');
+    const generate = async () => 'User is a long-term Obsidian plugin developer focused on memory.';
+    const consolidator = new HindsightConsolidator(store, generate);
+    const created = await consolidator.consolidate({ now: 7000 });
+
+    expect(created.length).toBe(1);
+    expect(created[0].text).toContain('long-term Obsidian plugin developer');
   });
 }
 

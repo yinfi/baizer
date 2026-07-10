@@ -6,6 +6,7 @@ import {
   MemoryRecord,
   MemoryType,
   normalizeMemoryText,
+  sanitizeMemoryText,
 } from './hindsight-types';
 import { DEFAULT_USER_PROFILE } from './types';
 import { HindsightStore, MigrationState } from './hindsight-store';
@@ -188,10 +189,10 @@ function normalizeImportedMemory(value: any, now: number): MemoryRecord | null {
     ? value.bankId
     : DEFAULT_MEMORY_BANK_ID;
   const source = normalizeSource(value.source);
-  const text = value.text.trim();
-  const normalizedText = typeof value.normalizedText === 'string' && value.normalizedText.trim()
-    ? value.normalizedText
-    : normalizeMemoryText(text);
+  // 迁移导入同样必须脱敏:旧文件文本可能含密钥,且导入不经 retain 热路径。
+  const text = sanitizeMemoryText(value.text.trim());
+  // normalizedText 一律基于脱敏后文本重算,不信任旧文件里可能含密钥的缓存值。
+  const normalizedText = normalizeMemoryText(text);
 
   return {
     id: typeof value.id === 'string' && value.id.trim()
@@ -239,12 +240,14 @@ function summariesToMemories(summaries: any[], now: number): MemoryRecord[] {
 }
 
 function makeMemory(
-  text: string,
+  rawText: string,
   type: 'world' | 'experience',
   sourceKind: 'profile-migration' | 'summary-migration',
   timestamp: number,
   confidence: number,
 ): MemoryRecord {
+  // profile / summary 迁移文本同样脱敏后再入库。
+  const text = sanitizeMemoryText(rawText);
   return {
     id: createMemoryId({ bankId: DEFAULT_MEMORY_BANK_ID, type, text, sourceKind }),
     bankId: DEFAULT_MEMORY_BANK_ID,

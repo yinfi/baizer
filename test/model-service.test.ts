@@ -56,6 +56,7 @@ async function runTests() {
     service.memoryManager = {
       ready: async () => { order.push('ready'); },
       clearSession: async () => { order.push('clearSession'); },
+      flush: async () => { order.push('flush'); },
       save: async () => { order.push('save'); },
     };
     service.cleanup = () => {
@@ -71,6 +72,7 @@ async function runTests() {
     expect(order).toEqual([
       'ready',
       'clearSession',
+      'flush',
       'save',
       'cleanup',
       'initializeProvider',
@@ -87,6 +89,7 @@ async function runTests() {
     service.memoryManager = {
       ready: async () => { order.push('ready'); },
       clearSession: async () => { order.push('clearSession'); },
+      flush: async () => { order.push('flush'); },
       save: async () => { order.push('save'); },
     };
     service.cleanup = () => {
@@ -105,6 +108,7 @@ async function runTests() {
     expect(order).toEqual([
       'ready',
       'clearSession',
+      'flush',
       'save',
       'cleanup',
       'initializeProvider',

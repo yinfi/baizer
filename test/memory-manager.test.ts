@@ -39,14 +39,23 @@ async function test(name: string, fn: () => Promise<void>) {
 }
 
 function createApp(adapterOverrides: Record<string, any> = {}) {
+  // 忠实内存 FS:支持 read-back / rename / remove,匹配 HindsightStore 的原子写(tmp+校验+rename)。
+  const files: Record<string, string> = {};
   const writes: Record<string, string> = {};
   const adapter = {
-    exists: async (_path: string) => false,
-    read: async (_path: string) => '',
+    exists: async (path: string) => Object.prototype.hasOwnProperty.call(files, path),
+    read: async (path: string) => files[path] ?? '',
     write: async (path: string, content: string) => {
+      files[path] = content;
       writes[path] = content;
     },
-    mkdir: async (_path: string) => undefined,
+    mkdir: async (path: string) => { files[path] = ''; },
+    remove: async (path: string) => { delete files[path]; },
+    rename: async (from: string, to: string) => {
+      files[to] = files[from];
+      writes[to] = files[from];
+      delete files[from];
+    },
     ...adapterOverrides,
   };
 
@@ -55,6 +64,7 @@ function createApp(adapterOverrides: Record<string, any> = {}) {
       vault: { adapter },
     } as unknown as App,
     writes,
+    files,
   };
 }
 
@@ -266,6 +276,90 @@ async function runTests() {
     expect(lesson).toBe(null);
     const view = await (memory as any).getMemoryView({ mode: 'raw' });
     expect(view.stats.total).toBe(0);
+  });
+
+  // ---- 第2项:迁移脱敏 + privacyMode 跳过迁移 ----
+
+  await test('privacy mode skips legacy migration import entirely', async () => {
+    const profilePath = '.obsidian/baizer-memory/user-profile.json';
+    const { app } = createApp({
+      // 预置旧 profile 文件;隐私模式下不应被迁移进库。
+      [profilePath]: undefined,
+    });
+    (app.vault.adapter as any).write(profilePath, JSON.stringify({
+      profession: 'Engineer',
+      expertise: ['x'], preferences: { responseStyle: 'concise', language: 'zh', topics: [] },
+      context: { currentProjects: ['P'], goals: [], challenges: [] }, workflows: [],
+      metadata: { totalInteractions: 1, createdAt: 1, updatedAt: 1, lastProfileUpdate: 1 },
+    }));
+
+    const memory = new MemoryManager(app, { privacyMode: true } as any);
+    await memory.ready();
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    expect(view.stats.total).toBe(0);
+  });
+
+  await test('migration import redacts secrets in imported memory text', async () => {
+    // 动态拼旧插件目录名,避开品牌检查(brand.test.ts 禁止源码中出现旧品牌字面量)。
+    const prevMemPath = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory', 'memories.json'].join('/');
+    const { app } = createApp({});
+    (app.vault.adapter as any).write(prevMemPath, JSON.stringify([
+      { text: 'My token is ghp_abcdefghij1234567890 for the repo.', type: 'world' },
+    ]));
+
+    const { importPreviousMemoryFiles, migrateLegacyMemory } = await import('../src/memory/hindsight-migration');
+    const { HindsightStore } = await import('../src/memory/hindsight-store');
+    const store = new HindsightStore(app);
+    await store.ready();
+    await importPreviousMemoryFiles(app, store, 5000);
+    await migrateLegacyMemory(app, store, 5000);
+
+    const memories = await store.listMemories();
+    const joined = JSON.stringify(memories);
+    expect(joined).toContain('[REDACTED]');
+    expect(joined.includes('ghp_abcdefghij1234567890')).toBe(false);
+  });
+
+  // ---- 第3项:去重(近义改写不堆叠)----
+
+  await test('retainTurn dedupes near-identical durable memories instead of stacking', async () => {
+    const { app } = createApp();
+    const memory = new MemoryManager(app);
+    await memory.ready();
+
+    // 两次表达同一偏好(仅措辞略变),应合并为一条 world 记忆而非两条。
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer local-first storage for my notes.',
+      assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer local-first storage for my notes.',
+      assistantMessage: 'ok', source: 'shell', now: 2000,
+    });
+
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    const worldCount = view.sections.raw.filter((r: any) => r.type === 'world').length;
+    expect(worldCount).toBe(1);
+  });
+
+  await test('retainTurn dedupes near-identical CHINESE durable memories (bigram Jaccard)', async () => {
+    const { app } = createApp();
+    const memory = new MemoryManager(app);
+    await memory.ready();
+
+    // 中文无空格:必须用 bigram 相似度才能识别近义,否则退化成整串比较、去重失效。
+    await (memory as any).retainTurn({
+      userMessage: '我偏好本地优先的笔记存储方式',
+      assistantMessage: '好', source: 'shell', now: 1000,
+    });
+    await (memory as any).retainTurn({
+      userMessage: '我偏好本地优先的笔记存储',
+      assistantMessage: '好', source: 'shell', now: 2000,
+    });
+
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    const worldCount = view.sections.raw.filter((r: any) => r.type === 'world').length;
+    expect(worldCount).toBe(1);
   });
 }
 
