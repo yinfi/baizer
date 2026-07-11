@@ -30,6 +30,11 @@ interface MemoryManagerOptions {
      * 缺省或调用失败时回退到纯规则沉淀。
      */
     generate?: (prompt: string, systemPrompt?: string) => Promise<string>;
+    /**
+     * 召回前 LLM 查询扩展开关。开启且注入了 generate 时,对话路径(非 Guardian)召回前
+     * 把 query 扩成同义词/跨语言译词再喂 BM25,补偿纯词法检索的同义/跨语言漏召回。
+     */
+    queryExpansion?: boolean;
 }
 
 type ForgetMemoryField = 'name' | 'profession' | 'expertise' | 'preferences' | 'workflows' | 'projects' | 'goals' | 'all';
@@ -40,6 +45,10 @@ export class MemoryManager {
     private hindsightStore: HindsightStore;
     private hindsightRetriever: HindsightRetriever;
     private hindsightConsolidator: HindsightConsolidator;
+    // 查询扩展缓存:同一 query 只付一次 LLM 费用(归一化 key → 扩展词串)。有界,超量淘汰最旧。
+    private queryExpansionCache = new Map<string, string>();
+    private static readonly QUERY_EXPANSION_CACHE_MAX = 100;
+    private static readonly QUERY_EXPANSION_TIMEOUT_MS = 2000;
     // 后台沉淀任务集合:retain 走 fire-and-forget,flush 时 await 排空,插件卸载前不丢在途写。
     private pendingRetains = new Set<Promise<void>>();
 
@@ -97,14 +106,74 @@ export class MemoryManager {
         const includeTypes = input.source === 'guardian'
             ? ['observation', 'world'] as const
             : ['observation', 'world', 'experience'] as const;
+        // 对话路径(非 Guardian)按需做 LLM 查询扩展,补偿纯词法检索的同义/跨语言漏召回;
+        // Guardian 亚秒补全绝不扩展。扩展词并入原 query 后交给 BM25(打分逻辑不变)。
+        const query = input.source === 'guardian'
+            ? input.query
+            : await this.maybeExpandQuery(input.query);
         const result = await this.hindsightRetriever.recall({
-            query: input.query,
+            query,
             source: input.source,
             maxChars: input.maxChars ?? 2500,
             includeTypes: [...includeTypes],
             now: input.now,
         });
         return result.promptBlock;
+    }
+
+    /**
+     * LLM 查询扩展:把 query 扩成"原词 + 同义词 + 跨语言译词",并入一个字符串交给 BM25。
+     * 未开启 / 未注入 generate / 空 query → 原样返回。命中缓存直接返回。
+     * LLM 超时或失败 → 回退原 query(withTimeout 恒 resolve,绝不阻塞召回)。
+     */
+    private async maybeExpandQuery(rawQuery: string): Promise<string> {
+        const generate = this.options.generate;
+        const query = rawQuery.trim();
+        if (!this.options.queryExpansion || typeof generate !== 'function' || !query) {
+            return rawQuery;
+        }
+
+        const cacheKey = normalizeMemoryText(query);
+        const cached = this.queryExpansionCache.get(cacheKey);
+        if (cached !== undefined) return cached;
+
+        const system = '你是检索查询扩展器。给定一句查询,输出它的同义词与跨语言译词(中↔英),'
+            + '用于扩大关键词召回。只输出词/短语的 JSON 数组(如 ["部署","发布","deploy"]),'
+            + '最多 8 个,不要解释,不要输出原句整句。';
+        const timeout = MemoryManager.QUERY_EXPANSION_TIMEOUT_MS;
+        let expanded = query;
+        try {
+            const raw = await this.withTimeout(generate(query, system), timeout);
+            const terms = this.parseDistilledLines(raw);
+            if (terms.length > 0) {
+                // 原 query 打头保证原始信号不被稀释,扩展词追加。
+                expanded = `${query} ${terms.join(' ')}`;
+            }
+        } catch {
+            expanded = rawQuery;
+        }
+
+        this.putQueryExpansionCache(cacheKey, expanded);
+        return expanded;
+    }
+
+    /** 给 promise 套超时,超时/失败恒 resolve(空串),绝不 reject——照搬 selection-context-builder 范式。 */
+    private withTimeout(p: Promise<string>, ms: number): Promise<string> {
+        return new Promise<string>((resolve) => {
+            let done = false;
+            const t = setTimeout(() => { if (!done) { done = true; resolve(''); } }, ms);
+            p.then((v) => { if (!done) { done = true; clearTimeout(t); resolve(v || ''); } })
+             .catch(() => { if (!done) { done = true; clearTimeout(t); resolve(''); } });
+        });
+    }
+
+    /** 写入查询扩展缓存,超出上限时淘汰最旧一条(Map 迭代序即插入序)。 */
+    private putQueryExpansionCache(key: string, value: string): void {
+        if (this.queryExpansionCache.size >= MemoryManager.QUERY_EXPANSION_CACHE_MAX) {
+            const oldest = this.queryExpansionCache.keys().next().value;
+            if (oldest !== undefined) this.queryExpansionCache.delete(oldest);
+        }
+        this.queryExpansionCache.set(key, value);
     }
 
     async getMemoryView(request: MemoryViewRequest = {}): Promise<MemoryView> {

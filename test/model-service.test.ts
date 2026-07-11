@@ -43,7 +43,8 @@ async function runTests() {
 
     const options = service.buildMemoryOptions();
 
-    expect(options).toEqual({ privacyMode: true });
+    // 只断言 privacyMode 被正确传入,不锁死整个 options 形状(避免每加一个记忆选项都改测试)。
+    expect({ privacyMode: options.privacyMode }).toEqual({ privacyMode: true });
   });
 
   await test('switchProvider flushes the active memory session before cleanup', async () => {

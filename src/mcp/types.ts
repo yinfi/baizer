@@ -126,6 +126,9 @@ export interface PluginSettings {
     guardianAutoDeepEscalation: boolean;
     ignoredFolders: string;
     privacyMode: boolean;
+    // 记忆召回前用 LLM 把查询扩成同义词/跨语言译词再喂 BM25,补偿纯词法检索"同义/跨语言召不回"。
+    // 每轮对话召回额外一次(带缓存+超时兜底)LLM 调用,故默认关——按需开启。仅作用于对话路径,不影响 Guardian 亚秒补全。
+    memoryQueryExpansion: boolean;
 
     // --- ⚡ Permissions ---
     vaultWriteScope: VaultWriteScope;
@@ -203,6 +206,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     guardianAutoDeepEscalation: true,
     ignoredFolders: '',
     privacyMode: false,
+    memoryQueryExpansion: false,
 
     // Permissions
     vaultWriteScope: 'all-vault',

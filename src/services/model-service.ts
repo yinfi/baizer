@@ -170,6 +170,7 @@ export class ModelService {
             // 用箭头函数捕获 this,并显式跳过 generationPlan(记忆提炼是纯文本任务,不需要写作策略装饰)。
             generate: (prompt: string, systemPrompt?: string) =>
                 this.generate(prompt, systemPrompt, 'shell', undefined, null, { skipGenerationPlan: true }),
+            queryExpansion: this.settings.memoryQueryExpansion === true,
         };
     }
 

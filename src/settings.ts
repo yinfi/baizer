@@ -1057,6 +1057,19 @@ export class SettingTab extends PluginSettingTab {
                     await this.refreshMemoryView();
                 }));
 
+        new Setting(toolbar)
+            .setName(t('Semantic query expansion'))
+            .setDesc(t('When enabled, memory recall first uses the AI to expand your query with synonyms and cross-language terms, improving recall for reworded or cross-language queries. Adds one cached AI call per conversation turn; does not affect Guardian completions.'))
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.memoryQueryExpansion)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.memoryQueryExpansion = value;
+                    await this.persistSettings();
+                    if (typeof this.plugin.modelService?.updateSettings === 'function') {
+                        await this.plugin.modelService.updateSettings(this.plugin.settings);
+                    }
+                }));
+
         // 工具栏底行:左侧数据目录芯片,右侧「刷新 + 清除全部」操作组。
         // 清除全部从原本列表最底部上移至此 —— 避免高危操作被埋在长列表里(用户反馈「藏在数据中」)。
         const toolbarFooter = toolbar.createDiv({ cls: 'baizer-memory-toolbar-footer' });

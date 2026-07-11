@@ -361,6 +361,65 @@ async function runTests() {
     const worldCount = view.sections.raw.filter((r: any) => r.type === 'world').length;
     expect(worldCount).toBe(1);
   });
+
+  // ---- 语义查询扩展(LLM query expansion)----
+
+  await test('query expansion recalls a cross-language memory the raw query would miss', async () => {
+    const { app } = createApp();
+    let expandCalls = 0;
+    // generate 模拟扩展器:把中文查询扩出英文译词,使英文记忆能被 BM25 命中。
+    const generate = async (_prompt: string, _system?: string) => {
+      expandCalls += 1;
+      return JSON.stringify(['deploy', 'deployment', 'release']);
+    };
+    const memory = new MemoryManager(app, { generate, queryExpansion: true } as any);
+    await memory.ready();
+
+    // 存一条纯英文记忆。
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer to deploy via GitHub Actions pipeline.',
+      assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    // 中文查询与英文记忆零 token 重叠,无扩展必然召不回;扩展出 deploy 后应命中。
+    const block = await (memory as any).recallForPrompt({
+      query: '部署', source: 'shell', maxChars: 500, now: 2000,
+    });
+
+    expect(block).toContain('deploy');
+    expect(expandCalls >= 1).toBe(true);
+  });
+
+  await test('query expansion is skipped for guardian source and when disabled', async () => {
+    const { app } = createApp();
+    let expandCalls = 0;
+    const generate = async () => { expandCalls += 1; return JSON.stringify(['x']); };
+
+    // 开关关闭:即便注入 generate 也不扩展。
+    const off = new MemoryManager(app, { generate, queryExpansion: false } as any);
+    await off.ready();
+    await (off as any).recallForPrompt({ query: '部署', source: 'shell', now: 2000 });
+    expect(expandCalls).toBe(0);
+
+    // 开关开启但 source=guardian(亚秒补全):绝不扩展。
+    const on = new MemoryManager(app, { generate, queryExpansion: true } as any);
+    await on.ready();
+    await (on as any).recallForPrompt({ query: '部署', source: 'guardian', now: 2000 });
+    expect(expandCalls).toBe(0);
+  });
+
+  await test('query expansion caches per query (one LLM call for repeated query)', async () => {
+    const { app } = createApp();
+    let expandCalls = 0;
+    const generate = async () => { expandCalls += 1; return JSON.stringify(['deploy']); };
+    const memory = new MemoryManager(app, { generate, queryExpansion: true } as any);
+    await memory.ready();
+
+    await (memory as any).recallForPrompt({ query: '部署', source: 'shell', now: 2000 });
+    await (memory as any).recallForPrompt({ query: '部署', source: 'shell', now: 3000 });
+    // 同一 query 命中缓存,只应付一次 LLM 费用。
+    expect(expandCalls).toBe(1);
+  });
 }
 
 runTests().catch((e) => {

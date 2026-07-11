@@ -40,6 +40,8 @@ export const ZH_MESSAGES: Record<string, string> = {
     // ── 记忆 ──
     'Privacy Mode': '隐私模式',
     'When enabled, new conversation turns are not retained as Hindsight memory.': '开启后，新的对话轮次不会被保留为 Hindsight 记忆。',
+    'Semantic query expansion': '语义查询扩展',
+    'When enabled, memory recall first uses the AI to expand your query with synonyms and cross-language terms, improving recall for reworded or cross-language queries. Adds one cached AI call per conversation turn; does not affect Guardian completions.': '开启后，记忆召回会先用 AI 把查询扩展为同义词与跨语言译词，提升改写或跨语言查询的召回率。每轮对话增加一次（带缓存）AI 调用；不影响 Guardian 补全。',
     'Refreshing...': '刷新中…',
     'Refresh': '刷新',
     'Search memories': '搜索记忆',
