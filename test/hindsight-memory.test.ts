@@ -569,6 +569,79 @@ async function runTests() {
     expect(created.length).toBe(1);
     expect(created[0].text).toContain('long-term Obsidian plugin developer');
   });
+
+  // ---- 4b:一跳实体图检索 ----
+
+  await test('graph recall surfaces an entity-sharing neighbor with zero lexical overlap', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemories([
+      // 种子:命中查询 "TypeScript",共享实体 LaunchPad。
+      makeMemory({
+        id: 'mem_seed', type: 'world',
+        text: 'Project LaunchPad uses TypeScript for config.',
+        normalizedText: 'project launchpad uses typescript for config.',
+        entities: ['LaunchPad', 'TypeScript'], tags: ['project'], mentionedAt: 2000,
+      }),
+      // 邻居:与查询零词法重叠,但共享实体 LaunchPad,应被图检索带出。
+      makeMemory({
+        id: 'mem_neighbor', type: 'experience',
+        text: 'Deployment runs through GitHub Actions.',
+        normalizedText: 'deployment runs through github actions.',
+        entities: ['LaunchPad', 'GitHub Actions'], tags: ['chat'], mentionedAt: 1000,
+      }),
+      // 无关记录:不共享实体,不应被带出。
+      makeMemory({
+        id: 'mem_unrelated', type: 'experience',
+        text: 'User discussed lunch plans.',
+        normalizedText: 'user discussed lunch plans.',
+        entities: ['lunch'], tags: ['chat'], mentionedAt: 1500,
+      }),
+    ]);
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+
+    // 不开图检索:查询 TypeScript 只命中种子。
+    const off = await retriever.recall({ query: 'TypeScript', maxRecords: 6, now: 3000 });
+    const offIds = off.records.map((r) => r.id);
+    expect(offIds.includes('mem_seed')).toBe(true);
+    expect(offIds.includes('mem_neighbor')).toBe(false);
+
+    // 开图检索:共享 LaunchPad 的邻居被带出,无关记录仍不出现。
+    const on = await retriever.recall({ query: 'TypeScript', maxRecords: 6, now: 3000, graphRecall: true });
+    const onIds = on.records.map((r) => r.id);
+    expect(onIds.includes('mem_seed')).toBe(true);
+    expect(onIds.includes('mem_neighbor')).toBe(true);
+    expect(onIds.includes('mem_unrelated')).toBe(false);
+    // 邻居排在种子之后(种子相关度更高)。
+    expect(onIds.indexOf('mem_neighbor') > onIds.indexOf('mem_seed')).toBe(true);
+  });
+
+  await test('graph recall skips stop-entities shared by too many records', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    // 10 条记录都含实体 "Common";查询只命中 1 条种子。Common 命中率 100% > 30% → 停用,不带邻居。
+    const records = [];
+    for (let i = 0; i < 10; i += 1) {
+      records.push(makeMemory({
+        id: `mem_${i}`, type: 'experience',
+        text: i === 0 ? 'Seed about zebra topic with Common.' : `Filler ${i} with Common.`,
+        normalizedText: i === 0 ? 'seed about zebra topic with common.' : `filler ${i} with common.`,
+        entities: ['Common'], tags: ['chat'], mentionedAt: 1000 + i,
+      }));
+    }
+    await store.upsertMemories(records);
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    const result = await retriever.recall({ query: 'zebra', maxRecords: 6, now: 3000, graphRecall: true });
+    // 只应有种子(zebra 命中),Common 是停用实体不带出任何邻居。
+    expect(result.records.length).toBe(1);
+    expect(result.records[0].id).toBe('mem_0');
+  });
 }
 
 runTests().catch((error) => {

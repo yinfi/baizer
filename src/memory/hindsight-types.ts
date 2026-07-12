@@ -50,6 +50,8 @@ export interface MemoryRecallRequest {
   maxChars?: number;
   includeTypes?: MemoryType[];
   now?: number;
+  // 开启一跳实体图检索:BM25 种子命中后,把与种子共享实体的邻居(即便 BM25=0)以衰减分带出。
+  graphRecall?: boolean;
 }
 
 export interface MemoryRecallResult {

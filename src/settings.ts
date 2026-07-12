@@ -1070,6 +1070,19 @@ export class SettingTab extends PluginSettingTab {
                     }
                 }));
 
+        new Setting(toolbar)
+            .setName(t('Entity graph recall'))
+            .setDesc(t('When enabled, memory recall also surfaces memories that share entities (people, projects, technologies) with the best matches, providing related context even without keyword overlap. Runs locally with no extra AI calls.'))
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.memoryGraphRecall)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.memoryGraphRecall = value;
+                    await this.persistSettings();
+                    if (typeof this.plugin.modelService?.updateSettings === 'function') {
+                        await this.plugin.modelService.updateSettings(this.plugin.settings);
+                    }
+                }));
+
         // 工具栏底行:左侧数据目录芯片,右侧「刷新 + 清除全部」操作组。
         // 清除全部从原本列表最底部上移至此 —— 避免高危操作被埋在长列表里(用户反馈「藏在数据中」)。
         const toolbarFooter = toolbar.createDiv({ cls: 'baizer-memory-toolbar-footer' });

@@ -129,6 +129,9 @@ export interface PluginSettings {
     // 记忆召回前用 LLM 把查询扩成同义词/跨语言译词再喂 BM25,补偿纯词法检索"同义/跨语言召不回"。
     // 每轮对话召回额外一次(带缓存+超时兜底)LLM 调用,故默认关——按需开启。仅作用于对话路径,不影响 Guardian 亚秒补全。
     memoryQueryExpansion: boolean;
+    // 一跳实体图检索:BM25 种子命中后,把与种子共享实体的记忆(即便词法零重叠)以衰减分带出,提供关联上下文。
+    // 纯内存、零 LLM 成本、带停用实体+上限防噪声,默认开。
+    memoryGraphRecall: boolean;
 
     // --- ⚡ Permissions ---
     vaultWriteScope: VaultWriteScope;
@@ -207,6 +210,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     ignoredFolders: '',
     privacyMode: false,
     memoryQueryExpansion: false,
+    memoryGraphRecall: true,
 
     // Permissions
     vaultWriteScope: 'all-vault',

@@ -35,6 +35,11 @@ interface MemoryManagerOptions {
      * 把 query 扩成同义词/跨语言译词再喂 BM25,补偿纯词法检索的同义/跨语言漏召回。
      */
     queryExpansion?: boolean;
+    /**
+     * 一跳实体图检索开关。开启时召回把与 BM25 种子共享实体的邻居也带出(衰减分)。
+     * 纯内存零 LLM 成本,对话/Guardian 均安全。
+     */
+    graphRecall?: boolean;
 }
 
 type ForgetMemoryField = 'name' | 'profession' | 'expertise' | 'preferences' | 'workflows' | 'projects' | 'goals' | 'all';
@@ -119,6 +124,7 @@ export class MemoryManager {
             maxChars: input.maxChars ?? 2500,
             includeTypes: [...includeTypes],
             now: input.now,
+            graphRecall: this.options.graphRecall === true,
         });
         return result.promptBlock;
     }
@@ -269,7 +275,9 @@ export class MemoryManager {
         if (!userText && !assistantText) return [];
 
         const system = '你是记忆提炼器。从一轮对话中提取"未来可复用的持久事实/偏好/决策",'
-            + '忽略寒暄与一次性问答。每条一行,不超过 40 字,以 JSON 数组字符串返回(如 ["用户偏好X","决定采用Y"]);'
+            + '忽略寒暄与一次性问答。每条不超过 40 字。同时抽出该条涉及的实体'
+            + '(人名/项目/技术/产品/概念,中英文均可,每条最多 4 个)。'
+            + '以 JSON 数组返回,元素形如 {"text":"用户偏好X","entities":["X"]};'
             + '无值得记忆的内容返回 []。不要输出任何解释。'
             + await this.directivesHint();
         const prompt = `用户: ${userText.slice(0, 800)}\n助手: ${assistantText.slice(0, 800)}`;
@@ -281,17 +289,52 @@ export class MemoryManager {
             return null;
         }
 
-        const lines = this.parseDistilledLines(raw);
-        if (lines.length === 0) return [];
+        const items = this.parseDistilledItems(raw);
+        if (items.length === 0) return [];
 
-        return lines.map((line) => this.createMemoryRecord({
-            type: this.looksDurable(line) ? 'world' : 'experience',
-            text: line,
+        return items.map((item) => this.createMemoryRecord({
+            type: this.looksDurable(item.text) ? 'world' : 'experience',
+            text: item.text,
             sourceKind: 'chat',
-            tags: this.tagsForText(line),
+            tags: this.tagsForText(item.text),
             now,
             confidence: 0.7,
+            entities: item.entities,
         }));
+    }
+
+    /**
+     * 解析 distill 的结构化返回:元素为 {text, entities}(新格式)或纯字符串(旧格式/降级)。
+     * text 走脱敏+去前缀符号,entities 原样(交给 createMemoryRecord 的 normalizeEntities 清洗)。
+     */
+    private parseDistilledItems(raw: string): Array<{ text: string; entities?: string[] }> {
+        const text = (raw || '').trim();
+        if (!text) return [];
+        let parsed: any;
+        try {
+            parsed = JSON.parse(text);
+        } catch {
+            // 非 JSON:退化成按行的纯文本(无实体)。
+            return text.split('\n')
+                .map((line) => sanitizeMemoryText(line.replace(/^[-*\d.\s]+/, '').trim()))
+                .filter((line) => line.length >= 2)
+                .slice(0, 5)
+                .map((line) => ({ text: line }));
+        }
+        if (!Array.isArray(parsed)) return [];
+        const result: Array<{ text: string; entities?: string[] }> = [];
+        for (const el of parsed) {
+            // 兼容:元素可能是对象 {text,entities} 或纯字符串。
+            const rawText = typeof el === 'string' ? el : (el && typeof el.text === 'string' ? el.text : '');
+            const clean = sanitizeMemoryText(rawText.replace(/^[-*\d.\s]+/, '').trim());
+            if (clean.length < 2) continue;
+            const entities = (el && Array.isArray(el.entities))
+                ? el.entities.map((x: any) => String(x))
+                : undefined;
+            result.push({ text: clean, entities });
+            if (result.length >= 5) break;
+        }
+        return result;
     }
 
     /** 解析 LLM 返回:优先当 JSON 数组,失败则按行切分;去空、去长、限量。 */
@@ -598,7 +641,12 @@ export class MemoryManager {
         now: number;
         confidence?: number;
         polarity?: 'positive' | 'negative';
+        // LLM 结构化抽取的实体(优先);缺省时回退正则版 extractEntities。
+        entities?: string[];
     }) {
+        const entities = (input.entities && input.entities.length > 0)
+            ? this.normalizeEntities(input.entities)
+            : this.extractEntities(input.text);
         return {
             id: createMemoryId({
                 bankId: DEFAULT_MEMORY_BANK_ID,
@@ -610,7 +658,7 @@ export class MemoryManager {
             type: input.type,
             text: input.text,
             normalizedText: normalizeMemoryText(input.text),
-            entities: this.extractEntities(input.text),
+            entities,
             tags: input.tags,
             source: { kind: input.sourceKind },
             confidence: input.confidence ?? (input.type === 'world' ? 0.75 : 0.6),
@@ -650,6 +698,22 @@ export class MemoryManager {
             .map((entity) => entity.trim())
             .filter((entity) => entity.length >= 2)
             .slice(0, 8);
+    }
+
+    /** 清洗 LLM 给的实体:去空白/去空/去重/限长/限量,口径与正则版 extractEntities 一致。 */
+    private normalizeEntities(entities: string[]): string[] {
+        const seen = new Set<string>();
+        const result: string[] = [];
+        for (const raw of entities) {
+            const entity = String(raw).trim();
+            if (entity.length < 2) continue;
+            const key = entity.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            result.push(entity);
+            if (result.length >= 8) break;
+        }
+        return result;
     }
 
     getProfile(): UserProfile {

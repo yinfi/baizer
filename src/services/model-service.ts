@@ -171,6 +171,7 @@ export class ModelService {
             generate: (prompt: string, systemPrompt?: string) =>
                 this.generate(prompt, systemPrompt, 'shell', undefined, null, { skipGenerationPlan: true }),
             queryExpansion: this.settings.memoryQueryExpansion === true,
+            graphRecall: this.settings.memoryGraphRecall !== false,
         };
     }
 

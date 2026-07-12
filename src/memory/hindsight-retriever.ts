@@ -67,11 +67,18 @@ export class HindsightRetriever {
     // Build corpus stats once over the full candidate set before scoring
     const stats = this.buildCorpusStats(records);
 
-    const ranked = records
+    const scoredSeeds = records
       .map((record) => ({ record, score: this.score(record, queryTerms, stats, now) }))
       .filter((entry) => entry.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .map((entry) => entry.record);
+      .sort((a, b) => b.score - a.score);
+
+    let ranked = scoredSeeds.map((entry) => entry.record);
+
+    // 一跳实体图检索:用 BM25 种子的实体作钩子,把共享实体的邻居(即便 BM25=0)以衰减分带出,
+    // 追加到种子之后。纯内存、即时倒排,带停用实体+上限防噪声。
+    if (request.graphRecall) {
+      ranked = this.expandByEntityGraph(scoredSeeds, records);
+    }
 
     const selected = this.applyBudget(ranked, maxRecords, maxChars);
     // 更新访问元数据:store 内部已把磁盘落盘 fire-and-forget(void scheduleWrite),
@@ -81,6 +88,73 @@ export class HindsightRetriever {
       records: selected,
       promptBlock: this.formatPromptBlock(selected, maxChars),
     };
+  }
+
+  /**
+   * 一跳实体图检索。种子 = BM25 命中(已按分降序)。
+   * 即时构建 entity→记忆倒排(仅本次候选集,纯内存),用种子的实体作钩子取共享实体的邻居,
+   * 邻居即便 BM25=0 也带出,给衰减分,追加在所有种子之后(保证不越过同等相关的种子)。
+   *
+   * 防噪声:
+   * - 停用实体:出现在 >30% 候选记忆里的 entity 不作钩子(类比高频词无区分度)。
+   * - 三重上限:每种子最多 3 个钩子实体、每实体最多 3 个邻居、图邻居总数 ≤ 5。
+   */
+  private expandByEntityGraph(
+    scoredSeeds: Array<{ record: MemoryRecord; score: number }>,
+    allRecords: MemoryRecord[],
+  ): MemoryRecord[] {
+    const seeds = scoredSeeds.map((e) => e.record);
+    if (seeds.length === 0) return seeds;
+
+    // 即时倒排:entity(lowercase)→ 含该实体的记忆列表。
+    const invertedIndex = new Map<string, MemoryRecord[]>();
+    for (const record of allRecords) {
+      for (const entity of record.entities) {
+        const key = entity.toLowerCase();
+        const list = invertedIndex.get(key);
+        if (list) list.push(record); else invertedIndex.set(key, [record]);
+      }
+    }
+
+    // 停用实体:命中过多记忆的实体无链接区分度,跳过。
+    const stopThreshold = Math.max(2, Math.floor(allRecords.length * 0.3));
+
+    const seedIds = new Set(seeds.map((r) => r.id));
+    const neighborScore = new Map<string, { record: MemoryRecord; score: number }>();
+    const MAX_HOOKS_PER_SEED = 3;
+    const MAX_NEIGHBORS_PER_ENTITY = 3;
+    const MAX_GRAPH_NEIGHBORS = 5;
+
+    for (const { record: seed, score: seedScore } of scoredSeeds) {
+      let hooksUsed = 0;
+      for (const entity of seed.entities) {
+        if (hooksUsed >= MAX_HOOKS_PER_SEED) break;
+        const key = entity.toLowerCase();
+        const bucket = invertedIndex.get(key);
+        if (!bucket || bucket.length > stopThreshold) continue; // 停用实体跳过
+        hooksUsed += 1;
+
+        let added = 0;
+        for (const neighbor of bucket) {
+          if (added >= MAX_NEIGHBORS_PER_ENTITY) break;
+          if (seedIds.has(neighbor.id)) continue; // 已是种子,跳过
+          // 衰减分:0.5×种子分,再按共享实体数微增;取遇到的最高分(可能经多个种子命中)。
+          const candidate = seedScore * 0.5;
+          const prev = neighborScore.get(neighbor.id);
+          if (!prev || candidate > prev.score) {
+            neighborScore.set(neighbor.id, { record: neighbor, score: candidate });
+          }
+          added += 1;
+        }
+      }
+    }
+
+    const neighbors = [...neighborScore.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_GRAPH_NEIGHBORS)
+      .map((e) => e.record);
+
+    return [...seeds, ...neighbors];
   }
 
   /**

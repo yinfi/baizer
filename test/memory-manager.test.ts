@@ -477,6 +477,29 @@ async function runTests() {
     const block = await (memory as any).getMentalModelBlock({ now: 2000 });
     expect(block).toBe('');
   });
+
+  // ---- 4a:LLM 结构化实体抽取(尤其中文,正则版抽不到)----
+
+  await test('distill uses LLM-provided entities (works for Chinese where regex extracts none)', async () => {
+    const { app } = createApp();
+    // LLM 返回结构化 {text, entities};中文实体正则版抽不到,靠 LLM 补。
+    const generate = async () => JSON.stringify([
+      { text: '用户在做知了项目,用 TypeScript', entities: ['知了', 'TypeScript'] },
+    ]);
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: '我在做知了项目', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    const rec = view.sections.raw.find((r: any) => r.text.includes('知了'));
+    expect(rec !== undefined).toBe(true);
+    // 中文实体 "知了" 被 LLM 抽出并入库(正则版无法产出)。
+    expect(rec.entities.includes('知了')).toBe(true);
+    expect(rec.entities.includes('TypeScript')).toBe(true);
+  });
 }
 
 runTests().catch((e) => {
