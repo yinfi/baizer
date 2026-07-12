@@ -53,6 +53,7 @@ async function runTests() {
         ready: async () => { },
         buildContext: () => '[Memory Context]',
         recallForPrompt: async () => '[Memory Context]',
+        getMentalModelBlock: async () => '',
         recordMessage: async () => { },
       } as any,
       toolRegistry: {
@@ -88,6 +89,7 @@ async function runTests() {
           memoryCalls.push({ type: 'recallForPrompt', input });
           return '[Relevant Memory]\n- world: User prefers local-first memory.\n';
         },
+        getMentalModelBlock: async () => '',
         retainTurn: async (input: any) => {
           memoryCalls.push({ type: 'retainTurn', input });
         },

@@ -420,6 +420,63 @@ async function runTests() {
     // 同一 query 命中缓存,只应付一次 LLM 费用。
     expect(expandCalls).toBe(1);
   });
+
+  // ---- 3a:disposition/directives 注入提炼 prompt ----
+
+  await test('distill injects bank directives into the LLM system prompt', async () => {
+    const { app } = createApp();
+    let capturedSystem = '';
+    const generate = async (_prompt: string, system?: string) => {
+      capturedSystem = system || '';
+      return JSON.stringify(['用户偏好本地优先']);
+    };
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    // durable 用户消息触发 LLM 提炼路径(worthDistilling)。
+    await (memory as any).retainTurn({
+      userMessage: '我偏好本地优先的存储方案',
+      assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    // system prompt 应含记忆库 directives(此前定义却从不注入)。
+    expect(capturedSystem).toContain('记忆准则');
+    expect(capturedSystem).toContain('concise');
+  });
+
+  // ---- 3b:Mental Models 无条件用户画像块 ----
+
+  await test('getMentalModelBlock returns observations unconditionally (no query gating)', async () => {
+    const { app } = createApp();
+    const memory = new MemoryManager(app);
+    await memory.ready();
+
+    // 直接写一条 observation(模拟 consolidate 产出的高层画像)。
+    await (memory as any).hindsightStore.upsertMemory({
+      id: 'mem_mm', bankId: 'default', type: 'observation',
+      text: '该用户是偏好简洁技术回答的 TypeScript 开发者',
+      normalizedText: '该用户是偏好简洁技术回答的 typescript 开发者',
+      entities: [], tags: ['observation'], source: { kind: 'manual' },
+      confidence: 0.8, createdAt: 1000, updatedAt: 1000, mentionedAt: 1000, accessCount: 0,
+    });
+
+    const block = await (memory as any).getMentalModelBlock({ now: 2000 });
+    // 无 query 参与,画像块仍应含该 observation。
+    expect(block).toContain('[User Model]');
+    expect(block).toContain('TypeScript 开发者');
+  });
+
+  await test('getMentalModelBlock returns empty when no observations exist', async () => {
+    const { app } = createApp();
+    const memory = new MemoryManager(app);
+    await memory.ready();
+    // 只有 world/experience,无 observation → 空块(不无中生有)。
+    await (memory as any).retainTurn({
+      userMessage: '我偏好本地优先', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+    const block = await (memory as any).getMentalModelBlock({ now: 2000 });
+    expect(block).toBe('');
+  });
 }
 
 runTests().catch((e) => {

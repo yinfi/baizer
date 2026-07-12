@@ -68,13 +68,19 @@ export abstract class BaseChatRuntime implements ChatRuntime {
 
   async prepareTurn(request: ChatTurnRequest): Promise<PreparedChatTurn> {
     let memoryContext = '';
+    let mentalModelBlock = '';
     if (this.deps.memoryManager) {
       await this.deps.memoryManager.ready();
-      memoryContext = await this.deps.memoryManager.recallForPrompt({
-        query: request.userMessage,
-        source: request.source,
-        maxChars: 2500,
-      });
+      // 两者独立,并行取:recall 受 BM25 词法门控(与 query 相关),
+      // Mental Models 无条件注入(高层用户画像,即便与本轮 query 无词法重叠也应在场)。
+      [memoryContext, mentalModelBlock] = await Promise.all([
+        this.deps.memoryManager.recallForPrompt({
+          query: request.userMessage,
+          source: request.source,
+          maxChars: 2500,
+        }),
+        this.deps.memoryManager.getMentalModelBlock({ maxChars: 600 }),
+      ]);
     }
 
     const activeSkill = this.resolveRequestedSkill(request);
@@ -101,6 +107,9 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     let systemPrompt = '';
     if (request.systemPromptOverride) {
       systemPrompt += `[System Prompt Override]\n${request.systemPromptOverride}\n\n`;
+    }
+    if (mentalModelBlock) {
+      systemPrompt += `${mentalModelBlock}\n\n`;
     }
     if (memoryContext) {
       systemPrompt += `${memoryContext}\n\n`;

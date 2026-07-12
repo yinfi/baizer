@@ -75,7 +75,8 @@ export class HindsightConsolidator {
   private async summarizeWithLlm(memories: MemoryRecord[]): Promise<string | null> {
     if (typeof this.generate !== 'function') return null;
     const system = '你是记忆归纳器。阅读若干条零散记忆,归纳出一条更高层、可复用的用户观察(偏好/工作模式/长期目标),'
-      + '一句话,不超过 60 字。若无法归纳出有意义的高层模式,只回复 NONE。不要输出解释。';
+      + '一句话,不超过 60 字。若无法归纳出有意义的高层模式,只回复 NONE。不要输出解释。'
+      + await this.directivesHint();
     const prompt = memories.map((m, i) => `${i + 1}. ${m.text}`).join('\n');
     try {
       const raw = (await this.generate(prompt, system)).trim();
@@ -83,6 +84,19 @@ export class HindsightConsolidator {
       return raw.slice(0, 200);
     } catch {
       return null;
+    }
+  }
+
+  /** 记忆库 directives 拼成 system prompt 追加文本,让归纳也遵守"精炼可复用"等准则。取不到返回空串。 */
+  private async directivesHint(): Promise<string> {
+    try {
+      const banks = await this.store.listBanks();
+      const bank = banks.find((b) => b.id === DEFAULT_MEMORY_BANK_ID) || banks[0];
+      const directives = bank?.directives?.filter((d) => d.trim()) ?? [];
+      if (directives.length === 0) return '';
+      return `\n遵守以下记忆准则:\n${directives.map((d) => `- ${d}`).join('\n')}`;
+    } catch {
+      return '';
     }
   }
 

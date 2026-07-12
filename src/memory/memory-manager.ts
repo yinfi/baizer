@@ -45,6 +45,8 @@ export class MemoryManager {
     private hindsightStore: HindsightStore;
     private hindsightRetriever: HindsightRetriever;
     private hindsightConsolidator: HindsightConsolidator;
+    // 记忆库 directives(disposition/立场)缓存:默认 bank 的 directives 是静态的,取一次即可。
+    private directivesHintCache: string | null = null;
     // 查询扩展缓存:同一 query 只付一次 LLM 费用(归一化 key → 扩展词串)。有界,超量淘汰最旧。
     private queryExpansionCache = new Map<string, string>();
     private static readonly QUERY_EXPANSION_CACHE_MAX = 100;
@@ -268,7 +270,8 @@ export class MemoryManager {
 
         const system = '你是记忆提炼器。从一轮对话中提取"未来可复用的持久事实/偏好/决策",'
             + '忽略寒暄与一次性问答。每条一行,不超过 40 字,以 JSON 数组字符串返回(如 ["用户偏好X","决定采用Y"]);'
-            + '无值得记忆的内容返回 []。不要输出任何解释。';
+            + '无值得记忆的内容返回 []。不要输出任何解释。'
+            + await this.directivesHint();
         const prompt = `用户: ${userText.slice(0, 800)}\n助手: ${assistantText.slice(0, 800)}`;
 
         let raw: string;
@@ -306,6 +309,68 @@ export class MemoryManager {
             .map((line) => sanitizeMemoryText(line.replace(/^[-*\d.\s]+/, '').trim()))
             .filter((line) => line.length >= 2)
             .slice(0, 5);
+    }
+
+    /**
+     * 记忆库 directives(disposition/立场)拼成一段 system prompt 追加文本,注入到提炼/归纳中,
+     * 让 LLM 真正遵守"偏好精炼可复用记忆、不存密钥"等规矩(此前 directives 定义了却从不参与决策)。
+     * 默认 bank 的 directives 是静态的,首次读后缓存。取不到返回空串。
+     */
+    private async directivesHint(): Promise<string> {
+        if (this.directivesHintCache !== null) return this.directivesHintCache;
+        let hint = '';
+        try {
+            const banks = await this.hindsightStore.listBanks();
+            const bank = banks.find((b) => b.id === DEFAULT_MEMORY_BANK_ID) || banks[0];
+            const directives = bank?.directives?.filter((d) => d.trim()) ?? [];
+            if (directives.length > 0) {
+                hint = `\n遵守以下记忆准则:\n${directives.map((d) => `- ${d}`).join('\n')}`;
+            }
+        } catch {
+            hint = '';
+        }
+        this.directivesHintCache = hint;
+        return hint;
+    }
+
+    /**
+     * Mental Models 层:把最高层、最可信的 observation(consolidate 产出的用户画像)拼成
+     * 一个「无条件注入每轮 prompt」的用户画像块。与 recallForPrompt 的区别是它不受 BM25 词法
+     * 门控——用户问"今天天气"也应看到"该用户偏好简洁技术回答"这类长期画像。
+     * 仅取 observation(已是归纳结论),按 confidence×recency 排序取前 N,带字符预算。
+     * 无 observation 时返回空串。与 [Relevant Memory] 可能有轻微重复(observation 也会被召回),
+     * 但 observation 数量少、是高价值结论,接受这点冗余换"永远在场"。
+     */
+    async getMentalModelBlock(input: { maxRecords?: number; maxChars?: number; now?: number } = {}): Promise<string> {
+        await this.ready();
+        const maxRecords = input.maxRecords ?? 3;
+        const maxChars = input.maxChars ?? 600;
+        const now = input.now ?? Date.now();
+        const observations = (await this.hindsightStore.listMemories(DEFAULT_MEMORY_BANK_ID))
+            .filter((m) => m.type === 'observation');
+        if (observations.length === 0) return '';
+
+        // 排序键:confidence 为主,recency(14天半衰)为辅,与 retriever 的时近口径一致。
+        const scored = observations
+            .map((m) => {
+                const ageMs = Math.max(0, now - m.mentionedAt);
+                const recency = 1 / (1 + ageMs / (1000 * 60 * 60 * 24 * 14));
+                return { m, score: m.confidence + recency * 0.5 };
+            })
+            .sort((a, b) => b.score - a.score)
+            .slice(0, maxRecords)
+            .map((x) => x.m);
+
+        let used = '[User Model]\n'.length;
+        const lines: string[] = [];
+        for (const m of scored) {
+            const line = `- ${m.text}\n`;
+            if (lines.length > 0 && used + line.length > maxChars) break;
+            lines.push(line);
+            used += line.length;
+        }
+        if (lines.length === 0) return '';
+        return `[User Model]\n${lines.join('')}`;
     }
 
     /**
