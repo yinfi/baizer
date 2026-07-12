@@ -642,6 +642,89 @@ async function runTests() {
     expect(result.records.length).toBe(1);
     expect(result.records[0].id).toBe('mem_0');
   });
+
+  // ---- 公共基建:召回排除被 superseded 的记忆 ----
+
+  await test('recall excludes superseded memories (retired but kept in store)', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemories([
+      makeMemory({
+        id: 'mem_old', type: 'world', text: 'User prefers dark theme.',
+        normalizedText: 'user prefers dark theme.', tags: ['preference'], mentionedAt: 1000,
+      }),
+      makeMemory({
+        id: 'mem_new', type: 'world', text: 'User prefers light theme.',
+        normalizedText: 'user prefers light theme.', tags: ['preference'], mentionedAt: 2000,
+        supersedes: ['mem_old'],
+      }),
+    ]);
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    const result = await retriever.recall({ query: 'theme preference', maxRecords: 6, now: 3000 });
+    const ids = result.records.map((r) => r.id);
+    expect(ids.includes('mem_new')).toBe(true);
+    expect(ids.includes('mem_old')).toBe(false); // 被退役,不召回
+    // 但仍在库(可恢复)。
+    const all = await store.listMemories();
+    expect(all.some((m) => m.id === 'mem_old')).toBe(true);
+  });
+
+  // ---- #2 读写分离:访问计数不触发写盘 ----
+
+  await test('recall does not write to disk (access count only marks dirty)', async () => {
+    const { app, writes } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemory(makeMemory({
+      id: 'mem_read', text: 'User prefers local-first.', normalizedText: 'user prefers local-first.',
+      tags: ['preference'], mentionedAt: 1000,
+    }));
+    // 清空写记录:此后只做读(recall),不应再有 memories.json 落盘。
+    delete writes['.obsidian/baizer-memory/memories.json'];
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    await retriever.recall({ query: 'local-first', now: 2000 });
+    await retriever.recall({ query: 'local-first', now: 3000 });
+
+    // 纯读会话:memories.json 未被重写。
+    expect(writes['.obsidian/baizer-memory/memories.json'] === undefined).toBe(true);
+
+    // flush() 兜底:退出前把攒着的访问计数落盘。
+    await store.flush();
+    expect(writes['.obsidian/baizer-memory/memories.json'] !== undefined).toBe(true);
+  });
+
+  // ---- #3 consolidate 收敛:同主题 observation 覆盖 ----
+
+  await test('consolidate retires a same-topic prior observation (entity overlap)', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    // 预置一条旧 observation,与将要生成的新 observation 共享实体 Baizer。
+    await store.upsertMemory(makeMemory({
+      id: 'obs_old', type: 'observation',
+      text: 'User works casually on Baizer.', normalizedText: 'user works casually on baizer.',
+      entities: ['Baizer'], tags: ['observation'], mentionedAt: 1000,
+    }));
+    // 证据:两条非-observation,含实体 Baizer,供 LLM 归纳。
+    await store.upsertMemories([
+      makeMemory({ id: 'ev1', type: 'world', text: 'Deep work on Baizer memory.', normalizedText: 'deep work on baizer memory.', entities: ['Baizer'], tags: ['project'], mentionedAt: 2000 }),
+      makeMemory({ id: 'ev2', type: 'experience', text: 'Refactored Baizer store today.', normalizedText: 'refactored baizer store today.', entities: ['Baizer'], tags: ['chat'], mentionedAt: 2100 }),
+    ]);
+
+    const { HindsightConsolidator } = await import('../src/memory/hindsight-consolidator');
+    const generate = async () => 'User is a dedicated Baizer developer focused on the memory layer.';
+    const consolidator = new HindsightConsolidator(store, generate);
+    const created = await consolidator.consolidate({ now: 3000 });
+
+    expect(created.length).toBe(1);
+    // 新 observation 退役了同主题(共享 Baizer)的旧 observation。
+    expect((created[0].supersedes || []).includes('obs_old')).toBe(true);
+  });
 }
 
 runTests().catch((error) => {

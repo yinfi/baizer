@@ -129,9 +129,9 @@ export class HindsightStore {
     });
 
     if (changed) {
-      // 访问计数是"读"的副作用,不该阻塞召回:排入写队列但不要求调用方 await。
-      // 丢一两次计数无伤大雅,但绝不让读路径卡在写 I/O 上。
-      void this.scheduleWrite();
+      // 读写分离:访问计数只标脏,不主动落盘。纯读会话零写盘;计数在下次真正写盘时搭车,
+      // flush() 在设置变更/卸载前兜底持久化。最坏丢"上次写→退出之间"的计数增量,可接受。
+      this.markDirty();
     }
   }
 
@@ -228,6 +228,14 @@ export class HindsightStore {
    * 写入调度:合并抖动 + 串行落盘。多次调用挂在同一条 promise 链上,
    * 天然去重(只要 dirty 仍为真就 flush 当前最新全量快照)、天然串行(永不并发写)。
    */
+  /**
+   * 只标脏、不排落盘。用于"读的副作用"(访问计数)——不想为高频低价值更新触发全量写盘,
+   * 而是攒着,等下一次 retain/consolidate/delete 的 scheduleWrite 搭车落盘;flush() 兜底退出前持久化。
+   */
+  private markDirty(): void {
+    this.dirty = true;
+  }
+
   private scheduleWrite(): Promise<void> {
     this.dirty = true;
     this.writeChain = this.writeChain

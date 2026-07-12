@@ -1083,6 +1083,19 @@ export class SettingTab extends PluginSettingTab {
                     }
                 }));
 
+        new Setting(toolbar)
+            .setName(t('Conflict-aware updates'))
+            .setDesc(t('When enabled, a new fact on the same topic (e.g. you change a stated preference) retires the outdated one so recall no longer mixes old and new. Retired memories are kept and can be restored.'))
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.memoryConflictUpdate)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.memoryConflictUpdate = value;
+                    await this.persistSettings();
+                    if (typeof this.plugin.modelService?.updateSettings === 'function') {
+                        await this.plugin.modelService.updateSettings(this.plugin.settings);
+                    }
+                }));
+
         // 工具栏底行:左侧数据目录芯片,右侧「刷新 + 清除全部」操作组。
         // 清除全部从原本列表最底部上移至此 —— 避免高危操作被埋在长列表里(用户反馈「藏在数据中」)。
         const toolbarFooter = toolbar.createDiv({ cls: 'baizer-memory-toolbar-footer' });

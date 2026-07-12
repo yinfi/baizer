@@ -3,6 +3,7 @@ import {
   DEFAULT_MEMORY_BANK_ID,
   MemoryRecord,
   normalizeMemoryText,
+  tokenizeForRetrieval,
 } from './hindsight-types';
 import { HindsightStore } from './hindsight-store';
 
@@ -47,13 +48,21 @@ export class HindsightConsolidator {
       text = this.buildObservationText(preference, project);
     }
 
+    const entities = [...new Set(memories.flatMap((memory) => memory.entities))].slice(0, 8);
+    const id = createMemoryId({ bankId, type: 'observation', text, sourceKind: 'manual' });
+    // 收敛:同主题的旧 observation 被新的退役,画像每主题只留最新一条,避免堆积/漂移。
+    // 同主题判据:与新 observation 共享实体,或(都无实体时)文本高相似。仅退役已存 observation。
+    // 排除自身 id(同文本→同 id 时是原地更新,不能自我退役)。
+    const supersedes = (await this.findStaleObservations(bankId, entities, normalizeMemoryText(text), now))
+      .filter((sid) => sid !== id);
+
     const observation: MemoryRecord = {
-      id: createMemoryId({ bankId, type: 'observation', text, sourceKind: 'manual' }),
+      id,
       bankId,
       type: 'observation',
       text,
       normalizedText: normalizeMemoryText(text),
-      entities: [...new Set(memories.flatMap((memory) => memory.entities))].slice(0, 8),
+      entities,
       tags: ['observation'],
       source: { kind: 'manual' },
       confidence: 0.75,
@@ -62,6 +71,7 @@ export class HindsightConsolidator {
       mentionedAt: now,
       accessCount: 0,
       evidenceIds,
+      ...(supersedes.length > 0 ? { supersedes } : {}),
     };
 
     await this.store.upsertMemory(observation);
@@ -85,6 +95,41 @@ export class HindsightConsolidator {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * 找出与新 observation 同主题的已存 observation(应被退役)。
+   * 同主题判据:共享至少一个实体;或(新 observation 无实体时)文本 token 相似度 ≥ 0.4。
+   * 只作用于已存 observation,不碰 world/experience。
+   */
+  private async findStaleObservations(
+    bankId: string,
+    newEntities: string[],
+    newNormalizedText: string,
+    _now: number,
+  ): Promise<string[]> {
+    const existing = (await this.store.listMemories(bankId))
+      .filter((m) => m.type === 'observation');
+    if (existing.length === 0) return [];
+
+    const newEntitySet = new Set(newEntities.map((e) => e.toLowerCase()));
+    const newTokens = new Set(tokenizeForRetrieval(newNormalizedText));
+
+    const stale: string[] = [];
+    for (const obs of existing) {
+      const sharesEntity = obs.entities.some((e) => newEntitySet.has(e.toLowerCase()));
+      let sameTopic = sharesEntity;
+      // 双方都无实体时,退化到文本相似度判同主题。
+      if (!sameTopic && newEntitySet.size === 0 && obs.entities.length === 0) {
+        const t = new Set(tokenizeForRetrieval(obs.normalizedText));
+        let inter = 0;
+        for (const x of t) if (newTokens.has(x)) inter += 1;
+        const union = t.size + newTokens.size - inter;
+        sameTopic = union > 0 && inter / union >= 0.4;
+      }
+      if (sameTopic) stale.push(obs.id);
+    }
+    return stale;
   }
 
   /** 记忆库 directives 拼成 system prompt 追加文本,让归纳也遵守"精炼可复用"等准则。取不到返回空串。 */

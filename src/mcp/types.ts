@@ -132,6 +132,9 @@ export interface PluginSettings {
     // 一跳实体图检索:BM25 种子命中后,把与种子共享实体的记忆(即便词法零重叠)以衰减分带出,提供关联上下文。
     // 纯内存、零 LLM 成本、带停用实体+上限防噪声,默认开。
     memoryGraphRecall: boolean;
+    // 矛盾更新:同主题的新事实(改偏好/改名/换项目)退役旧事实,避免召回时新旧偏好并存。
+    // 仅 world 单值主题、纯规则、退役只标记不删除(可恢复),默认开。
+    memoryConflictUpdate: boolean;
 
     // --- ⚡ Permissions ---
     vaultWriteScope: VaultWriteScope;
@@ -211,6 +214,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     privacyMode: false,
     memoryQueryExpansion: false,
     memoryGraphRecall: true,
+    memoryConflictUpdate: true,
 
     // Permissions
     vaultWriteScope: 'all-vault',

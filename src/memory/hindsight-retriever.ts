@@ -61,8 +61,17 @@ export class HindsightRetriever {
     const includeTypes = new Set<MemoryType>(request.includeTypes || ['observation', 'world', 'experience']);
     // Use the new bigram-aware tokenizer for retrieval
     const queryTerms = tokenizeForRetrieval(request.query);
-    const records = (await this.store.listMemories(bankId))
-      .filter((record) => includeTypes.has(record.type));
+    const all = await this.store.listMemories(bankId);
+    // 退役集合:任何记录经 supersedes 声明取代的旧 id 都不再召回(留库不删,可审计/可恢复)。
+    // 这是矛盾更新(#4)与 consolidate 收敛(#3)的共同前置——新的取代旧的,旧的从检索中消失。
+    const superseded = new Set<string>();
+    for (const record of all) {
+      if (record.supersedes) {
+        for (const id of record.supersedes) superseded.add(id);
+      }
+    }
+    const records = all.filter((record) =>
+      includeTypes.has(record.type) && !superseded.has(record.id));
 
     // Build corpus stats once over the full candidate set before scoring
     const stats = this.buildCorpusStats(records);

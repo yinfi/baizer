@@ -40,6 +40,11 @@ interface MemoryManagerOptions {
      * 纯内存零 LLM 成本,对话/Guardian 均安全。
      */
     graphRecall?: boolean;
+    /**
+     * 矛盾更新开关。开启时 upsertDeduped 对同主题的 world 单值记忆(偏好/名字/职业等)
+     * 做退役替换:新事实 supersedes 旧事实,旧的从召回消失(留库可恢复)。
+     */
+    conflictUpdate?: boolean;
 }
 
 type ForgetMemoryField = 'name' | 'profession' | 'expertise' | 'preferences' | 'workflows' | 'projects' | 'goals' | 'all';
@@ -556,13 +561,58 @@ export class MemoryManager {
                 && this.sameTagSet(e.tags, record.tags)
                 && this.tokenJaccard(e.normalizedText, record.normalizedText) >= 0.8);
             if (dup) {
-                // 命中重复:刷新时近度,复用旧 id/累积计数,写回旧记录。
+                // 命中重复(近义改写):刷新时近度,复用旧 id/累积计数,写回旧记录。
                 toWrite.push({ ...dup, mentionedAt: now, updatedAt: now });
-            } else {
-                toWrite.push(record);
+                continue;
             }
+
+            // 矛盾更新:同主题但内容变了(改偏好/改名/换项目)→ 新记录退役旧记录。
+            // 仅对 world 单值主题启用,experience(经历累积)与多值主题不替换,把误退役压到最低。
+            if (this.options.conflictUpdate !== false) {
+                const stale = this.findStaleSameTopic(record, existing);
+                if (stale.length > 0) {
+                    record.supersedes = stale.map((s) => s.id);
+                }
+            }
+            toWrite.push(record);
         }
         await this.hindsightStore.upsertMemories(toWrite);
+    }
+
+    // world 单值主题:同一主题只应有一个当前值,新值到来时旧值退役。多值主题(如 expertise 可有多个)不在此列。
+    private static readonly SINGLE_VALUE_TOPICS = ['preference', 'name', 'profession', 'project', 'goal'];
+
+    // 同主题退役的相似度窗口:低于下限视为"不同槽位的并存值"(如深色主题 vs 简洁回答),不退役;
+    // 高于去重阈(0.8)是近义,已在上游合并。二者之间才是"同维度改了值",退役。
+    private static readonly TOPIC_REPLACE_MIN = 0.15;
+    private static readonly TOPIC_REPLACE_MAX = 0.8;
+
+    /**
+     * 找出应被新记录退役的旧 world 记录。判据:同一单值主题 tag + 相似度落在 [MIN, MAX) 窗口。
+     * 精度取舍:只退役窗口内"最相似"的一条(同维度改值),不误伤同 tag 但不同槽位的并存偏好;
+     * 相似度过低(<MIN)说明是不同槽位,一律不退役。多值主题/experience 一律不触发。
+     */
+    private findStaleSameTopic(record: any, existing: any[]): any[] {
+        if (record.type !== 'world') return [];
+        const recordTopics = record.tags.filter((t: string) =>
+            MemoryManager.SINGLE_VALUE_TOPICS.includes(t));
+        if (recordTopics.length === 0) return [];
+        const topicSet = new Set(recordTopics);
+
+        let best: any = null;
+        let bestSim = 0;
+        for (const e of existing) {
+            if (e.type !== 'world' || e.id === record.id) continue;
+            if (!e.tags.some((t: string) => topicSet.has(t))) continue;
+            const sim = this.tokenJaccard(e.normalizedText, record.normalizedText);
+            if (sim >= MemoryManager.TOPIC_REPLACE_MIN
+                && sim < MemoryManager.TOPIC_REPLACE_MAX
+                && sim > bestSim) {
+                best = e;
+                bestSim = sim;
+            }
+        }
+        return best ? [best] : [];
     }
 
     private sameTagSet(a: string[], b: string[]): boolean {

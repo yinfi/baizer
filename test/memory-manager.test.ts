@@ -500,6 +500,66 @@ async function runTests() {
     expect(rec.entities.includes('知了')).toBe(true);
     expect(rec.entities.includes('TypeScript')).toBe(true);
   });
+
+  // ---- #4 矛盾更新:同主题替换 ----
+
+  await test('conflict update retires an outdated same-topic preference from recall', async () => {
+    const { app } = createApp();
+    const memory = new MemoryManager(app);
+    await memory.ready();
+
+    // 先"偏好深色主题",后"偏好浅色主题" —— 同维度改值,旧的应退役、不再召回。
+    await (memory as any).retainTurn({
+      userMessage: '我偏好深色主题', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+    await (memory as any).retainTurn({
+      userMessage: '我偏好浅色主题', assistantMessage: 'ok', source: 'shell', now: 2000,
+    });
+
+    const block = await (memory as any).recallForPrompt({ query: '主题偏好', maxChars: 800, now: 3000 });
+    expect(block.includes('浅色')).toBe(true);
+    expect(block.includes('深色')).toBe(false); // 旧偏好已退役
+
+    // 退役记忆仍留在库(可恢复),不是硬删。
+    const all = await (memory as any).hindsightStore.listMemoriesRaw('default');
+    expect(all.some((m: any) => m.text.includes('深色'))).toBe(true);
+  });
+
+  await test('conflict update keeps distinct-slot preferences (no false retirement)', async () => {
+    const { app } = createApp();
+    const memory = new MemoryManager(app);
+    await memory.ready();
+
+    // 两条不同槽位的偏好(主题 vs 回答风格),相似度低于下限,应并存。
+    await (memory as any).retainTurn({
+      userMessage: '我偏好深色主题配色', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+    await (memory as any).retainTurn({
+      userMessage: '我偏好简洁直接的回答', assistantMessage: 'ok', source: 'shell', now: 2000,
+    });
+
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    const worldCount = view.sections.raw.filter((r: any) => r.type === 'world').length;
+    expect(worldCount).toBe(2); // 两条并存,无误退役
+  });
+
+  await test('conflict update is disabled when option is off', async () => {
+    const { app } = createApp();
+    const memory = new MemoryManager(app, { conflictUpdate: false } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: '我偏好深色主题', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+    await (memory as any).retainTurn({
+      userMessage: '我偏好浅色主题', assistantMessage: 'ok', source: 'shell', now: 2000,
+    });
+
+    // 关闭时新旧并存(退化到旧行为)。
+    const all = await (memory as any).hindsightStore.listMemoriesRaw('default');
+    const live = all.filter((m: any) => m.type === 'world' && !all.some((x: any) => (x.supersedes || []).includes(m.id)));
+    expect(live.length).toBe(2);
+  });
 }
 
 runTests().catch((e) => {
