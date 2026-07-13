@@ -871,7 +871,7 @@ export class ChatController {
     private async renderMemoryView(request: any, prefix: string = '') {
         const getMemoryView = (this.api as any).getMemoryView;
         if (typeof getMemoryView !== 'function') {
-            this.addMessage('system', this.formatLegacyProfile(prefix));
+            this.addMessage('system', `${prefix}No memory data available.`);
             return;
         }
 
@@ -882,20 +882,6 @@ export class ChatController {
         }
 
         this.addMessage('system', `${prefix}${this.formatMemoryView(view, request)}`);
-    }
-
-    private formatLegacyProfile(prefix: string): string {
-        const profile = this.api.getUserProfile();
-        if (!profile) return `${prefix}No profile data available.`;
-
-        let text = `${prefix}## User Profile\n\n`;
-        if (profile.name) text += `**Name**: ${profile.name}\n`;
-        if (profile.profession) text += `**Profession**: ${profile.profession}\n`;
-        if (profile.expertise?.length) text += `**Expertise**: ${profile.expertise.join(', ')}\n`;
-        if (profile.context?.currentProjects?.length) {
-            text += `**Projects**: ${profile.context.currentProjects.join(', ')}\n`;
-        }
-        return text.trim();
     }
 
     private formatMemoryView(view: any, request: any): string {
@@ -996,56 +982,22 @@ export class ChatController {
             return;
         }
 
-        const profile = this.api.getUserProfile();
-        const forgetHindsight = typeof (this.api as any).forgetMemory === 'function'
-            ? (forgetField: string) => (this.api as any).forgetMemory(forgetField)
-            : async (_forgetField: string) => undefined;
-
-        if (!profile && typeof (this.api as any).forgetMemory !== 'function') {
+        // 遗留 UserProfile 已退役(#6):/forget 现在只作用于 Hindsight 记忆。
+        // 旧实现还会 updateProfile 清空 profile 字段,但那是 write-only 死状态、对召回零影响,一并删除。
+        if (typeof (this.api as any).forgetMemory !== 'function') {
             this.addMessage('system', `${compatibilityNote}No user memory data available.`);
             return;
         }
 
-        if (f === 'all') {
-            if (profile) await this.api.updateProfile({
-                name: '', profession: '', expertise: [],
-                preferences: { language: 'zh-CN', responseStyle: 'balanced', topics: [] },
-                workflows: [],
-                context: { currentProjects: [], goals: [], challenges: [] }
-            });
-            const result = await forgetHindsight(f);
-            this.addMessage('system', `${compatibilityNote}${result?.message || 'Cleared all remembered user data.'}`);
-        } else if (f === 'name') {
-            if (profile) await this.api.updateProfile({ name: '' });
-            const result = await forgetHindsight(f);
-            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: name'}`);
-        } else if (f === 'profession') {
-            if (profile) await this.api.updateProfile({ profession: '' });
-            const result = await forgetHindsight(f);
-            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: profession'}`);
-        } else if (f === 'expertise') {
-            if (profile) await this.api.updateProfile({ expertise: [] });
-            const result = await forgetHindsight(f);
-            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: expertise'}`);
-        } else if (f === 'preferences') {
-            if (profile) await this.api.updateProfile({ preferences: { language: 'zh-CN', responseStyle: 'balanced', topics: [] } });
-            const result = await forgetHindsight(f);
-            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: preferences'}`);
-        } else if (f === 'workflows') {
-            if (profile) await this.api.updateProfile({ workflows: [] });
-            const result = await forgetHindsight(f);
-            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: workflows'}`);
-        } else if (f === 'projects') {
-            if (profile) await this.api.updateProfile({ context: { ...profile.context, currentProjects: [] } });
-            const result = await forgetHindsight(f);
-            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: projects'}`);
-        } else if (f === 'goals') {
-            if (profile) await this.api.updateProfile({ context: { ...profile.context, goals: [] } });
-            const result = await forgetHindsight(f);
-            this.addMessage('system', `${compatibilityNote}${result?.message || 'Forgot memory field: goals'}`);
-        } else {
+        const validFields = ['all', 'name', 'profession', 'expertise', 'preferences', 'workflows', 'projects', 'goals'];
+        if (!validFields.includes(f)) {
             this.addMessage('system', `${compatibilityNote}Unknown field: ${f}\nForgettable fields: name, profession, expertise, preferences, workflows, projects, goals, all`);
+            return;
         }
+
+        const result = await (this.api as any).forgetMemory(f);
+        const fallback = f === 'all' ? 'Cleared all remembered user data.' : `Forgot memory field: ${f}`;
+        this.addMessage('system', `${compatibilityNote}${result?.message || fallback}`);
     }
 
     private async handleNewNote(argStr: string) {

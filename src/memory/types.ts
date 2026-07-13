@@ -60,7 +60,6 @@ export interface MemoryViewSections {
 
 export interface MemoryView {
     privacyMode: boolean;
-    legacyProfile: UserProfile;
     stats: MemoryStats;
     sections: MemoryViewSections;
 }

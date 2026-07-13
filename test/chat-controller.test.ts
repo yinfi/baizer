@@ -148,7 +148,8 @@ async function runTests() {
     controller.cleanup();
   });
 
-  await test('/profile renders hindsight memory profile text when available', async () => {
+  await test('/profile (alias of /memory) renders the Hindsight memory view', async () => {
+    // 遗留 UserProfile 已退役(#6):/profile 现为 /memory 别名,统一走 getMemoryView。
     const messages: any[] = [];
 
     const controller = new ChatController({
@@ -156,13 +157,17 @@ async function runTests() {
       api: {
         getSkillCommands: () => [],
         executeSlashSkillCommand: async () => ({ success: true }),
-        getUserProfile: () => ({
-          profession: 'Engineer',
-          expertise: ['Obsidian'],
-          preferences: { responseStyle: 'balanced' },
-          context: { currentProjects: ['Memory'], goals: [] },
+        getMemoryView: async () => ({
+          privacyMode: false,
+          stats: { total: 1, world: 1, experience: 0, observation: 0, lastUpdatedAt: 1000 },
+          sections: {
+            observations: [],
+            facts: [{ id: 'mem_fact', type: 'world', text: 'User is an Engineer.', confidence: 0.8, source: { kind: 'chat' }, mentionedAt: 1000 }],
+            recent: [],
+            searchResults: [],
+            raw: [],
+          },
         }),
-        updateProfile: async () => undefined,
         getAvailableTools: () => [],
         clearSession: async () => undefined,
       } as any,
@@ -256,8 +261,9 @@ async function runTests() {
 
     await controller.processCommand('/forget all');
 
-    expect(calls.map(call => call.type)).toEqual(['updateProfile', 'forgetMemory']);
-    expect(calls[1].field).toBe('all');
+    // #6 profile 退役后,/forget 只作用于 Hindsight,不再写 profile。
+    expect(calls.map(call => call.type)).toEqual(['forgetMemory']);
+    expect(calls[0].field).toBe('all');
     expect(messages[messages.length - 1].content).toContain('Cleared all remembered user data');
     controller.cleanup();
   });
@@ -295,8 +301,9 @@ async function runTests() {
 
     await controller.processCommand('/memory forget all');
 
-    expect(calls.map(call => call.type)).toEqual(['updateProfile', 'forgetMemory']);
-    expect(calls[1].field).toBe('all');
+    // #6 profile 退役后,/forget 只作用于 Hindsight,不再写 profile。
+    expect(calls.map(call => call.type)).toEqual(['forgetMemory']);
+    expect(calls[0].field).toBe('all');
     expect(messages[messages.length - 1].content).toContain('forgot all');
     controller.cleanup();
   });

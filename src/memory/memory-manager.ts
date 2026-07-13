@@ -1,7 +1,5 @@
 import { App } from 'obsidian';
 import {
-    UserProfile,
-    DEFAULT_USER_PROFILE,
     MemoryMutationResult,
     MemoryView,
     MemoryViewRequest,
@@ -50,7 +48,6 @@ interface MemoryManagerOptions {
 type ForgetMemoryField = 'name' | 'profession' | 'expertise' | 'preferences' | 'workflows' | 'projects' | 'goals' | 'all';
 
 export class MemoryManager {
-    private userProfile: UserProfile;
     private initPromise: Promise<void>;
     private hindsightStore: HindsightStore;
     private hindsightRetriever: HindsightRetriever;
@@ -65,13 +62,11 @@ export class MemoryManager {
     private pendingRetains = new Set<Promise<void>>();
 
     private readonly MEMORY_DIR = MEMORY_DIR;
-    private readonly PROFILE_FILE = 'user-profile.json';
 
     constructor(
         private app: App,
         private options: MemoryManagerOptions = {},
     ) {
-        this.userProfile = { ...DEFAULT_USER_PROFILE };
         this.hindsightStore = new HindsightStore(app);
         this.hindsightRetriever = new HindsightRetriever(this.hindsightStore);
         this.hindsightConsolidator = new HindsightConsolidator(this.hindsightStore, options.generate);
@@ -83,9 +78,6 @@ export class MemoryManager {
         // 隐私模式语义是「这台机器不沉淀我的数据」,把旧数据搬进新库与之冲突,故整体跳过迁移导入。
         if (!this.options.privacyMode) {
             await importPreviousMemoryFiles(this.app, this.hindsightStore);
-        }
-        await this.loadProfile();
-        if (!this.options.privacyMode) {
             await migrateLegacyMemory(this.app, this.hindsightStore);
         }
     }
@@ -206,7 +198,6 @@ export class MemoryManager {
 
         return {
             privacyMode: this.options.privacyMode === true,
-            legacyProfile: this.getProfile(),
             stats: {
                 total: memories.length,
                 world: memories.filter((memory) => memory.type === 'world').length,
@@ -773,54 +764,10 @@ export class MemoryManager {
         return result;
     }
 
-    getProfile(): UserProfile {
-        return { ...this.userProfile };
-    }
-
-    async updateProfile(updates: Partial<UserProfile>) {
-        await this.ready();
-        this.userProfile = { ...this.userProfile, ...updates };
-        this.userProfile.metadata.updatedAt = Date.now();
-        await this.saveProfile();
-    }
-
+    // 遗留 user-profile.json 子系统已退役(#6):它 write-only、永远默认值、对生成零效果。
+    // 旧文件的迁移导入(profileToMemories)由 hindsight-migration 承担,不依赖此处的 live 状态。
+    // save() 保留为兼容空实现:调用方(flushMemorySession)仍会调,但已无 profile 可存。
     async save() {
         await this.ready();
-        await this.saveProfile();
-    }
-
-    private async ensureMemoryDir() {
-        const adapter = this.app.vault.adapter;
-        const dirExists = await adapter.exists(this.MEMORY_DIR);
-        if (!dirExists) {
-            await adapter.mkdir(this.MEMORY_DIR);
-        }
-    }
-
-    private async loadProfile() {
-        try {
-            const path = `${this.MEMORY_DIR}/${this.PROFILE_FILE}`;
-
-            if (await this.app.vault.adapter.exists(path)) {
-                const content = await this.app.vault.adapter.read(path);
-                this.userProfile = JSON.parse(content);
-            }
-        } catch (e) {
-            console.error('Failed to load profile:', e);
-            this.userProfile = { ...DEFAULT_USER_PROFILE };
-        }
-    }
-
-    private async saveProfile() {
-        try {
-            await this.ensureMemoryDir();
-            const path = `${this.MEMORY_DIR}/${this.PROFILE_FILE}`;
-            await this.app.vault.adapter.write(
-                path,
-                JSON.stringify(this.userProfile, null, 2)
-            );
-        } catch (e) {
-            console.error('Failed to save profile:', e);
-        }
     }
 }

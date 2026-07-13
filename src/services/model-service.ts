@@ -428,7 +428,7 @@ export class ModelService {
                 selection,
                 source,
                 obsidianContext,
-                userProfile: userProfile ?? this.getUserProfile(),
+                userProfile: userProfile ?? null,
                 systemPromptOverride,
                 conversationId,
                 ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory(conversationId) } : {}),
@@ -468,7 +468,7 @@ export class ModelService {
                 selection,
                 source: resolvedSource,
                 obsidianContext,
-                userProfile: userProfile ?? this.getUserProfile(),
+                userProfile: userProfile ?? null,
                 conversationId,
                 ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory(conversationId) } : {}),
             });
@@ -509,7 +509,7 @@ export class ModelService {
                     prompt,
                     source,
                     obsidianContext,
-                    userProfile ?? this.getUserProfile(),
+                    userProfile ?? null,
                 )
                 : prompt;
             // 无状态生成走 pi 原生 completeSimple（取代旧 provider.generateContent）。
@@ -620,10 +620,6 @@ export class ModelService {
         }
     }
 
-    getUserProfile(): UserProfile | null {
-        return this.memoryManager ? this.memoryManager.getProfile() : null;
-    }
-
     async getMemoryView(request: MemoryViewRequest = {}): Promise<MemoryView | null> {
         return this.memoryManager ? await this.memoryManager.getMemoryView(request) : null;
     }
@@ -639,11 +635,6 @@ export class ModelService {
         return await this.memoryManager.recallForPrompt({ query, source: 'guardian', maxChars });
     }
 
-    async updateProfile(updates: Partial<UserProfile>) {
-        if (this.memoryManager) {
-            await this.memoryManager.updateProfile(updates);
-        }
-    }
 
     async forgetMemory(field: string): Promise<MemoryMutationResult | null> {
         return this.memoryManager ? await this.memoryManager.forgetMemory(field) : null;
