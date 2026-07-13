@@ -939,10 +939,45 @@ export class ChatController {
         for (const record of records) {
             const text = this.truncateMemoryText(record.text || '', 220);
             const meta = showMeta
-                ? ` _(id: ${record.id}, type: ${record.type}, confidence: ${Number(record.confidence || 0).toFixed(2)})_`
-                : '';
+                ? ` _(id: ${record.id}, type: ${record.type}, confidence: ${Number(record.confidence || 0).toFixed(2)}${this.formatProvenance(record)})_`
+                : ` _(${this.formatProvenance(record).replace(/^, /, '')})_`;
             lines.push(`- ${text}${meta}`);
         }
+    }
+
+    /**
+     * 溯源(provenance):把每条记忆的来源与时间透出,回答"这条为什么被记住/何时记的"。
+     * 数据已在 record 上(source.kind / mentionedAt),此前从不展示。返回以 ", " 开头的片段(便于拼接)。
+     */
+    private formatProvenance(record: any): string {
+        const parts: string[] = [];
+        const kind = record?.source?.kind;
+        if (kind) {
+            // 来源类型 → 人类可读标签。
+            const label: Record<string, string> = {
+                chat: '对话', tool: '工具', manual: '归纳',
+                'profile-migration': '迁移', 'summary-migration': '迁移',
+            };
+            parts.push(`来源: ${label[kind] || kind}`);
+        }
+        const ts = record?.mentionedAt ?? record?.createdAt;
+        if (typeof ts === 'number' && ts > 0) {
+            parts.push(`记于 ${this.formatRelativeTime(ts)}`);
+        }
+        if (record?.supersedes?.length) {
+            parts.push('已更新过');
+        }
+        return parts.length > 0 ? `, ${parts.join(', ')}` : '';
+    }
+
+    /** 相对时间:今天/N天前/N月前,便于用户快速判断记忆新旧。 */
+    private formatRelativeTime(ts: number): string {
+        const days = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+        if (days <= 0) return '今天';
+        if (days === 1) return '昨天';
+        if (days < 30) return `${days} 天前`;
+        if (days < 365) return `${Math.floor(days / 30)} 个月前`;
+        return `${Math.floor(days / 365)} 年前`;
     }
 
     private truncateMemoryText(text: string, max: number): string {

@@ -742,9 +742,16 @@ export class MemoryManager {
     }
 
     private extractEntities(text: string): string[] {
+        // 英文/技术标识:大写开头词组 + 带点/斜杠 token。
         const matches = text.match(/[A-Z][A-Za-z0-9_.-]*(?:\s+[A-Z][A-Za-z0-9_.-]*)*/g) || [];
         const dotted = text.match(/[a-z0-9_.-]+\/[a-z0-9_.-]+|[a-z0-9_.-]+\.[a-z0-9_.-]+/gi) || [];
-        return [...new Set([...matches, ...dotted])]
+        // 中文实体信号(正则版对中文此前几乎为零):
+        //   《...》书名/作品名、「...」/『...』术语引用、【...】标注,取括号内内容。
+        const bracketed = (text.match(/《([^》]{1,20})》|「([^」]{1,20})」|『([^』]{1,20})』|【([^】]{1,20})】/g) || [])
+            .map((m) => m.replace(/^[《「『【]|[》」』】]$/g, ''));
+        //   "关于X的""X项目""X系统"这类结构里 X 是 2-8 个连续中文字。
+        const cjkPhrases = (text.match(/[一-鿿]{2,8}(?=项目|系统|平台|框架|模型|方案|计划)/g) || []);
+        return [...new Set([...matches, ...dotted, ...bracketed, ...cjkPhrases])]
             .map((entity) => entity.trim())
             .filter((entity) => entity.length >= 2)
             .slice(0, 8);

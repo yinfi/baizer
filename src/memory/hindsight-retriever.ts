@@ -20,6 +20,10 @@ const TYPE_WEIGHT: Record<MemoryType, number> = {
 const BM25_K1 = 1.2;
 const BM25_B = 0.75;
 
+// 相关性最低分门槛:BM25 原始分低于此值视为"擦边命中"(如只匹配到一个高频低区分度词),
+// 不召回。0.15 是经验值——单个中等 idf 词的 tfNorm 贡献通常远高于此,只挡真正无意义的擦边。
+const BM25_MIN_SCORE = 0.15;
+
 // Field boost weights used when building the per-document term-frequency bag.
 // These preserve the same relative intent as the original +2/+3/+1.5 additive weights.
 const FIELD_BOOST_TEXT = 2;
@@ -252,14 +256,11 @@ export class HindsightRetriever {
   ): number {
     const { N, avgdl, df } = stats;
 
-    // Empty-query fallback: same behaviour as before
+    // 空查询:不再无差别注入 world/observation。空查询没有相关性信号,
+    // "永远在场的用户画像"已由 getMentalModelBlock(无条件注入)承担,这里返回 0,
+    // 避免记忆稀少时把不相关记忆当"相关记忆"塞进 prompt。
     if (queryTerms.length === 0) {
-      const baseline = record.type !== 'experience' ? 0.5 : 0;
-      if (baseline === 0) return 0;
-      const ageMs = Math.max(0, now - record.mentionedAt);
-      const recency = 1 / (1 + ageMs / (1000 * 60 * 60 * 24 * 14));
-      const access = Math.min(record.accessCount, 10) * 0.05;
-      return ((baseline * TYPE_WEIGHT[record.type]) + recency + access + record.confidence) * polarityBoost(record);
+      return 0;
     }
 
     const tf = this.termFreqs(record);
@@ -281,7 +282,9 @@ export class HindsightRetriever {
       bm25 += idf * tfNorm;
     }
 
-    if (bm25 === 0) return 0;
+    // 相关性阈值:不仅要求有词法重叠(bm25>0),还要求过一个最低分,
+    // 避免只擦到一个高频/低区分度词(idf 很小)的记忆靠 confidence/recency 蒙混进召回。
+    if (bm25 < BM25_MIN_SCORE) return 0;
 
     // Scale BM25 output to ≈2–5 range so recency/access/confidence remain
     // gentle tie-breakers (same intent as original additive weights of +2/+3).

@@ -47,6 +47,12 @@ export class HindsightStore {
   // 只读降级:memories.json 损坏且无可用备份时置真,阻止 flush 用空态覆盖损坏文件。
   private corrupted = false;
 
+  // 淘汰参数:硬容量上限 + evictable 记忆的最低保活分。二者满足其一即淘汰(仅作用于 experience)。
+  private static readonly MEMORY_HARD_CAP = 10000;
+  private static readonly EVICT_MIN_SCORE = 0.02;
+  // 低分淘汰的软启用阈值:库小于此值时不做低分淘汰(避免误删主动导入的旧历史)。
+  private static readonly EVICT_SOFT_THRESHOLD = 500;
+
   constructor(private app: App) {
     this.initPromise = this.initialize();
   }
@@ -97,7 +103,52 @@ export class HindsightStore {
         this.memories.push(next);
       }
     }
+    this.evictIfNeeded();
     await this.scheduleWrite();
+  }
+
+  /**
+   * 淘汰:防止记忆无上限增长导致每轮召回全表扫描线性劣化。两个触发条件(满足其一即淘汰):
+   *   1) 分数过低:evictable 记忆的保活分 < EVICT_MIN_SCORE(明显陈旧且从不被访问的经历);
+   *   2) 超容量:总数 > MEMORY_HARD_CAP 时,按保活分从低到高淘汰 evictable 记忆直到回到上限。
+   * 只淘汰 experience(经历,累积性、可再生);world(事实)/observation(画像)/负极性教训一律保护——
+   * 它们是长期资产,宁可留着也不误删。仅在内存态标记删除,由调用方的 scheduleWrite 落盘。
+   */
+  private evictIfNeeded(now: number = Date.now()): void {
+    const isProtected = (m: MemoryRecord) =>
+      m.type !== 'experience' || m.polarity === 'negative';
+
+    // 保活分:recency(14天半衰)× (0.5 + confidence) × (1 + 访问加成)。分越低越该淘汰。
+    const keepScore = (m: MemoryRecord) => {
+      const ageMs = Math.max(0, now - m.mentionedAt);
+      const recency = 1 / (1 + ageMs / (1000 * 60 * 60 * 24 * 14));
+      const access = 1 + Math.min(m.accessCount, 10) * 0.1;
+      return recency * (0.5 + m.confidence) * access;
+    };
+
+    const before = this.memories.length;
+
+    // 条件1:低分淘汰(仅 evictable),且仅当库已明显增长(> 软阈值)才启用——
+    // 否则会误删"用户主动导入的旧历史"(迁移进来的老 summary 时间戳很旧、保活分趋近 0,
+    // 但库很小,没有淘汰的必要)。软阈值以下只靠容量硬上限(几乎不触发),尊重导入意图。
+    if (this.memories.length > HindsightStore.EVICT_SOFT_THRESHOLD) {
+      this.memories = this.memories.filter((m) =>
+        isProtected(m) || keepScore(m) >= HindsightStore.EVICT_MIN_SCORE);
+    }
+
+    // 条件2:超容量淘汰——把 evictable 按保活分升序,从最低开始删到回到上限。
+    if (this.memories.length > HindsightStore.MEMORY_HARD_CAP) {
+      const overflow = this.memories.length - HindsightStore.MEMORY_HARD_CAP;
+      const evictable = this.memories
+        .filter((m) => !isProtected(m))
+        .sort((a, b) => keepScore(a) - keepScore(b))
+        .slice(0, overflow);
+      const evictIds = new Set(evictable.map((m) => m.id));
+      this.memories = this.memories.filter((m) => !evictIds.has(m.id));
+    }
+
+    // 有删除才需要标脏(upsert 本身已会 scheduleWrite,这里不额外触发写)。
+    if (this.memories.length !== before) this.markDirty();
   }
 
   async deleteMemories(predicate: (memory: MemoryRecord) => boolean): Promise<void> {

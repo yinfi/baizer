@@ -560,6 +560,27 @@ async function runTests() {
     const live = all.filter((m: any) => m.type === 'world' && !all.some((x: any) => (x.supersedes || []).includes(m.id)));
     expect(live.length).toBe(2);
   });
+
+  // ---- #5 中文实体抽取(正则回退,无 LLM)----
+
+  await test('regex extractEntities picks up Chinese bracketed and phrase entities', async () => {
+    const { app } = createApp();
+    const memory = new MemoryManager(app);
+    await memory.ready();
+    // 无 generate → 走规则路径 buildTurnMemories → createMemoryRecord → 正则 extractEntities。
+    await (memory as any).retainTurn({
+      userMessage: '我在做知了项目,参考《深度工作》这本书',
+      assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    const all = await (memory as any).hindsightStore.listMemoriesRaw('default');
+    const rec = all.find((m: any) => m.type === 'world');
+    expect(rec !== undefined).toBe(true);
+    // 《深度工作》书名 + 知了项目短语,正则版此前对中文抽不到,现应命中。
+    const ents = rec.entities.join('|');
+    expect(ents.includes('深度工作')).toBe(true);
+    expect(ents.includes('知了')).toBe(true);
+  });
 }
 
 runTests().catch((e) => {

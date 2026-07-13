@@ -725,6 +725,86 @@ async function runTests() {
     // 新 observation 退役了同主题(共享 Baizer)的旧 observation。
     expect((created[0].supersedes || []).includes('obs_old')).toBe(true);
   });
+
+  // ---- #1/#7 相关性阈值 ----
+
+  await test('empty query no longer indiscriminately injects world/observation', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemories([
+      makeMemory({ id: 'w1', type: 'world', text: 'User prefers dark theme.', normalizedText: 'user prefers dark theme.', tags: ['preference'], mentionedAt: 1000 }),
+      makeMemory({ id: 'o1', type: 'observation', text: 'User is a developer.', normalizedText: 'user is a developer.', tags: ['observation'], mentionedAt: 1000 }),
+    ]);
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    const result = await retriever.recall({ query: '', maxRecords: 6, now: 2000 });
+    // 空查询无相关性信号,不再兜底注入(用户画像由 Mental Models 单独承担)。
+    expect(result.records.length).toBe(0);
+    expect(result.promptBlock).toBe('');
+  });
+
+  await test('a strong lexical match still ranks and returns', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+    await store.upsertMemories([
+      makeMemory({ id: 'hit', type: 'world', text: 'User works on the Zephyrine encryption module.', normalizedText: 'user works on the zephyrine encryption module.', entities: ['Zephyrine'], tags: ['project'], mentionedAt: 1000 }),
+      makeMemory({ id: 'miss', type: 'experience', text: 'User discussed lunch.', normalizedText: 'user discussed lunch.', tags: ['chat'], mentionedAt: 1000 }),
+    ]);
+
+    const { HindsightRetriever } = await import('../src/memory/hindsight-retriever');
+    const retriever = new HindsightRetriever(store);
+    const result = await retriever.recall({ query: 'Zephyrine encryption', maxRecords: 6, now: 2000 });
+    const ids = result.records.map((r) => r.id);
+    // 强词法命中正常返回;无关记录不返回(阈值挡掉零/擦边)。
+    expect(ids.includes('hit')).toBe(true);
+    expect(ids.includes('miss')).toBe(false);
+  });
+
+  // ---- 存储淘汰:低分淘汰 + 保护类型 ----
+
+  await test('eviction drops a very old low-score experience but protects world/observation/lesson', async () => {
+    const { app } = createApp();
+    const store = new HindsightStore(app);
+    await store.ready();
+
+    // 时间戳相对真实 Date.now():upsert 内部的 evictIfNeeded 用真实 now,
+    // 若用远古常量会把 filler 也全淘汰、跌破软阈值,导致后续低分淘汰不触发。
+    const now = Date.now();
+    const ancient = now - 1000 * 60 * 60 * 24 * 365 * 4; // 约 4 年前 → 保活分趋近 0
+    const fresh = now - 1000 * 60 * 60; // 1 小时前,新鲜、高保活分
+
+    // 先跨过低分淘汰软阈值(500):插入 520 条新鲜 evictable experience(自身高保活分不被删)。
+    const filler = [];
+    for (let i = 0; i < 520; i += 1) {
+      filler.push(makeMemory({
+        id: `filler_${i}`, type: 'experience',
+        text: `recent activity ${i}`, normalizedText: `recent activity ${i}`,
+        tags: ['chat'], confidence: 0.6, mentionedAt: fresh,
+      }));
+    }
+    await store.upsertMemories(filler);
+
+    await store.upsertMemories([
+      makeMemory({ id: 'ev_exp', type: 'experience', text: 'stale chatter', normalizedText: 'stale chatter', tags: ['chat'], confidence: 0.5, mentionedAt: ancient }),
+      makeMemory({ id: 'keep_world', type: 'world', text: 'User prefers dark theme.', normalizedText: 'user prefers dark theme.', tags: ['preference'], confidence: 0.5, mentionedAt: ancient }),
+      makeMemory({ id: 'keep_obs', type: 'observation', text: 'User is a developer.', normalizedText: 'user is a developer.', tags: ['observation'], confidence: 0.5, mentionedAt: ancient }),
+      makeMemory({ id: 'keep_lesson', type: 'observation', polarity: 'negative', text: 'avoid verbose answers', normalizedText: 'avoid verbose answers', tags: ['feedback-lesson'], confidence: 0.5, mentionedAt: ancient }),
+    ]);
+
+    // 直接调内部以确定性验证低分淘汰(evictIfNeeded 默认用 Date.now(),这里传定值)。
+    (store as any).evictIfNeeded(now);
+
+    const all = await store.listMemoriesRaw('default');
+    const ids = all.map((m) => m.id);
+    // 极旧的 evictable experience 被淘汰;三类受保护记忆(即便同样极旧)全部留存。
+    expect(ids.includes('ev_exp')).toBe(false);
+    expect(ids.includes('keep_world')).toBe(true);
+    expect(ids.includes('keep_obs')).toBe(true);
+    expect(ids.includes('keep_lesson')).toBe(true);
+  });
 }
 
 runTests().catch((error) => {
