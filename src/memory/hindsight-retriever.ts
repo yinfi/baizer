@@ -1,4 +1,5 @@
 import {
+  collectSupersededIds,
   DEFAULT_MEMORY_BANK_ID,
   MemoryRecallRequest,
   MemoryRecallResult,
@@ -68,12 +69,8 @@ export class HindsightRetriever {
     const all = await this.store.listMemories(bankId);
     // 退役集合:任何记录经 supersedes 声明取代的旧 id 都不再召回(留库不删,可审计/可恢复)。
     // 这是矛盾更新(#4)与 consolidate 收敛(#3)的共同前置——新的取代旧的,旧的从检索中消失。
-    const superseded = new Set<string>();
-    for (const record of all) {
-      if (record.supersedes) {
-        for (const id of record.supersedes) superseded.add(id);
-      }
-    }
+    // 与 Mental Models 用户画像层共用 collectSupersededIds,保证两条读路径退役口径一致。
+    const superseded = collectSupersededIds(all);
     const records = all.filter((record) =>
       includeTypes.has(record.type) && !superseded.has(record.id));
 

@@ -406,7 +406,9 @@ export class ChatController {
     public async approveApproval(request: ApprovalRequest) {
         this.setResponding(true);
         try {
-            const result = await (this.api as any).executeApprovedAction(request.action, request.args);
+            // 传 conversationId:批准后的真实结果由 ModelService 回灌进该会话的 pi session,
+            // 使下一轮模型看到动作已执行而非停留在审批占位上失忆。
+            const result = await (this.api as any).executeApprovedAction(request.action, request.args, this.conversationId);
             this.handleStructuredResult(result, request.action, request.args);
         } catch (error: any) {
             this.handleError(error);

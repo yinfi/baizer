@@ -261,7 +261,14 @@ export default class BaizerPlugin extends Plugin {
             this.knowledgeRuntime.cleanup();
         }
         this.pluginWatcher?.stop();
-        this.modelService.shutdown();
+        // onunload 是同步契约,Obsidian 不 await 返回的 Promise,故这里无法真正等待
+        // shutdown() 完成。但必须同步「启动」它:shutdown→flushMemorySession→flush 会排空
+        // 在途记忆沉淀(pendingRetains)并把已构建记录落盘。已 upsert 的记录本就随写链落盘,
+        // 真正易丢的是「LLM distill 尚未返回」的在途 retain——那部分受限于同步卸载,尽力而为。
+        // 显式 void + catch:避免未处理 rejection,并标明这是有意的 fire-and-forget。
+        void this.modelService.shutdown().catch((error) => {
+            console.warn('[Baizer] shutdown flush did not complete before unload', error);
+        });
     }
 
     async activateView() {

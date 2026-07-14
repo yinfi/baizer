@@ -225,7 +225,7 @@ export class ShellView extends ItemView {
                 // 末轮(只出答案、无工具/思考)不产生时间线内容 → 不会留下空分隔。
                 this.pendingStepDivider = true;
             },
-            onDone: () => this.finalizeStream(),
+            onDone: (finalText) => this.finalizeStream(finalText),
             onError: () => this.finalizeStream(),
             onScrollRequest: () => this.scrollToEnd(),
         });
@@ -874,18 +874,25 @@ export class ShellView extends ItemView {
     }
 
 
-    private finalizeStream() {
+    private finalizeStream(finalText?: string) {
         this.debouncedRenderStream.flush();
 
         this.thinkingRenderer?.finalizeCurrentThinking();
 
-        if (this.streamContent && this.streamAccumulatedText) {
+        // runtime 可能在结束前替换正文(如 generation quality failure):done.text 才是
+        // 入库/重建所见。有非空 finalText 时用它定型 DOM,使屏幕与保存一致;
+        // 否则回退到 UI 逐字累计(onError 无 text、以及 runtime 未替换时二者本就相同)。
+        const resolvedText = (typeof finalText === 'string' && finalText.length > 0)
+            ? finalText
+            : this.streamAccumulatedText;
+
+        if (this.streamContent && resolvedText) {
             // 流结束:把回复区切回 polite,让读屏把完成的整段回复播报一次(流式途中是 off)。
             this.streamContent.setAttribute('aria-live', 'polite');
             this.streamContent.empty();
             this.getMessageRenderer().renderAiContent(
                 this.streamContent,
-                this.streamAccumulatedText,
+                resolvedText,
             ).then(() => {
                 this.scrollToEnd();
             });
@@ -913,7 +920,7 @@ export class ShellView extends ItemView {
                 : {
                     id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
                     role: 'ai',
-                    content: this.streamAccumulatedText,
+                    content: resolvedText,
                     timestamp: Date.now(),
                 };
             this.getMessageRenderer().addActionToolbar(this.streamContainer, toolbarMessage);
@@ -1987,6 +1994,9 @@ export class ShellView extends ItemView {
 
     private async deleteConversationFromHistory(id: string) {
         await this.conversationController.deleteConversation(id);
+        // 删历史 = 用户显式删除:同步删磁盘 pi session 文件 + 清 ref,不留孤儿文件
+        // (磁盘泄漏 + 隐私:JSONL 存对话原文)。失败静默——快照已删,尽力清盘。
+        await this.modelService.purgeSession(id);
 
         await this.refreshHistoryMenu();
         new Notice('Conversation deleted.');

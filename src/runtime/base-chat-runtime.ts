@@ -289,13 +289,27 @@ If no listed command fits, suggest a plain-language request instead.
     };
   }
 
+  // 收窄工具集时必须始终保留的元能力:read_skill 是渐进式披露的入口——模型靠它拉取
+  // 其它 skill 的完整正文、按 SKILL.md 指令切换行为。收窄却丢了它 = 渐进式披露断链,
+  // 模型再也读不到/切不到别的 skill。口径与运行中 steering 的 ActiveRunController 一致。
+  private static readonly ALWAYS_AVAILABLE_TOOL_NAMES = ['read_skill'];
+
   private buildSkillModeTools(activeSkill?: { tools: ToolDefinition[] } | null): ToolDefinition[] {
     // B 方案：不再注入 use_skill 元工具。skill 发现走 system prompt 的 <available_skills>
-    // 清单 + read_skill 工具（read_skill 已注册为核心工具，恒在全量集内）。
-    // 强制激活时仍收窄到该 skill 的工具子集（门控 Stage 2 交 PermissionService）。
-    return activeSkill?.tools?.length
-      ? [...activeSkill.tools]
-      : [...this.deps.toolRegistry.getAllDefinitions()];
+    // 清单 + read_skill 工具。无激活 skill 时给全量集(read_skill 已在其中)。
+    if (!activeSkill?.tools?.length) {
+      return [...this.deps.toolRegistry.getAllDefinitions()];
+    }
+    // 强制/意图激活收窄到该 skill 的工具子集,但补回 read_skill 等元能力(去重),
+    // 否则模型被困在当前 skill 里、无法再读其它 skill 指令。
+    const tools = [...activeSkill.tools];
+    const present = new Set(tools.map(tool => tool.name));
+    for (const name of BaseChatRuntime.ALWAYS_AVAILABLE_TOOL_NAMES) {
+      if (present.has(name)) continue;
+      const def = this.deps.toolRegistry.getDefinition?.(name);
+      if (def) tools.push(def);
+    }
+    return tools;
   }
 
   private resolveRequestedSkill(request: ChatTurnRequest) {
@@ -308,14 +322,25 @@ If no listed command fits, suggest a plain-language request instead.
     if (!turn.activeSkillName) {
       return { allowedToolNames: null };
     }
+    // 元能力(read_skill)并入白名单:pi-tool-adapter 用 allowedToolNames 做硬门,
+    // 只把工具列进 tools 还不够——不在白名单里仍会被拦成 "not available"。
+    // 二者必须同步补,否则模型看得到 read_skill 却调不动。
+    const allowed = new Set(turn.allowedToolNames ?? []);
+    for (const name of BaseChatRuntime.ALWAYS_AVAILABLE_TOOL_NAMES) {
+      allowed.add(name);
+    }
     return {
       activeSkillName: turn.activeSkillName,
-      allowedToolNames: new Set(turn.allowedToolNames ?? []),
+      allowedToolNames: allowed,
     };
   }
 
 
-  protected async retainCompletedTurn(turn: PreparedChatTurn, assistantMessage: string): Promise<void> {
+  protected async retainCompletedTurn(
+    turn: PreparedChatTurn,
+    assistantMessage: string,
+    toolResults?: Array<{ name: string; result: unknown }>,
+  ): Promise<void> {
     // 阶段1:会话持久化由 AgentHarness 完成(prompt() 已把 user/assistant 追加进 session),
     // 此处不再自己落盘。仅保留把本轮原文交给长期记忆(Hindsight)——它与 session 正交。
     const userRequest = turn.userRequest || turn.prompt;
@@ -324,10 +349,13 @@ If no listed command fits, suggest a plain-language request instead.
 
     // fire-and-forget:记忆沉淀走后台(可能含 LLM 提炼),不阻塞对话回合返回。
     // MemoryManager 内部追踪在途任务,设置变更/卸载时经 flush() 排空。
+    // toolResults 让"本轮有实际工具动作"的轮次(web clip/写文件/插件操作)也能被沉淀——
+    // 否则 hadToolAction 恒 false,这类轮次除非用户原话恰好 durable 才会入库。
     void this.deps.memoryManager.retainTurn({
       userMessage: userRequest,
       assistantMessage,
       source: turn.generationPlan?.source || 'shell',
+      ...(toolResults && toolResults.length > 0 ? { toolResults } : {}),
     });
   }
 }

@@ -290,6 +290,10 @@ async function saveVideo(
     ctx.settings.wechatStoragePath,
     (p) => !!ctx.app.vault.getAbstractFileByPath(p),
   );
+  // 中断守卫:同 saveWebpage,超时/中断已触发时不落笔记,避免状态不一致。
+  if (ctx.signal?.aborted) {
+    return { success: false, error: 'Aborted before saving note', aborted: true };
+  }
   await ensureFolder(ctx.app, finalPath);
   await ctx.app.vault.create(finalPath, content);
   return { success: true, path: finalPath, message: `Video Note Saved: ${finalPath}` };
@@ -402,6 +406,11 @@ async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebCl
   );
   const content = buildFrontmatter({ source: url, author, tags: ['clipping', ...webpageTags] })
     + `# ${title}\n\n${markdown}`;
+  // 中断守卫:requestUrl 无法中途取消网络请求,但可在写盘前拦截——超时/中断已触发时
+  // 不落笔记,避免「上层已判失败、笔记却照样创建」的状态不一致。
+  if (ctx.signal?.aborted) {
+    return { success: false, error: 'Aborted before saving note', aborted: true };
+  }
   await ensureFolder(ctx.app, finalPath);
   await ctx.app.vault.create(finalPath, content);
   return { success: true, path: finalPath, message: `Webpage Saved: ${finalPath}` };
@@ -422,6 +431,10 @@ export function createSaveWebpageTool(modelService: any, deps: WebClipperDeps = 
       required: ['url'],
     },
     async execute(args, ctx) {
+      // 入口即检查:已中断(上游超时/用户取消)则不发起任何网络请求或写盘。
+      if (ctx.signal?.aborted) {
+        return { success: false, error: 'Aborted before saving note', aborted: true };
+      }
       try {
         const videoResult = await saveVideo(args.url, args, ctx, modelService, deps);
         if (videoResult) return videoResult;

@@ -53,6 +53,26 @@ async function runTests() {
       'done', 'scroll',
     ]);
   });
+
+  // 论断5:done 必须把 runtime 定型后的最终文本透传给 onDone。runtime 可能在结束前
+  // 替换正文(如 generation quality failure),该文本才是入库/重建所见,UI 须用它定型
+  // DOM,而非逐字累计的 streamAccumulatedText,否则屏幕与保存不一致。
+  await test('done forwards the final text to onDone so the DOM matches what is saved', () => {
+    const received: (string | undefined)[] = [];
+    const controller = new StreamController({
+      onThinking: () => { },
+      onToolCall: () => { },
+      onToolResult: () => { },
+      onTextDelta: () => { },
+      onDone: (finalText) => received.push(finalText),
+      onError: () => { },
+    });
+
+    controller.handleEvent({ type: 'text_delta', content: 'streamed body' });
+    controller.handleEvent({ type: 'done', text: 'Generation quality check failed:\n- too short' });
+
+    expect(received).toEqual(['Generation quality check failed:\n- too short']);
+  });
 }
 
 runTests().catch((e) => {

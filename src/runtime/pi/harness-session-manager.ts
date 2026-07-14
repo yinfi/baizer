@@ -26,6 +26,15 @@ interface PiSession {
   moveTo(entryId: string | null): Promise<string | undefined>;
   appendLabel(targetId: string, label: string | undefined): Promise<string>;
   buildContext(): Promise<{ messages: unknown[] }>;
+  // custom_message entry:对模型可见(buildSessionContext→convertToLlm 转成 user 消息),
+  // 但 UI 的分支投影(projectBranchToMessages)只认 type==='message',会跳过它,
+  // 故不会在分叉/重开时渲染成假 user 气泡。用于回灌审批执行结果(见 appendApprovalOutcome)。
+  appendCustomMessageEntry(
+    customType: string,
+    content: string,
+    display: boolean,
+    details?: unknown,
+  ): Promise<string>;
 }
 
 interface PiSessionRepo {
@@ -224,6 +233,77 @@ export class HarnessSessionManager {
   release(conversationId: string): void {
     this.conversations.delete(conversationId);
     this.readyPromises.delete(conversationId);
+  }
+
+  /**
+   * 彻底销毁某会话:删磁盘 JSONL session 文件 + 清持久 ref + 释放内存态。
+   * 用于「删除历史对话」——与 release(仅释放内存、保留可回溯)、clear(开新文件、旧文件留存)不同,
+   * 这是用户显式删除,不应在盘上留孤儿文件或残留 ref(既是磁盘泄漏,也是隐私:JSONL 存对话原文)。
+   *
+   * 优先用当前活跃/持久 ref 的 path 定位文件;取不到 ref 时静默跳过删文件(仍清 ref、释放内存)。
+   * 删文件失败不抛——尽力而为,ref 已清则重启不会再引用它。
+   * conversationId 缺省时无操作(临时会话无持久文件)。
+   */
+  async purge(conversationId: string | undefined): Promise<void> {
+    if (!conversationId) return;
+    // 先解析出该会话的持久 ref(内存有就用,没有走 loadRef 兜底),拿到磁盘 path。
+    const ref = this.conversations.get(conversationId)?.ref
+      ?? await this.resolveSavedRef(conversationId);
+
+    // 释放内存态,避免后续再被 getSession 复用到已删文件。
+    this.conversations.delete(conversationId);
+    this.readyPromises.delete(conversationId);
+
+    if (ref?.path) {
+      try {
+        const result = await this.fileSystem.remove(ref.path, { force: true });
+        if (!result.ok) {
+          logger.warn(
+            `Failed to remove session file ${ref.path} for conversation ${conversationId}.`,
+            'HarnessSessionManager.purge',
+          );
+        }
+      } catch {
+        logger.warn(
+          `Error removing session file ${ref.path} for conversation ${conversationId}.`,
+          'HarnessSessionManager.purge',
+        );
+      }
+    }
+
+    // 清持久 ref(ref=null 表示删除该会话的引用),使重启后不再尝试恢复。
+    await this.persistRef(conversationId, null);
+  }
+
+  /**
+   * 把一次「用户批准并已执行」的动作结果回灌进该会话的 pi session。
+   *
+   * 背景:审批轮在 afterToolCall 里 terminate 结束,session 中只留下
+   * assistant(tool_call) + toolResult(approval_required 占位);用户随后点批准是在
+   * runtime 之外直执工具,结果此前只进 UI,从不入 session。由于跨轮上下文的唯一真相源
+   * 是 session(UI 历史不再回灌),下一轮模型因此看不到「批准了、文件已建/失败」而失忆。
+   *
+   * 用 appendCustomMessageEntry 追加(而非再补一条 toolResult):原 tool_call 已有配对的
+   * 占位 toolResult,不能对同一 call 再给第二个结果。custom_message 对模型可见(转成 user 消息)、
+   * 对 UI 分支投影不可见(不渲染假气泡),正好承载这条带外的执行结果。
+   *
+   * conversationId 缺省(临时会话)或会话未建立时:无持久 session 可写,静默跳过。
+   * 任何异常吞掉——回灌是增强,不能让「已成功执行的动作」因记账失败而看起来失败。
+   */
+  async appendApprovalOutcome(conversationId: string | undefined, text: string): Promise<void> {
+    if (!conversationId) return;
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+    const entry = this.conversations.get(conversationId);
+    if (!entry) return;
+    try {
+      await entry.session.appendCustomMessageEntry('approval_outcome', trimmed, false);
+    } catch {
+      logger.warn(
+        `Failed to append approval outcome to session for conversation ${conversationId}.`,
+        'HarnessSessionManager.appendApprovalOutcome',
+      );
+    }
   }
 
   // ---- 阶段C:分支导航原语(都基于该会话持有的 session 对象)----

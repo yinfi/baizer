@@ -6,11 +6,13 @@ import {
 } from './types';
 import { MEMORY_DIR } from '../mcp/types';
 import {
+    collectSupersededIds,
     createMemoryId,
     DEFAULT_MEMORY_BANK_ID,
     normalizeMemoryText,
     sanitizeMemoryText,
     tokenizeForRetrieval,
+    withTextTimeout,
     RetainTurnInput,
     RetainLessonInput,
 } from './hindsight-types';
@@ -43,6 +45,11 @@ interface MemoryManagerOptions {
      * 做退役替换:新事实 supersedes 旧事实,旧的从召回消失(留库可恢复)。
      */
     conflictUpdate?: boolean;
+    /**
+     * 后台 LLM 提炼/归纳的超时(ms)。provider 卡死时,超时→回退纯规则,绝不让在途沉淀
+     * 永不结束(否则 flush() 死循环,拖住设置切换/插件卸载)。默认 8s;测试可注入小值。
+     */
+    distillTimeoutMs?: number;
 }
 
 type ForgetMemoryField = 'name' | 'profession' | 'expertise' | 'preferences' | 'workflows' | 'projects' | 'goals' | 'all';
@@ -58,6 +65,8 @@ export class MemoryManager {
     private queryExpansionCache = new Map<string, string>();
     private static readonly QUERY_EXPANSION_CACHE_MAX = 100;
     private static readonly QUERY_EXPANSION_TIMEOUT_MS = 2000;
+    // 后台提炼/归纳的默认超时:比查询扩展(2s)宽松,后台任务不阻塞对话热路径。
+    private static readonly DEFAULT_DISTILL_TIMEOUT_MS = 8000;
     // 后台沉淀任务集合:retain 走 fire-and-forget,flush 时 await 排空,插件卸载前不丢在途写。
     private pendingRetains = new Set<Promise<void>>();
 
@@ -69,7 +78,11 @@ export class MemoryManager {
     ) {
         this.hindsightStore = new HindsightStore(app);
         this.hindsightRetriever = new HindsightRetriever(this.hindsightStore);
-        this.hindsightConsolidator = new HindsightConsolidator(this.hindsightStore, options.generate);
+        this.hindsightConsolidator = new HindsightConsolidator(
+            this.hindsightStore,
+            options.generate,
+            options.distillTimeoutMs ?? MemoryManager.DEFAULT_DISTILL_TIMEOUT_MS,
+        );
         this.initPromise = this.initialize();
     }
 
@@ -148,7 +161,7 @@ export class MemoryManager {
         const timeout = MemoryManager.QUERY_EXPANSION_TIMEOUT_MS;
         let expanded = query;
         try {
-            const raw = await this.withTimeout(generate(query, system), timeout);
+            const raw = await withTextTimeout(generate(query, system), timeout);
             const terms = this.parseDistilledLines(raw);
             if (terms.length > 0) {
                 // 原 query 打头保证原始信号不被稀释,扩展词追加。
@@ -160,16 +173,6 @@ export class MemoryManager {
 
         this.putQueryExpansionCache(cacheKey, expanded);
         return expanded;
-    }
-
-    /** 给 promise 套超时,超时/失败恒 resolve(空串),绝不 reject——照搬 selection-context-builder 范式。 */
-    private withTimeout(p: Promise<string>, ms: number): Promise<string> {
-        return new Promise<string>((resolve) => {
-            let done = false;
-            const t = setTimeout(() => { if (!done) { done = true; resolve(''); } }, ms);
-            p.then((v) => { if (!done) { done = true; clearTimeout(t); resolve(v || ''); } })
-             .catch(() => { if (!done) { done = true; clearTimeout(t); resolve(''); } });
-        });
     }
 
     /** 写入查询扩展缓存,超出上限时淘汰最旧一条(Map 迭代序即插入序)。 */
@@ -260,7 +263,8 @@ export class MemoryManager {
 
     /**
      * LLM 沉淀:把 user+assistant 一轮提炼成 0-N 条精炼、可复用的记忆(每条一句话)。
-     * 未注入 generate 时返回 null(交给规则回退);LLM 失败/空结果也返回 null。
+     * 返回 null = 交给上层规则回退(未注入 generate / LLM 失败 / LLM 超时 / LLM 判定无可记);
+     * 返回 [] = 输入真空(user、assistant 都空),规则回退也产不出记录,无需回退。
      */
     private async distillTurnMemories(input: RetainTurnInput, now: number): Promise<any[] | null> {
         const generate = this.options.generate;
@@ -278,15 +282,15 @@ export class MemoryManager {
             + await this.directivesHint();
         const prompt = `用户: ${userText.slice(0, 800)}\n助手: ${assistantText.slice(0, 800)}`;
 
-        let raw: string;
-        try {
-            raw = await generate(prompt, system);
-        } catch {
-            return null;
-        }
+        // 套超时:provider 卡死时超时→空串→(下方)当作"无可记"→返回 null 交给规则回退,
+        // 绝不让在途沉淀永不结束(否则 flush() 死循环,拖住设置切换/插件卸载)。
+        const timeout = this.options.distillTimeoutMs ?? MemoryManager.DEFAULT_DISTILL_TIMEOUT_MS;
+        const raw = await withTextTimeout(generate(prompt, system), timeout);
 
         const items = this.parseDistilledItems(raw);
-        if (items.length === 0) return [];
+        // 空结果(LLM 判无可记 / 超时空串 / 解析不出):返回 null 交给规则回退,
+        // 而非 []——否则 durable 用户事实会被 distill 静默吞掉,规则保底路径拿不到机会。
+        if (items.length === 0) return null;
 
         return items.map((item) => this.createMemoryRecord({
             type: this.looksDurable(item.text) ? 'world' : 'experience',
@@ -385,8 +389,13 @@ export class MemoryManager {
         const maxRecords = input.maxRecords ?? 3;
         const maxChars = input.maxChars ?? 600;
         const now = input.now ?? Date.now();
-        const observations = (await this.hindsightStore.listMemories(DEFAULT_MEMORY_BANK_ID))
-            .filter((m) => m.type === 'observation');
+        // 退役过滤:与 BM25 召回共用 collectSupersededIds。此前本层直取全部 observation,
+        // 导致被 consolidate 收敛退役的过期用户画像仍被无条件注入(新旧结论同时在场)。
+        // superseded 基于全部记录构建(supersedes 可指向任意类型),再 filter observation。
+        const allMemories = await this.hindsightStore.listMemories(DEFAULT_MEMORY_BANK_ID);
+        const superseded = collectSupersededIds(allMemories);
+        const observations = allMemories
+            .filter((m) => m.type === 'observation' && !superseded.has(m.id));
         if (observations.length === 0) return '';
 
         // 排序键:confidence 为主,recency(14天半衰)为辅,与 retriever 的时近口径一致。
@@ -712,7 +721,13 @@ export class MemoryManager {
     }
 
     private looksDurable(text: string): boolean {
-        return /\bI prefer\b|\bmy project\b|\bmy goal\b|\bremember\b|偏好|喜欢|目标|项目|我是|我正在/i.test(text);
+        // 第一人称信号(用户原话):I prefer / my project / 我是 / 偏好 ...
+        // 第三人称信号(LLM distill 输出口径,如 "User prefers concise answers." / "用户偏好X"):
+        //   distill 的 system prompt 让 LLM 产出的正是第三人称陈述,此前分类器只认第一人称,
+        //   导致这类长期事实被错分成 experience(丢失矛盾退役/画像归纳资格),故必须一并识别。
+        return /\bI prefer\b|\bmy project\b|\bmy goal\b|\bremember\b|偏好|喜欢|目标|项目|我是|我正在|用户/i.test(text)
+            || /\buser\s+(?:prefers?|likes?|wants?|uses?|is\s+an?|works?\s+(?:on|as))\b/i.test(text)
+            || /\buser['’]s\s+(?:preference|project|goal|name|profession)\b/i.test(text);
     }
 
     private memoryTextForUserMessage(text: string): string {

@@ -4,6 +4,7 @@ import {
   MemoryRecord,
   normalizeMemoryText,
   tokenizeForRetrieval,
+  withTextTimeout,
 } from './hindsight-types';
 import { HindsightStore } from './hindsight-store';
 
@@ -14,10 +15,15 @@ interface ConsolidateOptions {
 }
 
 export class HindsightConsolidator {
+  // 归纳 LLM 调用的超时(ms):provider 卡死时超时→回退规则拼接,不让 consolidate 挂住
+  // 触发它的 retain 后台任务(进而拖住 flush/设置切换)。默认 8s,由 MemoryManager 注入。
+  private static readonly DEFAULT_TIMEOUT_MS = 8000;
+
   constructor(
     private store: HindsightStore,
     // 无状态 LLM 生成回调(可选)。提供时优先 LLM 归纳,失败回退规则拼接。
     private generate?: (prompt: string, systemPrompt?: string) => Promise<string>,
+    private timeoutMs: number = HindsightConsolidator.DEFAULT_TIMEOUT_MS,
   ) {}
 
   async consolidate(options: ConsolidateOptions = {}): Promise<MemoryRecord[]> {
@@ -88,13 +94,11 @@ export class HindsightConsolidator {
       + '一句话,不超过 60 字。若无法归纳出有意义的高层模式,只回复 NONE。不要输出解释。'
       + await this.directivesHint();
     const prompt = memories.map((m, i) => `${i + 1}. ${m.text}`).join('\n');
-    try {
-      const raw = (await this.generate(prompt, system)).trim();
-      if (!raw || /^none$/i.test(raw)) return null;
-      return raw.slice(0, 200);
-    } catch {
-      return null;
-    }
+    // 套超时:provider 卡死时超时→空串→当作无法归纳→返回 null 回退规则拼接,
+    // 绝不让归纳挂住上游 retain 后台任务(withTextTimeout 恒 resolve,不 reject)。
+    const raw = (await withTextTimeout(this.generate(prompt, system), this.timeoutMs)).trim();
+    if (!raw || /^none$/i.test(raw)) return null;
+    return raw.slice(0, 200);
   }
 
   /**

@@ -561,6 +561,15 @@ export class ModelService {
         this.sessionManager?.release(conversationId);
     }
 
+    /**
+     * 彻底销毁某会话的持久 session(删除历史对话时调):删磁盘 JSONL 文件 + 清 ref。
+     * 与 releaseSession(仅释放内存)、clearSession(开新文件)不同,这是用户显式删除,
+     * 不留孤儿文件(磁盘泄漏 + 隐私:JSONL 存对话原文)。无 sessionManager 时无操作。
+     */
+    async purgeSession(conversationId: string): Promise<void> {
+        await this.sessionManager?.purge(conversationId);
+    }
+
     // ---- 阶段C:会话分支操作(投影 / 切换 / 重跑定位)----
 
     /**
@@ -736,7 +745,11 @@ export class ModelService {
         });
     }
 
-    async executeApprovedAction(action: string, args: Record<string, any>): Promise<any> {
+    async executeApprovedAction(
+        action: string,
+        args: Record<string, any>,
+        conversationId?: string,
+    ): Promise<any> {
         const result = await this.toolRegistry.execute(action, {
             ...args,
             approved: true,
@@ -747,7 +760,36 @@ export class ModelService {
             approvalSource: 'user-click',
             undoable: this.isUndoableApprovedAction(action),
         });
+        // 把真实执行结果回灌进该会话的 pi session,使下一轮模型看到「用户批准了、动作已执行」
+        // 而非停留在审批占位上失忆。session 是跨轮上下文唯一真相源(UI 历史不回灌)。
+        // 失败静默——回灌是增强,不能让已成功执行的动作看起来失败。
+        if (this.sessionManager) {
+            await this.sessionManager.appendApprovalOutcome(
+                conversationId,
+                this.buildApprovalOutcomeText(action, args, result),
+            );
+        }
         return result;
+    }
+
+    /**
+     * 构造回灌进 session 的审批结果文本(模型可读的带外事件)。
+     * 说明「哪个动作被批准了」+「成功落到哪个路径 / 或失败原因」,让模型据此续接下一步。
+     */
+    private buildApprovalOutcomeText(
+        action: string,
+        args: Record<string, any>,
+        result: any,
+    ): string {
+        const target = getFileWriteResultPath(action, result, args)
+            || args?.path || args?.filename || args?.target || '';
+        const targetSuffix = target ? ` (${target})` : '';
+        const succeeded = result?.success === true || result?.status === 'success';
+        if (succeeded) {
+            return `[Approved action executed] The user approved "${action}"${targetSuffix} and it completed successfully. You may continue from here.`;
+        }
+        const error = result?.error || result?.message || 'unknown error';
+        return `[Approved action failed] The user approved "${action}"${targetSuffix} but it failed: ${error}`;
     }
 
     async executeWorkspaceTool(action: string, args: Record<string, any>): Promise<any> {

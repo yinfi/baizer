@@ -4,7 +4,7 @@ description: 从个人知识库检索相关知识，或将高质量回答归档�
 triggers:
   commands: ["/wiki:query"]
   keywords: ["知识库", "知识", "knowledge", "wiki"]
-tools: ["query_knowledge", "file_back_knowledge"]
+tools: ["query_knowledge", "file_back_knowledge", "search_vault"]
 ---
 
 # Knowledge Wiki

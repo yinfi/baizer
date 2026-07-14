@@ -12,6 +12,13 @@ import { ToolDefinition } from '../models/interfaces';
 export interface ToolContext {
   app: App;
   settings: PluginSettings;
+  /**
+   * 本次工具执行的中断信号(由 runtime 透传:pi 的软超时/用户中断)。
+   * 网络类工具(save_webpage/web_search)应把它接进 fetch,使超时/中断能真正取消
+   * 在途请求,而非仅让上层 race 返回错误、请求却在后台跑完(状态不一致)。
+   * 本地 vault 操作通常毫秒级完成,可忽略此信号(维持原签名不变)。
+   */
+  signal?: AbortSignal;
 }
 
 /**

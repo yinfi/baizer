@@ -411,6 +411,27 @@ async function runTests() {
     expect(retained).toEqual([{ userMessage: 'remember this', assistantMessage: 'Remembered', source: 'shell' }]);
   });
 
+  await test('forwards tool results to memory so tool-only turns can be retained', async () => {
+    const retained: any[] = [];
+    const deps = createDeps({
+      // 两阶段:先叫工具(input 是字符串),拿到结果后(input 是数组)给最终答案。
+      streamFactory: (input) => Array.isArray(input)
+        ? [{ type: 'text_delta', content: 'Saved.' }, { type: 'done', text: 'Saved.' }]
+        : [{ type: 'tool_call', id: 'call_1', name: 'read_note', args: { path: 'A.md' } }, { type: 'done', text: '' }],
+      toolResults: { read_note: { success: true, content: 'note body' } },
+      memoryManager: { retainTurn: async (turn: any) => retained.push(turn) },
+    });
+    const runtime = await makeRuntime(deps);
+    await collect(runtime.queryStream(createTurn({ userRequest: 'open A' })));
+
+    expect(retained.length).toBe(1);
+    // toolResults 被接线回传(此前恒缺失 → hadToolAction 恒 false → 工具轮次不沉淀)。
+    const tr = retained[0].toolResults;
+    expect(Array.isArray(tr)).toBe(true);
+    expect(tr.length).toBe(1);
+    expect(tr[0].name).toBe('read_note');
+  });
+
   await test('emits provider errors from queryStream and query throws them', async () => {
     const mk = () => createDeps({ streamFactory: () => [{ type: 'error', message: 'provider failed' }] });
     const runtime = await makeRuntime(mk());

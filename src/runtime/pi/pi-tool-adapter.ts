@@ -40,7 +40,8 @@ export function adaptToolDefinitionsToPi(input: AdaptToolDefinitionsInput): Agen
       executionMode: inferToolExecutionMode(definition.name, registeredTool),
       execute: async (_toolCallId: string, params: any, signal?: AbortSignal) => {
         const response = await executeWithTimeout(
-          () => executeBaizerTool(definition.name, params, input),
+          // effectiveSignal = 上游中断 ∪ 本地超时,透传进工具,使网络工具能真正取消在途请求。
+          (effectiveSignal) => executeBaizerTool(definition.name, params, input, effectiveSignal),
           timeoutMs,
           `Tool ${definition.name} execution timed out`,
           signal,
@@ -59,6 +60,7 @@ async function executeBaizerTool(
   name: string,
   args: any,
   input: AdaptToolDefinitionsInput,
+  signal?: AbortSignal,
 ): Promise<any> {
   // B 方案：use_skill 元工具已移除，skill 激活改由 read_skill（普通工具）+ system prompt
   // 的 <available_skills> 清单完成。此处不再有 use_skill 分支。
@@ -70,10 +72,11 @@ async function executeBaizerTool(
   }
 
   if (input.workspaceEditService && isDirectApplyWorkspaceTool(name)) {
+    // 直接应用写工具是本地 vault 操作(毫秒级),不接 signal,维持原路径。
     return input.workspaceEditService.executeWorkspaceTool(name, args);
   }
 
-  return input.toolRegistry.execute(name, args);
+  return input.toolRegistry.execute(name, args, signal);
 }
 
 function stringifyToolResponse(response: any): string {
@@ -86,7 +89,7 @@ function stringifyToolResponse(response: any): string {
 }
 
 async function executeWithTimeout<T>(
-  operation: () => Promise<T>,
+  operation: (effectiveSignal: AbortSignal) => Promise<T>,
   timeoutMs: number,
   errorMessage: string,
   signal?: AbortSignal,
@@ -95,21 +98,30 @@ async function executeWithTimeout<T>(
     throw createAbortError();
   }
 
+  // 组合信号:超时 ∪ 上游中断。任一触发即 abort,透传给工具让它取消在途副作用
+  // (如 save_webpage 的 fetch),而非仅让 race 返回错误、请求却在后台跑完。
+  const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  let abortHandler: (() => void) | undefined;
+  let upstreamHandler: (() => void) | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new Error(errorMessage));
+    }, timeoutMs);
     if (signal) {
-      abortHandler = () => reject(createAbortError());
-      signal.addEventListener('abort', abortHandler, { once: true });
+      upstreamHandler = () => {
+        controller.abort();
+        reject(createAbortError());
+      };
+      signal.addEventListener('abort', upstreamHandler, { once: true });
     }
   });
 
   try {
-    return await Promise.race([operation(), timeoutPromise]);
+    return await Promise.race([operation(controller.signal), timeoutPromise]);
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
-    if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
+    if (signal && upstreamHandler) signal.removeEventListener('abort', upstreamHandler);
   }
 }
 

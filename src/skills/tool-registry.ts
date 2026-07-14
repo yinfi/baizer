@@ -65,14 +65,18 @@ export class ToolRegistry implements IToolRegistry {
     }));
   }
 
-  /** 执行工具 */
-  async execute(name: string, args: any): Promise<any> {
+  /**
+   * 执行工具。可选 signal 透传进 ctx,供网络类工具接入 fetch 实现真正的中断/超时取消。
+   * 用每次调用的浅拷贝 ctx(而非 mutate 共享 this.ctx),避免并发工具间信号串台。
+   */
+  async execute(name: string, args: any, signal?: AbortSignal): Promise<any> {
     const tool = this.tools.get(name);
     if (!tool) {
       return { error: `Unknown tool: ${name}` };
     }
     try {
-      return await tool.execute(args, this.ctx);
+      const ctx = signal ? { ...this.ctx, signal } : this.ctx;
+      return await tool.execute(args, ctx);
     } catch (e: any) {
       console.error(`[ToolRegistry] Tool "${name}" execution error:`, e);
       return { error: e.message };

@@ -228,6 +228,33 @@ async function runTests() {
     expect(result.success).toBe(false);
     expect(result.error).toContain('403');
   });
+
+  // 论断6:requestUrl 无法中途取消,但写盘前必须检查中断信号——超时/中断已触发时
+  // 不落笔记,避免「上层判失败、笔记却照样创建」的状态不一致。
+  await test('does not write the note when the abort signal fired before saving', async () => {
+    const notes: Record<string, string> = {};
+    const app = createMockApp(notes);
+    transcriptImpl = async (_url: string) => null;
+    requestUrlImpl = async (_options: any) => ({
+      status: 200,
+      text: '<html><head><title>Article</title></head><body>Body text</body></html>',
+      headers: {},
+    });
+
+    const controller = new AbortController();
+    controller.abort(); // 模拟请求返回后、写盘前已超时/中断。
+
+    const tool = createSaveWebpageTool(null, deps);
+    const result = await tool.execute(
+      { url: 'https://example.com/article' },
+      { app, settings: DEFAULT_SETTINGS, signal: controller.signal } as any,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.aborted).toBe(true);
+    // 关键:笔记未被创建(副作用被拦下)。
+    expect(Object.keys(notes).length).toBe(0);
+  });
 }
 
 runTests().catch((e) => {

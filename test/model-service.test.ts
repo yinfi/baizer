@@ -208,6 +208,26 @@ async function runTests() {
     }]);
   });
 
+  await test('purgeSession delegates to the session manager to delete the persisted session', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const calls: string[] = [];
+    service.sessionManager = {
+      purge: async (conversationId: string) => { calls.push(conversationId); },
+    };
+
+    await service.purgeSession('tab-7');
+
+    expect(calls).toEqual(['tab-7']);
+  });
+
+  await test('purgeSession is a no-op when no session manager exists', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.sessionManager = null;
+    // 无 sessionManager(降级/临时会话):不应抛错。
+    await service.purgeSession('tab-x');
+    expect(true).toEqual(true);
+  });
+
   await test('undoWorkspaceEdit proxies to the shared workspace edit service', async () => {
     const service: any = Object.create(ModelService.prototype);
     const calls: string[] = [];
@@ -328,10 +348,17 @@ async function runTests() {
     service.settings = { activeProvider: 'openai' };
     service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
 
+    const outcomeCalls: any[] = [];
+    service.sessionManager = {
+      appendApprovalOutcome: async (conversationId: string | undefined, text: string) => {
+        outcomeCalls.push({ conversationId, text });
+      },
+    };
+
     const result = await service.executeApprovedAction('create_note', {
       filename: 'approved.md',
       content: '# Approved',
-    });
+    }, 'tab-1');
 
     expect(result).toEqual({ success: true, message: 'approved execution' });
     expect(calls).toEqual([{
@@ -350,6 +377,57 @@ async function runTests() {
       approvalSource: 'user-click',
       undoable: true,
     }]);
+    // 论断2:批准后的真实结果回灌进该会话 session,下一轮模型可见「已批准执行」。
+    expect(outcomeCalls.length).toEqual(1);
+    expect(outcomeCalls[0].conversationId).toEqual('tab-1');
+    expect(outcomeCalls[0].text.includes('create_note')).toEqual(true);
+    expect(outcomeCalls[0].text.includes('approved.md')).toEqual(true);
+    expect(outcomeCalls[0].text.includes('successfully')).toEqual(true);
+  });
+
+  await test('executeApprovedAction feeds a failure outcome back into the session', async () => {
+    const service: any = Object.create(ModelService.prototype);
+
+    service.toolRegistry = {
+      execute: async () => ({ success: false, error: 'File modification is disabled' }),
+    };
+    service.operationAuditLog = { record: async () => { } };
+    service.settings = { activeProvider: 'openai' };
+    service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
+
+    const outcomeCalls: any[] = [];
+    service.sessionManager = {
+      appendApprovalOutcome: async (conversationId: string | undefined, text: string) => {
+        outcomeCalls.push({ conversationId, text });
+      },
+    };
+
+    await service.executeApprovedAction('update_note', { path: 'locked.md', content: 'x' }, 'tab-9');
+
+    expect(outcomeCalls.length).toEqual(1);
+    expect(outcomeCalls[0].conversationId).toEqual('tab-9');
+    expect(outcomeCalls[0].text.includes('failed')).toEqual(true);
+    expect(outcomeCalls[0].text.includes('File modification is disabled')).toEqual(true);
+  });
+
+  await test('executeApprovedAction skips session feedback when no session manager exists', async () => {
+    const service: any = Object.create(ModelService.prototype);
+
+    service.toolRegistry = {
+      execute: async () => ({ success: true, message: 'ok' }),
+    };
+    service.operationAuditLog = { record: async () => { } };
+    service.settings = { activeProvider: 'openai' };
+    service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
+    service.sessionManager = null;
+
+    // 无 sessionManager(临时/降级会话):不应抛错,静默跳过回灌。
+    const result = await service.executeApprovedAction('create_note', {
+      filename: 'x.md',
+      content: 'y',
+    });
+
+    expect(result).toEqual({ success: true, message: 'ok' });
   });
 
   await test('chat delegates prepared turn execution to ChatRuntime', async () => {

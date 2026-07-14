@@ -108,6 +108,10 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     let approvalToolResultYielded = false;
     // provider 错误/中断在此累计;prompt() 不会 reject provider 错误(见探针结论)。
     let runError: { message: string; aborted: boolean } | null = null;
+    // 本轮工具动作累计:交给长期记忆判定"是否值得沉淀"(hadToolAction 门控)。
+    // 只收集 { name, result },不进 distill prompt——工具结果可能含大体积/密钥内容,
+    // 提炼只用 user+assistant 文本(assistant 文本已是动作的自然摘要)。
+    const turnToolResults: Array<{ name: string; result: unknown }> = [];
 
     const unsubscribe = harness.subscribe((event: any) => {
       // Provider 错误不会让 harness.prompt() reject,而是以 message_end(stopReason:'error') 出现。
@@ -132,6 +136,8 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
           queue.push({ ...mapped, result: raw });
           return;
         }
+        // 真实工具结果(非审批占位):记入本轮动作集,供记忆沉淀门控。
+        turnToolResults.push({ name: mapped.name, result: raw });
         if (!approvalMessage) queue.push({ ...mapped, result: raw });
         return;
       }
@@ -210,7 +216,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     }
 
     if (approvalMessage) {
-      await this.retainCompletedTurn(turn, approvalMessage);
+      await this.retainCompletedTurn(turn, approvalMessage, turnToolResults);
       if (!approvalToolResultYielded) fullResponseText = '';
       yield { type: 'done', text: '' };
       return;
@@ -218,7 +224,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
 
     fullResponseText = resolvePiFinalText(fileWriteState, fullResponseText);
     fullResponseText = this.applyGenerationQuality(turn, fullResponseText);
-    await this.retainCompletedTurn(turn, fullResponseText);
+    await this.retainCompletedTurn(turn, fullResponseText, turnToolResults);
     // 阶段B:在压缩改动会话树之前提取本轮 entryId,供 UI 锚定(阶段C 分叉/重试用)。
     const entryIds = canAnchorEntries
       ? await extractTurnEntryIds(session, preTurnLeafId)

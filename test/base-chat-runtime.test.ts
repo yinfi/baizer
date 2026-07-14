@@ -124,7 +124,13 @@ async function runTests() {
         getAllDefinitions: () => [
           { name: 'search_vault', description: 'Search vault', parameters: {} },
           { name: 'save_webpage', description: 'Save webpage', parameters: {} },
+          { name: 'read_skill', description: 'Read a skill', parameters: {} },
         ],
+        getDefinition: (name: string) => (
+          name === 'read_skill'
+            ? { name: 'read_skill', description: 'Read a skill', parameters: {} }
+            : undefined
+        ),
         execute: async () => ({}),
       } as any,
       skillRegistry: {
@@ -151,8 +157,9 @@ async function runTests() {
 
     expect((prepared as any).activeSkillName).toBe('web-clipper');
     expect((prepared as any).allowedToolNames).toEqual(['save_webpage']);
-    // B 方案：use_skill 元工具已移除，激活 skill 时工具集只含该 skill 的工具子集。
-    expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['save_webpage']);
+    // 论断3:收窄到 skill 工具子集时,元能力 read_skill 必须补回——否则渐进式披露断链,
+    // 模型再也读不到/切不到别的 skill(与运行中 steering 的 ActiveRunController 口径一致)。
+    expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['save_webpage', 'read_skill']);
     expect(prepared.systemPrompt!.includes('Use save_webpage to save the requested page.')).toBe(true);
   });
 

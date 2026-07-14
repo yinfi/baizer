@@ -84,6 +84,36 @@ export interface RetainLessonInput {
 
 export const DEFAULT_MEMORY_BANK_ID = 'default';
 
+/**
+ * 退役集合的单一真相源:扫描全部记录,把任何被 supersedes 声明取代的旧 id 收集成 Set。
+ * 所有读路径(BM25 召回、Mental Models 用户画像)共用它过滤退役记录,
+ * 避免"退役"逻辑散落在多处各自实现导致某条读路径漏过滤(如过期用户画像被无条件注入)。
+ * supersedes 可指向任意类型,故必须基于全部记录构建,调用方再按需 filter 类型。
+ */
+export function collectSupersededIds(records: Array<{ supersedes?: string[] }>): Set<string> {
+  const superseded = new Set<string>();
+  for (const record of records) {
+    if (record.supersedes) {
+      for (const id of record.supersedes) superseded.add(id);
+    }
+  }
+  return superseded;
+}
+
+/**
+ * 给文本生成 promise 套超时:超时或失败恒 resolve(空串),绝不 reject——供召回查询扩展、
+ * 后台记忆提炼、归纳共用。裸 await provider 时,provider 卡死会让在途沉淀永不结束,
+ * 进而 flush() 死循环、拖住设置切换/插件卸载;统一套此超时消除该风险。
+ */
+export function withTextTimeout(p: Promise<string>, ms: number): Promise<string> {
+  return new Promise<string>((resolve) => {
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; resolve(''); } }, ms);
+    p.then((v) => { if (!done) { done = true; clearTimeout(t); resolve(v || ''); } })
+     .catch(() => { if (!done) { done = true; clearTimeout(t); resolve(''); } });
+  });
+}
+
 export function normalizeMemoryText(value: string): string {
   return value.replace(/\s+/g, ' ').trim().toLowerCase();
 }

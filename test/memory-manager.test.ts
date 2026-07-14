@@ -581,6 +581,114 @@ async function runTests() {
     expect(ents.includes('深度工作')).toBe(true);
     expect(ents.includes('知了')).toBe(true);
   });
+
+  // ---- P1-1:退役 observation 不进 [User Model] ----
+
+  await test('getMentalModelBlock excludes superseded observations', async () => {
+    const { app } = createApp();
+    const memory = new MemoryManager(app);
+    await memory.ready();
+
+    // 旧画像。
+    await (memory as any).hindsightStore.upsertMemory({
+      id: 'mem_old', bankId: 'default', type: 'observation',
+      text: 'User prefers verbose answers',
+      normalizedText: 'user prefers verbose answers',
+      entities: [], tags: ['observation'], source: { kind: 'manual' },
+      confidence: 0.8, createdAt: 1000, updatedAt: 1000, mentionedAt: 1000, accessCount: 0,
+    });
+    // 新画像退役旧画像。
+    await (memory as any).hindsightStore.upsertMemory({
+      id: 'mem_new', bankId: 'default', type: 'observation',
+      text: 'User prefers concise answers',
+      normalizedText: 'user prefers concise answers',
+      entities: [], tags: ['observation'], source: { kind: 'manual' },
+      confidence: 0.8, createdAt: 2000, updatedAt: 2000, mentionedAt: 2000, accessCount: 0,
+      supersedes: ['mem_old'],
+    });
+
+    const block = await (memory as any).getMentalModelBlock({ now: 3000 });
+    // 只应出现新结论,退役的旧结论不得注入(此前 bug:两者同时在场)。
+    expect(block.includes('concise')).toBe(true);
+    expect(block.includes('verbose')).toBe(false);
+  });
+
+  // ---- P1-2:LLM 提炼的第三人称英文长期事实应归为 world(非 experience)----
+
+  await test('distill classifies third-person "User prefers ..." as world and retires the old one', async () => {
+    const { app } = createApp();
+    let out = '[]';
+    const generate = async () => out;
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    // 真实场景:用户说 durable 的第一人称(过 worthDistilling 成本闸门)→ 走 distill →
+    // LLM 把它提炼成第三人称 "User prefers ..."。分类器须认第三人称,否则错分 experience。
+    out = JSON.stringify([{ text: 'User prefers concise answers', entities: [] }]);
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer concise answers', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    const view1 = await (memory as any).getMemoryView({ mode: 'raw' });
+    const rec1 = view1.sections.raw.find((r: any) => r.text.includes('concise'));
+    expect(rec1 !== undefined).toBe(true);
+    // 第三人称长期事实必须落 world(此前 looksDurable 只认第一人称 → 错分 experience)。
+    expect(rec1.type).toBe('world');
+
+    // 改偏好:新的第三人称事实应退役旧的(只有落 world 才有退役资格)。
+    out = JSON.stringify([{ text: 'User prefers verbose answers', entities: [] }]);
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer verbose answers', assistantMessage: 'ok', source: 'shell', now: 2000,
+    });
+
+    const block = await (memory as any).recallForPrompt({ query: 'answer length preference', maxChars: 800, now: 3000 });
+    expect(block.includes('verbose')).toBe(true);
+    expect(block.includes('concise')).toBe(false); // 旧偏好已退役
+  });
+
+  // ---- P1-3:LLM 返回空数组时,durable 用户事实经规则回退仍入库 ----
+
+  await test('durable fact is retained via rule fallback when LLM returns empty array', async () => {
+    const { app } = createApp();
+    // LLM 判"无可记"返回 []:此前 distill 直接返回 [] → 上层不回退 → 事实静默丢失。
+    const generate = async () => '[]';
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer concise answers', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    const world = view.sections.raw.filter((r: any) => r.type === 'world');
+    // 规则回退保底:至少一条 world 记录入库(不再被 distill 空数组吞掉)。
+    expect(world.length).toBe(1);
+    expect(world[0].text.includes('concise')).toBe(true);
+  });
+
+  // ---- P2-5:provider 卡死时 retain/flush 经超时返回,不挂起 ----
+
+  await test('retain and flush return via timeout when the LLM generate hangs', async () => {
+    const { app } = createApp();
+    // 永不 resolve 的 generate:模拟 provider 卡死。
+    const generate = () => new Promise<string>(() => {});
+    const memory = new MemoryManager(app, { generate, distillTimeoutMs: 50 } as any);
+    await memory.ready();
+
+    const start = Date.now();
+    // userMessage durable → worthDistilling → 走 distill(卡死路径),超时后应回退规则。
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer concise answers', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+    await (memory as any).flush();
+    const elapsed = Date.now() - start;
+
+    // 未挂起:在超时(50ms)量级返回,给足裕量 5s。
+    expect(elapsed < 5000).toBe(true);
+    // 超时→空串→null→规则回退,durable 事实仍入库。
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    expect(view.sections.raw.filter((r: any) => r.type === 'world').length).toBe(1);
+  });
 }
 
 runTests().catch((e) => {
