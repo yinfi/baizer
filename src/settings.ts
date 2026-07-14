@@ -1193,7 +1193,7 @@ export class SettingTab extends PluginSettingTab {
             ['overview', t('Overview')],
             ['observations', t('Observations')],
             ['facts', t('Facts')],
-            ['recent', t('Recent')],
+            ['recent', t('Experiences')],
             ['search', t('Search Results')],
         ];
         for (const [id, label] of entries) {

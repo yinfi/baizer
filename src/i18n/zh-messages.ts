@@ -56,6 +56,7 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Deleted memory': '已删除记忆',
     'Observations': '观察',
     'Facts': '事实',
+    'Experiences': '经验',
     'Recent': '最近',
     'Search Results': '搜索结果',
     'Loading memory...': '加载记忆中…',
