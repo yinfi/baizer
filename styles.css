@@ -3785,18 +3785,27 @@ textarea.shell-input {
     border-radius: 8px;
 }
 
+/* 注:按钮本体不再承载 grid。移动端 WebView(旧 Android System WebView / iOS WKWebView)
+   长期不允许 <button> 作为 grid/flex 容器,会忽略 display:grid,导致子项退回行内堆叠而重叠。
+   故把栅格下沉到内层 <div>(任何引擎都能当容器),按钮只做普通块级点击区。 */
 .baizer-settings-provider-card-main {
+    width: 100%;
+    display: block;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.baizer-settings-provider-card-main-inner {
     width: 100%;
     display: grid;
     grid-template-columns: minmax(120px, .8fr) minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
     padding: 8px 10px;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
 }
 
 .baizer-settings-provider-card-title {
@@ -3835,7 +3844,7 @@ textarea.shell-input {
     }
 
     .baizer-settings-section-summary,
-    .baizer-settings-provider-card-main,
+    .baizer-settings-provider-card-main-inner,
     .baizer-settings-connection-detail-grid,
     .baizer-settings-detail-row,
     .baizer-settings-preset-grid {

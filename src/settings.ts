@@ -283,16 +283,21 @@ export function getSettingsFallbackCss(): string {
 }
 .baizer-settings-provider-card-main {
     width: 100%;
-    display: grid;
-    grid-template-columns: minmax(120px, .8fr) minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-    padding: 8px 10px;
+    display: block;
+    padding: 0;
     border: 0;
     background: transparent;
     color: inherit;
     text-align: left;
     cursor: pointer;
+}
+.baizer-settings-provider-card-main-inner {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(120px, .8fr) minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
 }
 .baizer-settings-provider-card-title { min-width: 0; font-weight: var(--font-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .baizer-settings-provider-card-meta { min-width: 0; margin: 0; color: var(--text-muted); font-size: var(--font-smallest); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -486,7 +491,7 @@ export function getSettingsFallbackCss(): string {
         grid-template-areas: "title" "subtitle" "search";
     }
     .baizer-settings-section-summary,
-    .baizer-settings-provider-card-main,
+    .baizer-settings-provider-card-main-inner,
     .baizer-settings-connection-detail-grid,
     .baizer-settings-detail-row,
     .baizer-settings-preset-grid {
@@ -504,7 +509,7 @@ export function getSettingsFallbackCss(): string {
         grid-template-areas: "title" "subtitle" "search";
     }
     .baizer-settings-section-summary,
-    .baizer-settings-provider-card-main,
+    .baizer-settings-provider-card-main-inner,
     .baizer-settings-connection-detail-grid,
     .baizer-settings-detail-row,
     .baizer-settings-preset-grid {
@@ -1368,9 +1373,12 @@ export class SettingTab extends PluginSettingTab {
                     'aria-pressed': meta.isActive ? 'true' : 'false',
                 },
             }) as HTMLButtonElement;
-            button.createDiv({ cls: 'baizer-settings-provider-card-title', text: meta.label });
-            button.createDiv({ cls: 'baizer-settings-provider-card-meta', text: meta.compactMeta });
-            button.createSpan({ cls: `baizer-settings-badge is-${badgeTone}`, text: badgeLabel });
+            // 栅格下沉到内层 div：移动端 WebView 不允许 <button> 当 grid 容器，
+            // 直接在 button 上 display:grid 会被忽略、子项重叠。
+            const buttonInner = button.createDiv({ cls: 'baizer-settings-provider-card-main-inner' });
+            buttonInner.createDiv({ cls: 'baizer-settings-provider-card-title', text: meta.label });
+            buttonInner.createDiv({ cls: 'baizer-settings-provider-card-meta', text: meta.compactMeta });
+            buttonInner.createSpan({ cls: `baizer-settings-badge is-${badgeTone}`, text: badgeLabel });
 
             button.addEventListener('click', async () => {
                 if (providerId === settings.activeProvider) return;
