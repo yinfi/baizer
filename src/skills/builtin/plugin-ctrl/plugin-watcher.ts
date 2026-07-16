@@ -10,6 +10,7 @@ import {
 } from '../../skill-files';
 import { SkillRegistry } from '../../skill-registry';
 import { PluginSkillGenerator } from './skill-generator';
+import { logger } from '../../../utils/logger';
 
 const POLL_INTERVAL_MS = 10_000;
 const GENERATE_DELAY_MS = 1_000;
@@ -102,10 +103,10 @@ export class PluginWatcher {
 
   async start(): Promise<void> {
     if (!this.settings.autoGeneratePluginSkills) {
-      console.log('[PluginWatcher] Disabled by settings');
+      logger.info('Disabled by settings', 'PluginWatcher');
       return;
     }
-    console.log('[PluginWatcher] Starting...');
+    logger.info('Starting...', 'PluginWatcher');
     await this.initialScan();
     this.intervalId = window.setInterval(
       () => this.checkChanges(),
@@ -118,7 +119,7 @@ export class PluginWatcher {
       window.clearInterval(this.intervalId);
       this.intervalId = null;
     }
-    console.log('[PluginWatcher] Stopped');
+    logger.info('Stopped', 'PluginWatcher');
   }
 
   private async initialScan(): Promise<void> {
@@ -134,7 +135,7 @@ export class PluginWatcher {
     }
 
     if (toGenerate.length === 0) {
-      console.log('[PluginWatcher] All plugins have skills');
+      logger.info('All plugins have skills', 'PluginWatcher');
       return;
     }
 
@@ -145,7 +146,7 @@ export class PluginWatcher {
 
     if (candidates.length === 0) return;
 
-    console.log(`[PluginWatcher] Generating skills for ${candidates.length} plugins`);
+    logger.info(`Generating skills for ${candidates.length} plugins`, 'PluginWatcher');
     new Notice(`Generating skills for ${candidates.length} plugins...`);
 
     for (let i = 0; i < candidates.length; i++) {
@@ -179,7 +180,7 @@ export class PluginWatcher {
     for (const id of removed) {
       const skillName = `plugin-${id}`;
       this.skillRegistry.unregisterSkill(skillName);
-      console.log(`[PluginWatcher] Unregistered skill: ${skillName}`);
+      logger.info(`Unregistered skill: ${skillName}`, 'PluginWatcher');
     }
 
     this.snapshot = currentIds;
@@ -200,7 +201,7 @@ export class PluginWatcher {
       }
 
       this.failedRetries.delete(pluginId);
-      console.log(`[PluginWatcher] Generated skill for: ${pluginId}`);
+      logger.info(`Generated skill for: ${pluginId}`, 'PluginWatcher');
     } catch (e: any) {
       this.failedRetries.set(pluginId, retries + 1);
       console.error(

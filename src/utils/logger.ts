@@ -12,7 +12,6 @@ export class Logger {
     private logs: LogEntry[] = [];
     private maxLogs: number = 1000;
     private enableConsole: boolean = true;
-    private enableStorage: boolean = true;
 
     private constructor() {
         // 私有构造函数，确保单例模式
@@ -62,11 +61,6 @@ export class Logger {
         if (this.enableConsole) {
             this.outputToConsole(entry);
         }
-
-        // 存储到本地（可选）
-        if (this.enableStorage) {
-            this.saveToStorage(entry);
-        }
     }
 
     private serializeError(error: any): any {
@@ -103,34 +97,6 @@ export class Logger {
         }
     }
 
-    private saveToStorage(entry: LogEntry) {
-        try {
-            // 简单的本地存储实现
-            const key = `gemini_log_${Date.now()}`;
-            localStorage.setItem(key, JSON.stringify(entry));
-
-            // 清理旧的日志（保留最近100条）
-            this.cleanupOldStorageLogs();
-        } catch (error) {
-            console.warn('无法保存日志到本地存储:', error);
-        }
-    }
-
-    private cleanupOldStorageLogs() {
-        const keys = [];
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key?.startsWith('gemini_log_')) {
-                keys.push(key);
-            }
-        }
-
-        // 按时间排序并删除旧的日志
-        keys.sort().reverse();
-        const keysToRemove = keys.slice(100);
-        keysToRemove.forEach(key => localStorage.removeItem(key));
-    }
-
     getRecentLogs(level?: LogEntry['level'], limit: number = 100): LogEntry[] {
         let filteredLogs = this.logs;
 
@@ -151,10 +117,6 @@ export class Logger {
 
     setConsoleOutput(enabled: boolean) {
         this.enableConsole = enabled;
-    }
-
-    setStorage(enabled: boolean) {
-        this.enableStorage = enabled;
     }
 }
 

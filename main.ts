@@ -99,7 +99,7 @@ export default class BaizerPlugin extends Plugin {
         // 不再用 allowPluginControl 决定 plugin-ctrl 是否可用。
         this.skillRegistry.registerBuiltinFromMd(pluginCtrlSkillMd, pluginCtrlSkillExecutor);
 
-        console.log(`[Baizer] SkillRegistry initialized: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
+        logger.info(`SkillRegistry initialized: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`, 'Baizer');
 
         // Initialize Knowledge Runtime
         this.knowledgeRuntime = new KnowledgeRuntime(
@@ -126,12 +126,12 @@ export default class BaizerPlugin extends Plugin {
         await this.skillRegistry.init();
         await this.skillRegistry.materializeBuiltins(this.app.vault.adapter);
 
-        console.log(`[Baizer] Final: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
+        logger.info(`Final: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`, 'Baizer');
 
         // 加载用户自定义 Skill
         await this.skillRegistry.loadUserSkills(USER_SKILLS_DIR, this.app);
 
-        console.log(`[Baizer] Skill system ready: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`);
+        logger.info(`Skill system ready: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`, 'Baizer');
 
         // 防止 hot reload 时重复注册
         this.app.workspace.detachLeavesOfType(VIEW_TYPE_SHELL);
@@ -142,7 +142,7 @@ export default class BaizerPlugin extends Plugin {
             );
         } catch (e) {
             // hot reload 时 view type 可能已注册，忽略
-            console.log('[Baizer] View type already registered, skipping.');
+            logger.info('View type already registered, skipping.', 'Baizer');
         }
 
         // Add ribbon icon for quick access to Baizer.
@@ -590,7 +590,7 @@ export default class BaizerPlugin extends Plugin {
                 editor,
                 obsidianContext,
                 activePath,
-                userProfile: this.modelService.getUserProfile(),
+                userProfile: null,
                 isStale,
                 requestId: requestSeq,
                 signal: inflight.signal,
@@ -806,7 +806,7 @@ export default class BaizerPlugin extends Plugin {
                 editor,
                 obsidianContext,
                 activePath,
-                userProfile: this.modelService.getUserProfile(),
+                userProfile: null,
                 isStale,
                 requestId: requestSeq,
                 signal: inflight.signal,
@@ -1016,7 +1016,7 @@ Instructions:
                 prompt,
                 systemPromptOverride,
                 obsidianContext,
-                userProfile: this.modelService.getUserProfile(),
+                userProfile: null,
             });
 
             // 提取第一个完整 JSON 对象（平衡括号计数，避免贪婪 regex 抓到多余内容）
@@ -1063,7 +1063,7 @@ Instructions:
                 const currentLine = view.state.doc.line(lineNumber);
                 const safeCh = Math.min(cursor.ch, currentLine.length);
 
-                console.log("Guardian: Showing ghost text", { suggestion: data.suggestion, line: lineNumber, ch: safeCh });
+                logger.debug('Showing ghost text', 'Guardian', { suggestion: data.suggestion, line: lineNumber, ch: safeCh });
                 showGhostText(view, data.suggestion, lineNumber, safeCh);
                 updateGuardianState(view, lineNumber, GuardianState.HasSuggestion);
             } else {

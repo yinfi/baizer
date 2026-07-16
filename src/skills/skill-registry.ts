@@ -20,6 +20,7 @@ import {
   ToolContext,
 } from './types';
 import { ToolRegistry } from './tool-registry';
+import { logger } from '../utils/logger';
 import { LoadedSkill, parseBuiltinSkill } from './pi-skill-source';
 import {
   SkillFilesAdapter,
@@ -89,7 +90,7 @@ export class SkillRegistry implements ISkillRegistry {
       builtinMd: skillMd,
     });
     this.indexTriggers(loaded);
-    console.log(`[SkillRegistry] Registered builtin skill: ${loaded.skill.name}`);
+    logger.info(`Registered builtin skill: ${loaded.skill.name}`, 'SkillRegistry');
   }
 
   /** 物化所有内置 Skill 到隐藏目录，并回填各自的真实文件路径。onload 中 await。 */
@@ -113,7 +114,7 @@ export class SkillRegistry implements ISkillRegistry {
     const loaded = this.skillToLoaded(skill);
     this.entries.set(skill.name, { loaded, isBuiltin: true, executor: skill });
     this.indexTriggers(loaded);
-    console.log(`[SkillRegistry] Registered builtin skill: ${skill.name}`);
+    logger.info(`Registered builtin skill: ${skill.name}`, 'SkillRegistry');
   }
 
   /** 注册用户 / 插件 Skill（兼容旧接口：接收已构造的 Skill 对象）。 */
@@ -125,7 +126,7 @@ export class SkillRegistry implements ISkillRegistry {
     const loaded = this.skillToLoaded(skill);
     this.entries.set(skill.name, { loaded, isBuiltin: false, executor: skill });
     this.indexTriggers(loaded);
-    console.log(`[SkillRegistry] Registered user skill: ${skill.name}`);
+    logger.info(`Registered user skill: ${skill.name}`, 'SkillRegistry');
   }
 
   /**
@@ -143,7 +144,7 @@ export class SkillRegistry implements ISkillRegistry {
     }
     this.entries.set(loaded.skill.name, { loaded, isBuiltin: false });
     this.indexTriggers(loaded);
-    console.log(`[SkillRegistry] Registered user skill: ${loaded.skill.name}`);
+    logger.info(`Registered user skill: ${loaded.skill.name}`, 'SkillRegistry');
     return true;
   }
 
@@ -155,7 +156,7 @@ export class SkillRegistry implements ISkillRegistry {
       this.commandIndex.delete(cmd);
     }
     this.entries.delete(name);
-    console.log(`[SkillRegistry] Unregistered skill: ${name}`);
+    logger.info(`Unregistered skill: ${name}`, 'SkillRegistry');
   }
 
   /**
@@ -175,7 +176,7 @@ export class SkillRegistry implements ISkillRegistry {
       }
     }
     if (count > 0) {
-      console.log(`[SkillRegistry] Loaded ${count} user skills from ${skillsDir}`);
+      logger.info(`Loaded ${count} user skills from ${skillsDir}`, 'SkillRegistry');
     }
   }
 

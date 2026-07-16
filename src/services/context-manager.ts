@@ -38,7 +38,7 @@ export class ContextManager {
 
             if (this.activeContexts.length > this.MAX_ACTIVE_CONTEXTS) {
                 const removed = this.activeContexts.splice(0, this.activeContexts.length - this.MAX_ACTIVE_CONTEXTS);
-                console.log(`[ContextManager] Removed ${removed.length} old contexts to prevent memory leak. Keeping ${this.MAX_ACTIVE_CONTEXTS} most recent contexts.`);
+                logger.debug(`Removed ${removed.length} old contexts to prevent memory leak. Keeping ${this.MAX_ACTIVE_CONTEXTS} most recent contexts.`, 'ContextManager');
             }
         }
     }

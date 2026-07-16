@@ -288,7 +288,7 @@ function createChatPanel(
     container.className = `guardian-chat-view is-${state.mode}`;
 
     const header = container.createDiv({ cls: 'guardian-chat-header' });
-    header.createSpan({ text: state.mode === 'selection' ? t('Selection AI') : t('Inline AI') });
+    header.createSpan({ text: t('Inline AI') });
     const closeBtn = header.createEl('button', {
         text: 'x',
         cls: 'guardian-close-btn',
@@ -306,9 +306,7 @@ function createChatPanel(
         if (messages.length === 0) {
             messageList.createDiv({
                 cls: 'guardian-message system',
-                text: state.mode === 'selection'
-                    ? 'Ask about the selected text.'
-                    : 'Ask AI what to insert here.',
+                text: 'Ask AI what to insert here.',
             });
         } else {
             for (const msg of messages) {
@@ -334,8 +332,8 @@ function createChatPanel(
     const textarea = inputWrapper.createEl('textarea', {
         cls: 'guardian-chat-input',
         attr: {
-            placeholder: state.mode === 'selection' ? t('Ask about this selection...') : t('Ask what to insert...'),
-            'aria-label': state.mode === 'selection' ? t('Ask about this selection...') : t('Ask what to insert...'),
+            placeholder: t('Ask what to insert...'),
+            'aria-label': t('Ask what to insert...'),
             rows: '2',
         },
     });
@@ -431,10 +429,6 @@ function renderSelectionMessage(app: App, messageList: HTMLElement, msg: ChatMes
 }
 
 function getTargetText(view: EditorView, state: Extract<SelectionMenuState, { type: 'chat' }>) {
-    if (state.mode === 'selection') {
-        return view.state.doc.sliceString(state.from, state.to);
-    }
-
     const line = view.state.doc.lineAt(state.from);
     const beforeTrigger = line.text.slice(0, Math.max(0, state.from - line.from)).trim();
     return beforeTrigger || line.text.replace('@', '').trim();

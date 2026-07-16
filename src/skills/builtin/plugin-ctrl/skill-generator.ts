@@ -8,6 +8,7 @@ import {
   pluginSkillFilePath,
 } from '../../skill-files';
 import { getPluginCommandPreconditions } from './executor';
+import { logger } from '../../../utils/logger';
 
 // ==================== 类型 ====================
 
@@ -118,8 +119,8 @@ export class PluginSkillGenerator {
     // Remote README/search context is only needed when generating a skill.
     const webContext = await this.fetchPluginContext(pluginId, baseInfo.name);
 
-    console.log(`[SkillGenerator] ${pluginId} syntaxHints:`, syntaxHints);
-    console.log(`[SkillGenerator] ${pluginId} webContext length:`, webContext.length);
+    logger.debug(`${pluginId} syntaxHints`, 'SkillGenerator', { syntaxHints });
+    logger.debug(`${pluginId} webContext length`, 'SkillGenerator', { length: webContext.length });
 
     return {
       ...baseInfo,
@@ -164,10 +165,10 @@ export class PluginSkillGenerator {
       try {
         content = await this.app.vault.adapter.read(path);
       } catch {
-        console.log(`[SkillGenerator] extractSyntaxHints ${pluginId}: file not found`);
+        logger.debug(`extractSyntaxHints ${pluginId}: file not found`, 'SkillGenerator');
         return [];
       }
-      console.log(`[SkillGenerator] extractSyntaxHints ${pluginId}: file read, ${content.length} chars`);
+      logger.debug(`extractSyntaxHints ${pluginId}: file read, ${content.length} chars`, 'SkillGenerator');
       // 只取前 50KB
       const chunk = content.slice(0, 50_000);
       const hints = new Set<string>();
@@ -206,7 +207,7 @@ export class PluginSkillGenerator {
       const rawUrl = `https://raw.githubusercontent.com/${repo}/HEAD/README.md`;
       const content = await this.fetchRawText(rawUrl);
       if (content) {
-        console.log(`[SkillGenerator] ${pluginId}: got ${content.length} chars from GitHub README (${repo})`);
+        logger.debug(`${pluginId}: got ${content.length} chars from GitHub README (${repo})`, 'SkillGenerator');
         return content;
       }
     }
@@ -235,7 +236,7 @@ export class PluginSkillGenerator {
       for (const p of plugins) {
         this.communityPluginsCache[p.id] = p.repo;
       }
-      console.log(`[SkillGenerator] Loaded community-plugins.json: ${plugins.length} plugins`);
+      logger.debug(`Loaded community-plugins.json: ${plugins.length} plugins`, 'SkillGenerator');
       return this.communityPluginsCache[pluginId] || '';
     } catch (e: any) {
       console.warn(`[SkillGenerator] Failed to load community-plugins.json:`, e.message);
@@ -282,7 +283,7 @@ export class PluginSkillGenerator {
       let html = '';
       for (let attempt = 0; attempt < 3; attempt++) {
         const response = await requestUrl({ url });
-        console.log(`[SkillGenerator] web search for "${pluginName}": attempt=${attempt + 1}, status=${response.status}, html=${response.text.length} chars`);
+        logger.debug(`web search for "${pluginName}": attempt=${attempt + 1}, status=${response.status}, html=${response.text.length} chars`, 'SkillGenerator');
         if (response.status === 200 && response.text.length > 20_000) {
           html = response.text;
           break;

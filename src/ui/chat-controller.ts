@@ -93,7 +93,7 @@ export class ChatController {
             const now = Date.now();
             if (now - this.fileSearchCache.timestamp > this.FILE_SEARCH_CACHE_TTL) {
                 this.fileSearchCache = null;
-                console.log('[ChatController] Cleaned up expired file search cache.');
+                logger.debug('Cleaned up expired file search cache.', 'ChatController');
             }
         }
     }

@@ -2,6 +2,7 @@
 
 import { App, TFile, Notice } from 'obsidian';
 import { debounce } from '../utils/throttle';
+import { logger } from '../utils/logger';
 import { PluginSettings } from '../mcp/types';
 import { ModelService } from '../services/model-service';
 import { KnowledgeCompiler, findCurrentCompiledSummary } from './compiler';
@@ -98,7 +99,7 @@ export class KnowledgeRuntime {
       let processed = 0;
       try {
         const ontology = await this.loadOntologySchema();
-        console.log(`[KnowledgeRuntime] Auto-compiling pending notes...${ontology ? ' (with ontology schema)' : ''}`);
+        logger.info(`Auto-compiling pending notes...${ontology ? ' (with ontology schema)' : ''}`, 'KnowledgeRuntime');
         const result = await this.compiler.compileAllPending(
           maxBatch,
           undefined,
@@ -146,7 +147,7 @@ export class KnowledgeRuntime {
       const ref = this.app.metadataCache.on('resolved', async () => {
         this.metadataIndex.rebuild();
         this.app.metadataCache.offref(ref);
-        console.log(`[KnowledgeRuntime] MetadataCache resolved, ${this.metadataIndex.size} articles indexed`);
+        logger.info(`MetadataCache resolved, ${this.metadataIndex.size} articles indexed`, 'KnowledgeRuntime');
         await this.onMetadataReady();
       });
     }
@@ -156,7 +157,7 @@ export class KnowledgeRuntime {
     this.indexer.checkBasesPlugin();
     await this.indexer.ensureBaseFile();
 
-    console.log(`[KnowledgeRuntime] Initialized`);
+    logger.info(`Initialized`, 'KnowledgeRuntime');
   }
 
   /** metadataCache 就绪后：扫描未注册文件 + 重置 processing + 触发自动编译 */
@@ -170,18 +171,18 @@ export class KnowledgeRuntime {
       await setKnowledgeStatus(this.app, f, 'pending');
     }
     if (stuckFiles.length > 0) {
-      console.log(`[KnowledgeRuntime] Reset ${stuckFiles.length} stuck processing files`);
+      logger.info(`Reset ${stuckFiles.length} stuck processing files`, 'KnowledgeRuntime');
     }
 
     // 2. 检测过期文件（schema 或内容变更）
     const reconciledCount = await this.reconcilePendingFiles(wikiFolder, sourceFolders);
     if (reconciledCount > 0) {
-      console.log(`[KnowledgeRuntime] Reconciled ${reconciledCount} pending files with current summaries`);
+      logger.info(`Reconciled ${reconciledCount} pending files with current summaries`, 'KnowledgeRuntime');
     }
 
     const staleCount = await this.detectStaleFiles(wikiFolder);
     if (staleCount > 0) {
-      console.log(`[KnowledgeRuntime] Detected ${staleCount} stale files for recompilation`);
+      logger.info(`Detected ${staleCount} stale files for recompilation`, 'KnowledgeRuntime');
     }
 
     // 2.5 自动发现 ontology（_ontology.md 不存在且文章数足够时）
@@ -194,7 +195,7 @@ export class KnowledgeRuntime {
       await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'new' });
     }
     if (unregistered.length > 0) {
-      console.log(`[KnowledgeRuntime] Startup scan: registered ${unregistered.length} new files`);
+      logger.info(`Startup scan: registered ${unregistered.length} new files`, 'KnowledgeRuntime');
     }
 
     // 计算总 pending 数：刚注册的 + 之前 stuck 的 + 已有的 pending
@@ -204,7 +205,7 @@ export class KnowledgeRuntime {
     const totalPending = Math.max(autoCompilePending, unregistered.length + staleCount);
 
     if (this.settings.knowledgeAutoCompile && totalPending > 0) {
-      console.log(`[KnowledgeRuntime] ${totalPending} pending notes, scheduling auto-compile...`);
+      logger.info(`${totalPending} pending notes, scheduling auto-compile...`, 'KnowledgeRuntime');
       setTimeout(() => this.watcher.triggerCompile(), 10000);
     }
   }
@@ -352,7 +353,7 @@ export class KnowledgeRuntime {
       callback: async () => {
         const preview = await this.discoverOntologyPreview();
         if (preview.content) {
-          console.log('[KnowledgeRuntime] Ontology preview:\n', preview.content);
+          logger.info('Ontology preview', 'KnowledgeRuntime', { content: preview.content });
         }
         new Notice(preview.message);
       }
@@ -575,26 +576,26 @@ export class KnowledgeRuntime {
     try {
       const status = await this.ontologyService.getStatus();
       if (status.kind === 'valid') {
-        console.log('[KnowledgeRuntime] Ontology schema already exists, skipping discovery');
+        logger.info('Ontology schema already exists, skipping discovery', 'KnowledgeRuntime');
         return status.path;
       }
       if (status.kind === 'invalid' || status.kind === 'disabled') {
-        console.log(`[KnowledgeRuntime] Ontology discovery skipped: ${status.kind}`);
+        logger.info(`Ontology discovery skipped: ${status.kind}`, 'KnowledgeRuntime');
         return null;
       }
       if (this.settings.knowledgeOntologyUpdateMode !== 'auto') {
-        console.log(`[KnowledgeRuntime] Ontology discovery skipped in ${this.settings.knowledgeOntologyUpdateMode || 'suggest'} mode`);
+        logger.info(`Ontology discovery skipped in ${this.settings.knowledgeOntologyUpdateMode || 'suggest'} mode`, 'KnowledgeRuntime');
         return null;
       }
 
       const candidate = await this.ontologyService.generateDiscoveryCandidate((prompt) => this.modelService.generate(prompt));
       if (!candidate.content) {
-        console.log(`[KnowledgeRuntime] Ontology discovery skipped: ${candidate.readiness.kind}${candidate.error ? ` (${candidate.error})` : ''}`);
+        logger.info(`Ontology discovery skipped: ${candidate.readiness.kind}${candidate.error ? ` (${candidate.error})` : ''}`, 'KnowledgeRuntime');
         return null;
       }
 
       const path = await this.ontologyService.createSchemaFile(candidate.content);
-      console.log(`[KnowledgeRuntime] Ontology schema created at ${path}`);
+      logger.info(`Ontology schema created at ${path}`, 'KnowledgeRuntime');
       return path;
     } catch (e: any) {
       console.error('[KnowledgeRuntime] Ontology discovery failed:', e.message);

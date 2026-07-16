@@ -3,6 +3,7 @@
 
 import { App, TFile } from 'obsidian';
 import { debounce } from '../utils/throttle';
+import { logger } from '../utils/logger';
 import { DEFAULT_WIKI_FOLDER } from './types';
 import {
   getKnowledgeStatus,
@@ -93,7 +94,7 @@ export class KnowledgeWatcher {
     try {
       await ensureSourceId(this.app, file);
       await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'new' });
-      console.log(`[KnowledgeWatcher] Registered new file: ${file.path}`);
+      logger.info(`Registered new file: ${file.path}`, 'KnowledgeWatcher');
       this._onCompileNeeded?.();
     } finally {
       // 延迟清除，等 vault modify 事件传播完毕
@@ -114,7 +115,7 @@ export class KnowledgeWatcher {
         this.writingPaths.add(file.path);
         try {
           await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'content_changed' });
-          console.log(`[KnowledgeWatcher] Marked pending (was done): ${file.path}`);
+          logger.info(`Marked pending (was done): ${file.path}`, 'KnowledgeWatcher');
           this._onCompileNeeded?.();
         } finally {
           setTimeout(() => this.writingPaths.delete(file.path), 500);

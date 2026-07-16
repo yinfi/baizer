@@ -3,6 +3,7 @@
 import { App, TFile } from 'obsidian';
 import { Tool, ToolContext, ToolParameters } from '../types';
 import { ToolRegistry } from '../tool-registry';
+import { logger } from '../../utils/logger';
 import { ChangePreview } from '../../ui/diff/change-preview';
 import {
   checkWriteScope,
@@ -585,5 +586,5 @@ export function registerVaultTools(registry: ToolRegistry): void {
   for (const tool of ALL_VAULT_TOOLS) {
     registry.register(tool);
   }
-  console.log(`[vault-ops] Registered ${ALL_VAULT_TOOLS.length} vault tools.`);
+  logger.info(`Registered ${ALL_VAULT_TOOLS.length} vault tools.`, 'vault-ops');
 }

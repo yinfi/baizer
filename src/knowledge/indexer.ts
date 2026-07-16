@@ -3,6 +3,7 @@
 
 import { App, TFile, Notice } from 'obsidian';
 import { MetadataIndex } from './metadata-index';
+import { logger } from '../utils/logger';
 import {
   DEFAULT_WIKI_FOLDER,
   WIKI_INDEX_BASE_FILENAME,
@@ -91,7 +92,7 @@ export class WikiIndexer {
       const content = await this.app.vault.read(oldIndex);
       if (content.includes('knowledge_generated: true')) {
         await this.app.vault.trash(oldIndex, true);
-        console.log('[WikiIndexer] Migrated: removed legacy index.md');
+        logger.info('Migrated: removed legacy index.md', 'WikiIndexer');
       }
     }
 
@@ -107,7 +108,7 @@ export class WikiIndexer {
       }
     }
     if (topicFiles.length > 0) {
-      console.log(`[WikiIndexer] Migrated: cleaned ${topicFiles.length} legacy topic pages`);
+      logger.info(`Migrated: cleaned ${topicFiles.length} legacy topic pages`, 'WikiIndexer');
     }
   }
 
