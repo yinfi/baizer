@@ -420,7 +420,7 @@
     padding: var(--size-2-1) var(--size-4-1);
     border-radius: var(--radius-s);
     cursor: pointer;
-    transition: all var(--baizer-transition-fast);
+    transition: color var(--baizer-transition-fast), background-color var(--baizer-transition-fast), border-color var(--baizer-transition-fast);
     border: 1px solid var(--background-modifier-border);
     background: var(--background-primary);
 }
@@ -630,33 +630,6 @@ textarea.shell-input::placeholder {
     align-items: center;
 }
 
-.shell-status-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    background-color: var(--color-green);
-    border-radius: 50%;
-    margin-right: 8px;
-    box-shadow: 0 0 8px color-mix(in srgb, var(--color-green) 60%, transparent);
-    animation: shell-pulse 1.5s infinite ease-in-out;
-}
-
-@keyframes shell-pulse {
-    0% {
-        transform: scale(0.8);
-        opacity: 0.5;
-    }
-
-    50% {
-        transform: scale(1.2);
-        opacity: 1;
-    }
-
-    100% {
-        transform: scale(0.8);
-        opacity: 0.5;
-    }
-}
 
 /* Guardian Styles */
 .guardian-gutter {
@@ -678,7 +651,7 @@ textarea.shell-input::placeholder {
     border-radius: 50%;
     margin-top: 6px;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: transform 0.3s ease, opacity 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease;
 }
 
 /* idle/paused 是静止态:去掉持续呼吸动画(常驻动画分散注意、耗电),
@@ -856,7 +829,7 @@ textarea.shell-input::placeholder {
     display: flex;
     flex-direction: column;
     width: min(420px, 90vw);
-    max-height: min(480px, 70vh);
+    max-height: min(480px, 70dvh);
     overflow: hidden;
 }
 
@@ -1016,7 +989,7 @@ textarea.shell-input::placeholder {
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: pointer;
-    transition: all var(--baizer-transition-fast);
+    transition: background-color var(--baizer-transition-fast), box-shadow var(--baizer-transition-fast);
     position: relative;
 }
 
@@ -1091,7 +1064,7 @@ textarea.shell-input::placeholder {
 .baizer-diff-modal {
     width: 80vw;
     max-width: 1000px;
-    height: 80vh;
+    height: 80dvh;
     display: flex;
     flex-direction: column;
 }
@@ -1165,7 +1138,7 @@ textarea.shell-input::placeholder {
     color: var(--text-muted);
     display: flex;
     align-items: center;
-    transition: all var(--baizer-transition-fast);
+    transition: background-color var(--baizer-transition-fast), color var(--baizer-transition-fast);
 }
 
 .shell-feedback-btn:hover {
@@ -1384,7 +1357,7 @@ textarea.shell-input::placeholder {
     color: var(--text-muted);
     display: flex;
     align-items: center;
-    transition: all var(--baizer-transition-fast);
+    transition: background-color var(--baizer-transition-fast), color var(--baizer-transition-fast);
 }
 
 .shell-branch-prev:hover,
@@ -2537,7 +2510,7 @@ textarea.shell-input {
 
 .shell-change-preview-diff-lines {
     display: grid;
-    max-height: min(24vh, 180px);
+    max-height: min(24dvh, 180px);
     overflow-y: auto;
     overscroll-behavior: contain;
     font-family: var(--font-monospace);
@@ -2697,7 +2670,7 @@ textarea.shell-input {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 12px;
-    max-height: 60vh;
+    max-height: 60dvh;
     padding: 14px;
     background: var(--background-primary);
     border: none;
@@ -2721,7 +2694,7 @@ textarea.shell-input {
 
 .baizer-diff-pane-code {
     min-height: 220px;
-    max-height: 52vh;
+    max-height: 52dvh;
     margin: 0;
     padding: 12px;
     overflow: auto;
@@ -2762,7 +2735,7 @@ textarea.shell-input {
 .baizer-diff-modal {
     width: min(720px, calc(100vw - 72px)) !important;
     height: auto !important;
-    max-height: calc(100vh - 96px);
+    max-height: calc(100dvh - 96px);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -2804,7 +2777,7 @@ textarea.shell-input {
 
 .diff-container.baizer-diff-unified {
     flex: 0 1 auto;
-    max-height: min(30vh, 260px);
+    max-height: min(30dvh, 260px);
     margin: 12px 16px 0;
     padding: 8px 0;
     overflow: auto;
@@ -2826,7 +2799,7 @@ textarea.shell-input {
 
 .baizer-diff-pane-code {
     min-height: 84px !important;
-    max-height: min(24vh, 190px) !important;
+    max-height: min(24dvh, 190px) !important;
 }
 
 .baizer-diff-empty {
@@ -2871,12 +2844,12 @@ textarea.shell-input {
 .guardian-chat-view {
     width: min(340px, calc(100vw - 64px));
     height: auto;
-    max-height: min(380px, 56vh);
+    max-height: min(380px, 56dvh);
 }
 
 .guardian-message-list {
     min-height: 54px;
-    max-height: min(170px, 24vh);
+    max-height: min(170px, 24dvh);
 }
 
 .guardian-chat-input {
@@ -4089,14 +4062,6 @@ textarea.shell-input {
     border-radius: var(--radius-s);
 }
 .baizer-inline-diff-btn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
-.baizer-inline-diff-spinner {
-    width: 12px; height: 12px;
-    border: 2px solid var(--background-modifier-border);
-    border-top-color: var(--interactive-accent);
-    border-radius: 50%;
-    animation: baizer-spin 0.7s linear infinite;
-}
-@keyframes baizer-spin { to { transform: rotate(360deg); } }
 
 /* ===== 选中横向工具条 ===== */
 .baizer-selection-toolbar {
