@@ -755,6 +755,9 @@ export class SettingTab extends PluginSettingTab {
     private accordionHost: HTMLElement | null = null;
     private searchQuery = '';
     private revealApiKey = false;
+    // 激活 provider 卡片的详情是否折叠。默认展开(false)；再次点击当前激活卡即切换折叠态，
+    // 切换到其它 provider 时重置为展开。此前「激活==展开」耦合导致再点无法折叠(用户反馈)。
+    private activeProviderDetailCollapsed = false;
     private connectionTestStatus: ConnectionTestStatus = { state: 'idle', message: '' };
     private memoryView: any = null;
     private memorySearchQuery = '';
@@ -1366,11 +1369,16 @@ export class SettingTab extends PluginSettingTab {
             });
             card.setAttribute('data-provider-id', providerId);
 
-            const button = card.createEl('button', {
+            // 切换按钮不能内嵌 button（无效 HTML），故用 header 行把删除图标作为兄弟节点并排。
+            const header = card.createDiv({ cls: 'baizer-settings-provider-card-header' });
+            // 激活卡此时兼作详情展开/折叠开关，补 aria-expanded 让读屏知道点击会展开/收起详情。
+            const detailExpanded = meta.isActive && !this.activeProviderDetailCollapsed;
+            const button = header.createEl('button', {
                 cls: 'baizer-settings-provider-card-main',
                 attr: {
                     type: 'button',
                     'aria-pressed': meta.isActive ? 'true' : 'false',
+                    'aria-expanded': detailExpanded ? 'true' : 'false',
                 },
             }) as HTMLButtonElement;
             // 栅格下沉到内层 div：移动端 WebView 不允许 <button> 当 grid 容器，
@@ -1381,22 +1389,69 @@ export class SettingTab extends PluginSettingTab {
             buttonInner.createSpan({ cls: `baizer-settings-badge is-${badgeTone}`, text: badgeLabel });
 
             button.addEventListener('click', async () => {
-                if (providerId === settings.activeProvider) return;
+                // 点当前激活卡：切换详情折叠/展开(可折叠已展开的详情)。
+                if (providerId === settings.activeProvider) {
+                    this.activeProviderDetailCollapsed = !this.activeProviderDetailCollapsed;
+                    this.openSectionIds.add('connection');
+                    this.renderAccordion();
+                    return;
+                }
+                // 点其它卡：切换为激活并展开其详情。
                 this.resetConnectionTestStatus();
+                this.activeProviderDetailCollapsed = false;
                 await this.plugin.modelService.switchProvider(providerId, () => this.persistSettings());
                 this.revealApiKey = false;
                 this.openSectionIds.add('connection');
                 this.renderAccordion();
             });
 
-            if (meta.isActive) {
+            // 删除移到卡片头部：图标按钮 + tooltip，低调可发现，不再是抢眼的实体红按钮。
+            // 每张卡删自己（点哪张删哪张）；至少保留一个 provider 时禁用。
+            const canDelete = Object.keys(settings.providers || {}).length > 1;
+            const deleteBtn = header.createEl('button', {
+                cls: 'baizer-settings-provider-card-delete',
+                attr: {
+                    type: 'button',
+                    title: t('Delete provider'),
+                    'aria-label': `${t('Delete provider')} ${meta.label}`,
+                },
+            }) as HTMLButtonElement;
+            setIcon(deleteBtn, 'trash-2');
+            deleteBtn.disabled = !canDelete;
+            deleteBtn.addEventListener('click', (evt) => {
+                evt.stopPropagation();
+                if (deleteBtn.disabled) return;
+                // T12: 删除 Provider 前用 MemoryConfirmModal 二次确认，避免误触即毁配置。
+                new MemoryConfirmModal(
+                    this.app,
+                    t('Delete Provider'),
+                    `${t('Delete provider')} "${meta.label}"? ${t('This removes its configuration from this workspace.')}`,
+                    async () => {
+                        delete settings.providers[providerId];
+                        if (BUILTIN_PROVIDER_KEYS.includes(providerId)) {
+                            settings.deletedProviderIds = Array.from(new Set([...(settings.deletedProviderIds || []), providerId]));
+                        }
+                        // 仅当删的是当前激活项时才需要改选激活；删其它项保持当前激活不变。
+                        if (providerId === settings.activeProvider) {
+                            settings.activeProvider = settings.providers.gemini ? 'gemini' : Object.keys(settings.providers)[0];
+                            this.revealApiKey = false;
+                            this.resetConnectionTestStatus();
+                        }
+                        this.openSectionIds.add('connection');
+                        await this.persistSettings();
+                        new Notice(t('Provider deleted'));
+                        this.renderAccordion();
+                    },
+                ).open();
+            });
+
+            if (meta.isActive && !this.activeProviderDetailCollapsed) {
                 this.renderActiveProviderDetail(card, activeConfig, token);
             }
         });
     }
 
     private renderActiveProviderDetail(parent: HTMLElement, activeConfig: ProviderConfig, token: number): void {
-        const settings = this.plugin.settings;
         const detail = parent.createDiv({ cls: 'baizer-settings-provider-detail-inline' });
         const grid = detail.createDiv({ cls: 'baizer-settings-connection-detail-grid' });
         const basic = grid.createDiv({ cls: 'baizer-settings-connection-card' });
@@ -1492,9 +1547,13 @@ export class SettingTab extends PluginSettingTab {
                     placeholder: 'https://api.openai.com/v1',
                     value: supportsCustomBaseUrl ? activeConfig.baseUrl : (activeConfig.baseUrl || t('Default Gemini endpoint')),
                     'aria-label': t('API endpoint'),
-                    disabled: supportsCustomBaseUrl ? undefined : 'true',
                 },
             }) as HTMLInputElement;
+            // disabled 只在「不支持自定义 baseUrl」(如 gemini) 时才设。
+            // 注意：不能走 attr.disabled=undefined —— Obsidian createEl 会把 undefined 当字符串
+            // 写成 disabled="undefined"，HTML 里 disabled 属性只要存在即生效，导致 openai-compatible
+            // 的端点也被锁死（用户反馈「api端点不允许修改」的根因）。
+            input.disabled = !supportsCustomBaseUrl;
             input.addEventListener('change', async () => {
                 activeConfig.baseUrl = input.value;
                 this.resetConnectionTestStatus();
@@ -1574,40 +1633,7 @@ export class SettingTab extends PluginSettingTab {
                 this.renderAccordion();
             }, 'primary', this.connectionTestStatus.state === 'testing');
 
-            const deletion = getProviderDeletionState(settings);
-            // T16: 删除是破坏性操作，从 Run test 旁挤开——推到行尾并靠视觉分隔线归入独立 Danger Zone。
-            // 只改 settings.ts，故用内联样式实现隔离，不依赖 styles.css。
-            const dangerZone = valueEl.createDiv({ cls: 'baizer-settings-danger-zone' });
-            dangerZone.style.marginLeft = 'auto';
-            dangerZone.style.marginTop = 'var(--size-4-2)';
-            dangerZone.style.paddingTop = 'var(--size-4-2)';
-            dangerZone.style.borderTop = '1px solid var(--background-modifier-border)';
-            const deleteBtn = this.createActionButton(dangerZone, t(deletion.label), () => {
-                if (!deletion.canDelete) return;
-                // T12: 删除 Provider 前用 MemoryConfirmModal 二次确认，避免误触即毁配置。
-                const targetLabel = settings.providers[settings.activeProvider]?.label || settings.activeProvider;
-                new MemoryConfirmModal(
-                    this.app,
-                    t('Delete Provider'),
-                    `${t('Delete provider')} "${targetLabel}"? ${t('This removes its configuration from this workspace.')}`,
-                    async () => {
-                        const deletedProviderId = settings.activeProvider;
-                        delete settings.providers[deletedProviderId];
-                        if (BUILTIN_PROVIDER_KEYS.includes(deletedProviderId)) {
-                            settings.deletedProviderIds = Array.from(new Set([...(settings.deletedProviderIds || []), deletedProviderId]));
-                        }
-                        settings.activeProvider = settings.providers.gemini ? 'gemini' : Object.keys(settings.providers)[0];
-                        this.revealApiKey = false;
-                        this.resetConnectionTestStatus();
-                        this.openSectionIds.add('connection');
-                        await this.persistSettings();
-                        new Notice(t('Provider deleted'));
-                        this.renderAccordion();
-                    },
-                ).open();
-            }, 'danger', !deletion.canDelete);
-            deleteBtn.addClass('baizer-settings-danger-action');
-
+            // 删除 Provider 已上移到卡片头部的图标按钮，此处只保留连接测试结果提示。
             const status = getConnectionTestStatusPresentation(this.connectionTestStatus);
             if (status) {
                 // P1-5: 连接测试「测试中→成功/失败」是异步结果,加 aria-live 让读屏播报;失败用 assertive。
@@ -1617,7 +1643,6 @@ export class SettingTab extends PluginSettingTab {
                     attr: { role: 'status', 'aria-live': status.tone === 'danger' ? 'assertive' : 'polite' },
                 });
             }
-            valueEl.createDiv({ cls: 'baizer-settings-inline-hint', text: t(getProviderDeletionState(settings).helperText) });
         });
     }
 

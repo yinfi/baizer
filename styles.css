@@ -3761,8 +3761,16 @@ textarea.shell-input {
 /* 注:按钮本体不再承载 grid。移动端 WebView(旧 Android System WebView / iOS WKWebView)
    长期不允许 <button> 作为 grid/flex 容器,会忽略 display:grid,导致子项退回行内堆叠而重叠。
    故把栅格下沉到内层 <div>(任何引擎都能当容器),按钮只做普通块级点击区。 */
-.baizer-settings-provider-card-main {
+/* 卡片头部：切换按钮占满 + 删除图标靠右（切换按钮不能内嵌 button，故并排为兄弟）。 */
+.baizer-settings-provider-card-header {
+    display: flex;
+    align-items: stretch;
     width: 100%;
+}
+
+.baizer-settings-provider-card-main {
+    flex: 1 1 auto;
+    min-width: 0;
     display: block;
     padding: 0;
     border: 0;
@@ -3770,6 +3778,53 @@ textarea.shell-input {
     color: inherit;
     text-align: left;
     cursor: pointer;
+}
+
+/* 删除图标：低调可发现——默认 muted，hover/focus 才亮出危险红。 */
+.baizer-settings-provider-card-delete {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    align-self: center;
+    margin-right: 6px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+    opacity: 0;
+    transition: color 0.12s ease, background 0.12s ease, opacity 0.12s ease;
+}
+
+.baizer-settings-provider-card-delete svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* 平时隐形，卡片 hover 或图标聚焦时才浮现，避免抢焦点。 */
+.baizer-settings-provider-card:hover .baizer-settings-provider-card-delete,
+.baizer-settings-provider-card-delete:focus-visible {
+    opacity: 1;
+}
+
+.baizer-settings-provider-card-delete:hover:not(:disabled),
+.baizer-settings-provider-card-delete:focus-visible {
+    color: var(--text-error);
+    background: color-mix(in srgb, var(--text-error) 12%, transparent);
+}
+
+.baizer-settings-provider-card-delete:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--background-modifier-border-focus, var(--interactive-accent));
+}
+
+.baizer-settings-provider-card-delete:disabled {
+    opacity: 0;
+    cursor: default;
+    pointer-events: none;
 }
 
 .baizer-settings-provider-card-main-inner {
