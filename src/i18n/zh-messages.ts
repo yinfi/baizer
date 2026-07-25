@@ -131,6 +131,8 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Restore Default Prompt': '恢复默认提示词',
 
     // ── Guardian ──
+    'Selection Toolbar': '选中工具条',
+    'Show a floating AI toolbar (rewrite, explain, etc.) when you select text in the editor.': '在编辑器中选中文字时，弹出悬浮 AI 工具条（改写、解释等）。',
     'Enable Guardian': '启用 Guardian',
     'Allow AI to passively analyze text and offer suggestions.': '允许 AI 被动分析文本并给出建议。',
     'Auto Mode': '自动模式',

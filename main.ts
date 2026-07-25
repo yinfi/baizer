@@ -208,6 +208,7 @@ export default class BaizerPlugin extends Plugin {
                     this.modelService,
                     this.knowledgeRuntime,
                     this.guardianContextService,
+                    this.settings,
                 ),
             ]);
             this.editorExtensionsRegistered = true;

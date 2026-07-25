@@ -551,7 +551,7 @@ function getSettingsSections(): SettingsSectionMeta[] {
     { id: 'skills', title: t('Skills'), description: t('Enable or disable individual skills (availability, separate from permissions).'), keywords: ['skills', 'skill', 'enable', 'disable', 'workflow', 'available', '技能'] },
     { id: 'capture', title: t('Capture'), description: t('Inbox, clipping storage, WeChat import, and URL capture.'), keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper', '采集', '微信'] },
     { id: 'knowledge', title: t('Knowledge'), description: t('Source folders, output folder, compile state, and ontology.'), keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema', '知识'] },
-    { id: 'guardian', title: t('Guardian'), description: t('Inline writing assistance, trigger mode, and ignored folders.'), keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity', '守护', '行内补全', '幽灵文本', '灵敏度', '补全'] },
+    { id: 'guardian', title: t('Guardian'), description: t('Inline writing assistance, trigger mode, and ignored folders.'), keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity', 'selection', 'toolbar', 'selection toolbar', '守护', '行内补全', '幽灵文本', '灵敏度', '补全', '选中', '工具条', '选中工具条'] },
     { id: 'appearance', title: t('Appearance'), description: t('Workbench theme, font size, and opacity.'), keywords: ['appearance', 'theme', 'font', 'opacity', 'terminal', 'workbench', 'language', 'locale', '外观', '语言'] },
     { id: 'plugin-skills', title: t('Plugin Skills'), description: t('Skill generation, excluded plugins, and startup scanning.'), keywords: ['plugin', 'skills', 'generator', 'exclude', 'startup', '插件'] },
     ];
@@ -1778,6 +1778,18 @@ export class SettingTab extends PluginSettingTab {
     }
 
     private renderGuardianSection(containerEl: HTMLElement): void {
+        // 选中文字工具条:独立于 Guardian 补全,放在 enableGuardian 短路 return 之前,
+        // 保证即使 Guardian 关闭也能单独控制这个开关。
+        new Setting(containerEl)
+            .setName(t('Selection Toolbar'))
+            .setDesc(t('Show a floating AI toolbar (rewrite, explain, etc.) when you select text in the editor.'))
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableSelectionMenu)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.enableSelectionMenu = value;
+                    await this.persistSettings();
+                }));
+
         new Setting(containerEl)
             .setName(t('Enable Guardian'))
             .setDesc(t('Allow AI to passively analyze text and offer suggestions.'))

@@ -9,6 +9,7 @@ import { SuggestionItem, SuggestionType } from './controllers/input-controller';
 import { SELECTION_ACTIONS, getAction, buildActionPrompt } from './selection-ai/action-registry';
 import { SelectionContextBuilder } from './selection-ai/selection-context-builder';
 import { FloatingPanel } from './selection-ai/floating-panel';
+import { PluginSettings } from '../mcp/types';
 import { t } from '../i18n/zh';
 
 // 浮窗单例:同一时刻只允许一个选区 AI 浮窗,开新窗前销毁旧窗,避免多开堆叠。
@@ -28,6 +29,8 @@ interface PluginContext {
     app: App;
     modelService: ModelService;
     contextBuilder: SelectionContextBuilder;
+    // 稳定引用（插件 onload 后原地 mutate，不整体替换），故此处直接读取即可反映最新设置。
+    settings: PluginSettings;
 }
 
 const pluginContextMap = new WeakMap<EditorView, PluginContext>();
@@ -108,6 +111,7 @@ export function selectionMenuExtension(
     modelService: ModelService,
     knowledgeRuntime: { getGuardianDeepKnowledgeContext(q: string): Promise<string> } | null,
     contextService: { collect(): Promise<any> } | null,
+    settings: PluginSettings,
 ): Extension {
     const contextBuilder = new SelectionContextBuilder({
         knowledgeRuntime,
@@ -124,7 +128,7 @@ export function selectionMenuExtension(
             position: 'fixed',
         }),
         EditorView.updateListener.of((update) => {
-            pluginContextMap.set(update.view, { app, modelService, contextBuilder });
+            pluginContextMap.set(update.view, { app, modelService, contextBuilder, settings });
         }),
     ];
 }
@@ -156,6 +160,9 @@ function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
 
     // selection 场景:横向工具条,点动作直接分流。
     if (state.type === 'toolbar') {
+        // 用户可在设置里关闭"选中即弹工具条"。关则返回空节点,选区不再触发悬浮条。
+        // (trigger 的 @ 行内插入是独立功能,不受此开关控制。)
+        if (!context.settings.enableSelectionMenu) return { dom };
         const bar = dom.createDiv({ cls: 'baizer-selection-toolbar' });
         for (const action of SELECTION_ACTIONS) {
             const btn = bar.createEl('button', {

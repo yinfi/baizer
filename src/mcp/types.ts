@@ -118,6 +118,9 @@ export interface PluginSettings {
     }>;
 
     // --- 🛡️ Guardian Behavior ---
+    // 在编辑器中选中文字时是否弹出悬浮 AI 工具条（改写/解释等）。默认开；
+    // 该功能独立于 Guardian 补全，用户可单独关闭以免选中即弹造成打扰。
+    enableSelectionMenu: boolean;
     enableGuardian: boolean;
     guardianAutoMode: boolean; // New: Auto-trigger toggle
     guardianSensitivity: number;
@@ -205,6 +208,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     contextWindow: 100000,
 
     // Guardian
+    enableSelectionMenu: true,
     enableGuardian: false,
     guardianAutoMode: true, // Default to true
     guardianSensitivity: 50,
