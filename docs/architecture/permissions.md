@@ -2,12 +2,29 @@
 
 ## Settings Gates
 
-Sensitive behavior is controlled by four settings:
+Sensitive behavior is controlled by six settings, declared in `src/mcp/types.ts`:
 
-- `allowFileCreation`
-- `allowFileModification`
-- `allowPluginControl`
-- `confirmExecutions`
+**What kind of operation is allowed**
+
+- `allowFileCreation` — may new files be created at all
+- `allowFileModification` — may existing files be changed at all
+- `allowPluginControl` — may other Obsidian plugins be inspected and driven (off by default)
+- `confirmExecutions` — do risky actions become approval requests
+
+**Where writes may land**
+
+- `vaultWriteScope` — `read-only` | `current-note` | `configured-folders` | `all-vault` (default `all-vault`)
+- `vaultWriteAllowedFolders` — the folder list consulted when scope is `configured-folders`
+
+Scope and capability are **orthogonal**: a write must satisfy both. "Is this
+path writable?" and "is this kind of edit permitted?" are separate questions,
+answered by `checkWriteScope` and `checkFileCapability` respectively.
+
+`.obsidian` is always blocked no matter the scope — that is enforced in the
+vault-ops layer, not by these settings.
+
+All six feed pure functions in `src/permissions/permission-service.ts`; policy
+comes only from settings, never hardcoded.
 
 ## Tool-Level Enforcement
 

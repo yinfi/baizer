@@ -4,7 +4,7 @@
 
 Baizer is an AI knowledge workbench for Obsidian. Named after Bai Ze, the mythic beast that knew the nature of all things, it turns your vault into an AI-native pipeline: information flows in, gets understood, becomes durable memory, and is fed back into everything you write next.
 
-![main](https://github.com/user-attachments/assets/d0ab9014-ea13-4300-8d76-d8839fd0c046)
+![Baizer knowledge loop](assets/baizer-knowledge-loop.png)
 
 ## The Pipeline: AI End To End
 
@@ -69,6 +69,10 @@ Baizer speaks Obsidian's own language throughout: notes, wikilinks, frontmatter,
 ## Architecture Snapshot
 
 The system is layered: **UI entry points → `ModelService` (facade) → pi runtime → Skills/Tools**, with Knowledge and Memory as side subsystems. All LLM inference runs through a single runtime built on the `@earendil-works/pi-agent-core` agent harness.
+
+> Going deeper: [`CLAUDE.md`](./CLAUDE.md) is the fullest module-by-module map, and
+> [`docs/architecture/`](./docs/architecture/) covers the runtime, skills, and
+> permission model in detail. Start there before a first contribution.
 
 ### Core runtime
 
@@ -138,13 +142,33 @@ Skill-backed commands: `/save <url>` (web-clipper), `/wiki:query` (knowledge). T
 
 `.obsidian` writes are always blocked, even when the write scope is broad. With confirmation on, Baizer renders approval cards and replays approved actions with an explicit approval flag; editor-side writes use the same preview-first model and are recorded in the local audit log.
 
+## Data Handling
+
+**Baizer sends your note content to the AI provider you configure.** That is how
+every feature here works — there is no local-only mode.
+
+- **Where it goes:** only to the provider endpoint you set up yourself (Google
+  Gemini, OpenAI, DeepSeek, Qwen, or any OpenAI-compatible base URL). Never to a
+  Baizer-operated server — there isn't one.
+- **What goes:** the notes, selections, and vault search results that a given
+  feature needs as prompt context. Guardian sends surrounding text as you type.
+- **No telemetry, no analytics, no data collection.**
+- **Your API keys** are stored unencrypted in the plugin's `data.json` inside
+  your vault's `.obsidian` folder — the standard Obsidian plugin mechanism.
+
+Review your provider's data-usage policy before pointing Baizer at sensitive
+notes. Full trust-boundary details are in [SECURITY.md](./SECURITY.md).
+
 ## Local Storage
 
 Baizer keeps operational data inside the vault:
 
+- `.obsidian/baizer/` — conversation history, the operation audit log, and materialized/generated skills.
+- `.obsidian/baizer-sessions/` — per-conversation session transcripts (JSONL), including branch history.
 - `.obsidian/baizer-memory/` — Hindsight memory, profiles, session summaries, observations.
-- `.obsidian/baizer/` — conversation history, audit records, generated skills, session JSONL.
-- `Knowledge Wiki/` (default) — compiled knowledge output.
+- `.obsidian/baizer-commands/` — your own slash-command templates; drop a `.md` file here to add a command.
+- `.obsidian/baizer-tmp/` — scratch files for the agent runtime.
+- `Knowledge Wiki/` (default) — compiled knowledge output. This one is a normal, visible vault folder.
 
 ## Supported Providers
 
@@ -164,7 +188,7 @@ npm run dev
 
 ## Installation
 
-1. Download the latest release from the [Releases](https://github.com/yinfie/baizer/releases) page.
+1. Download the latest release from the [Releases](https://github.com/yinfi/baizer/releases) page.
 2. Extract `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/baizer/`.
 3. Reload Obsidian and enable Baizer.
 

@@ -27,10 +27,13 @@ jobs:
       - name: Test
         run: npm test
 
-      # Lint 与类型检查为信息性步骤:当前仍有已知的 any / Obsidian API 类型债,
-      # 不阻断合并,但在 CI 日志中保持可见,便于逐步收敛。
-      - name: Lint (non-blocking)
-        run: npx eslint . || true
+      # eslint 目前 0 error / 若干 any 警告,所以这一步是阻断式的:
+      # 新引入的 error 会让 CI 失败,而已有的警告不会。
+      - name: Lint
+        run: npx eslint .
 
-      - name: Type check (non-blocking)
+      # 类型检查暂不阻断:main 上仍有已知的类型债(未使用变量 + 少量未标注的
+      # Obsidian API 访问)。报错在 CI 日志里保持可见,清理它是 good first issue。
+      # 债清零后请删掉 `|| true`。
+      - name: Type check (non-blocking, known debt)
         run: npx tsc --noEmit || true

@@ -15,7 +15,50 @@ function test(name: string, fn: () => void) {
   }
 }
 
+/**
+ * 构造「旧品牌名」检测正则。
+ *
+ * 关键点:每个词条都必须以词尾边界(\b)收口。否则会误伤正常英文 ——
+ * 比如没有 \b 时,"obsidian cli" 这个模式会命中 "Obsidian client"
+ * 的前 12 个字符,让 SECURITY.md 里一句完全正常的话被判成旧品牌残留。
+ *
+ * 词条用字符串拼接写("obsidian" + "[- ]cli"),是为了让本文件自身
+ * 不包含旧品牌名的字面量 —— 否则这个测试会检测到自己。
+ */
+function buildOldBrandRegex(): RegExp {
+  const oldBrandTerms = [
+    'obsidian' + '[- ]cli\\b',
+    'obsidian' + ' shell\\b',
+    '\\bo' + 'cli\\b',
+  ];
+  return new RegExp(oldBrandTerms.join('|'), 'i');
+}
+
 console.log('=== Brand Tests ===');
+
+test('old-brand regex matches real leftovers but not normal English', () => {
+  const oldBrand = buildOldBrandRegex();
+
+  // 应该命中:真正的旧品牌残留
+  const shouldMatch = [
+    'clone https://github.com/yinfi/' + 'obsidian-cli' + '.git',
+    'the ' + 'Obsidian CLI' + ' plugin',
+    'run ' + 'obsidian shell' + ' to start',
+  ];
+  for (const line of shouldMatch) {
+    expect(oldBrand.test(line), `Expected to flag legacy branding: ${line}`);
+  }
+
+  // 不应命中:正常英文,词干恰好相同
+  const shouldNotMatch = [
+    'Baizer runs entirely inside your Obsidian client.',
+    'Baizer 完全在你的 Obsidian client 内运行。',
+    'the Obsidian clipboard integration',
+  ];
+  for (const line of shouldNotMatch) {
+    expect(!oldBrand.test(line), `False positive on normal text: ${line}`);
+  }
+});
 
 test('manifest exposes Baizer identity', () => {
   const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
@@ -41,15 +84,13 @@ test('tracked project text has no legacy branding', () => {
     // FORYF.md 是开发过程记录(非面向用户的产品文本),其历史条目会提及仓库目录名
     // (客观路径,非产品旧品牌名),与 .planning/ 同属开发记录,一并豁免。
     .filter((path) => path !== 'FORYF.md')
+    // 本测试文件自身必须包含旧品牌名的字面量 —— 上面那条回归测试要用它们做
+    // 正例样本,否则无法验证正则真的还能抓到残留。所以扫描时豁免自己,
+    // 不然这个测试会检测到自己而永远失败。
+    .filter((path) => path !== 'test/brand.test.ts')
     .filter((path) => !path.endsWith('.png'));
 
-  const oldBrandTerms = [
-    'obsidian' + '-cli',
-    'obsidian' + ' cli',
-    'obsidian' + ' shell',
-    'o' + 'cli',
-  ];
-  const oldBrand = new RegExp(oldBrandTerms.join('|'), 'i');
+  const oldBrand = buildOldBrandRegex();
   const matches: string[] = [];
 
   for (const path of trackedFiles) {

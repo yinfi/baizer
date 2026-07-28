@@ -3,7 +3,7 @@
 //
 // 一次性清洗脚本：修复被知识库自动编译回退循环损坏的剪藏文件 frontmatter。
 //
-// 背景（见 FORYF.md 2026-07-05 两条）：
+// 背景：
 //   历史上 fixAndSetFrontmatter 回退路径非幂等，对含冒号的值反复翻倍转义、
 //   每轮 append 一份 knowledge_status / 每轮新生成一个 source_id，最终把少数
 //   剪藏文件的 frontmatter 撑成非法 YAML。代码根因已修复（不再恶化），但已损坏
@@ -27,8 +27,8 @@
 //   - 只处理「检测为损坏」的文件（合法 frontmatter 的文件跳过，不 touch mtime）。
 //
 // 用法：
-//   node scripts/repair-clipping-frontmatter.mjs "D:/code/obsidian/Assets/网页剪藏"          # dry-run
-//   node scripts/repair-clipping-frontmatter.mjs "D:/code/obsidian/Assets/网页剪藏" --apply   # 落盘
+//   node scripts/repair-clipping-frontmatter.mjs "<你的库>/Clippings"          # dry-run
+//   node scripts/repair-clipping-frontmatter.mjs "<你的库>/Clippings" --apply   # 落盘
 
 import fs from 'node:fs';
 import path from 'node:path';

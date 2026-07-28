@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
-    "test": "tsx --tsconfig tsconfig.test.json test/run-tests.ts"
+    "test": "tsx --tsconfig tsconfig.test.json test/run-tests.ts",
+    "licenses": "node scripts/gen-third-party-licenses.mjs"
   },
   "keywords": [],
   "author": "yinfie",
@@ -28,7 +29,6 @@
     "@earendil-works/pi-agent-core": "^0.75.5",
     "@google/generative-ai": "^0.21.0",
     "@mozilla/readability": "^0.6.0",
-    "yaml": "^2.8.3",
-    "youtube-transcript": "^1.2.1"
+    "yaml": "^2.8.3"
   }
 }

@@ -38,8 +38,8 @@ Thumbs.db
 # OMC 运行时状态（会话/HUD/state，不入库）
 .omc/
 
-# 项目私有/个人文件,不入库（AI 工作流指令、内部规划/spec，不随开源仓库发布）
-CLAUDE.md
+# 项目私有/个人文件,不入库（内部规划/spec，不随开源仓库发布）
+# 注:CLAUDE.md 已入库 —— 它是最完整的架构地图,对贡献者(尤其用 AI 助手的)有用。
 FORYF.md
 AGENTS.md
 TODOS.md

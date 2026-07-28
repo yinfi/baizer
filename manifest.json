@@ -2,9 +2,9 @@
     "id": "baizer",
     "name": "Baizer",
     "version": "1.0.0",
-    "minAppVersion": "1.0.0",
+    "minAppVersion": "1.5.0",
     "description": "An AI knowledge workbench for Obsidian.",
     "author": "yinfie",
-    "authorUrl": "https://github.com/yinfie/baizer",
+    "authorUrl": "https://github.com/yinfi/baizer",
     "isDesktopOnly": false
 }
