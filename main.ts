@@ -6,7 +6,7 @@ import { setLocale, Locale } from './src/i18n/zh';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
-import { ghostTextExtension, showGhostText, hideGhostText, showThinkingGhostText } from './src/ui/ghost-text';
+import { ghostTextExtension, showGhostText, hideGhostText, showThinkingGhostText, disposeGhostLiveRegion } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
 import { requestGuardianResponse } from './src/ui/guardian-request';
 import { GuardianCompletionService, getGuardianAutoDelayMs, shouldScheduleDeepEscalation, GUARDIAN_WEAK_COMPLETION_REASON } from './src/ui/guardian-completion';
@@ -66,7 +66,6 @@ export default class BaizerPlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
-        new Notice(`${PLUGIN_NAME}: Plugin loaded`);
 
         // Initialize Skill Architecture
         this.toolRegistry = new ToolRegistry(this.app, this.settings);
@@ -257,6 +256,8 @@ export default class BaizerPlugin extends Plugin {
         this.guardianDeepInflight?.abort();
         this.guardianDeepInflight = null;
         this.clearGuardianEscalationTimer();
+        // ghost 的 aria-live 播报区挂在 document.body 上,不随 CM view 回收,必须手动移除。
+        disposeGhostLiveRegion();
         this.app.workspace.detachLeavesOfType(VIEW_TYPE_SHELL);
         if (this.knowledgeRuntime) {
             this.knowledgeRuntime.cleanup();

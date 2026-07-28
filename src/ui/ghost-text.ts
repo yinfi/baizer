@@ -34,6 +34,18 @@ function getGhostLiveRegion(): HTMLElement | null {
     return region;
 }
 
+/**
+ * 移除 aria-live 播报区。
+ *
+ * 必须在插件 onunload 里调用:这个节点挂在 document.body 上,不属于任何 CM view,
+ * 所以 CM 的生命周期不会回收它。不清理的话,每次「禁用→启用插件」都会在 workspace
+ * 上多留一个空 div。
+ */
+export function disposeGhostLiveRegion(): void {
+    ghostLiveRegion?.remove();
+    ghostLiveRegion = null;
+}
+
 function announceGhost(suggestion: GhostTextSuggestion | null): void {
     const region = getGhostLiveRegion();
     if (!region) return;
