@@ -1,7 +1,7 @@
 {
   "name": "baizer",
-  "version": "1.0.0",
-  "description": "Baizer Obsidian plugin",
+  "version": "1.0.1",
+  "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",

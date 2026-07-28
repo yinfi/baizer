@@ -64,9 +64,17 @@ test('manifest exposes Baizer identity', () => {
   const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
   expect(manifest.id === 'baizer', `Expected manifest id baizer, got ${manifest.id}`);
   expect(manifest.name === 'Baizer', `Expected manifest name Baizer, got ${manifest.name}`);
+  // authorUrl 指向「作者」,不是仓库 —— Obsidian 社区目录的自动审核会对
+  // 指向插件自身仓库的 authorUrl 报警告。所以这里断言它不能是仓库地址。
   expect(
-    typeof manifest.authorUrl === 'string' && manifest.authorUrl.endsWith('/baizer'),
-    `Expected authorUrl to point at baizer, got ${manifest.authorUrl}`,
+    typeof manifest.authorUrl === 'string' && !manifest.authorUrl.endsWith('/baizer'),
+    `authorUrl must point at the author profile, not the plugin repo; got ${manifest.authorUrl}`,
+  );
+
+  // description 不得含 "Obsidian" —— 在插件目录的语境里是冗余的,自动审核会报错。
+  expect(
+    typeof manifest.description === 'string' && !/obsidian/i.test(manifest.description),
+    `description must not contain "Obsidian"; got ${manifest.description}`,
   );
 });
 

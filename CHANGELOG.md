@@ -7,6 +7,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1]
+
+- `authorUrl` now points at the author's profile instead of the plugin's own
+  repository, as the community directory expects.
+
 ## [1.0.0]
 
 Initial public release.
@@ -35,6 +40,10 @@ _[English](#changelog) · 简体中文_
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),并遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [1.0.1]
+
+- `authorUrl` 改为指向作者主页,而不是插件自己的仓库 —— 社区目录要求如此。
 
 ## [1.0.0]
 
