@@ -1,0 +1,100 @@
+name: Bug report
+description: Something in Baizer doesn't work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **Do not paste API keys or private note content.** If you need to show a
+        prompt or a note, replace anything sensitive first. For security
+        vulnerabilities, follow [SECURITY.md](../blob/main/SECURITY.md) instead
+        of opening an issue here.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the Workbench with Mod+J
+        2. Ask it to ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Baizer version
+      description: From Obsidian's Community plugins list, or `manifest.json`.
+    validations:
+      required: true
+
+  - type: input
+    id: obsidian-version
+    attributes:
+      label: Obsidian version
+      description: Settings → About → Current version.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - iOS
+        - Android
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      description: Which AI provider was active. Never include the key itself.
+      options:
+        - Google Gemini
+        - OpenAI
+        - DeepSeek
+        - Qwen / DashScope
+        - Other OpenAI-compatible endpoint
+        - Not relevant to this bug
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where it happened
+      options:
+        - Workbench (chat)
+        - Guardian (inline completions)
+        - Selection menu
+        - Knowledge Wiki
+        - Memory
+        - Settings
+        - Somewhere else / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: |
+        Errors from the developer console, if any. Open it with
+        Ctrl+Shift+I (Cmd+Option+I on macOS). Check for keys before pasting.
+      render: shell

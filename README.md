@@ -4,7 +4,7 @@
 
 Baizer is an AI knowledge workbench for Obsidian. Named after Bai Ze, the mythic beast that knew the nature of all things, it turns your vault into an AI-native pipeline: information flows in, gets understood, becomes durable memory, and is fed back into everything you write next.
 
-![Baizer knowledge loop](assets/baizer-knowledge-loop.png)
+![Baizer knowledge loop](assets/baizer-knowledge-loop.jpg)
 
 ## The Pipeline: AI End To End
 
@@ -71,8 +71,9 @@ Baizer speaks Obsidian's own language throughout: notes, wikilinks, frontmatter,
 The system is layered: **UI entry points → `ModelService` (facade) → pi runtime → Skills/Tools**, with Knowledge and Memory as side subsystems. All LLM inference runs through a single runtime built on the `@earendil-works/pi-agent-core` agent harness.
 
 > Going deeper: [`CLAUDE.md`](./CLAUDE.md) is the fullest module-by-module map, and
-> [`docs/architecture/`](./docs/architecture/) covers the runtime, skills, and
-> permission model in detail. Start there before a first contribution.
+> [`docs/architecture/`](./docs/architecture/) covers the runtime, skills,
+> permissions, and settings page in detail. [`CONTEXT.md`](./CONTEXT.md) defines
+> the domain vocabulary. Start there before a first contribution.
 
 ### Core runtime
 

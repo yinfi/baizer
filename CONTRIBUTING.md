@@ -16,6 +16,13 @@ Before your first change, read these in order:
 3. [`docs/architecture/skills.md`](./docs/architecture/skills.md) and
    [`docs/architecture/permissions.md`](./docs/architecture/permissions.md) — the
    skill/tool split and the permission model.
+4. [`CONTEXT.md`](./CONTEXT.md) — the domain glossary. Worth skimming even if you
+   only plan a small change; it is what makes issue threads legible.
+
+Touching the settings page? Read
+[`docs/architecture/settings.md`](./docs/architecture/settings.md) first — it is
+the largest file in the plugin and has one convention (partial re-render) that is
+easy to break without noticing.
 
 The single most common source of confusion: **skills are instructions, tools are
 execution.** A skill never runs anything; it tells the model how to behave and
@@ -80,6 +87,11 @@ Open a GitHub issue with reproduction steps, expected vs. actual behavior, and
 your plugin/Obsidian versions. For **security** issues, follow
 [SECURITY.md](./SECURITY.md) instead — do not open a public issue.
 
+## Code of Conduct
+
+Participation in this project is governed by the
+[Code of Conduct](./CODE_OF_CONDUCT.md).
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the
@@ -93,6 +105,26 @@ _[English](#contributing-to-baizer) · 简体中文_
 
 感谢你有兴趣改进 Baizer!本指南介绍如何搭建项目、我们遵循的约定,以及如何提交
 变更。
+
+## 读懂这个代码库
+
+第一次改动前,按顺序读这几份:
+
+1. [`CLAUDE.md`](./CLAUDE.md) —— 最完整的逐模块地图,含关键架构模式及其理由。
+2. [`docs/architecture/runtime.md`](./docs/architecture/runtime.md) —— 一轮对话
+   如何准备与执行。
+3. [`docs/architecture/skills.md`](./docs/architecture/skills.md) 与
+   [`docs/architecture/permissions.md`](./docs/architecture/permissions.md) ——
+   技能/工具之分与权限模型。
+4. [`CONTEXT.md`](./CONTEXT.md) —— 领域术语表。即使只做小改动也值得扫一遍,
+   它决定了 issue 讨论能不能看懂。
+
+最容易搞错的一点:**技能是指令,工具才执行。** 技能自己不运行任何东西,它只告诉
+模型该怎么做、该去调哪些工具。
+
+要动配置页?先读
+[`docs/architecture/settings.md`](./docs/architecture/settings.md) —— 它是插件里
+最大的单文件,有一条(局部重渲染)约定很容易在不知情的情况下破坏。
 
 ## 开发环境搭建
 
@@ -149,6 +181,10 @@ npx eslint .
 
 创建 GitHub issue,附上复现步骤、预期与实际行为,以及你的插件/Obsidian 版本。
 对于**安全**问题,请改为遵循 [SECURITY.md](./SECURITY.md) —— 不要创建公开 issue。
+
+## 行为准则
+
+参与本项目须遵守[行为准则](./CODE_OF_CONDUCT.md)。
 
 ## 许可证
 
