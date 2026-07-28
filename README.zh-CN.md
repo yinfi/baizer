@@ -4,7 +4,7 @@
 
 Baizer 是一个面向 Obsidian 的 AI 知识工作台。取名自上古神兽「白泽」——知天下万物之情——它把你的 vault 变成一条 AI 原生的流水线:信息流入、被理解、沉淀为可复用的记忆,再回流到你接下来写的每一段文字里。
 
-![Baizer knowledge loop](assets/baizer-knowledge-loop.png)
+![Baizer knowledge loop](assets/baizer-knowledge-loop.jpg)
 
 ## 主线:全流程 AI 化
 
@@ -70,8 +70,8 @@ Baizer 不是在 Obsidian 上外挂一个聊天框。它是一条闭环:**采集
 系统分层:**UI 入口 → `ModelService`(门面)→ pi 运行时 → 技能/工具**,知识与记忆作为旁路子系统。所有 LLM 推理都走同一套基于 `@earendil-works/pi-agent-core` agent harness 的运行时。
 
 > 想读更深:[`CLAUDE.md`](./CLAUDE.md) 是最完整的逐模块地图,
-> [`docs/architecture/`](./docs/architecture/) 详细讲运行时、技能与权限模型。
-> 第一次贡献前建议先看这两处。
+> [`docs/architecture/`](./docs/architecture/) 详细讲运行时、技能、权限与配置页,
+> [`CONTEXT.md`](./CONTEXT.md) 定义领域术语。第一次贡献前建议先看这几处。
 
 ### 核心运行时
 
