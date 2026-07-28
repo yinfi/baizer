@@ -3,12 +3,10 @@
 import { App, TFile } from 'obsidian';
 import { CompilerExtraction, TopicRef, normalizeTopicSlug, OntologySchema } from './types';
 import {
-  getSourceId,
   ensureSourceId,
   setKnowledgeStatus,
   getFilesByKnowledgeStatus,
   getPendingReason,
-  KnowledgeStatus,
   KnowledgePendingReason,
 } from './frontmatter';
 import { computeSchemaHash, extractFrontmatter } from './ontology';

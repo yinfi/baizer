@@ -1,7 +1,7 @@
 // src/skills/builtin/vault-ops.ts — Vault 文件操作工具集
 
 import { App, TFile } from 'obsidian';
-import { Tool, ToolContext, ToolParameters } from '../types';
+import { Tool, ToolContext } from '../types';
 import { ToolRegistry } from '../tool-registry';
 import { logger } from '../../utils/logger';
 import { ChangePreview } from '../../ui/diff/change-preview';

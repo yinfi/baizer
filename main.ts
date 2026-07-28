@@ -1,7 +1,7 @@
 import { Plugin, Notice, MarkdownView, TFile, addIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
-import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, ProviderConfig, PLUGIN_NAME, mergeProviderDefaults } from './src/mcp/types';
+import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, mergeProviderDefaults } from './src/mcp/types';
 import { setLocale, Locale } from './src/i18n/zh';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';

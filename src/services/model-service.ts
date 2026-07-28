@@ -3,7 +3,7 @@ import { PluginSettings, ProviderConfig } from '../mcp/types';
 import { MemoryManager } from '../memory/memory-manager';
 import { MemoryMutationResult, MemoryView, MemoryViewRequest, UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
-import { GenerationOptions, ModelOption, ToolDefinition, StreamEvent } from '../models/interfaces';
+import { GenerationOptions, ModelOption, StreamEvent } from '../models/interfaces';
 import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry, SkillSummary } from '../skills/types';

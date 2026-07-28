@@ -1,5 +1,5 @@
 import { EditorView, gutter, GutterMarker } from '@codemirror/view';
-import { StateField, StateEffect, RangeSet, EditorState } from '@codemirror/state';
+import { StateField, StateEffect, RangeSet } from '@codemirror/state';
 
 // Guardian状态
 export enum GuardianState {

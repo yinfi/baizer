@@ -52,7 +52,6 @@ export class HarnessExecutionEnv {
 
   constructor(
     private readonly fs: VaultSessionFileSystem,
-    private readonly adapter: VaultFileAdapter,
   ) {
     this.cwd = fs.cwd;
   }
@@ -139,5 +138,5 @@ export class HarnessExecutionEnv {
 /** 从 VaultFileAdapter 构造完整的 Harness ExecutionEnv。 */
 export function createHarnessExecutionEnv(adapter: VaultFileAdapter, cwd = '/'): HarnessExecutionEnv {
   const fs = new VaultSessionFileSystem(adapter, cwd);
-  return new HarnessExecutionEnv(fs, adapter);
+  return new HarnessExecutionEnv(fs);
 }
