@@ -266,7 +266,7 @@ export class ShellView extends ItemView {
         this.tabBarContainerEl = headerTitle.createDiv({ cls: 'shell-tab-bar-container' });
         this.createHeaderActions(header);
 
-        this.historyMenuContainerEl = header.createDiv({ cls: 'baizer-history-menu' });
+        this.historyMenuContainerEl = header.createDiv({ cls: 'baizer-history-menu baizer-hidden' });
         this.historyMenu = new HistoryMenu(this.historyMenuContainerEl, {
             onOpen: (id) => this.openConversationFromHistory(id),
             onDelete: (id) => this.deleteConversationFromHistory(id),
@@ -389,8 +389,8 @@ export class ShellView extends ItemView {
     }
 
     adjustHeight() {
-        this.inputEl.style.height = 'auto';
-        this.inputEl.style.height = this.inputEl.scrollHeight + 'px';
+        this.inputEl.setCssStyles({ height: 'auto' });
+        this.inputEl.setCssStyles({ height: `${this.inputEl.scrollHeight}px` });
     }
 
     // ==================== Suggestion Logic ====================
@@ -607,13 +607,14 @@ export class ShellView extends ItemView {
                 this.dirtyTabs.delete(id);
                 continue;
             }
-            node.style.display = id === activeId ? '' : 'none';
+            if (id === activeId) node.removeClass('baizer-hidden');
+            else node.addClass('baizer-hidden');
         }
     }
 
     private scrollToEnd() {
         // Use setTimeout to ensure DOM is ready
-        setTimeout(() => {
+        window.setTimeout(() => {
             this.outputContainer.scrollTop = this.outputContainer.scrollHeight;
         }, 50);
     }
@@ -667,7 +668,7 @@ export class ShellView extends ItemView {
         if (height <= 0) return; // 不可见(display:none 的后台 tab 或尚未布局)——不处理
         const fragment = document.createDocumentFragment();
         while (el.firstChild) fragment.appendChild(el.firstChild);
-        el.style.minHeight = `${height}px`;
+        el.setCssStyles({ minHeight: `${height}px` });
         el.classList.add('shell-entry-dehydrated');
         this.dehydratedEntries.set(el, fragment);
     }
@@ -677,7 +678,7 @@ export class ShellView extends ItemView {
         const fragment = this.dehydratedEntries.get(el);
         if (!fragment) return;
         el.appendChild(fragment);
-        el.style.minHeight = '';
+        el.setCssStyles({ minHeight: '' });
         el.classList.remove('shell-entry-dehydrated');
         this.dehydratedEntries.delete(el);
     }
@@ -905,7 +906,7 @@ export class ShellView extends ItemView {
             const summary = this.streamTimeline.querySelector('.shell-think-summary') as HTMLElement;
             summary?.setAttribute('aria-expanded', 'false');
         } else if (this.streamTimeline && this.streamNodeCount === 0) {
-            this.streamTimeline.style.display = 'none';
+            this.streamTimeline.addClass('baizer-hidden');
         }
 
         if (this.streamContainer) {
@@ -1232,7 +1233,7 @@ export class ShellView extends ItemView {
 
     private createSuggestionContainer(inputContainer: HTMLElement) {
         const host = inputContainer.parentElement || inputContainer;
-        return host.createDiv({ cls: 'shell-suggestions' });
+        return host.createDiv({ cls: 'shell-suggestions baizer-hidden' });
     }
 
     private createHeaderActions(container: HTMLElement) {
@@ -1952,7 +1953,7 @@ export class ShellView extends ItemView {
     private async toggleHistoryMenu() {
         if (!this.historyMenu || !this.historyMenuContainerEl) return;
 
-        if (this.historyMenuContainerEl.style.display === 'block') {
+        if (!this.historyMenuContainerEl.hasClass('baizer-hidden')) {
             this.hideHistoryMenu();
             return;
         }
@@ -1962,7 +1963,7 @@ export class ShellView extends ItemView {
 
     private hideHistoryMenu() {
         // 仅当菜单当前可见时才还原焦点:避免 init/unload 等场景无谓抢焦点。
-        const wasOpen = this.historyMenuContainerEl?.style.display === 'block';
+        const wasOpen = this.historyMenuContainerEl ? !this.historyMenuContainerEl.hasClass('baizer-hidden') : false;
         this.historyMenu?.hide();
         if (wasOpen) this.historyMenuTriggerEl?.focus();
     }

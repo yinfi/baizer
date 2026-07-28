@@ -133,7 +133,6 @@ export default class BaizerPlugin extends Plugin {
         logger.info(`Skill system ready: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`, 'Baizer');
 
         // 防止 hot reload 时重复注册
-        this.app.workspace.detachLeavesOfType(VIEW_TYPE_SHELL);
         try {
             this.registerView(
                 VIEW_TYPE_SHELL,
@@ -149,21 +148,20 @@ export default class BaizerPlugin extends Plugin {
         // 18px 下双描边字母易糊,故字母用填充、外框用描边,复刻头部品牌块观感。
         addIcon('baizer-bz', `<g fill="none" stroke="currentColor" stroke-width="8" stroke-linejoin="round"><rect x="8" y="8" width="84" height="84" rx="20"/></g><text x="50" y="50" fill="currentColor" font-family="-apple-system,'Segoe UI',sans-serif" font-size="46" font-weight="800" text-anchor="middle" dominant-baseline="central" letter-spacing="-2">BZ</text>`);
         this.addRibbonIcon('baizer-bz', `Open ${PLUGIN_NAME}`, (evt: MouseEvent) => {
-            this.activateView();
+            void this.activateView();
         });
 
         this.addCommand({
             id: 'open-shell',
             name: `Open ${PLUGIN_NAME}`,
-            callback: () => this.activateView(),
-            hotkeys: [{ modifiers: ["Mod"], key: "j" }]
+            callback: () => { void this.activateView(); },
         });
         this.addCommand({
             id: 'save-url-from-clipboard',
-            name: 'Baizer: Save URL from clipboard',
+            name: 'Save URL from clipboard',
             callback: async () => {
                 try {
-                    const text = await globalThis.navigator?.clipboard?.readText?.();
+                    const text = await navigator.clipboard?.readText?.();
                     const result = await saveClipText({
                         text: text || '',
                         saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
@@ -185,7 +183,6 @@ export default class BaizerPlugin extends Plugin {
             id: 'guardian-manual-trigger',
             name: 'Guardian: Manual Trigger',
             callback: () => this.activateGuardianModal(),
-            hotkeys: [{ modifiers: ["Mod", "Shift"], key: "g" }]
         });
 
         // Deep completion: 手动触发,读知识库正文+个性化+连接意图,允许更慢以换取更高质量。
@@ -193,7 +190,6 @@ export default class BaizerPlugin extends Plugin {
             id: 'guardian-deep-completion',
             name: 'Guardian: Deep completion at cursor',
             editorCallback: (editor) => { void this.runDeepGuardianCheck(editor); },
-            hotkeys: [{ modifiers: ["Mod", "Shift"], key: " " }]
         });
 
         this.addSettingTab(new SettingTab(this.app, this));
@@ -258,7 +254,6 @@ export default class BaizerPlugin extends Plugin {
         this.clearGuardianEscalationTimer();
         // ghost 的 aria-live 播报区挂在 document.body 上,不随 CM view 回收,必须手动移除。
         disposeGhostLiveRegion();
-        this.app.workspace.detachLeavesOfType(VIEW_TYPE_SHELL);
         if (this.knowledgeRuntime) {
             this.knowledgeRuntime.cleanup();
         }
@@ -276,14 +271,15 @@ export default class BaizerPlugin extends Plugin {
     async activateView() {
         const { workspace } = this.app;
         const leaves = workspace.getLeavesOfType(VIEW_TYPE_SHELL);
+        let leaf = leaves[0] ?? null;
 
-        if (leaves.length > 0) {
-            leaves[0].detach();
-        } else {
-            const leaf = workspace.getRightLeaf(false);
-            await leaf?.setViewState({ type: VIEW_TYPE_SHELL, active: true });
-            workspace.revealLeaf(leaf!);
+        if (!leaf) {
+            leaf = workspace.getRightLeaf(false);
+            if (!leaf) return;
+            await leaf.setViewState({ type: VIEW_TYPE_SHELL, active: true });
         }
+
+        await workspace.revealLeaf(leaf);
     }
 
     activateGuardianModal() {

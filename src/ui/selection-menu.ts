@@ -210,8 +210,9 @@ function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
         return { dom };
     }
 
-    dom.appendChild(createChatPanel(view, state, context));
-    return { dom };
+    const markdownComponent = new Component();
+    dom.appendChild(createChatPanel(view, state, context, markdownComponent));
+    return { dom, destroy: () => markdownComponent.unload() };
 }
 
 /**
@@ -290,6 +291,7 @@ function createChatPanel(
     view: EditorView,
     state: Extract<SelectionMenuState, { type: 'chat' }>,
     context: { app: App; modelService: ModelService },
+    markdownComponent: Component,
 ) {
     const container = document.createElement('div');
     container.className = `guardian-chat-view is-${state.mode}`;
@@ -317,10 +319,10 @@ function createChatPanel(
             });
         } else {
             for (const msg of messages) {
-                renderSelectionMessage(context.app, messageList, msg);
+                renderSelectionMessage(context.app, messageList, msg, markdownComponent);
             }
         }
-        setTimeout(() => {
+        window.setTimeout(() => {
             messageList.scrollTop = messageList.scrollHeight;
         }, 0);
     };
@@ -328,11 +330,11 @@ function createChatPanel(
     renderMessages();
     (state.controller as any).onMessageAdded = () => renderMessages();
 
-    const statusContainer = container.createDiv({ cls: 'guardian-status-bar' });
-    statusContainer.style.display = 'none';
+    const statusContainer = container.createDiv({ cls: 'guardian-status-bar baizer-hidden' });
     statusContainer.setText(t('Thinking...'));
     (state.controller as any).onStatusChanged = (isResponding: boolean) => {
-        statusContainer.style.display = isResponding ? 'block' : 'none';
+        if (isResponding) statusContainer.removeClass('baizer-hidden');
+        else statusContainer.addClass('baizer-hidden');
     };
 
     const inputWrapper = container.createDiv({ cls: 'guardian-input-wrapper' });
@@ -345,8 +347,7 @@ function createChatPanel(
         },
     });
 
-    const suggestContainer = inputWrapper.createDiv({ cls: 'baizer-suggest-container' });
-    suggestContainer.style.display = 'none';
+    const suggestContainer = inputWrapper.createDiv({ cls: 'baizer-suggest-container baizer-hidden' });
     const suggestList = new SuggestList({
         container: suggestContainer,
         hostInput: textarea,
@@ -422,14 +423,14 @@ function createChatPanel(
         void applyTriggerInsertion(view, state, context);
     };
 
-    setTimeout(() => textarea.focus(), 50);
+    window.setTimeout(() => textarea.focus(), 50);
     return container;
 }
 
-function renderSelectionMessage(app: App, messageList: HTMLElement, msg: ChatMessage) {
+function renderSelectionMessage(app: App, messageList: HTMLElement, msg: ChatMessage, markdownComponent: Component) {
     const msgEl = messageList.createDiv({ cls: `guardian-message ${msg.role}` });
     if (msg.role === 'ai') {
-        void MarkdownRenderer.render(app, msg.content, msgEl, '', new Component());
+        void MarkdownRenderer.render(app, msg.content, msgEl, '', markdownComponent);
     } else {
         msgEl.setText(msg.content);
     }

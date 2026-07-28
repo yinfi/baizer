@@ -2,6 +2,10 @@
    Baizer - Sidebar UI
    ========================================================================== */
 
+.baizer-hidden {
+    display: none !important;
+}
+
 /* Fix Obsidian parent containers to enable flexbox layout */
 .workspace-leaf-content:has(.baizer-shell-view) {
     display: flex !important;
@@ -136,7 +140,6 @@
     width: min(360px, calc(100vw - 32px));
     max-height: 320px;
     overflow-y: auto;
-    display: none;
     z-index: 20;
     padding: 8px;
     border: 1px solid var(--background-modifier-border);
@@ -585,8 +588,6 @@ textarea.shell-input::placeholder {
     max-height: 200px;
     overflow-y: auto;
     z-index: 100;
-    display: none;
-    /* Hidden by default */
     margin-bottom: 8px;
 }
 

@@ -23,6 +23,9 @@ class FakeEl {
   empty() { this.children = []; }
   setAttribute(n: string, v: string) { this.attributes[n] = v; }
   addEventListener(t: string, h: Function) { (this.listeners[t] ||= []).push(h); }
+  hasClass(name: string) { return this.className.split(' ').includes(name); }
+  addClass(name: string) { if (!this.hasClass(name)) this.className = [this.className, name].filter(Boolean).join(' '); }
+  removeClass(name: string) { this.className = this.className.split(' ').filter(part => part && part !== name).join(' '); }
   scrollIntoView() {}
 }
 

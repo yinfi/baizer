@@ -83,8 +83,8 @@ export class FloatingPanel {
       onToolCall: () => { /* 选区场景一般无工具调用;忽略以保持面板简洁 */ },
       onToolResult: () => { /* 同上 */ },
       onTextDelta: (c) => { this.thinkingRenderer?.finalizeCurrentThinking(); this.answerText += c; this.renderAnswer(); this.scrollToEnd(); },
-      onDone: () => { this.thinkingRenderer?.finalizeCurrentThinking(); this.statusEl.style.display = 'none'; this.scrollToEnd(); },
-      onError: (m) => { this.statusEl.style.display = 'none'; this.answerText += `\n\n> ⚠ ${m}`; this.renderAnswer(); },
+      onDone: () => { this.thinkingRenderer?.finalizeCurrentThinking(); this.statusEl.addClass('baizer-hidden'); this.scrollToEnd(); },
+      onError: (m) => { this.statusEl.addClass('baizer-hidden'); this.answerText += `\n\n> ⚠ ${m}`; this.renderAnswer(); },
     });
   }
 
@@ -113,7 +113,7 @@ export class FloatingPanel {
     this.timeline.empty();
     this.answerText = '';
     this.answerEl.empty();
-    this.statusEl.style.display = '';
+    this.statusEl.removeClass('baizer-hidden');
     this.scrollToEnd();
   }
 
@@ -126,7 +126,7 @@ export class FloatingPanel {
   }
 
   private applyRect(r: PanelRect) {
-    Object.assign(this.root.style, {
+    this.root.setCssStyles({
       position: 'fixed', left: `${r.left}px`, top: `${r.top}px`,
       width: `${r.width}px`, height: `${r.height}px`,
     });

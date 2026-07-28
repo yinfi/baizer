@@ -38,7 +38,7 @@ export class CommandDropdown {
       return;
     }
 
-    this.containerEl.style.display = 'block';
+    this.containerEl.removeClass('baizer-hidden');
     this.setAttribute(this.containerEl, 'role', 'listbox');
     this.setAttribute(this.containerEl, 'id', this.listboxId);
 
@@ -115,7 +115,7 @@ export class CommandDropdown {
   }
 
   hide() {
-    this.containerEl.style.display = 'none';
+    this.containerEl.addClass('baizer-hidden');
     this.containerEl.empty();
     this.items = [];
   }

@@ -743,6 +743,17 @@ function getSectionMeta(id: SettingsSectionId): SettingsSectionMeta {
     return section;
 }
 
+function renderSettingHeading(
+    containerEl: HTMLElement,
+    name: string,
+    options: { settingClass?: string; nameClass?: string } = {},
+): Setting {
+    const heading = new Setting(containerEl).setName(name).setHeading();
+    if (options.settingClass) heading.settingEl.addClass(options.settingClass);
+    if (options.nameClass) heading.nameEl.addClass(options.nameClass);
+    return heading;
+}
+
 export class SettingTab extends PluginSettingTab {
     plugin: IPlugin;
     private renderToken = 0;
@@ -887,7 +898,7 @@ export class SettingTab extends PluginSettingTab {
 
     private renderHeader(containerEl: HTMLElement): void {
         const hero = containerEl.createDiv({ cls: 'baizer-settings-hero' });
-        hero.createEl('h2', { text: `${PLUGIN_NAME} ${t('Configuration')}`, cls: 'baizer-settings-title' });
+        renderSettingHeading(hero, `${PLUGIN_NAME} ${t('Configuration')}`, { nameClass: 'baizer-settings-title' });
         hero.createEl('p', {
             text: t('A cleaner control center for provider setup, runtime behavior, and plugin capabilities.'),
             cls: 'baizer-settings-subtitle',
@@ -925,7 +936,7 @@ export class SettingTab extends PluginSettingTab {
         const visibleSections = this.getVisibleSections();
         if (!visibleSections.length) {
             const empty = host.createDiv({ cls: 'baizer-settings-empty-state' });
-            empty.createEl('h3', { text: t('No matching settings') });
+            renderSettingHeading(empty, t('No matching settings'));
             empty.createEl('p', { text: t('Try searching by provider, prompt, permissions, or knowledge.') });
             return;
         }
@@ -956,8 +967,8 @@ export class SettingTab extends PluginSettingTab {
             });
 
             const summary = card.createEl('summary', { cls: 'baizer-settings-section-summary' });
-            const copy = summary.createSpan({ cls: 'baizer-settings-section-copy' });
-            copy.createEl('h3', { text: meta.title, cls: 'baizer-settings-section-title' });
+            const copy = summary.createDiv({ cls: 'baizer-settings-section-copy' });
+            renderSettingHeading(copy, meta.title, { nameClass: 'baizer-settings-section-title' });
             copy.createEl('p', { text: meta.description, cls: 'baizer-settings-section-description' });
             const metaEl = summary.createSpan({ cls: 'baizer-settings-section-meta' });
             if (status) {
@@ -1455,8 +1466,11 @@ export class SettingTab extends PluginSettingTab {
         const detail = parent.createDiv({ cls: 'baizer-settings-provider-detail-inline' });
         const grid = detail.createDiv({ cls: 'baizer-settings-connection-detail-grid' });
         const basic = grid.createDiv({ cls: 'baizer-settings-connection-card' });
-        basic.createDiv({ cls: 'baizer-settings-connection-card-header' })
-            .createEl('h4', { text: t('Basic'), cls: 'baizer-settings-connection-card-title' });
+        renderSettingHeading(
+            basic.createDiv({ cls: 'baizer-settings-connection-card-header' }),
+            t('Basic'),
+            { nameClass: 'baizer-settings-connection-card-title' },
+        );
 
         this.renderConnectionField(basic, t('Provider Name'), (valueEl) => {
             const input = valueEl.createEl('input', {
@@ -1535,8 +1549,11 @@ export class SettingTab extends PluginSettingTab {
         });
 
         const credentials = grid.createDiv({ cls: 'baizer-settings-connection-card' });
-        credentials.createDiv({ cls: 'baizer-settings-connection-card-header' })
-            .createEl('h4', { text: t('Credentials'), cls: 'baizer-settings-connection-card-title' });
+        renderSettingHeading(
+            credentials.createDiv({ cls: 'baizer-settings-connection-card-header' }),
+            t('Credentials'),
+            { nameClass: 'baizer-settings-connection-card-title' },
+        );
 
         this.renderConnectionField(credentials, t('API Endpoint'), (valueEl) => {
             const supportsCustomBaseUrl = this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl;
@@ -1873,8 +1890,11 @@ export class SettingTab extends PluginSettingTab {
 
     private renderPermissionsSection(containerEl: HTMLElement): void {
         const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        panel.createDiv({ cls: 'baizer-settings-panel-header' })
-            .createEl('h4', { text: t('Permission presets'), cls: 'baizer-settings-panel-title' });
+        renderSettingHeading(
+            panel.createDiv({ cls: 'baizer-settings-panel-header' }),
+            t('Permission presets'),
+            { nameClass: 'baizer-settings-panel-title' },
+        );
         const presetGrid = panel.createDiv({ cls: 'baizer-settings-panel-body' }).createDiv({ cls: 'baizer-settings-preset-grid' });
         this.renderPermissionPreset(presetGrid, 'read-only', t('Read only'), t('Read and analyze notes without writing to the vault.'));
         this.renderPermissionPreset(presetGrid, 'configured-folders', t('Scoped write'), t('Write only inside explicitly configured folders.'));
@@ -1882,8 +1902,11 @@ export class SettingTab extends PluginSettingTab {
         this.renderPermissionPreset(presetGrid, 'open', t('Open access'), t('Allow full-vault writes and plugin control.'));
 
         const summaryPanel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        summaryPanel.createDiv({ cls: 'baizer-settings-panel-header' })
-            .createEl('h4', { text: t('Effective permissions'), cls: 'baizer-settings-panel-title' });
+        renderSettingHeading(
+            summaryPanel.createDiv({ cls: 'baizer-settings-panel-header' }),
+            t('Effective permissions'),
+            { nameClass: 'baizer-settings-panel-title' },
+        );
         this.renderEffectivePermissions(summaryPanel.createDiv({ cls: 'baizer-settings-panel-body' }));
 
         const advanced = containerEl.createEl('details', { cls: 'baizer-settings-advanced' });
@@ -2129,8 +2152,11 @@ export class SettingTab extends PluginSettingTab {
 
     private renderAppearanceSection(containerEl: HTMLElement): void {
         const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        panel.createDiv({ cls: 'baizer-settings-panel-header' })
-            .createEl('h4', { text: t('Workbench'), cls: 'baizer-settings-panel-title' });
+        renderSettingHeading(
+            panel.createDiv({ cls: 'baizer-settings-panel-header' }),
+            t('Workbench'),
+            { nameClass: 'baizer-settings-panel-title' },
+        );
         const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
 
         // 底部预览行的值 span 引用：外观字段变更时只更新这一行文本，
@@ -2236,19 +2262,22 @@ export class SettingTab extends PluginSettingTab {
         const mobileSchemeTemplate = 'obsidian://baizer-clip?text=<encoded-share-text>';
         new Setting(containerEl)
             .setName(t('Mobile WeChat Capture'))
-            .setDesc(t('Use this URL scheme from iOS Shortcuts or Android automation. Fallback command: Baizer: Save URL from clipboard.'))
+            .setDesc(t('Use this URL scheme from iOS Shortcuts or Android automation. Fallback command: Save URL from clipboard.'))
             .addButton(btn => btn
                 .setButtonText(t('Copy URL Scheme'))
                 .onClick(async () => {
-                    await globalThis.navigator?.clipboard?.writeText?.(mobileSchemeTemplate);
+                    await navigator.clipboard?.writeText?.(mobileSchemeTemplate);
                     new Notice(t('Baizer mobile capture URL scheme copied.'));
                 }));
     }
 
     private renderKnowledgeSection(containerEl: HTMLElement): void {
         const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        panel.createDiv({ cls: 'baizer-settings-panel-header' })
-            .createEl('h4', { text: t('Knowledge Compile'), cls: 'baizer-settings-panel-title' });
+        renderSettingHeading(
+            panel.createDiv({ cls: 'baizer-settings-panel-header' }),
+            t('Knowledge Compile'),
+            { nameClass: 'baizer-settings-panel-title' },
+        );
         const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
 
         new Setting(body)
@@ -2451,8 +2480,11 @@ export class SettingTab extends PluginSettingTab {
 
     private renderPluginSkillsSection(containerEl: HTMLElement): void {
         const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        panel.createDiv({ cls: 'baizer-settings-panel-header' })
-            .createEl('h4', { text: t('Generation'), cls: 'baizer-settings-panel-title' });
+        renderSettingHeading(
+            panel.createDiv({ cls: 'baizer-settings-panel-header' }),
+            t('Generation'),
+            { nameClass: 'baizer-settings-panel-title' },
+        );
         const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
 
         new Setting(body)
@@ -2523,7 +2555,7 @@ class MemoryConfirmModal extends Modal {
     onOpen(): void {
         const { contentEl } = this;
         contentEl.empty();
-        contentEl.createEl('h2', { text: this.titleText });
+        renderSettingHeading(contentEl, this.titleText);
         contentEl.createEl('p', { text: this.message });
 
         const actions = contentEl.createDiv({ cls: 'baizer-memory-confirm-actions' });
@@ -2560,7 +2592,7 @@ class AddProviderModal extends Modal {
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.createEl('h3', { text: t('Add OpenAI Compatible Provider') });
+        renderSettingHeading(contentEl, t('Add OpenAI Compatible Provider'));
 
         let labelValue = '';
         let baseUrlValue = '';

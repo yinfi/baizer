@@ -83,6 +83,16 @@ class FakeElement {
     return this.className.split(' ').includes(name);
   }
 
+  addClass(name: string) {
+    if (!this.hasClass(name)) {
+      this.className = [this.className, name].filter(Boolean).join(' ');
+    }
+  }
+
+  removeClass(name: string) {
+    this.className = this.className.split(' ').filter(part => part && part !== name).join(' ');
+  }
+
   querySelector(selector: string): FakeElement | null {
     if (!selector.startsWith('.')) return null;
     const className = selector.slice(1);
@@ -121,7 +131,7 @@ async function runTests() {
       selectedIndex: 1,
     });
 
-    expect(container.style.display).toBe('block');
+    expect(container.hasClass('baizer-hidden')).toBe(false);
     expect(container.children.length).toBe(2);
     expect(container.children[1].hasClass('is-selected')).toBe(true);
     expect(container.children[0].querySelector('.suggestion-source')?.textContent).toBe('local');
@@ -200,7 +210,7 @@ async function runTests() {
 
     dropdown.update({ type: 'command', items: [], selectedIndex: 0 });
 
-    expect(container.style.display).toBe('none');
+    expect(container.hasClass('baizer-hidden')).toBe(true);
     expect(container.children.length).toBe(0);
   });
 

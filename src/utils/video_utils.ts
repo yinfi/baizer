@@ -16,9 +16,11 @@ interface VideoTranscriptDeps {
     userAgent: string;
 }
 
+const DEFAULT_USER_AGENT = 'Mozilla/5.0';
+
 const defaultDeps: VideoTranscriptDeps = {
     requestUrl: (options) => requestUrl(options),
-    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Mozilla/5.0',
+    userAgent: DEFAULT_USER_AGENT,
 };
 
 function extractBalancedJson(source: string, marker: string): any | null {

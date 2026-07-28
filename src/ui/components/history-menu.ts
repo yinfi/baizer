@@ -37,7 +37,7 @@ export class HistoryMenu {
   }
 
   hide() {
-    this.containerEl.style.display = 'none';
+    this.containerEl.addClass('baizer-hidden');
     this.containerEl.empty();
     this.listContainerEl = null;
     this.countEl = null;
@@ -47,7 +47,7 @@ export class HistoryMenu {
   /** 重建整个菜单骨架(toolbar + 列表容器)。仅在 update()/hide() 等数据集变更时调用一次。 */
   private render() {
     this.containerEl.empty();
-    this.containerEl.style.display = 'block';
+    this.containerEl.removeClass('baizer-hidden');
     this.listContainerEl = null;
     this.countEl = null;
 

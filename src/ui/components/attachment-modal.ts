@@ -81,9 +81,9 @@ export class AttachmentModal extends Modal {
 
         // 隐藏的原生 file input —— 浏览器 API，移动端兼容，不碰 Node fs。
         this.fileInput = contentEl.createEl('input', {
+            cls: 'baizer-hidden',
             attr: { type: 'file', multiple: 'true', accept: '.md,.txt,.json,.csv,.js,.ts,.py,text/*' },
         }) as HTMLInputElement;
-        this.fileInput.style.display = 'none';
 
         dropZone.addEventListener('click', () => this.fileInput?.click());
         this.fileInput.addEventListener('change', () => {

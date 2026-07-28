@@ -107,15 +107,23 @@ class FakeElement {
     }
   }
 
+  removeClass(name: string) {
+    this.className = this.className
+      .split(' ')
+      .filter(part => part && part !== name)
+      .join(' ');
+  }
+
   toggleClass(name: string, enabled: boolean) {
     if (enabled) {
       this.addClass(name);
       return;
     }
-    this.className = this.className
-      .split(' ')
-      .filter(part => part && part !== name)
-      .join(' ');
+    this.removeClass(name);
+  }
+
+  setCssStyles(styles: Record<string, string>) {
+    Object.assign(this.style, styles);
   }
 
   hasClass(name: string) {
@@ -544,6 +552,9 @@ async function runTests() {
       focused: false,
       focus() {
         this.focused = true;
+      },
+      setCssStyles(styles: Record<string, string>) {
+        Object.assign(this.style, styles);
       },
     };
     (view as any).inputEl = input;

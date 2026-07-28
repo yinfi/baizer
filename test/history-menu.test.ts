@@ -103,6 +103,16 @@ class FakeElement {
     return this.className.split(' ').includes(name);
   }
 
+  addClass(name: string) {
+    if (!this.hasClass(name)) {
+      this.className = [this.className, name].filter(Boolean).join(' ');
+    }
+  }
+
+  removeClass(name: string) {
+    this.className = this.className.split(' ').filter(part => part && part !== name).join(' ');
+  }
+
   querySelector(selector: string): FakeElement | null {
     const matches = this.querySelectorAll(selector);
     return matches[0] || null;
@@ -146,7 +156,7 @@ async function runTests() {
       { id: 'c-2', title: 'Daily note', updatedAt: 10, providerId: 'openai' },
     ]);
 
-    expect(container.style.display).toBe('block');
+    expect(container.hasClass('baizer-hidden')).toBe(false);
     expect(container.querySelectorAll('.baizer-history-item').length).toBe(2);
     expect(container.querySelector('.baizer-history-title')?.textContent).toBe('Roadmap chat');
 
@@ -288,12 +298,12 @@ async function runTests() {
 
     menu.update([]);
 
-    expect(container.style.display).toBe('block');
+    expect(container.hasClass('baizer-hidden')).toBe(false);
     expect(container.children[0].textContent).toBe('No saved conversations yet.');
 
     menu.hide();
 
-    expect(container.style.display).toBe('none');
+    expect(container.hasClass('baizer-hidden')).toBe(true);
     expect(container.children.length).toBe(0);
   });
 }
