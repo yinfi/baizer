@@ -3,7 +3,7 @@
     "name": "Baizer",
     "version": "1.0.0",
     "minAppVersion": "1.5.0",
-    "description": "An AI knowledge workbench for Obsidian.",
+    "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
     "author": "yinfie",
     "authorUrl": "https://github.com/yinfi/baizer",
     "isDesktopOnly": false
