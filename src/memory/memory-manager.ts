@@ -4,7 +4,6 @@ import {
     MemoryView,
     MemoryViewRequest,
 } from './types';
-import { MEMORY_DIR } from '../mcp/types';
 import {
     collectSupersededIds,
     createMemoryId,
@@ -69,8 +68,6 @@ export class MemoryManager {
     private static readonly DEFAULT_DISTILL_TIMEOUT_MS = 8000;
     // 后台沉淀任务集合:retain 走 fire-and-forget,flush 时 await 排空,插件卸载前不丢在途写。
     private pendingRetains = new Set<Promise<void>>();
-
-    private readonly MEMORY_DIR = MEMORY_DIR;
 
     constructor(
         private app: App,

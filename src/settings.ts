@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, TextComponent, debounce, Debouncer, setIcon } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, debounce, Debouncer, setIcon } from 'obsidian';
 import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 import { OntologyUpdateMode } from './knowledge/types';

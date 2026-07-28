@@ -10,7 +10,7 @@ import { StreamEvent } from '../models/interfaces';
 import { buildCommandSuggestions, CommandSuggestion } from './command-suggestions';
 import { t } from '../i18n/zh';
 import { ContextController } from './controllers/context-controller';
-import { InputController, SuggestionType, SuggestionItem, SuggestionSelection } from './controllers/input-controller';
+import { SuggestionType, SuggestionItem, SuggestionSelection } from './controllers/input-controller';
 import { StreamController } from './controllers/stream-controller';
 import { SuggestList } from './components/suggest-list';
 import { ContextChips } from './components/context-chips';

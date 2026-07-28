@@ -7,8 +7,6 @@
 // - 激活：formatSkillInvocation 包装完整正文（斜杠命令 / 强制激活）
 // - 路由：斜杠命令 / 关键词意图 → 匹配 Skill
 
-import { ToolDefinition } from '../models/interfaces';
-import { PluginSettings } from '../mcp/types';
 import type { Skill as PiSkill } from '@earendil-works/pi-agent-core';
 import {
   Skill,
