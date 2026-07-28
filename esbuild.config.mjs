@@ -20,6 +20,59 @@ if you want to view the source, please visit the github repository of this plugi
 */
 `;
 
+/**
+ * 把用不到的 pi-ai provider 换成存根，避免它们的 SDK 进入 bundle。
+ *
+ * 背景：pi-ai 的 providers/register-builtins.js 会为全部 9 个 provider 注册
+ * 惰性加载器，每个都是 `import("./<provider>.js")`。esbuild 在 format: "cjs"
+ * 下无法做 code splitting，于是把这些动态 import 全部内联进单文件 —— 哪怕
+ * 运行时永远走不到。
+ *
+ * Baizer 的 ProviderConfig 只有 'gemini' 和 'openai-compatible' 两种
+ * （见 src/mcp/types.ts），传给 pi 的 api 只会是 google-generative-ai 或
+ * openai-completions。Mistral 的 1.2MB SDK 是纯死重量。
+ *
+ * 这里不改上游代码，只在打包层把该模块解析到一个存根：导出同名函数，被调用
+ * 时抛出可读错误。如果将来真要支持 Mistral，从这个列表里移除即可。
+ *
+ * 为什么在意体积：Obsidian Sync Standard 计划不同步超过 5MB 的文件，
+ * 而 main.js 原本是 6.0MB —— 这会让付费同步用户拿不到插件更新。
+ */
+const STUBBED_PI_PROVIDERS = [
+	{ file: "mistral.js", exports: ["streamMistral", "streamSimpleMistral"] },
+];
+
+const stubUnusedPiProviders = {
+	name: "stub-unused-pi-providers",
+	setup(build) {
+		for (const { file, exports } of STUBBED_PI_PROVIDERS) {
+			// 只匹配 pi-ai 自己 providers 目录下的相对 import，避免误伤同名文件。
+			const filter = new RegExp(`^\\./${file.replace(".", "\\.")}$`);
+			build.onResolve({ filter }, (args) => {
+				if (!args.importer.includes("pi-ai")) return null;
+				return { path: `pi-provider-stub:${file}`, namespace: "pi-stub" };
+			});
+		}
+
+		build.onLoad({ filter: /.*/, namespace: "pi-stub" }, (args) => {
+			const file = args.path.replace("pi-provider-stub:", "");
+			const entry = STUBBED_PI_PROVIDERS.find((p) => p.file === file);
+			const name = file.replace(".js", "");
+			const contents = entry.exports
+				.map(
+					(fn) => `export function ${fn}() {
+	throw new Error(
+		"Baizer does not bundle the '${name}' provider. " +
+		"Configure a Gemini or OpenAI-compatible provider instead."
+	);
+}`,
+				)
+				.join("\n");
+			return { contents, loader: "js" };
+		});
+	},
+};
+
 const prod = (process.argv[2] === "production");
 
 await mkdir(outputDir, { recursive: true });
@@ -52,6 +105,7 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: `${outputDir}/main.js`,
 	loader: { '.md': 'text' },
+	plugins: [stubUnusedPiProviders],
 });
 
 if (prod) {
