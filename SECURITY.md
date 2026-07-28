@@ -18,7 +18,7 @@ released version only.
 
 If you discover a security issue, report it privately:
 
-- Use GitHub's [private vulnerability reporting](https://github.com/yinfie/baizer/security/advisories/new), or
+- Use GitHub's [private vulnerability reporting](https://github.com/yinfi/baizer/security/advisories/new), or
 - Email the maintainer at **yinfie@qq.com** with the subject line `[Baizer Security]`.
 
 Please include:
@@ -71,7 +71,7 @@ Baizer 处于活跃开发阶段,安全修复仅应用于最新发布版本。
 
 如果你发现安全问题,请通过私密渠道报告:
 
-- 使用 GitHub 的[私密漏洞报告](https://github.com/yinfie/baizer/security/advisories/new),或
+- 使用 GitHub 的[私密漏洞报告](https://github.com/yinfi/baizer/security/advisories/new),或
 - 发送邮件至 **yinfie@qq.com**,主题为 `[Baizer Security]`。
 
 请在报告中包含:

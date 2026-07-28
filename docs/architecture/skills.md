@@ -1,5 +1,12 @@
 # Skills And Tools
 
+**A Tool is a verb the model can invoke. A Skill is advice the model can read.**
+
+If something writes a file, it is a Tool. If something tells the model *how* to
+write files, it is a Skill. A Skill has no path to the vault or the network — the
+only thing it changes is what the model reads, and therefore which Tools the
+model decides to call. This is the distinction newcomers get wrong most often.
+
 ## Layering
 
 The plugin uses two orchestration layers:
@@ -34,14 +41,38 @@ They provide:
 - keyword-based intent routing
 - tool subsets plus workflow instructions
 
-Built-in skills currently cover:
+Seven built-in skills are registered in `main.ts`, each from a
+`src/skills/builtin/<name>/SKILL.md`:
 
 - `web-search`
 - `web-clipper`
-- `knowledge`
+- `obsidian-markdown`
+- `json-canvas`
+- `obsidian-bases`
 - `plugin-ctrl`
+- `knowledge`
 
-User-defined `SKILL.md` files can also be loaded from the vault.
+User-defined `SKILL.md` files can also be loaded from the vault, out of
+`.obsidian/baizer/skills/`.
+
+### Progressive disclosure
+
+Skill instructions are **not** in the system prompt. Only a list of names and
+one-line descriptions is, under `<available_skills>`. The model pulls a skill's
+full text on demand by calling `read_skill(name)` — an ordinary tool, registered
+by `registerSkillReadTool` and always available even when the active tool set
+has been narrowed, so the model can never get trapped inside one skill.
+
+This is why a large skill library costs almost nothing per turn: the prompt
+carries the index, not the content.
+
+> There is no `use_skill` meta-tool. It was removed in favour of the
+> `<available_skills>` listing plus `read_skill`. If you find a doc or comment
+> mentioning `use_skill`, it is stale.
+
+Built-in `SKILL.md` files are *materialized* to a hidden vault directory on load
+(`SkillRegistry.materializeBuiltins`), which is what lets `read_skill` treat
+built-in and user skills identically.
 
 ## Slash Commands
 

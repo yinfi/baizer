@@ -5,6 +5,22 @@ _English · [简体中文](#为-baizer-做贡献)_
 Thanks for your interest in improving Baizer! This guide covers how to set up
 the project, the conventions we follow, and how to submit changes.
 
+## Understanding the Codebase
+
+Before your first change, read these in order:
+
+1. [`CLAUDE.md`](./CLAUDE.md) — the fullest module-by-module map of the whole
+   plugin, including the key architectural patterns and their rationale.
+2. [`docs/architecture/runtime.md`](./docs/architecture/runtime.md) — how a chat
+   turn is prepared and executed.
+3. [`docs/architecture/skills.md`](./docs/architecture/skills.md) and
+   [`docs/architecture/permissions.md`](./docs/architecture/permissions.md) — the
+   skill/tool split and the permission model.
+
+The single most common source of confusion: **skills are instructions, tools are
+execution.** A skill never runs anything; it tells the model how to behave and
+which tools to reach for.
+
 ## Development Setup
 
 ```bash
@@ -27,6 +43,12 @@ npx tsc --noEmit
 npx eslint .
 ```
 
+> **Known debt:** `tsc --noEmit` currently reports errors on `main` (mostly
+> unused locals plus some untyped Obsidian API access), and `eslint` reports
+> warnings for `any` usage. `npm run build` and `npm test` **are** clean and are
+> enforced in CI. Clearing the remaining type errors is a good first
+> contribution — see the issues labelled `good first issue`.
+
 To test inside Obsidian, symlink or copy `dist/main.js`, `manifest.json`, and
 `styles.css` into a vault's `.obsidian/plugins/baizer/` folder, then reload.
 
@@ -47,7 +69,8 @@ To test inside Obsidian, symlink or copy `dist/main.js`, `manifest.json`, and
 
 1. Fork and create a feature branch (never commit directly to `main`).
 2. Make your change with focused, well-scoped commits.
-3. Ensure `npm run build`, `npm test`, and `npx tsc --noEmit` all pass.
+3. Ensure `npm run build` and `npm test` pass, and that `npx tsc --noEmit`
+   reports no *new* errors beyond the known debt noted above.
 4. Open a pull request describing **what** changed and **why**, plus how you tested it.
 5. Link any related issue.
 
@@ -93,6 +116,11 @@ npx tsc --noEmit
 npx eslint .
 ```
 
+> **已知技术债:** `tsc --noEmit` 目前在 `main` 上会报错(多为未使用的局部变量,
+> 以及少量未标注类型的 Obsidian API 访问),`eslint` 会对 `any` 的使用报出警告。
+> `npm run build` 和 `npm test` **是干净的**,并在 CI 中强制通过。清理剩余的类型
+> 错误是很好的第一份贡献 —— 请看标记为 `good first issue` 的 issue。
+
 要在 Obsidian 中测试,将 `dist/main.js`、`manifest.json`、`styles.css` 软链接或
 复制到某个库的 `.obsidian/plugins/baizer/` 目录,然后重新加载。
 
@@ -112,7 +140,8 @@ npx eslint .
 
 1. Fork 并创建特性分支(切勿直接提交到 `main`)。
 2. 以聚焦、范围清晰的提交完成你的改动。
-3. 确保 `npm run build`、`npm test`、`npx tsc --noEmit` 全部通过。
+3. 确保 `npm run build` 与 `npm test` 通过,且 `npx tsc --noEmit` 没有在上述已知
+   技术债之外产生**新的**报错。
 4. 提交 PR,说明**改了什么**、**为什么**,以及你如何测试。
 5. 关联相关 issue。
 

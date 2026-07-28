@@ -4,7 +4,7 @@
 
 Baizer 是一个面向 Obsidian 的 AI 知识工作台。取名自上古神兽「白泽」——知天下万物之情——它把你的 vault 变成一条 AI 原生的流水线:信息流入、被理解、沉淀为可复用的记忆,再回流到你接下来写的每一段文字里。
 
-![main](https://github.com/user-attachments/assets/d0ab9014-ea13-4300-8d76-d8839fd0c046)
+![Baizer knowledge loop](assets/baizer-knowledge-loop.png)
 
 ## 主线:全流程 AI 化
 
@@ -68,6 +68,10 @@ Baizer 不是在 Obsidian 上外挂一个聊天框。它是一条闭环:**采集
 ## 架构速览
 
 系统分层:**UI 入口 → `ModelService`(门面)→ pi 运行时 → 技能/工具**,知识与记忆作为旁路子系统。所有 LLM 推理都走同一套基于 `@earendil-works/pi-agent-core` agent harness 的运行时。
+
+> 想读更深:[`CLAUDE.md`](./CLAUDE.md) 是最完整的逐模块地图,
+> [`docs/architecture/`](./docs/architecture/) 详细讲运行时、技能与权限模型。
+> 第一次贡献前建议先看这两处。
 
 ### 核心运行时
 
@@ -137,13 +141,33 @@ Baizer 不是在 Obsidian 上外挂一个聊天框。它是一条闭环:**采集
 
 `.obsidian` 写入始终被阻止,即使写入作用域很宽。开启确认后,Baizer 渲染审批卡片并以显式审批标记重放已批准动作;编辑器侧写入走同样的预览优先模型,并记入本地审计日志。
 
+## 数据处理
+
+**Baizer 会把你的笔记内容发送到你自己配置的 AI 服务商。** 这里的每一项功能都
+以此为前提 —— 没有纯本地模式。
+
+- **发往哪里:**只发往你自己配置的服务商端点(Google Gemini、OpenAI、DeepSeek、
+  Qwen,或任意 OpenAI 兼容的 base URL)。绝不发往任何 Baizer 运营的服务器 ——
+  这样的服务器并不存在。
+- **发送什么:**具体功能所需的 prompt 上下文,即笔记内容、选中文本、库内搜索
+  结果。Guardian 会在你打字时发送光标周围的文本。
+- **无遥测、无统计分析、无数据收集。**
+- **你的 API 密钥**以未加密形式存放在库内 `.obsidian` 目录下插件自己的
+  `data.json` 中 —— 这是 Obsidian 插件的标准机制。
+
+在让 Baizer 处理敏感笔记之前,请先了解你所用服务商的数据使用政策。完整的信任
+边界说明见 [SECURITY.md](./SECURITY.md)。
+
 ## 本地存储
 
 Baizer 把运行数据放在 vault 内:
 
+- `.obsidian/baizer/` —— 对话历史、操作审计日志、物化/生成的技能。
+- `.obsidian/baizer-sessions/` —— 每个会话的完整记录(JSONL),含分支历史。
 - `.obsidian/baizer-memory/` —— Hindsight 记忆、profile、会话摘要、观察。
-- `.obsidian/baizer/` —— 对话历史、审计记录、生成的技能、会话 JSONL。
-- `Knowledge Wiki/`(默认)—— 编译后的知识输出。
+- `.obsidian/baizer-commands/` —— 你自己的斜杠命令模板,丢一个 `.md` 进来就多一条命令。
+- `.obsidian/baizer-tmp/` —— agent 运行时的临时文件。
+- `Knowledge Wiki/`(默认)—— 编译后的知识输出。这一个是正常可见的库内文件夹。
 
 ## 支持的 Provider
 
@@ -163,7 +187,7 @@ npm run dev
 
 ## 安装
 
-1. 从 [Releases](https://github.com/yinfie/baizer/releases) 页面下载最新版本。
+1. 从 [Releases](https://github.com/yinfi/baizer/releases) 页面下载最新版本。
 2. 把 `main.js`、`manifest.json`、`styles.css` 解压到 `.obsidian/plugins/baizer/`。
 3. 重载 Obsidian 并启用 Baizer。
 
