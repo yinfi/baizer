@@ -431,7 +431,7 @@ export class ModelService {
                 userProfile: userProfile ?? null,
                 systemPromptOverride,
                 conversationId,
-                ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory(conversationId) } : {}),
+                // hasPriorContext 不再由此注入:runtime 自己向 sessionManager 查。
             });
             return await runtime.query(preparedTurn);
         } catch (e: any) {
@@ -470,7 +470,7 @@ export class ModelService {
                 obsidianContext,
                 userProfile: userProfile ?? null,
                 conversationId,
-                ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory(conversationId) } : {}),
+                // hasPriorContext 不再由此注入:runtime 自己向 sessionManager 查。
             });
             for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
                 yield event;
@@ -717,7 +717,7 @@ export class ModelService {
         return modelCatalog.getProviderCapabilities(this.getActiveProviderConfig());
     }
 
-    async executeSlashSkillCommand(command: string, input: string): Promise<any> {
+    async executeSlashSkillCommand(command: string, input: string, conversationId?: string): Promise<any> {
         const skill = this.skillRegistry.resolveByCommand(command);
         if (!skill) {
             return { success: false, error: `Unknown command: ${command}` };
@@ -725,10 +725,13 @@ export class ModelService {
 
         if (skill.executionMode === 'instructions') {
             const runtime = this.createChatRuntime();
+            // conversationId 必须透传:runtime 靠它向 sessionManager 查历史,
+            // 缺了就拿不到延续检测,短确认会被当成新话题。
             const preparedTurn = await runtime.prepareTurn({
                 userMessage: input,
                 contextItems: [],
                 forcedSkillName: skill.name,
+                conversationId,
             });
             const message = await runtime.query(preparedTurn);
             return { success: true, message };

@@ -285,7 +285,7 @@ export class ChatController {
 
         if (matchedSkillCommand && typeof (this.api as any).executeSlashSkillCommand === 'function') {
             try {
-                const result = await (this.api as any).executeSlashSkillCommand(cmd, argStr.trim());
+                const result = await (this.api as any).executeSlashSkillCommand(cmd, argStr.trim(), this.conversationId);
                 this.handleStructuredResult(result);
             } catch (error: any) {
                 this.handleError(error);

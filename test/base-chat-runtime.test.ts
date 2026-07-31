@@ -427,6 +427,68 @@ async function runTests() {
     // 超过5词的英文实质请求，不是延续，环境上下文必须保留
     expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(true);
   });
+
+  // ── 历史存在性由 runtime 自取,不再依赖调用方注入 ──────────────────────
+  //
+  // 背景:hasPriorContext 原先由 ModelService 查 sessionManager 后注入,
+  // 在 chat/chatStream 里各写一遍,而第三个入口 executeSlashSkillCommand
+  // 漏了 —— 于是 skill 命令永远拿不到延续检测。runtime 自己就持有
+  // sessionManager,该由它自己问。
+
+  const makeRuntimeWithSession = (hasHistory: boolean) => createChatRuntime({
+    memoryManager: null,
+    toolRegistry: {
+      getAllDefinitions: () => [],
+      execute: async () => ({}),
+    } as any,
+    skillRegistry: {
+      resolveByIntent: () => null,
+      getSkillSummaryText: () => '',
+      activateSkill: () => null,
+    } as any,
+    sessionManager: {
+      hasHistory: async () => hasHistory,
+    } as any,
+  });
+
+  await test('[B] runtime derives prior history from sessionManager when caller omits it', async () => {
+    const runtime = makeRuntimeWithSession(true);
+
+    // 注意:没有传 hasPriorContext——这正是 skill 命令入口的情形
+    const prepared = await runtime.prepareTurn({
+      userMessage: '需要',
+      contextItems: [ambientNote()],
+      conversationId: 'conv-1',
+    } as any);
+
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(false);
+  });
+
+  await test('[B] runtime keeps ambient context when sessionManager reports no history', async () => {
+    const runtime = makeRuntimeWithSession(false);
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: '需要',
+      contextItems: [ambientNote()],
+      conversationId: 'conv-1',
+    } as any);
+
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(true);
+  });
+
+  await test('[B] explicit hasPriorContext still wins over the session lookup', async () => {
+    // 显式传入时不再查会话:保留这条是为了让无 conversationId 的一次性调用
+    // (file-back、/edit)能按调用方的判断走。
+    const runtime = makeRuntimeWithSession(false);
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: '需要',
+      contextItems: [ambientNote()],
+      hasPriorContext: true,
+    } as any);
+
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(false);
+  });
 }
 
 runTests().catch((e) => {
