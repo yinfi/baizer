@@ -75,6 +75,21 @@ tree; "message" is one kind of entry.
 effect, oldest entry to newest. The next turn builds on the current branch.
 Unrelated to git branches.
 
+**Branch projection** — flattening the current branch of the session tree into a
+list of messages the UI can render. Reads the durable session; produces a fresh
+list. This is what happens when you switch between siblings.
+
+**Message projection** — the per-tab read-only copy of the message list the
+Workbench renders from. It is *received*, never authored: `ChatController` owns
+the list, and the projection follows. Writing to a projection directly is how the
+two copies drift apart.
+
+> Both are called "projection" in code (`projectBranchToMessages`,
+> `getBranchProjection`). They are different: a **branch projection** is derived
+> from the session tree and answers "what does this branch look like"; a
+> **message projection** is a mirror of the owning list and answers "what should
+> this tab render". Say which one you mean.
+
 **Fork / edit / retry** — going back to an earlier point and continuing from
 there. Fork and edit leave the original continuation intact as a **sibling**,
 navigable in the UI. Retry marks the replaced branch superseded, so it is not
@@ -249,6 +264,12 @@ is the user-facing name and the one to use in docs and UI text.
 
 **Timeline** — the foldable trace of tool calls and model thinking shown
 alongside an answer.
+
+**Already rendered** — a message that reached the screen through stream events as
+it arrived, so recording it must not draw it a second time. Recording and drawing
+are separate acts: recording always happens, drawing is conditional on this fact.
+Conflating the two is what let a streamed reply exist in one list and not the
+other.
 
 **Context item / context chip** — a note or selection the user explicitly
 attached to the request, shown as a removable chip. Explicit, unlike ambient

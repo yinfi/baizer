@@ -3,6 +3,13 @@ import { cloneChangePreview } from '../diff/change-preview';
 import { WorkspaceEditSummary } from '../../services/workspace-edit-service';
 
 export class ChatState {
+    /**
+     * 消息投影(ADR 0002):这份列表是*收到*的,不是*写出*的。
+     * 唯一作者是该 tab 的 ChatController;宿主在 onMessageAdded 里把它同步过来。
+     * 直接调 addMessage 造一条 ai 回复,会得到一个 owner 那边没有的 id,
+     * 于是按 id 回查的操作(👍 归档 / 👎 改进重答)静默失效——这正是该 ADR 要关掉的缺陷。
+     * 例外:分支切换(rebuildActiveTabFromProjection)整体替换本列表,那是另一种投影。
+     */
     private messages: ChatMessage[] = [];
     private tools = new Map<string, ToolRunState>();
     private workspaceEdits = new Map<string, WorkspaceEditSummary>();

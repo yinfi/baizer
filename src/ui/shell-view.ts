@@ -910,9 +910,10 @@ export class ShellView extends ItemView {
         }
 
         if (this.streamContainer) {
-            // 阶段C:用 tab.state 里刚落盘的真实 ai 消息(已带 assistantEntryId)渲染操作栏,
+            // 阶段C:用投影里刚落下的真实 ai 消息(已带 assistantEntryId)渲染操作栏,
             // 而非临时空壳——否则 sessionEntryId 缺失,重试按钮的显示条件永不满足。
-            // handleTabStreamEvent 在 done 时已先把 entryId 写进 tab.state,此处取最后一条 ai 消息即可。
+            // ChatController 在发出 done 之前就把该消息记进了投影(ADR 0002),此处取最后一条 ai 即可。
+            // 它的 id 与 ChatController 列表里的同一条一致,故 👍/👎 能回查到。
             const activeMessages = this.tabManager.getActiveTab()?.state.getMessages() ?? [];
             const lastAiMessage = [...activeMessages].reverse().find(m => m.role === 'ai');
             // 就近填充分叉源问题文本:该 ai 回复紧邻其前的 user 消息原文,供底部「分叉」输入预填。
@@ -1801,7 +1802,7 @@ export class ShellView extends ItemView {
             app: this.app,
             api: this.modelService,
             conversationId: id,
-            onMessageAdded: (msg) => this.handleTabMessageAdded(id, msg),
+            onMessageAdded: (msg, options) => this.handleTabMessageAdded(id, msg, options),
             onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
             onStreamEvent: (event) => this.handleTabStreamEvent(id, event),
             onClear: () => this.handleTabClear(id),
@@ -1815,11 +1816,18 @@ export class ShellView extends ItemView {
         return session;
     }
 
-    private handleTabMessageAdded(tabId: TabId, msg: ChatMessage) {
+    /**
+     * 收到 ChatController(消息列表的唯一作者)的记录通知。
+     * tab.state 是只读投影:永远写,不自己造消息(ADR 0002)。
+     * alreadyRendered 的消息已随 stream 事件上屏,只记录、不重画。
+     */
+    private handleTabMessageAdded(tabId: TabId, msg: ChatMessage, options?: { alreadyRendered?: boolean }) {
         const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
         if (tab) {
             tab.state.addMessage(msg);
         }
+
+        if (options?.alreadyRendered) return;
 
         if (this.tabManager.getActiveTab()?.id === tabId) {
             this.appendMessage(msg);
@@ -1851,8 +1859,9 @@ export class ShellView extends ItemView {
         if (event.type === 'done') {
             const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
             if (tab) {
-                // 阶段B:把本轮 entryId 锚定到 tab.state 的消息(阶段C 分叉/重试的定位依据)。
-                // user entry 打到最近一条尚未锚定的 user 消息;assistant entry 打到本轮新建的 ai 消息。
+                // 阶段B:把本轮 user entryId 锚定到投影里最近一条尚未锚定的 user 消息
+                // (阶段C 分叉/重试的定位依据)。
+                // ai 消息不在此创建——它由 ChatController 在发出 done 之前就记进了投影(ADR 0002)。
                 const entryIds = event.entryIds;
                 if (entryIds?.userEntryId) {
                     const messages = tab.state.getMessages();
@@ -1863,16 +1872,6 @@ export class ShellView extends ItemView {
                         }
                     }
                 }
-                if (event.text) {
-                    tab.state.addMessage({
-                        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                        role: 'ai',
-                        content: event.text,
-                        timestamp: Date.now(),
-                        sessionEntryId: entryIds?.assistantEntryId,
-                        metadata: event.interrupted ? { interrupted: true } : undefined,
-                    });
-                }
             }
         }
 
@@ -1880,7 +1879,9 @@ export class ShellView extends ItemView {
             this.handleStreamEvent(event);
         } else {
             this.tabManager.markAttention(tabId, true);
-            // 后台 tab 有流事件(done 时会落 ai 消息):标脏,切回时重建。
+            // 后台 tab 有流事件:标脏,切回时重建。
+            // 这也是流式 ai 回复在后台 tab 的标脏来源——它在 handleTabMessageAdded
+            // 里带 alreadyRendered 早退,不走那边的标脏分支。
             this.dirtyTabs.add(tabId);
         }
     }
