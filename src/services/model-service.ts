@@ -884,8 +884,9 @@ export class ModelService {
      * 运行中补话入口:把一条用户指令转发给当前活跃 harness 的原生 steer(),
      * 不打断当前流,由 Harness 在下一轮纳入。无活跃 run 或空白文本时忽略。
      */
-    public steerActiveRun(text: string): void {
-        this.activeRunController.steer(text);
+    /** 返回补话是否已交给活跃 run。false = 模型不会看到它,调用方不应渲染成已发送。 */
+    public steerActiveRun(text: string): boolean {
+        return this.activeRunController.steer(text);
     }
 
     /**

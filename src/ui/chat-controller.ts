@@ -445,7 +445,12 @@ export class ChatController {
         const steer = (this.api as any).steerActiveRun;
         if (typeof steer !== 'function') return false;
 
-        steer.call(this.api, trimmed);
+        // 必须听 steer 的回话,不能只看自己的 activeStreamController:
+        // 后者在调 chatStream 之前就置位,而 harness 要到 queryStream 内部
+        // 若干 await 之后才 register。这段窗口里补话会被丢弃,
+        // 若仍渲染用户气泡,用户会以为发出去了。
+        if (steer.call(this.api, trimmed) !== true) return false;
+
         this.addMessage('user', trimmed);
         return true;
     }

@@ -45,16 +45,26 @@ export class ActiveRunController {
   }
 
   /**
-   * 运行中补话:转发给活跃 harness 的原生 steer()。空白文本或无活跃 run 时忽略。
-   * steer 是异步的,但调用方(UI)只需「已排队」语义,故 fire-and-forget,失败仅记日志。
+   * 运行中补话:转发给活跃 harness 的原生 steer()。
+   *
+   * 返回补话是否**已交给** harness。这个返回值是必需的,不是便利:
+   * 调用方(UI)此前只能凭自己那个更早置位的 AbortController 判断能否 steer,
+   * 而 harness 要到 queryStream 内部好几个 await 之后才 register。两者不一致的
+   * 窗口里,补话被这里静默丢弃,UI 却照样把它渲染成已发送的用户消息。
+   *
+   * false 有两种情形:文本空白、或当前无活跃 run。两者都意味着模型不会看到它。
+   *
+   * 注意 true 只保证「已交给 harness」,不保证注入成功——steer 是异步的,
+   * 而调用方只需要「已排队」语义,故 fire-and-forget,失败仅记日志。
    */
-  steer(text: string): void {
+  steer(text: string): boolean {
     const trimmed = (text ?? '').trim();
-    if (!trimmed || !this.active) return;
+    if (!trimmed || !this.active) return false;
     void this.active.steer(trimmed).catch((error) => {
       logger.warn('Failed to steer active run', 'ActiveRunController.steer');
       void error;
     });
+    return true;
   }
 
   /**
