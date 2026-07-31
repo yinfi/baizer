@@ -17,6 +17,12 @@ import { ChatMessage } from './types';
 import { WorkspaceEditSummary } from '../services/workspace-edit-service';
 import { PLUGIN_ID } from '../mcp/types';
 
+/** 记录一条消息时告知宿主的事实(ADR 0002:记录与绘制分离)。 */
+export interface MessageAddedOptions {
+    /** 该消息已随 stream 事件上屏,宿主只记录、不重画。 */
+    alreadyRendered?: boolean;
+}
+
 export interface ChatControllerOptions {
     app: App;
     api: ModelService;
@@ -26,11 +32,8 @@ export interface ChatControllerOptions {
      * 缺省时退化为无持久会话(每轮内存临时会话)。
      */
     conversationId?: string;
-    /**
-     * 消息已记入本控制器的列表(唯一作者)。宿主据此更新自己的只读投影。
-     * alreadyRendered=true 表示该消息已随 stream 事件上屏,宿主只记录、不重画。
-     */
-    onMessageAdded?: (message: ChatMessage, options?: { alreadyRendered?: boolean }) => void;
+    /** 消息已记入本控制器的列表(唯一作者)。宿主据此更新自己的只读投影。 */
+    onMessageAdded?: (message: ChatMessage, options?: MessageAddedOptions) => void;
     onStatusChanged?: (isResponding: boolean) => void;
     onStreamEvent?: (event: StreamEvent) => void;
     /** /clear 时触发:宿主清空该 tab 的可见历史(tab.state)并重渲。 */
@@ -46,7 +49,7 @@ export class ChatController {
     private readonly conversationId?: string;
     private messages: ChatMessage[] = [];
     // private isResponding: boolean = false; // Unused
-    private onMessageAdded?: (message: ChatMessage, options?: { alreadyRendered?: boolean }) => void;
+    private onMessageAdded?: (message: ChatMessage, options?: MessageAddedOptions) => void;
     private onStatusChanged?: (isResponding: boolean) => void;
     private onStreamEvent?: (event: StreamEvent) => void;
     private onClear?: () => void;
@@ -144,6 +147,11 @@ export class ChatController {
         let turnEntryIds: { userEntryId?: string; assistantEntryId?: string } | undefined;
         // 本轮是否已记过 ai 回复。正常收尾在 done 时记,中断在 catch 里记,二者互斥。
         let assistantRecorded = false;
+        // 正文是否被缓冲(待审批 / 写请求未落地),即屏幕上还没显示过。
+        // 必须提到与 fullText 同一作用域:catch 里的中断路径也要读它,
+        // 否则会记下一条用户从未见过的回复(它标 alreadyRendered,宿主不画,
+        // 于是只在切 tab 重渲时凭空出现)。
+        let textWithheld = false;
 
         try {
             if (this.onStreamEvent) {
@@ -191,6 +199,8 @@ export class ChatController {
                                     this.onStreamEvent(bufferedEvent);
                                 }
                                 bufferedTextEvents.length = 0;
+                                // 缓冲的正文补发上屏了,不再算「未显示」。
+                                textWithheld = false;
                             }
                         }
                     }
@@ -198,6 +208,7 @@ export class ChatController {
                     if (event.type === 'text_delta') {
                         if (approvalRequest || (isWriteRequest && !successfulFileWrite)) {
                             bufferedTextEvents.push(event);
+                            textWithheld = true;
                         } else {
                             this.onStreamEvent(event);
                         }
@@ -247,7 +258,7 @@ export class ChatController {
                             'system',
                             this.getFileWriteFailureMessage(attemptedFileWrite, lastWriteError)
                         );
-                    } else if (!assistantRecorded && fullText) {
+                    } else if (!assistantRecorded && fullText && !textWithheld) {
                         // 流正常收尾但没有 done 事件(runtime 提前结束):仍把已有正文记为
                         // 一条中断的回复,否则这段文字只存在于屏幕上、不在任何列表里。
                         this.recordStreamedReply(fullText, { interrupted: true });
@@ -264,7 +275,9 @@ export class ChatController {
             if (this.isAbortError(error)) {
                 // 中断路径过去只发 done 事件、不记消息:宿主的投影里有这条回复,
                 // 本列表里没有,两份内容因此分叉(ADR 0002)。改为走同一个记录入口。
-                if (!assistantRecorded && fullText) {
+                // textWithheld 时不记:那段正文还在缓冲里、屏幕上从没出现过,
+                // 记下来就成了一条只在重渲时冒出来的幽灵回复。
+                if (!assistantRecorded && fullText && !textWithheld) {
                     this.recordStreamedReply(fullText, { interrupted: true });
                 }
                 this.onStreamEvent?.({ type: 'done', text: fullText, interrupted: true });
@@ -709,19 +722,16 @@ export class ChatController {
      *
      * 任何地方另建一条 ChatMessage,都会得到另一个 id——宿主的投影渲染操作栏、
      * 本列表解析反馈,两边就再也对不上。所以 id 只在此处生成一次。
-     *
-     * extra.alreadyRendered:该消息已随 stream 事件上屏,宿主只记录、不重画。
      */
     private addMessage(
         role: 'user' | 'ai' | 'system',
         content: string,
         approval?: ApprovalRequest,
-        extra?: {
+        extra?: MessageAddedOptions & {
             sessionEntryId?: string;
             metadata?: ChatMessage['metadata'];
-            alreadyRendered?: boolean;
         },
-    ): ChatMessage {
+    ) {
         const msg: ChatMessage = {
             id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
             role,
@@ -735,7 +745,6 @@ export class ChatController {
         if (this.onMessageAdded) {
             this.onMessageAdded(msg, { alreadyRendered: extra?.alreadyRendered === true });
         }
-        return msg;
     }
 
     /**

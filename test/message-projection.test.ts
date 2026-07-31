@@ -176,6 +176,58 @@ async function runTests() {
     controller.cleanup();
   });
 
+  await test('aborting while text is withheld records no ghost reply', async () => {
+    const host = createHost(ChatState);
+    const shown: string[] = [];
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'fallback',
+        chatStream: async function* (
+          _query: string,
+          _context: any[],
+          _selection: string,
+          _source?: any,
+          _obsidianContext?: any,
+          _userProfile?: any,
+          signal?: AbortSignal,
+        ) {
+          yield { type: 'text_delta', content: 'Copy this JSON yourself.' };
+          await new Promise<void>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => {
+              const error = new Error('Aborted');
+              (error as any).name = 'AbortError';
+              reject(error);
+            });
+          });
+        },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onMessageAdded: host.onMessageAdded,
+      onStreamEvent: (event) => {
+        if (event.type === 'text_delta') shown.push(event.content);
+      },
+    });
+
+    // 写请求 + 没有成功的写工具 ⇒ 正文被缓冲,屏幕上从未出现。
+    const run = controller.processCommand('Create a canvas file for this article');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    controller.cancelActiveStream();
+    await run;
+
+    expect(shown).toEqual([]);
+    // 记下这条就成了幽灵回复:它标 alreadyRendered、宿主不画,只在切 tab 重渲时冒出来。
+    expect(controller.getMessages().map((m: ChatMessage) => m.role)).toEqual(['user', 'system']);
+    expect(host.state.getMessages().map((m: ChatMessage) => m.role)).toEqual(['user', 'system']);
+
+    controller.cleanup();
+  });
+
   await test('feedback handlers resolve the id the projection rendered', async () => {
     const host = createHost(ChatState);
     const archived: any[] = [];
