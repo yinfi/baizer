@@ -51,7 +51,11 @@ export default class BaizerPlugin extends Plugin {
     private pluginWatcher: PluginWatcher | null = null;
     private inboxAutosave: InboxAutosaveCoordinator | null = null;
     private guardianCheckTimer: number | null = null;
+    // 快补全的请求序号。既是日志 ID,也是快路径 isStale 的判据:
+    // 递增它即宣告此前所有在途快请求作废。深路径不得触碰它。
     private guardianRequestSeq = 0;
+    // 深补全的请求序号,仅用于日志关联,不参与任何 staleness 判定。
+    private guardianDeepRequestSeq = 0;
     // 自动补全在途请求的单飞控制：新请求开始时 abort 上一个，避免并发堆积。
     private guardianInflight: AbortController | null = null;
     // 深补全(手动触发)独立单飞：与自动补全分离,避免昂贵的手动请求被随手打字 abort。
@@ -780,7 +784,11 @@ export default class BaizerPlugin extends Plugin {
         const requestLineText = editor.getLine(requestLine) || '';
         const lineNumber = cursor.line + 1;
         const startedAt = Date.now();
-        const requestSeq = ++this.guardianRequestSeq;
+        // 深补全用自己的序号,不碰 guardianRequestSeq。
+        // 那个计数器是快路径 isStale 的判据(见 runAutoGuardianCheck),深路径这边
+        // 只拿它做日志 ID——递增它会让任何在途的快补全立刻变 stale 被丢弃,
+        // 即使它马上就要返回可用建议。两条路径本应各自独立可取消。
+        const requestSeq = ++this.guardianDeepRequestSeq;
 
         const isStale = () => {
             const c = editor.getCursor();
