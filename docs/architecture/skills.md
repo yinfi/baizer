@@ -74,6 +74,13 @@ Built-in `SKILL.md` files are *materialized* to a hidden vault directory on load
 (`SkillRegistry.materializeBuiltins`), which is what lets `read_skill` treat
 built-in and user skills identically.
 
+The materialized copy is a cache, not the original: built-in skills are
+**overwritten from the bundle on every launch**. Built-ins are code-owned, so a
+hand-edit to a materialized built-in `SKILL.md` does not survive a restart —
+change the file in `src/skills/builtin/<name>/SKILL.md` instead. User skills in
+`.obsidian/baizer/skills/` are the opposite: those files are the original and are
+never written by the plugin.
+
 ## Slash Commands
 
 Slash commands should not be hardcoded when they are really workflow commands.

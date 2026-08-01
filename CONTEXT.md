@@ -32,6 +32,28 @@ reads, and therefore which Tools the model chooses to call.
 > Said once more: a Tool is a verb the model can invoke. A Skill is advice the
 > model can read.
 
+Skills come in three kinds, and the kind decides who owns the file:
+
+| | **Built-in** | **User** | **Derived** |
+|---|---|---|---|
+| written by | us, in the repo | you, by hand | Baizer, from something already installed |
+| on-disk copy is | a cache, overwritten every launch | the original | a cache, rewritten when its source moves |
+| exists as long as | the plugin is installed | you keep the file | its source and its permission both hold |
+
+**Derived skill** — a Skill generated *from* something else already present, and
+named after it. The only ones today are the `plugin-<id>` skills written from
+another installed Obsidian plugin. Two properties set them apart, and both are
+consequences of being derived rather than authored:
+
+- **The file is a cache; the truth is the current state of the source.** A
+  derived skill is reconciled at every launch against its source. If the source
+  is gone, disabled, excluded, or unpermitted, the skill is not offered — the
+  file stays on disk, but it does not count.
+- **Their existence is gated on a permission**, so they are the one exception to
+  the availability/permission orthogonality below. A `plugin-*` skill is only
+  generated, and only offered, while plugin control is granted. Advice for
+  calling a tool the model may not call is not advice.
+
 ### Memory vs Knowledge Wiki
 
 Two completely separate stores, and the pair most often confused. Nothing flows
@@ -115,6 +137,16 @@ calls for, checked against the result afterwards.
 by default; narrowed to a Skill's declared subset only when that Skill was
 force-activated. `read_skill` is always added back.
 
+**Force-activation** — the user naming a Skill for this turn, by typing its slash
+command. This is the *only* thing that narrows the active tool set, and the only
+thing that replaces the skill list with one skill's full instructions. Nothing
+Baizer infers counts as force-activation.
+
+**Keyword hint** — a Skill matched by a keyword in the user's message. A hint is
+a *suggestion to the model*, nothing more: the full skill list stays in the
+prompt and every tool stays available. Distinct from force-activation, which the
+user asked for; a hint is a guess, and a guess must not take capabilities away.
+
 **read_skill** — the ordinary Tool that returns a Skill's full instruction text
 by name. This is the mechanism that makes Skills do anything: the text lands in
 the conversation and the model follows it. Always available, so the model can
@@ -152,6 +184,27 @@ the model's reasoning as it streams.
 
 ---
 
+## Generated artefacts
+
+Two subsystems write files *from* other files — the wiki compiles notes into
+articles, and plugin control writes derived skills from installed plugins. They
+share this vocabulary.
+
+**Staleness** — whether a generated file still matches what it was generated
+from. Always decided by **content hash**, never by timestamps: a file touched
+without being changed is not stale, and a clock that disagrees does not matter.
+
+**Local edit** — a generated file the user has since changed by hand, detected by
+the same hash the generator recorded when it wrote the file. Staleness and local
+edit are independent, and both being true is the interesting case: the source
+moved *and* the user has work in the file. Regenerating would destroy the work,
+so that case is reported and nothing is overwritten.
+
+> The rule this expresses: **regeneration may overwrite what we wrote, never what
+> you wrote.**
+
+---
+
 ## Permissions
 
 **Write scope** — *where* writes may land: `read-only`, `current-note`,
@@ -169,6 +222,10 @@ needs approval, not a judgement made per call.
 **Skill availability** — whether a Skill is offered to the model at all. This is
 **orthogonal to permissions**: disabling a Skill hides advice, it does not revoke
 a capability. The model can still call the underlying Tool directly.
+
+The orthogonality is about *availability*, not *existence*, which is why derived
+skills do not contradict it: a permission does not silence them, it is the
+precondition for there being one at all.
 
 ---
 
@@ -204,8 +261,8 @@ and safe to delete.
 **Compilation** — turning source notes into articles. Runs map-reduce over a
 note's parts, so a long note does not have to fit in one context window.
 
-**Staleness** — whether a source note has changed since its article was built,
-decided by content hash rather than timestamps.
+**Staleness** — see the general definition under *Generated artefacts*. For the
+wiki it means a source note changed after its article was built.
 
 **Compile status** — per-note progress: `pending`, `processing`, `done`,
 `failed`. Lives in the source note's frontmatter, so it is visible in Obsidian.
