@@ -2,6 +2,7 @@ import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, debou
 import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 import { OntologyUpdateMode } from './knowledge/types';
+import type { DerivedSkillStatus } from './skills/builtin/plugin-ctrl/plugin-watcher';
 import { t, getLocale, Locale } from './i18n/zh';
 
 export type SettingsSectionId =
@@ -646,6 +647,56 @@ export function getSettingsOverviewActions(settings: PluginSettings): SettingsOv
     }
 
     return actions;
+}
+
+/** 派生技能在设置页的一行展示。判定归 PluginWatcher，这里只决定「显示什么」。 */
+export interface DerivedSkillRow {
+    pluginId: string;
+    skillName: string;
+    /** 生成时的插件版本；漂移时附上当前版本 */
+    versionLabel: string;
+    /** 陈旧 / 被手工编辑 / 未提供，按此固定顺序 */
+    badges: string[];
+    /** 最近一次生成失败的原因；没有则 null */
+    failureReason: string | null;
+    offered: boolean;
+}
+
+/**
+ * 把对账状态 + 生成失败原因映射成展示行。
+ * 抽成纯函数是为了可测：DOM 那层只负责把这些字段放进元素里。
+ */
+export function getDerivedSkillRows(
+    statuses: DerivedSkillStatus[],
+    failures: ReadonlyMap<string, string>,
+): DerivedSkillRow[] {
+    return statuses.map((status) => ({
+        pluginId: status.pluginId,
+        skillName: status.skillName,
+        versionLabel: buildDerivedVersionLabel(status),
+        badges: buildDerivedBadges(status),
+        failureReason: failures.get(status.pluginId) ?? null,
+        offered: status.offered,
+    }));
+}
+
+/** 无溯源时明说「版本未知」,不要编一个出来——用户据此判断要不要信这份技能。 */
+function buildDerivedVersionLabel(status: DerivedSkillStatus): string {
+    if (!status.recordedVersion) {
+        return t('Generated from an unknown version');
+    }
+    const base = t('Generated from v{version}').replace('{version}', status.recordedVersion);
+    if (!status.stale || !status.installedVersion) return base;
+    return `${base} · ${t('plugin now v{version}').replace('{version}', status.installedVersion)}`;
+}
+
+function buildDerivedBadges(status: DerivedSkillStatus): string[] {
+    const badges: string[] = [];
+    if (status.stale) badges.push(t('Stale'));
+    // handEdited 为 null 表示无溯源、无从判断,不能报成「你改过」。
+    if (status.handEdited === true) badges.push(t('Edited by you'));
+    if (!status.offered) badges.push(t('Not offered'));
+    return badges;
 }
 
 export function getProviderDeletionState(settings: PluginSettings): ProviderDeletionState {
@@ -2519,6 +2570,93 @@ export class SettingTab extends PluginSettingTab {
         const excludeItem = list.createEl('li');
         excludeItem.createEl('strong', { text: t('Excluded plugins') });
         excludeItem.createSpan({ text: String(this.plugin.settings.pluginSkillExcludeList.length) });
+
+        this.renderDerivedSkillList(containerEl);
+    }
+
+    /**
+     * 派生技能的管理入口。文件在 .obsidian 隐藏目录，Obsidian 文件浏览器看不见,
+     * 所以这里是用户唯一能查看与处置它们的地方。
+     */
+    private renderDerivedSkillList(containerEl: HTMLElement): void {
+        const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
+        renderSettingHeading(
+            panel.createDiv({ cls: 'baizer-settings-panel-header' }),
+            t('Generated plugin skills'),
+            { nameClass: 'baizer-settings-panel-title' },
+        );
+        const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
+
+        const watcher = this.plugin.pluginWatcher;
+        const rows = watcher
+            ? getDerivedSkillRows(watcher.getDerivedSkillStatuses(), watcher.getGenerationFailures())
+            : [];
+
+        if (rows.length === 0) {
+            body.createDiv({
+                cls: 'baizer-settings-inline-note is-muted',
+                text: t('No plugin skills have been generated yet.'),
+            });
+            return;
+        }
+
+        for (const row of rows) {
+            this.renderDerivedSkillRow(body, row);
+        }
+    }
+
+    private renderDerivedSkillRow(body: HTMLElement, row: DerivedSkillRow): void {
+        const descParts = [row.versionLabel, ...row.badges];
+        if (row.failureReason) {
+            descParts.push(`${t('Last generation failed')}: ${row.failureReason}`);
+        }
+
+        const setting = new Setting(body)
+            .setName(row.pluginId)
+            .setDesc(descParts.join(' · '));
+
+        setting.addButton(button => button
+            .setButtonText(t('Regenerate'))
+            .onClick(() => { void this.regenerateDerivedSkill(row.pluginId); }));
+
+        setting.addButton(button => {
+            button.setButtonText(t('Delete')).setWarning();
+            button.onClick(() => {
+                new MemoryConfirmModal(
+                    this.app,
+                    t('Delete plugin skill'),
+                    t('Delete the generated skill for {plugin}? This cannot be undone.')
+                        .replace('{plugin}', row.pluginId),
+                    async () => { await this.deleteDerivedSkill(row.pluginId); },
+                ).open();
+            });
+        });
+    }
+
+    /**
+     * 显式重新生成:覆盖写,即使用户手改过——这是用户亲自要求的,优先于对账给手工编辑的保护。
+     * 前置条件不满足时 watcher 返回 null,此时给一句提示说明为什么没动,而不是假装成功。
+     */
+    private async regenerateDerivedSkill(pluginId: string): Promise<void> {
+        const watcher = this.plugin.pluginWatcher;
+        if (!watcher) return;
+
+        const status = await watcher.regenerateDerivedSkill(pluginId);
+        new Notice(status
+            ? t('Regenerated the skill for {plugin}.').replace('{plugin}', pluginId)
+            : t('Cannot regenerate now: grant plugin control and configure a model first.'));
+        this.renderAccordion();
+    }
+
+    private async deleteDerivedSkill(pluginId: string): Promise<void> {
+        const watcher = this.plugin.pluginWatcher;
+        if (!watcher) return;
+
+        const deleted = await watcher.deleteDerivedSkill(pluginId);
+        new Notice(deleted
+            ? t('Deleted the skill for {plugin}.').replace('{plugin}', pluginId)
+            : t('Failed to delete the skill for {plugin}.').replace('{plugin}', pluginId));
+        this.renderAccordion();
     }
 
     private createActionButton(

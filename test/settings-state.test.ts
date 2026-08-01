@@ -10,6 +10,7 @@ import {
   getSettingsFallbackCss,
   getSettingsOverviewActions,
   getRenderableSettingsSections,
+  getDerivedSkillRows,
 } from '../src/settings';
 
 // 断言用英文原文 key(t() 在非中文环境返回原文),固定 locale 保证与运行环境无关。
@@ -354,6 +355,89 @@ async function runTests() {
   await test('settings search exposes the Behavior section for thinking', () => {
     const matches = getMatchingSettingsSections('thinking');
     expect({ hasBehavior: matches.includes('behavior') }).toEqual({ hasBehavior: true });
+  });
+
+  // ── 派生技能列表（设置页展示行）──
+  // 这里测的是「显示什么」这个纯函数，DOM 只消费它；状态判定本身归 PluginWatcher。
+
+  const derived = (over: Record<string, any> = {}) => ({
+    skillName: 'plugin-tasks',
+    pluginId: 'tasks',
+    offered: true,
+    status: 'offered',
+    recordedVersion: '1.0',
+    installedVersion: '1.0',
+    handEdited: false,
+    stale: false,
+    ...over,
+  });
+
+  await test('lists a derived skill with its source plugin and generated-from version', () => {
+    expect(getDerivedSkillRows([derived()] as any, new Map())).toEqual([{
+      pluginId: 'tasks',
+      skillName: 'plugin-tasks',
+      versionLabel: 'Generated from v1.0',
+      badges: [],
+      failureReason: null,
+      offered: true,
+    }]);
+  });
+
+  await test('marks a stale derived skill and names the version it drifted to', () => {
+    const [row] = getDerivedSkillRows(
+      [derived({ stale: true, installedVersion: '2.0' })] as any, new Map(),
+    );
+
+    expect({ badges: row.badges, versionLabel: row.versionLabel }).toEqual({
+      badges: ['Stale'],
+      versionLabel: 'Generated from v1.0 · plugin now v2.0',
+    });
+  });
+
+  await test('marks a hand-edited derived skill', () => {
+    const [row] = getDerivedSkillRows([derived({ handEdited: true })] as any, new Map());
+
+    expect(row.badges).toEqual(['Edited by you']);
+  });
+
+  // 两者同时为真是最要紧的情形：源头动了，而用户在文件里有活儿。
+  await test('marks a skill that is both stale and hand-edited', () => {
+    const [row] = getDerivedSkillRows(
+      [derived({ stale: true, handEdited: true, installedVersion: '2.0' })] as any, new Map(),
+    );
+
+    expect(row.badges).toEqual(['Stale', 'Edited by you']);
+  });
+
+  await test('marks a withdrawn derived skill as not offered', () => {
+    const [row] = getDerivedSkillRows(
+      [derived({ offered: false, status: 'withdrawn-missing' })] as any, new Map(),
+    );
+
+    expect({ badges: row.badges, offered: row.offered }).toEqual({
+      badges: ['Not offered'],
+      offered: false,
+    });
+  });
+
+  await test('reports an unknown generated-from version rather than inventing one', () => {
+    const [row] = getDerivedSkillRows(
+      [derived({ recordedVersion: null, handEdited: null })] as any, new Map(),
+    );
+
+    expect(row.versionLabel).toEqual('Generated from an unknown version');
+  });
+
+  await test('surfaces the last generation failure for a plugin', () => {
+    const [row] = getDerivedSkillRows(
+      [derived()] as any, new Map([['tasks', 'quota exceeded']]),
+    );
+
+    expect(row.failureReason).toEqual('quota exceeded');
+  });
+
+  await test('an empty derived skill list yields no rows', () => {
+    expect(getDerivedSkillRows([], new Map())).toEqual([]);
   });
 }
 

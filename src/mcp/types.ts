@@ -298,4 +298,12 @@ export interface IPlugin extends Plugin {
     saveSettingsLight?(): Promise<void>;
     // 切换界面语言：设定 locale、落盘并即时重渲染所有打开的 ShellView。
     applyLanguageChange?(locale: Locale): Promise<void>;
+    // 派生技能的管理入口（设置页读对账状态、重新生成、删除）。
+    // 用最小结构类型而非 import PluginWatcher：types.ts 是底层模块，不该反向依赖 skills 层。
+    pluginWatcher?: {
+        getDerivedSkillStatuses(): any[];
+        getGenerationFailures(): ReadonlyMap<string, string>;
+        regenerateDerivedSkill(pluginId: string): Promise<any | null>;
+        deleteDerivedSkill(pluginId: string): Promise<boolean>;
+    } | null;
 }
