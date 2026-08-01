@@ -462,6 +462,31 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Please select some text first.': '请先选中文字。',
     'Selection changed; cannot replace. Please copy manually.': '选区已变化,无法替换,请手动复制。',
 
+    // ── 插件技能生成提示(Notice:真实结果而非尝试数量)──
+    'Generating skills for {n} plugins...': '正在为 {n} 个插件生成技能…',
+    'Generating skill for {plugin}...': '正在为 {plugin} 生成技能…',
+    'Generated skills for {n} plugins': '已为 {n} 个插件生成技能',
+    'Failed to generate skills for {n} plugins': '{n} 个插件的技能生成失败',
+    'Plugin skills: {ok} generated, {failed} failed': '插件技能:{ok} 个成功,{failed} 个失败',
+
+    // ── 派生技能管理(设置页 · 插件技能)──
+    'Generated plugin skills': '已生成的插件技能',
+    'No plugin skills have been generated yet.': '尚未生成任何插件技能。',
+    'Generated from v{version}': '生成于 v{version}',
+    'Generated from an unknown version': '生成版本未知',
+    'plugin now v{version}': '插件当前为 v{version}',
+    'Stale': '已过期',
+    'Edited by you': '你改过',
+    'Not offered': '未提供',
+    'Last generation failed': '上次生成失败',
+    // 'Regenerate' 已在知识库区块定义（第 432 行），同词同义，此处复用不再重复声明。
+    'Delete plugin skill': '删除插件技能',
+    'Delete the generated skill for {plugin}? This cannot be undone.': '删除为 {plugin} 生成的技能?此操作不可撤销。',
+    'Regenerated the skill for {plugin}.': '已为 {plugin} 重新生成技能。',
+    'Cannot regenerate now: grant plugin control and configure a model first.': '暂时无法重新生成:请先授予插件控制权限并配置模型。',
+    'Deleted the skill for {plugin}.': '已删除 {plugin} 的技能。',
+    'Failed to delete the skill for {plugin}.': '删除 {plugin} 的技能失败。',
+
     // ── ShellView 分支/重试提示(Notice)──
     'Cannot switch branch.': '无法切换分支。',
     'Cannot locate the question to fork.': '无法定位要分叉的问题。',

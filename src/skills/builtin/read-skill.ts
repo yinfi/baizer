@@ -41,8 +41,9 @@ export function registerSkillReadTool(
       const resolved = skillRegistry.resolveForRead(name);
       if (!resolved) return { error: `Skill "${name}" not found or disabled` };
 
-      // 优先读磁盘文件（反映用户对 SKILL.md 的编辑）；读不到则回退内存中的
-      // pi formatSkillInvocation 结果（内置刚物化、或点目录读取异常时的兜底）。
+      // 优先读磁盘文件（用户 skill 的原件、内置 skill 每次启动被 materializeBuiltins
+      // 从 bundle 覆写后的副本——内置由代码持有，手工编辑不会保留）；读不到则回退
+      // 内存中的 pi formatSkillInvocation 结果（点目录读取异常时的兜底）。
       if (resolved.filePath) {
         try {
           const fileContent = await ctx.app.vault.adapter.read(resolved.filePath);

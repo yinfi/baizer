@@ -88,6 +88,7 @@ export class SkillRegistry implements ISkillRegistry {
       builtinMd: skillMd,
     });
     this.indexTriggers(loaded);
+    this.warnUnresolvedTools(loaded);
     logger.info(`Registered builtin skill: ${loaded.skill.name}`, 'SkillRegistry');
   }
 
@@ -142,6 +143,7 @@ export class SkillRegistry implements ISkillRegistry {
     }
     this.entries.set(loaded.skill.name, { loaded, isBuiltin: false });
     this.indexTriggers(loaded);
+    this.warnUnresolvedTools(loaded);
     logger.info(`Registered user skill: ${loaded.skill.name}`, 'SkillRegistry');
     return true;
   }
@@ -284,6 +286,22 @@ export class SkillRegistry implements ISkillRegistry {
   }
 
   // ==================== 内部 ====================
+
+  /**
+   * 注册时校验声明的工具名：解析不到就告警（仅诊断，不改变行为——激活时
+   * 该 skill 仍只拿到解析成功的那些）。
+   *
+   * 放在注册路径而非 activateSkill：绝大多数 skill 没有斜杠命令（派生 skill
+   * 一律没有），永远走不到激活，SKILL.md 里的错别字必须在加载时就暴露。
+   * 前提是 main.ts 先注册工具再注册 skill——否则会误报。
+   */
+  private warnUnresolvedTools(loaded: LoadedSkill): void {
+    const missing = loaded.sidecar.tools.filter(n => !this.toolRegistry.get(n));
+    if (missing.length === 0) return;
+    console.warn(
+      `[SkillRegistry] Skill "${loaded.skill.name}" declares unknown tools: ${missing.join(', ')}`,
+    );
+  }
 
   /** 把外部 Skill 接口对象转成内部 LoadedSkill（用户 / 插件 skill 路径）。 */
   private skillToLoaded(skill: Skill): LoadedSkill {

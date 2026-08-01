@@ -1,5 +1,4 @@
 import { App } from 'obsidian';
-import { DEFAULT_SETTINGS } from '../src/mcp/types';
 
 function mockFn(impl?: Function) {
   const fn: any = impl ? (...args: any[]) => impl(...args) : () => {};
@@ -45,6 +44,30 @@ function parseKeywords(skillMd: string): string[] {
   const match = skillMd.match(/keywords:\s*(\[[^\n]+\])/);
   if (!match) throw new Error('Could not find keywords frontmatter');
   return JSON.parse(match[1]);
+}
+
+/** 写入/读取测试用的 adapter 假件，只实现 skill-files 需要的四个方法。 */
+class FakeAdapter {
+  files = new Map<string, string>();
+  folders = new Set<string>();
+
+  async exists(path: string): Promise<boolean> {
+    return this.files.has(path) || this.folders.has(path);
+  }
+
+  async read(path: string): Promise<string> {
+    const content = this.files.get(path);
+    if (content === undefined) throw new Error(`File not found: ${path}`);
+    return content;
+  }
+
+  async write(path: string, data: string): Promise<void> {
+    this.files.set(path, data);
+  }
+
+  async mkdir(path: string): Promise<void> {
+    this.folders.add(path);
+  }
 }
 
 const mockApp = {
@@ -103,13 +126,8 @@ async function runTests() {
 1. 用 append_to_note 追加任务`,
   };
 
-  const settings = {
-    ...DEFAULT_SETTINGS,
-    autoGeneratePluginSkills: true,
-    pluginSkillExcludeList: [] as string[],
-  };
   const generator = new PluginSkillGenerator(
-    mockApp, mockModelService as any, settings,
+    mockApp, mockModelService as any,
   );
 
   await test('collectPluginInfo returns correct data', async () => {
@@ -192,6 +210,153 @@ async function runTests() {
     expect(skillMd).toContain('Open the target note before execution.');
     expect(skillMd).toContain('Confirm the relevant editor pane or selection is focused before execution.');
     expect(skillMd).notToContain('execute_plugin_command(commandId, path)');
+  });
+
+  // ---------- 溯源（source 块）与写入模式 ----------
+
+  const {
+    USER_SKILLS_DIR,
+    computeSkillBodyHash,
+    readPluginSkillProvenance,
+    readSkillProvenanceFromFile,
+    readSkillProvenanceFromText,
+    splitSkillFrontmatter,
+  } = await import('../src/skills/skill-files');
+  const { parseBuiltinSkill } = await import('../src/skills/pi-skill-source');
+
+  const tasksInfo = {
+    id: 'obsidian-tasks-plugin',
+    name: 'Tasks',
+    description: 'Task management for Obsidian',
+    version: '7.14.0',
+    commands: [
+      { id: 'obsidian-tasks-plugin:edit-task', name: 'Tasks: Edit task', aiUsable: true },
+    ],
+    settingsKeys: ['globalFilter'],
+    syntaxHints: [] as string[],
+    webContext: '',
+  };
+
+  await test('generateSkillMd records source plugin, version and body hash', async () => {
+    const skillMd = await generator.generateSkillMd({ ...tasksInfo });
+
+    expect(skillMd).toContain('source:');
+    const report = readSkillProvenanceFromText(skillMd);
+    expect(report.present).toBe(true);
+    expect(report.provenance!.plugin).toBe('obsidian-tasks-plugin');
+    expect(report.provenance!.version).toBe('7.14.0');
+    expect(report.provenance!.bodyHash.length).toBe(8);
+  });
+
+  await test('recorded body hash recomputes over the written body, and differs after a hand-edit', async () => {
+    const skillMd = await generator.generateSkillMd({ ...tasksInfo });
+    const report = readSkillProvenanceFromText(skillMd);
+
+    const { body } = splitSkillFrontmatter(skillMd);
+    expect(computeSkillBodyHash(body)).toBe(report.provenance!.bodyHash);
+    expect(report.handEdited).toBe(false);
+
+    const handEdited = readSkillProvenanceFromText(`${skillMd}\n\n手工补充的一段说明。`);
+    expect(handEdited.present).toBe(true);
+    expect(handEdited.handEdited).toBe(true);
+  });
+
+  await test('reading provenance from a skill without a source block reports absence', async () => {
+    const adapter = new FakeAdapter();
+    const handWritten = [
+      '---',
+      'name: my-own-skill',
+      'description: 手写的 skill，没有 source 块',
+      '---',
+      '',
+      '# My own skill',
+    ].join('\n');
+    adapter.files.set('skills/my-own-skill/SKILL.md', handWritten);
+
+    const written = await readSkillProvenanceFromFile(adapter, 'skills/my-own-skill/SKILL.md');
+    expect(written.present).toBe(false);
+    expect(written.provenance).toBe(null);
+    expect(written.handEdited).toBe(null);
+
+    const missing = await readSkillProvenanceFromFile(adapter, 'skills/absent/SKILL.md');
+    expect(missing.present).toBe(false);
+    expect(missing.handEdited).toBe(null);
+  });
+
+  await test('provenance reads back by plugin id from the plugin- prefixed dir', async () => {
+    const adapter = new FakeAdapter();
+    const writer = new PluginSkillGenerator(
+      { vault: { adapter } } as unknown as App, mockModelService as any,
+    );
+    const skillMd = await writer.generateSkillMd({ ...tasksInfo });
+    await writer.writeSkillFile('obsidian-tasks-plugin', skillMd, 'replace');
+
+    expect(
+      adapter.files.has(`${USER_SKILLS_DIR}/plugin-obsidian-tasks-plugin/SKILL.md`),
+    ).toBe(true);
+
+    const report = await readPluginSkillProvenance(adapter, 'obsidian-tasks-plugin');
+    expect(report.present).toBe(true);
+    expect(report.provenance!.plugin).toBe('obsidian-tasks-plugin');
+    expect(report.handEdited).toBe(false);
+  });
+
+  await test('each absent report is a fresh object, so a caller cannot poison later reads', async () => {
+    const adapter = new FakeAdapter();
+    const first = await readPluginSkillProvenance(adapter, 'never-generated');
+    (first as any).handEdited = false;
+
+    const second = await readPluginSkillProvenance(adapter, 'never-generated');
+    expect(second.handEdited).toBe(null);
+    expect(readSkillProvenanceFromText('# 没有 frontmatter 的手写 skill').handEdited).toBe(null);
+  });
+
+  await test('a failed read reports absence instead of throwing', async () => {
+    const lockedAdapter = {
+      exists: async () => true,
+      read: async () => { throw new Error('EACCES'); },
+    };
+
+    const report = await readSkillProvenanceFromFile(lockedAdapter, 'skills/locked/SKILL.md');
+    expect(report.present).toBe(false);
+    expect(report.provenance).toBe(null);
+    expect(report.handEdited).toBe(null);
+  });
+
+  await test('a description containing ": " keeps frontmatter parseable and provenance readable', async () => {
+    const colonDescGenerator = new PluginSkillGenerator(mockApp, {
+      generate: async () => `<!-- DESC: 任务管理: 截止日期与重复任务 -->
+
+# Tasks
+## 操作指南
+1. 用 append_to_note 追加任务`,
+    } as any);
+    const skillMd = await colonDescGenerator.generateSkillMd({ ...tasksInfo });
+
+    const report = readSkillProvenanceFromText(skillMd);
+    expect(report.present).toBe(true);
+    expect(report.provenance!.plugin).toBe('obsidian-tasks-plugin');
+    expect(report.handEdited).toBe(false);
+
+    const loaded = parseBuiltinSkill(skillMd, 'plugin-obsidian-tasks-plugin/SKILL.md');
+    expect(loaded?.skill.description).toBe('任务管理: 截止日期与重复任务');
+  });
+
+  await test('replace overwrites an existing skill file, first-write leaves it alone', async () => {
+    const adapter = new FakeAdapter();
+    const writer = new PluginSkillGenerator(
+      { vault: { adapter } } as unknown as App, mockModelService as any,
+    );
+    const filePath = writer.skillFilePath('obsidian-tasks-plugin');
+
+    await writer.writeSkillFile('obsidian-tasks-plugin', 'first', 'first-write');
+    expect(adapter.files.get(filePath)).toBe('first');
+
+    await writer.writeSkillFile('obsidian-tasks-plugin', 'second', 'first-write');
+    expect(adapter.files.get(filePath)).toBe('first');
+
+    await writer.writeSkillFile('obsidian-tasks-plugin', 'third', 'replace');
+    expect(adapter.files.get(filePath)).toBe('third');
   });
 }
 
