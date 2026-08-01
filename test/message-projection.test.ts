@@ -179,6 +179,7 @@ async function runTests() {
   await test('aborting while text is withheld records no ghost reply', async () => {
     const host = createHost(ChatState);
     const shown: string[] = [];
+    const doneEvents: any[] = [];
     const controller = new ChatController({
       app: {} as any,
       api: {
@@ -211,6 +212,7 @@ async function runTests() {
       onMessageAdded: host.onMessageAdded,
       onStreamEvent: (event) => {
         if (event.type === 'text_delta') shown.push(event.content);
+        if (event.type === 'done') doneEvents.push(event);
       },
     });
 
@@ -224,6 +226,9 @@ async function runTests() {
     // 记下这条就成了幽灵回复:它标 alreadyRendered、宿主不画,只在切 tab 重渲时冒出来。
     expect(controller.getMessages().map((m: ChatMessage) => m.role)).toEqual(['user', 'system']);
     expect(host.state.getMessages().map((m: ChatMessage) => m.role)).toEqual(['user', 'system']);
+    // done 事件也不能带这段正文:宿主的 finalizeStream 会把 done.text 渲染进流容器,
+    // 并给它挂一个 id 对不上任何列表的操作栏——同一类缺陷,只是走视觉定型那条路。
+    expect(doneEvents.map(e => e.text)).toEqual(['']);
 
     controller.cleanup();
   });

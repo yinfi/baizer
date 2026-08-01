@@ -280,7 +280,14 @@ export class ChatController {
                 if (!assistantRecorded && fullText && !textWithheld) {
                     this.recordStreamedReply(fullText, { interrupted: true });
                 }
-                this.onStreamEvent?.({ type: 'done', text: fullText, interrupted: true });
+                // done.text 同样要挡:宿主的 finalizeStream 会把它渲染进流容器,
+                // 并给它挂一个 id 对不上任何列表的操作栏(👍/👎/重试全部空操作)。
+                // 与正常 done 路径的抑制态一致——那里也是发 text: ''。
+                this.onStreamEvent?.({
+                    type: 'done',
+                    text: textWithheld ? '' : fullText,
+                    interrupted: true,
+                });
                 this.addMessage('system', 'Response stopped.');
                 return;
             }
