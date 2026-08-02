@@ -46,7 +46,11 @@ function createFile(path: string) {
   const basenameWithExt = parts[parts.length - 1];
   const extension = basenameWithExt.includes('.') ? basenameWithExt.split('.').pop() || 'md' : 'md';
   const basename = basenameWithExt.replace(/\.[^.]+$/, '');
-  return { path: normalized, basename, extension };
+  const file = new TFile();
+  file.path = normalized;
+  file.basename = basename;
+  file.extension = extension;
+  return file;
 }
 
 async function runTests() {
@@ -242,3 +246,4 @@ runTests().catch((e) => {
   console.error(e);
   process.exit(1);
 });
+import { TFile } from 'obsidian';

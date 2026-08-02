@@ -77,6 +77,7 @@ async function run() {
     USER_SKILLS_DIR,
     ensureDirectory,
     listSkillFilePaths,
+    materializeBuiltinSkill,
     pluginSkillFileExists,
     pluginSkillFilePath,
   } = await import('../src/skills/skill-files.ts');
@@ -122,6 +123,28 @@ async function run() {
       ['.obsidian', '.obsidian/baizer', USER_SKILLS_DIR, `${USER_SKILLS_DIR}/plugin-a`],
       'ensureDirectory should create each missing path segment once',
     );
+  }
+
+  {
+    const adapter = new FakeAdapter();
+    const filePath = await materializeBuiltinSkill(adapter, 'editable', 'bundle-v1');
+    expectEqual(await adapter.read(filePath), 'bundle-v1', 'first materialization should write the bundle');
+
+    await materializeBuiltinSkill(adapter, 'editable', 'bundle-v2');
+    expectEqual(await adapter.read(filePath), 'bundle-v2', 'an unedited builtin should upgrade with the bundle');
+
+    adapter.files.set(filePath, 'user-edited');
+    await materializeBuiltinSkill(adapter, 'editable', 'bundle-v3');
+    expectEqual(await adapter.read(filePath), 'user-edited', 'a user-edited builtin should not be overwritten');
+  }
+
+  {
+    const adapter = new FakeAdapter();
+    const legacyPath = `${USER_SKILLS_DIR}/legacy/SKILL.md`;
+    adapter.files.set(legacyPath, 'legacy-bundle');
+    const filePath = await materializeBuiltinSkill(adapter, 'legacy', 'current-bundle');
+    expectEqual(filePath, legacyPath, 'legacy materialization should keep the stable path');
+    expectEqual(await adapter.read(filePath), 'current-bundle', 'a markerless legacy bundle should migrate once');
   }
 
   console.log('skill-files tests passed');

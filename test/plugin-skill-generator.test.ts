@@ -1,5 +1,4 @@
 import { App } from 'obsidian';
-import { DEFAULT_SETTINGS } from '../src/mcp/types';
 
 function mockFn(impl?: Function) {
   const fn: any = impl ? (...args: any[]) => impl(...args) : () => {};
@@ -103,13 +102,10 @@ async function runTests() {
 1. 用 append_to_note 追加任务`,
   };
 
-  const settings = {
-    ...DEFAULT_SETTINGS,
-    autoGeneratePluginSkills: true,
-    pluginSkillExcludeList: [] as string[],
-  };
   const generator = new PluginSkillGenerator(
-    mockApp, mockModelService as any, settings,
+    mockApp,
+    mockModelService as any,
+    () => ['append_to_note', 'execute_plugin_command', 'open_file', 'read_note', 'search_vault'],
   );
 
   await test('collectPluginInfo returns correct data', async () => {
@@ -192,6 +188,65 @@ async function runTests() {
     expect(skillMd).toContain('Open the target note before execution.');
     expect(skillMd).toContain('Confirm the relevant editor pane or selection is focused before execution.');
     expect(skillMd).notToContain('execute_plugin_command(commandId, path)');
+  });
+
+  await test('generateSkillMd rejects known tools that are absent from the skill tool list', async () => {
+    const invalidGenerator = new PluginSkillGenerator(mockApp, {
+      generate: async () => `# Tasks
+
+## 操作指南
+Use create_note("Tasks.md", "content") before processing the plugin command.`,
+    } as any, () => ['create_note']);
+    let error = '';
+
+    try {
+      await invalidGenerator.generateSkillMd({
+        id: 'obsidian-tasks-plugin', name: 'Tasks', description: 'Tasks', version: '1.0.0',
+        commands: [{ id: 'obsidian-tasks-plugin:edit-task', name: 'Edit task', aiUsable: true }],
+        settingsKeys: [], syntaxHints: [], webContext: '',
+      });
+    } catch (caught: any) {
+      error = caught.message;
+    }
+
+    expect(error).toContain('create_note');
+  });
+
+  await test('generateSkillMd ignores ordinary API calls in plugin examples', async () => {
+    const apiExampleGenerator = new PluginSkillGenerator(mockApp, {
+      generate: async () => `# Dataview workflow
+
+## Example
+Use dv.pages() to collect notes and date() to normalize a field before calling read_note(path).`,
+    } as any, () => ['read_note']);
+
+    const skillMd = await apiExampleGenerator.generateSkillMd({
+      id: 'dataview', name: 'Dataview', description: 'Queries notes', version: '1.0.0',
+      commands: [], settingsKeys: ['renderNullAs'], syntaxHints: ['dataviewjs'], webContext: '',
+    });
+
+    expect(skillMd).toContain('dv.pages()');
+    expect(skillMd).toContain('date()');
+  });
+
+  await test('generateSkillMd validates registered tools outside the generator prompt set', async () => {
+    const invalidGenerator = new PluginSkillGenerator(mockApp, {
+      generate: async () => `# Plugin settings
+
+## Workflow
+Call get_plugin_settings("plugin-id") before reading the target note with read_note(path).`,
+    } as any, () => ['get_plugin_settings', 'read_note']);
+    let error = '';
+    try {
+      await invalidGenerator.generateSkillMd({
+        id: 'settings-plugin', name: 'Settings', description: 'Settings', version: '1.0.0',
+        commands: [], settingsKeys: ['theme'], syntaxHints: [], webContext: '',
+      });
+    } catch (caught: any) {
+      error = caught.message;
+    }
+
+    expect(error).toContain('get_plugin_settings');
   });
 }
 

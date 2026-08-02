@@ -543,30 +543,6 @@ async function runTests() {
       scope: 'backlinks',
     }]);
 
-    const input = {
-      value: '',
-      style: {} as Record<string, string>,
-      scrollHeight: 42,
-      selectionStart: 0,
-      selectionEnd: 0,
-      focused: false,
-      focus() {
-        this.focused = true;
-      },
-      setCssStyles(styles: Record<string, string>) {
-        Object.assign(this.style, styles);
-      },
-    };
-    (view as any).inputEl = input;
-
-    (view as any).prepareSelectionEdit();
-
-    expect(input.value).toBe('/edit ');
-    expect(input.selectionStart).toBe(6);
-    expect(input.selectionEnd).toBe(6);
-    expect(input.focused).toBe(true);
-    expect(input.style.height).toBe('42px');
-
     (view as any).openPluginSettings();
 
     expect(settingCalls).toEqual(['open', 'baizer']);

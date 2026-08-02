@@ -140,6 +140,76 @@ async function runTests() {
     });
     expect(executeCalls).toEqual(['obsidian-kanban:create-new-board']);
   });
+
+  // ---- F0-1: 配置脱敏 ----
+
+  const secretApp = {
+    plugins: {
+      getPlugin: (_id: string) => ({
+        settings: {
+          folder: 'Kanban',
+          apiKey: 'sk-secret-abc123',
+          authToken: undefined,
+          nested: { token: 'tok-xyz', theme: 'dark' },
+          password: 'p@ssw0rd',
+          items: ['a', 'b'],
+          capital: 'Beijing',
+          rapidMode: true,
+        },
+      }),
+    },
+  } as unknown as App;
+
+  await test('get_plugin_settings redacts sensitive keys and omits values by default', async () => {
+    const registry = new ToolRegistry(secretApp, {
+      ...DEFAULT_SETTINGS,
+      allowPluginControl: true,
+      allowPluginConfigValues: false,
+    });
+    registerTools(registry);
+
+    const result = await registry.execute('get_plugin_settings', { pluginId: 'obsidian-kanban' });
+
+    const serialized = JSON.stringify(result);
+    expect(serialized.includes('sk-secret-abc123')).toBe(false);
+    expect(serialized.includes('tok-xyz')).toBe(false);
+    expect(serialized.includes('p@ssw0rd')).toBe(false);
+
+    // 敏感键被替换为 redacted 标记
+    const settings = (result as any).settings;
+    expect(settings.apiKey.redacted).toBe(true);
+    expect(settings.authToken.redacted).toBe(true);
+    expect(settings.password.redacted).toBe(true);
+    expect(settings.nested.token.redacted).toBe(true);
+    // 非敏感键：未开 allowValues 时也只给类型不给值
+    expect(settings.folder).toEqual({ type: 'string' });
+    expect(settings.nested.theme).toEqual({ type: 'string' });
+    expect(settings.items).toEqual({ type: 'array', itemTypes: ['string'] });
+    expect(settings.capital).toEqual({ type: 'string' });
+    expect(settings.rapidMode).toEqual({ type: 'boolean' });
+    expect(serialized.includes('Kanban')).toBe(false);
+    expect(serialized.includes('dark')).toBe(false);
+    expect(serialized.includes('Beijing')).toBe(false);
+  });
+
+  await test('get_plugin_settings returns scalar values when allowPluginConfigValues is on, sensitive keys still redacted', async () => {
+    const registry = new ToolRegistry(secretApp, {
+      ...DEFAULT_SETTINGS,
+      allowPluginControl: true,
+      allowPluginConfigValues: true,
+    });
+    registerTools(registry);
+
+    const result = await registry.execute('get_plugin_settings', { pluginId: 'obsidian-kanban' });
+    const serialized = JSON.stringify(result);
+    expect(serialized.includes('sk-secret-abc123')).toBe(false);
+    expect(serialized.includes('tok-xyz')).toBe(false);
+    // 非敏感标量值可读
+    expect((result as any).settings.folder).toEqual('Kanban');
+    expect((result as any).settings.nested.theme).toEqual('dark');
+    expect((result as any).settings.capital).toEqual('Beijing');
+    expect((result as any).settings.rapidMode).toEqual(true);
+  });
 }
 
 runTests().catch(console.error);

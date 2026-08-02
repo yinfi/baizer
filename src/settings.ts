@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, debounce, Debouncer, setIcon } from 'obsidian';
+import { App, PluginSettingTab, Setting, Notice, Modal, debounce, Debouncer, setIcon } from 'obsidian';
 import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 import { OntologyUpdateMode } from './knowledge/types';
@@ -818,53 +818,6 @@ export class SettingTab extends PluginSettingTab {
 
     private resetConnectionTestStatus(): void {
         this.connectionTestStatus = { state: 'idle', message: '' };
-    }
-
-    private async loadDynamicModelOptions(
-        dropdown: DropdownComponent,
-        token: number,
-        forceRefresh: boolean = false
-    ) {
-        const config = this.getActiveConfig();
-        const currentModel = config?.model || '';
-
-        dropdown.selectEl.empty();
-        dropdown.addOption('__loading__', 'Loading models...');
-        dropdown.setValue('__loading__');
-        dropdown.setDisabled(true);
-
-        try {
-            const models = await this.plugin.modelService.getAvailableModels(forceRefresh);
-            if (token !== this.renderToken) return;
-
-            dropdown.selectEl.empty();
-
-            const options: ModelOption[] = models.length > 0
-                ? models
-                : [{ value: currentModel, label: `${currentModel} (Current)` }];
-
-            options.forEach(option => dropdown.addOption(option.value, option.label));
-
-            if (currentModel && !options.some(option => option.value === currentModel)) {
-                dropdown.addOption(currentModel, `${currentModel} (Current)`);
-            }
-
-            dropdown.setValue(currentModel || options[0]?.value || '');
-            dropdown.setDisabled(false);
-        } catch (_error: any) {
-            if (token !== this.renderToken) return;
-
-            dropdown.selectEl.empty();
-            if (currentModel) {
-                dropdown.addOption(currentModel, `${currentModel} (Current)`);
-                dropdown.setValue(currentModel);
-                dropdown.setDisabled(false);
-            } else {
-                dropdown.addOption('__failed__', 'Model list unavailable');
-                dropdown.setValue('__failed__');
-                dropdown.setDisabled(true);
-            }
-        }
     }
 
     hide(): void {
@@ -2020,6 +1973,17 @@ export class SettingTab extends PluginSettingTab {
                         return;
                     }
                     this.plugin.settings.confirmExecutions = true;
+                    await this.persistSettings();
+                    this.renderAccordion();
+                }));
+
+        new Setting(advancedBody)
+            .setName(t('Allow Reading Plugin Config Values'))
+            .setDesc(t('Let AI read third-party plugin configuration values. When off, only key names and types are returned. API keys, tokens, and secrets are always redacted regardless of this setting.'))
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.allowPluginConfigValues)
+                .onChange(async (value: boolean) => {
+                    this.plugin.settings.allowPluginConfigValues = value;
                     await this.persistSettings();
                     this.renderAccordion();
                 }));

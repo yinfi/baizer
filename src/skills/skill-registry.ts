@@ -9,12 +9,10 @@
 
 import type { Skill as PiSkill } from '@earendil-works/pi-agent-core';
 import {
-  Skill,
   SkillSummary,
   SkillCommandEntry,
   ActivatedSkill,
   ResolvedSkill,
-  ISkillRegistry,
   ToolContext,
 } from './types';
 import { ToolRegistry } from './tool-registry';
@@ -50,7 +48,7 @@ interface RegistryEntry {
 
 /** 路由返回的轻量 skill 句柄由 ./types 导出（ResolvedSkill）。 */
 
-export class SkillRegistry implements ISkillRegistry {
+export class SkillRegistry {
   private entries = new Map<string, RegistryEntry>();
   /** 斜杠命令 → skill name 快速索引。 */
   private commandIndex = new Map<string, string>();
@@ -65,11 +63,16 @@ export class SkillRegistry implements ISkillRegistry {
    */
   async init(): Promise<void> {
     if (this.formatters) return;
-    const mod: any = await import('@earendil-works/pi-agent-core');
-    this.formatters = {
-      formatSkillsForSystemPrompt: mod.formatSkillsForSystemPrompt,
-      formatSkillInvocation: mod.formatSkillInvocation,
-    };
+    try {
+      const mod: any = await import('@earendil-works/pi-agent-core');
+      this.formatters = {
+        formatSkillsForSystemPrompt: mod.formatSkillsForSystemPrompt,
+        formatSkillInvocation: mod.formatSkillInvocation,
+      };
+    } catch (error) {
+      logger.error('Failed to load pi skill formatters', error, 'SkillRegistry');
+      throw error;
+    }
   }
 
   /** 注册一个内置 Skill（从 bundled SKILL.md 字符串 + executor）。 */
@@ -80,6 +83,7 @@ export class SkillRegistry implements ISkillRegistry {
       console.error('[SkillRegistry] Invalid builtin SKILL.md: missing name/description');
       return;
     }
+    this.warnUnknownTools(loaded);
     // 内置 executor 提供 direct 执行能力：无 executor 或空壳则视为 instructions 模式。
     this.entries.set(loaded.skill.name, {
       loaded,
@@ -98,33 +102,22 @@ export class SkillRegistry implements ISkillRegistry {
       const name = entry.loaded.skill.name;
       try {
         const path = await materializeBuiltinSkill(adapter, name, entry.builtinMd, skillsDir);
-        entry.loaded.skill.filePath = path;
+        const diskMd = await adapter.read(path);
+        const diskLoaded = parseBuiltinSkill(diskMd, path);
+        if (diskLoaded?.skill.name === name && this.hasKnownTools(diskLoaded)) {
+          this.unindexTriggers(entry.loaded);
+          entry.loaded = diskLoaded;
+          this.indexTriggers(diskLoaded);
+        } else {
+          entry.loaded.skill.filePath = path;
+          console.warn(`[SkillRegistry] Ignoring invalid materialized builtin skill "${name}".`);
+        }
       } catch (e) {
         // 物化失败：回退到确定性路径，read_skill 仍可尝试读；记录告警不阻断。
         entry.loaded.skill.filePath = builtinSkillFilePath(name, skillsDir);
         console.warn(`[SkillRegistry] Failed to materialize builtin skill "${name}"`);
       }
     }
-  }
-
-  /** 兼容旧接口：注册已构造的 Skill 对象（内置路径基本不再用，保留以防调用方）。 */
-  registerBuiltin(skill: Skill): void {
-    const loaded = this.skillToLoaded(skill);
-    this.entries.set(skill.name, { loaded, isBuiltin: true, executor: skill });
-    this.indexTriggers(loaded);
-    logger.info(`Registered builtin skill: ${skill.name}`, 'SkillRegistry');
-  }
-
-  /** 注册用户 / 插件 Skill（兼容旧接口：接收已构造的 Skill 对象）。 */
-  registerUser(skill: Skill): void {
-    if (this.entries.has(skill.name)) {
-      console.warn(`[SkillRegistry] Skill "${skill.name}" already exists, user skill skipped.`);
-      return;
-    }
-    const loaded = this.skillToLoaded(skill);
-    this.entries.set(skill.name, { loaded, isBuiltin: false, executor: skill });
-    this.indexTriggers(loaded);
-    logger.info(`Registered user skill: ${skill.name}`, 'SkillRegistry');
   }
 
   /**
@@ -136,6 +129,7 @@ export class SkillRegistry implements ISkillRegistry {
   registerUserFromMd(skillMd: string, filePath: string): boolean {
     const loaded = parseBuiltinSkill(skillMd, filePath);
     if (!loaded) return false;
+    if (!this.hasKnownTools(loaded)) return false;
     if (this.entries.has(loaded.skill.name)) {
       console.warn(`[SkillRegistry] Skill "${loaded.skill.name}" already exists, user skill skipped.`);
       return false;
@@ -146,14 +140,32 @@ export class SkillRegistry implements ISkillRegistry {
     return true;
   }
 
+  /** Replace an existing user/generated skill after parsing the new file successfully. */
+  replaceUserFromMd(skillMd: string, filePath: string): boolean {
+    const loaded = parseBuiltinSkill(skillMd, filePath);
+    if (!loaded) return false;
+    if (!this.hasKnownTools(loaded)) return false;
+
+    const existing = this.entries.get(loaded.skill.name);
+    if (existing?.isBuiltin) {
+      console.warn(`[SkillRegistry] Builtin skill "${loaded.skill.name}" cannot be replaced.`);
+      return false;
+    }
+    if (existing) this.unregisterSkill(loaded.skill.name);
+
+    this.entries.set(loaded.skill.name, { loaded, isBuiltin: false });
+    this.indexTriggers(loaded);
+    logger.info(`Replaced user skill: ${loaded.skill.name}`, 'SkillRegistry');
+    return true;
+  }
+
   /** 注销 skill（插件禁用时）。 */
   unregisterSkill(name: string): void {
     const entry = this.entries.get(name);
     if (!entry) return;
-    for (const cmd of entry.loaded.sidecar.triggers?.commands ?? []) {
-      this.commandIndex.delete(cmd);
-    }
+    this.unindexTriggers(entry.loaded);
     this.entries.delete(name);
+    this.rebuildCommandIndex();
     logger.info(`Unregistered skill: ${name}`, 'SkillRegistry');
   }
 
@@ -207,6 +219,7 @@ export class SkillRegistry implements ISkillRegistry {
     for (const entry of this.entries.values()) {
       if (!this.isEnabled(entry)) continue;
       for (const command of entry.loaded.sidecar.triggers?.commands ?? []) {
+        if (this.findCommandOwner(command) !== entry) continue;
         entries.push({ command, skillName: entry.loaded.skill.name, description: entry.loaded.skill.description });
       }
     }
@@ -229,10 +242,8 @@ export class SkillRegistry implements ISkillRegistry {
   // ==================== 路由 ====================
 
   resolveByCommand(command: string): ResolvedSkill | null {
-    const name = this.commandIndex.get(command);
-    if (!name) return null;
-    const entry = this.entries.get(name);
-    return entry && this.isEnabled(entry) ? this.toResolved(entry) : null;
+    const entry = this.findCommandOwner(command);
+    return entry ? this.toResolved(entry) : null;
   }
 
   resolveByIntent(message: string): ResolvedSkill | null {
@@ -241,16 +252,21 @@ export class SkillRegistry implements ISkillRegistry {
     let best: RegistryEntry | null = null;
     let bestScore = 0;
     for (const entry of this.entries.values()) {
-      if (!this.isEnabled(entry)) continue;
+      if (!this.isEnabled(entry) || entry.loaded.skill.disableModelInvocation) continue;
       const keywords = entry.loaded.sidecar.triggers?.keywords ?? [];
       let score = 0;
       for (const kw of keywords) {
         const k = kw.trim().toLowerCase();
-        if (k && normalized.includes(k)) score += 1;
+        if (!k || !normalized.includes(k)) continue;
+        // 权重：含空格的英文短语 / 4 字以上中文短语语义明确 → 2 分；
+        // 单英文词或短中文词 → 1 分。防 "knowledge"/"clip" 泛词单命中即误路由。
+        const isStrongPhrase = k.includes(' ') || (/\p{Script=Han}/u.test(k) && k.length >= 4);
+        score += isStrongPhrase ? 2 : 1;
       }
       if (score > bestScore) { bestScore = score; best = entry; }
     }
-    return bestScore > 0 && best ? this.toResolved(best) : null;
+    // 阈值：至少命中 2 个普通词，或 1 个短语（加权 2 分）才视为意图命中。
+    return bestScore >= 2 && best ? this.toResolved(best) : null;
   }
 
   // ==================== Level 2: 激活 ====================
@@ -266,7 +282,7 @@ export class SkillRegistry implements ISkillRegistry {
     const instructions = this.formatters
       ? this.formatters.formatSkillInvocation(entry.loaded.skill)
       : entry.loaded.skill.content;
-    return { skill: this.toResolved(entry) as any, tools, instructions };
+    return { skillName: entry.loaded.skill.name, tools, instructions };
   }
 
   /** read_skill 用：按名返回物化路径 + pi 包装后的完整指令。 */
@@ -285,24 +301,6 @@ export class SkillRegistry implements ISkillRegistry {
 
   // ==================== 内部 ====================
 
-  /** 把外部 Skill 接口对象转成内部 LoadedSkill（用户 / 插件 skill 路径）。 */
-  private skillToLoaded(skill: Skill): LoadedSkill {
-    return {
-      skill: {
-        name: skill.name,
-        description: skill.description,
-        content: skill.getInstructions(),
-        filePath: skill.filePath ?? '',
-        disableModelInvocation: false,
-      },
-      sidecar: {
-        tools: skill.getTools().map(t => t.name),
-        triggers: skill.triggers,
-        executionMode: skill.executionMode ?? 'instructions',
-      },
-    };
-  }
-
   /** 内部条目 → 路由句柄。execute 委托给 executor（无则返回激活指令）。 */
   private toResolved(entry: RegistryEntry): ResolvedSkill {
     const { skill, sidecar } = entry.loaded;
@@ -317,8 +315,52 @@ export class SkillRegistry implements ISkillRegistry {
 
   private indexTriggers(loaded: LoadedSkill): void {
     for (const cmd of loaded.sidecar.triggers?.commands ?? []) {
+      const owner = this.commandIndex.get(cmd);
+      if (owner && owner !== loaded.skill.name) {
+        console.warn(
+          `[SkillRegistry] Command "${cmd}" already belongs to "${owner}"; `
+          + `ignoring collision from "${loaded.skill.name}".`,
+        );
+        continue;
+      }
       this.commandIndex.set(cmd, loaded.skill.name);
     }
+  }
+
+  private unindexTriggers(loaded: LoadedSkill): void {
+    for (const cmd of loaded.sidecar.triggers?.commands ?? []) {
+      if (this.commandIndex.get(cmd) === loaded.skill.name) {
+        this.commandIndex.delete(cmd);
+      }
+    }
+  }
+
+  private rebuildCommandIndex(): void {
+    this.commandIndex.clear();
+    for (const entry of this.entries.values()) {
+      this.indexTriggers(entry.loaded);
+    }
+  }
+
+  private findCommandOwner(command: string): RegistryEntry | null {
+    for (const entry of this.entries.values()) {
+      if (!this.isEnabled(entry)) continue;
+      if (entry.loaded.sidecar.triggers?.commands?.includes(command)) return entry;
+    }
+    return null;
+  }
+
+  private hasKnownTools(loaded: LoadedSkill): boolean {
+    const unknown = loaded.sidecar.tools.filter(name => !this.toolRegistry.get(name));
+    if (unknown.length === 0) return true;
+    this.warnUnknownTools(loaded);
+    return false;
+  }
+
+  private warnUnknownTools(loaded: LoadedSkill): void {
+    const unknown = loaded.sidecar.tools.filter(name => !this.toolRegistry.get(name));
+    if (unknown.length === 0) return;
+    console.warn(`[SkillRegistry] Skill "${loaded.skill.name}" references unknown tools: ${unknown.join(', ')}.`);
   }
 
   /** 是否启用：唯一来源是 settings.disabledSkills（与权限设置正交）。 */

@@ -141,7 +141,7 @@ async function runTests() {
         activateSkill: (name: string) => (
           name === 'web-clipper'
             ? {
-                skill: { name: 'web-clipper' },
+                skillName: 'web-clipper',
                 instructions: 'Use save_webpage to save the requested page.',
                 tools: [{ name: 'save_webpage', description: 'Save webpage', parameters: {} }],
               }
@@ -156,11 +156,59 @@ async function runTests() {
     });
 
     expect((prepared as any).activeSkillName).toBe('web-clipper');
-    expect((prepared as any).allowedToolNames).toEqual(['save_webpage']);
-    // 论断3:收窄到 skill 工具子集时,元能力 read_skill 必须补回——否则渐进式披露断链,
-    // 模型再也读不到/切不到别的 skill(与运行中 steering 的 ActiveRunController 口径一致)。
-    expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['save_webpage', 'read_skill']);
+    expect((prepared as any).activeSkillSource).toBe('intent');
+    // F1-1: 意图激活不再收窄工具集——模型读到其它 skill 指令后能直接调用其工具
+    //（read_skill 只返回文本、不会更新白名单，意图路径不能依赖收窄）。
+    expect((prepared as any).allowedToolNames).toEqual(undefined);
+    expect(prepared.tools.map((tool: any) => tool.name)).toEqual([
+      'search_vault', 'save_webpage', 'read_skill',
+    ]);
+    // 激活指令 + skill 清单始终注入（渐进式披露入口不因激活而消失）。
     expect(prepared.systemPrompt!.includes('Use save_webpage to save the requested page.')).toBe(true);
+    expect(prepared.systemPrompt!.includes('- web-clipper: Save webpages')).toBe(true);
+  });
+
+  await test('prepareTurn scopes tools to the skill subset only for forced activation', async () => {
+    const runtime = createChatRuntime({
+      memoryManager: null,
+      toolRegistry: {
+        getAllDefinitions: () => [
+          { name: 'search_vault', description: 'Search vault', parameters: {} },
+          { name: 'save_webpage', description: 'Save webpage', parameters: {} },
+          { name: 'read_skill', description: 'Read a skill', parameters: {} },
+        ],
+        getDefinition: (name: string) => (
+          name === 'read_skill'
+            ? { name: 'read_skill', description: 'Read a skill', parameters: {} }
+            : undefined
+        ),
+        execute: async () => ({}),
+      } as any,
+      skillRegistry: {
+        resolveByIntent: () => null,
+        getSkillSummaryText: () => '- web-clipper: Save webpages',
+        activateSkill: (name: string) => (
+          name === 'web-clipper'
+            ? {
+                skillName: 'web-clipper',
+                instructions: 'Use save_webpage to save the requested page.',
+                tools: [{ name: 'save_webpage', description: 'Save webpage', parameters: {} }],
+              }
+            : null
+        ),
+      } as any,
+    });
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: 'whatever',
+      contextItems: [],
+      forcedSkillName: 'web-clipper',
+    });
+
+    expect((prepared as any).activeSkillSource).toBe('forced');
+    expect((prepared as any).allowedToolNames).toEqual(['save_webpage']);
+    // 论断:forced 收窄时,元能力 read_skill 必须补回——否则渐进式披露断链。
+    expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['save_webpage', 'read_skill']);
   });
 
   await test('prepareTurn adds a file-operation contract for write requests', async () => {

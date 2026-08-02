@@ -3,7 +3,7 @@ name: web-clipper
 description: 保存网页或视频到 vault。支持 YouTube、Bilibili、微信公众号和普通网页。
 triggers:
   commands: ["/save"]
-  keywords: ["剪藏", "clip", "网页", "webpage", "http://", "https://", "youtube", "bilibili", "微信公众号"]
+  keywords: ["剪藏", "clip", "网页", "webpage", "保存这个网页", "保存这个视频", "youtube", "bilibili", "微信公众号"]
 tools: ["save_webpage"]
 ---
 

@@ -72,7 +72,7 @@ Web search instructions.`, {
 name: disabled-search
 description: Search the web
 triggers:
-  keywords: ["search"]
+  keywords: ["search", "web"]
 tools: []
 ---
 Disabled instructions.`, {
@@ -97,6 +97,109 @@ Disabled instructions.`, {
     const matched = registry.resolveByIntent('保存文件到工作区');
 
     expect(matched).toBeNull();
+  });
+
+  // ---- F1-2: 泛词不再单次命中即路由 ----
+
+  await test('resolveByIntent does not route bare generic keywords like knowledge/clip', async () => {
+    const toolRegistry = new ToolRegistry({} as any, JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
+    const registry = new SkillRegistry(toolRegistry);
+
+    registry.registerBuiltinFromMd(`---
+name: knowledge
+description: Knowledge base
+triggers:
+  keywords: ["知识库", "knowledge", "wiki"]
+tools: []
+---
+Knowledge instructions.`, {
+      execute: async () => ({ ok: true }),
+    });
+
+    // 泛词 "知识" 不再命中（已从关键词移除）；单次 "knowledge" 命中不足阈值。
+    expect(registry.resolveByIntent('请分享你的知识')).toBeNull();
+    expect(registry.resolveByIntent('I have some knowledge about this')).toBeNull();
+    // 多个关键词才激活
+    expect(registry.resolveByIntent('搜索我的知识库 wiki')?.name === 'knowledge').toBe(true);
+  });
+
+  await test('resolveByIntent routes web-clipper only on strong signals, not bare URLs', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const toolRegistry = new ToolRegistry({} as any, JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
+    const registry = new SkillRegistry(toolRegistry);
+
+    const skillMd = await readFile('src/skills/builtin/web-clipper/SKILL.md', 'utf8');
+    registry.registerBuiltinFromMd(skillMd, {
+      execute: async () => ({ ok: true }),
+    });
+
+    // 裸 URL 不再触发（http:// 已从关键词移除）
+    expect(registry.resolveByIntent('https://example.com 帮我总结一下')).toBeNull();
+    // 明确剪藏意图（剪藏 + 网页 双命中）仍触发
+    expect(registry.resolveByIntent('帮我剪藏这个网页 https://x.com')?.name === 'web-clipper').toBe(true);
+    // 短语 "保存这个视频" 加权命中
+    expect(registry.resolveByIntent('帮我保存这个视频到 vault')?.name === 'web-clipper').toBe(true);
+  });
+
+  await test('resolveByIntent ignores skills that disable model invocation', async () => {
+    const toolRegistry = new ToolRegistry({} as any, JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
+    const registry = new SkillRegistry(toolRegistry);
+    registry.registerBuiltinFromMd(`---
+name: manual-only
+description: Manual activation only
+disable-model-invocation: true
+triggers:
+  keywords: ["manual workflow"]
+tools: []
+---
+Manual instructions.`, { execute: async () => ({ ok: true }) });
+
+    expect(registry.resolveByIntent('Run the manual workflow')).toBeNull();
+  });
+
+  await test('command collisions keep the first owner when another skill is removed', async () => {
+    const collisionSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    const toolRegistry = new ToolRegistry({} as any, collisionSettings);
+    const registry = new SkillRegistry(toolRegistry);
+    const skillMd = (name: string) => `---
+name: ${name}
+description: ${name}
+triggers:
+  commands: ["/same"]
+tools: []
+---
+Instructions.`;
+    registry.registerBuiltinFromMd(skillMd('first-skill'), { execute: async () => ({ ok: true }) });
+    registry.registerBuiltinFromMd(skillMd('second-skill'), { execute: async () => ({ ok: true }) });
+
+    expect(registry.resolveByCommand('/same')?.name).toBe('first-skill');
+    expect(registry.listCommandEntries().length).toBe(1);
+    expect(registry.listCommandEntries()[0].skillName).toBe('first-skill');
+    collisionSettings.disabledSkills = ['first-skill'];
+    expect(registry.resolveByCommand('/same')?.name).toBe('second-skill');
+    expect(registry.listCommandEntries()[0].skillName).toBe('second-skill');
+    collisionSettings.disabledSkills = [];
+    registry.unregisterSkill('second-skill');
+    expect(registry.resolveByCommand('/same')?.name).toBe('first-skill');
+
+    const fallbackRegistry = new SkillRegistry(toolRegistry);
+    fallbackRegistry.registerBuiltinFromMd(skillMd('first-skill'), { execute: async () => ({ ok: true }) });
+    fallbackRegistry.registerBuiltinFromMd(skillMd('second-skill'), { execute: async () => ({ ok: true }) });
+    fallbackRegistry.unregisterSkill('first-skill');
+    expect(fallbackRegistry.resolveByCommand('/same')?.name).toBe('second-skill');
+  });
+
+  await test('registerUserFromMd rejects unknown tool names', async () => {
+    const toolRegistry = new ToolRegistry({} as any, JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
+    const registry = new SkillRegistry(toolRegistry);
+    const registered = registry.registerUserFromMd(`---
+name: invalid-tools
+description: Invalid tools
+tools: [missing_tool]
+---
+Instructions.`, '/invalid/SKILL.md');
+
+    expect(registered).toBe(false);
   });
 }
 

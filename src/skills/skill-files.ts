@@ -15,6 +15,7 @@ export interface SkillFilesAdapter {
 
 export const SKILL_FILE_NAME = 'SKILL.md';
 export const SKILL_SKIP_MARKER_FILE_NAME = '.skip-generation.json';
+export const BUILTIN_SKILL_SOURCE_FILE_NAME = '.builtin-source.json';
 export const USER_SKILLS_DIR = `${PLUGIN_DATA_DIR}/skills`;
 
 function joinPath(...segments: string[]): string {
@@ -49,13 +50,20 @@ export function builtinSkillFilePath(
   return skillFilePath(builtinSkillDirPath(name, skillsDir));
 }
 
+export function builtinSkillSourcePath(
+  name: string,
+  skillsDir = USER_SKILLS_DIR,
+): string {
+  return joinPath(builtinSkillDirPath(name, skillsDir), BUILTIN_SKILL_SOURCE_FILE_NAME);
+}
+
 /**
  * 物化一个内置 skill 到隐藏目录：写入 <skillsDir>/<name>/SKILL.md。
  * 覆盖写——内置为代码所有，每次启动以 bundle 为准（无 staleness）。
  * 返回物化后的文件路径，供 SkillRegistry 记录、read_skill 读取。
  */
 export async function materializeBuiltinSkill(
-  adapter: Pick<SkillFilesAdapter, 'exists' | 'mkdir' | 'write'>,
+  adapter: Pick<SkillFilesAdapter, 'exists' | 'mkdir' | 'read' | 'write'>,
   name: string,
   skillMd: string,
   skillsDir = USER_SKILLS_DIR,
@@ -63,8 +71,51 @@ export async function materializeBuiltinSkill(
   const dir = builtinSkillDirPath(name, skillsDir);
   await ensureDirectory(adapter, dir);
   const filePath = skillFilePath(dir);
-  await adapter.write(filePath, skillMd);
+  const sourcePath = builtinSkillSourcePath(name, skillsDir);
+  const bundleHash = hashSkillContent(skillMd);
+
+  if (await adapter.exists(filePath)) {
+    const existing = await adapter.read(filePath);
+    const sourceHash = await readBuiltinSourceHash(adapter, sourcePath);
+    // Before source tracking existed, startup always overwrote builtins. Migrate that
+    // legacy file once, then use the marker to preserve subsequent user edits.
+    if (sourceHash === null) {
+      if (existing !== skillMd) await adapter.write(filePath, skillMd);
+      await adapter.write(sourcePath, JSON.stringify({ bundleHash }, null, 2));
+      return filePath;
+    }
+    const isUneditedBundle = existing === skillMd || hashSkillContent(existing) === sourceHash;
+
+    if (!isUneditedBundle) return filePath;
+    if (existing !== skillMd) await adapter.write(filePath, skillMd);
+  } else {
+    await adapter.write(filePath, skillMd);
+  }
+
+  await adapter.write(sourcePath, JSON.stringify({ bundleHash }, null, 2));
   return filePath;
+}
+
+async function readBuiltinSourceHash(
+  adapter: Pick<SkillFilesAdapter, 'exists' | 'read'>,
+  sourcePath: string,
+): Promise<string | null> {
+  if (!await adapter.exists(sourcePath)) return null;
+  try {
+    const parsed = JSON.parse(await adapter.read(sourcePath));
+    return typeof parsed.bundleHash === 'string' ? parsed.bundleHash : null;
+  } catch {
+    return null;
+  }
+}
+
+function hashSkillContent(content: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < content.length; index++) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 
@@ -87,6 +138,16 @@ export function pluginSkillSkipMarkerPath(
   skillsDir = USER_SKILLS_DIR,
 ): string {
   return joinPath(pluginSkillDirPath(pluginId, skillsDir), SKILL_SKIP_MARKER_FILE_NAME);
+}
+
+/** 生成的 skill 的来源追踪文件：记录生成时的插件版本，供升级后重新生成判断。 */
+export const SKILL_GENERATED_FROM_FILE_NAME = 'generated-from.json';
+
+export function pluginSkillGeneratedFromPath(
+  pluginId: string,
+  skillsDir = USER_SKILLS_DIR,
+): string {
+  return joinPath(pluginSkillDirPath(pluginId, skillsDir), SKILL_GENERATED_FROM_FILE_NAME);
 }
 
 export async function pluginSkillFileExists(

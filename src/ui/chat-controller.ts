@@ -1,4 +1,4 @@
-﻿import { App, MarkdownView } from 'obsidian';
+﻿import { App, MarkdownView, TFile } from 'obsidian';
 import { ModelService } from '../services/model-service';
 import { StreamEvent } from '../models/interfaces';
 import { logger } from '../utils/logger';
@@ -684,7 +684,7 @@ export class ChatController {
 
         try {
             const file = this.app.vault?.getAbstractFileByPath?.(path);
-            if (!file) return;
+            if (!file || !(file instanceof TFile)) return;
             await this.app.workspace?.getLeaf?.(false)?.openFile?.(file);
         } catch (error) {
             logger.warn(`Unable to open file after write: ${path}`, 'ChatController.openFileFromToolResult', error);
@@ -1043,7 +1043,6 @@ export class ChatController {
 
         this.setResponding(true);
         try {
-            const prompt = `请根据以下指令修改文本，只返回修改后的文本，不要解释。\n\n指令: ${instruction}\n\n原文:\n${selection}`;
             const result = await this.api.chat(
                 instruction,
                 [],
@@ -1053,23 +1052,6 @@ export class ChatController {
             this.addMessage('ai', result);
         } catch (e: any) {
             this.addMessage('system', `${t('Edit failed:')} ${e.message}`);
-        } finally {
-            this.setResponding(false);
-        }
-    }
-
-    private async handleSave(url: string) {
-        if (!url.trim()) {
-            this.addMessage('system', t('Usage: `/save <url>`\nSupported: web pages, YouTube, Bilibili, WeChat articles'));
-            return;
-        }
-        this.setResponding(true);
-        try {
-            const prompt = `请使用 save_webpage 工具保存这个链接: ${url.trim()}`;
-            const result = await this.api.chat(prompt, [], '');
-            this.addMessage('ai', result);
-        } catch (e: any) {
-            this.addMessage('system', `${t('Save failed:')} ${e.message}`);
         } finally {
             this.setResponding(false);
         }
@@ -1117,29 +1099,6 @@ export class ChatController {
         }
 
         help += `\n\nType \`/\` to browse commands and \`@\` to mention files.`;
-        this.addMessage('system', help);
-    }
-
-    private showLegacyHelp() {
-        const help = `## Shell Commands
-
-| Command | Description |
-|------|------|
-| \`/clear\` | Clear session history |
-| \`/memory\` | View Hindsight memory |
-| \`/memory search <query>\` | Search Hindsight memory |
-| \`/memory forget <field>\` | Forget saved memory |
-| \`/new <title>\` | Create a new note |
-| \`/edit <instruction>\` | AI edit the selected text |
-| \`/open <file>\` | Open a file |
-| \`/save <url>\` | Save a webpage or video into the vault |
-| \`/tools\` | List available tools |
-| \`/wiki:compile [path]\` | Compile notes into the knowledge wiki |
-| \`/wiki:index\` | Open the knowledge wiki index |
-| \`/wiki:lint\` | Run the knowledge wiki health check |
-| \`/help\` | Show this help |
-
-**Tip**: Type \`/\` for command suggestions and \`@\` to mention files.`;
         this.addMessage('system', help);
     }
 

@@ -468,7 +468,7 @@ export class ShellView extends ItemView {
 
     private buildContextScopeSuggestions(query: string) {
         const normalized = query.toLowerCase();
-        const suggestions = [
+        const suggestions: SuggestionItem[] = [
             {
                 label: '@current',
                 desc: 'Add the current note',
@@ -1265,22 +1265,6 @@ export class ShellView extends ItemView {
         return button;
     }
 
-    private showAvailableTools() {
-        const tools = this.modelService.getAvailableTools();
-        if (tools && tools.length > 0) {
-            let toolsList = 'Available Tools:\n';
-            tools.forEach(tool => {
-                toolsList += `\n${tool.name}: ${tool.description}\n`;
-                if (tool.input_schema && tool.input_schema.properties) {
-                    toolsList += `  Parameters: ${Object.keys(tool.input_schema.properties).join(', ')}\n`;
-                }
-            });
-            new Notice(toolsList, 8000);
-            return;
-        }
-        new Notice('No tools available or tools not loaded yet.');
-    }
-
     private addBacklinksScopeContext() {
         this.contextManager.addContext({
             id: 'scope:backlinks',
@@ -1330,16 +1314,6 @@ export class ShellView extends ItemView {
             this.scopePillEl.setAttribute('title', t('No note in scope'));
         }
         this.scopePillEl.toggleClass('is-scoped', scoped);
-    }
-
-    private prepareSelectionEdit() {
-        if (!this.inputEl) return;
-        if (!this.inputEl.value.trim().startsWith('/edit')) {
-            this.inputEl.value = '/edit ';
-        }
-        this.inputEl.focus();
-        this.inputEl.selectionStart = this.inputEl.selectionEnd = this.inputEl.value.length;
-        this.adjustHeight();
     }
 
     private openPluginSettings() {
@@ -1565,96 +1539,6 @@ export class ShellView extends ItemView {
         this.inputToolbar.updateThinking((settings.thinkingLevel ?? 'medium') as ThinkingLevel);
     }
 
-    private async populateModelOptions(selectEl: HTMLSelectElement, forceRefresh: boolean = false) {
-        const settings = this.getPluginInstance()?.settings;
-        if (!settings?.providers) return;
-
-        const requestId = ++this.modelLoadRequestId;
-        const config = settings.providers[settings.activeProvider];
-        if (!config) return;
-
-        selectEl.empty();
-        selectEl.disabled = true;
-        const loadingOption = selectEl.createEl('option', {
-            value: '',
-            text: `Loading ${config.label} models...`
-        });
-        loadingOption.selected = true;
-
-        try {
-            const models = await this.modelService.getAvailableModels(forceRefresh);
-
-            // 用户在请求期间切换了 provider，丢弃旧请求结果
-            if (requestId !== this.modelLoadRequestId) return;
-
-            selectEl.empty();
-
-            if (!models.length) {
-                const emptyOption = selectEl.createEl('option', {
-                    value: '',
-                    text: 'No models available'
-                });
-                emptyOption.selected = true;
-                emptyOption.disabled = true;
-                selectEl.disabled = true;
-                return;
-            }
-
-            const currentModel = config.model || '';
-
-            models.forEach(model => {
-                const option = selectEl.createEl('option', {
-                    value: model.value,
-                    text: model.label
-                });
-                if (model.value === currentModel) {
-                    option.selected = true;
-                }
-            });
-
-            if (currentModel && !models.some(m => m.value === currentModel)) {
-                const current = selectEl.createEl('option', {
-                    value: currentModel,
-                    text: `${currentModel} (Current)`
-                });
-                current.selected = true;
-            }
-
-            selectEl.disabled = false;
-        } catch (error: any) {
-            if (requestId !== this.modelLoadRequestId) return;
-            logger.warn(
-                `Failed to load model list: ${error?.message || 'Unknown error'}`,
-                'ShellView.populateModelOptions'
-            );
-            selectEl.empty();
-            const failedOption = selectEl.createEl('option', {
-                value: '',
-                text: 'Model list unavailable'
-            });
-            failedOption.selected = true;
-            failedOption.disabled = true;
-            selectEl.disabled = true;
-        }
-    }
-
-    private populateProviderOptions(selectEl: HTMLSelectElement) {
-        const settings = this.getPluginInstance()?.settings;
-        if (!settings?.providers) return;
-
-        selectEl.empty();
-        const active = settings.activeProvider || 'gemini';
-
-        for (const [id, config] of Object.entries(settings.providers) as [string, any][]) {
-            const configured = !!config.apiKey;
-            const option = selectEl.createEl('option', {
-                value: id,
-                text: configured ? config.label : `${config.label} !`
-            });
-            if (id === active) option.selected = true;
-        }
-    }
-
     private updatePlaceholder() {
         if (!this.inputEl) return;
         const settings = this.getPluginInstance()?.settings;
@@ -1665,35 +1549,6 @@ export class ShellView extends ItemView {
 
     public async updateModelSelector(forceRefresh: boolean = false) {
         await this.refreshInputToolbarModels(forceRefresh);
-    }
-
-    private clearChat() {
-        // 只清空当前活动 tab 的子树(其余 tab 子树保留)。
-        const activeContainer = this.getActiveMessageContainer();
-        this.unobserveContainerEntries(activeContainer);
-        activeContainer.empty();
-        const activeTab = this.tabManager.getActiveTab();
-        activeTab?.state.clearMessages();
-        if (activeTab) {
-            this.tabManager.updateTab(activeTab.id, {
-                title: `Chat ${activeTab.index}`,
-                createdAt: undefined,
-                updatedAt: undefined,
-                pinnedAt: undefined,
-                providerId: this.getActiveProviderId(),
-                modelId: this.getActiveModelId(),
-                currentNote: this.getCurrentNotePath(),
-            });
-            void this.conversationController.deleteConversation(activeTab.id);
-        }
-        // Re-add welcome message
-        this.appendMessage({
-            id: 'init',
-            role: 'system',
-            content: 'Chat cleared.',
-            timestamp: Date.now()
-        });
-        new Notice('Chat cleared');
     }
 
     private async createAndShowTab() {

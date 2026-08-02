@@ -233,7 +233,8 @@ export default class BaizerPlugin extends Plugin {
 
         // 启动插件 Skill 自动生成（后台异步，不阻塞）
         const skillGenerator = new PluginSkillGenerator(
-            this.app, this.modelService, this.settings,
+            this.app, this.modelService,
+            () => this.toolRegistry.listAll().map(tool => tool.name),
         );
         this.pluginWatcher = new PluginWatcher(
             this.app, this.skillRegistry, skillGenerator, this.settings,
@@ -274,9 +275,10 @@ export default class BaizerPlugin extends Plugin {
         let leaf = leaves[0] ?? null;
 
         if (!leaf) {
-            leaf = workspace.getRightLeaf(false);
-            if (!leaf) return;
-            await leaf.setViewState({ type: VIEW_TYPE_SHELL, active: true });
+            const newLeaf = workspace.getRightLeaf(false);
+            if (!newLeaf) return;
+            await newLeaf.setViewState({ type: VIEW_TYPE_SHELL, active: true });
+            leaf = newLeaf;
         }
 
         await workspace.revealLeaf(leaf);

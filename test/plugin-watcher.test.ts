@@ -228,6 +228,219 @@ async function runTests() {
 
     expect(basicCalls).toBe(1);
   });
+
+  await test('initial scan preserves a user-authored plugin skill without provenance', async () => {
+    const adapter = new FakeAdapter();
+    const skillPath = '.obsidian/baizer/skills/plugin-custom/SKILL.md';
+    adapter.files.set(skillPath, 'user-authored');
+    const app = {
+      ...mockApp,
+      plugins: {
+        ...(mockApp as any).plugins,
+        enabledPlugins: new Set(['baizer', 'custom']),
+        manifests: { custom: { id: 'custom', name: 'Custom', version: '2.0.0' } },
+      },
+      vault: { adapter },
+    } as unknown as App;
+    let generationCalls = 0;
+    const generator = {
+      ...mockGenerator,
+      collectPluginInfo: async () => {
+        generationCalls += 1;
+        return mockGenerator.collectPluginInfo('custom');
+      },
+      skillFilePath: () => skillPath,
+    };
+
+    await (new PluginWatcher(app, mockSkillRegistry as any, generator as any, settings) as any).initialScan();
+
+    expect(generationCalls).toBe(0);
+    expect(await adapter.read(skillPath)).toBe('user-authored');
+  });
+
+  await test('stale generated skill is replaced before its provenance version advances', async () => {
+    const adapter = new FakeAdapter();
+    const dir = '.obsidian/baizer/skills/plugin-stale';
+    const skillPath = `${dir}/SKILL.md`;
+    const markerPath = `${dir}/generated-from.json`;
+    adapter.files.set(skillPath, 'old-content');
+    adapter.files.set(markerPath, JSON.stringify({ pluginVersion: '1.0.0' }));
+    const app = {
+      ...mockApp,
+      plugins: {
+        ...(mockApp as any).plugins,
+        enabledPlugins: new Set(['baizer', 'stale']),
+        manifests: { stale: { id: 'stale', name: 'Stale', version: '2.0.0' } },
+      },
+      vault: { adapter },
+    } as unknown as App;
+    let replacedContent = '';
+    const registry = {
+      registerUserFromMd: () => false,
+      replaceUserFromMd: (content: string) => {
+        replacedContent = content;
+        return true;
+      },
+      unregisterSkill: () => {},
+    };
+    const generator = {
+      ...mockGenerator,
+      collectPluginInfo: async () => ({
+        ...(await mockGenerator.collectPluginInfo('stale')),
+        version: '2.0.0',
+      }),
+      generateSkillMd: async () => 'new-content',
+      writeSkillFile: async (_id: string, content: string, options?: { overwrite?: boolean }) => {
+        expect(options?.overwrite).toBe(true);
+        await adapter.write(skillPath, content);
+        return skillPath;
+      },
+      skillFilePath: () => skillPath,
+    };
+
+    await (new PluginWatcher(app, registry as any, generator as any, settings) as any).initialScan();
+
+    expect(await adapter.read(skillPath)).toBe('new-content');
+    expect(replacedContent).toBe('new-content');
+    const marker = JSON.parse(await adapter.read(markerPath));
+    expect(marker.pluginVersion).toBe('2.0.0');
+  });
+
+  await test('failed generation is attempted at most three times across polls', async () => {
+    const adapter = new FakeAdapter();
+    const app = {
+      ...mockApp,
+      plugins: {
+        ...(mockApp as any).plugins,
+        enabledPlugins: new Set(['baizer', 'retry']),
+        manifests: { retry: { id: 'retry', name: 'Retry', version: '1.0.0' } },
+      },
+      vault: { adapter },
+    } as unknown as App;
+    let attempts = 0;
+    const generator = {
+      ...mockGenerator,
+      collectBasicPluginInfo: async () => ({
+        id: 'retry', name: 'Retry', description: '', version: '1.0.0',
+        commands: [{ id: 'retry:cmd', name: 'Command', aiUsable: true }],
+        settingsKeys: [], syntaxHints: [], webContext: '',
+      }),
+      collectPluginInfo: async () => {
+        attempts += 1;
+        throw new Error('generation failed');
+      },
+    };
+    const localWatcher = new PluginWatcher(app, mockSkillRegistry as any, generator as any, settings);
+
+    await (localWatcher as any).initialScan();
+    await (localWatcher as any).checkChanges();
+    await (localWatcher as any).checkChanges();
+    await (localWatcher as any).checkChanges();
+
+    expect(attempts).toBe(3);
+  });
+
+  await test('retry replaces an unmarked file left by a failed registration', async () => {
+    const adapter = new FakeAdapter();
+    const dir = '.obsidian/baizer/skills/plugin-recover';
+    const skillPath = `${dir}/SKILL.md`;
+    const markerPath = `${dir}/generated-from.json`;
+    const app = {
+      ...mockApp,
+      plugins: {
+        ...(mockApp as any).plugins,
+        enabledPlugins: new Set(['baizer', 'recover']),
+        manifests: { recover: { id: 'recover', name: 'Recover', version: '1.0.0' } },
+      },
+      vault: { adapter },
+    } as unknown as App;
+    let generationAttempt = 0;
+    const generator = {
+      ...mockGenerator,
+      collectBasicPluginInfo: async () => ({
+        id: 'recover', name: 'Recover', description: '', version: '1.0.0',
+        commands: [{ id: 'recover:cmd', name: 'Command', aiUsable: true }],
+        settingsKeys: [], syntaxHints: [], webContext: '',
+      }),
+      collectPluginInfo: async () => ({
+        ...(await mockGenerator.collectPluginInfo('recover')),
+        version: '1.0.0',
+      }),
+      generateSkillMd: async () => {
+        generationAttempt += 1;
+        return generationAttempt === 1 ? 'invalid-content' : 'valid-content';
+      },
+      writeSkillFile: async (_id: string, content: string, options?: { overwrite?: boolean }) => {
+        if (!await adapter.exists(skillPath) || options?.overwrite) {
+          await adapter.write(skillPath, content);
+        }
+        return skillPath;
+      },
+      skillFilePath: () => skillPath,
+    };
+    const registry = {
+      registerUserFromMd: (content: string) => content === 'valid-content',
+      replaceUserFromMd: (content: string) => content === 'valid-content',
+      unregisterSkill: () => {},
+    };
+    const localWatcher = new PluginWatcher(app, registry as any, generator as any, settings);
+
+    await (localWatcher as any).initialScan();
+    await (localWatcher as any).checkChanges();
+
+    expect(generationAttempt).toBe(2);
+    expect(await adapter.read(skillPath)).toBe('valid-content');
+    expect(JSON.parse(await adapter.read(markerPath)).pluginVersion).toBe('1.0.0');
+  });
+
+  await test('retry does not claim a user skill created after a pre-write failure', async () => {
+    const adapter = new FakeAdapter();
+    const skillPath = '.obsidian/baizer/skills/plugin-race/SKILL.md';
+    const app = {
+      ...mockApp,
+      plugins: {
+        ...(mockApp as any).plugins,
+        enabledPlugins: new Set(['baizer', 'race']),
+        manifests: { race: { id: 'race', name: 'Race', version: '1.0.0' } },
+      },
+      vault: { adapter },
+    } as unknown as App;
+    let attempts = 0;
+    const generator = {
+      ...mockGenerator,
+      collectBasicPluginInfo: async () => ({
+        id: 'race', name: 'Race', description: '', version: '1.0.0',
+        commands: [{ id: 'race:cmd', name: 'Command', aiUsable: true }],
+        settingsKeys: [], syntaxHints: [], webContext: '',
+      }),
+      collectPluginInfo: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('failed before write');
+        return mockGenerator.collectPluginInfo('race');
+      },
+      generateSkillMd: async () => 'generated-content',
+      writeSkillFile: async (_id: string, content: string, options?: { overwrite?: boolean }) => {
+        if (await adapter.exists(skillPath) && !options?.overwrite) {
+          throw new Error('refusing user file overwrite');
+        }
+        await adapter.write(skillPath, content);
+        return skillPath;
+      },
+      skillFilePath: () => skillPath,
+    };
+    const registry = {
+      registerUserFromMd: () => false,
+      replaceUserFromMd: () => false,
+      unregisterSkill: () => {},
+    };
+    const localWatcher = new PluginWatcher(app, registry as any, generator as any, settings);
+
+    await (localWatcher as any).initialScan();
+    await adapter.write(skillPath, 'user-authored-during-retry');
+    await (localWatcher as any).checkChanges();
+
+    expect(await adapter.read(skillPath)).toBe('user-authored-during-retry');
+  });
 }
 
 runTests().catch(console.error);
