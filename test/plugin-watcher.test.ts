@@ -59,6 +59,7 @@ const unregisteredSkills: string[] = [];
 
 const mockSkillRegistry = {
   registerUser: (skill: any) => { registeredSkills.push(skill.name); },
+  getAllSkillSummaries: () => registeredSkills.map(name => ({ name, description: '' })),
   // watcher 生成后走这条注册路径：以目录名（plugin-<id>）作为 skill 名。
   registerUserFromMd: (_md: string, filePath: string) => {
     registeredSkills.push(filePath.split('/').slice(-2)[0]);
@@ -839,6 +840,24 @@ async function runTests() {
     expect(s.counters).toEqual({ basic: 0, full: 0, generated: 0, written: 0 });
   });
 
+  // 撤回插件控制后重新授权：设置保存必须恢复盘上已有文件，而不是只补跑「生成缺失文件」的扫描。
+  // 恢复不等于生成，所以四个 generator 入口都必须保持零调用。
+  await test('re-granting plugin control restores an existing skill with zero generator calls', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'paused', recordedVersion: '1.0' }],
+      enabled: ['paused'],
+      allowPluginControl: false,
+    });
+    await s.localWatcher.reconcileDerivedSkills();
+    expect(s.names.has('plugin-paused')).toBe(false);
+
+    s.localSettings.allowPluginControl = true;
+    await s.localWatcher.handleSettingsSaved();
+
+    expect(s.names.has('plugin-paused')).toBe(true);
+    expect(s.counters).toEqual({ basic: 0, full: 0, generated: 0, written: 0 });
+  });
+
   // 表格第 4 行：版本变了、body 没被改过 → 重新生成后再提供（覆盖写）。
   await test('a version change with an unmodified body regenerates', async () => {
     const s = createReconcileSetup({
@@ -1161,6 +1180,20 @@ async function runTests() {
 
     expect(s.names.has('plugin-fine')).toBe(true);
     expect(s.counters.generated).toBe(0);
+  });
+
+  // 自动生成关闭只应阻止网络/LLM 生成，不能让本地撤下与恢复停止工作。
+  await test('the polling pass restores an existing skill with auto-generate off', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'quiet', recordedVersion: '1.0', registered: false }],
+      enabled: ['quiet'],
+      autoGenerate: false,
+    });
+
+    await (s.localWatcher as any).checkChanges();
+
+    expect(s.names.has('plugin-quiet')).toBe(true);
+    expect(s.counters).toEqual({ basic: 0, full: 0, generated: 0, written: 0 });
   });
 
   // 决策 3 表格：来源不在了就不提供。显式「重新生成」也不能绕过这一行——

@@ -95,6 +95,8 @@ export class PluginWatcher {
   private failedRetries = new Map<string, number>();
   /** 上次观察到的「可生成」状态——判断设置变更是否跨过阈值的唯一依据 */
   private lastReadyForGeneration: boolean;
+  /** 上次观察到的插件控制授权状态——授权变化必须触发对账，即使 enabledPlugins 没变。 */
+  private lastPluginControlGranted: boolean;
   /** 扫描单飞标记：补跑由设置保存非阻塞触发，不能叠加第二轮 */
   private scanInFlight = false;
   /** 每个插件最近一次生成失败的原因（键 = 插件 id）；成功后清除。设置页据此展示「谁失败、为什么」 */
@@ -112,6 +114,7 @@ export class PluginWatcher {
     private notify: (message: string) => void = (message) => { new Notice(message); },
   ) {
     this.lastReadyForGeneration = this.canGenerate();
+    this.lastPluginControlGranted = this.settings.allowPluginControl === true;
   }
 
   /**
@@ -141,6 +144,15 @@ export class PluginWatcher {
     const ready = this.canGenerate();
     const crossedThreshold = ready && !this.lastReadyForGeneration;
     this.lastReadyForGeneration = ready;
+
+    const pluginControlGranted = this.settings.allowPluginControl === true;
+    const pluginControlChanged = pluginControlGranted !== this.lastPluginControlGranted;
+    this.lastPluginControlGranted = pluginControlGranted;
+    if (pluginControlChanged) {
+      // 授权切换不一定改变 enabledPlugins：重新授权必须直接对账，
+      // 才能从盘上恢复此前仅被注销的技能，而不触发生成。
+      await this.reconcileDerivedSkills();
+    }
 
     if (!crossedThreshold) return;
 
@@ -531,10 +543,8 @@ export class PluginWatcher {
   }
 
   async start(): Promise<void> {
-    if (!this.settings.autoGeneratePluginSkills) {
-      logger.info('Disabled by settings', 'PluginWatcher');
-      return;
-    }
+    // 自动生成关闭时仍需监听插件增删，才能及时撤下和零成本恢复已有技能。
+    // initialScan/checkChanges 内部只在 canGenerate() 通过时执行生成工作。
     logger.info('Starting...', 'PluginWatcher');
     await this.initialScan();
     this.intervalId = window.setInterval(
@@ -642,8 +652,6 @@ export class PluginWatcher {
   }
 
   private async checkChanges(): Promise<void> {
-    if (!this.settings.autoGeneratePluginSkills) return;
-
     const currentIds = new Set(this.getEnabledPluginIds());
     const { added, removed } = this.diffPlugins(this.snapshot, currentIds);
 
@@ -706,6 +714,9 @@ export class PluginWatcher {
   }
 
   private async loadAndRegister(pluginId: string): Promise<boolean> {
+    // 生成可能跨越设置变更；在唯一注册入口再次检查，避免撤权期间的在途生成绕过撤下。
+    if (this.withdrawalReason(pluginId)) return false;
+
     const filePath = this.generator.skillFilePath(pluginId);
     const content = await readTextIfExists(this.app.vault.adapter, filePath);
     if (content === null) return false;
