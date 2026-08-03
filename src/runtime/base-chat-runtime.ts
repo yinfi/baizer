@@ -10,6 +10,7 @@ import {
 import { evaluateGenerationQuality } from '../services/generation-quality';
 import { formatGenerationPlanBlock, GenerationStrategyService } from '../services/generation-strategy-service';
 import { PreparedChatTurn, ChatRuntime, ChatRuntimeDeps, ChatTurnRequest } from './runtime-types';
+import { logger } from '../utils/logger';
 
 interface ActiveSkillScope {
   activeSkillName?: string;
@@ -122,10 +123,8 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     // [B] 用户给出短确认/延续性回复（"需要"、"用第二个"等）且存在对话历史时，
     // 剔除自动注入的环境上下文（当前笔记/反链），避免它盖过对话意图把模型带偏。
     // 用户显式选择的上下文与编辑器选区始终保留。
-    // 阶段1:历史存在性由 request.hasPriorContext 提供(ModelService 从 Harness session 查询),
-    // 取代旧的 priorMessages.length 判断。
     const isContinuation = this.isContinuationMessage(request.userMessage)
-      && request.hasPriorContext === true;
+      && await this.resolveHasPriorContext(request);
     const promptContextItems = isContinuation
       ? this.stripAmbientContext(request.contextItems)
       : request.contextItems;
@@ -233,6 +232,34 @@ export abstract class BaseChatRuntime implements ChatRuntime {
   }
 
   /** [B] 剔除自动注入的环境上下文，保留用户显式选择的上下文与选区。 */
+  /**
+   * 本轮开始时会话是否已有跨轮历史 —— 延续判定的前置条件。
+   *
+   * 自己向 sessionManager 问,不要求调用方注入。历史存在性是会话的属性,
+   * 而 sessionManager 就在 deps 里;让每个入口自己查一遍,只会漏。
+   * (曾经就漏过:chat/chatStream 各写一遍相同的查询,而 skill 命令入口忘了,
+   * 于是 skill 命令永远拿不到延续检测。)
+   *
+   * 调用方显式给了值就用它:无 conversationId 的一次性调用(file-back、/edit)
+   * 没有会话可查,由调用方判断更准。
+   */
+  private async resolveHasPriorContext(request: ChatTurnRequest): Promise<boolean> {
+    if (typeof request.hasPriorContext === 'boolean') return request.hasPriorContext;
+
+    const sessionManager = this.deps.sessionManager;
+    if (!sessionManager || !request.conversationId) return false;
+
+    try {
+      return await sessionManager.hasHistory(request.conversationId);
+    } catch (error) {
+      // 查不到就当没有历史:保留环境上下文是更安全的降级
+      // (误剔除会让模型丢掉用户正在看的笔记)。
+      logger.warn('Failed to resolve prior history; assuming none', 'BaseChatRuntime');
+      void error;
+      return false;
+    }
+  }
+
   private stripAmbientContext(contextItems: ChatContextItem[]): ChatContextItem[] {
     return (contextItems ?? []).filter(item => !this.isAmbientContextItem(item));
   }
