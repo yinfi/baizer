@@ -30,6 +30,17 @@ export type DerivedSkillWithdrawal =
   | 'withdrawn-missing'
   | 'withdrawn-excluded';
 
+/**
+ * 显式重新生成被拒的成因。设置页据此告诉用户「去改哪一项」——
+ * 笼统地列举全部前置条件会指向三件与本次无关的事，比不解释更糟。
+ */
+export type DerivedSkillRegenerateBlocker =
+  | 'auto-generate-off'
+  | 'plugin-control-off'
+  | 'model-not-ready'
+  | 'source-missing'
+  | 'source-excluded';
+
 /** 对账结论。除三种撤下外，其余都仍然提供给模型。 */
 export type DerivedSkillReconcileStatus =
   | DerivedSkillWithdrawal
@@ -66,6 +77,10 @@ export interface DerivedSkillStatus {
   handEdited: boolean | null;
   /** 版本漂移且未被修复 */
   stale: boolean;
+  /** 本轮是否真的重写了文件。设置页据此区分「已重新生成」与「没写成」。 */
+  regenerated: boolean;
+  /** 本轮生成失败的原因；没试过或成功了为 null */
+  failureReason: string | null;
 }
 
 /** 对账过程中先采集、各分支共用的事实部分（结论字段由分支补齐）。 */
@@ -106,9 +121,15 @@ export class PluginWatcher {
    * 开关也算前置条件，这样「先补 Key 再打开开关」的顺序不会漏掉补跑（见下）。
    */
   private canGenerate(): boolean {
-    return this.settings.autoGeneratePluginSkills === true
-      && this.settings.allowPluginControl === true
-      && this.isModelReady();
+    return this.generationBlocker() === null;
+  }
+
+  /** 哪一项前置条件没过（判定顺序即报告顺序）；全过返回 null。 */
+  private generationBlocker(): DerivedSkillRegenerateBlocker | null {
+    if (this.settings.autoGeneratePluginSkills !== true) return 'auto-generate-off';
+    if (this.settings.allowPluginControl !== true) return 'plugin-control-off';
+    if (!this.isModelReady()) return 'model-not-ready';
+    return null;
   }
 
   /**
@@ -176,13 +197,16 @@ export class PluginWatcher {
    *
    * 这是「重新生成可以覆盖我们写的，绝不覆盖你写的」的唯一例外——用户亲自要求了，
    * 显式请求优先于对账给手工编辑的保护（对账走 regenerateForReconcile，那条路遇到
-   * handEdited 会绕开）。前置条件不满足时返回 null 且不采集任何信息：静默地什么都不做，
-   * 而不是看起来成功了。
+   * handEdited 会绕开）。条件不满足时不采集任何信息，并报出**是哪一项**不满足——
+   * 笼统列举全部前置条件会指向三件与本次无关的事，比不解释更糟。
    */
-  async regenerateDerivedSkill(pluginId: string): Promise<DerivedSkillStatus | null> {
-    if (!this.canGenerate()) {
-      logger.info(`前置条件未满足，跳过 ${pluginId} 的显式重新生成`, 'PluginWatcher');
-      return null;
+  async regenerateDerivedSkill(
+    pluginId: string,
+  ): Promise<DerivedSkillStatus | { blocker: DerivedSkillRegenerateBlocker }> {
+    const blocker = this.regenerateBlocker(pluginId);
+    if (blocker) {
+      logger.info(`${blocker}，跳过 ${pluginId} 的显式重新生成`, 'PluginWatcher');
+      return { blocker };
     }
 
     // 先读真实溯源：重新生成失败时要按原样报告，而盘上文件的版本与编辑状态都还是旧的。
@@ -201,6 +225,21 @@ export class PluginWatcher {
     const status = await this.regenerateForReconcile(facts, true, this.hasVersionDrift(facts));
     this.replaceStatus(status);
     return status;
+  }
+
+  /**
+   * 显式重新生成被拒的成因：先看生成前置条件，再看来源是否还站得住。
+   * 显式请求能压过「不覆盖手工编辑」，但压不过对账表的撤下三行——来源已消失的技能
+   * 重新生成出来也不该提供，否则花一次网络+LLM 的钱换回一份注定撤下的文件。
+   */
+  private regenerateBlocker(pluginId: string): DerivedSkillRegenerateBlocker | null {
+    const precondition = this.generationBlocker();
+    if (precondition) return precondition;
+
+    const withdrawal = this.withdrawalReason(pluginId);
+    if (withdrawal === 'withdrawn-excluded') return 'source-excluded';
+    // withdrawn-plugin-control 已被上面的 plugin-control-off 覆盖，剩下的就是来源不在了。
+    return withdrawal ? 'source-missing' : null;
   }
 
   /** 版本漂移：需同时有溯源版本与当前版本才可判定，否则一律视为不漂移。 */
@@ -323,19 +362,30 @@ export class PluginWatcher {
   ): DerivedSkillStatus {
     this.skillRegistry.unregisterSkill(facts.skillName);
     logger.info(`撤下派生 skill ${facts.skillName}（${status}），文件保留在盘上`, 'PluginWatcher');
-    return { ...facts, offered: false, status, stale: false };
+    return {
+      ...facts, offered: false, status, stale: false,
+      regenerated: false, failureReason: null,
+    };
   }
 
-  /** 按盘上原样提供：已注册的保持不动，未注册的从文件恢复注册。 */
+  /**
+   * 按盘上原样提供：已注册的保持不动，未注册的从文件恢复注册。
+   * failureReason 由重新生成失败的分支传入——「按原样提供」是那条路的收尾，
+   * 但失败本身必须一路带到状态里，否则设置页只能看到一个像成功的结果。
+   */
   private async offerAsIs(
     facts: DerivedSkillFacts,
     wasRegistered: boolean,
     status: DerivedSkillReconcileStatus,
     stale: boolean,
+    failureReason: string | null = null,
   ): Promise<DerivedSkillStatus> {
     if (!wasRegistered && !await this.loadAndRegister(facts.pluginId)) {
       logger.info(`派生 skill ${facts.skillName} 无法从文件恢复注册`, 'PluginWatcher');
-      return { ...facts, offered: false, status: 'restore-failed', stale };
+      return {
+        ...facts, offered: false, status: 'restore-failed', stale,
+        regenerated: false, failureReason,
+      };
     }
     if (stale) {
       logger.info(
@@ -344,7 +394,10 @@ export class PluginWatcher {
         'PluginWatcher',
       );
     }
-    return { ...facts, offered: true, status, stale };
+    return {
+      ...facts, offered: true, status, stale,
+      regenerated: false, failureReason,
+    };
   }
 
   /**
@@ -367,17 +420,30 @@ export class PluginWatcher {
       const content = await this.generator.generateSkillMd(info);
       await this.generator.writeSkillFile(facts.pluginId, content, 'replace');
     } catch (e: any) {
+      const reason = String(e?.message ?? e);
+      // 原因不能只进 console：设置页要能回答「哪个插件失败、为什么」，
+      // 这条路径与启动扫描一样是生成，失败的留痕口径必须一致。
+      this.generationFailures.set(facts.pluginId, reason);
       console.error(
-        `[PluginWatcher] Failed to regenerate skill for ${facts.pluginId}:`, e?.message ?? e,
+        `[PluginWatcher] Failed to regenerate skill for ${facts.pluginId}:`, reason,
       );
-      return this.offerAsIs(facts, wasRegistered, 'stale-regenerate-failed', staleOnFailure);
+      return this.offerAsIs(
+        facts, wasRegistered, 'stale-regenerate-failed', staleOnFailure, reason,
+      );
     }
 
     // 文件已被覆盖，注册表里的旧正文必须让位：先注销再从新文件加载。
     this.skillRegistry.unregisterSkill(facts.skillName);
     if (!await this.loadAndRegister(facts.pluginId)) {
-      return { ...facts, offered: false, status: 'regenerate-failed', stale: true };
+      const reason = `Regenerated skill file could not be loaded: ${this.generator.skillFilePath(facts.pluginId)}`;
+      this.generationFailures.set(facts.pluginId, reason);
+      return {
+        ...facts, offered: false, status: 'regenerate-failed', stale: true,
+        regenerated: false, failureReason: reason,
+      };
     }
+    // 成功必须清掉旧原因，否则设置页会在整个会话里继续展示一个已经修好的失败。
+    this.generationFailures.delete(facts.pluginId);
     logger.info(`派生 skill ${facts.skillName} 已按新版本重新生成`, 'PluginWatcher');
     return {
       ...facts,
@@ -386,6 +452,8 @@ export class PluginWatcher {
       offered: true,
       status: 'regenerated',
       stale: false,
+      regenerated: true,
+      failureReason: null,
     };
   }
 
@@ -581,6 +649,9 @@ export class PluginWatcher {
 
     const canGenerate = this.canGenerate();
     for (const id of added) {
+      // 与对账同一把闸：撤下只在启动跑一次，若轮询能绕过它，撤下就形同白做——
+      // 撤回插件控制授权后新启用一个插件，就会把它的技能重新交给模型。
+      if (this.withdrawalReason(id)) continue;
       if (await this.hasSkillFile(id)) {
         await this.loadAndRegister(id);
       } else if (canGenerate) {

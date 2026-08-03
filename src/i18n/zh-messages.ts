@@ -483,7 +483,14 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Delete plugin skill': '删除插件技能',
     'Delete the generated skill for {plugin}? This cannot be undone.': '删除为 {plugin} 生成的技能?此操作不可撤销。',
     'Regenerated the skill for {plugin}.': '已为 {plugin} 重新生成技能。',
-    'Cannot regenerate now: grant plugin control and configure a model first.': '暂时无法重新生成:请先授予插件控制权限并配置模型。',
+    // 被拒时点明是哪一项不满足:笼统列举全部前置条件会指向与本次无关的事。
+    'Cannot regenerate: turn on automatic plugin skill generation first.': '无法重新生成:请先打开「自动生成插件技能」。',
+    'Cannot regenerate: grant plugin control first.': '无法重新生成:请先授予插件控制权限。',
+    'Cannot regenerate: configure a usable model first.': '无法重新生成:请先配置可用的模型。',
+    'Cannot regenerate: the source plugin is no longer installed or enabled.': '无法重新生成:来源插件已卸载或未启用。',
+    'Cannot regenerate: the source plugin is on the exclude list.': '无法重新生成:来源插件在排除名单中。',
+    'Could not regenerate the skill for {plugin}: {reason}': '{plugin} 的技能重新生成失败:{reason}',
+    'unknown reason': '原因未知',
     'Deleted the skill for {plugin}.': '已删除 {plugin} 的技能。',
     'Failed to delete the skill for {plugin}.': '删除 {plugin} 的技能失败。',
 

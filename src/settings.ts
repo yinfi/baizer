@@ -2,7 +2,10 @@ import { App, PluginSettingTab, Setting, Notice, DropdownComponent, Modal, debou
 import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 import { OntologyUpdateMode } from './knowledge/types';
-import type { DerivedSkillStatus } from './skills/builtin/plugin-ctrl/plugin-watcher';
+import type {
+    DerivedSkillRegenerateBlocker,
+    DerivedSkillStatus,
+} from './skills/builtin/plugin-ctrl/plugin-watcher';
 import { t, getLocale, Locale } from './i18n/zh';
 
 export type SettingsSectionId =
@@ -688,6 +691,50 @@ function buildDerivedVersionLabel(status: DerivedSkillStatus): string {
     const base = t('Generated from v{version}').replace('{version}', status.recordedVersion);
     if (!status.stale || !status.installedVersion) return base;
     return `${base} · ${t('plugin now v{version}').replace('{version}', status.installedVersion)}`;
+}
+
+/** 被拒成因 → 该去改哪一项。笼统列举全部前置条件会指向与本次无关的事。 */
+const REGENERATE_BLOCKER_MESSAGES: Record<DerivedSkillRegenerateBlocker, string> = {
+    'auto-generate-off': 'Cannot regenerate: turn on automatic plugin skill generation first.',
+    'plugin-control-off': 'Cannot regenerate: grant plugin control first.',
+    'model-not-ready': 'Cannot regenerate: configure a usable model first.',
+    'source-missing': 'Cannot regenerate: the source plugin is no longer installed or enabled.',
+    'source-excluded': 'Cannot regenerate: the source plugin is on the exclude list.',
+};
+
+/**
+ * 显式重新生成的三种结局,各说各的:
+ * - 带 blocker:条件不满足,什么都没做——并点明是哪一项
+ * - regenerated=false:真的试了但没写成，带上原因
+ * - regenerated=true:写成了
+ * 把中间那种说成成功就是把失败报成成功——ticket 05 要消灭的正是这类提示。
+ */
+export function getRegenerateOutcomeMessage(
+    pluginId: string,
+    outcome:
+        | Pick<DerivedSkillStatus, 'regenerated' | 'failureReason'>
+        | { blocker: DerivedSkillRegenerateBlocker },
+): string {
+    if ('blocker' in outcome) {
+        return t(REGENERATE_BLOCKER_MESSAGES[outcome.blocker]);
+    }
+    if (!outcome.regenerated) {
+        const reason = outcome.failureReason ?? t('unknown reason');
+        return fillPlaceholders(
+            t('Could not regenerate the skill for {plugin}: {reason}'),
+            { plugin: pluginId, reason },
+        );
+    }
+    return fillPlaceholders(t('Regenerated the skill for {plugin}.'), { plugin: pluginId });
+}
+
+/**
+ * 占位符替换。用回调式 replace 而非替换串:失败原因来自 provider 的异常消息,
+ * 是任意外部文本,其中的 $& / $' / $1 在替换串位置有特殊语义,会把文案吃掉。
+ */
+function fillPlaceholders(template: string, values: Record<string, string>): string {
+    return template.replace(/\{(\w+)\}/g, (match, key: string) =>
+        Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match);
 }
 
 function buildDerivedBadges(status: DerivedSkillStatus): string[] {
@@ -2635,16 +2682,14 @@ export class SettingTab extends PluginSettingTab {
 
     /**
      * 显式重新生成:覆盖写,即使用户手改过——这是用户亲自要求的,优先于对账给手工编辑的保护。
-     * 前置条件不满足时 watcher 返回 null,此时给一句提示说明为什么没动,而不是假装成功。
+     * 三种结局都要说清楚(见 getRegenerateOutcomeMessage),不能把没写成的报成已重新生成。
      */
     private async regenerateDerivedSkill(pluginId: string): Promise<void> {
         const watcher = this.plugin.pluginWatcher;
         if (!watcher) return;
 
         const status = await watcher.regenerateDerivedSkill(pluginId);
-        new Notice(status
-            ? t('Regenerated the skill for {plugin}.').replace('{plugin}', pluginId)
-            : t('Cannot regenerate now: grant plugin control and configure a model first.'));
+        new Notice(getRegenerateOutcomeMessage(pluginId, status));
         this.renderAccordion();
     }
 

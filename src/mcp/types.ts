@@ -303,7 +303,14 @@ export interface IPlugin extends Plugin {
     pluginWatcher?: {
         getDerivedSkillStatuses(): any[];
         getGenerationFailures(): ReadonlyMap<string, string>;
-        regenerateDerivedSkill(pluginId: string): Promise<any | null>;
+        // 返回值不写 any：设置页据 regenerated / blocker 决定提示哪一种结局，
+        // any 会让日后改字段名时静默退化成「每次成功都报失败」。
+        // blocker 用字面量联合而非 import 那个类型别名：types.ts 不该反向依赖 skills 层。
+        regenerateDerivedSkill(pluginId: string): Promise<
+            | { regenerated: boolean; failureReason: string | null }
+            | { blocker: 'auto-generate-off' | 'plugin-control-off' | 'model-not-ready'
+                | 'source-missing' | 'source-excluded' }
+        >;
         deleteDerivedSkill(pluginId: string): Promise<boolean>;
     } | null;
 }

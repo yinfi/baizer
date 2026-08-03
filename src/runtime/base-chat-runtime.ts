@@ -167,7 +167,12 @@ export abstract class BaseChatRuntime implements ChatRuntime {
       userRequest: request.userMessage,
       memoryContext,
       activeSkillName: activeSkill?.skill.name,
-      allowedToolNames: activeSkill?.tools.map(tool => tool.name),
+      // 空 tools 声明 = 不限制（手写 skill 省掉 tools 字段即如此，见 pi-skill-source）。
+      // 此时必须不给白名单：buildSkillModeTools 已按「不限制」给出全量工具，而下游硬门
+      // 见到一个非 null 的空白名单会把它们全拦掉——模型看得到却一个也调不动。
+      allowedToolNames: activeSkill?.tools.length
+        ? activeSkill.tools.map(tool => tool.name)
+        : undefined,
       requiresFileWrite: isFileWriteRequest(request.userMessage),
       selection: request.selection,
       generationPlan,
@@ -335,13 +340,17 @@ If no listed command fits, suggest a plain-language request instead.
   }
 
   protected createSkillScope(turn: PreparedChatTurn): ActiveSkillScope {
-    if (!turn.activeSkillName) {
+    // 白名单为空就不闭合硬门:关键词命中(无 activeSkillName)与空 tools 声明
+    // (有 activeSkillName 但不收窄)都走这条路,口径与 buildSkillModeTools 一致。
+    // 判 length 而非判真假:空数组是 truthy,而 runtime-types 允许它出现,
+    // 只挡 undefined 等于把这道防线押在「生产者恰好不给空数组」上。
+    if (!turn.activeSkillName || !turn.allowedToolNames?.length) {
       return { allowedToolNames: null };
     }
     // 元能力(read_skill)并入白名单:pi-tool-adapter 用 allowedToolNames 做硬门,
     // 只把工具列进 tools 还不够——不在白名单里仍会被拦成 "not available"。
     // 二者必须同步补,否则模型看得到 read_skill 却调不动。
-    const allowed = new Set(turn.allowedToolNames ?? []);
+    const allowed = new Set(turn.allowedToolNames);
     for (const name of BaseChatRuntime.ALWAYS_AVAILABLE_TOOL_NAMES) {
       allowed.add(name);
     }

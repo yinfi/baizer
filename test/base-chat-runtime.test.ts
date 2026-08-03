@@ -192,6 +192,57 @@ async function runTests() {
     expect(prepared.systemPrompt!.includes('[Skill Hint]')).toBe(false);
   });
 
+  // 空 tools 声明在 pi-skill-source 里的语义是「不限制」(手写 skill 省掉 tools 字段即如此)。
+  // 工具清单与下游硬门必须对这一点给出同一个答案,否则模型看得到全量工具却一个也调不动。
+  await test('force-activating a skill that declares no tools does not close the hard gate', async () => {
+    const runtime = createChatRuntime({
+      memoryManager: null,
+      toolRegistry: {
+        getAllDefinitions: () => [
+          { name: 'search_vault', description: 'Search vault', parameters: {} },
+          { name: 'read_skill', description: 'Read a skill', parameters: {} },
+        ],
+        getDefinition: () => undefined,
+        execute: async () => ({}),
+      } as any,
+      skillRegistry: {
+        resolveByIntent: () => null,
+        getSkillSummaryText: () => '- freeform: Anything',
+        activateSkill: () => ({
+          skill: { name: 'freeform' },
+          instructions: 'Do whatever the request needs.',
+          tools: [],
+        }),
+      } as any,
+    });
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: 'go',
+      contextItems: [],
+      forcedSkillName: 'freeform',
+    } as any);
+
+    // 指令照常注入——用户点名了这个 skill。
+    expect(prepared.systemPrompt!.includes('Do whatever the request needs.')).toBe(true);
+    // 但工具没有被收窄,故不能声明白名单:非 null 的白名单会让硬门闭合到只剩 read_skill。
+    expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['search_vault', 'read_skill']);
+    expect((prepared as any).allowedToolNames).toBe(undefined);
+    expect((runtime as any).createSkillScope(prepared).allowedToolNames).toBe(null);
+  });
+
+  // 硬门只看白名单是否为空,不看它是 undefined 还是空数组——runtime-types 允许两者,
+  // 只挡住 undefined 就等于把这道防线的有效性押在「生产者恰好没给空数组」上。
+  await test('an empty allowed-tool list leaves the hard gate open, like an absent one', async () => {
+    const runtime = makeSkillRoutingRuntime();
+
+    const scope = (runtime as any).createSkillScope({
+      activeSkillName: 'freeform',
+      allowedToolNames: [],
+    });
+
+    expect(scope.allowedToolNames).toBe(null);
+  });
+
   await test('prepareTurn adds a file-operation contract for write requests', async () => {
     const runtime = createChatRuntime({
       memoryManager: null,

@@ -11,6 +11,7 @@ import {
   getSettingsOverviewActions,
   getRenderableSettingsSections,
   getDerivedSkillRows,
+  getRegenerateOutcomeMessage,
 } from '../src/settings';
 
 // 断言用英文原文 key(t() 在非中文环境返回原文),固定 locale 保证与运行环境无关。
@@ -438,6 +439,68 @@ async function runTests() {
 
   await test('an empty derived skill list yields no rows', () => {
     expect(getDerivedSkillRows([], new Map())).toEqual([]);
+  });
+
+  // ── 显式重新生成的结局提示 ──
+  // 三种结局必须各说各的：没做、试了没成、成了。把中间那种说成成功就是假成功提示。
+
+  // 被拒时必须点明是哪一项不满足。笼统列举全部前置条件会指向与本次无关的事:
+  // 关掉自动生成开关后点重新生成,却被告知去授权、配模型、检查插件启用状态。
+  await test('a refused regeneration names the one thing to change', () => {
+    const messages = ([
+      'auto-generate-off', 'plugin-control-off', 'model-not-ready',
+      'source-missing', 'source-excluded',
+    ] as const).map(blocker => getRegenerateOutcomeMessage('tasks', { blocker }));
+
+    // 每种成因给出不同的一句话,且都不读成成功。
+    expect(new Set(messages).size).toEqual(5);
+    expect(messages.every(m => /cannot regenerate/i.test(m))).toEqual(true);
+    expect(messages.some(m => /^regenerated the skill/i.test(m))).toEqual(false);
+  });
+
+  await test('a refused regeneration points at the exclude list when that is the cause', () => {
+    const message = getRegenerateOutcomeMessage('tasks', { blocker: 'source-excluded' });
+
+    expect(message.includes('exclude list')).toEqual(true);
+  });
+
+  await test('a failed regeneration names the plugin and the reason', () => {
+    const message = getRegenerateOutcomeMessage(
+      'tasks', { regenerated: false, failureReason: 'quota exceeded' },
+    );
+
+    expect({
+      names: message.includes('tasks'),
+      reason: message.includes('quota exceeded'),
+      // 不能读成成功——设置页此前正是在这里撒谎。
+      readsAsSuccess: /^regenerated the skill/i.test(message),
+    }).toEqual({ names: true, reason: true, readsAsSuccess: false });
+  });
+
+  await test('a failed regeneration without a reason still does not read as success', () => {
+    const message = getRegenerateOutcomeMessage(
+      'tasks', { regenerated: false, failureReason: null },
+    );
+
+    expect(/^regenerated the skill/i.test(message)).toEqual(false);
+  });
+
+  // 失败原因来自 provider 的异常消息,是任意外部文本。$& / $' 在 replace 的替换位
+  // 有特殊语义,直接拼进去会把文案吃掉——用户就看不到真正的原因了。
+  await test('a failure reason containing replacement patterns survives intact', () => {
+    const message = getRegenerateOutcomeMessage(
+      'tasks', { regenerated: false, failureReason: 'bad $& and $\' token' },
+    );
+
+    expect(message.includes('bad $& and $\' token')).toEqual(true);
+  });
+
+  await test('a successful regeneration reads as unqualified success', () => {
+    const message = getRegenerateOutcomeMessage(
+      'tasks', { regenerated: true, failureReason: null },
+    );
+
+    expect(message).toEqual('Regenerated the skill for tasks.');
   });
 }
 

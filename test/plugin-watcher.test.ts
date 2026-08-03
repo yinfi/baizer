@@ -630,6 +630,9 @@ async function runTests() {
     const adapter = new FakeAdapter();
     const manifests: Record<string, any> = {};
     const initiallyRegistered: string[] = [];
+    // 可变而非只读 options.failGeneration：要断言「成功后旧失败原因被清掉」，
+    // 就得在同一个 watcher 上先失败一次再成功一次。
+    let failGeneration = options.failGeneration ?? false;
 
     for (const skill of options.skills) {
       const body = skill.body ?? `# ${skill.pluginId} 用法`;
@@ -669,7 +672,7 @@ async function runTests() {
       },
       generateSkillMd: async () => {
         counters.generated += 1;
-        if (options.failGeneration) throw new Error('quota exceeded');
+        if (failGeneration) throw new Error('quota exceeded');
         return REGENERATED_MD;
       },
       writeSkillFile: async (id: string, content: string, mode: string) => {
@@ -694,7 +697,11 @@ async function runTests() {
       () => options.modelReady ?? true,
       () => {},
     );
-    return { adapter, counters, writeModes, names, unregistered, restored, localWatcher, localSettings, app };
+    return {
+      adapter, counters, writeModes, names, unregistered, restored,
+      localWatcher, localSettings, app,
+      setFailGeneration: (fail: boolean) => { failGeneration = fail; },
+    };
   }
 
   /** 从对账结果里取某个插件的状态；取不到就报错，避免 undefined 静默通过断言。 */
@@ -989,9 +996,10 @@ async function runTests() {
     });
     const before = s.adapter.files.get(pluginSkillFilePath('mine'));
 
-    const status = await s.localWatcher.regenerateDerivedSkill('mine');
+    const status: any = await s.localWatcher.regenerateDerivedSkill('mine');
 
-    expect(status).toBe(null);
+    // 报出是哪一项不满足，设置页才能说「去配模型」而不是列举全部前置条件。
+    expect(status.blocker).toBe('model-not-ready');
     expect(s.counters.generated).toBe(0);
     expect(s.counters.written).toBe(0);
     expect(s.adapter.files.get(pluginSkillFilePath('mine'))).toBe(before);
@@ -1004,7 +1012,20 @@ async function runTests() {
       allowPluginControl: false,
     });
 
-    expect(await s.localWatcher.regenerateDerivedSkill('mine')).toBe(null);
+    const status: any = await s.localWatcher.regenerateDerivedSkill('mine');
+    expect(status.blocker).toBe('plugin-control-off');
+    expect(s.counters.generated).toBe(0);
+  });
+
+  await test('an explicit regeneration is blocked when auto-generate is off', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'mine', recordedVersion: '1.0' }],
+      enabled: ['mine'],
+      autoGenerate: false,
+    });
+
+    const status: any = await s.localWatcher.regenerateDerivedSkill('mine');
+    expect(status.blocker).toBe('auto-generate-off');
     expect(s.counters.generated).toBe(0);
   });
 
@@ -1091,6 +1112,155 @@ async function runTests() {
 
     const ids = s.localWatcher.getDerivedSkillStatuses().map((x: any) => x.pluginId);
     expect(ids).toEqual(['kept']);
+  });
+
+  // ---------- 撤下的技能不能被别的路径悄悄放回来 ----------
+  // 对账把来源已消失的技能撤下，但撤下只发生在启动那一次。若会话中途还有别的
+  // 路径能重新注册，撤下就形同白做——模型又拿到一份无法执行的操作指南。
+
+  // 决策 3 第一行 + 用户故事 17：撤回插件控制授权后，任何路径都不该再提供派生技能。
+  await test('the polling pass does not re-offer a skill while plugin control is revoked', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'back', recordedVersion: '1.0' }],
+      enabled: ['back'],
+      allowPluginControl: false,
+    });
+    await s.localWatcher.reconcileDerivedSkills();
+    expect(s.names.has('plugin-back')).toBe(false);
+
+    // 插件从禁用变启用（或新装一个盘上还留着旧 SKILL.md 的插件）→ 轮询看到 added。
+    await (s.localWatcher as any).checkChanges();
+
+    expect(s.names.has('plugin-back')).toBe(false);
+  });
+
+  // 用户故事 16：加进排除名单后该技能就不再提供，不必等到下次启动对账。
+  // 排除名单走的是另一条路——getEnabledPluginIds 过滤掉它，于是轮询把它当作 removed。
+  await test('adding a plugin to the exclude list withdraws its skill on the next poll', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'skip', recordedVersion: '1.0' }],
+      enabled: ['skip'],
+    });
+    await (s.localWatcher as any).checkChanges();
+    expect(s.names.has('plugin-skip')).toBe(true);
+
+    s.localSettings.pluginSkillExcludeList = ['skip'];
+    await (s.localWatcher as any).checkChanges();
+
+    expect(s.names.has('plugin-skip')).toBe(false);
+  });
+
+  // 反向对照：来源一切正常时，轮询仍然要把盘上已有的技能恢复注册（零生成成本）。
+  await test('the polling pass still restores a healthy plugin\'s existing skill', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'fine', recordedVersion: '1.0', registered: false }],
+      enabled: ['fine'],
+    });
+
+    await (s.localWatcher as any).checkChanges();
+
+    expect(s.names.has('plugin-fine')).toBe(true);
+    expect(s.counters.generated).toBe(0);
+  });
+
+  // 决策 3 表格：来源不在了就不提供。显式「重新生成」也不能绕过这一行——
+  // 否则用户花一次网络+LLM 的钱，换回一份来源已消失的技能，还被报成 offered。
+  await test('an explicit regeneration is refused when the source plugin is gone', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'off', recordedVersion: '1.0' }],
+      enabled: [],
+    });
+    await s.localWatcher.reconcileDerivedSkills();
+
+    const status: any = await s.localWatcher.regenerateDerivedSkill('off');
+
+    expect(status.blocker).toBe('source-missing');
+    expect(s.counters.generated).toBe(0);
+    expect(s.names.has('plugin-off')).toBe(false);
+  });
+
+  await test('an explicit regeneration is refused for an excluded plugin', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'skip', recordedVersion: '1.0' }],
+      enabled: ['skip'],
+      excludeList: ['skip'],
+    });
+
+    const status: any = await s.localWatcher.regenerateDerivedSkill('skip');
+    expect(status.blocker).toBe('source-excluded');
+    expect(s.counters.generated).toBe(0);
+  });
+
+  // ---------- 失败原因：所有生成路径都要留痕，成功后要清掉 ----------
+  // ticket 05：失败原因必须以「另一部分应用能读到」的形式留存，键为插件 id。
+  // 只有启动扫描留痕是不够的——对账与显式重新生成同样是生成，同样会失败。
+
+  await test('a failed reconcile regeneration retains its reason, keyed by plugin', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'mine', recordedVersion: '1.0', installedVersion: '2.0' }],
+      enabled: ['mine'],
+      failGeneration: true,
+    });
+
+    await s.localWatcher.reconcileDerivedSkills();
+
+    expect(s.localWatcher.getGenerationFailures().get('mine')).toBe('quota exceeded');
+  });
+
+  await test('a failed explicit regeneration retains its reason', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'mine', recordedVersion: '1.0' }],
+      enabled: ['mine'],
+      failGeneration: true,
+    });
+
+    await s.localWatcher.regenerateDerivedSkill('mine');
+
+    expect(s.localWatcher.getGenerationFailures().get('mine')).toBe('quota exceeded');
+  });
+
+  // 成功必须清掉旧原因，否则设置页在整个会话里继续展示一个已经修好的失败。
+  await test('a successful regeneration clears a stale failure reason', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'mine', recordedVersion: '1.0' }],
+      enabled: ['mine'],
+      failGeneration: true,
+    });
+    await s.localWatcher.regenerateDerivedSkill('mine');
+    expect(s.localWatcher.getGenerationFailures().has('mine')).toBe(true);
+
+    s.setFailGeneration(false);
+    await s.localWatcher.regenerateDerivedSkill('mine');
+
+    expect(s.localWatcher.getGenerationFailures().has('mine')).toBe(false);
+  });
+
+  // 设置页据返回值决定弹「已重新生成」还是「暂时无法重新生成」。
+  // 失败的一轮不能返回一个看起来成功的对象——那会变成一句纯粹的假成功提示。
+  await test('a failed explicit regeneration is reported as a failure, not a success', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'mine', recordedVersion: '1.0' }],
+      enabled: ['mine'],
+      failGeneration: true,
+    });
+
+    const status = await s.localWatcher.regenerateDerivedSkill('mine');
+
+    expect(status?.regenerated).toBe(false);
+    expect(status?.failureReason).toBe('quota exceeded');
+  });
+
+  // 成功的一轮同样要能被区分出来。
+  await test('a successful explicit regeneration is reported as regenerated', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'mine', recordedVersion: '1.0' }],
+      enabled: ['mine'],
+    });
+
+    const status = await s.localWatcher.regenerateDerivedSkill('mine');
+
+    expect(status?.regenerated).toBe(true);
+    expect(status?.failureReason).toBe(null);
   });
 }
 
