@@ -136,6 +136,8 @@ export interface PreparedChatTurn {
   userRequest?: string;
   memoryContext?: string;
   activeSkillName?: string;
+  /** 激活来源：forced = 斜杠/强制激活（收窄工具集）；intent = 意图路由（全量工具）。 */
+  activeSkillSource?: 'forced' | 'intent';
   allowedToolNames?: string[];
   requiresFileWrite?: boolean;
   selection?: string;

@@ -141,7 +141,7 @@ async function runTests() {
       activateSkill: (name: string) => (
         name === 'web-clipper'
           ? {
-              skill: { name: 'web-clipper' },
+              skillName: 'web-clipper',
               instructions: 'Use save_webpage to save the requested page.',
               tools: [{ name: 'save_webpage', description: 'Save webpage', parameters: {} }],
             }
@@ -209,7 +209,7 @@ async function runTests() {
         resolveByIntent: () => null,
         getSkillSummaryText: () => '- freeform: Anything',
         activateSkill: () => ({
-          skill: { name: 'freeform' },
+          skillName: 'freeform',
           instructions: 'Do whatever the request needs.',
           tools: [],
         }),
@@ -506,6 +506,56 @@ async function runTests() {
 
     // 超过5词的英文实质请求，不是延续，环境上下文必须保留
     expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(true);
+  });
+
+  // 历史存在性由 runtime 从 sessionManager 获取，避免 skill 命令入口漏传。
+  const makeRuntimeWithSession = (hasHistory: boolean) => createChatRuntime({
+    memoryManager: null,
+    toolRegistry: {
+      getAllDefinitions: () => [],
+      execute: async () => ({}),
+    } as any,
+    skillRegistry: {
+      resolveByIntent: () => null,
+      getSkillSummaryText: () => '',
+      activateSkill: () => null,
+    } as any,
+    sessionManager: {
+      hasHistory: async () => hasHistory,
+    } as any,
+  });
+
+  await test('[B] runtime derives prior history from sessionManager when caller omits it', async () => {
+    const runtime = makeRuntimeWithSession(true);
+    const prepared = await runtime.prepareTurn({
+      userMessage: '需要',
+      contextItems: [ambientNote()],
+      conversationId: 'conv-1',
+    } as any);
+
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(false);
+  });
+
+  await test('[B] runtime keeps ambient context when sessionManager reports no history', async () => {
+    const runtime = makeRuntimeWithSession(false);
+    const prepared = await runtime.prepareTurn({
+      userMessage: '需要',
+      contextItems: [ambientNote()],
+      conversationId: 'conv-1',
+    } as any);
+
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(true);
+  });
+
+  await test('[B] explicit hasPriorContext still wins over the session lookup', async () => {
+    const runtime = makeRuntimeWithSession(false);
+    const prepared = await runtime.prepareTurn({
+      userMessage: '需要',
+      contextItems: [ambientNote()],
+      hasPriorContext: true,
+    } as any);
+
+    expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(false);
   });
 }
 

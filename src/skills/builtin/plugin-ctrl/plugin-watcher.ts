@@ -99,6 +99,8 @@ export class PluginWatcher {
   private lastPluginControlGranted: boolean;
   /** 扫描单飞标记：补跑由设置保存非阻塞触发，不能叠加第二轮 */
   private scanInFlight = false;
+  /** 轮询单飞：生成是慢操作，10 秒轮询不能叠加第二轮。 */
+  private pollingInFlight = false;
   /** 每个插件最近一次生成失败的原因（键 = 插件 id）；成功后清除。设置页据此展示「谁失败、为什么」 */
   private generationFailures = new Map<string, string>();
   /** 最近一次对账结果，供设置页展示来源版本与 staleness */
@@ -652,45 +654,78 @@ export class PluginWatcher {
   }
 
   private async checkChanges(): Promise<void> {
-    const currentIds = new Set(this.getEnabledPluginIds());
-    const { added, removed } = this.diffPlugins(this.snapshot, currentIds);
+    if (this.pollingInFlight) return;
+    this.pollingInFlight = true;
+    try {
+      const currentIds = new Set(this.getEnabledPluginIds());
+      const { added, removed } = this.diffPlugins(this.snapshot, currentIds);
 
-    const canGenerate = this.canGenerate();
-    for (const id of added) {
-      // 与对账同一把闸：撤下只在启动跑一次，若轮询能绕过它，撤下就形同白做——
-      // 撤回插件控制授权后新启用一个插件，就会把它的技能重新交给模型。
-      if (this.withdrawalReason(id)) continue;
-      if (await this.hasSkillFile(id)) {
-        await this.loadAndRegister(id);
-      } else if (canGenerate) {
-        const candidate = await this.getGenerationCandidate(id);
-        if (candidate) {
-          this.notify(t('Generating skill for {plugin}...').replace('{plugin}', id));
-          await this.generateAndRegister(id);
+      const canGenerate = this.canGenerate();
+      for (const id of added) {
+        // 与对账同一把闸：撤下只在启动跑一次，若轮询能绕过它，撤下就形同白做。
+        if (this.withdrawalReason(id)) continue;
+        if (await this.hasSkillFile(id)) {
+          if (await this.loadAndRegister(id)) {
+            this.failedRetries.delete(id);
+            this.generationFailures.delete(id);
+          }
+        } else if (canGenerate) {
+          const candidate = await this.getGenerationCandidate(id);
+          if (candidate) {
+            this.notify(t('Generating skill for {plugin}...').replace('{plugin}', id));
+            await this.generateAndRegister(id);
+          }
         }
       }
-    }
 
-    for (const id of removed) {
-      const skillName = `plugin-${id}`;
-      this.skillRegistry.unregisterSkill(skillName);
-      logger.info(`Unregistered skill: ${skillName}`, 'PluginWatcher');
-    }
+      // 主线已有保证：失败的生成最多跨轮询重试三次。若写盘后注册失败，
+      // 只有带 Baizer provenance 的派生文件可覆盖；无 provenance 的文件按用户文件处理。
+      if (canGenerate) {
+        for (const [id, retries] of [...this.failedRetries]) {
+          if (!currentIds.has(id) || retries >= MAX_RETRIES || this.withdrawalReason(id)) continue;
 
-    this.snapshot = currentIds;
+          let mode: 'first-write' | 'replace' = 'first-write';
+          if (await this.hasSkillFile(id)) {
+            const report = await readPluginSkillProvenance(this.app.vault.adapter, id);
+            if (!report.present) {
+              if (await this.loadAndRegister(id)) {
+                this.failedRetries.delete(id);
+                this.generationFailures.delete(id);
+              }
+              continue;
+            }
+            mode = 'replace';
+          }
+          await this.generateAndRegister(id, mode);
+        }
+      }
+
+      for (const id of removed) {
+        const skillName = `plugin-${id}`;
+        this.skillRegistry.unregisterSkill(skillName);
+        this.failedRetries.delete(id);
+        this.generationFailures.delete(id);
+        logger.info(`Unregistered skill: ${skillName}`, 'PluginWatcher');
+      }
+
+      this.snapshot = currentIds;
+    } finally {
+      this.pollingInFlight = false;
+    }
   }
 
   /** 返回是否真的生成并注册成功——完成提示的成功数只能来自这个返回值。 */
-  private async generateAndRegister(pluginId: string): Promise<boolean> {
+  private async generateAndRegister(
+    pluginId: string,
+    mode: 'first-write' | 'replace' = 'first-write',
+  ): Promise<boolean> {
     const retries = this.failedRetries.get(pluginId) || 0;
     if (retries >= MAX_RETRIES) return false;
 
     try {
       const info = await this.generator.collectPluginInfo(pluginId);
       const content = await this.generator.generateSkillMd(info);
-      // 这条路径只处理「还没有 skill 文件」的插件（见 getGenerationCandidate），
-      // 所以是首次写入；重新生成的覆盖场景由 reconcile 负责。
-      await this.generator.writeSkillFile(pluginId, content, 'first-write');
+      await this.generator.writeSkillFile(pluginId, content, mode);
 
       const registered = await this.loadAndRegister(pluginId);
       if (!registered) {

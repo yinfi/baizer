@@ -33,7 +33,8 @@ export interface ToolParameters {
 export interface ParameterDef {
   type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object';
   description: string;
-  items?: ParameterDef;
+  /** 数组元素的类型；语义上只需 type，故放宽为部分定义。 */
+  items?: Partial<ParameterDef>;
   enum?: string[];
 }
 
@@ -118,10 +119,12 @@ export interface SkillCommandEntry {
 }
 
 /**
- * Level 2 激活结果：触发 Skill 后返回的完整信息
+ * Level 2 激活结果：触发 Skill 后返回的完整信息。
+ * 只承载实际消费字段（调用方只读 skillName/tools/instructions），
+ * 不再伪装成完整 Skill 接口。
  */
 export interface ActivatedSkill {
-  skill: Skill;
+  skillName: string;
   tools: ToolDefinition[];
   instructions: string;
 }
@@ -134,31 +137,4 @@ export interface ResolvedSkill {
   name: string;
   executionMode: 'direct' | 'instructions';
   execute(args: any, ctx: ToolContext): Promise<any>;
-}
-
-/**
- * 原子工具注册表接口
- */
-export interface IToolRegistry {
-  register(tool: Tool): void;
-  get(name: string): Tool | undefined;
-  getDefinition(name: string): ToolDefinition | undefined;
-  getDefinitions(names: string[]): ToolDefinition[];
-  execute(name: string, args: any): Promise<any>;
-  listAll(): Tool[];
-}
-
-/**
- * Skill 注册表接口
- */
-export interface ISkillRegistry {
-  registerBuiltin(skill: Skill): void;
-  loadUserSkills(skillsDir: string, app: import('obsidian').App): Promise<void>;
-  getSkillSummaries(): SkillSummary[];
-  listCommandEntries(): SkillCommandEntry[];
-  getSkillSummaryText(): string;
-  resolveByCommand(command: string): ResolvedSkill | null;
-  resolveByIntent(message: string): ResolvedSkill | null;
-  activateSkill(name: string, args?: any): ActivatedSkill | null;
-  listSkills(): SkillSummary[];
 }

@@ -431,7 +431,7 @@ export class ModelService {
                 userProfile: userProfile ?? null,
                 systemPromptOverride,
                 conversationId,
-                ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory(conversationId) } : {}),
+                // hasPriorContext 不再由此注入:runtime 自己向 sessionManager 查。
             });
             return await runtime.query(preparedTurn);
         } catch (e: any) {
@@ -470,7 +470,7 @@ export class ModelService {
                 obsidianContext,
                 userProfile: userProfile ?? null,
                 conversationId,
-                ...(this.sessionManager ? { hasPriorContext: await this.sessionManager.hasHistory(conversationId) } : {}),
+                // hasPriorContext 不再由此注入:runtime 自己向 sessionManager 查。
             });
             for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
                 yield event;
@@ -717,7 +717,7 @@ export class ModelService {
         return modelCatalog.getProviderCapabilities(this.getActiveProviderConfig());
     }
 
-    async executeSlashSkillCommand(command: string, input: string): Promise<any> {
+    async executeSlashSkillCommand(command: string, input: string, conversationId?: string): Promise<any> {
         const skill = this.skillRegistry.resolveByCommand(command);
         if (!skill) {
             return { success: false, error: `Unknown command: ${command}` };
@@ -725,10 +725,13 @@ export class ModelService {
 
         if (skill.executionMode === 'instructions') {
             const runtime = this.createChatRuntime();
+            // conversationId 必须透传:runtime 靠它向 sessionManager 查历史,
+            // 缺了就拿不到延续检测,短确认会被当成新话题。
             const preparedTurn = await runtime.prepareTurn({
                 userMessage: input,
                 contextItems: [],
                 forcedSkillName: skill.name,
+                conversationId,
             });
             const message = await runtime.query(preparedTurn);
             return { success: true, message };
@@ -881,8 +884,9 @@ export class ModelService {
      * 运行中补话入口:把一条用户指令转发给当前活跃 harness 的原生 steer(),
      * 不打断当前流,由 Harness 在下一轮纳入。无活跃 run 或空白文本时忽略。
      */
-    public steerActiveRun(text: string): void {
-        this.activeRunController.steer(text);
+    /** 返回补话是否已交给活跃 run。false = 模型不会看到它,调用方不应渲染成已发送。 */
+    public steerActiveRun(text: string): boolean {
+        return this.activeRunController.steer(text);
     }
 
     /**

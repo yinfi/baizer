@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, Notice, MarkdownView, setIcon } from 'obsidian
 import { EditorView } from '@codemirror/view';
 import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
-import { ChatController } from './chat-controller';
+import { ChatController, MessageAddedOptions } from './chat-controller';
 import { ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
 import { IPlugin, PLUGIN_ID, PLUGIN_NAME, VIEW_TYPE_SHELL } from '../mcp/types';
@@ -103,6 +103,13 @@ export class ShellView extends ItemView {
     /** 已晋升为稳定块的文本前缀长度(streamAccumulatedText 的字符数),尾部从此处开始。 */
     private streamRenderedLen = 0;
     private streamAccumulatedText: string = '';
+    /**
+     * 本轮流开始时投影里最后一条 ai 消息的 id。
+     * finalizeStream 靠它判断「最后一条 ai」是本轮新落的还是上一轮的残留——
+     * 本轮没有最终正文时不落消息(纯工具轮次),若不比对就会把操作栏
+     * 挂到上一轮的回复上,👍/👎/重试全部作用在错误的消息。
+     */
+    private streamPriorLastAiId: string | null = null;
     private streamNodeCount = 0;
     /** 智能体工具循环回合数(step_boundary 计数),用于时间线「Step N」分组标签。 */
     private streamStepCount = 0;
@@ -468,7 +475,7 @@ export class ShellView extends ItemView {
 
     private buildContextScopeSuggestions(query: string) {
         const normalized = query.toLowerCase();
-        const suggestions = [
+        const suggestions: SuggestionItem[] = [
             {
                 label: '@current',
                 desc: 'Add the current note',
@@ -746,6 +753,10 @@ export class ShellView extends ItemView {
         this.ensureTimelineDelegation();
         if (this.streamContainer) return;
 
+        // 记下开流前的最后一条 ai 消息,供 finalizeStream 区分本轮新落与上一轮残留。
+        const priorMessages = this.tabManager.getActiveTab()?.state.getMessages() ?? [];
+        this.streamPriorLastAiId = [...priorMessages].reverse().find(m => m.role === 'ai')?.id ?? null;
+
         this.loadingIndicatorEl?.remove();
         this.loadingIndicatorEl = null;
 
@@ -910,21 +921,33 @@ export class ShellView extends ItemView {
         }
 
         if (this.streamContainer) {
-            // 阶段C:用 tab.state 里刚落盘的真实 ai 消息(已带 assistantEntryId)渲染操作栏,
+            // 阶段C:用投影里刚落下的真实 ai 消息(已带 assistantEntryId)渲染操作栏,
             // 而非临时空壳——否则 sessionEntryId 缺失,重试按钮的显示条件永不满足。
-            // handleTabStreamEvent 在 done 时已先把 entryId 写进 tab.state,此处取最后一条 ai 消息即可。
+            // ChatController 在发出 done 之前就把该消息记进了投影(ADR 0002),
+            // 它的 id 与 ChatController 列表里的同一条一致,故 👍/👎 能回查到。
+            // 但「最后一条 ai」未必属于本轮:纯工具轮次没有最终正文、不落消息,
+            // 那时它是上一轮的残留。与开流前记下的 id 比对,不同才是本轮新落的。
             const activeMessages = this.tabManager.getActiveTab()?.state.getMessages() ?? [];
-            const lastAiMessage = [...activeMessages].reverse().find(m => m.role === 'ai');
+            const candidate = [...activeMessages].reverse().find(m => m.role === 'ai');
+            const lastAiMessage = candidate && candidate.id !== this.streamPriorLastAiId
+                ? candidate
+                : undefined;
             // 就近填充分叉源问题文本:该 ai 回复紧邻其前的 user 消息原文,供底部「分叉」输入预填。
-            const toolbarMessage: ChatMessage = lastAiMessage
+            // 兜底空壳仅在无持久会话时出现(投影里没有本轮消息);它的 id 与任何列表都对不上,
+            // 只有复制可用——与本轮无正文可言时(纯工具轮次)一并不渲染操作栏。
+            const toolbarMessage: ChatMessage | null = lastAiMessage
                 ? { ...lastAiMessage, forkSourceText: this.findPrecedingUserMessage(lastAiMessage)?.content }
-                : {
-                    id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                    role: 'ai',
-                    content: resolvedText,
-                    timestamp: Date.now(),
-                };
-            this.getMessageRenderer().addActionToolbar(this.streamContainer, toolbarMessage);
+                : resolvedText
+                    ? {
+                        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                        role: 'ai',
+                        content: resolvedText,
+                        timestamp: Date.now(),
+                    }
+                    : null;
+            if (toolbarMessage) {
+                this.getMessageRenderer().addActionToolbar(this.streamContainer, toolbarMessage);
+            }
         }
 
         // 流结束:该容器已定型为一条普通 ai 消息,纳入虚拟化观察。
@@ -939,6 +962,7 @@ export class ShellView extends ItemView {
         this.streamCursorEl = null;
         this.streamRenderedLen = 0;
         this.streamAccumulatedText = '';
+        this.streamPriorLastAiId = null;
         this.streamNodeCount = 0;
         this.streamStepCount = 0;
         this.pendingStepDivider = false;
@@ -1265,22 +1289,6 @@ export class ShellView extends ItemView {
         return button;
     }
 
-    private showAvailableTools() {
-        const tools = this.modelService.getAvailableTools();
-        if (tools && tools.length > 0) {
-            let toolsList = 'Available Tools:\n';
-            tools.forEach(tool => {
-                toolsList += `\n${tool.name}: ${tool.description}\n`;
-                if (tool.input_schema && tool.input_schema.properties) {
-                    toolsList += `  Parameters: ${Object.keys(tool.input_schema.properties).join(', ')}\n`;
-                }
-            });
-            new Notice(toolsList, 8000);
-            return;
-        }
-        new Notice('No tools available or tools not loaded yet.');
-    }
-
     private addBacklinksScopeContext() {
         this.contextManager.addContext({
             id: 'scope:backlinks',
@@ -1330,16 +1338,6 @@ export class ShellView extends ItemView {
             this.scopePillEl.setAttribute('title', t('No note in scope'));
         }
         this.scopePillEl.toggleClass('is-scoped', scoped);
-    }
-
-    private prepareSelectionEdit() {
-        if (!this.inputEl) return;
-        if (!this.inputEl.value.trim().startsWith('/edit')) {
-            this.inputEl.value = '/edit ';
-        }
-        this.inputEl.focus();
-        this.inputEl.selectionStart = this.inputEl.selectionEnd = this.inputEl.value.length;
-        this.adjustHeight();
     }
 
     private openPluginSettings() {
@@ -1565,96 +1563,6 @@ export class ShellView extends ItemView {
         this.inputToolbar.updateThinking((settings.thinkingLevel ?? 'medium') as ThinkingLevel);
     }
 
-    private async populateModelOptions(selectEl: HTMLSelectElement, forceRefresh: boolean = false) {
-        const settings = this.getPluginInstance()?.settings;
-        if (!settings?.providers) return;
-
-        const requestId = ++this.modelLoadRequestId;
-        const config = settings.providers[settings.activeProvider];
-        if (!config) return;
-
-        selectEl.empty();
-        selectEl.disabled = true;
-        const loadingOption = selectEl.createEl('option', {
-            value: '',
-            text: `Loading ${config.label} models...`
-        });
-        loadingOption.selected = true;
-
-        try {
-            const models = await this.modelService.getAvailableModels(forceRefresh);
-
-            // 用户在请求期间切换了 provider，丢弃旧请求结果
-            if (requestId !== this.modelLoadRequestId) return;
-
-            selectEl.empty();
-
-            if (!models.length) {
-                const emptyOption = selectEl.createEl('option', {
-                    value: '',
-                    text: 'No models available'
-                });
-                emptyOption.selected = true;
-                emptyOption.disabled = true;
-                selectEl.disabled = true;
-                return;
-            }
-
-            const currentModel = config.model || '';
-
-            models.forEach(model => {
-                const option = selectEl.createEl('option', {
-                    value: model.value,
-                    text: model.label
-                });
-                if (model.value === currentModel) {
-                    option.selected = true;
-                }
-            });
-
-            if (currentModel && !models.some(m => m.value === currentModel)) {
-                const current = selectEl.createEl('option', {
-                    value: currentModel,
-                    text: `${currentModel} (Current)`
-                });
-                current.selected = true;
-            }
-
-            selectEl.disabled = false;
-        } catch (error: any) {
-            if (requestId !== this.modelLoadRequestId) return;
-            logger.warn(
-                `Failed to load model list: ${error?.message || 'Unknown error'}`,
-                'ShellView.populateModelOptions'
-            );
-            selectEl.empty();
-            const failedOption = selectEl.createEl('option', {
-                value: '',
-                text: 'Model list unavailable'
-            });
-            failedOption.selected = true;
-            failedOption.disabled = true;
-            selectEl.disabled = true;
-        }
-    }
-
-    private populateProviderOptions(selectEl: HTMLSelectElement) {
-        const settings = this.getPluginInstance()?.settings;
-        if (!settings?.providers) return;
-
-        selectEl.empty();
-        const active = settings.activeProvider || 'gemini';
-
-        for (const [id, config] of Object.entries(settings.providers) as [string, any][]) {
-            const configured = !!config.apiKey;
-            const option = selectEl.createEl('option', {
-                value: id,
-                text: configured ? config.label : `${config.label} !`
-            });
-            if (id === active) option.selected = true;
-        }
-    }
-
     private updatePlaceholder() {
         if (!this.inputEl) return;
         const settings = this.getPluginInstance()?.settings;
@@ -1665,35 +1573,6 @@ export class ShellView extends ItemView {
 
     public async updateModelSelector(forceRefresh: boolean = false) {
         await this.refreshInputToolbarModels(forceRefresh);
-    }
-
-    private clearChat() {
-        // 只清空当前活动 tab 的子树(其余 tab 子树保留)。
-        const activeContainer = this.getActiveMessageContainer();
-        this.unobserveContainerEntries(activeContainer);
-        activeContainer.empty();
-        const activeTab = this.tabManager.getActiveTab();
-        activeTab?.state.clearMessages();
-        if (activeTab) {
-            this.tabManager.updateTab(activeTab.id, {
-                title: `Chat ${activeTab.index}`,
-                createdAt: undefined,
-                updatedAt: undefined,
-                pinnedAt: undefined,
-                providerId: this.getActiveProviderId(),
-                modelId: this.getActiveModelId(),
-                currentNote: this.getCurrentNotePath(),
-            });
-            void this.conversationController.deleteConversation(activeTab.id);
-        }
-        // Re-add welcome message
-        this.appendMessage({
-            id: 'init',
-            role: 'system',
-            content: 'Chat cleared.',
-            timestamp: Date.now()
-        });
-        new Notice('Chat cleared');
     }
 
     private async createAndShowTab() {
@@ -1801,7 +1680,7 @@ export class ShellView extends ItemView {
             app: this.app,
             api: this.modelService,
             conversationId: id,
-            onMessageAdded: (msg) => this.handleTabMessageAdded(id, msg),
+            onMessageAdded: (msg, options) => this.handleTabMessageAdded(id, msg, options),
             onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
             onStreamEvent: (event) => this.handleTabStreamEvent(id, event),
             onClear: () => this.handleTabClear(id),
@@ -1815,11 +1694,18 @@ export class ShellView extends ItemView {
         return session;
     }
 
-    private handleTabMessageAdded(tabId: TabId, msg: ChatMessage) {
+    /**
+     * 收到 ChatController(消息列表的唯一作者)的记录通知。
+     * tab.state 是只读投影:永远写,不自己造消息(ADR 0002)。
+     * alreadyRendered 的消息已随 stream 事件上屏,只记录、不重画。
+     */
+    private handleTabMessageAdded(tabId: TabId, msg: ChatMessage, options?: MessageAddedOptions) {
         const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
         if (tab) {
             tab.state.addMessage(msg);
         }
+
+        if (options?.alreadyRendered) return;
 
         if (this.tabManager.getActiveTab()?.id === tabId) {
             this.appendMessage(msg);
@@ -1851,8 +1737,9 @@ export class ShellView extends ItemView {
         if (event.type === 'done') {
             const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
             if (tab) {
-                // 阶段B:把本轮 entryId 锚定到 tab.state 的消息(阶段C 分叉/重试的定位依据)。
-                // user entry 打到最近一条尚未锚定的 user 消息;assistant entry 打到本轮新建的 ai 消息。
+                // 阶段B:把本轮 user entryId 锚定到投影里最近一条尚未锚定的 user 消息
+                // (阶段C 分叉/重试的定位依据)。
+                // ai 消息不在此创建——它由 ChatController 在发出 done 之前就记进了投影(ADR 0002)。
                 const entryIds = event.entryIds;
                 if (entryIds?.userEntryId) {
                     const messages = tab.state.getMessages();
@@ -1863,16 +1750,6 @@ export class ShellView extends ItemView {
                         }
                     }
                 }
-                if (event.text) {
-                    tab.state.addMessage({
-                        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                        role: 'ai',
-                        content: event.text,
-                        timestamp: Date.now(),
-                        sessionEntryId: entryIds?.assistantEntryId,
-                        metadata: event.interrupted ? { interrupted: true } : undefined,
-                    });
-                }
             }
         }
 
@@ -1880,7 +1757,9 @@ export class ShellView extends ItemView {
             this.handleStreamEvent(event);
         } else {
             this.tabManager.markAttention(tabId, true);
-            // 后台 tab 有流事件(done 时会落 ai 消息):标脏,切回时重建。
+            // 后台 tab 有流事件:标脏,切回时重建。
+            // 这也是流式 ai 回复在后台 tab 的标脏来源——它在 handleTabMessageAdded
+            // 里带 alreadyRendered 早退,不走那边的标脏分支。
             this.dirtyTabs.add(tabId);
         }
     }
@@ -2314,6 +2193,7 @@ export class ShellView extends ItemView {
         this.streamCursorEl = null;
         this.streamRenderedLen = 0;
         this.streamAccumulatedText = '';
+        this.streamPriorLastAiId = null;
         this.streamNodeCount = 0;
         this.streamStepCount = 0;
         this.pendingStepDivider = false;

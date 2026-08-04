@@ -6,7 +6,7 @@ import { setLocale, Locale } from './src/i18n/zh';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
-import { ghostTextExtension, showGhostText, hideGhostText, showThinkingGhostText, disposeGhostLiveRegion } from './src/ui/ghost-text';
+import { ghostTextExtension, showGhostText, storeGhostText, hideGhostText, showThinkingGhostText, disposeGhostLiveRegion } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
 import { requestGuardianResponse } from './src/ui/guardian-request';
 import { GuardianCompletionService, getGuardianAutoDelayMs, shouldScheduleDeepEscalation, GUARDIAN_WEAK_COMPLETION_REASON } from './src/ui/guardian-completion';
@@ -52,7 +52,11 @@ export default class BaizerPlugin extends Plugin {
     pluginWatcher: PluginWatcher | null = null;
     private inboxAutosave: InboxAutosaveCoordinator | null = null;
     private guardianCheckTimer: number | null = null;
+    // 快补全的请求序号。既是日志 ID,也是快路径 isStale 的判据:
+    // 递增它即宣告此前所有在途快请求作废。深路径不得触碰它。
     private guardianRequestSeq = 0;
+    // 深补全的请求序号,仅用于日志关联,不参与任何 staleness 判定。
+    private guardianDeepRequestSeq = 0;
     // 自动补全在途请求的单飞控制：新请求开始时 abort 上一个，避免并发堆积。
     private guardianInflight: AbortController | null = null;
     // 深补全(手动触发)独立单飞：与自动补全分离,避免昂贵的手动请求被随手打字 abort。
@@ -136,7 +140,11 @@ export default class BaizerPlugin extends Plugin {
         this.pluginWatcher = new PluginWatcher(
             this.app,
             this.skillRegistry,
-            new PluginSkillGenerator(this.app, this.modelService),
+            new PluginSkillGenerator(
+                this.app,
+                this.modelService,
+                () => this.toolRegistry.listAll().map(tool => tool.name),
+            ),
             this.settings,
             // 只传「模型是否可用」这一个布尔，不把整个 ModelService 交给 watcher。
             () => this.modelService.isGenerationConfigured(),
@@ -281,9 +289,10 @@ export default class BaizerPlugin extends Plugin {
         let leaf = leaves[0] ?? null;
 
         if (!leaf) {
-            leaf = workspace.getRightLeaf(false);
-            if (!leaf) return;
-            await leaf.setViewState({ type: VIEW_TYPE_SHELL, active: true });
+            const newLeaf = workspace.getRightLeaf(false);
+            if (!newLeaf) return;
+            await newLeaf.setViewState({ type: VIEW_TYPE_SHELL, active: true });
+            leaf = newLeaf;
         }
 
         await workspace.revealLeaf(leaf);
@@ -647,7 +656,7 @@ export default class BaizerPlugin extends Plugin {
             const currentLine = view.state.doc.line(result.line);
             const safeCh = Math.min(result.ch, currentLine.length);
 
-            showGhostText(view, result.suggestion, result.line, safeCh);
+            this.presentGuardianSuggestion(view, result.suggestion, result.line, safeCh);
 
             updateGuardianState(
                 view,
@@ -792,7 +801,11 @@ export default class BaizerPlugin extends Plugin {
         const requestLineText = editor.getLine(requestLine) || '';
         const lineNumber = cursor.line + 1;
         const startedAt = Date.now();
-        const requestSeq = ++this.guardianRequestSeq;
+        // 深补全用自己的序号,不碰 guardianRequestSeq。
+        // 那个计数器是快路径 isStale 的判据(见 runAutoGuardianCheck),深路径这边
+        // 只拿它做日志 ID——递增它会让任何在途的快补全立刻变 stale 被丢弃,
+        // 即使它马上就要返回可用建议。两条路径本应各自独立可取消。
+        const requestSeq = ++this.guardianDeepRequestSeq;
 
         const isStale = () => {
             const c = editor.getCursor();
@@ -856,7 +869,7 @@ export default class BaizerPlugin extends Plugin {
             }
             const currentLine = view.state.doc.line(result.line);
             const safeCh = Math.min(result.ch, currentLine.length);
-            showGhostText(view, result.suggestion, result.line, safeCh);
+            this.presentGuardianSuggestion(view, result.suggestion, result.line, safeCh);
             updateGuardianState(
                 view,
                 result.line,
@@ -941,6 +954,25 @@ export default class BaizerPlugin extends Plugin {
         if (Array.isArray(value)) return `[${value.join(',')}]`;
         if (typeof value === 'string') return JSON.stringify(value);
         return String(value);
+    }
+
+    /**
+     * 按 UI Style 设置呈现建议。
+     *
+     * ghost / hybrid:显示行内 ghost text,Tab 接受。
+     * gutter:不显示 ghost,只在 gutter 亮点提示「有建议」,但仍可 Tab 接受
+     *        (storeGhostText 存的是 visible:false + acceptable:true)。
+     *
+     * 三种模式的差别只在这一个决定上,所以它必须只有一处。此前两个调用点各自
+     * 无条件调 showGhostText,而 shouldShowGuardianGhostText() 只被当成日志字段,
+     * 导致「Gutter Dot (Subtle)」选项完全没有效果。
+     */
+    private presentGuardianSuggestion(view: EditorView, suggestion: string, line: number, ch: number): void {
+        if (this.shouldShowGuardianGhostText()) {
+            showGhostText(view, suggestion, line, ch);
+        } else {
+            storeGhostText(view, suggestion, line, ch);
+        }
     }
 
     private shouldShowGuardianGhostText(): boolean {
@@ -1074,7 +1106,7 @@ Instructions:
                 const safeCh = Math.min(cursor.ch, currentLine.length);
 
                 logger.debug('Showing ghost text', 'Guardian', { suggestion: data.suggestion, line: lineNumber, ch: safeCh });
-                showGhostText(view, data.suggestion, lineNumber, safeCh);
+                this.presentGuardianSuggestion(view, data.suggestion, lineNumber, safeCh);
                 updateGuardianState(view, lineNumber, GuardianState.HasSuggestion);
             } else {
                 // console.warn("Guardian: Invalid suggestion data", data);

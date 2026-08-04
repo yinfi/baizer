@@ -1,4 +1,4 @@
-﻿import { App, MarkdownView } from 'obsidian';
+﻿import { App, MarkdownView, TFile } from 'obsidian';
 import { ModelService } from '../services/model-service';
 import { StreamEvent } from '../models/interfaces';
 import { logger } from '../utils/logger';
@@ -17,6 +17,12 @@ import { ChatMessage } from './types';
 import { WorkspaceEditSummary } from '../services/workspace-edit-service';
 import { PLUGIN_ID } from '../mcp/types';
 
+/** 记录一条消息时告知宿主的事实(ADR 0002:记录与绘制分离)。 */
+export interface MessageAddedOptions {
+    /** 该消息已随 stream 事件上屏,宿主只记录、不重画。 */
+    alreadyRendered?: boolean;
+}
+
 export interface ChatControllerOptions {
     app: App;
     api: ModelService;
@@ -26,7 +32,8 @@ export interface ChatControllerOptions {
      * 缺省时退化为无持久会话(每轮内存临时会话)。
      */
     conversationId?: string;
-    onMessageAdded?: (message: ChatMessage) => void;
+    /** 消息已记入本控制器的列表(唯一作者)。宿主据此更新自己的只读投影。 */
+    onMessageAdded?: (message: ChatMessage, options?: MessageAddedOptions) => void;
     onStatusChanged?: (isResponding: boolean) => void;
     onStreamEvent?: (event: StreamEvent) => void;
     /** /clear 时触发:宿主清空该 tab 的可见历史(tab.state)并重渲。 */
@@ -42,7 +49,7 @@ export class ChatController {
     private readonly conversationId?: string;
     private messages: ChatMessage[] = [];
     // private isResponding: boolean = false; // Unused
-    private onMessageAdded?: (message: ChatMessage) => void;
+    private onMessageAdded?: (message: ChatMessage, options?: MessageAddedOptions) => void;
     private onStatusChanged?: (isResponding: boolean) => void;
     private onStreamEvent?: (event: StreamEvent) => void;
     private onClear?: () => void;
@@ -137,8 +144,14 @@ export class ChatController {
         const streamController = new AbortController();
         this.activeStreamController = streamController;
         let fullText = '';
-        let sawDone = false;
         let turnEntryIds: { userEntryId?: string; assistantEntryId?: string } | undefined;
+        // 本轮是否已记过 ai 回复。正常收尾在 done 时记,中断在 catch 里记,二者互斥。
+        let assistantRecorded = false;
+        // 正文是否被缓冲(待审批 / 写请求未落地),即屏幕上还没显示过。
+        // 必须提到与 fullText 同一作用域:catch 里的中断路径也要读它,
+        // 否则会记下一条用户从未见过的回复(它标 alreadyRendered,宿主不画,
+        // 于是只在切 tab 重渲时凭空出现)。
+        let textWithheld = false;
 
         try {
             if (this.onStreamEvent) {
@@ -186,6 +199,8 @@ export class ChatController {
                                     this.onStreamEvent(bufferedEvent);
                                 }
                                 bufferedTextEvents.length = 0;
+                                // 缓冲的正文补发上屏了,不再算「未显示」。
+                                textWithheld = false;
                             }
                         }
                     }
@@ -193,31 +208,39 @@ export class ChatController {
                     if (event.type === 'text_delta') {
                         if (approvalRequest || (isWriteRequest && !successfulFileWrite)) {
                             bufferedTextEvents.push(event);
+                            textWithheld = true;
                         } else {
                             this.onStreamEvent(event);
                         }
                     } else if (event.type === 'done') {
-                        if (approvalRequest || (isWriteRequest && !successfulFileWrite)) {
-                            this.onStreamEvent({ ...event, text: '' });
-                        } else {
-                            this.onStreamEvent(event);
+                        const suppressed = !!approvalRequest || (isWriteRequest && !successfulFileWrite);
+                        fullText = approvalRequest ? '' : event.text;
+                        turnEntryIds = event.entryIds;
+                        // 回填 user 消息的 entry 锚定(ai 消息紧随其后创建时一并打)。
+                        if (turnEntryIds?.userEntryId && userMessageId) {
+                            const userMsg = this.messages.find(m => m.id === userMessageId);
+                            if (userMsg) userMsg.sessionEntryId = turnEntryIds.userEntryId;
                         }
+                        // ADR 0002:宿主在处理 done 时用投影里的真实 ai 消息渲染操作栏,
+                        // 所以记录必须先于 done 事件发出,否则它只能拿到上一轮的消息。
+                        // 抑制态(待审批 / 写请求未落地)不落 ai 消息:审批由卡片承载,
+                        // 写失败在循环后落一条 system 警告。
+                        // 空正文也不落:该列表现在是渲染来源,一条空 ai 消息会在重渲时
+                        // 变成一个带操作栏的空气泡(纯工具轮次可能没有最终正文)。
+                        if (!suppressed && fullText) {
+                            this.recordStreamedReply(fullText, {
+                                assistantEntryId: turnEntryIds?.assistantEntryId,
+                            });
+                            assistantRecorded = true;
+                        }
+                        this.onStreamEvent(suppressed ? { ...event, text: '' } : event);
                     } else if (event.type === 'tool_call' || event.type === 'tool_result' || event.type === 'step_boundary') {
                         this.onStreamEvent(event);
                     } else if (event.type === 'error') {
                         this.onStreamEvent(event);
                     }
 
-                    if (event.type === 'done') {
-                        sawDone = true;
-                        fullText = approvalRequest ? '' : event.text;
-                        turnEntryIds = event.entryIds;
-                        // 回填 user 消息的 entry 锚定(ai 消息在下方创建时一并打)。
-                        if (turnEntryIds?.userEntryId && userMessageId) {
-                            const userMsg = this.messages.find(m => m.id === userMessageId);
-                            if (userMsg) userMsg.sessionEntryId = turnEntryIds.userEntryId;
-                        }
-                    } else if (event.type === 'error') {
+                    if (event.type === 'error') {
                         this.addMessage('system', `Error: ${event.message}`);
                         return;
                     } else if (event.type === 'text_delta') {
@@ -229,25 +252,16 @@ export class ChatController {
                         fullText = '';
                     }
                 }
-        // 流式模式下只记录到历史，不触发 appendMessage（UI 已通过 stream 事件渲染）
                 if (!approvalRequest) {
                     if (isWriteRequest && !successfulFileWrite) {
                         this.addMessage(
                             'system',
                             this.getFileWriteFailureMessage(attemptedFileWrite, lastWriteError)
                         );
-                    } else {
-                        if (sawDone || fullText) {
-                            const msg: ChatMessage = {
-                                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                                role: 'ai',
-                                content: fullText,
-                                timestamp: Date.now(),
-                                sessionEntryId: turnEntryIds?.assistantEntryId,
-                                metadata: sawDone ? undefined : { interrupted: true }
-                            };
-                            this.messages.push(msg);
-                        }
+                    } else if (!assistantRecorded && fullText && !textWithheld) {
+                        // 流正常收尾但没有 done 事件(runtime 提前结束):仍把已有正文记为
+                        // 一条中断的回复,否则这段文字只存在于屏幕上、不在任何列表里。
+                        this.recordStreamedReply(fullText, { interrupted: true });
                     }
                 }
             } else {
@@ -259,7 +273,21 @@ export class ChatController {
             }
         } catch (error: any) {
             if (this.isAbortError(error)) {
-                this.onStreamEvent?.({ type: 'done', text: fullText, interrupted: true });
+                // 中断路径过去只发 done 事件、不记消息:宿主的投影里有这条回复,
+                // 本列表里没有,两份内容因此分叉(ADR 0002)。改为走同一个记录入口。
+                // textWithheld 时不记:那段正文还在缓冲里、屏幕上从没出现过,
+                // 记下来就成了一条只在重渲时冒出来的幽灵回复。
+                if (!assistantRecorded && fullText && !textWithheld) {
+                    this.recordStreamedReply(fullText, { interrupted: true });
+                }
+                // done.text 同样要挡:宿主的 finalizeStream 会把它渲染进流容器,
+                // 并给它挂一个 id 对不上任何列表的操作栏(👍/👎/重试全部空操作)。
+                // 与正常 done 路径的抑制态一致——那里也是发 text: ''。
+                this.onStreamEvent?.({
+                    type: 'done',
+                    text: textWithheld ? '' : fullText,
+                    interrupted: true,
+                });
                 this.addMessage('system', 'Response stopped.');
                 return;
             }
@@ -285,7 +313,7 @@ export class ChatController {
 
         if (matchedSkillCommand && typeof (this.api as any).executeSlashSkillCommand === 'function') {
             try {
-                const result = await (this.api as any).executeSlashSkillCommand(cmd, argStr.trim());
+                const result = await (this.api as any).executeSlashSkillCommand(cmd, argStr.trim(), this.conversationId);
                 this.handleStructuredResult(result);
             } catch (error: any) {
                 this.handleError(error);
@@ -445,7 +473,12 @@ export class ChatController {
         const steer = (this.api as any).steerActiveRun;
         if (typeof steer !== 'function') return false;
 
-        steer.call(this.api, trimmed);
+        // 必须听 steer 的回话,不能只看自己的 activeStreamController:
+        // 后者在调 chatStream 之前就置位,而 harness 要到 queryStream 内部
+        // 若干 await 之后才 register。这段窗口里补话会被丢弃,
+        // 若仍渲染用户气泡,用户会以为发出去了。
+        if (steer.call(this.api, trimmed) !== true) return false;
+
         this.addMessage('user', trimmed);
         return true;
     }
@@ -684,25 +717,56 @@ export class ChatController {
 
         try {
             const file = this.app.vault?.getAbstractFileByPath?.(path);
-            if (!file) return;
+            if (!file || !(file instanceof TFile)) return;
             await this.app.workspace?.getLeaf?.(false)?.openFile?.(file);
         } catch (error) {
             logger.warn(`Unable to open file after write: ${path}`, 'ChatController.openFileFromToolResult', error);
         }
     }
 
-    private addMessage(role: 'user' | 'ai' | 'system', content: string, approval?: ApprovalRequest) {
+    /**
+     * 消息列表的唯一创建入口(ADR 0002)。
+     *
+     * 任何地方另建一条 ChatMessage,都会得到另一个 id——宿主的投影渲染操作栏、
+     * 本列表解析反馈,两边就再也对不上。所以 id 只在此处生成一次。
+     */
+    private addMessage(
+        role: 'user' | 'ai' | 'system',
+        content: string,
+        approval?: ApprovalRequest,
+        extra?: MessageAddedOptions & {
+            sessionEntryId?: string;
+            metadata?: ChatMessage['metadata'];
+        },
+    ) {
         const msg: ChatMessage = {
             id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
             role,
             content,
             timestamp: Date.now(),
             approval,
+            sessionEntryId: extra?.sessionEntryId,
+            metadata: extra?.metadata,
         };
         this.messages.push(msg);
         if (this.onMessageAdded) {
-            this.onMessageAdded(msg);
+            this.onMessageAdded(msg, { alreadyRendered: extra?.alreadyRendered === true });
         }
+    }
+
+    /**
+     * 记录一条流式 ai 回复。正文已随 text_delta 上屏,故标 alreadyRendered——
+     * 宿主只把它写进投影,不再画第二遍(ADR 0002)。
+     */
+    private recordStreamedReply(
+        text: string,
+        options: { assistantEntryId?: string; interrupted?: boolean } = {},
+    ) {
+        this.addMessage('ai', text, undefined, {
+            sessionEntryId: options.assistantEntryId,
+            metadata: options.interrupted ? { interrupted: true } : undefined,
+            alreadyRendered: true,
+        });
     }
 
     private addApprovalMessage(request: ApprovalRequest) {
@@ -1043,7 +1107,6 @@ export class ChatController {
 
         this.setResponding(true);
         try {
-            const prompt = `请根据以下指令修改文本，只返回修改后的文本，不要解释。\n\n指令: ${instruction}\n\n原文:\n${selection}`;
             const result = await this.api.chat(
                 instruction,
                 [],
@@ -1053,23 +1116,6 @@ export class ChatController {
             this.addMessage('ai', result);
         } catch (e: any) {
             this.addMessage('system', `${t('Edit failed:')} ${e.message}`);
-        } finally {
-            this.setResponding(false);
-        }
-    }
-
-    private async handleSave(url: string) {
-        if (!url.trim()) {
-            this.addMessage('system', t('Usage: `/save <url>`\nSupported: web pages, YouTube, Bilibili, WeChat articles'));
-            return;
-        }
-        this.setResponding(true);
-        try {
-            const prompt = `请使用 save_webpage 工具保存这个链接: ${url.trim()}`;
-            const result = await this.api.chat(prompt, [], '');
-            this.addMessage('ai', result);
-        } catch (e: any) {
-            this.addMessage('system', `${t('Save failed:')} ${e.message}`);
         } finally {
             this.setResponding(false);
         }
@@ -1117,29 +1163,6 @@ export class ChatController {
         }
 
         help += `\n\nType \`/\` to browse commands and \`@\` to mention files.`;
-        this.addMessage('system', help);
-    }
-
-    private showLegacyHelp() {
-        const help = `## Shell Commands
-
-| Command | Description |
-|------|------|
-| \`/clear\` | Clear session history |
-| \`/memory\` | View Hindsight memory |
-| \`/memory search <query>\` | Search Hindsight memory |
-| \`/memory forget <field>\` | Forget saved memory |
-| \`/new <title>\` | Create a new note |
-| \`/edit <instruction>\` | AI edit the selected text |
-| \`/open <file>\` | Open a file |
-| \`/save <url>\` | Save a webpage or video into the vault |
-| \`/tools\` | List available tools |
-| \`/wiki:compile [path]\` | Compile notes into the knowledge wiki |
-| \`/wiki:index\` | Open the knowledge wiki index |
-| \`/wiki:lint\` | Run the knowledge wiki health check |
-| \`/help\` | Show this help |
-
-**Tip**: Type \`/\` for command suggestions and \`@\` to mention files.`;
         this.addMessage('system', help);
     }
 

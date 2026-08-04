@@ -328,6 +328,7 @@ async function runTests() {
       (message: string) => { notices.push(message); },
     );
     return {
+      adapter,
       counters,
       notices,
       localWatcher,
@@ -463,6 +464,53 @@ async function runTests() {
     expect(counters.basic).toBe(1);
     expect(counters.full).toBe(1);
     expect(counters.written).toBe(1);
+  });
+
+  await test('polling is single-flight while a slow generation candidate is being inspected', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const { counters, localWatcher } = createCountingSetup(true, true, { gate });
+
+    const firstPoll = (localWatcher as any).checkChanges();
+    await Promise.resolve();
+    const overlappingPoll = (localWatcher as any).checkChanges();
+    await Promise.resolve();
+
+    release();
+    await Promise.all([firstPoll, overlappingPoll]);
+
+    expect(counters.basic).toBe(1);
+    expect(counters.generated).toBe(1);
+  });
+
+  await test('failed generation is attempted at most three times across polls', async () => {
+    const { counters, localWatcher } = createCountingSetup(
+      true, true, { failGeneration: true },
+    );
+
+    await (localWatcher as any).initialScan();
+    await (localWatcher as any).checkChanges();
+    await (localWatcher as any).checkChanges();
+    await (localWatcher as any).checkChanges();
+
+    expect(counters.generated).toBe(3);
+  });
+
+  await test('a user file created after a pre-write failure is never overwritten by retry', async () => {
+    const { adapter, counters, localWatcher } = createCountingSetup(
+      true, true, { failGeneration: true },
+    );
+    await (localWatcher as any).initialScan();
+    const path = pluginSkillFilePath('plugin-a');
+    const userContent = '---\nname: plugin-plugin-a\ndescription: user authored\n---\n# Mine';
+    adapter.files.set(path, userContent);
+
+    await (localWatcher as any).checkChanges();
+
+    expect(counters.generated).toBe(1);
+    expect(counters.written).toBe(0);
+    expect(adapter.files.get(path)).toBe(userContent);
+    expect(localWatcher.getGenerationFailures().has('plugin-a')).toBe(false);
   });
 
   await test('settings saved while still unready triggers nothing', async () => {

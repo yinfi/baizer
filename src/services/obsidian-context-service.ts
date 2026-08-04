@@ -1,4 +1,4 @@
-import { App } from 'obsidian';
+import { App, TFile } from 'obsidian';
 import { ContextItem } from './context-manager';
 import { budgetTextBlock } from './context-budget';
 
@@ -71,7 +71,7 @@ export class ObsidianContextService {
     const tags = this.extractTags(cache);
     const outgoingLinks = this.extractOutgoingLinks(cache);
     const content = includeCurrent ? await this.app.vault.read(activeFile) : '';
-    const editor = includeCurrent ? this.app.workspace.getMostRecentLeaf?.()?.view?.editor : null;
+    const editor = includeCurrent ? (this.app.workspace.getMostRecentLeaf?.()?.view as any)?.editor : null;
     const selectionText = includeCurrent ? this.normalizeSelection(editor?.getSelection?.()) : null;
     const selectionLine = includeCurrent ? this.normalizeLine(editor?.getCursor?.('from')?.line) : null;
     const activeHeading = includeCurrent ? this.findActiveHeading(content, selectionLine) : null;
@@ -121,8 +121,9 @@ export class ObsidianContextService {
       selection: selectionText
         ? {
             text: selectionText,
-            from: selectionLine,
-            to: selectionLine,
+            // normalizeLine 已保证 number | null；null 时保持 undefined 以匹配可选字段。
+            from: selectionLine ?? undefined,
+            to: selectionLine ?? undefined,
           }
         : null,
       activeHeading,
@@ -204,9 +205,9 @@ export class ObsidianContextService {
     return match ? match[1].length : 7;
   }
 
-  private async collectBacklinks(activeFile: any, includeBacklinks: boolean): Promise<Array<{ path: string; summary: string }>> {
+  private async collectBacklinks(activeFile: TFile, includeBacklinks: boolean): Promise<Array<{ path: string; summary: string }>> {
     if (!includeBacklinks) return [];
-    const backlinkMap = this.app.metadataCache.getBacklinksForFile?.(activeFile);
+    const backlinkMap = (this.app.metadataCache as any).getBacklinksForFile?.(activeFile);
     if (!backlinkMap) return [];
 
     const entries = Array.from(backlinkMap instanceof Map ? backlinkMap.keys() : Object.keys(backlinkMap));
@@ -214,7 +215,7 @@ export class ObsidianContextService {
 
     for (const path of entries.slice(0, this.options.maxBacklinks)) {
       const file = this.app.vault.getAbstractFileByPath?.(path);
-      if (!file) continue;
+      if (!(file instanceof TFile)) continue;
       const content = await this.app.vault.read(file);
       results.push({
         path,

@@ -1,6 +1,8 @@
 import { Plugin } from "obsidian";
 import { OntologyUpdateMode } from "../knowledge/types";
 import { Locale } from "../i18n/zh";
+import type { KnowledgeRuntime } from "../knowledge/runtime";
+import type { ToolRegistry } from "../skills/tool-registry";
 
 // ===== 品牌配置 — 改名只需改这里 =====
 export const PLUGIN_ID = 'baizer';
@@ -145,6 +147,8 @@ export interface PluginSettings {
     allowFileCreation: boolean;
     allowFileModification: boolean;
     allowPluginControl: boolean;
+    // 允许 AI 读取第三方插件配置原值；关闭时仅返回键名与类型，敏感字段始终脱敏。
+    allowPluginConfigValues: boolean;
     confirmExecutions: boolean;
 
     // --- 🧩 Skills ---
@@ -226,6 +230,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     allowFileCreation: true,
     allowFileModification: false,
     allowPluginControl: false,
+    allowPluginConfigValues: false,
     confirmExecutions: true,
 
     // Skills（空 = 全部可用，零迁移成本）
@@ -313,4 +318,6 @@ export interface IPlugin extends Plugin {
         >;
         deleteDerivedSkill(pluginId: string): Promise<boolean>;
     } | null;
+    knowledgeRuntime: KnowledgeRuntime | null;
+    toolRegistry: ToolRegistry;
 }

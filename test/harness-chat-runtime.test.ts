@@ -365,7 +365,7 @@ async function runTests() {
       skillRegistry: { getSkillSummaryText: () => '', activateSkill: () => null },
     });
     const runtime = await makeRuntime(deps);
-    const scopedTurn = createTurn({ activeSkillName: 'web', allowedToolNames: ['web_search'] });
+    const scopedTurn = createTurn({ activeSkillName: 'web', activeSkillSource: 'forced', allowedToolNames: ['web_search'] });
     const events = await collect(runtime.queryStream(scopedTurn));
     expect(deps.workspaceCalls).toEqual([]);
     const blocked = events.find(e => e.type === 'tool_result' && e.name === 'update_file') as any;
