@@ -117,98 +117,130 @@ async function runTests() {
     expect(memoryCalls[0].type).toBe('recallForPrompt');
   });
 
-  await test('prepareTurn activates the matched intent skill and scopes turn tools', async () => {
-    const runtime = createChatRuntime({
-      memoryManager: null,
-      toolRegistry: {
-        getAllDefinitions: () => [
-          { name: 'search_vault', description: 'Search vault', parameters: {} },
-          { name: 'save_webpage', description: 'Save webpage', parameters: {} },
-          { name: 'read_skill', description: 'Read a skill', parameters: {} },
-        ],
-        getDefinition: (name: string) => (
-          name === 'read_skill'
-            ? { name: 'read_skill', description: 'Read a skill', parameters: {} }
-            : undefined
-        ),
-        execute: async () => ({}),
-      } as any,
-      skillRegistry: {
-        resolveByIntent: (message: string) => (
-          message.includes('save') ? { name: 'web-clipper' } : null
-        ),
-        getSkillSummaryText: () => '- web-clipper: Save webpages',
-        activateSkill: (name: string) => (
-          name === 'web-clipper'
-            ? {
-                skillName: 'web-clipper',
-                instructions: 'Use save_webpage to save the requested page.',
-                tools: [{ name: 'save_webpage', description: 'Save webpage', parameters: {} }],
-              }
-            : null
-        ),
-      } as any,
-    });
+  // ADR-0002:关键词命中(猜)与斜杠强制激活(用户明说)分道——前者只提示,后者才收窄。
+  const makeSkillRoutingRuntime = () => createChatRuntime({
+    memoryManager: null,
+    toolRegistry: {
+      getAllDefinitions: () => [
+        { name: 'search_vault', description: 'Search vault', parameters: {} },
+        { name: 'save_webpage', description: 'Save webpage', parameters: {} },
+        { name: 'read_skill', description: 'Read a skill', parameters: {} },
+      ],
+      getDefinition: (name: string) => (
+        name === 'read_skill'
+          ? { name: 'read_skill', description: 'Read a skill', parameters: {} }
+          : undefined
+      ),
+      execute: async () => ({}),
+    } as any,
+    skillRegistry: {
+      resolveByIntent: (message: string) => (
+        message.includes('save') ? { name: 'web-clipper' } : null
+      ),
+      getSkillSummaryText: () => '- web-clipper: Save webpages',
+      activateSkill: (name: string) => (
+        name === 'web-clipper'
+          ? {
+              skillName: 'web-clipper',
+              instructions: 'Use save_webpage to save the requested page.',
+              tools: [{ name: 'save_webpage', description: 'Save webpage', parameters: {} }],
+            }
+          : null
+      ),
+    } as any,
+  });
+
+  await test('[ADR-0002] a keyword match only hints: full tools, full skill list, no scoping', async () => {
+    const runtime = makeSkillRoutingRuntime();
 
     const prepared = await runtime.prepareTurn({
       userMessage: 'Please save this webpage',
       contextItems: [],
     });
 
-    expect((prepared as any).activeSkillName).toBe('web-clipper');
-    expect((prepared as any).activeSkillSource).toBe('intent');
-    // F1-1: 意图激活不再收窄工具集——模型读到其它 skill 指令后能直接调用其工具
-    //（read_skill 只返回文本、不会更新白名单，意图路径不能依赖收窄）。
-    expect((prepared as any).allowedToolNames).toEqual(undefined);
-    expect(prepared.tools.map((tool: any) => tool.name)).toEqual([
-      'search_vault', 'save_webpage', 'read_skill',
-    ]);
-    // 激活指令 + skill 清单始终注入（渐进式披露入口不因激活而消失）。
-    expect(prepared.systemPrompt!.includes('Use save_webpage to save the requested page.')).toBe(true);
-    expect(prepared.systemPrompt!.includes('- web-clipper: Save webpages')).toBe(true);
+    // 猜中不等于用户点名:本轮不声明 active skill,下游 pi-tool-adapter 的硬门因此不闭合。
+    expect((prepared as any).activeSkillName).toBe(undefined);
+    expect((prepared as any).allowedToolNames).toBe(undefined);
+    // 全量工具集保留:提问 vault 的请求不会因命中 web 类 skill 而失去读笔记的能力。
+    expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['search_vault', 'save_webpage', 'read_skill']);
+    // skill 清单保留,模型仍能发现比关键词猜测更合适的 skill。
+    expect(prepared.systemPrompt).toContain('- web-clipper: Save webpages');
+    expect(prepared.systemPrompt!.includes('Use save_webpage to save the requested page.')).toBe(false);
+    // 命中的 skill 以「可忽略的建议」形式点名给模型。
+    expect(prepared.systemPrompt).toContain('[Skill Hint]');
+    expect(prepared.systemPrompt).toContain('"web-clipper" skill');
+    expect(prepared.systemPrompt).toContain('otherwise ignore it');
   });
 
-  await test('prepareTurn scopes tools to the skill subset only for forced activation', async () => {
+  await test('[ADR-0002] slash-command force-activation injects instructions and narrows tools', async () => {
+    const runtime = makeSkillRoutingRuntime();
+
+    const prepared = await runtime.prepareTurn({
+      userMessage: 'https://example.com',
+      contextItems: [],
+      forcedSkillName: 'web-clipper',
+    } as any);
+
+    expect((prepared as any).activeSkillName).toBe('web-clipper');
+    expect((prepared as any).allowedToolNames).toEqual(['save_webpage']);
+    // 收窄到 skill 工具子集时,元能力 read_skill 必须补回——否则渐进式披露断链,
+    // 模型再也读不到/切不到别的 skill(与运行中 steering 的 ActiveRunController 口径一致)。
+    expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['save_webpage', 'read_skill']);
+    expect(prepared.systemPrompt!.includes('Use save_webpage to save the requested page.')).toBe(true);
+    // 强制激活时清单被完整指令取代,也不该再出现关键词提示。
+    expect(prepared.systemPrompt!.includes('- web-clipper: Save webpages')).toBe(false);
+    expect(prepared.systemPrompt!.includes('[Skill Hint]')).toBe(false);
+  });
+
+  // 空 tools 声明在 pi-skill-source 里的语义是「不限制」(手写 skill 省掉 tools 字段即如此)。
+  // 工具清单与下游硬门必须对这一点给出同一个答案,否则模型看得到全量工具却一个也调不动。
+  await test('force-activating a skill that declares no tools does not close the hard gate', async () => {
     const runtime = createChatRuntime({
       memoryManager: null,
       toolRegistry: {
         getAllDefinitions: () => [
           { name: 'search_vault', description: 'Search vault', parameters: {} },
-          { name: 'save_webpage', description: 'Save webpage', parameters: {} },
           { name: 'read_skill', description: 'Read a skill', parameters: {} },
         ],
-        getDefinition: (name: string) => (
-          name === 'read_skill'
-            ? { name: 'read_skill', description: 'Read a skill', parameters: {} }
-            : undefined
-        ),
+        getDefinition: () => undefined,
         execute: async () => ({}),
       } as any,
       skillRegistry: {
         resolveByIntent: () => null,
-        getSkillSummaryText: () => '- web-clipper: Save webpages',
-        activateSkill: (name: string) => (
-          name === 'web-clipper'
-            ? {
-                skillName: 'web-clipper',
-                instructions: 'Use save_webpage to save the requested page.',
-                tools: [{ name: 'save_webpage', description: 'Save webpage', parameters: {} }],
-              }
-            : null
-        ),
+        getSkillSummaryText: () => '- freeform: Anything',
+        activateSkill: () => ({
+          skillName: 'freeform',
+          instructions: 'Do whatever the request needs.',
+          tools: [],
+        }),
       } as any,
     });
 
     const prepared = await runtime.prepareTurn({
-      userMessage: 'whatever',
+      userMessage: 'go',
       contextItems: [],
-      forcedSkillName: 'web-clipper',
+      forcedSkillName: 'freeform',
+    } as any);
+
+    // 指令照常注入——用户点名了这个 skill。
+    expect(prepared.systemPrompt!.includes('Do whatever the request needs.')).toBe(true);
+    // 但工具没有被收窄,故不能声明白名单:非 null 的白名单会让硬门闭合到只剩 read_skill。
+    expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['search_vault', 'read_skill']);
+    expect((prepared as any).allowedToolNames).toBe(undefined);
+    expect((runtime as any).createSkillScope(prepared).allowedToolNames).toBe(null);
+  });
+
+  // 硬门只看白名单是否为空,不看它是 undefined 还是空数组——runtime-types 允许两者,
+  // 只挡住 undefined 就等于把这道防线的有效性押在「生产者恰好没给空数组」上。
+  await test('an empty allowed-tool list leaves the hard gate open, like an absent one', async () => {
+    const runtime = makeSkillRoutingRuntime();
+
+    const scope = (runtime as any).createSkillScope({
+      activeSkillName: 'freeform',
+      allowedToolNames: [],
     });
 
-    expect((prepared as any).activeSkillSource).toBe('forced');
-    expect((prepared as any).allowedToolNames).toEqual(['save_webpage']);
-    // 论断:forced 收窄时,元能力 read_skill 必须补回——否则渐进式披露断链。
-    expect(prepared.tools.map((tool: any) => tool.name)).toEqual(['save_webpage', 'read_skill']);
+    expect(scope.allowedToolNames).toBe(null);
   });
 
   await test('prepareTurn adds a file-operation contract for write requests', async () => {
@@ -476,13 +508,7 @@ async function runTests() {
     expect(prepared.systemPrompt!.includes('AI digest body that should not hijack')).toBe(true);
   });
 
-  // ── 历史存在性由 runtime 自取,不再依赖调用方注入 ──────────────────────
-  //
-  // 背景:hasPriorContext 原先由 ModelService 查 sessionManager 后注入,
-  // 在 chat/chatStream 里各写一遍,而第三个入口 executeSlashSkillCommand
-  // 漏了 —— 于是 skill 命令永远拿不到延续检测。runtime 自己就持有
-  // sessionManager,该由它自己问。
-
+  // 历史存在性由 runtime 从 sessionManager 获取，避免 skill 命令入口漏传。
   const makeRuntimeWithSession = (hasHistory: boolean) => createChatRuntime({
     memoryManager: null,
     toolRegistry: {
@@ -501,8 +527,6 @@ async function runTests() {
 
   await test('[B] runtime derives prior history from sessionManager when caller omits it', async () => {
     const runtime = makeRuntimeWithSession(true);
-
-    // 注意:没有传 hasPriorContext——这正是 skill 命令入口的情形
     const prepared = await runtime.prepareTurn({
       userMessage: '需要',
       contextItems: [ambientNote()],
@@ -514,7 +538,6 @@ async function runTests() {
 
   await test('[B] runtime keeps ambient context when sessionManager reports no history', async () => {
     const runtime = makeRuntimeWithSession(false);
-
     const prepared = await runtime.prepareTurn({
       userMessage: '需要',
       contextItems: [ambientNote()],
@@ -525,10 +548,7 @@ async function runTests() {
   });
 
   await test('[B] explicit hasPriorContext still wins over the session lookup', async () => {
-    // 显式传入时不再查会话:保留这条是为了让无 conversationId 的一次性调用
-    // (file-back、/edit)能按调用方的判断走。
     const runtime = makeRuntimeWithSession(false);
-
     const prepared = await runtime.prepareTurn({
       userMessage: '需要',
       contextItems: [ambientNote()],

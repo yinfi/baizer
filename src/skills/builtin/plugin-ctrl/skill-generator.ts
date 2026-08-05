@@ -3,6 +3,7 @@ import { App, requestUrl } from 'obsidian';
 import type { ModelService } from '../../../services/model-service';
 import {
   USER_SKILLS_DIR,
+  computeSkillBodyHash,
   ensureDirectory,
   pluginSkillDirPath,
   pluginSkillFilePath,
@@ -29,6 +30,9 @@ interface CommandInfo {
   aiUsable: boolean;
   reason?: string;
 }
+
+/** 写入意图：首次写入（已存在则保持原样）还是替换（无条件覆盖）。 */
+export type SkillWriteMode = 'first-write' | 'replace';
 
 // ==================== 常量 ====================
 
@@ -126,7 +130,7 @@ export class PluginSkillGenerator {
   constructor(
     private app: App,
     private modelService: ModelService,
-    private getKnownToolNames: () => string[],
+    private getKnownToolNames: () => string[] = () => [],
   ) {}
 
   // ---------- 信息收集 ----------
@@ -355,7 +359,11 @@ export class PluginSkillGenerator {
 
   // ---------- Frontmatter（代码生成，不交给 LLM） ----------
 
-  private buildFrontmatter(info: PluginInfo, llmDesc?: string): string {
+  /**
+   * @param body 已定稿的 body——source.body_hash 覆盖的就是这段文本，
+   *             所以 frontmatter 必须最后生成。
+   */
+  private buildFrontmatter(info: PluginInfo, body: string, llmDesc?: string): string {
     const name = `plugin-${info.id}`;
     const desc = (llmDesc || info.description || info.name).slice(0, 150);
     const keywords = this.extractKeywords(info);
@@ -363,10 +371,17 @@ export class PluginSkillGenerator {
     return [
       '---',
       `name: ${name}`,
-      `description: ${desc}`,
+      // 描述来自 LLM 或插件 manifest，可能含 ": " / "#" 等 YAML 元字符；
+      // 不加引号会让整块 frontmatter 解析失败，连带 source 溯源读不回来。
+      `description: ${JSON.stringify(desc)}`,
       'triggers:',
       `  keywords: ${JSON.stringify(keywords)}`,
       `tools: ${JSON.stringify(tools)}`,
+      // 溯源：解析器会丢弃这些未知字段，reconcile 与设置页从原文读回。
+      'source:',
+      `  plugin: ${JSON.stringify(info.id)}`,
+      `  version: ${JSON.stringify(info.version || '')}`,
+      `  body_hash: ${JSON.stringify(computeSkillBodyHash(body))}`,
       '---',
     ].join('\n');
   }
@@ -593,7 +608,7 @@ ${toolList}
     }
 
     // 用 LLM 描述（如果有）覆盖 manifest 描述
-    const frontmatter = this.buildFrontmatter(info, llmDesc);
+    const frontmatter = this.buildFrontmatter(info, body, llmDesc);
     return `${frontmatter}\n\n${body}`;
   }
 
@@ -619,23 +634,26 @@ ${toolList}
 
   // ---------- 文件操作 ----------
 
+  /**
+   * 写入 skill 文件。
+   * mode 由调用方给出：first-write 只在文件不存在时写（已存在则保持原样），
+   * replace 无条件覆盖。是否该覆盖（版本漂移、手工编辑）是调用方的判断，
+   * 不在这里做——这里只是个 writer。
+   */
   async writeSkillFile(
-    pluginId: string,
-    content: string,
-    options: { overwrite?: boolean } = {},
+    pluginId: string, content: string, mode: SkillWriteMode,
   ): Promise<string> {
     const resolvedDirPath = pluginSkillDirPath(pluginId, USER_SKILLS_DIR);
     const resolvedFilePath = pluginSkillFilePath(pluginId, USER_SKILLS_DIR);
     const adapter = this.app.vault.adapter;
 
     await ensureDirectory(adapter, resolvedDirPath);
-    if (await adapter.exists(resolvedFilePath) && !options.overwrite) {
-      throw new Error(`Refusing to overwrite existing skill: ${resolvedFilePath}`);
+    // .obsidian 目录下 getAbstractFileByPath 不可靠，用 adapter.exists 判断
+    if (mode === 'first-write' && await adapter.exists(resolvedFilePath)) {
+      return resolvedFilePath;
     }
     await adapter.write(resolvedFilePath, content);
     return resolvedFilePath;
-
-      // .obsidian 目录下 getAbstractFileByPath 不可靠，文件可能已存在
   }
 
   skillDirPath(pluginId: string): string {

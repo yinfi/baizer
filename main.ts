@@ -48,7 +48,8 @@ export default class BaizerPlugin extends Plugin {
     toolRegistry: ToolRegistry;
     skillRegistry: SkillRegistry;
     private editorExtensionsRegistered = false;
-    private pluginWatcher: PluginWatcher | null = null;
+    // 非 private：设置页要读对账状态、触发重新生成与删除（派生技能的唯一管理入口）。
+    pluginWatcher: PluginWatcher | null = null;
     private inboxAutosave: InboxAutosaveCoordinator | null = null;
     private guardianCheckTimer: number | null = null;
     // 快补全的请求序号。既是日志 ID,也是快路径 isStale 的判据:
@@ -133,6 +134,22 @@ export default class BaizerPlugin extends Plugin {
 
         // 加载用户自定义 Skill
         await this.skillRegistry.loadUserSkills(USER_SKILLS_DIR, this.app);
+
+        // 派生 skill 对账：loadUserSkills 会把目录里所有 SKILL.md 无条件注册，
+        // 必须紧接着核对来源插件的真实状态，把来源已消失的撤下（策略全在 watcher 里）。
+        this.pluginWatcher = new PluginWatcher(
+            this.app,
+            this.skillRegistry,
+            new PluginSkillGenerator(
+                this.app,
+                this.modelService,
+                () => this.toolRegistry.listAll().map(tool => tool.name),
+            ),
+            this.settings,
+            // 只传「模型是否可用」这一个布尔，不把整个 ModelService 交给 watcher。
+            () => this.modelService.isGenerationConfigured(),
+        );
+        await this.pluginWatcher.reconcileDerivedSkills();
 
         logger.info(`Skill system ready: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`, 'Baizer');
 
@@ -235,15 +252,8 @@ export default class BaizerPlugin extends Plugin {
             warn: (message: string) => console.warn(`[Baizer] ${message}`),
         });
 
-        // 启动插件 Skill 自动生成（后台异步，不阻塞）
-        const skillGenerator = new PluginSkillGenerator(
-            this.app, this.modelService,
-            () => this.toolRegistry.listAll().map(tool => tool.name),
-        );
-        this.pluginWatcher = new PluginWatcher(
-            this.app, this.skillRegistry, skillGenerator, this.settings,
-        );
-        this.pluginWatcher.start();
+        // 启动插件 Skill 自动生成（后台异步，不阻塞）。watcher 已在 skill 加载后构造。
+        this.pluginWatcher?.start();
     }
 
     onunload() {
@@ -370,6 +380,11 @@ export default class BaizerPlugin extends Plugin {
             await this.knowledgeRuntime.updateSettings(this.settings);
         }
         this.guardianCompletionService = this.createGuardianCompletionService();
+        // 无条件通知 watcher：由它自己比对上次观察到的就绪状态，决定是否补跑扫描。
+        // 补跑是逐插件的网络+LLM 工作，不能 await——否则设置项开关会卡住整个保存流程。
+        void this.pluginWatcher?.handleSettingsSaved().catch((error) => {
+            console.warn('[Baizer] plugin skill catch-up scan failed', error);
+        });
     }
 
     // 轻量落盘：只写 data.json，不重建 provider / guardian / knowledge。

@@ -189,17 +189,27 @@ Instructions.`;
     expect(fallbackRegistry.resolveByCommand('/same')?.name).toBe('second-skill');
   });
 
-  await test('registerUserFromMd rejects unknown tool names', async () => {
+  await test('registerUserFromMd warns about unknown tool names without rejecting the skill', async () => {
     const toolRegistry = new ToolRegistry({} as any, JSON.parse(JSON.stringify(DEFAULT_SETTINGS)));
     const registry = new SkillRegistry(toolRegistry);
-    const registered = registry.registerUserFromMd(`---
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    let registered = false;
+    try {
+      console.warn = (...args: any[]) => { warnings.push(args.join(' ')); };
+      registered = registry.registerUserFromMd(`---
 name: invalid-tools
 description: Invalid tools
 tools: [missing_tool]
 ---
 Instructions.`, '/invalid/SKILL.md');
+    } finally {
+      console.warn = originalWarn;
+    }
 
-    expect(registered).toBe(false);
+    expect(registered).toBe(true);
+    expect(warnings.some(message => message.includes('missing_tool'))).toBe(true);
+    expect(registry.activateSkill('invalid-tools')?.tools.length).toBe(0);
   });
 }
 

@@ -84,10 +84,7 @@ export abstract class BaseChatRuntime implements ChatRuntime {
       ]);
     }
 
-    const activeSkill = this.resolveRequestedSkill(request);
-    const activated = activeSkill
-      ? this.deps.skillRegistry.activateSkill(activeSkill.name)
-      : null;
+    const activeSkill = this.resolveForcedSkill(request);
     const obsidianContext = request.source
       ? this.createFallbackObsidianContext(request)
       : undefined;
@@ -135,19 +132,21 @@ export abstract class BaseChatRuntime implements ChatRuntime {
       systemPrompt += `${CONTEXT_DISCLAIMER}\n`;
     }
     systemPrompt += `${this.buildSlashCommandContract()}\n`;
-    if (activated) {
+    if (activeSkill) {
       // 强制 / 斜杠激活：直接注入 pi formatSkillInvocation 包装的完整指令。
-      systemPrompt += `[Active Skill: ${activated.skillName}]\n`;
-      systemPrompt += `[Skill Instructions]\n${activated.instructions}\n`;
-    }
-    // 无论是否激活，始终注入 pi 原生 skill 清单：模型可随时 read_skill 发现/切换其它
-    // skill（意图激活不再收窄工具集，故清单 + read_skill 是渐进式披露的完整入口）。
-    const skillList = this.deps.skillRegistry.getSkillSummaryText();
-    if (skillList) {
-      systemPrompt += `${skillList}\n`;
-      // 覆盖 pi 清单里“读取 skill 文件”的原生措辞：本插件的 skill 存放于隐藏目录，
-      // 普通文件读取工具够不到，必须用 read_skill(name)（name 取自上面清单）获取完整指令。
-      systemPrompt += `[Skill Access] To load a skill's full instructions, call the read_skill tool with the skill's name (e.g. read_skill({"name":"web-search"})). Do not try to open the <location> path with file-reading tools — skill files live in a hidden folder those tools cannot access.\n`;
+      systemPrompt += `[Active Skill: ${activeSkill.skillName}]\n`;
+      systemPrompt += `[Skill Instructions]\n${activeSkill.instructions}\n`;
+    } else {
+      // 自主发现（B 方案）：注入 pi 原生 skill 清单，模型按需 read_skill 拿完整正文。
+      const skillList = this.deps.skillRegistry.getSkillSummaryText();
+      if (skillList) {
+        systemPrompt += `${skillList}\n`;
+        // 覆盖 pi 清单里“读取 skill 文件”的原生措辞：本插件的 skill 存放于隐藏目录，
+        // 普通文件读取工具够不到，必须用 read_skill(name)（name 取自上面清单）获取完整指令。
+        systemPrompt += `[Skill Access] To load a skill's full instructions, call the read_skill tool with the skill's name (e.g. read_skill({"name":"web-search"})). Do not try to open the <location> path with file-reading tools — skill files live in a hidden folder those tools cannot access.\n`;
+      }
+      // ADR-0002：关键词命中只是提示——清单与全量工具全部保留，采纳与否交给模型。
+      systemPrompt += this.buildSkillHint(request.userMessage);
     }
     if (request.selection) {
       systemPrompt += `[Selected Text: ${request.selection}]\n`;
@@ -163,14 +162,15 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     return {
       prompt: request.userMessage,
       systemPrompt,
-      tools: this.buildSkillModeTools(activated, activeSkill?.source === 'forced'),
+      tools: this.buildSkillModeTools(activeSkill),
       userRequest: request.userMessage,
       memoryContext,
-      activeSkillName: activated?.skillName,
-      activeSkillSource: activeSkill?.source,
-      // 意图激活不收窄工具集（白名单 null）；仅强制/斜杠激活收窄到该 skill 的工具子集。
-      allowedToolNames: activeSkill?.source === 'forced'
-        ? activated?.tools.map(tool => tool.name)
+      activeSkillName: activeSkill?.skillName,
+      // 空 tools 声明 = 不限制（手写 skill 省掉 tools 字段即如此，见 pi-skill-source）。
+      // 此时必须不给白名单：buildSkillModeTools 已按「不限制」给出全量工具，而下游硬门
+      // 见到一个非 null 的空白名单会把它们全拦掉——模型看得到却一个也调不动。
+      allowedToolNames: activeSkill?.tools.length
+        ? activeSkill.tools.map(tool => tool.name)
         : undefined,
       requiresFileWrite: isFileWriteRequest(request.userMessage),
       selection: request.selection,
@@ -328,15 +328,15 @@ If no listed command fits, suggest a plain-language request instead.
   // 模型再也读不到/切不到别的 skill。口径与运行中 steering 的 ActiveRunController 一致。
   private static readonly ALWAYS_AVAILABLE_TOOL_NAMES = ['read_skill'];
 
-  private buildSkillModeTools(activated?: { tools: ToolDefinition[] } | null, restrict = false): ToolDefinition[] {
+  private buildSkillModeTools(activeSkill?: { tools: ToolDefinition[] } | null): ToolDefinition[] {
     // B 方案：不再注入 use_skill 元工具。skill 发现走 system prompt 的 <available_skills>
-    // 清单 + read_skill 工具。无激活 skill 或意图激活（restrict=false）时给全量集。
-    // 只有强制/斜杠激活（forced）才收窄到该 skill 的工具子集。
-    if (!restrict || !activated?.tools?.length) {
+    // 清单 + read_skill 工具。无激活 skill 时给全量集（read_skill 已在其中）。
+    if (!activeSkill?.tools?.length) {
       return [...this.deps.toolRegistry.getAllDefinitions()];
     }
-    // 收窄时补回 read_skill 等元能力(去重)，否则模型被困在当前 skill 里、无法再读其它 skill 指令。
-    const tools = [...activated.tools];
+    // 强制激活收窄到该 skill 的工具子集，但补回 read_skill 等元能力（去重），
+    // 否则模型被困在当前 skill 里、无法再读其它 skill 指令。
+    const tools = [...activeSkill.tools];
     const present = new Set(tools.map(tool => tool.name));
     for (const name of BaseChatRuntime.ALWAYS_AVAILABLE_TOOL_NAMES) {
       if (present.has(name)) continue;
@@ -346,25 +346,37 @@ If no listed command fits, suggest a plain-language request instead.
     return tools;
   }
 
-  private resolveRequestedSkill(request: ChatTurnRequest): { name: string; source: 'forced' | 'intent' } | null {
-    if (request.forcedSkillName) {
-      return { name: request.forcedSkillName, source: 'forced' };
-    }
-    const name = this.deps.skillRegistry.resolveByIntent?.(request.userMessage)?.name;
-    return name ? { name, source: 'intent' } : null;
+  /**
+   * ADR-0002：只有强制激活（用户输入 skill 的 slash 命令）才产出 activeSkill——
+   * 它替换 skill 清单为完整指令、并把工具收窄到声明子集。Baizer 自己猜的一律不算。
+   */
+  private resolveForcedSkill(request: ChatTurnRequest) {
+    const skillName = request.forcedSkillName;
+    return skillName ? this.deps.skillRegistry.activateSkill(skillName) : null;
+  }
+
+  /**
+   * ADR-0002：关键词命中降级为一行提示。不设 activeSkillName、不设 allowedToolNames、
+   * 不动 skill 清单与工具集——猜错的代价只是一行浪费的 prompt，而非一轮做不完的对话。
+   * 提示文本面向模型，故保持英文。
+   */
+  private buildSkillHint(userMessage: string): string {
+    const hinted = this.deps.skillRegistry.resolveByIntent?.(userMessage)?.name;
+    if (!hinted) return '';
+    return `[Skill Hint] A keyword in this request matched the "${hinted}" skill, which may be relevant. This is only a suggestion: call read_skill({"name":"${hinted}"}) if it fits, otherwise ignore it and pick any other skill or tool.\n`;
   }
 
   protected createSkillScope(turn: PreparedChatTurn): ActiveSkillScope {
-    // 仅强制/斜杠激活收窄工具集（白名单硬门）。意图激活白名单为 null（全量工具），
-    // 使模型读到其它 skill 指令后能直接调用其工具——read_skill 是纯文本读取，
-    // 无法同步更新白名单，故意图路径不能依赖收窄。
-    if (turn.activeSkillSource !== 'forced') {
+    // 白名单为空就不闭合硬门：关键词命中（无 activeSkillName）与空 tools 声明
+    // （有 activeSkillName 但不收窄）都走这条路，口径与 buildSkillModeTools 一致。
+    // 判 length 而非判真假：空数组是 truthy，而 runtime-types 允许它出现。
+    if (!turn.activeSkillName || !turn.allowedToolNames?.length) {
       return { allowedToolNames: null };
     }
     // 元能力(read_skill)并入白名单:pi-tool-adapter 用 allowedToolNames 做硬门,
     // 只把工具列进 tools 还不够——不在白名单里仍会被拦成 "not available"。
     // 二者必须同步补,否则模型看得到 read_skill 却调不动。
-    const allowed = new Set(turn.allowedToolNames ?? []);
+    const allowed = new Set(turn.allowedToolNames);
     for (const name of BaseChatRuntime.ALWAYS_AVAILABLE_TOOL_NAMES) {
       allowed.add(name);
     }

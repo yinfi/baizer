@@ -129,7 +129,7 @@ export class SkillRegistry {
   registerUserFromMd(skillMd: string, filePath: string): boolean {
     const loaded = parseBuiltinSkill(skillMd, filePath);
     if (!loaded) return false;
-    if (!this.hasKnownTools(loaded)) return false;
+    this.warnUnknownTools(loaded);
     if (this.entries.has(loaded.skill.name)) {
       console.warn(`[SkillRegistry] Skill "${loaded.skill.name}" already exists, user skill skipped.`);
       return false;
@@ -144,7 +144,7 @@ export class SkillRegistry {
   replaceUserFromMd(skillMd: string, filePath: string): boolean {
     const loaded = parseBuiltinSkill(skillMd, filePath);
     if (!loaded) return false;
-    if (!this.hasKnownTools(loaded)) return false;
+    this.warnUnknownTools(loaded);
 
     const existing = this.entries.get(loaded.skill.name);
     if (existing?.isBuiltin) {
