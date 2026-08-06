@@ -119,6 +119,10 @@ export class WikiIndexer {
 
     const existing = this.app.vault.getAbstractFileByPath(basePath);
     if (existing && existing instanceof TFile) {
+      // 内容只取决于 wikiFolder，启动时几乎总是与磁盘一致。
+      // 无条件 modify 会在每次启动付一次写盘（移动端要过 native 桥），
+      // 且让文件 mtime 无谓跳动、触发同步。cachedRead 命中缓存时接近免费。
+      if (await this.app.vault.cachedRead(existing) === content) return;
       await this.app.vault.modify(existing, content);
       return;
     }

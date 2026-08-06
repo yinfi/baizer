@@ -61,7 +61,13 @@ export function builtinSkillSourcePath(
 
 /**
  * 物化一个内置 skill 到隐藏目录：写入 <skillsDir>/<name>/SKILL.md。
- * 覆盖写——内置为代码所有，每次启动以 bundle 为准（无 staleness）。
+ *
+ * 两条约束同时成立：
+ * - 磁盘以 bundle 为准，但**用户手改过的文件不覆盖**——靠 `.builtin-source.json`
+ *   里的 bundleHash 区分"上一版 bundle"与"用户编辑"。
+ * - **内容与 marker 都已就位时零写入**——每次启动无条件重写 7 个文件是纯浪费，
+ *   移动端每次写盘还要过 native 桥。bundle 升级那一次才付 2 次写（正文 + marker）。
+ *
  * 返回物化后的文件路径，供 SkillRegistry 记录、read_skill 读取。
  */
 export async function materializeBuiltinSkill(
@@ -71,30 +77,49 @@ export async function materializeBuiltinSkill(
   skillsDir = USER_SKILLS_DIR,
 ): Promise<string> {
   const dir = builtinSkillDirPath(name, skillsDir);
-  await ensureDirectory(adapter, dir);
   const filePath = skillFilePath(dir);
   const sourcePath = builtinSkillSourcePath(name, skillsDir);
   const bundleHash = hashSkillContent(skillMd);
+  const writeSourceMarker = () =>
+    adapter.write(sourcePath, JSON.stringify({ bundleHash }, null, 2));
 
-  if (await adapter.exists(filePath)) {
-    const existing = await adapter.read(filePath);
-    const sourceHash = await readBuiltinSourceHash(adapter, sourcePath);
-    // Before source tracking existed, startup always overwrote builtins. Migrate that
-    // legacy file once, then use the marker to preserve subsequent user edits.
-    if (sourceHash === null) {
-      if (existing !== skillMd) await adapter.write(filePath, skillMd);
-      await adapter.write(sourcePath, JSON.stringify({ bundleHash }, null, 2));
-      return filePath;
-    }
-    const isUneditedBundle = existing === skillMd || hashSkillContent(existing) === sourceHash;
-
-    if (!isUneditedBundle) return filePath;
-    if (existing !== skillMd) await adapter.write(filePath, skillMd);
-  } else {
-    await adapter.write(filePath, skillMd);
+  // 直接 read 而不是先 exists：常态是文件已存在且内容一致，一次 read 就能收工。
+  // read 抛错（文件不存在）走首次写入路径。
+  let existing: string | null;
+  try {
+    existing = await adapter.read(filePath);
+  } catch {
+    existing = null;
   }
 
-  await adapter.write(sourcePath, JSON.stringify({ bundleHash }, null, 2));
+  if (existing === null) {
+    await ensureDirectory(adapter, dir);
+    await adapter.write(filePath, skillMd);
+    await writeSourceMarker();
+    return filePath;
+  }
+
+  const sourceHash = await readBuiltinSourceHash(adapter, sourcePath);
+
+  // 正文与 marker 都已是当前 bundle：整条路径不写盘，也不必 ensureDirectory
+  // （读得到 SKILL.md 就说明目录在）。
+  if (existing === skillMd && sourceHash === bundleHash) return filePath;
+
+  // Before source tracking existed, startup always overwrote builtins. Migrate that
+  // legacy file once, then use the marker to preserve subsequent user edits.
+  if (sourceHash === null) {
+    if (existing !== skillMd) await adapter.write(filePath, skillMd);
+    await writeSourceMarker();
+    return filePath;
+  }
+
+  // 手改过：正文既不等于当前 bundle，也不等于 marker 记录的上一版 bundle。
+  // 此时连 marker 都不更新——否则下次启动会把手改内容当成 bundle 基线。
+  const isUneditedBundle = existing === skillMd || hashSkillContent(existing) === sourceHash;
+  if (!isUneditedBundle) return filePath;
+
+  if (existing !== skillMd) await adapter.write(filePath, skillMd);
+  await writeSourceMarker();
   return filePath;
 }
 
@@ -286,14 +311,23 @@ export async function readTextIfExists(
   return adapter.read(path);
 }
 
+/**
+ * 列出 skill 目录下所有 SKILL.md。
+ *
+ * `skipDirNames` 用于排除已在内存中注册的内置 skill 子目录：它们刚被本次启动
+ * 物化到同一个根目录下，回读只会拿到 7 个同名条目并被 registerUserFromMd 全部
+ * 丢弃——每个都要付一次 exists + 一次 read，纯无用功。
+ */
 export async function listSkillFilePaths(
   adapter: Pick<SkillFilesAdapter, 'exists' | 'list'>,
   dirPath = USER_SKILLS_DIR,
+  skipDirNames: readonly string[] = [],
 ): Promise<string[]> {
   if (!await adapter.exists(dirPath)) return [];
 
   const listed = await adapter.list(dirPath);
   const paths = new Set<string>();
+  const skip = new Set(skipDirNames);
 
   for (const filePath of listed.files) {
     if (basename(filePath) === SKILL_FILE_NAME) {
@@ -302,6 +336,7 @@ export async function listSkillFilePaths(
   }
 
   for (const folderPath of listed.folders) {
+    if (skip.has(basename(folderPath))) continue;
     const filePath = skillFilePath(folderPath);
     if (await adapter.exists(filePath)) {
       paths.add(filePath);
@@ -311,16 +346,31 @@ export async function listSkillFilePaths(
   return [...paths].sort();
 }
 
+/**
+ * 确保目录存在。自深向浅探测第一个已存在的祖先，再由此向下补建。
+ *
+ * 为什么不是自浅向深逐层 exists：那样即使整棵树都已存在，也要为每一层付一次
+ * IO（`.obsidian/baizer/skills/<name>` = 4 次 × 7 个内置 skill = 28 次）。
+ * 常态是目录早已存在，自深向浅只需 1 次即可返回。
+ */
 export async function ensureDirectory(
   adapter: Pick<SkillFilesAdapter, 'exists' | 'mkdir'>,
   dirPath: string,
 ): Promise<void> {
+  const paths: string[] = [];
   let currentPath = '';
-
   for (const segment of dirPath.split('/').filter(Boolean)) {
     currentPath = currentPath ? `${currentPath}/${segment}` : segment;
-    if (!await adapter.exists(currentPath)) {
-      await adapter.mkdir(currentPath);
-    }
+    paths.push(currentPath);
+  }
+
+  let firstMissing = paths.length;
+  for (let i = paths.length - 1; i >= 0; i--) {
+    if (await adapter.exists(paths[i])) break;
+    firstMissing = i;
+  }
+
+  for (let i = firstMissing; i < paths.length; i++) {
+    await adapter.mkdir(paths[i]);
   }
 }
