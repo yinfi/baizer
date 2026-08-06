@@ -63,6 +63,7 @@ const tests = [
   'test/hindsight-memory.test.ts',
   'test/save-path.test.ts',
   'test/skill-files.test.ts',
+  'test/startup-io-budget.test.ts',
   'test/inbox-autosave.test.ts',
   'test/clip-input.test.ts',
   'test/clip-protocol.test.ts',

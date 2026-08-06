@@ -119,18 +119,22 @@ export default class BaizerPlugin extends Plugin {
         );
         this.skillRegistry.registerBuiltinFromMd(knowledgeSkillMd, createKnowledgeSkillExecutor(this.toolRegistry));
 
-        // 加载 pi 格式化器（getSkillSummaryText / activateSkill 依赖），并把内置 skill
-        // 物化为隐藏目录下的真实文件（read_skill 与系统提示 location 指向它）。
-        // 必须在所有内置注册后、loadUserSkills 前——使重扫到的内置文件按同名安全跳过。
+        // 加载 pi 格式化器（getSkillSummaryText / activateSkill 依赖）。
         await this.skillRegistry.init();
-        await this.skillRegistry.materializeBuiltins(this.app.vault.adapter);
 
-        logger.info(`Final: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`, 'Baizer');
+        // 内置 skill 的 location 是确定性路径，纯计算即可得——先同步填好，
+        // 使系统提示与 read_skill 立刻可用。
+        this.skillRegistry.resolveBuiltinPaths();
 
-        // 加载用户自定义 Skill
+        // 加载用户自定义 Skill（跳过内置自己的物化目录，故常态只有 2 次 IO）。
         await this.skillRegistry.loadUserSkills(USER_SKILLS_DIR, this.app);
 
         logger.info(`Skill system ready: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`, 'Baizer');
+
+        // 物化写盘搬到后台：它的产物只在用户真的发起对话时才被读，
+        // 而在移动端 7 个文件的串行写盘要过 native 桥，实测阻塞启动数百毫秒。
+        void this.skillRegistry.materializeBuiltins(this.app.vault.adapter)
+            .catch((e) => console.warn('[Baizer] Builtin skill materialization failed:', e));
 
         // 防止 hot reload 时重复注册
         try {

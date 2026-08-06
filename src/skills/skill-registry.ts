@@ -91,7 +91,35 @@ export class SkillRegistry implements ISkillRegistry {
     logger.info(`Registered builtin skill: ${loaded.skill.name}`, 'SkillRegistry');
   }
 
-  /** 物化所有内置 Skill 到隐藏目录，并回填各自的真实文件路径。onload 中 await。 */
+  /** 内置 skill 的名字集合——供 loadUserSkills 跳过自己刚物化的目录。 */
+  private builtinNames(): string[] {
+    return [...this.entries.values()]
+      .filter(e => e.isBuiltin && e.builtinMd)
+      .map(e => e.loaded.skill.name);
+  }
+
+  /**
+   * 回填所有内置 Skill 的物化路径。**纯路径计算，零 IO** ——
+   * filePath 是 `<skillsDir>/<name>/SKILL.md` 的确定性拼接，不需要磁盘确认。
+   *
+   * 这样系统提示的 location 与 read_skill 的目标路径在 onload 里立即可用，
+   * 而真正的写盘交给 materializeBuiltins 在后台完成。
+   */
+  resolveBuiltinPaths(skillsDir = USER_SKILLS_DIR): void {
+    for (const entry of this.entries.values()) {
+      if (!entry.isBuiltin || !entry.builtinMd) continue;
+      entry.loaded.skill.filePath = builtinSkillFilePath(entry.loaded.skill.name, skillsDir);
+    }
+  }
+
+  /**
+   * 物化所有内置 Skill 到隐藏目录（内容一致则跳过写入）。
+   *
+   * 不要在 onload 里 await 这个方法：7 个 skill 的串行写盘在移动端要过 native 桥，
+   * 实测把启动阻塞了数百毫秒，而它的产物只有「用户真的发起一次对话」才会被读。
+   * 路径由 resolveBuiltinPaths 同步给出，read_skill 另有内存兜底，
+   * 所以写盘迟一点到达不影响任何功能。
+   */
   async materializeBuiltins(adapter: SkillFilesAdapter, skillsDir = USER_SKILLS_DIR): Promise<void> {
     for (const entry of this.entries.values()) {
       if (!entry.isBuiltin || !entry.builtinMd) continue;
@@ -163,7 +191,9 @@ export class SkillRegistry implements ISkillRegistry {
    */
   async loadUserSkills(skillsDir: string, app: import('obsidian').App): Promise<void> {
     const adapter = app.vault.adapter as unknown as SkillFilesAdapter;
-    const filePaths = await listSkillFilePaths(adapter, skillsDir);
+    // 跳过内置 skill 自己的物化目录：回读它们只会得到一批同名丢弃项，
+    // 每个却要付一次 exists + 一次 read。
+    const filePaths = await listSkillFilePaths(adapter, skillsDir, this.builtinNames());
     let count = 0;
     for (const filePath of filePaths) {
       try {
