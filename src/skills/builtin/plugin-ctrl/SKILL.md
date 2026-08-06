@@ -1,6 +1,6 @@
 ---
 name: plugin-ctrl
-description: 发现和使用 Obsidian 插件。需要插件能力时先通过此 skill 查找合适插件。
+description: 发现和使用 Obsidian 插件。需要插件能力时先通过此 skill 查找合适插件。需先在设置中授予插件控制权限，否则相关工具会返回权限错误。
 triggers:
   keywords: ["插件", "plugin", "plugins"]
 tools: ["list_plugins", "get_plugin_commands", "get_plugin_settings", "execute_plugin_command"]

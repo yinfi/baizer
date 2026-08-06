@@ -3,6 +3,8 @@
   clearInterval,
 };
 
+import { TFile } from 'obsidian';
+
 (global as any).localStorage = {
   getItem: () => null,
   setItem: () => { },
@@ -124,7 +126,12 @@ function createWorkspaceApp() {
     app: {
       vault: {
         getAbstractFileByPath: (path: string) => {
-          if (!files.has(path)) files.set(path, { path, basename: path.split('/').pop() });
+          if (!files.has(path)) {
+            const file = new TFile();
+            file.path = path;
+            file.basename = path.split('/').pop() || '';
+            files.set(path, file);
+          }
           return files.get(path);
         },
       },

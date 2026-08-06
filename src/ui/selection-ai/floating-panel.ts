@@ -37,6 +37,7 @@ export function savePanelRect(rect: PanelRect, storage: Pick<Storage, 'setItem'>
 export interface FloatingPanelOptions {
   app: App;
   intent: string;                     // 顶部干净意图(如「解释:作为空间根目录」),非真实 prompt
+  title?: string;                     // 标题栏文案；缺省时用 intent
   anchor: { x: number; y: number };   // 选区屏幕坐标,用于首次定位
   onClose: () => void;
   onSubmit: (text: string) => void;   // 追问(text 是用户新输入,由调用方决定如何发)
@@ -138,7 +139,7 @@ export class FloatingPanel {
   }
   private buildHeader() {
     const header = this.root.createDiv({ cls: 'baizer-fp-header' });
-    header.createSpan({ text: this.opts.title, cls: 'baizer-fp-title' });
+    header.createSpan({ text: this.opts.title ?? this.opts.intent, cls: 'baizer-fp-title' });
     const close = header.createEl('button', { cls: 'baizer-fp-close', attr: { type: 'button', 'aria-label': 'Close' } });
     setIcon(close, 'x');
     close.onclick = () => this.destroy();

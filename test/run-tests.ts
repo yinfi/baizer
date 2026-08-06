@@ -33,6 +33,7 @@ const tests = [
   'test/guardian-completion.test.ts',
   'test/file-operation-contract.test.ts',
   'test/chat-controller.test.ts',
+  'test/message-projection.test.ts',
   'test/selection-menu.test.ts',
   'test/command-suggestions.test.ts',
   'test/input-controller.test.ts',

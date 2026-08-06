@@ -10,6 +10,7 @@ import {
 import { evaluateGenerationQuality } from '../services/generation-quality';
 import { formatGenerationPlanBlock, GenerationStrategyService } from '../services/generation-strategy-service';
 import { PreparedChatTurn, ChatRuntime, ChatRuntimeDeps, ChatTurnRequest } from './runtime-types';
+import { logger } from '../utils/logger';
 
 interface ActiveSkillScope {
   activeSkillName?: string;
@@ -83,7 +84,7 @@ export abstract class BaseChatRuntime implements ChatRuntime {
       ]);
     }
 
-    const activeSkill = this.resolveRequestedSkill(request);
+    const activeSkill = this.resolveForcedSkill(request);
     const obsidianContext = request.source
       ? this.createFallbackObsidianContext(request)
       : undefined;
@@ -119,10 +120,8 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     // [B] 用户给出短确认/延续性回复（"需要"、"用第二个"等）且存在对话历史时，
     // 剔除自动注入的环境上下文（当前笔记/反链），避免它盖过对话意图把模型带偏。
     // 用户显式选择的上下文与编辑器选区始终保留。
-    // 阶段1:历史存在性由 request.hasPriorContext 提供(ModelService 从 Harness session 查询),
-    // 取代旧的 priorMessages.length 判断。
     const isContinuation = this.isContinuationMessage(request.userMessage)
-      && request.hasPriorContext === true;
+      && await this.resolveHasPriorContext(request);
     const promptContextItems = isContinuation
       ? this.stripAmbientContext(request.contextItems)
       : request.contextItems;
@@ -135,7 +134,7 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     systemPrompt += `${this.buildSlashCommandContract()}\n`;
     if (activeSkill) {
       // 强制 / 斜杠激活：直接注入 pi formatSkillInvocation 包装的完整指令。
-      systemPrompt += `[Active Skill: ${activeSkill.skill.name}]\n`;
+      systemPrompt += `[Active Skill: ${activeSkill.skillName}]\n`;
       systemPrompt += `[Skill Instructions]\n${activeSkill.instructions}\n`;
     } else {
       // 自主发现（B 方案）：注入 pi 原生 skill 清单，模型按需 read_skill 拿完整正文。
@@ -146,6 +145,8 @@ export abstract class BaseChatRuntime implements ChatRuntime {
         // 普通文件读取工具够不到，必须用 read_skill(name)（name 取自上面清单）获取完整指令。
         systemPrompt += `[Skill Access] To load a skill's full instructions, call the read_skill tool with the skill's name (e.g. read_skill({"name":"web-search"})). Do not try to open the <location> path with file-reading tools — skill files live in a hidden folder those tools cannot access.\n`;
       }
+      // ADR-0002：关键词命中只是提示——清单与全量工具全部保留，采纳与否交给模型。
+      systemPrompt += this.buildSkillHint(request.userMessage);
     }
     if (request.selection) {
       systemPrompt += `[Selected Text: ${request.selection}]\n`;
@@ -164,8 +165,13 @@ export abstract class BaseChatRuntime implements ChatRuntime {
       tools: this.buildSkillModeTools(activeSkill),
       userRequest: request.userMessage,
       memoryContext,
-      activeSkillName: activeSkill?.skill.name,
-      allowedToolNames: activeSkill?.tools.map(tool => tool.name),
+      activeSkillName: activeSkill?.skillName,
+      // 空 tools 声明 = 不限制（手写 skill 省掉 tools 字段即如此，见 pi-skill-source）。
+      // 此时必须不给白名单：buildSkillModeTools 已按「不限制」给出全量工具，而下游硬门
+      // 见到一个非 null 的空白名单会把它们全拦掉——模型看得到却一个也调不动。
+      allowedToolNames: activeSkill?.tools.length
+        ? activeSkill.tools.map(tool => tool.name)
+        : undefined,
       requiresFileWrite: isFileWriteRequest(request.userMessage),
       selection: request.selection,
       generationPlan,
@@ -226,6 +232,34 @@ export abstract class BaseChatRuntime implements ChatRuntime {
   }
 
   /** [B] 剔除自动注入的环境上下文，保留用户显式选择的上下文与选区。 */
+  /**
+   * 本轮开始时会话是否已有跨轮历史 —— 延续判定的前置条件。
+   *
+   * 自己向 sessionManager 问,不要求调用方注入。历史存在性是会话的属性,
+   * 而 sessionManager 就在 deps 里;让每个入口自己查一遍,只会漏。
+   * (曾经就漏过:chat/chatStream 各写一遍相同的查询,而 skill 命令入口忘了,
+   * 于是 skill 命令永远拿不到延续检测。)
+   *
+   * 调用方显式给了值就用它:无 conversationId 的一次性调用(file-back、/edit)
+   * 没有会话可查,由调用方判断更准。
+   */
+  private async resolveHasPriorContext(request: ChatTurnRequest): Promise<boolean> {
+    if (typeof request.hasPriorContext === 'boolean') return request.hasPriorContext;
+
+    const sessionManager = this.deps.sessionManager;
+    if (!sessionManager || !request.conversationId) return false;
+
+    try {
+      return await sessionManager.hasHistory(request.conversationId);
+    } catch (error) {
+      // 查不到就当没有历史:保留环境上下文是更安全的降级
+      // (误剔除会让模型丢掉用户正在看的笔记)。
+      logger.warn('Failed to resolve prior history; assuming none', 'BaseChatRuntime');
+      void error;
+      return false;
+    }
+  }
+
   private stripAmbientContext(contextItems: ChatContextItem[]): ChatContextItem[] {
     return (contextItems ?? []).filter(item => !this.isAmbientContextItem(item));
   }
@@ -296,11 +330,11 @@ If no listed command fits, suggest a plain-language request instead.
 
   private buildSkillModeTools(activeSkill?: { tools: ToolDefinition[] } | null): ToolDefinition[] {
     // B 方案：不再注入 use_skill 元工具。skill 发现走 system prompt 的 <available_skills>
-    // 清单 + read_skill 工具。无激活 skill 时给全量集(read_skill 已在其中)。
+    // 清单 + read_skill 工具。无激活 skill 时给全量集（read_skill 已在其中）。
     if (!activeSkill?.tools?.length) {
       return [...this.deps.toolRegistry.getAllDefinitions()];
     }
-    // 强制/意图激活收窄到该 skill 的工具子集,但补回 read_skill 等元能力(去重),
+    // 强制激活收窄到该 skill 的工具子集，但补回 read_skill 等元能力（去重），
     // 否则模型被困在当前 skill 里、无法再读其它 skill 指令。
     const tools = [...activeSkill.tools];
     const present = new Set(tools.map(tool => tool.name));
@@ -312,20 +346,37 @@ If no listed command fits, suggest a plain-language request instead.
     return tools;
   }
 
-  private resolveRequestedSkill(request: ChatTurnRequest) {
-    const skillName = request.forcedSkillName
-      ?? this.deps.skillRegistry.resolveByIntent?.(request.userMessage)?.name;
+  /**
+   * ADR-0002：只有强制激活（用户输入 skill 的 slash 命令）才产出 activeSkill——
+   * 它替换 skill 清单为完整指令、并把工具收窄到声明子集。Baizer 自己猜的一律不算。
+   */
+  private resolveForcedSkill(request: ChatTurnRequest) {
+    const skillName = request.forcedSkillName;
     return skillName ? this.deps.skillRegistry.activateSkill(skillName) : null;
   }
 
+  /**
+   * ADR-0002：关键词命中降级为一行提示。不设 activeSkillName、不设 allowedToolNames、
+   * 不动 skill 清单与工具集——猜错的代价只是一行浪费的 prompt，而非一轮做不完的对话。
+   * 提示文本面向模型，故保持英文。
+   */
+  private buildSkillHint(userMessage: string): string {
+    const hinted = this.deps.skillRegistry.resolveByIntent?.(userMessage)?.name;
+    if (!hinted) return '';
+    return `[Skill Hint] A keyword in this request matched the "${hinted}" skill, which may be relevant. This is only a suggestion: call read_skill({"name":"${hinted}"}) if it fits, otherwise ignore it and pick any other skill or tool.\n`;
+  }
+
   protected createSkillScope(turn: PreparedChatTurn): ActiveSkillScope {
-    if (!turn.activeSkillName) {
+    // 白名单为空就不闭合硬门：关键词命中（无 activeSkillName）与空 tools 声明
+    // （有 activeSkillName 但不收窄）都走这条路，口径与 buildSkillModeTools 一致。
+    // 判 length 而非判真假：空数组是 truthy，而 runtime-types 允许它出现。
+    if (!turn.activeSkillName || !turn.allowedToolNames?.length) {
       return { allowedToolNames: null };
     }
     // 元能力(read_skill)并入白名单:pi-tool-adapter 用 allowedToolNames 做硬门,
     // 只把工具列进 tools 还不够——不在白名单里仍会被拦成 "not available"。
     // 二者必须同步补,否则模型看得到 read_skill 却调不动。
-    const allowed = new Set(turn.allowedToolNames ?? []);
+    const allowed = new Set(turn.allowedToolNames);
     for (const name of BaseChatRuntime.ALWAYS_AVAILABLE_TOOL_NAMES) {
       allowed.add(name);
     }

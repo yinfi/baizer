@@ -55,7 +55,7 @@ const getPluginCommands: Tool = {
 
 const getPluginSettings: Tool = {
   name: 'get_plugin_settings',
-  description: 'Get settings for a specific plugin.',
+  description: 'Get settings for a specific plugin. Sensitive fields (API keys, tokens, secrets) are always redacted and returned as key names with types only.',
   executionMode: 'sequential',
   risk: 'plugin-control',
   parameters: {
@@ -69,9 +69,95 @@ const getPluginSettings: Tool = {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
     const plugin = (ctx.app as any).plugins.getPlugin(args.pluginId);
     if (!plugin) return { error: 'Plugin not found or not enabled' };
-    return { pluginId: args.pluginId, settings: plugin.settings || plugin.data || {} };
+    const raw = plugin.settings || plugin.data || {};
+    const allowValues = ctx.settings.allowPluginConfigValues === true;
+    return {
+      pluginId: args.pluginId,
+      settings: redactPluginSettings(raw, { allowValues, depth: 0 }),
+      redactionNote: allowValues
+        ? 'Values returned per user setting; sensitive keys still redacted.'
+        : 'Sensitive keys and values are redacted; only key names and types are returned.',
+    };
   },
 };
+
+// ==================== 配置脱敏 ====================
+
+/** 命中即视为敏感字段：不返回原值。 */
+const SENSITIVE_KEY_TOKENS = new Set([
+  'api', 'apikey', 'auth', 'authorization', 'cookie', 'credential', 'credentials',
+  'key', 'passwd', 'password', 'secret', 'session', 'token',
+]);
+
+const REDACT_MAX_DEPTH = 3;
+const REDACT_MAX_ARRAY_ITEMS = 20;
+const REDACT_MAX_STRING_CHARS = 500;
+
+/**
+ * 递归脱敏插件配置：敏感键只给 { redacted, type, length }；
+ * 长字符串 / 深嵌套 / 大数组截断，避免把第三方插件配置原样灌给模型。
+ */
+function redactPluginSettings(
+  raw: unknown,
+  opts: { allowValues: boolean; depth: number },
+): unknown {
+  const { allowValues, depth } = opts;
+  if (depth > REDACT_MAX_DEPTH) return { redacted: true, reason: 'depth-limit' };
+
+  if (Array.isArray(raw)) {
+    if (!allowValues) {
+      const itemTypes = [...new Set(raw.map(describeValueType))].sort();
+      return { type: 'array', itemTypes };
+    }
+    const arr = raw.slice(0, REDACT_MAX_ARRAY_ITEMS);
+    return arr.map(item => redactPluginSettings(item, { allowValues, depth: depth + 1 }));
+  }
+
+  if (raw !== null && typeof raw === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (isSensitiveKey(key)) {
+        const serialized = safeStringify(value);
+        out[key] = { redacted: true, type: describeValueType(value), length: serialized.length };
+      } else {
+        out[key] = redactPluginSettings(value, { allowValues, depth: depth + 1 });
+      }
+    }
+    return out;
+  }
+
+  // 标量
+  if (!allowValues) return { type: describeValueType(raw) };
+  if (typeof raw === 'string') {
+    return raw.length > REDACT_MAX_STRING_CHARS
+      ? { redacted: true, type: 'string', length: raw.length }
+      : raw;
+  }
+  return raw;
+}
+
+function describeValueType(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
+function isSensitiveKey(key: string): boolean {
+  const tokens = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return tokens.some(token => SENSITIVE_KEY_TOKENS.has(token));
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
 
 const executePluginCommand: Tool = {
   name: 'execute_plugin_command',

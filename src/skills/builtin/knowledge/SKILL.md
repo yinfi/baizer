@@ -3,7 +3,7 @@ name: knowledge
 description: 从个人知识库检索相关知识，或将高质量回答归档到知识库。当用户的问题可能与已积累的知识相关时使用。
 triggers:
   commands: ["/wiki:query"]
-  keywords: ["知识库", "知识", "knowledge", "wiki"]
+  keywords: ["知识库", "knowledge", "wiki"]
 tools: ["query_knowledge", "file_back_knowledge", "search_vault"]
 ---
 

@@ -125,6 +125,33 @@ async function runTests() {
     expect(created.length).toBe(0);
   });
 
+  await test('create_note uses the standard error result for invalid or existing targets', async () => {
+    const registry = new ToolRegistry(mockApp, {
+      ...DEFAULT_SETTINGS,
+      confirmExecutions: false,
+    });
+    registerVaultTools(registry);
+
+    expect(await registry.execute('create_note', { content: '# Missing' })).toEqual({
+      success: false,
+      error: 'Missing filename parameter',
+    });
+    expect(await registry.execute('create_note', { filename: 'existing.md', content: '# Existing' })).toEqual({
+      success: false,
+      error: 'File already exists: existing.md. Use update_note to modify existing files.',
+    });
+  });
+
+  await test('read_note uses the standard error result when a note is missing', async () => {
+    const registry = new ToolRegistry(mockApp, DEFAULT_SETTINGS);
+    registerVaultTools(registry);
+
+    expect(await registry.execute('read_note', { path: 'missing.md' })).toEqual({
+      success: false,
+      error: 'File not found',
+    });
+  });
+
   await test('update_note respects allowFileModification', async () => {
     modified.length = 0;
     const registry = new ToolRegistry(mockApp, {

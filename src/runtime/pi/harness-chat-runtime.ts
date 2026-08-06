@@ -107,7 +107,9 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     const queue = createEventQueue<StreamEvent>();
     let approvalToolResultYielded = false;
     // provider 错误/中断在此累计;prompt() 不会 reject provider 错误(见探针结论)。
-    let runError: { message: string; aborted: boolean } | null = null;
+    // TS 对闭包捕获的 let 变量做控制流窄化会推成 never（见 212 行），
+    // 用 box 属性访问绕开该缺陷：闭包内写 box.value，读取时走属性窄化。
+    const runErrorBox: { value: { message: string; aborted: boolean } | null } = { value: null };
     // 本轮工具动作累计:交给长期记忆判定"是否值得沉淀"(hadToolAction 门控)。
     // 只收集 { name, result },不进 distill prompt——工具结果可能含大体积/密钥内容,
     // 提炼只用 user+assistant 文本(assistant 文本已是动作的自然摘要)。
@@ -118,7 +120,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       // 中断(aborted)由 runError 分支处理,这里只转 error。
       if (event?.type === 'message_end' && event.message?.stopReason === 'error') {
         if (!approvalMessage) {
-          runError = { message: event.message?.errorMessage || 'Provider error', aborted: false };
+          if (!runErrorBox.value) runErrorBox.value = { message: event.message?.errorMessage || 'Provider error', aborted: false };
         }
         return;
       }
@@ -185,7 +187,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
         await harness.prompt(turn.prompt);
       } catch (error: any) {
         const aborted = error?.name === 'AbortError' || signal?.aborted === true;
-        if (!runError) runError = { message: error?.message || 'Harness run failed', aborted };
+        if (!runErrorBox.value) runErrorBox.value = { message: error?.message || 'Harness run failed', aborted };
       } finally {
         queue.close();
       }
@@ -204,6 +206,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       activeRunController?.clear(harness);
     }
 
+    const runError = runErrorBox.value;
     if (runError) {
       if (runError.aborted) {
         yield { type: 'done', text: fullResponseText, interrupted: true };

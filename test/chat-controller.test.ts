@@ -3,6 +3,8 @@
   clearInterval,
 };
 
+import { TFile } from 'obsidian';
+
 (global as any).localStorage = {
   getItem: () => null,
   setItem: () => { },
@@ -55,7 +57,12 @@ function createWorkspaceApp() {
     app: {
       vault: {
         getAbstractFileByPath: (path: string) => {
-          if (!files.has(path)) files.set(path, { path, basename: path.split('/').pop() });
+          if (!files.has(path)) {
+            const file = new TFile();
+            file.path = path;
+            file.basename = path.split('/').pop() || '';
+            files.set(path, file);
+          }
           return files.get(path);
         },
       },
@@ -458,14 +465,17 @@ async function runTests() {
         updateProfile: async () => { },
         getAvailableTools: () => [],
       } as any,
-      onMessageAdded: (message) => messages.push(message),
+      onMessageAdded: (message, options) => messages.push({ ...message, options }),
       onStreamEvent: () => { },
     });
 
     await controller.processCommand('Create a canvas file for this article');
 
     expect(opened).toEqual(['Assets/Canvas/summary.canvas']);
-    expect(messages.map(message => message.role)).toEqual(['user']);
+    // ADR 0002:ai 回复也走 onMessageAdded(唯一创建点),但带 alreadyRendered
+    // ——宿主只写投影、不重画,屏幕上仍只有 stream 渲出的那一份。
+    expect(messages.map(message => message.role)).toEqual(['user', 'ai']);
+    expect(messages.map(message => message.options?.alreadyRendered)).toEqual([false, true]);
 
     controller.cleanup();
   });

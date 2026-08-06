@@ -1,8 +1,9 @@
 // src/skills/builtin/plugin-ctrl/skill-generator.ts
 import { App, requestUrl } from 'obsidian';
-import { PluginSettings } from '../../../mcp/types';
+import type { ModelService } from '../../../services/model-service';
 import {
   USER_SKILLS_DIR,
+  computeSkillBodyHash,
   ensureDirectory,
   pluginSkillDirPath,
   pluginSkillFilePath,
@@ -30,16 +31,39 @@ interface CommandInfo {
   reason?: string;
 }
 
+/** 写入意图：首次写入（已存在则保持原样）还是替换（无条件覆盖）。 */
+export type SkillWriteMode = 'first-write' | 'replace';
+
 // ==================== 常量 ====================
 
+const TOOL_SIGNATURES: Record<string, string> = {
+  append_to_note: 'append_to_note(path: string, content: string) — 追加内容',
+  execute_plugin_command: 'execute_plugin_command(commandId: string) — 执行命令（只接受 commandId）',
+  open_file: 'open_file(path: string) — 打开文件（配合需要 UI 的命令）',
+  read_note: 'read_note(path: string) — 读取笔记',
+  search_vault: 'search_vault(query: string) — 搜索文件',
+};
 
-/** 合法的 vault 工具名（来自 vault-ops.ts + executor.ts） */
-const SKILL_DIR = USER_SKILLS_DIR;
-const VALID_TOOLS = [
-  'read_note', 'create_note', 'update_note', 'append_to_note',
-  'delete_note', 'rename_note', 'list_notes', 'search_vault', 'open_file',
-  'execute_plugin_command', 'list_plugins', 'get_plugin_commands',
-];
+/**
+ * 生成后校验：正文引用的工具若不在允许集内 → 拒绝（防止生成器把未注册/未授权
+ * 工具写进正文，激活后模型按指令调用被硬拦截）。
+ */
+function validateGeneratedToolUsage(
+  body: string,
+  allowedTools: string[],
+  knownTools: Iterable<string>,
+): string[] {
+  const referenced = new Set<string>();
+  const allowed = new Set(allowedTools);
+  const known = new Set(knownTools);
+  const re = /\b([a-z][a-z0-9_]*)\s*\(/g;
+  let match;
+  while ((match = re.exec(body)) !== null) {
+    const name = match[1];
+    if (known.has(name)) referenced.add(name);
+  }
+  return [...referenced].filter(name => !allowed.has(name));
+}
 
 /** 命令名中包含这些词的通常需要 UI 交互，AI 无法直接调用 */
 const UI_KEYWORDS = [
@@ -105,8 +129,8 @@ const SYSTEM_PROMPT = `你是 Obsidian 插件专家。根据插件信息生成�
 export class PluginSkillGenerator {
   constructor(
     private app: App,
-    private modelService: any,
-    private settings: PluginSettings,
+    private modelService: ModelService,
+    private getKnownToolNames: () => string[] = () => [],
   ) {}
 
   // ---------- 信息收集 ----------
@@ -335,7 +359,11 @@ export class PluginSkillGenerator {
 
   // ---------- Frontmatter（代码生成，不交给 LLM） ----------
 
-  private buildFrontmatter(info: PluginInfo, llmDesc?: string): string {
+  /**
+   * @param body 已定稿的 body——source.body_hash 覆盖的就是这段文本，
+   *             所以 frontmatter 必须最后生成。
+   */
+  private buildFrontmatter(info: PluginInfo, body: string, llmDesc?: string): string {
     const name = `plugin-${info.id}`;
     const desc = (llmDesc || info.description || info.name).slice(0, 150);
     const keywords = this.extractKeywords(info);
@@ -343,10 +371,17 @@ export class PluginSkillGenerator {
     return [
       '---',
       `name: ${name}`,
-      `description: ${desc}`,
+      // 描述来自 LLM 或插件 manifest，可能含 ": " / "#" 等 YAML 元字符；
+      // 不加引号会让整块 frontmatter 解析失败，连带 source 溯源读不回来。
+      `description: ${JSON.stringify(desc)}`,
       'triggers:',
       `  keywords: ${JSON.stringify(keywords)}`,
       `tools: ${JSON.stringify(tools)}`,
+      // 溯源：解析器会丢弃这些未知字段，reconcile 与设置页从原文读回。
+      'source:',
+      `  plugin: ${JSON.stringify(info.id)}`,
+      `  version: ${JSON.stringify(info.version || '')}`,
+      `  body_hash: ${JSON.stringify(computeSkillBodyHash(body))}`,
       '---',
     ].join('\n');
   }
@@ -403,10 +438,12 @@ export class PluginSkillGenerator {
     if (info.commands.length > 0) {
       tools.add('execute_plugin_command');
     }
-    // 大多数插件 skill 都需要读写笔记来配合
+    // 大多数插件 skill 都需要读写笔记来配合；open_file 是生成器 preconditions 明确
+    // 要求的前置依赖（execute_plugin_command 前必须先打开目标笔记）。
     tools.add('read_note');
     tools.add('append_to_note');
     tools.add('search_vault');
+    tools.add('open_file');
     return [...tools];
   }
 
@@ -459,6 +496,9 @@ export class PluginSkillGenerator {
     const webSection = info.webContext
       ? `\n## 网络搜索补充信息\n${info.webContext}`
       : '';
+    const toolList = this.inferTools(info)
+      .map(name => `- ${TOOL_SIGNATURES[name]}`)
+      .join('\n');
 
     return `请为以下插件生成操作指南（从 # 标题开始，不要输出 frontmatter）：
 
@@ -478,14 +518,7 @@ ${syntaxSection}
 ${webSection}
 
 ## 可用的 vault 工具签名
-- read_note(path: string) — 读取笔记
-- create_note(path: string, content: string) — 创建笔记
-- update_note(path: string, content: string) — 覆盖更新笔记
-- append_to_note(path: string, content: string) — 追加内容
-- search_vault(query: string) — 搜索文件
-- list_notes(folder?: string) — 列出笔记
-- open_file(path: string) — 打开文件（配合需要 UI 的命令）
-- execute_plugin_command(commandId: string) — 执行命令（只接受 commandId）
+${toolList}
 
 请生成操作指南，重点写 AI 如何用 vault 工具配合插件完成任务。`;
   }
@@ -525,21 +558,28 @@ ${webSection}
     }
 
     // 空内容兜底：body 去掉标题后不足 50 字符，用模板替代
-    body = this.ensurePreconditionsSection(body);
+    if (info.commands.length > 0) {
+      body = this.ensurePreconditionsSection(body);
+    }
 
     const bodyWithoutTitle = body.replace(/^#[^\n]*\n*/, '').trim();
     if (bodyWithoutTitle.length < 50) {
-      const firstCmd = info.commands[0]?.id || `${info.id}:command`;
+      const firstCmd = info.commands[0]?.id;
+      const steps = [
+        `1. 搜索相关笔记：search_vault("${info.name}")`,
+        '2. 打开目标笔记：open_file(path)',
+        '3. 读取或补充内容：read_note(path) 或 append_to_note(path, content)',
+      ];
+      if (firstCmd) {
+        steps.splice(2, 0, `3. 执行插件命令：execute_plugin_command("${firstCmd}")`);
+        steps[3] = '4. 读取或补充后续内容：read_note(path) 或 append_to_note(path, content)';
+      }
       body = [
         `# ${info.name}`,
         '',
-        this.buildPreconditionsSection(),
-        '',
+        ...(firstCmd ? [this.buildPreconditionsSection(), ''] : []),
         '## 操作指南',
-        `1. 搜索相关笔记：search_vault("${info.name}")`,
-        '2. 打开目标笔记：open_file(path)',
-        `3. 执行插件命令：execute_plugin_command("${firstCmd}")`,
-        '4. 读取或补充后续内容：read_note(path) 或 append_to_note(path, content)',
+        ...steps,
       ].join('\n');
       console.warn(`[SkillGenerator] Body too short for ${info.id}, using fallback template`);
     }
@@ -553,8 +593,22 @@ ${webSection}
       );
     }
 
+    // F2-1: 校验正文引用的工具都在允许集内。引用未注册/未授权工具 → 拒绝注册
+    // （否则激活后模型按指令调用会被白名单硬拦截，生成器工作流自相矛盾）。
+    const forbiddenTools = validateGeneratedToolUsage(
+      body,
+      this.inferTools(info),
+      this.getKnownToolNames(),
+    );
+    if (forbiddenTools.length > 0) {
+      throw new Error(
+        `Generated skill for ${info.id} references tools outside the allowlist: `
+        + forbiddenTools.join(', '),
+      );
+    }
+
     // 用 LLM 描述（如果有）覆盖 manifest 描述
-    const frontmatter = this.buildFrontmatter(info, llmDesc);
+    const frontmatter = this.buildFrontmatter(info, body, llmDesc);
     return `${frontmatter}\n\n${body}`;
   }
 
@@ -580,17 +634,26 @@ ${webSection}
 
   // ---------- 文件操作 ----------
 
-  async writeSkillFile(pluginId: string, content: string): Promise<string> {
+  /**
+   * 写入 skill 文件。
+   * mode 由调用方给出：first-write 只在文件不存在时写（已存在则保持原样），
+   * replace 无条件覆盖。是否该覆盖（版本漂移、手工编辑）是调用方的判断，
+   * 不在这里做——这里只是个 writer。
+   */
+  async writeSkillFile(
+    pluginId: string, content: string, mode: SkillWriteMode,
+  ): Promise<string> {
     const resolvedDirPath = pluginSkillDirPath(pluginId, USER_SKILLS_DIR);
     const resolvedFilePath = pluginSkillFilePath(pluginId, USER_SKILLS_DIR);
     const adapter = this.app.vault.adapter;
 
     await ensureDirectory(adapter, resolvedDirPath);
-    if (await adapter.exists(resolvedFilePath)) return resolvedFilePath;
+    // .obsidian 目录下 getAbstractFileByPath 不可靠，用 adapter.exists 判断
+    if (mode === 'first-write' && await adapter.exists(resolvedFilePath)) {
+      return resolvedFilePath;
+    }
     await adapter.write(resolvedFilePath, content);
     return resolvedFilePath;
-
-      // .obsidian 目录下 getAbstractFileByPath 不可靠，文件可能已存在
   }
 
   skillDirPath(pluginId: string): string {

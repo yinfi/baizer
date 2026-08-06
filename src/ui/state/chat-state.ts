@@ -3,6 +3,11 @@ import { cloneChangePreview } from '../diff/change-preview';
 import { WorkspaceEditSummary } from '../../services/workspace-edit-service';
 
 export class ChatState {
+    /**
+     * 消息投影:这份列表是*收到*的,不是*写出*的。唯一作者是该 tab 的 ChatController。
+     * 在这里自造一条 ai 消息,它的 id 在 owner 那边不存在,按 id 回查的操作会静默失效。
+     * 详见 docs/adr/0002-chatcontroller-owns-the-message-list.md。
+     */
     private messages: ChatMessage[] = [];
     private tools = new Map<string, ToolRunState>();
     private workspaceEdits = new Map<string, WorkspaceEditSummary>();

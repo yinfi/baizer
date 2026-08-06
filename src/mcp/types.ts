@@ -1,6 +1,8 @@
 import { Plugin } from "obsidian";
 import { OntologyUpdateMode } from "../knowledge/types";
 import { Locale } from "../i18n/zh";
+import type { KnowledgeRuntime } from "../knowledge/runtime";
+import type { ToolRegistry } from "../skills/tool-registry";
 
 // ===== 品牌配置 — 改名只需改这里 =====
 export const PLUGIN_ID = 'baizer';
@@ -145,6 +147,8 @@ export interface PluginSettings {
     allowFileCreation: boolean;
     allowFileModification: boolean;
     allowPluginControl: boolean;
+    // 允许 AI 读取第三方插件配置原值；关闭时仅返回键名与类型，敏感字段始终脱敏。
+    allowPluginConfigValues: boolean;
     confirmExecutions: boolean;
 
     // --- 🧩 Skills ---
@@ -226,6 +230,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     allowFileCreation: true,
     allowFileModification: false,
     allowPluginControl: false,
+    allowPluginConfigValues: false,
     confirmExecutions: true,
 
     // Skills（空 = 全部可用，零迁移成本）
@@ -298,4 +303,21 @@ export interface IPlugin extends Plugin {
     saveSettingsLight?(): Promise<void>;
     // 切换界面语言：设定 locale、落盘并即时重渲染所有打开的 ShellView。
     applyLanguageChange?(locale: Locale): Promise<void>;
+    // 派生技能的管理入口（设置页读对账状态、重新生成、删除）。
+    // 用最小结构类型而非 import PluginWatcher：types.ts 是底层模块，不该反向依赖 skills 层。
+    pluginWatcher?: {
+        getDerivedSkillStatuses(): any[];
+        getGenerationFailures(): ReadonlyMap<string, string>;
+        // 返回值不写 any：设置页据 regenerated / blocker 决定提示哪一种结局，
+        // any 会让日后改字段名时静默退化成「每次成功都报失败」。
+        // blocker 用字面量联合而非 import 那个类型别名：types.ts 不该反向依赖 skills 层。
+        regenerateDerivedSkill(pluginId: string): Promise<
+            | { regenerated: boolean; failureReason: string | null }
+            | { blocker: 'auto-generate-off' | 'plugin-control-off' | 'model-not-ready'
+                | 'source-missing' | 'source-excluded' }
+        >;
+        deleteDerivedSkill(pluginId: string): Promise<boolean>;
+    } | null;
+    knowledgeRuntime: KnowledgeRuntime | null;
+    toolRegistry: ToolRegistry;
 }

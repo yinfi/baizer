@@ -143,8 +143,9 @@ async function run() {
     await materializeBuiltinSkill(adapter, 'web-search', skillMd('web-search') + '\nchanged');
     expectEqual(
       adapter.counts.write,
-      1,
-      'materializing changed content must write (bundle 更新后磁盘要跟上)',
+      2,
+      'materializing changed content must write SKILL.md + .builtin-source.json '
+        + '(marker 是"用户手改不覆盖"的判据，必须与正文同步更新)',
     );
   }
 

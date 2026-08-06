@@ -42,7 +42,7 @@ const readNote: Tool = {
   },
   async execute(args, ctx) {
     const file = ctx.app.metadataCache.getFirstLinkpathDest(args.path, '');
-    if (!file) return { error: 'File not found' };
+    if (!file) return { success: false, error: 'File not found' };
     const content = await ctx.app.vault.read(file);
     return { path: file.path, content: content.substring(0, 5000) };
   },
@@ -63,7 +63,7 @@ const createNote: Tool = {
   },
   async execute(args, ctx) {
     let path = args.filename || args.path || args.name;
-    if (!path) return { status: 'error', message: 'Missing filename parameter' };
+    if (!path) return { success: false, error: 'Missing filename parameter' };
     if (!path.endsWith('.md')) path += '.md';
 
     const scopeError = getWriteScopeError(ctx, path);
@@ -78,7 +78,7 @@ const createNote: Tool = {
 
     const existing = ctx.app.vault.getAbstractFileByPath(path);
     if (existing) {
-      return { status: 'error', message: `File already exists: ${path}. Use update_note to modify existing files.` };
+      return { success: false, error: `File already exists: ${path}. Use update_note to modify existing files.` };
     }
 
     if (needsApproval('write', ctx.settings) && !args.approved) {

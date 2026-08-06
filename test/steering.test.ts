@@ -191,6 +191,29 @@ async function runTests() {
     expect(harness.steered).toEqual([]);
   });
 
+  // steer 必须报告补话是否真的落地。UI 靠这个返回值决定要不要渲染用户气泡——
+  // 此前它返回 void,UI 只能凭自己那个更早置位的 AbortController 猜,
+  // 于是在 register 之前提交的补话被静默丢弃,却照样显示成已发送。
+  await test('steer reports whether the text actually landed', async () => {
+    const controller = new ActiveRunController();
+    const harness = createFakeHarness();
+
+    // 无活跃 run:必须明确报告未落地
+    expect(controller.steer('too early')).toBe(false);
+
+    controller.register(harness);
+    expect(controller.steer('now it lands')).toBe(true);
+
+    // 空白文本也算未落地
+    expect(controller.steer('   ')).toBe(false);
+
+    controller.clear(harness);
+    expect(controller.steer('too late')).toBe(false);
+
+    await wait(0);
+    expect(harness.steered).toEqual(['now it lands']);
+  });
+
   await test('setActiveTools forwards names plus read_skill fallback', async () => {
     const controller = new ActiveRunController();
     const harness = createFakeHarness();

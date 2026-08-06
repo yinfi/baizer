@@ -3,13 +3,13 @@
 import { App } from 'obsidian';
 import { PluginSettings } from '../mcp/types';
 import { ToolDefinition } from '../models/interfaces';
-import { Tool, ToolContext, IToolRegistry } from './types';
+import { Tool, ToolContext } from './types';
 
 /**
  * 原子工具注册表
  * 管理所有底层工具的注册、查找和执行
  */
-export class ToolRegistry implements IToolRegistry {
+export class ToolRegistry {
   private tools = new Map<string, Tool>();
   private ctx: ToolContext;
 
