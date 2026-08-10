@@ -282,7 +282,10 @@ export default class BaizerPlugin extends Plugin {
         // 在途记忆沉淀(pendingRetains)并把已构建记录落盘。已 upsert 的记录本就随写链落盘,
         // 真正易丢的是「LLM distill 尚未返回」的在途 retain——那部分受限于同步卸载,尽力而为。
         // 显式 void + catch:避免未处理 rejection,并标明这是有意的 fire-and-forget。
-        void this.modelService.shutdown().catch((error) => {
+        //
+        // ?. 不可省:onload 抛错时 Obsidian 会紧接着 unloadPlugin,onload 若尚未走到
+        // modelService 赋值,这里裸访问就会二次抛错,把真正的首因从控制台里挤掉。
+        void this.modelService?.shutdown().catch((error) => {
             console.warn('[Baizer] shutdown flush did not complete before unload', error);
         });
     }
@@ -361,12 +364,14 @@ export default class BaizerPlugin extends Plugin {
             ? this.settings.deletedProviderIds
             : [];
 
-        if (this.settings.providers) {
-            this.settings.providers = mergeProviderDefaults(
-                this.settings.providers,
-                this.settings.deletedProviderIds
-            );
-        }
+        // 无条件合并,不能加 if (this.settings.providers) 守卫:data.json 里 providers 若为
+        // null,Object.assign 会用 null 覆盖掉 DEFAULT_SETTINGS 的默认值(它只看键存在,不看值
+        // 是否可用),而守卫恰好跳过了唯一能修好它的这次调用,下面的下标访问随即抛错。
+        // onload 在此抛错会让插件整体加载失败,且症状表现为 onunload 里的二次错误。
+        this.settings.providers = mergeProviderDefaults(
+            this.settings.providers,
+            this.settings.deletedProviderIds
+        );
 
         if (!this.settings.providers[this.settings.activeProvider]) {
             this.settings.activeProvider = Object.keys(this.settings.providers)[0] || 'gemini';
