@@ -1,7 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from "module";
-import { copyFile, mkdir } from "fs/promises";
+import { copyFile, mkdir, readFile } from "fs/promises";
 
 const outputDir = "dist";
 
@@ -73,6 +73,63 @@ const stubUnusedPiProviders = {
 	},
 };
 
+/**
+ * 关掉 pi-ai 对 node 内建模块的 eager 动态 import，消除启动时的三条
+ * unhandled rejection。
+ *
+ * 背景：pi-ai 的 env-api-keys.js 与 providers/openai-codex-responses.js 用
+ * `"node:" + "fs"` 这种字符串拼接来躲开打包器的静态分析（源码注释写着
+ * "NEVER convert to top-level imports - breaks browser/Vite builds"），再靠
+ * `process.versions.node` 判断是否处于 Node 环境后 eager 加载。
+ *
+ * 但 Obsidian 是 Electron 渲染进程：`process.versions.node` 存在，判据通过，
+ * 而模块解析走浏览器 ESM 通道，于是 `import("node:fs")` 被当作 URL 去 fetch
+ * 并必然失败。三个 Promise 无人 catch，冒泡到 window 的 unhandledrejection，
+ * 被 ModelService 的全局钩子记成 ERROR —— 每次启动刷三条，会掩盖真正的报错。
+ *
+ * 为什么不能在 onResolve 拦：拼接出的 specifier 是运行时变量
+ * （`import(__rewriteRelativeImportExtension(specifier))`），构建期没有字面量
+ * 可匹配，onResolve 永远不命中。external 同样拦不住 —— builtinModules 只含裸名
+ * fs/os/path，不含 node: 前缀形式。所以改在 onLoad 层把那个环境判据置为 false，
+ * 让 eager 加载根本不启动。
+ *
+ * 安全性：置 false 后 _existsSync / _homedir / _join / _os 保持 null，与「加载
+ * 失败」的终态完全一致，只是不再抛。两处消费点本就对此做了兜底 —— env-api-keys
+ * 在 `!_existsSync || !_homedir || !_join` 时提前返回，codex 用
+ * `_os ? ... : "pi (browser)"`。它们服务的是「从 ~/.config 读第三方 CLI 凭据」
+ * 与 UA 拼装，而 Baizer 的 key 全部来自 settings，本就走不到这条路径。
+ */
+const NODE_EAGER_LOAD_GUARD =
+	'if (typeof process !== "undefined" && (process.versions?.node || process.versions?.bun)) {';
+
+const stubNodeBuiltinDynamicImports = {
+	name: "stub-node-builtin-dynamic-imports",
+	setup(build) {
+		build.onLoad(
+			{ filter: /(env-api-keys|providers[\\/]openai-codex-responses)\.js$/ },
+			async (args) => {
+				if (!args.path.includes("pi-ai")) return null;
+
+				const source = await readFile(args.path, "utf8");
+				const occurrences = source.split(NODE_EAGER_LOAD_GUARD).length - 1;
+				// 出声失败而非静默放过：pi-ai 升级若改了这段判据的写法，这里必须让构建
+				// 红掉，否则那三条启动期 ERROR 会悄悄回来。
+				if (occurrences !== 1) {
+					throw new Error(
+						`stub-node-builtin-dynamic-imports: expected exactly 1 eager-load guard in ${args.path}, found ${occurrences}. `
+						+ `pi-ai 可能改了写法，请重新核对 env-api-keys.js / openai-codex-responses.js。`,
+					);
+				}
+
+				return {
+					contents: source.replace(NODE_EAGER_LOAD_GUARD, "if (false) {"),
+					loader: "js",
+				};
+			},
+		);
+	},
+};
+
 const prod = (process.argv[2] === "production");
 
 await mkdir(outputDir, { recursive: true });
@@ -105,7 +162,7 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: `${outputDir}/main.js`,
 	loader: { '.md': 'text' },
-	plugins: [stubUnusedPiProviders],
+	plugins: [stubUnusedPiProviders, stubNodeBuiltinDynamicImports],
 });
 
 if (prod) {
