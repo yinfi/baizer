@@ -82,6 +82,10 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Credentials': '凭据',
     'Protocol': '协议',
     'Test': '测试',
+    'Custom Headers': '自定义请求头',
+    'Custom headers': '自定义请求头',
+    'One "Header-Name: value" per line. Use {{conversationId}} to send the current conversation ID (e.g. for opencode.ai Go: x-opencode-session: {{conversationId}}).':
+        '每行一条 "Header-Name: value"。用 {{conversationId}} 占位符发送当前会话 ID（例如 opencode.ai Go 要求：x-opencode-session: {{conversationId}}）。',
     'API Endpoint': 'API 端点',
     'Default Gemini endpoint': '默认 Gemini 端点',
     'Gemini API': 'Gemini API',

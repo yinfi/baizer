@@ -36,6 +36,12 @@ export interface NativeChatHandle {
    * 使运行期切换凭证下一轮即生效。生产由 model-service 提供。
    */
   getApiKey?: () => string | Promise<string>;
+  /**
+   * 取当前 provider 配置的自定义 header（ProviderConfig.customHeaders，已按 conversationId
+   * 解析占位符）。随 getApiKey 一起通过 AgentHarness 的 getApiKeyAndHeaders 回调按需取值。
+   * 缺省（未提供此函数，或返回 undefined）等价于不发任何自定义 header。
+   */
+  getHeaders?: () => Record<string, string> | undefined;
 }
 
 /**
@@ -43,8 +49,12 @@ export interface NativeChatHandle {
  * model + streamFn。做成工厂（而非直接传 model/streamFn）是为了：
  * (a) 凭证/模型可能在运行期被 settings 改动，每轮取最新值；
  * (b) 测试可注入一个产出 mock streamFn 的工厂，作为「假 LLM 响应」的唯一注入点。
+ *
+ * @param conversationId - 当前轮次的会话标识（= turn.conversationId），
+ *   用于解析 ProviderConfig.customHeaders 里的 {{conversationId}} 占位符；
+ *   一次性调用（无会话上下文）时为 undefined。
  */
-export type NativeChatFactory = () => NativeChatHandle;
+export type NativeChatFactory = (conversationId?: string) => NativeChatHandle;
 
 export interface ChatRuntimeDeps {
   /**

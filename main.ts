@@ -38,6 +38,7 @@ import { saveClipText } from './src/services/clip-input';
 import { ObsidianContextService } from './src/services/obsidian-context-service';
 import { USER_SKILLS_DIR } from './src/skills/skill-files';
 import { logger } from './src/utils/logger';
+import { installRequestUrlFetchFallback } from './src/utils/request-url-fetch';
 
 export default class BaizerPlugin extends Plugin {
     settings: PluginSettings;
@@ -70,6 +71,11 @@ export default class BaizerPlugin extends Plugin {
     };
 
     async onload() {
+        // 必须在任何 LLM/HTTP 请求前安装：pi-ai 与 @google/generative-ai 都走全局
+        // fetch。部分 OpenAI-compatible 端点（如 opencode.ai）不返回 CORS 头，
+        // 原生 fetch 失败后依次回退 Node http/https（无 CORS、真流式）与
+        // requestUrl（Electron 主进程、绕过 CORS 但缓冲）。
+        installRequestUrlFetchFallback();
         await this.loadSettings();
 
         // Initialize Skill Architecture

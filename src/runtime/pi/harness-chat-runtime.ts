@@ -48,7 +48,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     if (!this.deps.nativeChatFactory) {
       throw new Error('HarnessChatRuntime requires deps.nativeChatFactory to build a model handle');
     }
-    const { model, getApiKey } = resolveModelHandle(this.deps.nativeChatFactory());
+    const { model, getApiKey, getHeaders } = resolveModelHandle(this.deps.nativeChatFactory(turn.conversationId));
 
     const skillScope = this.createSkillScope(turn);
     const fileWriteState = createPiFileWriteState(turn.requiresFileWrite === true);
@@ -86,7 +86,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       // 装饰(memory/context/skill/plan/契约)作为 systemPrompt:每轮发送、不持久化进 session。
       systemPrompt: turn.systemPrompt ?? '',
       thinkingLevel: reasoning,
-      getApiKeyAndHeaders: async () => ({ apiKey: await getApiKey() }),
+      getApiKeyAndHeaders: async () => ({ apiKey: await getApiKey(), headers: getHeaders() }),
       // 审批:工具返回 approval_required 时,记录并请求本轮结束。
       afterToolCall: async ({ result }: any) => {
         const raw = unwrapPiToolResult(result);
@@ -282,23 +282,31 @@ async function extractTurnEntryIds(
 }
 
 /**
- * 从 NativeChatHandle 解析出 model 与 apiKey 取值器。
+ * 从 NativeChatHandle 解析出 model、apiKey 取值器与自定义 header 取值器。
  * 兼容两种句柄形态:
  *  - 旧形态 { model, streamFn } —— streamFn 已被 Harness 弃用,仅从其闭包无法取 key;
  *    但生产工厂同时可提供 apiKey/getApiKey,优先使用。
  *  - 新形态 { model, getApiKey } 或 { model, apiKey }。
+ * getHeaders 缺省(句柄未提供)时返回 undefined,等价于不发任何自定义 header。
  */
-function resolveModelHandle(handle: any): { model: any; getApiKey: () => Promise<string> } {
+function resolveModelHandle(handle: any): {
+  model: any;
+  getApiKey: () => Promise<string>;
+  getHeaders: () => Record<string, string> | undefined;
+} {
   const model = handle.model;
+  const getHeaders = typeof handle.getHeaders === 'function'
+    ? () => handle.getHeaders()
+    : () => undefined;
   if (typeof handle.getApiKey === 'function') {
-    return { model, getApiKey: async () => (await handle.getApiKey()) ?? '' };
+    return { model, getApiKey: async () => (await handle.getApiKey()) ?? '', getHeaders };
   }
   if (typeof handle.apiKey === 'string') {
     const key = handle.apiKey;
-    return { model, getApiKey: async () => key };
+    return { model, getApiKey: async () => key, getHeaders };
   }
   // 无显式 key(如测试用 mock provider,不校验 key):返回占位空串。
-  return { model, getApiKey: async () => '' };
+  return { model, getApiKey: async () => '', getHeaders };
 }
 
 /**

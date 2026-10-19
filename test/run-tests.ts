@@ -58,6 +58,7 @@ const tests = [
   'test/plugin-tools.test.ts',
   'test/provider-capabilities.test.ts',
   'test/context-budget.test.ts',
+  'test/request-url-fetch.test.ts',
   'test/context-manager.test.ts',
   'test/settings-state.test.ts',
   'test/memory-manager.test.ts',
