@@ -129,6 +129,33 @@ export function buildOpenAICompatModel(
 }
 
 /**
+ * 把 ProviderConfig.customHeaders 解析成实际发送的 header。
+ *
+ * 值里的 {{conversationId}} 占位符替换为当前会话 ID；无 conversationId 时，
+ * 含该占位符的 header 整体跳过（而非发送字面量 "{{conversationId}}"），
+ * 避免一次性调用（/edit、file-back 等无会话概念的场景）发出错误的 header 值。
+ *
+ * @param customHeaders - 来自 ProviderConfig.customHeaders 的原始配置
+ * @param conversationId - 当前对话的稳定会话 ID；无会话上下文时传 undefined
+ */
+export function resolveCustomHeaders(
+  customHeaders: Record<string, string> | undefined,
+  conversationId: string | undefined,
+): Record<string, string> | undefined {
+  if (!customHeaders) return undefined;
+  const resolved: Record<string, string> = {};
+  for (const [key, value] of Object.entries(customHeaders)) {
+    if (value.includes('{{conversationId}}')) {
+      if (!conversationId) continue;
+      resolved[key] = value.split('{{conversationId}}').join(conversationId);
+    } else {
+      resolved[key] = value;
+    }
+  }
+  return Object.keys(resolved).length > 0 ? resolved : undefined;
+}
+
+/**
  * 创建一个把 apiKey 注入 streamSimple options 的 StreamFn 工厂。
  *
  * apiKey 不存入 Model 对象（Model 是纯配置描述，不含凭证），

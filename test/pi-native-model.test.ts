@@ -241,6 +241,41 @@ async function runTests() {
     expect(model.contextWindow).toBe(50000);
   });
 
+  // (e) resolveCustomHeaders：opencode.ai Go 网关等要求自定义 header 的端点
+  const { resolveCustomHeaders } = await import('../src/runtime/pi/pi-native-model');
+
+  await test('resolveCustomHeaders: customHeaders=undefined → 返回 undefined', () => {
+    expect(resolveCustomHeaders(undefined, 'conv-1')).toBeUndefined();
+  });
+
+  await test('resolveCustomHeaders: 无占位符的固定 header 原样透传', () => {
+    const result = resolveCustomHeaders({ 'x-api-version': '2024-01' }, 'conv-1');
+    expect(result).toEqual({ 'x-api-version': '2024-01' });
+  });
+
+  await test('resolveCustomHeaders: {{conversationId}} 替换为当前会话 ID（opencode.ai Go 场景）', () => {
+    const result = resolveCustomHeaders({ 'x-opencode-session': '{{conversationId}}' }, 'conv-abc-123');
+    expect(result).toEqual({ 'x-opencode-session': 'conv-abc-123' });
+  });
+
+  await test('resolveCustomHeaders: 占位符嵌在固定前缀中也能替换', () => {
+    const result = resolveCustomHeaders({ 'x-session': 'ses_{{conversationId}}' }, 'abc');
+    expect(result).toEqual({ 'x-session': 'ses_abc' });
+  });
+
+  await test('resolveCustomHeaders: 无 conversationId 时跳过含占位符的 header', () => {
+    const result = resolveCustomHeaders({ 'x-opencode-session': '{{conversationId}}' }, undefined);
+    expect(result).toBeUndefined();
+  });
+
+  await test('resolveCustomHeaders: 无 conversationId 时固定 header 仍保留，仅跳过占位符 header', () => {
+    const result = resolveCustomHeaders(
+      { 'x-opencode-session': '{{conversationId}}', 'x-api-version': '2024-01' },
+      undefined,
+    );
+    expect(result).toEqual({ 'x-api-version': '2024-01' });
+  });
+
 }
 
 runTests().catch((e) => {

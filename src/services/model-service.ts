@@ -8,7 +8,7 @@ import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry, SkillSummary } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
-import { buildGeminiModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn } from '../runtime/pi/pi-native-model';
+import { buildGeminiModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn, resolveCustomHeaders } from '../runtime/pi/pi-native-model';
 import { createHarnessExecutionEnv } from '../runtime/pi/harness-env';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import * as modelCatalog from './model-catalog-service';
@@ -828,7 +828,7 @@ export class ModelService {
 
     createChatRuntime() {
         return createChatRuntime({
-            nativeChatFactory: () => this.buildNativeChatHandle(),
+            nativeChatFactory: (conversationId) => this.buildNativeChatHandle(conversationId),
             memoryManager: this.memoryManager,
             toolRegistry: this.toolRegistry,
             skillRegistry: this.skillRegistry,
@@ -847,8 +847,11 @@ export class ModelService {
      * 依当前 ProviderConfig.type 选择 model 构造器，并用同一 apiKey 造 streamFn。
      * 每轮 queryStream 启动时调用一次，故 settings 运行期改动（切换 provider/model/key/
      * contextWindow/thinkingLevel）都会在下一轮自动生效。
+     *
+     * @param conversationId - 本轮会话标识，用于解析 customHeaders 里的 {{conversationId}} 占位符
+     *   （如 opencode.ai Go 网关要求的 x-opencode-session）；一次性调用时为 undefined。
      */
-    private buildNativeChatHandle() {
+    private buildNativeChatHandle(conversationId?: string) {
         const config = this.getActiveProviderConfig();
         if (!config) {
             throw new Error(`Unknown provider: ${this.settings.activeProvider}`);
@@ -861,6 +864,7 @@ export class ModelService {
             // AgentHarness 通过 getApiKeyAndHeaders 按需取 key;取当前 provider 的最新 apiKey。
             // (不再提供 streamFn:Harness 内部按 model.api 路由到 pi api-registry,不消费注入的 streamFn。)
             getApiKey: () => this.getActiveProviderConfig()?.apiKey ?? '',
+            getHeaders: () => resolveCustomHeaders(this.getActiveProviderConfig()?.customHeaders, conversationId),
         };
     }
 

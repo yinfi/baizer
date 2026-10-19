@@ -571,6 +571,28 @@ function clampInteger(value: string, min: number, max: number, fallback: number)
     return Math.min(max, Math.max(min, parsed));
 }
 
+/** 把 ProviderConfig.customHeaders 渲染成每行一条 "Header-Name: value" 的可编辑文本。 */
+function serializeCustomHeaders(headers: Record<string, string> | undefined): string {
+    if (!headers) return '';
+    return Object.entries(headers).map(([key, value]) => `${key}: ${value}`).join('\n');
+}
+
+/** 解析每行一条 "Header-Name: value" 的文本为 customHeaders。空行/无冒号的行忽略。 */
+function parseCustomHeaders(text: string): Record<string, string> | undefined {
+    const result: Record<string, string> = {};
+    for (const line of text.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const sepIndex = trimmed.indexOf(':');
+        if (sepIndex === -1) continue;
+        const key = trimmed.slice(0, sepIndex).trim();
+        const value = trimmed.slice(sepIndex + 1).trim();
+        if (!key) continue;
+        result[key] = value;
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+}
+
 export function getMatchingSettingsSections(query: string): SettingsSectionId[] {
     const normalized = normalizeSearchQuery(query);
     const sections = getSettingsSections();
@@ -1671,6 +1693,27 @@ export class SettingTab extends PluginSettingTab {
                     },
                 ).open();
             }, 'danger');
+        });
+
+        this.renderConnectionField(credentials, t('Custom Headers'), (valueEl) => {
+            const textarea = valueEl.createEl('textarea', {
+                cls: 'baizer-settings-detail-input baizer-settings-detail-textarea',
+                attr: {
+                    placeholder: 'x-opencode-session: {{conversationId}}',
+                    rows: '3',
+                    'aria-label': t('Custom headers'),
+                },
+            }) as HTMLTextAreaElement;
+            textarea.value = serializeCustomHeaders(activeConfig.customHeaders);
+            textarea.addEventListener('change', async () => {
+                activeConfig.customHeaders = parseCustomHeaders(textarea.value);
+                this.resetConnectionTestStatus();
+                await this.persistSettings();
+            });
+            valueEl.createDiv({
+                cls: 'baizer-settings-inline-note',
+                text: t('One "Header-Name: value" per line. Use {{conversationId}} to send the current conversation ID (e.g. for opencode.ai Go: x-opencode-session: {{conversationId}}).'),
+            });
         });
 
         this.renderConnectionField(credentials, t('Test'), (valueEl) => {

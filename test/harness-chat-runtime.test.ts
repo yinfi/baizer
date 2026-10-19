@@ -184,16 +184,19 @@ function createDeps(options: {
   memoryManager?: any;
   skillRegistry?: any;
   toolDefinitions?: ToolDefinition[];
+  getHeaders?: (conversationId?: string) => Record<string, string> | undefined;
 }): ChatRuntimeDeps & {
   sessionInputs: (string | ToolResult[])[];
   registryCalls: any[];
   workspaceCalls: any[];
   capturedReasoning: () => string | undefined;
+  capturedHeaders: () => (Record<string, string> | undefined)[];
   register: (piAi: any) => void;
 } {
   const sessionInputs: (string | ToolResult[])[] = [];
   const registryCalls: any[] = [];
   const workspaceCalls: any[] = [];
+  const capturedHeadersCalls: (Record<string, string> | undefined)[] = [];
   let lastReasoning: string | undefined;
   const apiName = `mock-${mockApiSeq++}`;
   const model = { id: 'mock-model', name: 'Mock', api: apiName, provider: 'mock', baseUrl: '', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 1000 } as any;
@@ -201,6 +204,7 @@ function createDeps(options: {
   // 注册一个 mock api provider:Harness 内部按 model.api 路由到它。
   const streamSimple = (_model: any, context: any, opts?: any) => {
     lastReasoning = opts?.reasoning ?? opts?.thinkingLevel;
+    capturedHeadersCalls.push(opts?.headers);
     const input = deriveInput(context.messages || []);
     sessionInputs.push(input);
     return eventsToPiStream(model, options.streamFactory(input));
@@ -209,7 +213,11 @@ function createDeps(options: {
     piAi.registerApiProvider({ api: apiName, stream: streamSimple, streamSimple }, 'baizer-test');
   };
 
-  const nativeChatFactory = (): NativeChatHandle => ({ model, getApiKey: () => 'k' });
+  const nativeChatFactory = (conversationId?: string): NativeChatHandle => ({
+    model,
+    getApiKey: () => 'k',
+    getHeaders: options.getHeaders ? () => options.getHeaders!(conversationId) : undefined,
+  });
   const skillRegistry = options.skillRegistry || {
     getSkillSummaryText: () => '',
     activateSkill: (name: string) => ({
@@ -223,6 +231,7 @@ function createDeps(options: {
     registryCalls,
     workspaceCalls,
     capturedReasoning: () => lastReasoning,
+    capturedHeaders: () => capturedHeadersCalls,
     register,
     nativeChatFactory,
     harnessEnv: createMockEnv(),
@@ -486,6 +495,26 @@ async function runTests() {
     const text = await runtime.query(createTurn());
     expect(text).toBe('Low thinking');
     expect(deps.capturedReasoning()).toBe('low');
+  });
+
+  await test('no getHeaders provided → provider receives undefined headers (no regression)', async () => {
+    const deps = createDeps({ streamFactory: () => [{ type: 'text_delta', content: 'Hi' }, { type: 'done', text: 'Hi' }] });
+    const runtime = await makeRuntime(deps);
+    await collect(runtime.queryStream(createTurn()));
+    expect(deps.capturedHeaders()).toEqual([undefined]);
+  });
+
+  await test('customHeaders with {{conversationId}} resolve to the real session header (opencode.ai Go fix)', async () => {
+    // 复刻 x-opencode-session: {{conversationId}} 这个真实场景:provider 必须收到
+    // 解析后的真实会话 ID,而不是字面量占位符,这样 opencode.ai Go 网关才不会以
+    // "Request is missing x-opencode-session" 拒绝请求。
+    const deps = createDeps({
+      streamFactory: () => [{ type: 'text_delta', content: 'Hi' }, { type: 'done', text: 'Hi' }],
+      getHeaders: (conversationId) => conversationId ? { 'x-opencode-session': conversationId } : undefined,
+    });
+    const runtime = await makeRuntime(deps);
+    await collect(runtime.queryStream(createTurn({ conversationId: 'conv-xyz' } as any)));
+    expect(deps.capturedHeaders()).toEqual([{ 'x-opencode-session': 'conv-xyz' }]);
   });
 
   await test('passes turn.systemPrompt to the harness (decoration not persisted as a message)', async () => {

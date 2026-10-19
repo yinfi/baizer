@@ -46,6 +46,13 @@ export interface ProviderConfig {
     model: string;
     /** OpenAI 兼容协议的 API 端点方言；缺省 = 'completions'。见 OpenAIApiFlavor。 */
     apiFlavor?: OpenAIApiFlavor;
+    /**
+     * 随每次 LLM 请求附带的自定义 header（某些 OpenAI 兼容端点要求的非标准 header，
+     * 如 opencode.ai Go 网关的 x-opencode-session）。
+     * 值支持 {{conversationId}} 占位符，运行时替换为当前对话的稳定会话 ID；
+     * 无 conversationId 的一次性调用（/edit、file-back 等）会整体跳过含该占位符的 header。
+     */
+    customHeaders?: Record<string, string>;
 }
 
 export const DEFAULT_PROVIDERS: Record<string, ProviderConfig> = {

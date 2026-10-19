@@ -3181,6 +3181,14 @@ textarea.shell-input {
     opacity: 0.75;
 }
 
+.baizer-settings-detail-textarea {
+    min-height: 72px;
+    padding: 8px 10px;
+    font-family: var(--font-monospace);
+    resize: vertical;
+    white-space: pre;
+}
+
 .baizer-settings-detail-secret {
     display: flex;
     flex-wrap: wrap;
