@@ -35,6 +35,7 @@ const tests = [
   'test/chat-controller.test.ts',
   'test/message-projection.test.ts',
   'test/selection-menu.test.ts',
+  'test/selection-menu-state.test.ts',
   'test/command-suggestions.test.ts',
   'test/input-controller.test.ts',
   'test/command-dropdown.test.ts',
