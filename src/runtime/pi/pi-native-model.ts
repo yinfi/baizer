@@ -19,6 +19,30 @@ import type { ProviderConfig } from '../../mcp/types';
 // 与 settings.contextWindow 默认值对齐（src/mcp/types.ts DEFAULT_SETTINGS），
 // 也与 pi-provider-bridge.ts 的同名常量保持一致。
 const DEFAULT_CONTEXT_WINDOW = 100000;
+const OPENCODE_GO_HOST = 'opencode.ai';
+const OPENCODE_GO_PATH = /^\/zen\/go(?:\/|$)/i;
+
+/** 判断 provider endpoint 是否为 OpenCode Go。 */
+export function isOpenCodeGoBaseUrl(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return false;
+  try {
+    const url = new URL(baseUrl);
+    return url.hostname.toLowerCase() === OPENCODE_GO_HOST && OPENCODE_GO_PATH.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+/** 构造 OpenCode Go 要求的会话路由头，其他 endpoint 返回 undefined。 */
+export function buildOpenCodeGoHeaders(
+  baseUrl: string | undefined,
+  sessionId: string | undefined,
+): Record<string, string> | undefined {
+  const normalizedSessionId = sessionId?.trim();
+  if (!normalizedSessionId || !isOpenCodeGoBaseUrl(baseUrl)) return undefined;
+  return { 'x-opencode-session': normalizedSessionId };
+}
+
 
 /**
  * thinking 档对应 OpenAI reasoning_effort 的映射表。
@@ -178,8 +202,13 @@ export function createNativeCompleteFn(model: Model<any>, apiKey: string): Nativ
       systemPrompt: systemPrompt ?? '',
       messages: [{ role: 'user' as const, content: prompt, timestamp: Date.now() }],
     };
+    const requestSessionId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `baizer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const headers = buildOpenCodeGoHeaders(model.baseUrl, requestSessionId);
     const result: AssistantMessage = await completeSimple(model, context, {
       apiKey,
+      ...(headers ? { headers } : {}),
       ...(typeof options?.temperature === 'number' ? { temperature: options.temperature } : {}),
       ...(typeof options?.maxTokens === 'number' ? { maxTokens: options.maxTokens } : {}),
       ...(options?.signal ? { signal: options.signal } : {}),

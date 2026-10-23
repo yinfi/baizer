@@ -10,6 +10,7 @@ import {
 } from './pi-approval-policy';
 import { mapPiEventToStreamEvent, unwrapPiToolResult } from './pi-event-adapter';
 import { adaptToolDefinitionsToPi } from './pi-tool-adapter';
+import { buildOpenCodeGoHeaders, isOpenCodeGoBaseUrl } from './pi-native-model';
 
 /**
  * 基于 pi AgentHarness 的聊天运行时(阶段0)。
@@ -72,6 +73,17 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     const session = sessionManager
       ? await sessionManager.getSession(turn.conversationId)
       : await new (pi as any).InMemorySessionRepo().create({});
+    let sessionId = turn.conversationId?.trim();
+    if (!sessionId && isOpenCodeGoBaseUrl(model?.baseUrl)) {
+      try {
+        sessionId = (await session.getMetadata()).id;
+      } catch {
+        sessionId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `baizer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      }
+    }
+    const sessionHeaders = buildOpenCodeGoHeaders(model?.baseUrl, sessionId);
 
     const reasoning = (this.deps.thinkingLevel ?? 'medium');
 
@@ -86,7 +98,10 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       // 装饰(memory/context/skill/plan/契约)作为 systemPrompt:每轮发送、不持久化进 session。
       systemPrompt: turn.systemPrompt ?? '',
       thinkingLevel: reasoning,
-      getApiKeyAndHeaders: async () => ({ apiKey: await getApiKey() }),
+      getApiKeyAndHeaders: async () => ({
+        apiKey: await getApiKey(),
+        ...(sessionHeaders ? { headers: sessionHeaders } : {}),
+      }),
       // 审批:工具返回 approval_required 时,记录并请求本轮结束。
       afterToolCall: async ({ result }: any) => {
         const raw = unwrapPiToolResult(result);

@@ -74,8 +74,12 @@ function makeOpenAIConfig(overrides: Partial<ProviderConfig> = {}): ProviderConf
 async function runTests() {
   console.log('=== Pi Native Model Tests ===');
 
-  const { buildGeminiModel, buildOpenAICompatModel } =
-    await import('../src/runtime/pi/pi-native-model');
+  const {
+    buildGeminiModel,
+    buildOpenAICompatModel,
+    isOpenCodeGoBaseUrl,
+    buildOpenCodeGoHeaders,
+  } = await import('../src/runtime/pi/pi-native-model');
 
   // (a) Gemini Model 字段正确性
   await test('buildGeminiModel: api / provider / baseUrl 字段正确', () => {
@@ -160,6 +164,15 @@ async function runTests() {
       'medium',
     );
     expect(model.baseUrl).toBe('https://api.deepseek.com');
+  });
+
+  await test('OpenCode Go endpoint gets a trimmed session header only', () => {
+    expect(isOpenCodeGoBaseUrl('https://opencode.ai/zen/go/v1')).toBe(true);
+    expect(isOpenCodeGoBaseUrl('https://api.openai.com/v1')).toBe(false);
+    expect(buildOpenCodeGoHeaders('https://opencode.ai/zen/go/v1', '  session-1  ')).toEqual({
+      'x-opencode-session': 'session-1',
+    });
+    expect(buildOpenCodeGoHeaders('https://api.openai.com/v1', 'session-1')).toBeUndefined();
   });
 
   await test('buildOpenAICompatModel: baseUrl 缺省回落到 https://api.openai.com', () => {

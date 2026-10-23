@@ -184,23 +184,28 @@ function createDeps(options: {
   memoryManager?: any;
   skillRegistry?: any;
   toolDefinitions?: ToolDefinition[];
+  modelBaseUrl?: string;
+  sessionManager?: any;
 }): ChatRuntimeDeps & {
   sessionInputs: (string | ToolResult[])[];
+  capturedHeaders: () => Array<Record<string, string> | undefined>;
   registryCalls: any[];
   workspaceCalls: any[];
   capturedReasoning: () => string | undefined;
   register: (piAi: any) => void;
 } {
   const sessionInputs: (string | ToolResult[])[] = [];
+  const capturedHeaders: Array<Record<string, string> | undefined> = [];
   const registryCalls: any[] = [];
   const workspaceCalls: any[] = [];
   let lastReasoning: string | undefined;
   const apiName = `mock-${mockApiSeq++}`;
-  const model = { id: 'mock-model', name: 'Mock', api: apiName, provider: 'mock', baseUrl: '', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 1000 } as any;
+  const model = { id: 'mock-model', name: 'Mock', api: apiName, provider: 'mock', baseUrl: options.modelBaseUrl ?? '', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 1000 } as any;
 
   // 注册一个 mock api provider:Harness 内部按 model.api 路由到它。
   const streamSimple = (_model: any, context: any, opts?: any) => {
     lastReasoning = opts?.reasoning ?? opts?.thinkingLevel;
+    capturedHeaders.push(opts?.headers);
     const input = deriveInput(context.messages || []);
     sessionInputs.push(input);
     return eventsToPiStream(model, options.streamFactory(input));
@@ -208,7 +213,6 @@ function createDeps(options: {
   const register = (piAi: any) => {
     piAi.registerApiProvider({ api: apiName, stream: streamSimple, streamSimple }, 'baizer-test');
   };
-
   const nativeChatFactory = (): NativeChatHandle => ({ model, getApiKey: () => 'k' });
   const skillRegistry = options.skillRegistry || {
     getSkillSummaryText: () => '',
@@ -221,9 +225,11 @@ function createDeps(options: {
   const deps = {
     sessionInputs,
     registryCalls,
+    capturedHeaders: () => capturedHeaders,
     workspaceCalls,
     capturedReasoning: () => lastReasoning,
     register,
+    sessionManager: options.sessionManager,
     nativeChatFactory,
     harnessEnv: createMockEnv(),
     memoryManager: options.memoryManager || null,
@@ -297,6 +303,30 @@ async function runTests() {
     const done = events.at(-1) as any;
     expect(done.type).toBe('done');
     expect(done.text).toBe('Hello');
+  });
+
+  await test('forwards one stable x-opencode-session header per OpenCode Go conversation', async () => {
+    const pi = await import('@earendil-works/pi-agent-core');
+    const session = await new (pi as any).InMemorySessionRepo().create({});
+    const deps = createDeps({
+      modelBaseUrl: 'https://opencode.ai/zen/go/v1',
+      sessionManager: {
+        getSession: async () => session,
+        maybeCompact: async () => {},
+      },
+      streamFactory: () => [
+        { type: 'text_delta', content: 'Hello' },
+        { type: 'done', text: 'Hello' },
+      ],
+    });
+    const runtime = await makeRuntime(deps);
+    await collect(runtime.queryStream(createTurn({ conversationId: 'go-tab' })));
+    await collect(runtime.queryStream(createTurn({ conversationId: 'go-tab' })));
+
+    const headers = deps.capturedHeaders();
+    expect(headers.length).toBe(2);
+    expect(headers[0]).toEqual({ 'x-opencode-session': 'go-tab' });
+    expect(headers[1]).toEqual(headers[0]);
   });
 
   await test('runs a tool loop and sends unwrapped Baizer results to the second provider call', async () => {
