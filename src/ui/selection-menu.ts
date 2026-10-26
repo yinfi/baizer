@@ -1,6 +1,6 @@
 import { App, MarkdownRenderer, Component, Notice, setIcon } from 'obsidian';
-import { EditorView, showTooltip, tooltips } from '@codemirror/view';
-import { StateField, Extension, StateEffect, EditorState } from '@codemirror/state';
+import { EditorView, tooltips } from '@codemirror/view';
+import { Extension, EditorState } from '@codemirror/state';
 import { ModelService } from '../services/model-service';
 import { ChatController } from './chat-controller';
 import { ChatMessage } from './types';
@@ -9,21 +9,24 @@ import { SuggestionItem, SuggestionType } from './controllers/input-controller';
 import { SELECTION_ACTIONS, getAction, buildActionPrompt } from './selection-ai/action-registry';
 import { SelectionContextBuilder } from './selection-ai/selection-context-builder';
 import { FloatingPanel } from './selection-ai/floating-panel';
+import {
+    AiMenuMode,
+    SelectionMenuState,
+    createSelectionMenuFocusTracker,
+    requestSelectionMenuFocusSync,
+    selectionMenuTooltipExtension,
+    setSelectionMenuState,
+    stampTooltipOwner,
+} from './selection-ai/selection-menu-state';
 import { PluginSettings } from '../mcp/types';
 import { t } from '../i18n/zh';
 
 // 浮窗单例:同一时刻只允许一个选区 AI 浮窗,开新窗前销毁旧窗,避免多开堆叠。
 let activeExplainPanel: FloatingPanel | null = null;
 
-type AiMenuMode = 'selection' | 'trigger';
-
-// selection 场景:选中即出横向工具条(toolbar),点动作直接分流(改写→内联 diff / 只读→浮窗)。
-// trigger 场景(@ 行内插入):保留旧的 button→chat 迷你对话框,不在本次改造范围。
-type SelectionMenuState =
-    | { type: 'hidden' }
-    | { type: 'toolbar'; mode: 'selection'; from: number; to: number }
-    | { type: 'button'; mode: 'trigger'; from: number; to: number }
-    | { type: 'chat'; mode: 'trigger'; from: number; to: number; controller: ChatController };
+// 状态层把 chat 态的 controller 只约束到 cleanup()(以免状态层依赖 obsidian/app 层);
+// 本文件写入的始终是 ChatController,取回时按具体类型使用。
+type ChatMenuState = Extract<SelectionMenuState, { type: 'chat' }> & { controller: ChatController };
 
 interface PluginContext {
     app: App;
@@ -35,7 +38,7 @@ interface PluginContext {
 
 const pluginContextMap = new WeakMap<EditorView, PluginContext>();
 
-export const setSelectionMenuState = StateEffect.define<SelectionMenuState>();
+export { setSelectionMenuState };
 
 export function findAtTrigger(text: string, cursor: number): { from: number; to: number } | null {
     if (cursor <= 0 || cursor > text.length) return null;
@@ -46,65 +49,6 @@ export function findAtTrigger(text: string, cursor: number): { from: number; to:
 
     return { from: triggerFrom, to: cursor };
 }
-
-const selectionMenuField = StateField.define<SelectionMenuState>({
-    create() { return { type: 'hidden' }; },
-    update(state, tr) {
-        for (const effect of tr.effects) {
-            if (effect.is(setSelectionMenuState)) {
-                cleanupPreviousController(state, effect.value);
-                return effect.value;
-            }
-        }
-
-        if (!tr.selection && !tr.docChanged) return state;
-
-        const selection = tr.newSelection.main;
-        if (!selection.empty) {
-            // 选区非空 → 横向工具条(选中即出,无中间 AI 按钮态)。
-            const next: SelectionMenuState = {
-                type: 'toolbar',
-                mode: 'selection',
-                from: selection.from,
-                to: selection.to,
-            };
-            cleanupPreviousController(state, next);
-            return next;
-        }
-
-        const trigger = findAtTriggerInState(tr.state, selection.from);
-        if (trigger) {
-            if (state.type !== 'hidden'
-                && state.mode === 'trigger'
-                && state.from === trigger.from
-                && state.to === trigger.to) {
-                return state;
-            }
-            const next: SelectionMenuState = {
-                type: 'button',
-                mode: 'trigger',
-                from: trigger.from,
-                to: trigger.to,
-            };
-            cleanupPreviousController(state, next);
-            return next;
-        }
-
-        const next: SelectionMenuState = { type: 'hidden' };
-        cleanupPreviousController(state, next);
-        return next;
-    },
-    provide: field => showTooltip.from(field, (state) => {
-        if (state.type === 'hidden') return null;
-
-        return {
-            pos: state.to,
-            above: false,
-            strictSide: false,
-            create: (view: EditorView) => createSelectionTooltip(view, state),
-        };
-    }),
-});
 
 export function selectionMenuExtension(
     app: App,
@@ -119,7 +63,9 @@ export function selectionMenuExtension(
         contextService,
     });
     return [
-        selectionMenuField,
+        // 可见性判定在状态层(焦点门),tooltip provider 的产出随之变化。
+        selectionMenuTooltipExtension(createSelectionTooltip),
+        createSelectionMenuFocusTracker(),
         // Tooltip 定位:挂 body 顶层脱离兄弟遮挡 + fixed 视口定位不被 overflow 裁剪。
         // 不再把 tooltipSpace 限死为编辑器矩形——那会让选区靠右时工具条被强制左移/下移避让,
         // 脱离选区(实测漂到编辑器右侧空白)。用整个视口作可用空间,令工具条正常贴 pos(选区末尾)。
@@ -133,41 +79,41 @@ export function selectionMenuExtension(
     ];
 }
 
-function findAtTriggerInState(state: EditorState, cursor: number): { from: number; to: number } | null {
-    if (cursor <= 0) return null;
-
-    const at = state.doc.sliceString(cursor - 1, cursor);
-    if (at !== '@') return null;
-
-    const before = cursor > 1 ? state.doc.sliceString(cursor - 2, cursor - 1) : '';
-    if (cursor > 1 && !/\s/.test(before)) return null;
-
-    return { from: cursor - 1, to: cursor };
-}
-
 function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
     const context = pluginContextMap.get(view);
     const dom = document.createElement('div');
     dom.className = `guardian-selection-tooltip is-${state.type}`;
     if (state.type === 'hidden' || !context) return { dom };
 
-    // 防重:同一文档在运行时可能同时存在多个 CM 实例(链接面板 / 同笔记多标签 / 隐藏后台编辑器)。
-    // 它们都注册了本扩展,选区被 Obsidian 同步后各自的 field 都看到非空选区、各弹一个工具条;
-    // 又因 tooltip 被 parent 到 document.body + position:fixed,非当前实例也会显示在视口,
-    // 造成"两个工具条"。选区在语义上只属于用户此刻聚焦的那个编辑器 —— DOM 焦点唯一,
-    // 只让 hasFocus 的实例渲染,其余返回空节点。(隐藏后台实例天然无焦点,一并被挡掉。)
-    if (!view.hasFocus) return { dom };
+    // 防重("同一文档多个 CM 实例各弹一条")的判定已上移到状态层:
+    // 放在这里无效 —— 见 selection-menu-state.ts 文件头(create 只在 facet 重算、create 引用
+    // 变化时才被调用,编辑器失焦不会让这里重新求值)。
 
     // selection 场景:横向工具条,点动作直接分流。
     if (state.type === 'toolbar') {
         // 用户可在设置里关闭"选中即弹工具条"。关则返回空节点,选区不再触发悬浮条。
         // (trigger 的 @ 行内插入是独立功能,不受此开关控制。)
         if (!context.settings.enableSelectionMenu) return { dom };
-        const bar = dom.createDiv({ cls: 'baizer-selection-toolbar' });
+
+        // 打归属标记 + 监听条内焦点进出:点按钮时 mousedown 会先让编辑器失焦,
+        // 这层存活窗口让状态层仍判本视图活跃,节点不会在 click 之前被移除。
+        stampTooltipOwner(dom, view);
+        dom.addEventListener('focusin', () => requestSelectionMenuFocusSync(view));
+        dom.addEventListener('focusout', () => requestSelectionMenuFocusSync(view));
+
+        const bar = dom.createDiv({
+            cls: 'baizer-selection-toolbar',
+            attr: { 'data-testid': 'baizer-selection-toolbar' },
+        });
         for (const action of SELECTION_ACTIONS) {
             const btn = bar.createEl('button', {
                 cls: 'baizer-selection-tool',
-                attr: { type: 'button', title: t(action.label), 'aria-label': t(action.label) },
+                attr: {
+                    type: 'button',
+                    title: t(action.label),
+                    'aria-label': t(action.label),
+                    'data-testid': `baizer-selection-tool-${action.id}`,
+                },
             });
             setIcon(btn, action.icon);
             btn.createSpan({ cls: 'baizer-selection-tool-label', text: t(action.label) });
@@ -211,7 +157,7 @@ function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
     }
 
     const markdownComponent = new Component();
-    dom.appendChild(createChatPanel(view, state, context, markdownComponent));
+    dom.appendChild(createChatPanel(view, state as ChatMenuState, context, markdownComponent));
     return { dom, destroy: () => markdownComponent.unload() };
 }
 
@@ -289,7 +235,7 @@ function openPanel(
 
 function createChatPanel(
     view: EditorView,
-    state: Extract<SelectionMenuState, { type: 'chat' }>,
+    state: ChatMenuState,
     context: { app: App; modelService: ModelService },
     markdownComponent: Component,
 ) {
@@ -436,7 +382,7 @@ function renderSelectionMessage(app: App, messageList: HTMLElement, msg: ChatMes
     }
 }
 
-function getTargetText(view: EditorView, state: Extract<SelectionMenuState, { type: 'chat' }>) {
+function getTargetText(view: EditorView, state: ChatMenuState) {
     const line = view.state.doc.lineAt(state.from);
     const beforeTrigger = line.text.slice(0, Math.max(0, state.from - line.from)).trim();
     return beforeTrigger || line.text.replace('@', '').trim();
@@ -487,7 +433,7 @@ function relocateRange(
 
 async function applyTriggerInsertion(
     view: EditorView,
-    state: Extract<SelectionMenuState, { type: 'chat' }>,
+    state: ChatMenuState,
     context: { app: App },
 ) {
     const response = getLastAiResponse(state.controller);
@@ -513,10 +459,4 @@ async function applyTriggerInsertion(
 function getLastAiResponse(controller: ChatController): string {
     const message = [...controller.getMessages()].reverse().find(item => item.role === 'ai');
     return message?.content || '';
-}
-
-function cleanupPreviousController(previous: SelectionMenuState, next: SelectionMenuState) {
-    if (previous.type !== 'chat') return;
-    if (next.type === 'chat' && next.controller === previous.controller) return;
-    previous.controller.cleanup();
 }

@@ -94,7 +94,9 @@ function createMockEnv(): any {
 async function runE2ETests() {
   // 端到端:运行中补话经 ActiveRunController → 活跃 harness.steer() 注入下一轮。
   await test('mid-run steer via ActiveRunController is injected into a later provider turn', async () => {
-    const piAi: any = await import('@earendil-works/pi-ai');
+    // pi-ai 1.3.0 的主入口不再导出 registerApiProvider（改在 /compat 子路径，
+    // 见 pi-native-model.ts 的 createNativeStreamFn 同款说明）。
+    const piAi: any = await import('@earendil-works/pi-ai/compat');
     const apiName = `steer-mock-${mockSeq++}`;
     const lastInputs: string[] = [];
     let call = 0;

@@ -21,8 +21,16 @@ const BUNDLE = 'dist/main.js';
 // Obsidian Sync 的 Standard 计划不同步超过 5MB 的文件。main.js 一旦越线,
 // 付费同步用户就拿不到插件更新 —— 这是真实的用户影响,不只是过审问题。
 // 留一点余量,不要顶着 5MB 上限走。
+//
+// 预算从 4.6 MB 上调到 4.8 MB（2026-10-26，pi-agent-core/pi-ai 0.75.5→1.3.0
+// 升级）：1.3.0 的 provider 注册表从 9 个变成 42 个，即使把未用 provider/api 全部
+// 存根（见 esbuild.config.mjs 的 STUBBED_PI_PROVIDERS/STUBBED_PI_APIS），基线仍从
+// 2.04 MB 涨到 4.77 MB。压到 4.6 MB 以下唯一的大头是 yaml（821 KB，仅本项目 4 个
+// 文件用于解析 frontmatter），为此改手写解析器或切到 Obsidian metadataCache 的
+// 正确性风险，评估后判定不值得——5 MB 硬限（Obsidian Sync 真实限制）仍然守着,
+// 0.23 MB 余量继续能挡住下一次意外膨胀。
 const HARD_LIMIT_BYTES = 5 * 1024 * 1024;
-const BUDGET_BYTES = 4.6 * 1024 * 1024;
+const BUDGET_BYTES = 4.8 * 1024 * 1024;
 
 // dist/ 是构建产物,不入库。没构建过就跳过而不是失败,
 // 否则新克隆仓库的人第一次跑 npm test 会莫名其妙地红。

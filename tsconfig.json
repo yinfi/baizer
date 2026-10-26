@@ -7,7 +7,7 @@
     "target": "ES2022",
     "allowSyntheticDefaultImports": true,
     "importHelpers": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "noImplicitAny": true,
     "noImplicitReturns": true,
     "noImplicitThis": true,

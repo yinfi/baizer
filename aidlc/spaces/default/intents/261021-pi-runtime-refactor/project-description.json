@@ -1,0 +1,1 @@
+"我想对这个底层架构做改造，之前架构有两个问题：1.平台迁移不充分，没有完全以pi-agent作为底座，充分利用pi-agent的能力；2. 使用的pi-agent版本比较老，现在的pi-agent有较大升级。现在要解决这两个问题，进行彻底重构，是继续选pi-agent还是deepseek harness"

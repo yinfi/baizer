@@ -1,3 +1,4 @@
+import type { Agent as PiAgent, AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { StreamEvent } from '../../models/interfaces';
 import { BaseChatRuntime } from '../base-chat-runtime';
 import { ChatRuntime, PreparedChatTurn } from '../runtime-types';
@@ -10,17 +11,24 @@ import {
 } from './pi-approval-policy';
 import { mapPiEventToStreamEvent, unwrapPiToolResult } from './pi-event-adapter';
 import { adaptToolDefinitionsToPi } from './pi-tool-adapter';
+import { createNativeStreamFn } from './pi-native-model';
+import {
+  createInMemoryConversationSession,
+  type ConversationSession,
+} from './session-store/conversation-session';
+import type { EntryKind } from './session-store/types';
 
 /**
- * 基于 pi AgentHarness 的聊天运行时(阶段0)。
+ * 基于 pi `Agent` 的聊天运行时。
  *
  * 取代 PiChatRuntime 对底层 agentLoop 的直调:
- * - 引擎:AgentHarness 驱动整个工具循环、会话、事件。
- * - Session:阶段0 用 InMemorySessionRepo(无持久化,等价旧的「不注入 sessionStore」)。
- *   阶段1 再换 JsonlSessionRepo。
- * - LLM 注入:Harness 内部按 model.api 路由到 pi api-registry,不接受注入 streamFn。
- *   生产由 nativeChatFactory 提供已注册 provider 的 model + getApiKeyAndHeaders 回调;
- *   测试通过 registerApiProvider 注册 mock provider。
+ * - 引擎:pi `Agent`(1.3.0 的 `AgentHarness` 已移除)驱动工具循环与事件。
+ * - LLM 注入:`AgentOptions.streamFn` 是必填字段——`Agent` 不再自己按 model.api 路由,
+ *   故由 nativeChatFactory 提供的句柄给出 streamFn(生产 = createNativeStreamFn(apiKey + 自定义 header);
+ *   测试可注入 mock streamFn),未提供时回落到 createNativeStreamFn。
+ * - 会话:pi 1.3.0 的 `Agent` **不写持久层**,跨轮上下文与落盘都由本 runtime 经
+ *   sessionManager 的自建持久化层完成——prompt 前用 buildModelMessages() 组装 transcript,
+ *   prompt 后把本轮新增消息 append 成 Entry。
  * - 审批:afterToolCall hook 检测 approval_required → terminate,中止本轮。
  *
  * 对外仍产出既有的 StreamEvent 契约(text_delta/tool_call/tool_result/step_boundary/done/error),
@@ -48,7 +56,8 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     if (!this.deps.nativeChatFactory) {
       throw new Error('HarnessChatRuntime requires deps.nativeChatFactory to build a model handle');
     }
-    const { model, getApiKey, getHeaders } = resolveModelHandle(this.deps.nativeChatFactory(turn.conversationId));
+    const chatHandle = this.deps.nativeChatFactory(turn.conversationId);
+    const { model, getApiKey, getHeaders } = resolveModelHandle(chatHandle);
 
     const skillScope = this.createSkillScope(turn);
     const fileWriteState = createPiFileWriteState(turn.requiresFileWrite === true);
@@ -60,35 +69,49 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       skillScope,
     });
 
-    const pi = await import('@earendil-works/pi-agent-core');
-    const env = this.deps.harnessEnv;
-    if (!env) {
-      throw new Error('HarnessChatRuntime requires deps.harnessEnv (ExecutionEnv) to construct the AgentHarness');
-    }
-
-    // 阶段1:优先复用 sessionManager 持有的长生命持久化 session(跨轮上下文由 Harness
-    // 从它派生,跨重启可恢复)。无 sessionManager(纯单测)时退化为每轮全新内存会话。
+    // 阶段1:优先复用 sessionManager 持有的长生命持久化会话(跨轮上下文由它派生,跨重启可恢复)。
+    // 无 sessionManager(纯单测)时退化为每轮全新内存会话。
     const sessionManager = this.deps.sessionManager ?? null;
     const session = sessionManager
       ? await sessionManager.getSession(turn.conversationId)
-      : await new (pi as any).InMemorySessionRepo().create({});
+      : await createInMemoryConversationSession();
+
+    // BR1.3:迁移失败的会话被只读保护——仅可查看历史,不能继续对话。以 error 事件明确提示
+    // 用户(UI 把 error 渲染进对话流),而不是静默跑一轮注定写不进历史的对话。
+    if (session.availability === 'read_only_degraded') {
+      yield {
+        type: 'error',
+        message: '该会话的历史记录无法迁移（文件格式无法识别或已损坏），已降级为只读：只能查看历史，不能继续对话。',
+      };
+      return;
+    }
 
     const reasoning = (this.deps.thinkingLevel ?? 'medium');
 
     let approvalMessage = '';
     let fullResponseText = '';
 
-    const harness = new (pi as any).AgentHarness({
-      env,
-      session,
-      model,
-      tools,
-      // 装饰(memory/context/skill/plan/契约)作为 systemPrompt:每轮发送、不持久化进 session。
-      systemPrompt: turn.systemPrompt ?? '',
-      thinkingLevel: reasoning,
-      getApiKeyAndHeaders: async () => ({ apiKey: await getApiKey(), headers: getHeaders() }),
+    // pi 1.3.0 的 Agent 不持有会话:transcript 由本 runtime 从持久化层组装后交给它。
+    // 落盘的 payload 就是 pi 消息对象本身,故这里按 pi 的消息类型复原(形状由写入方保证)。
+    const priorMessages = (await session.buildModelMessages()) as unknown as AgentMessage[];
+
+    const pi = await import('@earendil-works/pi-agent-core');
+    const agent: PiAgent = new pi.Agent({
+      initialState: {
+        model,
+        tools,
+        // 装饰(memory/context/skill/plan/契约)作为 systemPrompt:每轮发送、不落盘。
+        systemPrompt: turn.systemPrompt ?? '',
+        // this.deps.thinkingLevel 来自 settings(宽泛的 string),取值集合与 pi 的 ThinkingLevel 对齐。
+        thinkingLevel: reasoning as ThinkingLevel,
+        messages: priorMessages,
+      },
+      // 句柄自带 streamFn 时优先(测试的 mock 注入点);否则用生产实现(注入 apiKey + 自定义 header)。
+      streamFn: chatHandle.streamFn ?? createNativeStreamFn({ getApiKey, getHeaders }),
+      // 供 provider 侧按需取 key(与 streamFn 内的取值同源)。
+      getApiKey: () => getApiKey(),
       // 审批:工具返回 approval_required 时,记录并请求本轮结束。
-      afterToolCall: async ({ result }: any) => {
+      afterToolCall: async ({ result }) => {
         const raw = unwrapPiToolResult(result);
         if (isPiApprovalResponse(raw)) {
           approvalMessage = formatPiApprovalMessage(raw);
@@ -96,12 +119,26 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
         }
         return undefined;
       },
+      sessionId: turn.conversationId,
     });
 
+    // 本轮新增消息 = transcript 基线之后的部分(prompt 前先记基线,含 Agent 自动前置的 system 消息)。
+    const transcriptBaseline = agent.state.messages.length;
+
     // 运行中 steering:把活跃 harness 登记进控制器,使 UI/ModelService 能对当前流
-    // 调用 Harness 原生 steer()/setActiveTools()。流结束时在 finally 里清除。
+    // 调用 steer()/替换活跃工具集。pi 1.3.0 的 Agent 用 steer(message) 与 state.tools,
+    // 故这里做一层薄适配,控制器与 UI 侧接口不变。流结束时在 finally 里清除。
     const activeRunController = this.deps.activeRunController ?? null;
-    activeRunController?.register(harness);
+    const steerable = {
+      steer: async (text: string) => {
+        agent.steer({ role: 'user', content: text, timestamp: Date.now() } as AgentMessage);
+      },
+      setActiveTools: async (toolNames: string[]) => {
+        const allowed = new Set(toolNames);
+        agent.state.tools = tools.filter((tool) => allowed.has(tool.name));
+      },
+    };
+    activeRunController?.register(steerable);
 
     // 事件桥接:Harness 原生事件 → StreamEvent,推入异步队列供本 generator 产出。
     const queue = createEventQueue<StreamEvent>();
@@ -115,8 +152,8 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     // 提炼只用 user+assistant 文本(assistant 文本已是动作的自然摘要)。
     const turnToolResults: Array<{ name: string; result: unknown }> = [];
 
-    const unsubscribe = harness.subscribe((event: any) => {
-      // Provider 错误不会让 harness.prompt() reject,而是以 message_end(stopReason:'error') 出现。
+    const unsubscribe = agent.subscribe((event: any) => {
+      // Provider 错误不会让 prompt() reject,而是以 message_end(stopReason:'error') 出现。
       // 中断(aborted)由 runError 分支处理,这里只转 error。
       if (event?.type === 'message_end' && event.message?.stopReason === 'error') {
         if (!approvalMessage) {
@@ -162,32 +199,27 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       if (!approvalMessage) queue.push(mapped);
     });
 
-    // 外部中断:透传到 Harness.abort()。
-    const onAbort = () => { void harness.abort(); };
+    // 外部中断:透传到 Agent.abort()。
+    const onAbort = () => { agent.abort(); };
     if (signal?.aborted) onAbort();
     else signal?.addEventListener('abort', onAbort, { once: true });
 
-    // 阶段B:prompt 前记下当前 leaf。prompt() 会把本轮 user 与 assistant 都 append 成 message entry,
-    // 本轮新增的 entry = preTurnLeafId 之后的部分。在 maybeCompact 改动 leaf 之前捕获才准确。
-    // 仅持久会话(有 sessionManager + conversationId)需要锚定;临时会话不追。
+    // 阶段B:prompt 前记下当前 leaf。本轮新增的 Entry 都挂在它之后,
+    // 在 maybeCompact 改动 leaf 之前捕获才准确。仅持久会话需要锚定;临时会话不追。
     const canAnchorEntries = !!sessionManager && !!turn.conversationId;
     let preTurnLeafId: string | null = null;
     if (canAnchorEntries) {
-      try {
-        preTurnLeafId = await (session as any).getLeafId();
-      } catch {
-        preTurnLeafId = null;
-      }
+      preTurnLeafId = session.getActiveLeafEntryId();
     }
 
     // 后台驱动一轮 prompt;完成/失败后标记队列结束。
     // 注:provider 错误不会 reject(见 subscribe 里 message_end 处理);此处 catch 仅兜底真正的抛错/中断。
     const runPromise = (async () => {
       try {
-        await harness.prompt(turn.prompt);
+        await agent.prompt(turn.prompt);
       } catch (error: any) {
         const aborted = error?.name === 'AbortError' || signal?.aborted === true;
-        if (!runErrorBox.value) runErrorBox.value = { message: error?.message || 'Harness run failed', aborted };
+        if (!runErrorBox.value) runErrorBox.value = { message: error?.message || 'Agent run failed', aborted };
       } finally {
         queue.close();
       }
@@ -199,11 +231,20 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
         yield event;
       }
       await runPromise;
+      // 本轮消息落盘(pi 1.3.0 的 Agent 不写持久层,故由本 runtime 负责)。
+      // 失败不静默:并入既有的错误通道,由下方 runError 分支产出 error 事件。
+      try {
+        await persistTurnMessages(session, agent.state.messages.slice(transcriptBaseline));
+      } catch (error: any) {
+        if (!runErrorBox.value) {
+          runErrorBox.value = { message: `Failed to persist turn: ${error?.message || 'unknown error'}`, aborted: false };
+        }
+      }
     } finally {
       unsubscribe();
       signal?.removeEventListener('abort', onAbort);
-      // 仅当当前活跃引用仍是本轮 harness 时清除,避免误清刚启动的新流。
-      activeRunController?.clear(harness);
+      // 仅当当前活跃引用仍是本轮注册对象时清除,避免误清刚启动的新流。
+      activeRunController?.clear(steerable);
     }
 
     const runError = runErrorBox.value;
@@ -232,9 +273,14 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     const entryIds = canAnchorEntries
       ? await extractTurnEntryIds(session, preTurnLeafId)
       : undefined;
-    // 本轮已落盘进 session;按真实 usage 判断是否超阈值,超了就压缩(失败静默降级)。
+    // 本轮已落盘;按真实 usage 判断是否超阈值,超了就压缩(失败静默降级)。
+    // 真的折叠了旧消息时,先产出 compaction 事件(functional-spec.md §4:压缩不再是纯内部副作用),
+    // 再产出 done——压缩动作发生在"本轮答案已确定"之后,顺序上在 done 之前通知更自然。
     if (sessionManager) {
-      await sessionManager.maybeCompact(harness, turn.conversationId);
+      const compactionResult = await sessionManager.maybeCompact(turn.conversationId);
+      if (compactionResult.compacted) {
+        yield { type: 'compaction', foldedEntryCount: compactionResult.foldedEntryCount ?? 0 };
+      }
     }
     yield entryIds ? { type: 'done', text: fullResponseText, entryIds } : { type: 'done', text: fullResponseText };
   }
@@ -243,35 +289,33 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
 /**
  * 提取本轮新增的 user / assistant entryId(阶段B)。
  *
- * pi 的 prompt() 把本轮 user 与 assistant 消息都 append 成 message entry;
- * 分支是 root→leaf 顺序,故本轮新增 = preTurnLeafId 之后的部分。
- * 从该切片里取第一条 role==='user' 作 userEntryId、最后一条 role==='assistant' 作 assistantEntryId。
+ * 本轮落盘的 user 与 assistant 消息都 append 进会话;分支是 root→leaf 顺序,
+ * 故本轮新增 = preTurnLeafId 之后的部分。从该切片里取第一条 user_message 作 userEntryId、
+ * 最后一条 assistant_message 作 assistantEntryId。
  *
- * 必须在 maybeCompact 之前调用:压缩会 append compaction entry 并移动 leaf,之后切片语义就变了。
+ * 必须在 maybeCompact 之前调用:压缩会改动会话树(移动 leaf),之后切片语义就变了。
  * 任何异常都吞掉(锚定是增强而非正确性前提),返回 undefined 让 UI 走无锚定降级。
  */
 async function extractTurnEntryIds(
-  session: any,
+  session: ConversationSession,
   preTurnLeafId: string | null,
 ): Promise<{ userEntryId?: string; assistantEntryId?: string } | undefined> {
   try {
-    const branch: any[] = await session.getBranch();
-    if (!Array.isArray(branch) || branch.length === 0) return undefined;
+    const branch = await session.getBranch();
+    if (branch.length === 0) return undefined;
 
     // 定位 preTurnLeafId 在分支中的位置;本轮新增 entry 在其之后。
     // preTurnLeafId 为 null(会话首轮)时,整条分支都是本轮新增。
     const startIndex = preTurnLeafId
-      ? branch.findIndex((entry) => entry?.id === preTurnLeafId) + 1
+      ? branch.findIndex((entry) => entry.id === preTurnLeafId) + 1
       : 0;
     const newEntries = branch.slice(startIndex);
 
     let userEntryId: string | undefined;
     let assistantEntryId: string | undefined;
     for (const entry of newEntries) {
-      if (entry?.type !== 'message') continue;
-      const role = entry.message?.role;
-      if (role === 'user' && !userEntryId) userEntryId = entry.id;
-      if (role === 'assistant') assistantEntryId = entry.id;
+      if (entry.kind === 'user_message' && !userEntryId) userEntryId = entry.id;
+      if (entry.kind === 'assistant_message') assistantEntryId = entry.id;
     }
 
     if (!userEntryId && !assistantEntryId) return undefined;
@@ -307,6 +351,37 @@ function resolveModelHandle(handle: any): {
   }
   // 无显式 key(如测试用 mock provider,不校验 key):返回占位空串。
   return { model, getApiKey: async () => '', getHeaders };
+}
+
+/** Entry.kind 由 pi 消息 role 决定;system 消息每轮由 systemPrompt 重发,不落盘。 */
+const ENTRY_KIND_BY_ROLE: Record<string, EntryKind> = {
+  user: 'user_message',
+  assistant: 'assistant_message',
+  toolResult: 'tool_result',
+};
+
+/**
+ * 把本轮新增的消息落成会话 Entry(pi 1.3.0 的 Agent 不写持久层,落盘由 runtime 负责)。
+ *
+ * 逐条按当前活跃叶子追加——每条新 Entry 的父节点是上一条刚追加的 Entry,
+ * 保证重建出的分支顺序与 Agent transcript 里的顺序一致。payload 存消息对象本身
+ * (见 session-store/types.ts 的 MessagePayload 文档),保真到位,供下一轮 buildModelMessages 还原。
+ *
+ * 不认识的 role(system 之外)按异常处理而不是静默丢弃——本轮答案已经产出,
+ * 吞掉它比报错更危险(用户会以为历史保存了,其实没有)。
+ */
+async function persistTurnMessages(session: ConversationSession, messages: AgentMessage[]): Promise<void> {
+  let parentEntryId = session.getActiveLeafEntryId();
+  for (const message of messages) {
+    const role = (message as { role?: string }).role;
+    if (role === 'system') continue; // 装饰性系统提示,延续既有的「不持久化」契约。
+    const kind = role ? ENTRY_KIND_BY_ROLE[role] : undefined;
+    if (!kind) {
+      throw new Error(`persistTurnMessages: unrecognized agent message role "${role}"`);
+    }
+    const entry = await session.append({ kind, parentEntryId, payload: message });
+    parentEntryId = entry.id;
+  }
 }
 
 /**
