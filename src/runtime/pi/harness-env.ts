@@ -1,5 +1,7 @@
-import type { FileError, FileInfo, Result } from '@earendil-works/pi-agent-core';
-import { VaultSessionFileSystem, type VaultFileAdapter } from './vault-session-fs';
+// pi 1.3.0 已移除 FileSystem 抽象及其 FileError/FileInfo/Result 类型（随 AgentHarness 一起）。
+// 本文件仍被 PromptTemplateService 使用（用户自定义 slash 命令的文件读取，Step 4.5 自建加载后退役），
+// 故改用 vault-session-fs.ts 已有的本地结构定义，而不是随 ChatRuntimeDeps 一起整体删除。
+import { VaultSessionFileSystem, type FileError, type FileInfo, type Result, type VaultFileAdapter } from './vault-session-fs';
 
 /**
  * 把 VaultSessionFileSystem 补全为 pi AgentHarness 所需的完整 ExecutionEnv。

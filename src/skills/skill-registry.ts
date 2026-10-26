@@ -7,7 +7,6 @@
 // - 激活：formatSkillInvocation 包装完整正文（斜杠命令 / 强制激活）
 // - 路由：斜杠命令 / 关键词意图 → 匹配 Skill
 
-import type { Skill as PiSkill } from '@earendil-works/pi-agent-core';
 import {
   SkillSummary,
   SkillCommandEntry,
@@ -17,7 +16,12 @@ import {
 } from './types';
 import { ToolRegistry } from './tool-registry';
 import { logger } from '../utils/logger';
-import { LoadedSkill, parseBuiltinSkill } from './pi-skill-source';
+import {
+  LoadedSkill,
+  formatSkillInvocation,
+  formatSkillsForSystemPrompt,
+  parseBuiltinSkill,
+} from './pi-skill-source';
 import {
   SkillFilesAdapter,
   USER_SKILLS_DIR,
@@ -31,13 +35,7 @@ export interface BuiltinExecutor {
   execute(args: any, ctx: ToolContext): Promise<any>;
 }
 
-/** pi 格式化器引用（动态 import 缓存，规避 ESM-only 在 CJS 下的静态导入问题）。 */
-interface PiFormatters {
-  formatSkillsForSystemPrompt(skills: PiSkill[]): string;
-  formatSkillInvocation(skill: PiSkill, additionalInstructions?: string): string;
-}
-
-/** 注册表内部条目：pi Skill + sidecar + 可选 executor + 来源标记。 */
+/** 注册表内部条目：skill 模型 + sidecar + 可选 executor + 来源标记。 */
 interface RegistryEntry {
   loaded: LoadedSkill;
   executor?: BuiltinExecutor;
@@ -52,28 +50,8 @@ export class SkillRegistry {
   private entries = new Map<string, RegistryEntry>();
   /** 斜杠命令 → skill name 快速索引。 */
   private commandIndex = new Map<string, string>();
-  /** 动态 import 缓存的 pi 格式化器；init() 后可用。 */
-  private formatters: PiFormatters | null = null;
 
   constructor(private toolRegistry: ToolRegistry) {}
-
-  /**
-   * 动态 import 并缓存 pi 格式化器。onload 中 await 一次；此后 getSkillSummaryText /
-   * activateSkill 可同步调用。pi 是 ESM-only，故用动态 import（CJS 测试环境亦可跑通）。
-   */
-  async init(): Promise<void> {
-    if (this.formatters) return;
-    try {
-      const mod: any = await import('@earendil-works/pi-agent-core');
-      this.formatters = {
-        formatSkillsForSystemPrompt: mod.formatSkillsForSystemPrompt,
-        formatSkillInvocation: mod.formatSkillInvocation,
-      };
-    } catch (error) {
-      logger.error('Failed to load pi skill formatters', error, 'SkillRegistry');
-      throw error;
-    }
-  }
 
   /** 注册一个内置 Skill（从 bundled SKILL.md 字符串 + executor）。 */
   registerBuiltinFromMd(skillMd: string, executor: BuiltinExecutor): void {
@@ -257,16 +235,14 @@ export class SkillRegistry {
   }
 
   /**
-   * B 方案：系统提示的 skill 清单用 pi 原生 formatSkillsForSystemPrompt 生成，
+   * B 方案：系统提示的 skill 清单由本地 `formatSkillsForSystemPrompt` 生成，
    * location 指向物化后的真实文件（模型经 read_skill 读取完整正文）。
-   * init() 未跑（理论上不会）时回退空串。
    */
   getSkillSummaryText(): string {
-    if (!this.formatters) return '';
     const skills = [...this.entries.values()]
       .filter(e => this.isEnabled(e))
       .map(e => e.loaded.skill);
-    return this.formatters.formatSkillsForSystemPrompt(skills);
+    return formatSkillsForSystemPrompt(skills);
   }
 
   // ==================== 路由 ====================
@@ -301,7 +277,7 @@ export class SkillRegistry {
 
   // ==================== Level 2: 激活 ====================
 
-  /** 激活 skill：instructions 用 pi formatSkillInvocation 包装完整正文。 */
+  /** 激活 skill：instructions 用本地 formatSkillInvocation 包装完整正文。 */
   activateSkill(name: string): ActivatedSkill | null {
     const entry = this.entries.get(name);
     if (!entry || !this.isEnabled(entry)) {
@@ -309,19 +285,15 @@ export class SkillRegistry {
       return null;
     }
     const tools = this.toolRegistry.getDefinitions(entry.loaded.sidecar.tools);
-    const instructions = this.formatters
-      ? this.formatters.formatSkillInvocation(entry.loaded.skill)
-      : entry.loaded.skill.content;
+    const instructions = formatSkillInvocation(entry.loaded.skill);
     return { skillName: entry.loaded.skill.name, tools, instructions };
   }
 
-  /** read_skill 用：按名返回物化路径 + pi 包装后的完整指令。 */
+  /** read_skill 用：按名返回物化路径 + 包装后的完整指令。 */
   resolveForRead(name: string): { filePath: string; instructions: string } | null {
     const entry = this.entries.get(name);
     if (!entry || !this.isEnabled(entry)) return null;
-    const instructions = this.formatters
-      ? this.formatters.formatSkillInvocation(entry.loaded.skill)
-      : entry.loaded.skill.content;
+    const instructions = formatSkillInvocation(entry.loaded.skill);
     return { filePath: entry.loaded.skill.filePath ?? '', instructions };
   }
 

@@ -19,7 +19,7 @@ import type { ActiveRunController } from './active-run-controller';
  * 本句柄把「该用哪个 Model」与「如何发起 stream」
  * 这两件事打包在一起：
  *   - model:    pi-ai 的 Model 配置对象（由 buildGeminiModel / buildOpenAICompatModel 构造）
- *   - streamFn: 注入了 apiKey 的 StreamFn（生产由 createNativeStreamFn 提供；测试注入 mock）
+ *   - streamFn: 注入了 apiKey 的 StreamFn（生产由 createNativeStreamFn 提供，也可由本句柄直接给出；测试注入 mock）
  *
  * 两者必须同源构造（同一 provider 类型、同一 apiKey），故合并为一个句柄一次性给出，
  * 避免 runtime 自己拼装 provider 细节。
@@ -27,8 +27,9 @@ import type { ActiveRunController } from './active-run-controller';
 export interface NativeChatHandle {
   model: Model<any>;
   /**
-   * @deprecated AgentHarness 内部按 model.api 路由到 pi api-registry,不再消费注入的 streamFn。
-   * 保留字段以兼容旧装配与测试;HarnessChatRuntime 忽略它。
+   * pi 1.3.0 的 `AgentOptions.streamFn` 是必填字段，`Agent` 不再自己按 model.api
+   * 路由到 api-registry。提供时优先使用（测试注入「假 LLM 响应」的入口）；
+   * 缺省时 HarnessChatRuntime 用 createNativeStreamFn(getApiKey, getHeaders) 构造生产实现。
    */
   streamFn?: StreamFn;
   /**
@@ -65,12 +66,6 @@ export interface ChatRuntimeDeps {
    * 缺省时 PiChatRuntime.queryStream 会抛出明确错误（生产必须提供）。
    */
   nativeChatFactory?: NativeChatFactory;
-  /**
-   * pi AgentHarness 所需的完整 ExecutionEnv(FileSystem + Shell)。
-   * 生产由 model-service 用 createHarnessExecutionEnv(vault adapter) 构造;
-   * 无 vault(如纯单测)时可省略,此时 HarnessChatRuntime 会快速失败。
-   */
-  harnessEnv?: unknown;
   memoryManager: MemoryManager | null;
   toolRegistry: ToolRegistry;
   skillRegistry: SkillRegistry;

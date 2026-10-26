@@ -150,6 +150,49 @@ async function runTests() {
       assistantMessageEvent: { type: 'text_start' },
     } as any)).toBeUndefined();
   });
+
+  // functional-spec.md §4 决策表:下列 1.3.0 AgentEvent 家族均"不适用/丢弃",
+  // 本函数不为它们产出任何 StreamEvent(压缩走独立的 maybeCompact 结果,
+  // 不经本函数;usage 搭载在 AgentMessage.usage 字段里,不是独立事件)。
+  await test('drops agent_start (no decision-table mapping target)', () => {
+    expect(mapPiEventToStreamEvent({ type: 'agent_start' } as any)).toBeUndefined();
+  });
+
+  await test('drops turn_end (turn completion handled by the runtime, not this mapping)', () => {
+    expect(mapPiEventToStreamEvent({
+      type: 'turn_end',
+      message: { role: 'assistant', content: [] },
+      toolResults: [],
+    } as any)).toBeUndefined();
+  });
+
+  await test('drops agent_end (final messages handled by the runtime, not this mapping)', () => {
+    expect(mapPiEventToStreamEvent({ type: 'agent_end', messages: [] } as any)).toBeUndefined();
+  });
+
+  await test('drops message_start (no decision-table mapping target)', () => {
+    expect(mapPiEventToStreamEvent({
+      type: 'message_start',
+      message: { role: 'assistant', content: [] },
+    } as any)).toBeUndefined();
+  });
+
+  await test('drops message_end (provider-error branch is intercepted upstream, not here)', () => {
+    expect(mapPiEventToStreamEvent({
+      type: 'message_end',
+      message: { role: 'assistant', content: [], stopReason: 'stop' },
+    } as any)).toBeUndefined();
+  });
+
+  await test('drops tool_execution_update (no decision-table mapping target)', () => {
+    expect(mapPiEventToStreamEvent({
+      type: 'tool_execution_update',
+      toolCallId: 'call_1',
+      toolName: 'read_note',
+      args: {},
+      partialResult: 'partial',
+    } as any)).toBeUndefined();
+  });
 }
 
 runTests().catch((e) => {

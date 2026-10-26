@@ -13,7 +13,7 @@ import { createHarnessExecutionEnv } from '../runtime/pi/harness-env';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import * as modelCatalog from './model-catalog-service';
 import { ActiveRunController } from '../runtime/active-run-controller';
-import { PromptTemplateService } from '../runtime/pi/prompt-template-service';
+import { PromptTemplateService, type PromptTemplateEnv } from '../runtime/pi/prompt-template-service';
 import { HarnessSessionManager, type PersistedSessionRef } from '../runtime/pi/harness-session-manager';
 import { projectBranchToMessages } from '../runtime/pi/session-branch-projector';
 import type { ChatMessage } from '../ui/types';
@@ -47,10 +47,10 @@ export class ModelService {
      */
     private sessionManager: HarnessSessionManager | null = null;
     /**
-     * pi AgentHarness 所需的完整 ExecutionEnv(FileSystem + NoopShell)。
+     * 用户命令模板服务所需的执行环境(vault 相对路径的文件读取)。
      * 与 sessionManager 同源(同一 vault adapter),vault 不可用时为 null。
      */
-    private harnessEnv: unknown = null;
+    private harnessEnv: PromptTemplateEnv | null = null;
     /**
      * 用户自定义 slash 命令服务(基于 pi prompt-template)。与 harnessEnv 同源;
      * 从 .obsidian/baizer-commands/*.md 加载,vault 不可用时为 null。
@@ -112,6 +112,9 @@ export class ModelService {
                 loadRef: (conversationId) => this.loadSessionRef(conversationId),
                 saveRef: (conversationId, ref) => this.saveSessionRef(conversationId, ref),
                 contextWindow: () => this.settings.contextWindow ?? 0,
+                // 压缩摘要走应用自己的 provider(无状态生成),与旧实现一致、不引入新依赖。
+                // skipGenerationPlan:摘要是纯文本任务,不需要写作策略装饰(同 buildMemoryOptions 的用法)。
+                summarize: (prompt) => this.generate(prompt, undefined, 'shell', undefined, null, { skipGenerationPlan: true }),
             });
             this.harnessEnv = createHarnessExecutionEnv(vaultAdapter);
             // 用户自定义命令服务与 harnessEnv 同源;懒加载模板(首次列命令/执行时读盘)。
@@ -834,7 +837,6 @@ export class ModelService {
             skillRegistry: this.skillRegistry,
             workspaceEditService: this.workspaceEditService,
             sessionManager: this.sessionManager,
-            harnessEnv: this.harnessEnv,
             contextWindow: this.settings.contextWindow,
             thinkingLevel: this.settings.thinkingLevel,
             activeRunController: this.activeRunController,

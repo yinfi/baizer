@@ -11,6 +11,7 @@
  */
 
 import type { AssistantMessage, Model } from '@earendil-works/pi-ai';
+import type { StreamFn } from '@earendil-works/pi-agent-core';
 // streamSimple 只在运行期动态 import（与 harness-chat-runtime.ts 的 AgentHarness 同模式），
 // 避免 ESM-only pi-ai 在 CJS 测试环境（tsconfig.test.json module=commonjs）下
 // 因 "No exports main defined" 错误而无法加载。
@@ -19,6 +20,30 @@ import type { ProviderConfig } from '../../mcp/types';
 // 与 settings.contextWindow 默认值对齐（src/mcp/types.ts DEFAULT_SETTINGS），
 // 也与 pi-provider-bridge.ts 的同名常量保持一致。
 const DEFAULT_CONTEXT_WINDOW = 100000;
+const OPENCODE_GO_HOST = 'opencode.ai';
+const OPENCODE_GO_PATH = /^\/zen\/go(?:\/|$)/i;
+
+/** 判断 provider endpoint 是否为 OpenCode Go。 */
+export function isOpenCodeGoBaseUrl(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return false;
+  try {
+    const url = new URL(baseUrl);
+    return url.hostname.toLowerCase() === OPENCODE_GO_HOST && OPENCODE_GO_PATH.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+/** 构造 OpenCode Go 要求的会话路由头，其他 endpoint 返回 undefined。 */
+export function buildOpenCodeGoHeaders(
+  baseUrl: string | undefined,
+  sessionId: string | undefined,
+): Record<string, string> | undefined {
+  const normalizedSessionId = sessionId?.trim();
+  if (!normalizedSessionId || !isOpenCodeGoBaseUrl(baseUrl)) return undefined;
+  return { 'x-opencode-session': normalizedSessionId };
+}
+
 
 /**
  * thinking 档对应 OpenAI reasoning_effort 的映射表。
@@ -200,18 +225,66 @@ export type NativeCompleteFn = (
  */
 export function createNativeCompleteFn(model: Model<any>, apiKey: string): NativeCompleteFn {
   return async (prompt, systemPrompt, options) => {
-    const { completeSimple } = await import('@earendil-works/pi-ai');
+    // pi-ai 1.3.0 的主入口不再导出 completeSimple/streamSimple（改为 createModels() 返回的实例方法）；
+    // `/compat` 子路径保留旧全局 API（含 api-registry），故无状态路径经它继续可用。
+    const { completeSimple } = await import('@earendil-works/pi-ai/compat');
     const context = {
       systemPrompt: systemPrompt ?? '',
       messages: [{ role: 'user' as const, content: prompt, timestamp: Date.now() }],
     };
+    const requestSessionId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `baizer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const headers = buildOpenCodeGoHeaders(model.baseUrl, requestSessionId);
     const result: AssistantMessage = await completeSimple(model, context, {
       apiKey,
+      ...(headers ? { headers } : {}),
       ...(typeof options?.temperature === 'number' ? { temperature: options.temperature } : {}),
       ...(typeof options?.maxTokens === 'number' ? { maxTokens: options.maxTokens } : {}),
       ...(options?.signal ? { signal: options.signal } : {}),
     });
     return extractAssistantText(result);
+  };
+}
+
+/**
+ * 会话型 StreamFn 的取值依赖：apiKey 与自定义 header 都在**每次调用时**取最新值，
+ * 使运行期切换凭证/header 配置下一轮即生效（对齐旧的 getApiKeyAndHeaders 回调语义）。
+ */
+export interface NativeStreamDeps {
+  getApiKey: () => string | Promise<string>;
+  /** 取当前 provider 配置的自定义 header（已按 conversationId 解析占位符）。 */
+  getHeaders?: () => Record<string, string> | undefined;
+}
+
+/**
+ * 创建会话型 StreamFn（注入 apiKey 与自定义 header）。
+ *
+ * pi 1.3.0 的 `AgentOptions.streamFn` 是**必填**字段——`Agent` 不再自己按 model.api
+ * 路由到 api-registry，而是把「如何发起一次流式请求」完全交给注入的 streamFn。
+ * 这同时意味着凭证与自定义 header 的注入点从旧的 `getApiKeyAndHeaders` 回调
+ * 整体搬到本函数（`getApiKeyAndHeaders` 在 1.3.0 已不存在）。
+ *
+ * 自定义 header 必须走 options.headers：opencode.ai Go 网关要求
+ * `x-opencode-session`（值来自 ProviderConfig.customHeaders 的 {{conversationId}} 占位符），
+ * 丢失它会让该网关以 "Request is missing x-opencode-session" 拒绝请求。
+ * options 里已有的 header 优先保留，本函数的 header 覆盖同名键。
+ *
+ * 底层 streamSimple 经动态 import 从 `/compat` 加载（主入口已不导出，见 createNativeCompleteFn 注释）。
+ */
+export function createNativeStreamFn(deps: NativeStreamDeps): StreamFn {
+  return async (model, context, options) => {
+    const { streamSimple } = await import('@earendil-works/pi-ai/compat');
+    const apiKey = await deps.getApiKey();
+    const custom = deps.getHeaders?.();
+    const headers = custom && Object.keys(custom).length > 0
+      ? { ...(options?.headers ?? {}), ...custom }
+      : options?.headers;
+    return streamSimple(model, context, {
+      ...options,
+      ...(apiKey ? { apiKey } : {}),
+      ...(headers ? { headers } : {}),
+    });
   };
 }
 

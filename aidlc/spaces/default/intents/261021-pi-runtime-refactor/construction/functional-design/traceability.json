@@ -1,0 +1,27 @@
+{
+  "stage": "functional-design",
+  "upstream_ids": [
+    "FR1.1", "FR1.2", "FR1.3",
+    "FR2.1", "FR2.2", "FR2.3",
+    "FR3.1", "FR3.2", "FR3.3", "FR3.4", "FR3.5",
+    "FR4.1",
+    "FR5.1", "FR5.2"
+  ],
+  "coverage": [
+    { "id": "FR1.1", "status": "N/A", "target": "版本号升级本身不产生领域实体/规则，属于 Code Generation 阶段的依赖升级工作" },
+    { "id": "FR1.2", "status": "N/A", "target": "验收标准（类型检查/lint/build/测试全绿）在 Build and Test 阶段核实，非本阶段设计对象" },
+    { "id": "FR1.3", "status": "OK", "target": "BR3.1" },
+    { "id": "FR2.1", "status": "OK", "target": "BR2.1, BR2.2" },
+    { "id": "FR2.2", "status": "OK", "target": "BR1.1, BR1.2, BR1.3" },
+    { "id": "FR2.3", "status": "N/A", "target": "运行环境约束（禁 child_process 等）在 Code Generation 阶段的实现选型中落实，不是业务规则" },
+    { "id": "FR3.1", "status": "N/A", "target": "pi 构造方式的类型安全是实现层约束，Code Generation 阶段落实" },
+    { "id": "FR3.2", "status": "N/A", "target": "接口定义来源取舍是实现层决策，Code Generation 阶段落实" },
+    { "id": "FR3.3", "status": "OK", "target": "BR3.1" },
+    { "id": "FR3.4", "status": "Deferred", "target": "配置面盘点与启用决策留给 Code Generation/后续阶段（见 requirements.md 开放问题 Q-future 第一条）" },
+    { "id": "FR3.5", "status": "N/A", "target": "动态 import() 工程约束延续现状，非本阶段设计对象" },
+    { "id": "FR4.1", "status": "N/A", "target": "esbuild 存根插件兼容性核查是构建脚手架层面的工作，Code Generation 阶段落实" },
+    { "id": "FR5.1", "status": "N/A", "target": "既有调用方行为不变是 Build and Test 阶段的回归验证对象，不产生新的业务规则" },
+    { "id": "FR5.2", "status": "OK", "target": "BR2.1, BR2.2 (本设计的三个工作流——会话打开/迁移、分支切换、审批回灌——覆盖 FR5.2 所列四条交互链路中的“会话分叉/重试/编辑/兄弟切换”与“审批中断与回灌”两条；“Guardian 快/深双路径”与“知识编译”两条不涉及会话持久化或 pi 事件适配，不需要本阶段新增实体/规则，按既有行为回归验证即可)" }
+  ],
+  "reverse": []
+}

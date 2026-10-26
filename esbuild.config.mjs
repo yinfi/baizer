@@ -1,6 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from "module";
+import { dirname, sep } from "path";
 import { copyFile, mkdir, readFile } from "fs/promises";
 
 const outputDir = "dist";
@@ -21,54 +22,239 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 /**
- * 把用不到的 pi-ai provider 换成存根，避免它们的 SDK 进入 bundle。
+ * 把用不到的 pi-ai provider 换成存根，避免它们的 SDK 与模型数据进入 bundle。
  *
- * 背景：pi-ai 的 providers/register-builtins.js 会为全部 9 个 provider 注册
- * 惰性加载器，每个都是 `import("./<provider>.js")`。esbuild 在 format: "cjs"
- * 下无法做 code splitting，于是把这些动态 import 全部内联进单文件 —— 哪怕
- * 运行时永远走不到。
+ * 背景（1.3.0 起更严重）：`providers/all.js` 现在**静态** import 全部 42 个
+ * provider，`compat.js` 又在模块顶层 `const compatModels = builtinModels();`
+ * 里立刻把它们全部构造一遍（`setProvider(<x>Provider())`）。0.75.5 时代那批
+ * provider 是惰性 `import()`、且只有 9 个，故旧的「只存根 mistral」够用；
+ * 1.3.0 下这 42 条链路（含各自的 SDK 与 `data/*.json` 模型目录）全被内联进单文件。
  *
- * Baizer 的 ProviderConfig 只有 'gemini' 和 'openai-compatible' 两种
- * （见 src/mcp/types.ts），传给 pi 的 api 只会是 google-generative-ai 或
- * openai-completions。Mistral 的 1.2MB SDK 是纯死重量。
+ * Baizer 的 ProviderConfig 只有 'gemini' 与 'openai-compatible' 两种
+ * （见 src/mcp/types.ts），`buildGeminiModel`/`buildOpenAICompatModel` 给出的
+ * provider 只会是 'google' 与 'openai'，故这两家必须保留真实实现，
+ * 其余 40 家（含 Mistral 的 1.2MB SDK）都是纯死重量。
  *
- * 这里不改上游代码，只在打包层把该模块解析到一个存根：导出同名函数，被调用
- * 时抛出可读错误。如果将来真要支持 Mistral，从这个列表里移除即可。
+ * 存根的返回值形状（关键，与 0.75.5 时代的"被调用就抛错"不同）：
+ * `compat.js` 顶层会**立刻调用**每个 `<x>Provider()`，所以存根不能再靠抛错来占位
+ * ——那会让 `import('@earendil-works/pi-ai/compat')` 直接炸掉整个插件。
+ * 改为返回一个由真实 `createProvider()` 构造的**惰性占位 provider**：
+ * 结构合法（`models: []`、`api.stream`/`api.streamSimple` 齐备）故 `setProvider`
+ * 接受，但真正的流式调用会抛出可读错误——只有用户真的把 provider 配成这些家时才可能触发。
+ *
+ * 导出名必须与 all.js 的 import 逐字一致：esbuild 在导出缺失时会报
+ * "No matching export"，这本身就是一道防漂移的构建期检查。
  *
  * 为什么在意体积：Obsidian Sync Standard 计划不同步超过 5MB 的文件，
- * 而 main.js 原本是 6.0MB —— 这会让付费同步用户拿不到插件更新。
+ * 超限会让付费同步用户拿不到插件更新。
  */
-const STUBBED_PI_PROVIDERS = [
-	{ file: "mistral.js", exports: ["streamMistral", "streamSimpleMistral"] },
+const KEPT_PI_PROVIDERS = ["google.js", "openai.js"];
+
+const PI_PROVIDER_EXPORTS = [
+	{ file: "amazon-bedrock.js", exports: ["amazonBedrockProvider"] },
+	{ file: "ant-ling.js", exports: ["antLingProvider"] },
+	{ file: "anthropic.js", exports: ["anthropicProvider"] },
+	{ file: "azure.js", exports: ["azureProvider"] },
+	{ file: "baseten.js", exports: ["basetenProvider"] },
+	{ file: "cerebras.js", exports: ["cerebrasProvider"] },
+	{ file: "cloudflare-ai-gateway.js", exports: ["cloudflareAIGatewayProvider"] },
+	{ file: "cloudflare-workers-ai.js", exports: ["cloudflareWorkersAIProvider"] },
+	{ file: "deepseek.js", exports: ["deepseekProvider"] },
+	{ file: "fireworks.js", exports: ["fireworksProvider"] },
+	{ file: "github-copilot.js", exports: ["githubCopilotProvider"] },
+	{ file: "google.js", exports: ["googleProvider"] },
+	{ file: "google-vertex.js", exports: ["googleVertexProvider"] },
+	{ file: "groq.js", exports: ["groqProvider"] },
+	{ file: "huggingface.js", exports: ["huggingfaceProvider"] },
+	{ file: "kimi-coding.js", exports: ["kimiCodingProvider"] },
+	{ file: "meta.js", exports: ["metaProvider"] },
+	{ file: "minimax.js", exports: ["minimaxProvider"] },
+	{ file: "minimax-cn.js", exports: ["minimaxCnProvider"] },
+	{ file: "mistral.js", exports: ["mistralProvider"] },
+	{ file: "moonshotai.js", exports: ["moonshotaiProvider"] },
+	{ file: "moonshotai-cn.js", exports: ["moonshotaiCnProvider"] },
+	{ file: "nvidia.js", exports: ["nvidiaProvider"] },
+	{ file: "openai.js", exports: ["openaiProvider"] },
+	{ file: "openai-codex.js", exports: ["openaiCodexProvider"] },
+	{ file: "opencode.js", exports: ["opencodeProvider"] },
+	{ file: "opencode-go.js", exports: ["opencodeGoProvider"] },
+	{ file: "openrouter.js", exports: ["openrouterProvider"] },
+	{ file: "qwen-token-plan.js", exports: ["qwenTokenPlanProvider"] },
+	{ file: "qwen-token-plan-cn.js", exports: ["qwenTokenPlanCnProvider"] },
+	{ file: "qwen-token-plan-individual.js", exports: ["qwenTokenPlanIndividualProvider"] },
+	{ file: "radius.js", exports: ["radiusProvider"] },
+	{ file: "together.js", exports: ["togetherProvider"] },
+	{ file: "typesafe.js", exports: ["typesafeProvider"] },
+	{ file: "vercel-ai-gateway.js", exports: ["vercelAIGatewayProvider"] },
+	{ file: "xai.js", exports: ["xaiProvider"] },
+	{ file: "xiaomi.js", exports: ["xiaomiProvider"] },
+	{ file: "xiaomi-token-plan-ams.js", exports: ["xiaomiTokenPlanAmsProvider"] },
+	{ file: "xiaomi-token-plan-cn.js", exports: ["xiaomiTokenPlanCnProvider"] },
+	{ file: "xiaomi-token-plan-sgp.js", exports: ["xiaomiTokenPlanSgpProvider"] },
+	{ file: "zai.js", exports: ["zaiProvider"] },
+	{ file: "zai-coding-cn.js", exports: ["zaiCodingCnProvider"] },
 ];
+
+const STUBBED_PI_PROVIDERS = PI_PROVIDER_EXPORTS.filter(
+	({ file }) => !KEPT_PI_PROVIDERS.includes(file),
+);
 
 const stubUnusedPiProviders = {
 	name: "stub-unused-pi-providers",
 	setup(build) {
-		for (const { file, exports } of STUBBED_PI_PROVIDERS) {
+		for (const { file } of STUBBED_PI_PROVIDERS) {
 			// 只匹配 pi-ai 自己 providers 目录下的相对 import，避免误伤同名文件。
 			const filter = new RegExp(`^\\./${file.replace(".", "\\.")}$`);
 			build.onResolve({ filter }, (args) => {
 				if (!args.importer.includes("pi-ai")) return null;
-				return { path: `pi-provider-stub:${file}`, namespace: "pi-stub" };
+				return {
+					path: `pi-provider-stub:${file}`,
+					namespace: "pi-stub",
+					// 存根里那句 `from "@earendil-works/pi-ai"` 需要解析基准目录，
+					// 否则 esbuild 报 "didn't set a resolve directory"。用真实 importer 所在目录。
+					pluginData: { resolveDir: dirname(args.importer) },
+				};
 			});
 		}
 
 		build.onLoad({ filter: /.*/, namespace: "pi-stub" }, (args) => {
 			const file = args.path.replace("pi-provider-stub:", "");
 			const entry = STUBBED_PI_PROVIDERS.find((p) => p.file === file);
-			const name = file.replace(".js", "");
-			const contents = entry.exports
-				.map(
+			const id = file.replace(".js", "");
+			const contents = [
+				// createProvider 走包根导出（index.js 不反向依赖 providers/，无循环）。
+				'import { createProvider } from "@earendil-works/pi-ai";',
+				`const BAIZER_STUB_MESSAGE =
+	"Baizer does not bundle the '${id}' provider. Configure a Gemini or OpenAI-compatible provider instead.";`,
+				...entry.exports.map(
 					(fn) => `export function ${fn}() {
-	throw new Error(
-		"Baizer does not bundle the '${name}' provider. " +
-		"Configure a Gemini or OpenAI-compatible provider instead."
-	);
+	return createProvider({
+		id: "${id}",
+		name: "${id}",
+		api: {
+			stream: () => { throw new Error(BAIZER_STUB_MESSAGE); },
+			streamSimple: () => { throw new Error(BAIZER_STUB_MESSAGE); },
+		},
+		models: [],
+	});
 }`,
-				)
-				.join("\n");
+				),
+			].join("\n");
+			return { contents, loader: "js", resolveDir: args.pluginData?.resolveDir };
+		});
+	},
+};
+
+/**
+ * 把用不到的 pi-ai **api 实现**换成存根（bundle 体积的第二大头）。
+ *
+ * 背景：`compat.js` 在顶部无差别 `export * from "./api/<x>.lazy.js"`（10 个）。这些
+ * `.lazy.js` 本身只有一行 `lazyApi(() => import("./<x>.js"))`，但 esbuild 在 format:"cjs"
+ * 下无法 code splitting，于是每个 `<x>.js` 连同它背后的 SDK 全被内联 —— 实测
+ * `openai`(25M)、`@anthropic-ai`(13M)、`@google/genai`(11M)、`@aws-sdk`(5.2M) 的
+ * 相关子集就是 main.js 突破 5MB 的主因。
+ *
+ * Baizer 只会用到三种 api（见 `buildGeminiModel`/`buildOpenAICompatModel`）：
+ * `google-generative-ai`、`openai-completions`、`openai-responses`。其余 7 个存根。
+ *
+ * 为什么可以直接替换 `.lazy.js` 而不必知道 `<x>.js` 的导出面：`lazyApi(load)` 只在
+ * `stream`/`streamSimple` 被调用时才执行 `load()`（见 api/lazy.js），故存根只需保持
+ * **同一导出的名字**，把 load 换成"抛可读错误"即可；用户真的配到这些家时，
+ * 请求会以 provider 错误事件的形式浮出来，而不是整个插件加载失败。
+ *
+ * 与 `stubNodeBuiltinDynamicImports` 的关系：`openai-codex-responses.js` 被存根后不再
+ * 进 bundle，那个针对它的启动期 unhandled-rejection 补丁自然失效也无害（问题本身不存在了）；
+ * 该插件对 `env-api-keys.js` 的修补不受影响，仍照常生效。
+ */
+const KEPT_PI_APIS = [
+	"google-generative-ai",
+	"openai-completions",
+	"openai-responses",
+];
+
+const PI_API_EXPORTS = [
+	{ file: "anthropic-messages", export: "anthropicMessagesApi" },
+	{ file: "azure-openai-responses", export: "azureOpenAIResponsesApi" },
+	{ file: "bedrock-converse-stream", export: "bedrockConverseStreamApi" },
+	{ file: "google-generative-ai", export: "googleGenerativeAIApi" },
+	{ file: "google-vertex", export: "googleVertexApi" },
+	{ file: "mistral-conversations", export: "mistralConversationsApi" },
+	{ file: "openai-codex-responses", export: "openAICodexResponsesApi" },
+	{ file: "openai-completions", export: "openAICompletionsApi" },
+	{ file: "openai-responses", export: "openAIResponsesApi" },
+	{ file: "pi-messages", export: "piMessagesApi" },
+];
+
+const STUBBED_PI_APIS = PI_API_EXPORTS.filter(({ file }) => !KEPT_PI_APIS.includes(file));
+
+const stubUnusedPiApis = {
+	name: "stub-unused-pi-apis",
+	setup(build) {
+		for (const { file } of STUBBED_PI_APIS) {
+			// 两种写法都要覆盖：`compat.js` 用 `./api/<x>.lazy.js`，`providers/*.js` 用
+			// `../api/<x>.lazy.js`，同目录内则是 `./<x>.lazy.js`。故只锚定结尾。
+			const filter = new RegExp(`${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.lazy\\.js$`);
+			build.onResolve({ filter }, (args) => {
+				if (!args.importer.includes("pi-ai")) return null;
+				return { path: `pi-api-stub:${file}`, namespace: "pi-api-stub" };
+			});
+		}
+
+		build.onLoad({ filter: /.*/, namespace: "pi-api-stub" }, (args) => {
+			const file = args.path.replace("pi-api-stub:", "");
+			const entry = STUBBED_PI_APIS.find((p) => p.file === file);
+			// 不引入真实的 lazyApi：这些 api 只被 compat.js 的 `export *` 重新导出，
+			// 没有任何调用方（Baizer 保留的 google/openai provider 用的是各自 KEPT 的 api）。
+			// 故直接给出同名导出 + 抛错的 stream/streamSimple 即可，无需 resolveDir。
+			const contents = `export const ${entry.export} = () => ({
+	stream: () => { throw new Error(BAIZER_STUB_MESSAGE); },
+	streamSimple: () => { throw new Error(BAIZER_STUB_MESSAGE); },
+});
+const BAIZER_STUB_MESSAGE =
+	"Baizer does not bundle the '${file}' api implementation. " +
+	"Configure a Gemini or OpenAI-compatible provider instead.";`;
 			return { contents, loader: "js" };
+		});
+	},
+};
+
+/**
+ * 去掉 pi-ai 1.3.0 源码里的 JSON import attributes（`with { type: "json" }`）。
+ *
+ * 背景：pi-ai 1.3.0 的 `providers/all.js` 与每个 `providers/<x>.models.js` 都写成
+ *   `import values from "./data/x.json" with { type: "json" };`
+ * 本项目锁定的 esbuild@0.17.19 不支持该语法（import attributes 是后续版本才支持的），
+ * 会在解析阶段直接报 `Expected ";" but found "with"`，整个构建失败。
+ *
+ * 为什么可以安全剥掉：`.json` 的解析本就由 esbuild 按扩展名走 json loader，
+ * 这个 attribute 对打包结果没有任何影响（它服务的是原生 Node ESM 的运行时断言）。
+ * 剥掉后语义等价。
+ *
+ * 为什么在 onLoad 而不是 onResolve：语法错误发生在解析阶段，onResolve 拦不到；
+ * 只能读源码、改写、再交给 esbuild。
+ *
+ * 出声失败：若某个文件里出现了该语法却没被剥掉（例如 pi-ai 换了写法），
+ * 这里必须让构建红掉，而不是留下一个"看起来成功"的包。
+ */
+const JSON_IMPORT_ATTRIBUTE = /\s+with\s*\{\s*type:\s*["']json["']\s*\}/g;
+
+const stripJsonImportAttributes = {
+	name: "strip-json-import-attributes",
+	setup(build) {
+		build.onLoad({ filter: /pi-ai[\\/]dist[\\/].*\.js$/ }, async (args) => {
+			const source = await readFile(args.path, "utf8");
+			const stripped = source.replace(JSON_IMPORT_ATTRIBUTE, "");
+			// 无该语法时原样返回，让 esbuild 走默认 loader（省掉无谓的重新解析）。
+			if (stripped === source) return null;
+
+			const leftover = stripped.match(/\bwith\s*\{\s*type:/g);
+			if (leftover) {
+				throw new Error(
+					`strip-json-import-attributes: ${args.path} 仍残留 ${leftover.length} 处未识别的 import attribute 写法。`
+					+ `pi-ai 可能改了语法，请重新核对。`,
+				);
+			}
+			return { contents: stripped, loader: "js" };
 		});
 	},
 };
@@ -162,7 +348,12 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: `${outputDir}/main.js`,
 	loader: { '.md': 'text' },
-	plugins: [stubUnusedPiProviders, stubNodeBuiltinDynamicImports],
+	plugins: [
+		stubUnusedPiProviders,
+		stubUnusedPiApis,
+		stripJsonImportAttributes,
+		stubNodeBuiltinDynamicImports,
+	],
 });
 
 if (prod) {
