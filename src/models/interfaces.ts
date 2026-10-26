@@ -69,6 +69,10 @@ export type StreamEvent =
     | { type: 'tool_result'; name: string; result: any; error?: string }
     // 智能体一个工具循环回合的开始,用于把过程按「回合」分组展示(Step N)。
     | { type: 'step_boundary' }
+    // 本轮结束后触发了自动压缩(functional-spec.md §4 决策表):pi 1.3.0 本身不发压缩事件,
+    // 压缩完全由本项目的 maybeCompact 驱动,故这里是该动作对 UI 的唯一可感知信号,
+    // 使压缩不再是纯内部副作用。只在真的折叠了旧消息时才产出。
+    | { type: 'compaction'; foldedEntryCount: number }
     | {
         type: 'done';
         text: string;

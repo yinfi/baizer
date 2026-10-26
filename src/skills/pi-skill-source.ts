@@ -12,7 +12,25 @@
 //   - executionMode: direct（execute 直接返回）| instructions（注入指引）
 
 import { parse } from 'yaml';
-import type { Skill as PiSkill } from '@earendil-works/pi-agent-core';
+
+/**
+ * skill 的数据模型（本地定义）。
+ *
+ * pi 1.3.0 移除了 `Skill` 类型（连同 `formatSkillsForSystemPrompt`/`formatSkillInvocation`
+ * 两个格式化器），而本项目的 skill 模型本就只用这几个字段，故由本地类型承接，
+ * 不再依赖 pi 的类型。字段语义与原 pi `Skill` 一致：
+ *   - name/description：必填，进系统提示清单
+ *   - content：Level 2 instructions（触发时才进 context）
+ *   - filePath：物化后的真实路径（清单里作 location 引用）
+ *   - disableModelInvocation：禁用「模型自主发现」，只能经斜杠命令显式激活
+ */
+export interface PiSkill {
+  name: string;
+  description: string;
+  content: string;
+  filePath: string;
+  disableModelInvocation?: boolean;
+}
 
 export interface SkillSidecar {
   /** 工具准入白名单：激活该 skill 时允许调用的工具名。空 = 无限制声明。 */
@@ -91,5 +109,33 @@ function normalizeTriggers(raw: any): SkillSidecar['triggers'] {
   const keywords = Array.isArray(raw.keywords) ? raw.keywords.filter((k: any) => typeof k === 'string') : undefined;
   if (!commands?.length && !keywords?.length) return undefined;
   return { commands, keywords };
+}
+
+/**
+ * 生成系统提示里的 skill 清单（自建，取代 pi 1.3.0 已移除的 `formatSkillsForSystemPrompt`）。
+ *
+ * 保持原有可观察契约：用 `<available_skills>` 包裹（`read_skill` 工具的描述按该标签名
+ * 引用本清单），每条列出 name/description 与物化后的 `<location>` 路径——模型据此决定
+ * 是否调 `read_skill(name)` 取完整正文（渐进式披露）。
+ * 无可列 skill 时返回空串，让调用方（`base-chat-runtime`）跳过整段注入。
+ */
+export function formatSkillsForSystemPrompt(skills: PiSkill[]): string {
+  if (skills.length === 0) return '';
+  const lines = skills.map((skill) => {
+    const location = skill.filePath ? `\n  <location>${skill.filePath}</location>` : '';
+    return `- ${skill.name}: ${skill.description}${location}`;
+  });
+  return `<available_skills>\n${lines.join('\n')}\n</available_skills>`;
+}
+
+/**
+ * 把 skill 的完整正文包装成注入 context 的指令块（自建，取代 pi 1.3.0 已移除的
+ * `formatSkillInvocation`）。调用方（`base-chat-runtime` 的 `[Skill Instructions]` 段、
+ * `read_skill` 的磁盘读取失败兜底）自行加标题，故这里只给正文与可选追加指令。
+ */
+export function formatSkillInvocation(skill: PiSkill, additionalInstructions?: string): string {
+  const parts = [skill.content.trim()];
+  if (additionalInstructions?.trim()) parts.push(additionalInstructions.trim());
+  return parts.join('\n\n');
 }
 

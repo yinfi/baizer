@@ -130,11 +130,9 @@ export default class BaizerPlugin extends Plugin {
         );
         this.skillRegistry.registerBuiltinFromMd(knowledgeSkillMd, createKnowledgeSkillExecutor(this.toolRegistry));
 
-        // 加载 pi 格式化器（getSkillSummaryText / activateSkill 依赖）。
-        await this.skillRegistry.init();
-
         // 内置 skill 的 location 是确定性路径，纯计算即可得——先同步填好，
         // 使系统提示与 read_skill 立刻可用。
+        // （skill 清单/指令的格式化器已是本地纯函数，不再需要异步 init 预加载 pi 导出。）
         this.skillRegistry.resolveBuiltinPaths();
 
         // 加载用户自定义 Skill（跳过内置自己的物化目录，故常态只有 2 次 IO）。

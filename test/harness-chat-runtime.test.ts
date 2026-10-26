@@ -147,33 +147,6 @@ function unwrapToolResultText(message: any): any {
   try { return JSON.parse(text); } catch { return text; }
 }
 
-/** 最小内存 ExecutionEnv:满足 Harness 构造,不触网、不落真实盘。 */
-function createMockEnv(): any {
-  const ok = (value: any) => ({ ok: true, value });
-  const err = (code: string, message: string) => ({ ok: false, error: { code, message } });
-  const store = new Map<string, string>();
-  return {
-    cwd: '/',
-    absolutePath: async (p: string) => ok(p),
-    joinPath: async (parts: string[]) => ok(parts.join('/')),
-    readTextFile: async (p: string) => (store.has(p) ? ok(store.get(p)) : err('not_found', 'nf')),
-    readTextLines: async (p: string) => (store.has(p) ? ok((store.get(p) || '').split('\n')) : err('not_found', 'nf')),
-    readBinaryFile: async () => err('not_found', 'nf'),
-    writeFile: async (p: string, c: string) => { store.set(p, c); return ok(undefined); },
-    appendFile: async (p: string, c: string) => { store.set(p, (store.get(p) || '') + c); return ok(undefined); },
-    fileInfo: async () => err('not_found', 'nf'),
-    listDir: async () => ok([]),
-    canonicalPath: async (p: string) => ok(p),
-    exists: async (p: string) => ok(store.has(p)),
-    createDir: async () => ok(undefined),
-    remove: async (p: string) => { store.delete(p); return ok(undefined); },
-    createTempDir: async () => ok('/tmp'),
-    createTempFile: async () => ok('/tmp/f'),
-    cleanup: async () => {},
-    exec: async () => err('shell_unavailable', 'no shell'),
-  };
-}
-
 let mockApiSeq = 0;
 
 function createDeps(options: {
@@ -234,7 +207,6 @@ function createDeps(options: {
     capturedHeaders: () => capturedHeadersCalls,
     register,
     nativeChatFactory,
-    harnessEnv: createMockEnv(),
     memoryManager: options.memoryManager || null,
     skillRegistry,
     workspaceEditService: {
@@ -269,7 +241,9 @@ function wait(ms: number): Promise<void> {
 }
 
 async function makeRuntime(deps: any) {
-  const piAi: any = await import('@earendil-works/pi-ai');
+  // pi-ai 1.3.0 的主入口不再导出 registerApiProvider（改在 /compat 子路径，见 pi-native-model.ts
+  // 的 createNativeStreamFn 同款说明）；streamSimple 经 /compat 分发到这里注册的 mock provider。
+  const piAi: any = await import('@earendil-works/pi-ai/compat');
   deps.register(piAi);
   const { HarnessChatRuntime } = await import('../src/runtime/pi/harness-chat-runtime');
   return new HarnessChatRuntime(deps);

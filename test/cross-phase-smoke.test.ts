@@ -105,8 +105,12 @@ async function buildStack(opts: {
   workspaceResult?: any;
   /** 每轮 assistant 回复的真实 usage token 数(estimateContextTokens 优先用它)。默认 2。 */
   usageTokens?: number;
+  /** 压缩设置覆盖(默认 keepRecentTokens=20000,测试的小内容折叠不出东西,故按需调小)。 */
+  compactionSettings?: { keepRecentTokens?: number; reserveTokens?: number; enabled?: boolean };
 }) {
-  const piAi: any = await import('@earendil-works/pi-ai');
+  // pi-ai 1.3.0 的主入口不再导出 registerApiProvider(改在 /compat 子路径,见 pi-native-model.ts
+  // 的 createNativeStreamFn 同款说明);streamSimple 经 /compat 分发到这里注册的 mock provider。
+  const piAi: any = await import('@earendil-works/pi-ai/compat');
   const { HarnessSessionManager } = await import('../src/runtime/pi/harness-session-manager');
   const { createHarnessExecutionEnv } = await import('../src/runtime/pi/harness-env');
   const { PromptTemplateService } = await import('../src/runtime/pi/prompt-template-service');
@@ -140,6 +144,10 @@ async function buildStack(opts: {
     loadRef: (cid: string) => savedRefs.get(cid) ?? null,
     saveRef: (cid: string, r: any) => { if (r) savedRefs.set(cid, r); else savedRefs.delete(cid); },
     contextWindow: () => opts.contextWindow ?? 100000,
+    // 压缩动作需要注入的 summarize(本层无 summarize 只做判定不做动作,见 harness-session-manager.ts
+    // maybeCompact 的说明);冒烟测试里不触网,直接回一个定长摘要文本。
+    summarize: async () => 'SUMMARY_OF_OLD_MESSAGES',
+    ...(opts.compactionSettings ? { compactionSettings: opts.compactionSettings } : {}),
   });
   const harnessEnv = createHarnessExecutionEnv(vaultAdapter);
   const promptTemplateService = new PromptTemplateService(harnessEnv);
@@ -303,8 +311,8 @@ async function runTests() {
     const byId = (id: string) => branch.find((e) => e?.id === id);
     const userEntry = byId(done.entryIds.userEntryId);
     const asstEntry = byId(done.entryIds.assistantEntryId);
-    assert(userEntry?.type === 'message' && userEntry.message?.role === 'user', 'userEntryId does not resolve to a user message');
-    assert(asstEntry?.type === 'message' && asstEntry.message?.role === 'assistant', 'assistantEntryId does not resolve to an assistant message');
+    assert(userEntry?.kind === 'user_message', 'userEntryId does not resolve to a user message');
+    assert(asstEntry?.kind === 'assistant_message', 'assistantEntryId does not resolve to an assistant message');
 
     // 轮2:新一轮的 entryId 与轮1不同(锚定随轮推进,不复用旧 entry)。
     const events2 = await stack.collect(cleanTurn('second question', { conversationId: 'conv-anchor' }));
@@ -465,12 +473,25 @@ async function runTests() {
       scripted: () => [{ type: 'text_delta', content: 'reply' }, { type: 'done', text: 'reply' }],
       contextWindow: RESERVE + MARGIN,
       usageTokens: 250, // eventsToPiStream: totalTokens = usageTokens*2 = 500
+      // keepRecentTokens 调小到 1:测试内容是极短的 "reply",默认 20000 的保留预算会把
+      // 全部消息都算作「最近」→ 没有可折叠的旧内容(cutoff=0)。调小后保留预算只覆盖
+      // 最后一条消息,前面的历史真正成为可折叠对象,压缩动作才会执行。
+      compactionSettings: { keepRecentTokens: 1 },
     });
+    let sawCompactionEvent = false;
     for (let i = 0; i < 3; i++) {
-      await stack.collect(cleanTurn(`turn ${i}`));
+      const events = await stack.collect(cleanTurn(`turn ${i}`));
+      if (events.some((e) => e.type === 'compaction')) sawCompactionEvent = true;
     }
+    // 本层的压缩动作落盘为一条 kind:'custom_message' 的摘要 Entry(payload.customType
+    // 标记为 'compaction_summary',取代 pi 时代的 "type":"compaction" 条目,见
+    // session-store/store.ts 的 applyCompaction)。
     const jsonl = [...stack.vault.files.entries()].filter(([k]) => k.endsWith('.jsonl')).map(([, v]) => v).join('\n');
-    assert(jsonl.includes('"type":"compaction"') || jsonl.includes('compaction'), 'expected a compaction entry after genuine overflow');
+    assert(jsonl.includes('compaction_summary'), 'expected a compaction summary entry after genuine overflow');
+    // functional-spec.md §4 决策表:压缩事件「映射」—— pi 1.3.0 本身不发压缩事件,
+    // 故本项目的 maybeCompact 结果必须经 runtime 产出 StreamEvent.compaction,使压缩
+    // 不再是纯内部副作用(本函数调用方 harness-chat-runtime.ts 里的新增 yield)。
+    assert(sawCompactionEvent, 'expected a StreamEvent.compaction after genuine overflow triggers auto-compaction');
   });
 
   // 阶段1 防呆:contextWindow <= reserveTokens 时,压缩不应每轮假触发(修复的负阈值坑)。
@@ -479,11 +500,14 @@ async function runTests() {
       scripted: () => [{ type: 'text_delta', content: 'reply' }, { type: 'done', text: 'reply' }],
       contextWindow: 50, // < reserveTokens(16384)
     });
+    let sawCompactionEvent = false;
     for (let i = 0; i < 4; i++) {
-      await stack.collect(cleanTurn(`turn ${i} short`));
+      const events = await stack.collect(cleanTurn(`turn ${i} short`));
+      if (events.some((e) => e.type === 'compaction')) sawCompactionEvent = true;
     }
     const jsonl = [...stack.vault.files.entries()].filter(([k]) => k.endsWith('.jsonl')).map(([, v]) => v).join('\n');
-    assert(!jsonl.includes('compaction'), 'compaction must NOT fire when window <= reserveTokens (negative-threshold guard)');
+    assert(!jsonl.includes('compaction_summary'), 'compaction must NOT fire when window <= reserveTokens (negative-threshold guard)');
+    assert(!sawCompactionEvent, 'StreamEvent.compaction must NOT fire when window <= reserveTokens (negative-threshold guard)');
   });
 }
 

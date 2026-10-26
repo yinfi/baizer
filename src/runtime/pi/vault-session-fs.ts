@@ -1,8 +1,30 @@
-import type { FileError, FileErrorCode, FileInfo, Result } from '@earendil-works/pi-agent-core';
+/**
+ * 文件系统错误码（本层只产生这两种）。
+ * pi 1.3.0 已移除 FileSystem 抽象及其 FileError/FileErrorCode/FileInfo/Result 类型，
+ * 故这里改用本地结构定义：消费方（pi 的 repo-utils 及本仓的 ExecutionEnv）只读取
+ * error.code / error.message，不做 instanceof 判定，结构化即可。
+ */
+export type FileErrorCode = 'not_found' | 'unknown';
 
-// pi 包仅暴露 ESM `import` 条件（无 `require`），静态 value import 在 CJS 测试/打包下会失败，
-// 因此这里只做 type-only import。运行时所需的 Result/FileError 形态用本地构造，
-// pi 的 repo-utils 只读取 error.code / error.message，不做 instanceof 判断，故无需真正的 FileError 类。
+/** 结构化的文件系统错误。 */
+export interface FileError extends Error {
+  code: FileErrorCode;
+  path?: string;
+  cause?: Error;
+}
+
+/** 统一的 Result 形状（成功带值 / 失败带错）。 */
+export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
+
+/** 目录项信息。 */
+export interface FileInfo {
+  name: string;
+  path: string;
+  kind: 'file' | 'directory';
+  size: number;
+  mtimeMs: number;
+}
+
 function ok<T>(value: T): Result<T, FileError> {
   return { ok: true, value };
 }
@@ -38,9 +60,10 @@ export interface VaultFileAdapter {
 }
 
 /**
- * pi 的 JsonlSessionRepo 需要的 FileSystem 切片（11 个方法）。
- * 直接复用 pi 类型可避免与上游漂移，但为保持移动端零 node 依赖，
- * 这里用结构化的最小定义。
+ * pi 0.75.5 的 JsonlSessionRepo 所需的 FileSystem 切片（11 个方法）。
+ * pi 1.3.0 已移除该抽象与 JsonlSessionRepo 本身；本仓的会话持久化不再经此路径
+ * （改由 session-store/* 直接使用 VaultFileAdapter）。该接口仅作为 ExecutionEnv
+ * （harness-env.ts）的委托目标保留，待 ExecutionEnv 随 1.3.0 的 Agent 构造一并退役。
  */
 export interface JsonlSessionRepoFileSystem {
   cwd: string;
