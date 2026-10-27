@@ -595,6 +595,7 @@ async function runTests() {
 
     await (localWatcher as any).initialScan();
 
+    console.error('[DIAG] nav=', globalThis.navigator?.language, 'locale=', (await import('../src/i18n/zh')).getLocale(), 'notices=', JSON.stringify(notices));
     const [opening, closing] = notices;
     expect(/[一-龥]/.test(opening)).toBe(true);
     expect(/[一-龥]/.test(closing)).toBe(true);
