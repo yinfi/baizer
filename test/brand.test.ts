@@ -89,9 +89,9 @@ test('tracked project text has no legacy branding', () => {
     .filter((path) => !path.startsWith('.omc/'))
     .filter((path) => !path.startsWith('.planning/'))
     .filter((path) => !path.startsWith('.worktrees/'))
-    // aidlc/ 是 AI-DLC 工作流存档(反向工程产出物等开发记录,非面向用户的产品
-    // 文本),其中会按客观仓库目录名引用"obsidian-cli",与 .planning/ 同属
-    // 开发记录,一并豁免。
+    // aidlc/ 是 AI-DLC 工作流存档(反向工程产出物、审计日志等开发记录,非面向
+    // 用户的产品文本),其中会按客观仓库目录名/历史会话记录引用"obsidian-cli",
+    // 与 .planning/、FORYF.md 同属开发记录,一并豁免。
     .filter((path) => !path.startsWith('aidlc/'))
     // FORYF.md 是开发过程记录(非面向用户的产品文本),其历史条目会提及仓库目录名
     // (客观路径,非产品旧品牌名),与 .planning/ 同属开发记录,一并豁免。
