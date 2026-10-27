@@ -2,7 +2,9 @@
 
 ## 结论
 
-新增 `.github/workflows/release.yml`，在打形如 `v*` 的 git tag 时触发：执行与现有 `ci.yml` 相同的 build+test+lint 质量门禁，通过后把构建产物打包并创建一个 **GitHub Release draft**（不自动发布，人工确认后手动点击 Publish）。
+新增 `.github/workflows/release.yml`，在打形如 `[0-9]+.[0-9]+.[0-9]+` 的纯数字 git tag 时触发（与仓库既有 `1.0.0`/`1.0.1`/`1.0.2` tag 命名习惯一致，不引入 `v` 前缀）：执行与现有 `ci.yml` 相同的 build+test+lint 质量门禁，通过后把构建产物打包并创建一个 **GitHub Release draft**（不自动发布，人工确认后手动点击 Publish）。
+
+> 落地执行阶段核实：最初设计曾用 `v*` 触发模式，经与人类确认后改为纯数字模式以匹配既有 tag 历史。
 
 ## 背景
 
@@ -19,7 +21,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
   release:
@@ -49,10 +51,10 @@ jobs:
 
       - name: Verify tag matches manifest version
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TAG_VERSION="${GITHUB_REF_NAME}"
           MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
           if [ "$TAG_VERSION" != "$MANIFEST_VERSION" ]; then
-            echo "Tag v$TAG_VERSION does not match manifest.json version $MANIFEST_VERSION"
+            echo "Tag $TAG_VERSION does not match manifest.json version $MANIFEST_VERSION"
             exit 1
           fi
 
