@@ -63,16 +63,16 @@ jobs:
         with:
           draft: true
           files: |
-            main.js
-            manifest.json
-            styles.css
+            dist/main.js
+            dist/manifest.json
+            dist/styles.css
 ```
 
 ## 要点
 
 - **门禁复用**：release workflow 复用与 CI 相同的 build+test+lint 步骤，不降低质量门禁；新增的"Verify tag matches manifest version"步骤是本 workflow 独有的额外检查，防止打错 tag 导致发布错版本号的产物。
 - **draft: true 是刻意选择**：GitHub Release 创建为草稿而非直接发布，人工确认产物无误后再手动点击 Publish——这是回滚策略（见 `rollback-runbook.md`）的前置防线，比发布后再撤回成本更低。
-- **`styles.css`**：已核查，该文件存在于仓库根目录（`esbuild.config.mjs` 构建时产出），故 `files:` 清单保留该行，与 `main.js`/`manifest.json` 一并作为 Release 产物附件。
+- **产物路径**：构建产物全部落在 `dist/` 下（`esbuild.config.mjs` 的 `outputDir = "dist"`，并把根目录的 `manifest.json`/`styles.css` 复制进去），根目录**没有** `main.js`（`main.js`/`dist/` 均被 `.gitignore` 忽略）。因此 `files:` 清单必须用 `dist/` 前缀；`softprops/action-gh-release` 上传时取 basename 作为附件名，最终 Release 附件仍为标准的 `main.js`/`manifest.json`/`styles.css` 三个名字。
 - **权限**：`permissions: contents: write` 是创建 Release 所必需的最小权限声明。
 
 ## 待办（移交给落地执行）

@@ -45,6 +45,6 @@ jobs:
         with:
           draft: true
           files: |
-            main.js
-            manifest.json
-            styles.css
+            dist/main.js
+            dist/manifest.json
+            dist/styles.css
