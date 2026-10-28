@@ -24,23 +24,32 @@ function detectIsChinese(): boolean {
     }
 }
 
-/** 用户设定的语言，默认跟随系统。 */
-let currentLocale: Locale = 'auto';
+/**
+ * 用户设定的语言，默认跟随系统。
+ *
+ * 状态挂在 globalThis 而非模块级变量：tsx 在部分 Node 版本下会把同一模块
+ * 解析成两个实例（测试的动态 import 与源码的静态 import 路径形式不同），
+ * 模块级变量不共享，会让 setLocale 对另一实例不可见。locale 是全局 UI
+ * 状态，挂 globalThis 语义正确且免疫该问题。
+ */
+const LOCALE_STATE_KEY = '__baizer_locale__';
 
 /** 把用户设定解析为实际生效的具体语言（en / zh）。auto 时按系统探测。 */
 function resolveLocale(): 'en' | 'zh' {
-    if (currentLocale === 'auto') return detectIsChinese() ? 'zh' : 'en';
-    return currentLocale;
+    const current = getLocale();
+    if (current === 'auto') return detectIsChinese() ? 'zh' : 'en';
+    return current;
 }
 
 /** 设置当前语言。设置面板切换、loadSettings 初始化均调用此函数。 */
 export function setLocale(locale: Locale): void {
-    currentLocale = locale;
+    (globalThis as unknown as Record<string, unknown>)[LOCALE_STATE_KEY] = locale;
 }
 
 /** 读取用户设定的语言（可能是 'auto'）。 */
 export function getLocale(): Locale {
-    return currentLocale;
+    const stored = (globalThis as unknown as Record<string, unknown>)[LOCALE_STATE_KEY];
+    return (stored as Locale) ?? 'auto';
 }
 
 /**
