@@ -272,6 +272,117 @@ async function runTests() {
     controller.cleanup();
   });
 
+  await test('feedback handlers resolve ids from restored conversation history', async () => {
+    const { ShellView } = await import('../src/ui/shell-view');
+    const { TabManager } = await import('../src/ui/tabs/tab-manager');
+
+    const archived: any[] = [];
+    const app = {
+      plugins: {
+        plugins: {
+          baizer: {
+            toolRegistry: {
+              execute: async (action: string, args: Record<string, any>) => {
+                archived.push({ action, args });
+                return { success: true, path: 'Knowledge Wiki/Articles/x.md' };
+              },
+            },
+          },
+        },
+      },
+    } as any;
+
+    const view = new ShellView({} as any, createApi([])) as any;
+    view.app = app;
+    // 本用例只验证按 id 回查,不初始化 DOM;归档结果消息不走绘制断言。
+    view.appendMessage = () => { };
+    const tabManager = new TabManager();
+    view.tabManager = tabManager;
+
+    // 从历史菜单恢复的会话:消息由快照直接写进宿主投影,没走过 onMessageAdded。
+    const tab = tabManager.createTab({
+      id: 'restored-conversation',
+      title: 'Restored',
+      createdAt: 1,
+      updatedAt: 2,
+      providerId: 'gemini',
+      modelId: 'gemini-2.5-flash',
+      messages: [
+        { id: 'u-restored', role: 'user', content: 'Explain the decision', timestamp: 1 },
+        {
+          id: 'a-restored',
+          role: 'ai',
+          content: '## Decision\n\nUse a projection.',
+          timestamp: 2,
+          sessionEntryId: 'entry-a',
+        },
+      ],
+    } as any);
+
+    view.activateTabSession(tab.id);
+    const session = view.tabSessions.get(tab.id);
+
+    // 唯一作者必须接管已有历史,否则按 id 回查会落空——恢复后 👍/👎 又是静默空操作。
+    expect(session.chatController.getMessages().map((m: ChatMessage) => m.id))
+      .toEqual(tab.state.getMessages().map((m: ChatMessage) => m.id));
+
+    await session.chatController.recordPositiveFeedback('a-restored');
+
+    expect(archived.length).toBe(1);
+    expect(archived[0].action).toBe('file_back_knowledge');
+    expect(archived[0].args.source_queries[0]).toBe('Explain the decision');
+
+    // 分支切换/重跑后用投影整表重建:owner 也要换成新表的 id。
+    view.renderActiveTabMessages = () => { };
+    view.rebuildActiveTabFromProjection([
+      { id: 'u-rebuilt', role: 'user', content: 'Explain the decision', timestamp: 3 },
+      {
+        id: 'a-rebuilt',
+        role: 'ai',
+        content: '## Decision\n\nRebuilt.',
+        timestamp: 4,
+        sessionEntryId: 'entry-b',
+      },
+    ]);
+    expect(session.chatController.getMessages().map((m: ChatMessage) => m.id))
+      .toEqual(['u-rebuilt', 'a-rebuilt']);
+
+    await session.chatController.recordPositiveFeedback('a-rebuilt');
+    expect(archived.length).toBe(2);
+
+    session.chatController.cleanup();
+  });
+
+  await test('negative feedback on adopted history re-asks with the reason', async () => {
+    const queries: string[] = [];
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        ...createApi([]),
+        chatStream: async function* (query: string) {
+          queries.push(query);
+          yield { type: 'text_delta', content: 'Better answer' };
+          yield { type: 'done', text: 'Better answer' };
+        },
+      } as any,
+      onMessageAdded: () => { },
+      onStreamEvent: () => { },
+    });
+
+    controller.adoptMessages([
+      { id: 'u1', role: 'user', content: 'Explain the decision', timestamp: 1 },
+      { id: 'a1', role: 'ai', content: 'Old answer', timestamp: 2, sessionEntryId: 'entry-a' },
+    ]);
+
+    await controller.recordNegativeFeedback('a1', '太啰嗦');
+
+    expect(queries.length).toBe(1);
+    expect(queries[0].includes('Explain the decision')).toBe(true);
+    expect(queries[0].includes('太啰嗦')).toBe(true);
+
+    controller.cleanup();
+  });
+
   await test('write-request failure keeps both lists aligned without an AI message', async () => {
     const host = createHost(ChatState);
     const controller = new ChatController({

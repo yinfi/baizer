@@ -1690,6 +1690,12 @@ export class ShellView extends ItemView {
         });
 
         const session = { chatController, contextManager, contextController };
+        // 从历史菜单恢复的 tab 在创建时就带着快照消息(只写进了投影,没经过 onMessageAdded)。
+        // 让唯一作者接管它们,否则恢复后的 👍/👎 按 id 回查会落空。
+        const tab = this.tabManager.getAllTabs().find(item => item.id === id);
+        if (tab) {
+            chatController.adoptMessages(tab.state.getMessages());
+        }
         this.tabSessions.set(id, session);
         return session;
     }
@@ -2015,6 +2021,9 @@ export class ShellView extends ItemView {
         for (const message of windowed) {
             tab.state.addMessage(message);
         }
+        // 同一批消息换表后也要让 owner 跟上:分支切换/重跑后从投影重建时,
+        // 旧 id 已不在屏幕上,owner 若不同步,操作栏上的 👍/👎 会再次查不到。
+        this.tabSessions.get(tab.id)?.chatController.adoptMessages(windowed);
         this.renderActiveTabMessages();
     }
 
