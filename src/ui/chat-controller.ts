@@ -85,6 +85,17 @@ export class ChatController {
         return [...this.messages];
     }
 
+    /**
+     * 接管一批宿主投影里已有的消息(从持久会话恢复、分支投影重建)。
+     *
+     * 这些消息不是本轮经 onMessageAdded 新建的,但宿主已持有同一批投影,所以这里
+     * 不回调、不重画,只把所有权收归本列表,避免出现「投影有、owner 没有」的分叉。
+     * 不接管的话,恢复会话后 👍/👎 按 id 回查必然落空,又回到静默空操作(ADR 0002)。
+     */
+    public adoptMessages(messages: ChatMessage[]) {
+        this.messages = messages.map(message => ({ ...message }));
+    }
+
     public clearHistory() {
         this.messages = [];
         void this.api.clearSession(this.conversationId);

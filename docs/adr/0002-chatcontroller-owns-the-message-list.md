@@ -101,5 +101,14 @@ supposed to call it for AI replies: that method is how the projection *receives*
 updates from the owner. Authoring a message anywhere other than
 `ChatController.addMessage` re-creates the bug this ADR exists to close.
 
+**Restored and rebuilt histories.** Conversation restore (`createTabData` from a
+snapshot) and branch rebuilds (`rebuildActiveTabFromProjection`) still write the
+projection first, because the snapshot or branch projector is where that history
+comes from. The tab's `ChatController` adopts that batch through `adoptMessages()`
+when its session is created and after each rebuild. Adoption is not a second
+author path: the host already holds the same messages, so it fires no
+`onMessageAdded` callback and draws nothing. Skipping it leaves projection ids
+that the owner cannot resolve — the same silent 👍/👎 miss in another disguise.
+
 See [`CONTEXT.md`](../../CONTEXT.md) for **message projection** vs **branch
 projection**, which are different things that share a word in the code.
