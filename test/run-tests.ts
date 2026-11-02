@@ -32,7 +32,6 @@ const tests = [
   'test/tab-manager.test.ts',
   'test/message-renderer.test.ts',
   'test/knowledge-status-panel.test.ts',
-  'test/guardian-request.test.ts',
   'test/ghost-text.test.ts',
   'test/guardian-completion.test.ts',
   'test/file-operation-contract.test.ts',

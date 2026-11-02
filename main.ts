@@ -8,7 +8,6 @@ import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
 import { ghostTextExtension, showGhostText, storeGhostText, hideGhostText, showThinkingGhostText, disposeGhostLiveRegion } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
-import { requestGuardianResponse } from './src/ui/guardian-request';
 import { GuardianCompletionService, getGuardianAutoDelayMs, shouldScheduleDeepEscalation, GUARDIAN_WEAK_COMPLETION_REASON } from './src/ui/guardian-completion';
 import { selectionMenuExtension } from './src/ui/selection-menu';
 import { KnowledgeRuntime } from './src/knowledge/runtime';
@@ -1008,132 +1007,29 @@ export default class BaizerPlugin extends Plugin {
             return;
         }
 
-        // Auto Mode Check: If not manual instruction and auto mode is disabled, skip.
-        if (!manualInstruction && !this.settings.guardianAutoMode) return;
-
         const cursor = editor.getCursor();
         const lineNumber = cursor.line + 1;
-        const view = (editor as any).cm as EditorView;
-
+        const view = editor.cm as EditorView;
         if (!view) return;
-
-        // Check Global Guardian Mode (Paused/Active)
-        const isGuardianEnabled = view.state.field(guardianModeField);
-        if (!manualInstruction && !isGuardianEnabled) return;
-
-        const line = editor.getLine(cursor.line);
-        // For auto mode, ensure line has content. For manual mode, we might process empty lines too.
-        if (!manualInstruction && (!line.trim() || line.trim().length < 3)) return;
-
-        // Get context: Last 10 lines (approx) to provide better context
-        const startLine = Math.max(0, cursor.line - 10);
-        const contextLines = [];
-        for (let i = startLine; i <= cursor.line; i++) {
-            contextLines.push(editor.getLine(i));
-        }
-        const contextText = contextLines.join('\n');
-
+        const document = view.state.doc;
+        const isStale = () => view.state.doc !== document
+            || editor.getCursor().line !== cursor.line || editor.getCursor().ch !== cursor.ch;
         updateGuardianState(view, lineNumber, GuardianState.Thinking);
-
         try {
-            let prompt = "";
-            let systemPromptOverride = "";
-
-            if (manualInstruction) {
-                prompt = `User Instruction: "${manualInstruction}"
-Context:
-"${contextText}"
-
-Please execute the instruction.
-- If it's an edit, return JSON: {"type":"edit", "suggestion":"REPLACED_TEXT"}
-- If it's a question, return JSON: {"type":"answer", "suggestion":"ANSWER_TEXT"}
-- If no action needed, return JSON: {"type":"none"}
-- Ensure the suggestion uses proper Markdown formatting.`;
-                systemPromptOverride = "You are a helpful assistant. Return ONLY JSON.";
-            } else {
-                // Generalized Co-writer Prompt
-                prompt = `Role: ${this.settings.systemPrompt || "You are a helpful AI assistant."}
-Task: You are a helpful co-writer. Complete the user's thought or continue the text naturally.
-
-Context:
-${contextText}
-
-Instructions:
-1. Suggest a continuation that flows naturally based on the context.
-2. Do NOT repeat the input text.
-3. If the text is complete or you have no good suggestion, return "type": "none".
-4. Output JSON: {"type": "completion", "suggestion": "MARKDOWN_FORMATTED_TEXT"}
-5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
-            }
-
-            const obsidianContext = await new ObsidianContextService(this.app).collect();
-            const response = await requestGuardianResponse(this.modelService, {
-                prompt,
-                systemPromptOverride,
-                obsidianContext,
-                userProfile: null,
+            const obsidianContext = await this.guardianContextService.collect();
+            const result = await this.guardianCompletionService.completeManual({
+                editor, instruction: manualInstruction, obsidianContext, isStale,
             });
-
-            // 提取第一个完整 JSON 对象（平衡括号计数，避免贪婪 regex 抓到多余内容）
-            let data: any;
-            const braceStart = response.indexOf('{');
-            if (braceStart === -1) {
+            if (isStale()) return;
+            if (result.type === 'none') {
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
-            let depth = 0;
-            let inString = false;
-            let escape = false;
-            let jsonEnd = -1;
-            for (let i = braceStart; i < response.length; i++) {
-                const ch = response[i];
-                if (escape) { escape = false; continue; }
-                if (ch === '\\' && inString) { escape = true; continue; }
-                if (ch === '"') { inString = !inString; continue; }
-                if (inString) continue;
-                if (ch === '{') depth++;
-                else if (ch === '}') { depth--; if (depth === 0) { jsonEnd = i; break; } }
-            }
-            if (jsonEnd === -1) {
-                updateGuardianState(view, lineNumber, GuardianState.Idle);
-                return;
-            }
-            try {
-                data = JSON.parse(response.substring(braceStart, jsonEnd + 1));
-            } catch {
-                updateGuardianState(view, lineNumber, GuardianState.Idle);
-                return;
-            }
-
-            // For edits/suggestions
-            if (data.suggestion && typeof data.suggestion === 'string') {
-                // Re-validate position as document might have changed
-                const currentLineCount = view.state.doc.lines;
-                if (lineNumber > currentLineCount) {
-                    console.warn("Guardian: Line number out of bounds after generation.");
-                    updateGuardianState(view, lineNumber, GuardianState.Idle);
-                    return;
-                }
-
-                const currentLine = view.state.doc.line(lineNumber);
-                const safeCh = Math.min(cursor.ch, currentLine.length);
-
-                logger.debug('Showing ghost text', 'Guardian', { suggestion: data.suggestion, line: lineNumber, ch: safeCh });
-                this.presentGuardianSuggestion(view, data.suggestion, lineNumber, safeCh);
-                updateGuardianState(view, lineNumber, GuardianState.HasSuggestion);
-            } else {
-                // console.warn("Guardian: Invalid suggestion data", data);
-                updateGuardianState(view, lineNumber, GuardianState.Idle);
-            }
-
-            if (data.type === 'none') {
-                updateGuardianState(view, lineNumber, GuardianState.Idle);
-                return;
-            }
-
-        } catch (error: any) {
-            console.error("Guardian Error:", error);
-            updateGuardianState(view, lineNumber, GuardianState.Error);
+            this.presentGuardianSuggestion(view, result.suggestion, result.line, result.ch);
+            updateGuardianState(view, lineNumber, GuardianState.HasSuggestion);
+        } catch (error) {
+            logger.error('Guardian manual request failed', error, 'Guardian');
+            if (!isStale()) updateGuardianState(view, lineNumber, GuardianState.Error);
         }
     }
 }
