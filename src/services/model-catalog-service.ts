@@ -113,29 +113,62 @@ export async function listModels(config: ProviderConfig, deps?: ModelCatalogDeps
 }
 
 /**
+ * 探活结果的三态。存在的理由：`checkAvailability()` 把「端点活着但不会列模型」
+ * 和「端点真的能列模型」都压成 `true`，于是连接测试会对一个刚回 404 的 URL 报
+ * 「model list reachable at <url>」—— 而同一屏的模型输入框却说列不了模型。
+ * 这里把「活着」与「列模型可用」拆开，UI 才能说人话。
+ */
+export interface AvailabilityStatus {
+    /** 端点应答了（哪怕答的是 404/405/501）。网络层失败才是 false。 */
+    reachable: boolean;
+    /** 端点明确表示没有列模型能力（404 / 405 / 501）。此时 reachable 仍为 true。 */
+    listingUnsupported: boolean;
+    /** reachable === false 时的原因。 */
+    error?: Error;
+}
+
+/**
  * 轻量探活：验证 key/端点是否可用。
  * 不发 LLM 推理，改用列模型端点的 200 判定（更快、不烧 token）。
  *
- * 例外：端点不支持列模型（ModelListingUnsupportedError）不算「不可用」——
- * 那只说明拿不到模型清单，生成能力并未被证伪。真发一次推理探活会烧 token，
- * 所以这里乐观返回 true，把「列表不可用」的事实交给 UI 的模型输入框处理。
- * gemini/openai 永远抛不出这个错误类，故它们的行为与改动前完全一致。
+ * 映射规则：
+ *  - 列模型成功（无论清单是否为空）→ `{reachable:true, listingUnsupported:false}`；
+ *  - 404 / 405 / 501 → `{reachable:true, listingUnsupported:true}` —— 端点应答了，
+ *    只是不提供模型清单；生成能力**未被验证**（真发一次推理会烧 token，故不在这里证伪）；
+ *  - 其他任何失败（401、网络、解析）→ `{reachable:false, error}`。
+ * gemini/openai 永远抛不出 ModelListingUnsupportedError，故它们恒为前两种之一，
+ * 行为与改动前完全一致。
  */
-export async function checkAvailability(config: ProviderConfig, deps?: ModelCatalogDeps): Promise<boolean> {
+export async function checkAvailabilityWithStatus(
+  config: ProviderConfig,
+  deps?: ModelCatalogDeps,
+): Promise<AvailabilityStatus> {
   try {
     await listModels(config, deps);
-    return true;
+    return { reachable: true, listingUnsupported: false };
   } catch (e) {
     if (isModelListingUnsupported(e)) {
       logger.warn(
         `Model listing unavailable for ${config?.label || config?.type}; assuming the endpoint can still generate`,
         'ModelCatalogService',
       );
-      return true;
+      return { reachable: true, listingUnsupported: true };
     }
     logger.error('Availability check failed', e, 'ModelCatalogService');
-    return false;
+    return {
+      reachable: false,
+      listingUnsupported: false,
+      error: e instanceof Error ? e : new Error(String(e)),
+    };
   }
+}
+
+/**
+ * 薄包装：只要「端点是否活着」这一个布尔量的既有调用方无需改动。
+ * 需要区分「活着但不列模型」请用 checkAvailabilityWithStatus。
+ */
+export async function checkAvailability(config: ProviderConfig, deps?: ModelCatalogDeps): Promise<boolean> {
+  return (await checkAvailabilityWithStatus(config, deps)).reachable;
 }
 
 async function listGeminiModels(config: ProviderConfig): Promise<ModelOption[]> {

@@ -2,6 +2,7 @@ import { App, PluginSettingTab, Setting, Notice, Modal, debounce, Debouncer, set
 import { BUILTIN_PROVIDER_KEYS, DEFAULT_PROVIDERS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, OpenAIApiFlavor, PluginSettings, ProviderConfig, ProviderType, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 import type { AvailableModelsResult } from './services/model-service';
+import { checkAvailabilityWithStatus } from './services/model-catalog-service';
 import { OntologyUpdateMode } from './knowledge/types';
 import type {
     DerivedSkillRegenerateBlocker,
@@ -29,7 +30,7 @@ export interface SettingsSectionStatus {
     tone: SettingsBadgeTone;
 }
 
-export type ConnectionTestState = 'idle' | 'testing' | 'success' | 'error';
+export type ConnectionTestState = 'idle' | 'testing' | 'success' | 'warning' | 'error';
 
 export interface ConnectionTestStatus {
     state: ConnectionTestState;
@@ -90,7 +91,9 @@ export function getSettingsFallbackCss(): string {
 .baizer-settings-hero {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
-    grid-template-areas: "title search" "subtitle search";
+    /* 副标题横跨两列：它是一整句说明文字（约 390px），此前只落在左侧 316px 的列里，
+       配合下面的 nowrap 就被裁掉 74px 且永远读不到。跨列后宽屏一行放得下。 */
+    grid-template-areas: "title search" "subtitle subtitle";
     column-gap: 12px;
     row-gap: 4px;
     align-items: center;
@@ -106,9 +109,11 @@ export function getSettingsFallbackCss(): string {
     min-width: 0;
     margin: 0;
     color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* 不设 nowrap/ellipsis：页面正文被省略号吃掉属于「读不到」，不是可接受的截断。
+       与 styles.css 保持一致（此前只有 styles.css 去掉了 nowrap，而本兜底表最后注入、优先级更高，
+       于是宽屏下依旧裁切）。 */
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 .baizer-settings-search-row {
     grid-area: search;
@@ -178,9 +183,12 @@ export function getSettingsFallbackCss(): string {
     margin: 0;
     color: var(--text-muted);
     font-size: var(--font-smallest);
-    white-space: nowrap;
+    /* 与 styles.css 同步：此前这里是单行 nowrap+ellipsis，而本兜底表最后注入、优先级更高，
+       于是 styles.css 里的两行截断形同虚设，分区描述在真实界面里只显示一行。 */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
 }
 .baizer-settings-section-meta {
     display: flex;
@@ -614,7 +622,10 @@ export function getSettingsFallbackCss(): string {
     }
     .baizer-settings-detail-label { padding-top: 0; }
 }
-@container (max-width: 560px) {
+/* 断点取 640 而非 560：设置浮窗自身声明 minWidth: 600（Setting#getPopoutOptions()），
+   600px 是真实用户能到达的最窄窗口。断点若正好压在 600 上，最窄窗口就会拿到宽屏布局
+   —— 而那是唯一没被量过的一档。抬到 640 让「最窄窗口」稳定落入窄屏处理。 */
+@container (max-width: 640px) {
     .baizer-settings-hero {
         grid-template-columns: 1fr;
         grid-template-areas: "title" "subtitle" "search";
@@ -632,7 +643,7 @@ export function getSettingsFallbackCss(): string {
     .baizer-settings-section-description,
     .baizer-settings-subtitle { white-space: normal; }
 }
-@media (max-width: 560px) {
+@media (max-width: 640px) {
     .baizer-settings-hero {
         grid-template-columns: 1fr;
         grid-template-areas: "title" "subtitle" "search";
@@ -960,15 +971,17 @@ export function validateCustomHeaders(text: string): CustomHeadersValidation {
 }
 
 /**
- * 模型列表的四种来源状态。此前只有一个 `listUnavailable` 布尔量，把
+ * 模型列表的来源状态。此前只有一个 `listUnavailable` 布尔量，把
  * 「端点不具备列模型能力」和「未配 key / 401 / 网络故障」塌成同一件事，
  * 于是真正的故障被说成「手动输入即可」，能力缺口又被当成配置错误。
  */
 export type ModelListStatus =
-    /** 端点真的返回了模型清单 */
+    /** 端点真的返回了非空模型清单 */
     | 'listed'
     /** 端点不具备列模型能力（/models 返回 404/405/501）—— 能力缺口，不是故障 */
     | 'listing-unsupported'
+    /** 端点 200 但清单为空（或响应体不是 {data:[...]}）—— 答了，但没宣称任何模型 */
+    | 'empty-listing'
     /** 还没配 API Key，请求根本没发出去 */
     | 'missing-key'
     /** 其他失败：401、网络、JSON 解析……这是真错误，必须原样说出来 */
@@ -986,10 +999,12 @@ export interface ModelFieldState {
      */
     manualEntry: true;
     /**
-     * 列表能不能当成「端点的真实结论」。
-     * 只有真列出来时才可信：其余状态下 `models` 是内置兜底列表，
-     * 把兜底值当候选渲染、或自动写进 config.model，等于替用户编了一个
-     * 端点未必支持的模型。
+     * 列表能不能当成「端点的真实结论」。**只由 `listed` 决定**。
+     *
+     * 不能用「listingUnsupported 与 error 都没设」来反推：`models` 永远非空
+     * （抓不到就回落到内置列表），端点回 200 `{"data":[]}` 时两个标志都不设、
+     * 列表里却是硬编码的兜底模型。此时若当可信，就会把 `claude-sonnet-4-5`
+     * 这类内置值写进一个从未宣称过它的端点配置里。
      */
     trustList: boolean;
 }
@@ -1013,7 +1028,7 @@ function summarizeModelListError(error: Error): string {
  * 的合法情况，也会把兜底列表误报成端点的真实清单。
  */
 export function getModelFieldState(input: {
-    result: Pick<AvailableModelsResult, 'models' | 'listingUnsupported' | 'error'>;
+    result: Pick<AvailableModelsResult, 'models' | 'listed' | 'listingUnsupported' | 'error'>;
     currentModel: string;
     hasApiKey: boolean;
 }): ModelFieldState {
@@ -1062,6 +1077,19 @@ export function getModelFieldState(input: {
         };
     }
 
+    // 端点答了 200，但没宣称任何模型（空清单，或响应体不是 {data:[...]}）。
+    // 此时 models 是内置兜底列表：既不是故障，也绝不是这个端点的清单。
+    if (!input.result.listed) {
+        return {
+            options,
+            status: 'empty-listing',
+            note: t('This endpoint returned no models. Type the model ID by hand — the listed suggestions are built in, not from this endpoint.'),
+            noteTone: 'warning',
+            manualEntry: true,
+            trustList: false,
+        };
+    }
+
     return {
         options,
         status: 'listed',
@@ -1088,8 +1116,32 @@ export function getModelListEndpoint(type: ProviderType, baseUrl: string): strin
 /**
  * 连接测试的阶段。测试只探模型列表端点（不烧 token），故它只能证明「列得出/列不出模型」，
  * 证明不了「能不能生成」——这两个结论必须分开说。
+ *
+ * `model-list-unavailable` 与 `unreachable` 必须分开：前者端点活着、只是没有列模型能力
+ * （404/405/501），后者才是真的连不上。此前两者共用一句「列表不可达」，于是 404 的端点
+ * 会拿到一句绿色的「模型列表可达」，而同一屏的模型输入框却说列不了模型。
  */
-export type ConnectionTestStage = 'missing-key' | 'model-list-unavailable' | 'endpoint-reachable';
+export type ConnectionTestStage =
+    | 'missing-key'
+    /** 端点应答了，但不提供模型清单（404/405/501）——不是成功，也不是配置错误 */
+    | 'model-list-unavailable'
+    /** 真的连不上 / 401 / 网络 / 解析失败 */
+    | 'unreachable'
+    /** 正常列出了模型 */
+    | 'endpoint-reachable';
+
+/**
+ * 把探活结果映射成测试阶段（纯函数，便于覆盖「真实探活结果 → 文案」这条端到端链路）。
+ * 优先级：连不上 > 活着但不列模型 > 正常。
+ */
+export function getConnectionTestStage(status: {
+    reachable: boolean;
+    listingUnsupported: boolean;
+}): ConnectionTestStage {
+    if (!status.reachable) return 'unreachable';
+    if (status.listingUnsupported) return 'model-list-unavailable';
+    return 'endpoint-reachable';
+}
 
 export interface ConnectionTestReport {
     state: ConnectionTestState;
@@ -1100,11 +1152,25 @@ export function getConnectionTestReport(input: {
     label: string;
     stage: ConnectionTestStage;
     endpoint: string;
+    /** 仅当「连不上」时给出的具体原因，原样附在结论后面。 */
+    reason?: string;
 }): ConnectionTestReport {
     const label = input.label || 'AI provider';
 
     if (input.stage === 'missing-key') {
         return { state: 'error', message: `${label}${t(': no API key configured.')}` };
+    }
+
+    // 端点活着但不提供模型清单：这不是成功，也不是配置错误。
+    // 必须明说「生成能力未被验证」，否则用户会把 404 当成「连接正常」。
+    if (input.stage === 'model-list-unavailable') {
+        return {
+            state: 'warning',
+            message: fillPlaceholders(
+                t('{label}: the endpoint at {url} answers, but it does not offer a model list. Generation was NOT verified — type the model ID by hand and try a real request.'),
+                { label, url: input.endpoint },
+            ),
+        };
     }
 
     if (input.stage === 'endpoint-reachable') {
@@ -1117,12 +1183,13 @@ export function getConnectionTestReport(input: {
         };
     }
 
+    // 真的连不上：把具体原因附上，否则「连接失败」四个字对排查毫无帮助。
     return {
         state: 'error',
         message: fillPlaceholders(
             t('{label}: could not reach the model list at {url}. Models cannot be listed — this does not prove the model cannot generate. Check the API key and service address, or type the model ID by hand.'),
             { label, url: input.endpoint },
-        ),
+        ) + (input.reason ? ` (${input.reason})` : ''),
     };
 }
 
@@ -1315,6 +1382,7 @@ export function renderModelField(container: HTMLElement, deps: ModelFieldDeps): 
             if (deps.isStale()) return;
             applyState({
                 models: [],
+                listed: false,
                 listingUnsupported: false,
                 error: caught instanceof Error ? caught : new Error(String(caught)),
             });
@@ -1600,6 +1668,12 @@ export function getConnectionTestStatusPresentation(
 
     if (status.state === 'success') {
         return { tone: 'success', label: status.message };
+    }
+
+    // 「端点活着但没有模型清单」既不是成功也不是失败：绿色会让用户以为一切正常，
+    // 红色又会让人以为配错了。用 warning 如实表达「这条结论没验证生成能力」。
+    if (status.state === 'warning') {
+        return { tone: 'warning', label: status.message };
     }
 
     return { tone: 'danger', label: status.message };
@@ -2641,21 +2715,25 @@ export class SettingTab extends PluginSettingTab {
                     this.openSectionIds.add('connection');
                     this.renderAccordion();
                     await this.plugin.modelService.updateSettings(this.plugin.settings);
-                    const reachable = await this.plugin.modelService.checkAvailability();
+                    // 必须用带状态的探活：checkAvailability() 把「404 不提供模型清单」也当 true，
+                    // 于是 404 的端点会拿到一句绿色的「模型列表可达」，与同一屏模型输入框的
+                    // 「该端点不支持列出模型」自相矛盾。
+                    const availability = await checkAvailabilityWithStatus(activeConfig);
                     // 测试只探模型列表端点（不烧 token），所以结论只能是「列得出/列不出模型」，
                     // 不能说成「能不能生成」——这两件事此前被同一句「连接失败」混为一谈。
                     this.connectionTestStatus = getConnectionTestReport({
                         label,
-                        stage: reachable ? 'endpoint-reachable' : 'model-list-unavailable',
+                        stage: getConnectionTestStage(availability),
                         endpoint,
+                        reason: availability.error?.message,
                     });
                 } catch (error: any) {
                     this.connectionTestStatus = getConnectionTestReport({
                         label,
-                        stage: 'model-list-unavailable',
+                        stage: 'unreachable',
                         endpoint,
+                        reason: error?.message || t('unknown reason'),
                     });
-                    this.connectionTestStatus.message += ` (${error?.message || t('unknown reason')})`;
                 }
 
                 this.openSectionIds.add('connection');

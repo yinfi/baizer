@@ -2887,7 +2887,9 @@ textarea.shell-input {
 .baizer-settings-hero {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
-    grid-template-areas: "title search" "subtitle search";
+    /* 副标题横跨两列：它是一整句说明文字（约 390px），此前只落在左侧 316px 的列里，
+       配合 nowrap 就被裁掉 74px 且永远读不到。跨列后宽屏一行放得下。 */
+    grid-template-areas: "title search" "subtitle subtitle";
     column-gap: 12px;
     row-gap: 4px;
     align-items: center;
@@ -2905,7 +2907,10 @@ textarea.shell-input {
     min-width: 0;
     margin: 0;
     color: var(--text-muted);
-    /* P2: 去掉单行 nowrap+ellipsis —— 此前副标题在常规宽度下被截断到不可读。允许换行。 */
+    /* P2: 去掉单行 nowrap+ellipsis —— 此前副标题在常规宽度下被截断到不可读。
+       允许换行，且任何宽度下都不许再出现裁切。 */
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .baizer-settings-search-row {
@@ -4042,7 +4047,10 @@ textarea.shell-input {
     flex-direction: column;
 }
 
-@container (max-width: 560px) {
+/* 断点取 640 而非 560：设置浮窗自身声明 minWidth: 600（Setting#getPopoutOptions()），
+   600px 是真实用户能到达的最窄窗口。断点若正好压在 600 上，最窄窗口就会拿到宽屏布局
+   —— 而那是唯一没被量过的一档。抬到 640 让「最窄窗口」稳定落入窄屏处理。 */
+@container (max-width: 640px) {
     .baizer-settings-hero {
         grid-template-columns: 1fr;
         grid-template-areas: "title" "subtitle" "search";
@@ -4075,7 +4083,7 @@ textarea.shell-input {
     }
 }
 
-/* 注:上方 @container(560) 已覆盖此断点的设置页栅格塌陷。原 @media 版逐字重复,已删。 */
+/* 注:上方 @container(640) 已覆盖此断点的设置页栅格塌陷。原 @media 版逐字重复,已删。 */
 
 /* ===== File Attachment Modal ===== */
 .baizer-attachment-modal .baizer-attachment-hint {

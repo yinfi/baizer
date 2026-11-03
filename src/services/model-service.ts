@@ -40,28 +40,35 @@ import { WorkspaceEditService } from './workspace-edit-service';
  * 而那会误伤「端点确实只暴露一个模型」的合法情况。
  *
  * 字段含义：
+ *  - `listed === true`：**仅当**端点真的回了一份非空模型清单。这是「这份 models
+ *    到底是不是端点说的」的唯一权威信号 —— 空清单、body 解析不出 `{data:[...]}`、
+ *    未配置 key、任何失败，以及被换成 `getFallbackModels()` 的内置猜测，都必须是 false。
+ *    只看 `listingUnsupported === false && !error` 是不够的：端点回 `200 {"data":[]}`
+ *    时两者都是默认值，但 models 其实是内置兜底 —— 那会让 UI 报「已列出 N 个模型」
+ *    并把一个端点从未宣称过的模型名写进 config.model。
  *  - `listingUnsupported === true`：**仅当** `listModels()` 抛出
  *    `ModelListingUnsupportedError`（列模型端点返回 404 / 405 / 501）。
  *    这是能力缺口而非故障 —— 端点可能照样能生成，UI 应提示「手动输入模型名」
  *    而不是报「配置错误」。此时 `error` 不设置。
  *  - `error`：没拿到真实列表的其他原因（未配置 apiKey、401、网络错误…）。
- *  - 两者都为默认值时，`models` 就是端点返回的真实清单。
- *  - 无论哪种情况，`models` 都非空（回落到内置列表），调用方可以直接渲染。
+ *  - `models` 无论哪种情况都非空（回落到内置列表），调用方可以直接渲染；
+ *    但只有 `listed === true` 时才可以把它们当作端点宣称的模型。
  *
- * 缓存语义（重要）：整个判定结果（含 `listingUnsupported` 与 `error`）一起缓存 10 分钟，
- * 非 `forceRefresh` 的调用会**原样重放**上一次的判定 —— 失败也重放。
+ * 缓存语义（重要）：整个判定结果（含 `listed` / `listingUnsupported` / `error`）一起缓存
+ * 10 分钟，非 `forceRefresh` 的调用会**原样重放**上一次的判定 —— 失败也重放。
  * 否则「失败一次之后，每次重渲染都退回 listed」这种谎报就落在最常见路径上
  * （重渲染从不传 forceRefresh）。需要真正重试请传 `forceRefresh: true`（UI 的 Refresh 即如此）。
  */
 export interface AvailableModelsResult {
     models: ModelOption[];
+    listed: boolean;
     listingUnsupported: boolean;
     error?: Error;
 }
 
 export class ModelService {
     private memoryManager: MemoryManager | null = null;
-    private readonly modelListCache = new Map<string, { timestamp: number; models: ModelOption[]; listingUnsupported: boolean; error?: Error }>();
+    private readonly modelListCache = new Map<string, { timestamp: number; models: ModelOption[]; listed: boolean; listingUnsupported: boolean; error?: Error }>();
     private readonly modelListCacheTtlMs = 10 * 60 * 1000;
     private readonly generationStrategyService = new GenerationStrategyService();
     private providerChangedCallbacks: Array<() => void> = [];
@@ -307,6 +314,25 @@ export class ModelService {
     }
 
     /**
+     * 与 `checkAvailability` 同源，但把「端点活着」与「端点会列模型」拆开返回。
+     * settings 的连接测试据此区分三态：能列模型 / 活着但不提供模型清单（生成未验证）/ 失败。
+     * 否则 404 会被渲染成绿色的「model list reachable at <url>」，而同一屏的模型输入框
+     * 同时说列不了模型 —— 自相矛盾。保留 `checkAvailability` 作为薄包装。
+     *
+     * @param deps - 可选注入，与 `modelCatalog.checkAvailabilityWithStatus(config, deps?)` 同一个缝
+     *               （换掉 requestUrl 以便测试/复用），生产调用不传。
+     */
+    async checkAvailabilityWithStatus(
+        deps?: modelCatalog.ModelCatalogDeps,
+    ): Promise<modelCatalog.AvailabilityStatus> {
+        const config = this.getActiveProviderConfig();
+        if (!config) {
+            return { reachable: false, listingUnsupported: false, error: new Error('No active provider configured') };
+        }
+        return await modelCatalog.checkAvailabilityWithStatus(config, deps);
+    }
+
+    /**
      * 与 `getAvailableModels` 同源，但把「列表是不是真的来自端点」一并返回。
      * settings 面板据此决定是否提示「手动输入模型名」，不再靠数组形状猜。
      * 保留 `getAvailableModels` 作为薄包装，既有调用方无需改动。
@@ -321,7 +347,7 @@ export class ModelService {
     ): Promise<AvailableModelsResult> {
         const providerId = this.settings.activeProvider;
         const config = this.getActiveProviderConfig();
-        if (!config) return { models: [], listingUnsupported: false };
+        if (!config) return { models: [], listed: false, listingUnsupported: false };
 
         const fetched = await this.fetchModelsForProvider(providerId, config, forceRefresh, deps);
         return {
@@ -378,6 +404,7 @@ export class ModelService {
                 // 一次 401 之后所有非 forceRefresh 的调用都会谎报成「已列出」。
                 return {
                     models: cached.models,
+                    listed: cached.listed,
                     listingUnsupported: cached.listingUnsupported,
                     error: cached.error,
                 };
@@ -385,12 +412,17 @@ export class ModelService {
         }
 
         let models: ModelOption[] = [];
+        let listed = false;
         let listingUnsupported = false;
         let error: Error | undefined;
 
         if (config.apiKey?.trim()) {
             try {
                 models = await modelCatalog.listModels(config, deps);
+                // 「端点真的给了非空清单」的唯一判定点：必须在这里取，一旦下面换成
+                // getFallbackModels() 就再也分不出「端点的清单」与「我们的猜测」了。
+                // 空清单（200 {"data":[]}）与解析不出 data 的 body 都留在 false。
+                listed = models.length > 0;
             } catch (caught: any) {
                 // 「端点不支持列模型」是能力缺口而非故障：它同样回落到内置列表，
                 // 但必须把真实原因透出去，UI 才能提示手输模型名，
@@ -411,14 +443,16 @@ export class ModelService {
         }
 
         if (!models.length) {
+            // 内置兜底：`listed` 保持 false，调用方据此知道这批模型不是端点宣称的。
             models = this.getFallbackModels(providerId);
         }
 
         const normalized = this.normalizeModelOptions(models);
         // 判定结果整体缓存：10 分钟内重复问同一个端点不必再打一次 404 / 401。
-        // error 必须一起存 —— 缓存命中路径要靠它复现失败状态（见上方缓存语义）。
-        this.modelListCache.set(cacheKey, { timestamp: now, models: normalized, listingUnsupported, error });
-        return { models: normalized, listingUnsupported, error };
+        // listed / error 必须一起存 —— 缓存命中路径要靠它们复现真实判定
+        //（见 AvailableModelsResult 的缓存语义），否则失败或兜底都会被谎报成「已列出」。
+        this.modelListCache.set(cacheKey, { timestamp: now, models: normalized, listed, listingUnsupported, error });
+        return { models: normalized, listed, listingUnsupported, error };
     }
 
     private getFallbackModels(providerId: string): ModelOption[] {
@@ -954,10 +988,15 @@ export class ModelService {
     /**
      * 依 ProviderConfig.type 选择 pi Model 构造器。
      *
-     * 必须是显式三分支：早先写成 `type === 'gemini' ? gemini : openai`，
+     * 三分支必须显式：早先写成 `type === 'gemini' ? gemini : openai`，
      * 于是新增的 'anthropic' 会静默落到 OpenAI-compatible 分支 —— 用户以为在打
      * Messages 协议，实际发的是 /chat/completions，报错完全指错方向。
-     * 这里用 switch + 穷尽兜底，让类型层面新增 provider 时立刻暴露。
+     * 类型层面的穷尽性由 `ProviderType` 联合类型保证：新增一个 type 会让这里出现未覆盖分支。
+     *
+     * `default:` 因此**不是**穷尽性兜底，而是运行期安全网：settings.json 是从磁盘读的，
+     * 可能残留旧版本或被手改出未知 type，那种情况下宁可退化成 OpenAI-compatible，
+     * 也不要让整个插件炸掉 —— 但必须 warn 出声，否则就和改动前那个静默 fallthrough
+     * 犯了同一个毛病（用户看不出自己配错了）。
      */
     private buildModelForConfig(config: ProviderConfig): Model<any> {
         switch (config.type) {
@@ -966,7 +1005,13 @@ export class ModelService {
             case 'anthropic':
                 return buildAnthropicModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
             case 'openai-compatible':
+                return buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
             default:
+                // 只有持久化数据里出现未知 type 才会走到这里（类型系统已排除其余情况）。
+                logger.warn(
+                    `Unknown provider type "${String((config as { type?: unknown }).type)}" for ${config.label || config.baseUrl}; falling back to OpenAI-compatible`,
+                    'ModelService.buildModelForConfig',
+                );
                 return buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
         }
     }

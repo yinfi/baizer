@@ -346,7 +346,7 @@ async function runTests() {
       hasFieldFeedback: css.includes('.baizer-settings-field-feedback'),
       hasModelPicker: css.includes('.baizer-settings-model-picker'),
       hasCompactSectionRow: css.includes('grid-template-columns: minmax(0, 1fr) auto 18px'),
-      hasNarrowOnlyBreakpoint: css.includes('@container (max-width: 560px)'),
+      hasNarrowOnlyBreakpoint: css.includes('@container (max-width: 640px)'),
       removedSectionIcon: css.includes('.baizer-settings-section-icon'),
       removedWideBreakpoint: css.includes('@container (max-width: 900px)'),
       removedNavLayout: css.includes('.baizer-settings-nav-list'),

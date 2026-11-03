@@ -1033,6 +1033,130 @@ async function runTests() {
     expect(retried.listingUnsupported).toEqual(false);
     expect(retried.models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
   });
+
+  // ---- F1：内置兜底列表必须不能被当成「端点列出的清单」 ----
+  // 症状：端点回 200 但清单为空（或 body 不是 {data:[...]}）时，listed 三兄弟全为默认值，
+  // UI 报「已列出 N 个模型」，settings 还会把一个端点从未宣称过的模型名写进 config.model。
+  // listed 是唯一能把「端点的清单」和「我们的猜测」分开的信号，所以这几条盯的是它。
+
+  await test('F1: 200 with an EMPTY list (key set) → listed=false, not "listed"', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({ status: 200, text: '{"data":[]}' }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    // 端点应答正常、没有错误、也不缺列模型能力 —— 旧实现到这里就说「已列出」了
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error).toEqual(undefined);
+    // 但模型其实全是内置兜底：必须 listed=false
+    expect(result.listed).toEqual(false);
+    // 具体证据：端点一个模型都没给，列表里却出现了 opus
+    expect(result.models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
+
+  await test('F1: 200 whose body has no data array → listed=false', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({ status: 200, text: '{"foo":1}' }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listed).toEqual(false);
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error).toEqual(undefined);
+  });
+
+  await test('F1: 200 with an unparseable body → listed=false (and it is an error, not a listing)', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({ status: 200, text: 'not json at all' }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listed).toEqual(false);
+    expect(result.error instanceof Error).toEqual(true);
+  });
+
+  await test('F1: a real non-empty listing → listed=true', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({
+      status: 200,
+      text: JSON.stringify({ data: [{ id: 'claude-opus-4-5', display_name: 'Opus 4.5' }] }),
+    }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listed).toEqual(true);
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error).toEqual(undefined);
+    expect(result.models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
+
+  await test('F1: 404 / 401 / missing key are all listed=false', async () => {
+    const notFound = serviceWithListingEndpoint(() => ({ status: 404, text: '' }));
+    expect((await notFound.service.getAvailableModelsWithStatus(true, notFound.deps)).listed).toEqual(false);
+
+    const unauthorized = serviceWithListingEndpoint(() => ({ status: 401, text: '{"error":{}}' }));
+    expect((await unauthorized.service.getAvailableModelsWithStatus(true, unauthorized.deps)).listed).toEqual(false);
+
+    const noKey = serviceWithListingEndpoint(() => ({ status: 200, text: '{"data":[]}' }));
+    noKey.service.settings.providers.anthropic.apiKey = '';
+    expect((await noKey.service.getAvailableModelsWithStatus(true, noKey.deps)).listed).toEqual(false);
+  });
+
+  await test('F1: cached empty listing replays listed=false on a non-forced call', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 200, text: '{"data":[]}' };
+    });
+
+    await service.getAvailableModelsWithStatus(true, deps);
+    const cached = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(1);
+    expect(cached.listed).toEqual(false);
+    expect(cached.listingUnsupported).toEqual(false);
+    expect(cached.error).toEqual(undefined);
+  });
+
+  // ---- F2：探活必须区分「端点活着」与「端点会列模型」 ----
+
+  await test('F2: checkAvailabilityWithStatus separates reachable from listing-capable', async () => {
+    const notFound = serviceWithListingEndpoint(() => ({ status: 404, text: '' }));
+    const unsupported = await notFound.service.checkAvailabilityWithStatus(notFound.deps);
+    // 端点应答了（所以不是「连不上」），但明确不会列模型
+    expect(unsupported.reachable).toEqual(true);
+    expect(unsupported.listingUnsupported).toEqual(true);
+    expect(unsupported.error).toEqual(undefined);
+    // 注意：ModelService.checkAvailability() 不接受 deps，无法在这里用注入的 requestUrl 驱动，
+    // 故「薄包装仍返回 true」在 test/anthropic-protocol.test.ts 里用 catalog 层的注入验证。
+
+    const unauthorized = serviceWithListingEndpoint(() => ({ status: 401, text: '{"error":{}}' }));
+    const failed = await unauthorized.service.checkAvailabilityWithStatus(unauthorized.deps);
+    expect(failed.reachable).toEqual(false);
+    expect(failed.listingUnsupported).toEqual(false);
+    expect(failed.error instanceof Error).toEqual(true);
+
+    const ok = serviceWithListingEndpoint(() => ({
+      status: 200,
+      text: JSON.stringify({ data: [{ id: 'claude-opus-4-5' }] }),
+    }));
+    const healthy = await ok.service.checkAvailabilityWithStatus(ok.deps);
+    expect(healthy.reachable).toEqual(true);
+    expect(healthy.listingUnsupported).toEqual(false);
+    expect(healthy.error).toEqual(undefined);
+  });
+
+  // ---- F4：未知 provider type 是运行期安全网，不是静默 fallthrough ----
+
+  await test('F4: an unknown persisted provider type falls back to OpenAI-compatible', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.settings = { contextWindow: 100000, thinkingLevel: 'medium' };
+
+    // 类型系统已排除，只有磁盘上残留/手改的 settings.json 能造出这种值
+    const model = service.buildModelForConfig({
+      type: 'legacy-openai', label: 'Legacy', apiKey: 'k',
+      baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o',
+    });
+
+    expect(model.api).toEqual('openai-completions');
+    expect(model.provider).toEqual('openai');
+  });
 }
 
 runTests().catch((e) => {

@@ -84,8 +84,10 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Test': '测试',
     'Custom Headers': '自定义请求头',
     'Custom headers': '自定义请求头',
-    'One "Header-Name: value" per line. Use {{conversationId}} to send the current conversation ID (e.g. for opencode.ai Go: x-opencode-session: {{conversationId}}).':
-        '每行一条 "Header-Name: value"。用 {{conversationId}} 占位符发送当前会话 ID（例如 opencode.ai Go 要求：x-opencode-session: {{conversationId}}）。',
+    'One "Header-Name: value" per line. Use {{conversationId}} to send the current conversation ID.':
+        '每行一条 "Header-Name: value"。用 {{conversationId}} 占位符发送当前会话 ID。',
+    'Sent with every request to this provider. The {{conversationId}} placeholder is skipped for one-off calls that have no conversation.':
+        '每次向该服务商发请求时都会带上。对于没有会话的一次性调用，{{conversationId}} 占位符会被跳过。',
     'API Endpoint': 'API 端点',
     'Default Gemini endpoint': '默认 Gemini 端点',
     'Gemini API': 'Gemini API',
@@ -175,6 +177,8 @@ export const ZH_MESSAGES: Record<string, string> = {
         '该端点不支持列出模型。可直接手填模型 ID —— 这不代表该模型无法生成。',
     'Could not load the model list: {reason}. Type the model ID by hand.':
         '未能获取模型列表：{reason}。可直接手填模型 ID。',
+    'This endpoint returned no models. Type the model ID by hand — the listed suggestions are built in, not from this endpoint.':
+        '该端点没有返回任何模型。可直接手填模型 ID —— 下拉里的候选是内置建议，并非该端点列出。',
     'unknown error': '未知错误',
     'Suggested models (not listed by this endpoint)': '候选模型（并非该端点列出）',
     '{count} models listed. Pick one or type an ID.': '已列出 {count} 个模型。可从中选择，也可直接输入 ID。',
@@ -185,6 +189,10 @@ export const ZH_MESSAGES: Record<string, string> = {
         '检查 {url} 的模型列表是否可达。它不会真正发起生成，所以通过只说明「端点有响应」，不代表「模型能生成」。',
     '{label}: model list reachable at {url}. Only the endpoint was verified, not generation.':
         '{label}：模型列表可达（{url}）。这里只验证了端点，未验证生成。',
+    // 「端点活着但不提供模型清单」既不能报成成功（会与模型输入框的「不支持列出模型」自相矛盾），
+    // 也不能报成失败（端点确实答了）。单独一句，明说生成能力未被验证。
+    '{label}: the endpoint at {url} answers, but it does not offer a model list. Generation was NOT verified — type the model ID by hand and try a real request.':
+        '{label}：{url} 有响应，但不提供模型列表。**生成能力未被验证** —— 请直接手填模型 ID，并发一次真实请求确认。',
     '{label}: could not reach the model list at {url}. Models cannot be listed — this does not prove the model cannot generate. Check the API key and service address, or type the model ID by hand.':
         '{label}：无法访问模型列表（{url}）。这只能说明「列不出模型」，不能证明「模型无法生成」。请检查 API Key 与服务地址，或直接手填模型 ID。',
 

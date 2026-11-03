@@ -57,6 +57,18 @@ const DEFAULT_BASE_URL = 'https://api.anthropic.com';
 /** Anthropic 要求的 API 版本头，SDK 0.129.0 的默认值。 */
 const DEFAULT_ANTHROPIC_VERSION = '2023-06-01';
 
+/**
+ * SDK 的默认请求超时（client.js: `BaseAnthropic.DEFAULT_TIMEOUT = 600000`，10 分钟）。
+ *
+ * 必须照抄：真 SDK 即使调用方一个 timeout 都没给，也会在请求上装这个上限
+ * （`this.timeout = options.timeout ?? DEFAULT_TIMEOUT` → `options.timeout = options.timeout ?? this.timeout`
+ * → fetchWithTimeout 里 setTimeout(abort, ms)）。shim 若在「没人给 timeout」时干脆不装信号，
+ * 连接半死不活时这个回合会永远挂着 —— 真 SDK 会自己中断，两边行为必须一致。
+ * 注意 pi 的调用方（model-service 的 generate）刻意不转发 timeoutMs，改用 AbortSignal 表达超时，
+ * 所以「没人给 timeout」是常态路径而不是边缘情况。
+ */
+const DEFAULT_TIMEOUT_MS = 600000;
+
 /** 判定「请求已经带了认证」时要看的 header（与 pi 的 hasRequestAuth 同一套）。 */
 const AUTH_HEADERS = ['x-api-key', 'authorization', 'cf-aig-authorization'];
 
@@ -78,6 +90,12 @@ export interface AnthropicShimClientOptions {
   defaultHeaders?: Record<string, string | null | undefined>;
   dangerouslyAllowBrowser?: boolean;
   fetch?: typeof fetch;
+  /**
+   * 客户端级超时（毫秒），对应 SDK ClientOptions.timeout。
+   * 真 SDK 是 `this.timeout = options.timeout ?? DEFAULT_TIMEOUT`，单次请求可覆盖；
+   * shim 同样支持，未提供时退到 DEFAULT_TIMEOUT_MS。pi 不传这个字段。
+   */
+  timeout?: number;
   /** federation 配置，真实 SDK 用它换 token；本模块不实现，仅接受该字段。 */
   config?: unknown;
 }
@@ -339,12 +357,15 @@ export default class Anthropic {
   }
 
   private buildAbortSignal(options?: AnthropicShimRequestOptions): {
-    signal: AbortSignal | undefined;
+    signal: AbortSignal;
     cleanup: () => void;
   } {
     const caller = options?.signal;
-    const timeoutMs = typeof options?.timeout === 'number' && options.timeout > 0 ? options.timeout : undefined;
-    if (!caller && timeoutMs === undefined) return { signal: undefined, cleanup: () => {} };
+    // 与 SDK 对齐：单次请求没给 timeout 就退到客户端级 timeout，再没有就用 600000ms 默认值。
+    // 非正数（含显式 0）也走默认值 —— SDK 对显式 timeout 会 validatePositiveInteger 直接报错，
+    // 我们这里选择「按默认值兜住」，不把一个 SDK 认为非法的输入变成永久挂起。
+    const requested = options?.timeout ?? this.options.timeout;
+    const timeoutMs = typeof requested === 'number' && requested > 0 ? requested : DEFAULT_TIMEOUT_MS;
 
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -352,12 +373,12 @@ export default class Anthropic {
       if (caller.aborted) controller.abort();
       else caller.addEventListener('abort', abort, { once: true });
     }
-    const timer = timeoutMs === undefined ? undefined : setTimeout(abort, timeoutMs);
+    const timer = setTimeout(abort, timeoutMs);
 
     return {
       signal: controller.signal,
       cleanup: () => {
-        if (timer !== undefined) clearTimeout(timer);
+        clearTimeout(timer);
         caller?.removeEventListener('abort', abort);
       },
     };

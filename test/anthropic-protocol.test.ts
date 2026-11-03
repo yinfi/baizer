@@ -716,6 +716,68 @@ async function runTests() {
     expect(fetchImpl.calls.length).toBe(1);
   });
 
+  // ---- F3：没人给 timeout 时必须装 SDK 的 600000ms 默认值 ----
+  // 旧行为：options.timeout 为空就直接返回 signal: undefined，连接半死不活时这个回合永远挂着，
+  // 而真 SDK 是 `BaseAnthropic.DEFAULT_TIMEOUT = 600000`，会自己中断。
+  // 10 分钟的定时器没法等，所以这里截获 setTimeout 看它实际排了多少毫秒（原函数照常调用）。
+
+  /** 截获 setTimeout 的延时参数，跑完 fn 后恢复。 */
+  async function captureTimeouts(fn: () => Promise<void>): Promise<number[]> {
+    const delays: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    (globalThis as any).setTimeout = (handler: any, ms?: number, ...rest: any[]) => {
+      delays.push(Number(ms));
+      return (realSetTimeout as any)(handler, ms, ...rest);
+    };
+    try {
+      await fn();
+    } finally {
+      (globalThis as any).setTimeout = realSetTimeout;
+    }
+    return delays;
+  }
+
+  await test('shim: applies the SDK default timeout (600000ms) when none is supplied', async () => {
+    const fetchImpl = recordingFetch(() => sseResponse(textStreamEvents(['x'])));
+    const client = new ShimAnthropic({ apiKey: API_KEY, baseURL: BASE_URL, fetch: fetchImpl, defaultHeaders: {} });
+
+    const delays = await captureTimeouts(async () => {
+      await client.beta.messages.create({ model: 'm', max_tokens: 1, messages: [] }, {}).asResponse();
+    });
+
+    // 与 SDK 的 DEFAULT_TIMEOUT 一致
+    expect(delays.includes(600000)).toBe(true);
+  });
+
+  await test('shim: an explicit per-request timeout wins over the default', async () => {
+    const fetchImpl = recordingFetch(() => sseResponse(textStreamEvents(['x'])));
+    const client = new ShimAnthropic({ apiKey: API_KEY, baseURL: BASE_URL, fetch: fetchImpl, defaultHeaders: {} });
+
+    const delays = await captureTimeouts(async () => {
+      await client.beta.messages.create(
+        { model: 'm', max_tokens: 1, messages: [] },
+        { timeout: 1234 },
+      ).asResponse();
+    });
+
+    expect(delays.includes(1234)).toBe(true);
+    expect(delays.includes(600000)).toBe(false);
+  });
+
+  await test('shim: the client-level timeout is honoured when the request omits one', async () => {
+    const fetchImpl = recordingFetch(() => sseResponse(textStreamEvents(['x'])));
+    const client = new ShimAnthropic({
+      apiKey: API_KEY, baseURL: BASE_URL, fetch: fetchImpl, defaultHeaders: {}, timeout: 4321,
+    });
+
+    const delays = await captureTimeouts(async () => {
+      await client.beta.messages.create({ model: 'm', max_tokens: 1, messages: [] }, {}).asResponse();
+    });
+
+    expect(delays.includes(4321)).toBe(true);
+    expect(delays.includes(600000)).toBe(false);
+  });
+
   await test('shim: awaiting create() directly fails loudly instead of returning a Response', async () => {
     const fetchImpl = recordingFetch(() => sseResponse(textStreamEvents(['x'])));
     const client = new ShimAnthropic({ apiKey: API_KEY, baseURL: BASE_URL, fetch: fetchImpl, defaultHeaders: {} });
@@ -744,7 +806,7 @@ async function runTests() {
   /* (g) 模型清单：GET /v1/models（x-api-key 认证，不是 Bearer）            */
   /* ------------------------------------------------------------------ */
 
-  const { listModels, checkAvailability, isModelListingUnsupported } =
+  const { listModels, checkAvailability, checkAvailabilityWithStatus, isModelListingUnsupported } =
     await import('../src/services/model-catalog-service');
 
   /** 记录 requestUrl 调用并按脚本返回 {status, text}。 */
@@ -855,6 +917,58 @@ async function runTests() {
     }
     expect(caught.message).toContain('API Key');
     expect(calls.length).toBe(0);
+  });
+
+  // ---- F2：探活三态。404 必须报「活着但不会列模型」，不能报成绿色的「可达」 ----
+  // 旧行为：checkAvailability 把 404 压成 true，连接测试于是对刚回 404 的 URL 报
+  // 「model list reachable at <url>」，而同一屏的模型输入框同时说列不了模型。
+
+  await test('checkAvailabilityWithStatus: 404 on /v1/models → reachable but NOT listing-capable', async () => {
+    const { calls, deps } = listingDeps(() => ({ status: 404, text: 'not found' }));
+
+    const status = await checkAvailabilityWithStatus(anthropicConfig(), deps);
+
+    // 关键：走的是真实 404 响应路径（不是断言纯格式化函数）
+    expect(calls.length).toBe(1);
+    expect(calls[0].url).toBe(`${BASE_URL}/v1/models`);
+    expect(status.reachable).toBe(true);
+    expect(status.listingUnsupported).toBe(true);
+    expect(status.error).toBe(undefined);
+    // 薄包装语义不变：仍然乐观返回 true（生成能力未被证伪）
+    expect(await checkAvailability(anthropicConfig(), deps)).toBe(true);
+  });
+
+  await test('checkAvailabilityWithStatus: 405 / 501 同样报 listingUnsupported', async () => {
+    for (const code of [405, 501]) {
+      const { deps } = listingDeps(() => ({ status: code, text: '' }));
+      const status = await checkAvailabilityWithStatus(anthropicConfig(), deps);
+      expect(status.reachable).toBe(true);
+      expect(status.listingUnsupported).toBe(true);
+    }
+  });
+
+  await test('checkAvailabilityWithStatus: 401 → unreachable with an error', async () => {
+    const { deps } = listingDeps(() => ({ status: 401, text: '{"error":{"message":"bad key"}}' }));
+
+    const status = await checkAvailabilityWithStatus(anthropicConfig(), deps);
+
+    expect(status.reachable).toBe(false);
+    expect(status.listingUnsupported).toBe(false);
+    expect(status.error instanceof Error).toBe(true);
+    expect(await checkAvailability(anthropicConfig(), deps)).toBe(false);
+  });
+
+  await test('checkAvailabilityWithStatus: 200 with a real list → reachable and listing-capable', async () => {
+    const { deps } = listingDeps(() => ({
+      status: 200,
+      text: JSON.stringify({ data: [{ id: 'claude-opus-4-5' }] }),
+    }));
+
+    const status = await checkAvailabilityWithStatus(anthropicConfig(), deps);
+
+    expect(status.reachable).toBe(true);
+    expect(status.listingUnsupported).toBe(false);
+    expect(status.error).toBe(undefined);
   });
 
   /* ------------------------------------------------------------------ */
