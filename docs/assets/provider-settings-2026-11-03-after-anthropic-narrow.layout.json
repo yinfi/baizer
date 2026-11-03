@@ -2,9 +2,9 @@
   "schema": "baizer-provider-settings-layout/1",
   "label": "after-anthropic-narrow",
   "phase": "after",
-  "revision": "53fbb25",
+  "revision": "b4fb0b5",
   "pluginDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\provider-settings-anthropic-29c5dba52d61\\dist",
-  "capturedAt": "2026-11-03T04:42:21.829Z",
+  "capturedAt": "2026-11-03T05:01:15.785Z",
   "limitations": [
     "Colour, contrast, font rendering, iconography and animation are NOT asserted; this probe only measures geometry and text reachability.",
     "Overlap is checked only between interactive controls (input/select/textarea/button) inside the active provider detail area, as agreed.",
@@ -1052,7 +1052,7 @@
     "copiedPluginFiles": [
       {
         "file": "main.js",
-        "bytes": 4137767
+        "bytes": 4137811
       },
       {
         "file": "manifest.json",
@@ -1072,19 +1072,19 @@
     "explanations": [
       "the settings panel rendered in a separate \"popout-window\"; it was measured and captured there (it has no `app` global, so plugin facts come from the main window)"
     ],
-    "pid": 19212,
+    "pid": 19148,
     "browser": "Chrome/150.0.7871.250",
     "protocolVersion": "1.3",
     "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.14.5 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
     "target": {
-      "id": "86D8133BF19085F3B1E95C6B1FEC2D99",
+      "id": "EA1FF0ACB1197FDBADA603C06726E920",
       "type": "page",
       "url": "app://obsidian.md/index.html",
       "title": "新标签页 - obsidian - Obsidian 1.14.5"
     },
     "pageTargetsSeen": [
       {
-        "id": "86D8133BF19085F3B1E95C6B1FEC2D99",
+        "id": "EA1FF0ACB1197FDBADA603C06726E920",
         "url": "app://obsidian.md/index.html",
         "title": "新标签页 - obsidian - Obsidian 1.14.5"
       }
@@ -1272,7 +1272,8 @@
       "settingsPopoutWindowConfig": true,
       "shouldUsePopout": true,
       "settingsModalInMainDocument": false,
-      "providerCardsInMainDocument": 0
+      "providerCardsInMainDocument": 0,
+      "readyWaitedMs": 45
     },
     "pluginInfoFromMainWindow": {
       "loaded": true,
@@ -1281,7 +1282,7 @@
     },
     "settingsPanelLocation": "popout-window",
     "captureTarget": {
-      "id": "579C1A8D0C64B70C64AF9991F370DED9",
+      "id": "615A03BEDD655CB04D47962879C623EE",
       "type": "page",
       "url": "about:blank",
       "title": "设置 - obsidian - Obsidian 1.14.5"
@@ -1292,10 +1293,32 @@
       ],
       "total": 1
     },
+    "modelListRequest": {
+      "settled": false,
+      "via": "no-request",
+      "note": "no /models request seen; relying on the DOM stability wait",
+      "waitedMs": 8044
+    },
+    "modelListTrackers": [
+      {
+        "seen": 0,
+        "completed": 0,
+        "pending": 0,
+        "lastUrl": null,
+        "error": null
+      },
+      {
+        "seen": 0,
+        "completed": 0,
+        "pending": 0,
+        "lastUrl": null,
+        "error": null
+      }
+    ],
     "domStability": {
       "stable": true,
-      "signature": "6151|7|anthropic|false|4",
-      "settledAfterMs": 1579
+      "signature": "6434|7|anthropic|false|7",
+      "settledAfterMs": 1589
     },
     "viewportControl": [
       "Emulation.setDeviceMetricsOverride"
@@ -1303,7 +1326,7 @@
     "domStabilityAfterViewport": {
       "stable": true,
       "signature": "6434|7|anthropic|false|7",
-      "settledAfterMs": 1322
+      "settledAfterMs": 1327
     },
     "advancedSectionsReopened": {
       "opened": [

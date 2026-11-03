@@ -1,14 +1,14 @@
 ### cch-opencode wide (1353x1053)
 
 - before: `docs/assets/provider-settings-2026-11-03-before-wide.layout.json` (revision `154e483`)
-- after:  `docs/assets/provider-settings-2026-11-03-after-wide.layout.json` (revision `53fbb25`)
+- after:  `docs/assets/provider-settings-2026-11-03-after-wide.layout.json` (revision `b4fb0b5`)
 
 | Metric | Before | After | |
 | --- | --- | --- | --- |
-| revision | 154e483 | 53fbb25 | **changed** |
+| revision | 154e483 | b4fb0b5 | **changed** |
 | phase | before | after | **changed** |
 | label | before-wide | after-wide | **changed** |
-| captured at | 2026-11-03T04:43:10.650Z | 2026-11-03T04:41:41.559Z | **changed** |
+| captured at | 2026-11-03T04:43:10.650Z | 2026-11-03T04:52:08.708Z | **changed** |
 | image size | 1353x1053 | 1353x1053 |  |
 | viewport innerWidth x innerHeight | 1353x1053 | 1353x1053 |  |
 | Obsidian version | 1.14.5 | 1.14.5 |  |

@@ -2,9 +2,9 @@
   "schema": "baizer-provider-settings-layout/1",
   "label": "after-mobile",
   "phase": "after",
-  "revision": "53fbb25",
+  "revision": "b4fb0b5",
   "pluginDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\provider-settings-anthropic-29c5dba52d61\\dist",
-  "capturedAt": "2026-11-03T04:42:32.996Z",
+  "capturedAt": "2026-11-03T04:53:00.170Z",
   "limitations": [
     "Colour, contrast, font rendering, iconography and animation are NOT asserted; this probe only measures geometry and text reachability.",
     "Overlap is checked only between interactive controls (input/select/textarea/button) inside the active provider detail area, as agreed.",
@@ -1536,7 +1536,7 @@
     "copiedPluginFiles": [
       {
         "file": "main.js",
-        "bytes": 4137767
+        "bytes": 4137811
       },
       {
         "file": "manifest.json",
@@ -1556,19 +1556,19 @@
     "explanations": [
       "the settings panel rendered in a separate \"popout-window\"; it was measured and captured there (it has no `app` global, so plugin facts come from the main window)"
     ],
-    "pid": 16456,
+    "pid": 6796,
     "browser": "Chrome/150.0.7871.250",
     "protocolVersion": "1.3",
     "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.14.5 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
     "target": {
-      "id": "77DB02E042CA127C8985F1E57A1EBC38",
+      "id": "CF52BCB7E7D462F2D96041455512B668",
       "type": "page",
       "url": "app://obsidian.md/index.html",
       "title": "新标签页 - obsidian - Obsidian 1.14.5"
     },
     "pageTargetsSeen": [
       {
-        "id": "77DB02E042CA127C8985F1E57A1EBC38",
+        "id": "CF52BCB7E7D462F2D96041455512B668",
         "url": "app://obsidian.md/index.html",
         "title": "新标签页 - obsidian - Obsidian 1.14.5"
       }
@@ -1765,7 +1765,7 @@
     },
     "settingsPanelLocation": "popout-window",
     "captureTarget": {
-      "id": "7BC92E49FF3CF196D7D9175BF1331C7B",
+      "id": "6FD937BB81CFE7BD103781CCCC11E567",
       "type": "page",
       "url": "about:blank",
       "title": "设置 - obsidian - Obsidian 1.14.5"
@@ -1779,7 +1779,7 @@
     "domStability": {
       "stable": true,
       "signature": "6769|8|openai-compatible|false|6",
-      "settledAfterMs": 2515
+      "settledAfterMs": 2101
     },
     "viewportControl": [
       "Emulation.setDeviceMetricsOverride"
@@ -1787,7 +1787,7 @@
     "domStabilityAfterViewport": {
       "stable": true,
       "signature": "6769|8|openai-compatible|false|6",
-      "settledAfterMs": 1310
+      "settledAfterMs": 1325
     },
     "advancedSectionsReopened": {
       "opened": [

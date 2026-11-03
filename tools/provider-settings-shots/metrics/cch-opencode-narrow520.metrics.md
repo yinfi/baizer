@@ -1,14 +1,14 @@
 ### cch-opencode narrow520 stress (520x900)
 
 - before: `docs/assets/provider-settings-2026-11-03-before-narrow520.layout.json` (revision `154e483`)
-- after:  `docs/assets/provider-settings-2026-11-03-after-narrow520.layout.json` (revision `53fbb25`)
+- after:  `docs/assets/provider-settings-2026-11-03-after-narrow520.layout.json` (revision `b4fb0b5`)
 
 | Metric | Before | After | |
 | --- | --- | --- | --- |
-| revision | 154e483 | 53fbb25 | **changed** |
+| revision | 154e483 | b4fb0b5 | **changed** |
 | phase | before | after | **changed** |
 | label | before-narrow520 | after-narrow520 | **changed** |
-| captured at | 2026-11-03T04:43:30.809Z | 2026-11-03T04:42:01.367Z | **changed** |
+| captured at | 2026-11-03T04:43:30.809Z | 2026-11-03T04:52:31.054Z | **changed** |
 | image size | 520x900 | 520x900 |  |
 | viewport innerWidth x innerHeight | 520x900 | 520x900 |  |
 | Obsidian version | 1.14.5 | 1.14.5 |  |

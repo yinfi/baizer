@@ -6,7 +6,7 @@
     {
       "metric": "revision",
       "before": "154e483",
-      "after": "53fbb25",
+      "after": "b4fb0b5",
       "changed": true,
       "note": "changed"
     },
@@ -27,7 +27,7 @@
     {
       "metric": "captured at",
       "before": "2026-11-03T04:43:20.540Z",
-      "after": "2026-11-03T04:41:51.822Z",
+      "after": "2026-11-03T04:52:19.485Z",
       "changed": true,
       "note": "changed"
     },

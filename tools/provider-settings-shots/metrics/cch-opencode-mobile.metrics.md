@@ -1,14 +1,14 @@
 ### cch-opencode mobile (400x800) - desktop window squeezed, not Obsidian mobile
 
 - before: `docs/assets/provider-settings-2026-11-03-before-mobile.layout.json` (revision `154e483`)
-- after:  `docs/assets/provider-settings-2026-11-03-after-mobile.layout.json` (revision `53fbb25`)
+- after:  `docs/assets/provider-settings-2026-11-03-after-mobile.layout.json` (revision `b4fb0b5`)
 
 | Metric | Before | After | |
 | --- | --- | --- | --- |
-| revision | 154e483 | 53fbb25 | **changed** |
+| revision | 154e483 | b4fb0b5 | **changed** |
 | phase | before | after | **changed** |
 | label | before-mobile | after-mobile | **changed** |
-| captured at | 2026-11-03T04:43:40.795Z | 2026-11-03T04:42:32.996Z | **changed** |
+| captured at | 2026-11-03T04:43:40.795Z | 2026-11-03T04:53:00.170Z | **changed** |
 | image size | 400x800 | 400x800 |  |
 | viewport innerWidth x innerHeight | 400x800 | 400x800 |  |
 | Obsidian version | 1.14.5 | 1.14.5 |  |

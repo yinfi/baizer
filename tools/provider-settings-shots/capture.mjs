@@ -23,7 +23,6 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
@@ -31,8 +30,6 @@ import { parseArgs } from 'node:util';
 import { CDPSession, waitForDevTools, listTargets } from './lib/cdp.mjs';
 import { buildProbeExpression } from './lib/probe.mjs';
 import { materialiseVault, registerVaultGlobally, defaultVaultDir, PLUGIN_ID } from './lib/vault.mjs';
-
-const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 
 // --------------------------------------------------------------- helpers ----
 
@@ -293,7 +290,32 @@ async function openBaizerSettings(session, { timeoutMs = 60000 } = {}) {
     };
   })()`);
   if (opened && opened.error) throw new Error(`could not open the Baizer settings tab: ${opened.error}`);
-  return opened;
+
+  // `openTabById` returns before the tab has rendered, and in the popout case the
+  // window itself is created asynchronously. Poll until the tab we asked for is
+  // the active one *and* its host window exists, bounded by the caller's
+  // readiness budget (`--ready-timeout`). Returning immediately here made every
+  // later step race the panel's first render.
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  let ready = null;
+  while (Date.now() < deadline) {
+    ready = await session.evaluate(`(() => {
+      const app = window.app;
+      const tab = app.setting && app.setting.activeTab;
+      return {
+        tabId: (tab && tab.id) || null,
+        isOpen: app.setting ? app.setting.isOpen ?? null : null,
+        popoutCreated: !!(app.setting && app.setting.popout),
+        settingsModalInMainDocument: !!document.querySelector('.modal.mod-settings'),
+      };
+    })()`);
+    if (ready.tabId === PLUGIN_ID && (ready.popoutCreated || ready.settingsModalInMainDocument)) {
+      return { ...opened, ...ready, readyWaitedMs: Date.now() - startedAt };
+    }
+    await delay(250);
+  }
+  return { ...opened, ...(ready || {}), readyTimedOut: true, readyWaitedMs: Date.now() - startedAt };
 }
 
 /**
@@ -430,6 +452,132 @@ async function waitForStableDom(session, { quietMs = 1500, timeoutMs = 45000 } =
   return { stable: false, signature: previous, settledAfterMs: Date.now() - started };
 }
 
+/**
+ * Track the plugin's model-list request on one CDP session.
+ *
+ * `waitForStableDom` cannot make the Model row reproducible on its own. The panel
+ * renders that row twice: once from the built-in candidate list while the
+ * endpoint call is still in flight, and again when the call resolves and the note
+ * under the select is filled in. **The pre-resolution render is the SHORTER one**
+ * — the note div stays 0 px tall until the first `applyState`, so the row is
+ * 18 px shorter at 1353 and 36 px shorter at 600 before the call resolves.
+ * `alignment.rows[4].valueBox.h` measures 104 (pre) / 122 (post) at 1353 and
+ * 162 / 198 at 600. The pre-resolution render is also perfectly *stable* — it is
+ * simply not final — so a quiet-window wait can and did capture it, and the same
+ * revision produced both values.
+ *
+ * **KNOWN DEFECT — this tracker can never fire for this plugin.** Baizer lists
+ * models through Obsidian's `requestUrl` (`src/services/model-catalog-service.ts`),
+ * which performs the HTTP call in the Electron *main* process and hands the
+ * renderer a buffered body over IPC. No renderer-level network request is ever
+ * emitted, so CDP's `Network` domain sees nothing: every artifact records
+ * `via: 'no-request'` with `seen: 0`. Do **not** cite `modelListRequest` as
+ * evidence that the row settled — it says the opposite.
+ *
+ * What actually keeps captures deterministic today is the incidental `graceMs`
+ * sleep in `waitForModelListRequest` below, which happens to sit before
+ * `waitForStableDom`. That is a timing band-aid, not a signal: an endpoint slower
+ * than the grace window reintroduces the flake silently, with no warning.
+ * A correct fix has to key on a DOM signal — the model select leaves its loading
+ * state (`disabled` with a single `__loading__` option) once the list resolves —
+ * because `waitForStableDom`'s signature hashes the *first* select in the detail
+ * (the protocol select) and is therefore blind to this re-render.
+ */
+function createModelListTracker() {
+  return { seen: 0, completed: 0, pending: new Set(), lastUrl: null, lastCompletedAt: 0 };
+}
+
+function attachModelListListeners(session, tracker) {
+  const offRequest = session.on('Network.requestWillBeSent', (params) => {
+    const url = (params && params.request && params.request.url) || '';
+    // Both listers hit `.../models`: openai-compatible `{base}/models`, anthropic
+    // `{base}/v1/models`. Nothing else in the settings panel calls that path.
+    if (!/\/models(?:[?#]|$)/.test(url)) return;
+    tracker.pending.add(params.requestId);
+    tracker.seen += 1;
+    tracker.lastUrl = url;
+  });
+  const settle = (params) => {
+    if (!tracker.pending.delete(params.requestId)) return;
+    tracker.completed += 1;
+    tracker.lastCompletedAt = Date.now();
+  };
+  const offFinished = session.on('Network.loadingFinished', settle);
+  const offFailed = session.on('Network.loadingFailed', settle);
+  return () => {
+    offRequest();
+    offFinished();
+    offFailed();
+  };
+}
+
+async function installModelListTracker(session, into) {
+  const tracker = createModelListTracker();
+  try {
+    await session.send('Network.enable', {}, { timeoutMs: 10000 });
+  } catch (error) {
+    tracker.error = String((error && error.message) || error);
+    return tracker;
+  }
+  tracker.detach = attachModelListListeners(session, tracker);
+  into.push(tracker);
+  return tracker;
+}
+
+/**
+ * Wait until the model-list request has been seen *and* finished — which, per the
+ * defect documented above, never happens in practice for this plugin. The only
+ * observable effect is therefore the `graceMs` sleep before it gives up; the
+ * `via: 'no-request'` it returns is the truthful report that no request was
+ * observed, not a signal that the row settled.
+ *
+ * Bounded, and honest when it cannot tell: if the panel never issues an
+ * observable request (always, today) we fall back to the DOM stability wait.
+ */
+async function waitForModelListRequest(trackers, { timeoutMs = 45000, graceMs = 8000, idleMs = 400 } = {}) {
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  // Load-bearing for reproducibility, but only by accident: the `no-request`
+  // branch below returns as soon as this elapses, so in practice this is a plain
+  // 8 s sleep before the stability wait. It is a bet that 8 s outlasts the
+  // endpoint, not a signal that the model list has arrived.
+  const graceDeadline = startedAt + graceMs;
+  while (Date.now() < deadline) {
+    const seen = trackers.filter((t) => t.seen > 0);
+    if (seen.length > 0) {
+      const pending = seen.reduce((n, t) => n + t.pending.size, 0);
+      const lastCompletedAt = Math.max(...seen.map((t) => t.lastCompletedAt || 0));
+      if (pending === 0 && Date.now() - lastCompletedAt >= idleMs) {
+        return {
+          settled: true,
+          via: 'network',
+          requests: seen.reduce((n, t) => n + t.seen, 0),
+          completed: seen.reduce((n, t) => n + t.completed, 0),
+          url: seen[seen.length - 1].lastUrl,
+          waitedMs: Date.now() - startedAt,
+        };
+      }
+    } else if (Date.now() >= graceDeadline) {
+      return {
+        settled: false,
+        via: 'no-request',
+        note: 'no /models request seen; relying on the DOM stability wait',
+        waitedMs: Date.now() - startedAt,
+      };
+    }
+    await delay(100);
+  }
+  const seen = trackers.filter((t) => t.seen > 0);
+  return {
+    settled: false,
+    via: 'timeout',
+    requests: seen.reduce((n, t) => n + t.seen, 0),
+    pending: seen.reduce((n, t) => n + t.pending.size, 0),
+    url: seen.length > 0 ? seen[seen.length - 1].lastUrl : null,
+    waitedMs: Date.now() - startedAt,
+  };
+}
+
 async function applyViewport(session, { width, height }) {
   const attempted = [];
   try {
@@ -547,6 +695,11 @@ async function main() {
     runInfo.blockingModals = await handleBlockingModals(session);
     runInfo.pluginActivation = await ensurePluginEnabled(session, PLUGIN_ID);
     runInfo.pluginLoaded = await waitForPluginLoaded(session, PLUGIN_ID, { timeoutMs: Math.min(readyTimeout, 90000) });
+
+    // Start watching for the model-list request before the settings tab opens, so
+    // the request cannot slip past us.
+    const modelListTrackers = [];
+    await installModelListTracker(session, modelListTrackers);
     if (!runInfo.pluginLoaded) {
       notes.push(
         'the Baizer plugin never became instantiated (app.plugins.plugins.baizer); the settings tab may still be registered',
@@ -569,11 +722,28 @@ async function main() {
       );
     }
 
+    // The panel's own window may be the one that issues the model-list request.
+    await installModelListTracker(panelSession, modelListTrackers);
+
     await expandActiveProviderDetail(panelSession, { timeoutMs: readyTimeout });
 
     // Open collapsed advanced blocks (Custom headers) so their help text is laid out and the
     // probe measures real geometry rather than a hidden 0-width box.
     runInfo.advancedSections = await expandAdvancedSections(panelSession);
+
+    // The model list loads asynchronously and the Model row renders twice. Wait for
+    // the request to actually finish first; the DOM stability wait below then
+    // covers the re-render that finishing triggers.
+    runInfo.modelListRequest = await waitForModelListRequest(modelListTrackers, {
+      timeoutMs: Math.min(readyTimeout, 45000),
+    });
+    runInfo.modelListTrackers = modelListTrackers.map((t) => ({
+      seen: t.seen,
+      completed: t.completed,
+      pending: t.pending.size,
+      lastUrl: t.lastUrl,
+      error: t.error || null,
+    }));
 
     // Give the async model-list load a chance to settle before measuring.
     runInfo.domStability = await waitForStableDom(panelSession);
