@@ -57,6 +57,24 @@ async function runTests() {
   console.log('=== ObsidianContextService Tests ===');
   const { ObsidianContextService } = await import('../src/services/obsidian-context-service');
 
+  await test('backlink folders are skipped without reading them as notes', async () => {
+    const active = createFile('active.md');
+    const folder = new TFolder();
+    folder.path = 'folder';
+    const reads: string[] = [];
+    const app = {
+      workspace: { getActiveFile: () => active },
+      vault: {
+        getAbstractFileByPath: (path: string) => path === 'folder' ? folder : createFile(path),
+        read: async (file: any) => { reads.push(file.path); return ''; },
+      },
+      metadataCache: { getBacklinksForFile: () => ({ data: new Map([['folder', {}], ['note.md', {}]]) }) },
+    } as any;
+    const result = await new ObsidianContextService(app).collect({ includeCurrent: false, includeBacklinks: true });
+    expect(result.backlinks).toEqual([{ path: 'note.md', summary: '' }]);
+    expect(reads).toEqual(['note.md']);
+  });
+
   await test('collect returns active note semantics, scoped section excerpt, backlinks summaries, and recent notes', async () => {
     const activeFile = createFile('Projects/Native AI.md');
     const backlinkA = createFile('Notes/Product Strategy.md');
@@ -246,4 +264,4 @@ runTests().catch((e) => {
   console.error(e);
   process.exit(1);
 });
-import { TFile } from 'obsidian';
+import { TFile, TFolder } from 'obsidian';

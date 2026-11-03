@@ -217,6 +217,32 @@ export class GuardianCompletionService {
     return { ...base, prompt };
   }
 
+  /** Explicit instructions bypass auto triggers and continuation quality filters. */
+  async completeManual(input: GuardianCompletionRequest & { instruction: string }): Promise<GuardianCompletionResult> {
+    if (!this.deps.settings.enableGuardian) return { type: 'none', reason: 'disabled' };
+    if (this.deps.modelService.isGenerationConfigured?.() === false) {
+      return { type: 'none', reason: 'model-not-configured' };
+    }
+    const context = await this.buildContext(input);
+    if (input.isStale?.()) return { type: 'none', reason: 'stale' };
+    const response = await this.deps.modelService.generate(
+      `User Instruction: ${JSON.stringify(input.instruction)}\nContext:\n${context.recentContext}\n`
+        + 'Execute the instruction. Return JSON: {"type":"edit"|"answer","suggestion":"MARKDOWN_TEXT"}, or {"type":"none"}.',
+      'You are a helpful writing assistant. Return ONLY JSON.',
+      'guardian', input.obsidianContext, input.userProfile,
+      { ...GUARDIAN_GENERATION_OPTIONS, signal: input.signal },
+    );
+    if (input.isStale?.()) return { type: 'none', reason: 'stale' };
+    const parsed = parseGuardianJson(response);
+    if (!parsed) return { type: 'none', reason: 'invalid-json' };
+    if (parsed.type === 'none') return { type: 'none', reason: 'explicit-none' };
+    if (typeof parsed.suggestion !== 'string' || !parsed.suggestion.trim()) {
+      return { type: 'none', reason: 'empty' };
+    }
+    return { type: 'completion', suggestion: parsed.suggestion, line: context.line, ch: context.ch,
+      quality: { ok: true, reasons: [] } };
+  }
+
   async completeAuto(input: GuardianCompletionRequest): Promise<GuardianCompletionResult> {
     const mode: GuardianCompletionMode = input.mode || 'fast';
     const timeoutMs = mode === 'deep'

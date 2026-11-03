@@ -3,7 +3,7 @@
   clearInterval,
 };
 
-import { TFile } from 'obsidian';
+import { TFile, TFolder } from 'obsidian';
 
 (global as any).localStorage = {
   getItem: () => null,
@@ -81,6 +81,20 @@ function createWorkspaceApp() {
 async function runTests() {
   console.log('=== ChatController Tests ===');
   const { ChatController } = await import('../src/ui/chat-controller');
+
+  await test('write results pointing to folders never open them as files', async () => {
+    let opened = false;
+    const folder = new TFolder();
+    folder.path = 'folder';
+    const controller = new ChatController({
+      app: { vault: { getAbstractFileByPath: () => folder },
+        workspace: { getLeaf: () => ({ openFile: async () => { opened = true; } }) } } as any,
+      api: {} as any,
+    });
+    await (controller as any).openFileFromToolResult('create_file', { success: true, path: 'folder' }, { path: 'folder' });
+    expect(opened).toBe(false);
+    controller.cleanup();
+  });
 
   await test('processCommand routes matching slash commands through executeSlashSkillCommand first', async () => {
     const messages: any[] = [];

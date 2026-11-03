@@ -1,6 +1,11 @@
-import { App, TFile } from 'obsidian';
+import { App, TFile, Editor, View, MetadataCache } from 'obsidian';
 import { ContextItem } from './context-manager';
 import { budgetTextBlock } from './context-budget';
+
+// Obsidian exposes backlinks at runtime but omits this method from its public typings.
+interface MetadataCacheWithBacklinks extends MetadataCache {
+  getBacklinksForFile?(file: TFile): { data: Map<string, unknown> } | Map<string, unknown> | Record<string, unknown>;
+}
 
 export interface ObsidianContextCollectOptions {
   includeBacklinks?: boolean;
@@ -71,7 +76,7 @@ export class ObsidianContextService {
     const tags = this.extractTags(cache);
     const outgoingLinks = this.extractOutgoingLinks(cache);
     const content = includeCurrent ? await this.app.vault.read(activeFile) : '';
-    const editor = includeCurrent ? (this.app.workspace.getMostRecentLeaf?.()?.view as any)?.editor : null;
+    const editor = includeCurrent ? (this.app.workspace.getMostRecentLeaf?.()?.view as (View & { editor?: Editor }) | undefined)?.editor : null;
     const selectionText = includeCurrent ? this.normalizeSelection(editor?.getSelection?.()) : null;
     const selectionLine = includeCurrent ? this.normalizeLine(editor?.getCursor?.('from')?.line) : null;
     const activeHeading = includeCurrent ? this.findActiveHeading(content, selectionLine) : null;
@@ -207,10 +212,13 @@ export class ObsidianContextService {
 
   private async collectBacklinks(activeFile: TFile, includeBacklinks: boolean): Promise<Array<{ path: string; summary: string }>> {
     if (!includeBacklinks) return [];
-    const backlinkMap = (this.app.metadataCache as any).getBacklinksForFile?.(activeFile);
+    const backlinkMap = (this.app.metadataCache as MetadataCacheWithBacklinks).getBacklinksForFile?.(activeFile);
     if (!backlinkMap) return [];
 
-    const entries = Array.from(backlinkMap instanceof Map ? backlinkMap.keys() : Object.keys(backlinkMap));
+    // Current Obsidian wraps the map in `data`; retain direct-map compatibility.
+    const paths = backlinkMap instanceof Map ? backlinkMap
+      : backlinkMap.data instanceof Map ? backlinkMap.data : backlinkMap;
+    const entries = Array.from(paths instanceof Map ? paths.keys() : Object.keys(paths));
     const results: Array<{ path: string; summary: string }> = [];
 
     for (const path of entries.slice(0, this.options.maxBacklinks)) {

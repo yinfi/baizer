@@ -42,8 +42,8 @@ export function createKnowledgeTools(
       properties: {
         title: { type: 'string', description: '回填文章的标题' },
         content: { type: 'string', description: '要归档的内容（Markdown）' },
-        topics: { type: 'array', items: { type: 'string' }, description: '主题标签' },
-        source_queries: { type: 'array', items: { type: 'string' }, description: '触发问题列表' },
+        topics: { type: 'array', items: { type: 'string', description: '单个用于归类文章的主题标签' }, description: '主题标签' },
+        source_queries: { type: 'array', items: { type: 'string', description: '产生该知识回答的一条原始用户问题' }, description: '触发问题列表' },
       },
       required: ['title', 'content', 'source_queries'],
     },

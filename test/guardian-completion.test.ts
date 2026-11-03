@@ -70,6 +70,37 @@ async function runTests() {
     GUARDIAN_WEAK_COMPLETION_REASON,
   } = await import('../src/ui/guardian-completion');
 
+  await test('manual instructions work with auto disabled and empty input, sharing tolerant JSON parsing', async () => {
+    const calls: any[] = [];
+    const service = new GuardianCompletionService({
+      settings: createSettings({ guardianAutoMode: false }) as any,
+      modelService: { generate: async (...args: any[]) => {
+        calls.push(args);
+        return 'Result: {"type":"answer","suggestion":"Use {braces} and \\"quotes\\"."} trailing';
+      } } as any,
+    });
+    const result = await service.completeManual({ editor: createEditor(['']), instruction: 'Explain braces' });
+    expect(result.type).toBe('completion');
+    if (result.type === 'completion') expect(result.suggestion).toContain('{braces}');
+    expect(calls[0][0]).toContain('Explain braces');
+    expect(calls[0][2]).toBe('guardian');
+  });
+
+  await test('manual none and stale responses never become suggestions', async () => {
+    let response = '{"type":"none","suggestion":"must not display"}';
+    let stale = false;
+    const service = new GuardianCompletionService({
+      settings: createSettings() as any,
+      modelService: { generate: async () => { stale = true; return response; } } as any,
+    });
+    const input = { editor: createEditor(['hello']), instruction: 'Rewrite' };
+    expect((await service.completeManual(input)).type).toBe('none');
+    response = '{"type":"edit","suggestion":"new text"}';
+    stale = false;
+    expect(await service.completeManual({ ...input, isStale: () => stale }))
+      .toEqual({ type: 'none', reason: 'stale' });
+  });
+
   await test('derives lower latency delay from higher sensitivity', () => {
     expect(getGuardianAutoDelayMs(90)).toBe(840);
     expect(getGuardianAutoDelayMs(10)).toBe(1160);
