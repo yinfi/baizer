@@ -51,8 +51,9 @@ import { WorkspaceEditService } from './workspace-edit-service';
  *    这是能力缺口而非故障 —— 端点可能照样能生成，UI 应提示「手动输入模型名」
  *    而不是报「配置错误」。此时 `error` 不设置。
  *  - `error`：没拿到真实列表的其他原因（未配置 apiKey、401、网络错误…）。
- *  - `models` 无论哪种情况都非空（回落到内置列表），调用方可以直接渲染；
- *    但只有 `listed === true` 时才可以把它们当作端点宣称的模型。
+ *  - `models` 通常在失败后回落到内置列表，所以大多非空 —— 但**并不保证非空**：
+ *    用户自建的 provider（`custom-*`）没有内置兜底列表，此时就是 `[]`。
+ *    调用方可以直接渲染；但只有 `listed === true` 时才可以把它们当作端点宣称的模型。
  *
  * 缓存语义（重要）：整个判定结果（含 `listed` / `listingUnsupported` / `error`）一起缓存
  * 10 分钟，非 `forceRefresh` 的调用会**原样重放**上一次的判定 —— 失败也重放。

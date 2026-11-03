@@ -195,6 +195,11 @@ async function listGeminiModels(config: ProviderConfig): Promise<ModelOption[]> 
       const label = displayName === value ? value : `${displayName} (${value})`;
       return { value, label };
     })
+    // 与 openai / anthropic 两个 lister 保持一致：丢掉空 id。
+    // `{"name":"models/"}` 会 map 出 value === '' 的选项，而 model-service 的
+    // `listed` 是在归一化之前按「原始清单非空」判定的，于是会得到「已列出 0 个模型」
+    // 却被标成可信来源的空下拉。空 id 不是模型，任何协议都不该保留。
+    .filter((option: ModelOption) => option.value.length > 0)
     .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
 
   return dedupeByValue(options);

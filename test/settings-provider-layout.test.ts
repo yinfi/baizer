@@ -360,7 +360,7 @@ async function runTests() {
     // 误判成漏译，故直接查表。漏收录才是这里要抓的（t() 会静默回退英文原文）。
     const missing = keys
       .filter(key => !Object.prototype.hasOwnProperty.call(ZH_MESSAGES, key))
-      // 本次改动之前就存在的漏译（权限/采集等既有文案，共 6 条）。
+      // 本次改动之前就存在的漏译（权限/采集等既有文案，共 7 条，见上方清单）。
       // 它们不属于本次范围；把它们也纳入断言只会让测试长期变红，
       // 反而掩盖新引入的漏译。清单必须精确，多一条就等于放过一条新的漏译。
       .filter(key => !PRE_EXISTING_UNTRANSLATED.has(key));
@@ -381,9 +381,12 @@ async function runTests() {
   });
 
   await test('the i18n check does not mistake other identifiers ending in t for t()', () => {
-    // 回归：`format('x')` / `setAttribute('style')` 里的 `t('` 会被朴素正则误当成翻译调用，
-    // 于是测试会去要求给 `,` `\n` `style` 这些「key」配译文。
-    const fakeSource = `format('a, b'); el.setAttribute('style', 'x'); const c = t('Real key');`;
+    // 回归：`format('a, b')` / `split(...)` / `assert(...)` / `expect(...)` 里的
+    // `t('` 子串（前一个字符属于标识符）会被朴素正则误当成翻译调用，于是测试会去
+    // 要求给 `a, b`、`x` 这些「key」配译文。
+    // 注意 `setAttribute('style', 'x')` 结尾是 `e(`，**根本不含** `t('`，
+    // 对这条断言没有贡献 —— 真正压住 lookbehind 的是下面这几个以 `t` 结尾的标识符。
+    const fakeSource = `format('a, b'); parts.split('a, b'); assert('x'); expect('y'); const c = t('Real key');`;
     expect(extractTranslationKeys(fakeSource)).toEqual(['Real key']);
   });
 

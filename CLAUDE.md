@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Knowledge Wiki**: Ontology-driven note compilation into a searchable, self-updating knowledge base
 - **Hindsight Memory**: Local semantic memory (facts/experiences/observations) with recall, consolidation, and feedback lessons
 
-> Provider abstraction: `ProviderConfig` (in `src/mcp/types.ts`) supports `gemini` and `openai-compatible` types. There is no longer a per-provider API wrapper — `pi-native-model.ts` maps each config to a pi-ai `Model` + `streamFn`.
+> Provider abstraction: `ProviderConfig` (in `src/mcp/types.ts`) supports `gemini`, `openai-compatible` and `anthropic` types. There is no longer a per-provider API wrapper — `pi-native-model.ts` maps each config to a pi-ai `Model` + `streamFn`. Anthropic uses pi-ai's native `anthropic-messages` api; the `@anthropic-ai/sdk` it expects is aliased at build time to `src/runtime/pi/anthropic-sdk-shim.ts` (see `esbuild.config.mjs`), because bundling the real SDK pushes the single-file output past Obsidian Sync's 5 MB limit.
 
 ## Build Commands
 
