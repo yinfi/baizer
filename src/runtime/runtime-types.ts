@@ -18,7 +18,7 @@ import type { ActiveRunController } from './active-run-controller';
  * 不再经由旧的 IChatSession 桥接路径调用 LLM。
  * 本句柄把「该用哪个 Model」与「如何发起 stream」
  * 这两件事打包在一起：
- *   - model:    pi-ai 的 Model 配置对象（由 buildGeminiModel / buildOpenAICompatModel 构造）
+ *   - model:    pi-ai 的 Model 配置对象（由 buildOpenAICompatModel / buildAnthropicModel 构造）
  *   - streamFn: 注入了 apiKey 的 StreamFn（生产由 createNativeStreamFn 提供，也可由本句柄直接给出；测试注入 mock）
  *
  * 两者必须同源构造（同一 provider 类型、同一 apiKey），故合并为一个句柄一次性给出，
@@ -60,8 +60,8 @@ export type NativeChatFactory = (conversationId?: string) => NativeChatHandle;
 export interface ChatRuntimeDeps {
   /**
    * 原生 LLM 直连句柄工厂（Phase 2 接入点）。
-   * 生产由 model-service 依据当前 ProviderConfig 构造（gemini→buildGeminiModel，
-   * openai-compatible→buildOpenAICompatModel，streamFn=createNativeStreamFn(apiKey)）。
+   * 生产由 model-service 依据当前 ProviderConfig 构造（openai-compatible→buildOpenAICompatModel，
+   * anthropic→buildAnthropicModel，streamFn=createNativeStreamFn(apiKey)）。
    * 测试注入 mock streamFn 以驱动工具循环。
    * 缺省时 PiChatRuntime.queryStream 会抛出明确错误（生产必须提供）。
    */

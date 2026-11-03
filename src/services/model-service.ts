@@ -8,7 +8,7 @@ import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry, SkillSummary } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
-import { buildAnthropicModel, buildGeminiModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn, resolveCustomHeaders } from '../runtime/pi/pi-native-model';
+import { buildAnthropicModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn, resolveCustomHeaders } from '../runtime/pi/pi-native-model';
 // 仅类型导入（编译期擦除），不把 ESM-only 的 pi-ai 主入口拉进 CJS 测试环境。
 import type { Model } from '@earendil-works/pi-ai';
 import { createHarnessExecutionEnv } from '../runtime/pi/harness-env';
@@ -458,12 +458,6 @@ export class ModelService {
 
     private getFallbackModels(providerId: string): ModelOption[] {
         const fallbacks: Record<string, ModelOption[]> = {
-            gemini: [
-                { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-                { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-                { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-                { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
-            ],
             // Anthropic 官方端点能列模型，但很多兼容网关没有实现 GET /v1/models。
             // 那条路径下 listModels 会抛「列表不可用」，这里给一份手选兜底，
             // 免得下拉框空掉、用户无法把已保存的 model 选回来（WP-B 还允许直接手输）。
@@ -989,20 +983,20 @@ export class ModelService {
     /**
      * 依 ProviderConfig.type 选择 pi Model 构造器。
      *
-     * 三分支必须显式：早先写成 `type === 'gemini' ? gemini : openai`，
-     * 于是新增的 'anthropic' 会静默落到 OpenAI-compatible 分支 —— 用户以为在打
+     * 分支必须显式：早先写成 `type === 'gemini' ? gemini : openai` 这种二选一，
+     * 于是后来新增的 'anthropic' 静默落到 OpenAI-compatible 分支 —— 用户以为在打
      * Messages 协议，实际发的是 /chat/completions，报错完全指错方向。
      * 类型层面的穷尽性由 `ProviderType` 联合类型保证：新增一个 type 会让这里出现未覆盖分支。
      *
-     * `default:` 因此**不是**穷尽性兜底，而是运行期安全网：settings.json 是从磁盘读的，
-     * 可能残留旧版本或被手改出未知 type，那种情况下宁可退化成 OpenAI-compatible，
-     * 也不要让整个插件炸掉 —— 但必须 warn 出声，否则就和改动前那个静默 fallthrough
-     * 犯了同一个毛病（用户看不出自己配错了）。
+     * `default:` 因此**不是**穷尽性兜底，而是运行期安全网：配置是从磁盘读的，
+     * 可能残留旧版本（如已移除的 'gemini'）或被手改出未知 type，那种情况下宁可退化成
+     * OpenAI-compatible，也不要让整个插件炸掉 —— 但必须 warn 出声，否则就和改动前那个
+     * 静默 fallthrough 犯了同一个毛病（用户看不出自己配错了）。
+     * 注意 loadSettings 已经用 pruneUnsupportedProviders 丢掉不受支持的 type，
+     * 所以正常路径走不到这里。
      */
     private buildModelForConfig(config: ProviderConfig): Model<any> {
         switch (config.type) {
-            case 'gemini':
-                return buildGeminiModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
             case 'anthropic':
                 return buildAnthropicModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
             case 'openai-compatible':
