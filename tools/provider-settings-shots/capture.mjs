@@ -467,6 +467,163 @@ async function expandAdvancedSections(session) {
 }
 
 /**
+ * Open a collapsed settings accordion section (e.g. `capture`) and bring its content to the top of
+ * the viewport.
+ *
+ * Why it exists: only `overview` and `connection` are expanded when the panel first opens, so a
+ * control that lives in another section (the video-transcription fields are in `capture`) is not in
+ * the DOM at all until that section is opened. Targeting `data-section-id` rather than the section
+ * title keeps this independent of the panel's locale.
+ *
+ * Clicking the `<summary>` (instead of assigning `.open`) also updates the plugin's own open/closed
+ * bookkeeping, so the section survives the re-render that the click itself triggers.
+ *
+ * The pane's scroll offset is reset before scrolling the minimum amount needed, for the same reason
+ * `focusProviderTypeSelect` does it: Obsidian persists that offset in `workspace.json`, so two runs
+ * of the same scenario can otherwise start 1200px apart and produce incomparable frames.
+ */
+/**
+ * Section titles per `data-section-id`, used ONLY when a revision predates the attribute.
+ * Mirrors `getSettingsSections()` in src/settings.ts (zh values come from src/i18n/zh-messages.ts).
+ */
+const SECTION_TITLES = {
+  overview: ['Overview', '概览'],
+  connection: ['Connection', '连接'],
+  behavior: ['Behavior', '行为'],
+  memory: ['Memory', '记忆'],
+  permissions: ['Permissions', '权限'],
+  skills: ['Skills', '技能'],
+  capture: ['Capture', '采集'],
+  knowledge: ['Knowledge', '知识库'],
+  guardian: ['Guardian'],
+  appearance: ['Appearance', '外观'],
+  'plugin-skills': ['Plugin Skills', '插件技能'],
+};
+
+async function openSettingsSection(session, sectionId, { timeoutMs = 30000, alsoOpen = [] } = {}) {
+  // Locate the section ONCE and then address it by its positional index: the click triggers a
+  // re-render that replaces every card node, and an index survives that while a node reference
+  // does not.
+  //
+  // `data-section-id` is the primary hook. It was introduced by the same change that introduced the
+  // video-transcription fields, so capturing the revision BEFORE it has to fall back to the section
+  // title. The strategy actually used is recorded in the report, because otherwise the two phases of
+  // a before/after pair would look like they had been driven differently.
+  const titles = SECTION_TITLES[sectionId] ?? [];
+  const located = await session.evaluate(`(() => {
+    const cards = Array.from(document.querySelectorAll('details.baizer-settings-section-card'));
+    const titleOf = (card) => {
+      const node = card.querySelector('.baizer-settings-section-title');
+      return node ? (node.textContent || '').trim() : '';
+    };
+    const byAttr = cards.findIndex((card) => card.getAttribute('data-section-id') === ${JSON.stringify(sectionId)});
+    if (byAttr >= 0) return { found: true, index: byAttr, strategy: 'data-section-id', cardCount: cards.length };
+    const wanted = ${JSON.stringify(titles)};
+    const byTitle = cards.findIndex((card) => wanted.includes(titleOf(card)));
+    if (byTitle >= 0) return { found: true, index: byTitle, strategy: 'title', cardCount: cards.length };
+    return {
+      found: false,
+      index: -1,
+      strategy: 'none',
+      cardCount: cards.length,
+      seenTitles: cards.map(titleOf),
+    };
+  })()`);
+
+  if (!located.found) return { ...located, contentFound: false, inViewport: false };
+
+  const cardExpr = `document.querySelectorAll('details.baizer-settings-section-card')[${located.index}]`;
+
+  await session.evaluate(`(() => {
+    const card = ${cardExpr};
+    if (card && !card.open) {
+      const summary = card.querySelector('summary');
+      if (summary) summary.click();
+    }
+    return true;
+  })()`);
+
+  await session.waitFor(
+    `!!(${cardExpr} && ${cardExpr}.querySelector('.baizer-settings-section-content'))`,
+    { timeoutMs, label: `settings section "${sectionId}" content` },
+  );
+
+  // Extra sections are expanded for ONE reason: to give the page enough content below the anchor
+  // for the framing scroll to actually reach it. A short section near the end of the page is clamped
+  // by maxScrollTop, so the same command produces a different anchor in each phase of a before/after
+  // pair (measured on this change: contentTop 459px before vs 33px after, i.e. exactly the height
+  // the new panel adds). These sections are NOT framed and are recorded in the report, so the two
+  // phases cannot look like they were driven differently.
+  const openedExtras = [];
+  for (const extraId of alsoOpen) {
+    const extraTitles = SECTION_TITLES[extraId] ?? [];
+    const opened = await session.evaluate(`(() => {
+      const cards = Array.from(document.querySelectorAll('details.baizer-settings-section-card'));
+      const titleOf = (card) => {
+        const node = card.querySelector('.baizer-settings-section-title');
+        return node ? (node.textContent || '').trim() : '';
+      };
+      const wanted = ${JSON.stringify(extraTitles)};
+      const card = cards.find((c) => c.getAttribute('data-section-id') === ${JSON.stringify(extraId)})
+        || cards.find((c) => wanted.includes(titleOf(c)));
+      if (!card) return false;
+      if (!card.open) {
+        const summary = card.querySelector('summary');
+        if (summary) summary.click();
+      }
+      return true;
+    })()`);
+    if (opened) openedExtras.push(extraId);
+  }
+  if (openedExtras.length > 0) {
+    // Expanding re-renders the accordion; wait for the DOM to settle before framing.
+    await session.waitFor(
+      `${JSON.stringify(openedExtras)}.every((id) => {
+        const card = document.querySelector('details[data-section-id="' + id + '"]');
+        return !card || card.open;
+      })`,
+      { timeoutMs, label: 'additional settings sections' },
+    );
+  }
+
+  const framed = await session.evaluate(`(() => {
+    const card = ${cardExpr};
+    const content = card && card.querySelector('.baizer-settings-section-content');
+    if (!content) return { contentFound: false, inViewport: false };
+    const scrollable = (() => {
+      let node = content.parentElement;
+      while (node && node !== document.documentElement) {
+        const cs = getComputedStyle(node);
+        if (/(auto|scroll|overlay)/.test(String(cs.overflowY)) && node.scrollHeight > node.clientHeight + 1) return node;
+        node = node.parentElement;
+      }
+      return null;
+    })();
+    const container = scrollable || document.scrollingElement || document.documentElement;
+    container.scrollTop = 0;
+    const margin = 24;
+    const rect = content.getBoundingClientRect();
+    // Align the section's FIRST control with the top of the viewport, so both phases are framed the
+    // same way even though the section is taller after the change.
+    const delta = rect.top - margin;
+    if (delta > 0) container.scrollTop = delta;
+    const finalRect = content.getBoundingClientRect();
+    return {
+      contentFound: true,
+      inViewport: finalRect.top >= 0 && finalRect.top <= window.innerHeight,
+      fullyInViewport: finalRect.top >= 0 && finalRect.bottom <= window.innerHeight,
+      scrollTop: container.scrollTop,
+      contentTop: finalRect.top,
+      contentBottom: finalRect.bottom,
+      contentHeight: finalRect.height,
+      viewportHeight: window.innerHeight,
+    };
+  })()`);
+
+  return { ...located, ...framed, alsoOpened: openedExtras };
+}
+
+/**
  * Bring the provider-type `<select>` into view, and optionally render its options inline.
  *
  * The type dropdown is the control whose OPTION LIST changes when a protocol is added or removed,
@@ -802,6 +959,9 @@ async function main() {
       locale: { type: 'string', default: 'zh' },
       'ready-timeout': { type: 'string', default: '180000' },
       'focus-type-select': { type: 'boolean', default: false },
+      // Open a settings accordion section by its `data-section-id` (e.g. `capture`) before
+      // measuring, so a control that lives outside the default-open sections can be captured.
+      'open-section': { type: 'string' },
       // string, not boolean: an optional row count (`--expand-type-select 3`) lets a before/after
       // pair pin the same list-box height, so the phase with one option fewer does not also shift
       // everything below the control. A bare `--expand-type-select` means size = option count.
@@ -1009,6 +1169,40 @@ async function main() {
         );
       }
       await delay(300);
+    }
+
+    // Last, so its scroll framing is the one that survives into the measurement.
+    if (values['open-section']) {
+      // `--open-section` takes a comma-separated list. The FIRST id is the one that gets framed; any
+      // others are only expanded, so that the page has enough content below the anchor for the
+      // framing scroll to reach the top (see openSettingsSection).
+      const sectionIds = String(values['open-section'])
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+      runInfo.sectionOpen = await openSettingsSection(panelSession, sectionIds[0], {
+        timeoutMs: Math.min(readyTimeout, 30000),
+        alsoOpen: sectionIds.slice(1),
+      });
+      if (!runInfo.sectionOpen.found) {
+        throw new Error(
+          `--open-section "${values['open-section']}": no settings section matched. `
+          + `Sections seen: ${JSON.stringify(runInfo.sectionOpen.seenTitles ?? [])}.`,
+        );
+      }
+      if (!runInfo.sectionOpen.inViewport) {
+        notes.push(
+          `the "${values['open-section']}" section content could not be brought into the viewport `
+          + `(scrollTop=${runInfo.sectionOpen.scrollTop}); the capture does not show it`,
+        );
+      } else if (!runInfo.sectionOpen.fullyInViewport) {
+        notes.push(
+          `the "${values['open-section']}" section is taller than the viewport (${runInfo.sectionOpen.contentHeight}px `
+          + `in ${runInfo.sectionOpen.viewportHeight}px), so its lower part is outside the capture; `
+          + 'its top is aligned to the viewport so both phases are framed identically',
+        );
+      }
+      await waitForStableDom(panelSession, { quietMs: 800, timeoutMs: 15000 });
     }
 
     const layout = await panelSession.evaluate(buildProbeExpression({

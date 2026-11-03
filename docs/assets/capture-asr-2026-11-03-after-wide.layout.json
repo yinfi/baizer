@@ -1,0 +1,1537 @@
+{
+  "schema": "baizer-provider-settings-layout/1",
+  "label": "capture-asr-after-wide",
+  "phase": "after",
+  "revision": "965ab79",
+  "pluginDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\scratch\\asr-shots\\after-final",
+  "capturedAt": "2026-11-03T08:11:15.029Z",
+  "limitations": [
+    "Colour, contrast, font rendering, iconography and animation are NOT asserted; this probe only measures geometry and text reachability.",
+    "Overlap is checked only between interactive controls (input/select/textarea/button) inside the active provider detail area, as agreed.",
+    "Horizontal overflow is asserted at the document level, per named settings container, and as element-vs-panel spill; an element clipped by an ancestor is detected by the offender scan but not attributed to that ancestor.",
+    "A truncated <input>/<textarea>/<select> value counts as reachable because the user can focus, scroll and edit it; only truncated values with no reachable form (disabled and no title) are treated as failures."
+  ],
+  "obsidianVersionInPage": "1.15.0",
+  "obsidianVersionSource": "window-title",
+  "obsidianVersionFromExe": "1.14.5",
+  "theme": "dark",
+  "expectedTheme": "dark",
+  "themeMatchesExpectation": true,
+  "language": "zh",
+  "momentLocale": null,
+  "viewport": {
+    "innerWidth": 1353,
+    "innerHeight": 1053,
+    "devicePixelRatio": 1.0000000298023224,
+    "documentClientWidth": 1353,
+    "documentClientHeight": 1053
+  },
+  "plugin": {
+    "loaded": true,
+    "id": "baizer",
+    "version": "1.1.0",
+    "source": "cfg.pluginInfo"
+  },
+  "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+  "appGlobalAvailable": false,
+  "presence": {
+    "settingsModal": true,
+    "settingsPage": true,
+    "providerShell": true,
+    "providerList": true,
+    "activeProviderCard": true,
+    "activeProviderDetail": true,
+    "connectionGrid": true
+  },
+  "settingsModalBox": {
+    "x": 0,
+    "y": 30,
+    "w": 1353.33,
+    "h": 1023.33,
+    "right": 1353.33,
+    "bottom": 1053.33
+  },
+  "settingsPageBox": {
+    "x": 451.67,
+    "y": -1634,
+    "w": 688,
+    "h": 4288.22,
+    "right": 1139.67,
+    "bottom": 2654.22
+  },
+  "providerCards": [
+    {
+      "active": true,
+      "title": "Anthropic",
+      "meta": "模型: claude-sonnet-4-5",
+      "box": {
+        "x": 469,
+        "y": -1326,
+        "w": 653.33,
+        "h": 1048.94,
+        "right": 1122.33,
+        "bottom": -277.06
+      }
+    }
+  ],
+  "connectionCards": [
+    {
+      "title": "服务商身份与协议",
+      "box": {
+        "x": 477.67,
+        "y": -1286.67,
+        "w": 636,
+        "h": 247.96,
+        "right": 1113.67,
+        "bottom": -1038.71
+      }
+    },
+    {
+      "title": "连接地址与凭证",
+      "box": {
+        "x": 477.67,
+        "y": -1030.71,
+        "w": 636,
+        "h": 348.19,
+        "right": 1113.67,
+        "bottom": -682.52
+      }
+    },
+    {
+      "title": "模型",
+      "box": {
+        "x": 477.67,
+        "y": -674.52,
+        "w": 636,
+        "h": 214.4,
+        "right": 1113.67,
+        "bottom": -460.13
+      }
+    },
+    {
+      "title": "测试结果",
+      "box": {
+        "x": 477.67,
+        "y": -452.12,
+        "w": 636,
+        "h": 166.4,
+        "right": 1113.67,
+        "bottom": -285.73
+      }
+    }
+  ],
+  "overflow": {
+    "document": {
+      "scrollWidth": 1353,
+      "clientWidth": 1353,
+      "innerWidth": 1353,
+      "bodyScrollWidth": 1353,
+      "overflowPx": 0,
+      "ok": true
+    },
+    "containers": [
+      {
+        "selector": ".modal.mod-settings",
+        "found": true,
+        "clientWidth": 1353,
+        "scrollWidth": 1353,
+        "overflowPx": 0,
+        "overflowX": "hidden",
+        "box": {
+          "x": 0,
+          "y": 30,
+          "w": 1353.33,
+          "h": 1023.33,
+          "right": 1353.33,
+          "bottom": 1053.33
+        },
+        "ok": true
+      },
+      {
+        "selector": ".modal.mod-settings .vertical-tab-content",
+        "found": true,
+        "clientWidth": 1091,
+        "scrollWidth": 1091,
+        "overflowPx": 0,
+        "overflowX": "auto",
+        "box": {
+          "x": 250,
+          "y": 30,
+          "w": 1103.33,
+          "h": 1023.33,
+          "right": 1353.33,
+          "bottom": 1053.33
+        },
+        "ok": true
+      },
+      {
+        "selector": ".baizer-settings-page",
+        "found": true,
+        "clientWidth": 688,
+        "scrollWidth": 688,
+        "overflowPx": 0,
+        "overflowX": "visible",
+        "box": {
+          "x": 451.67,
+          "y": -1634,
+          "w": 688,
+          "h": 4288.22,
+          "right": 1139.67,
+          "bottom": 2654.22
+        },
+        "ok": true
+      },
+      {
+        "selector": ".baizer-settings-provider-shell",
+        "found": true,
+        "clientWidth": 669,
+        "scrollWidth": 669,
+        "overflowPx": 0,
+        "overflowX": "hidden",
+        "box": {
+          "x": 460.33,
+          "y": -1383.33,
+          "w": 670.67,
+          "h": 1114.94,
+          "right": 1131,
+          "bottom": -268.4
+        },
+        "ok": true
+      },
+      {
+        "selector": ".baizer-settings-provider-list",
+        "found": true,
+        "clientWidth": 669,
+        "scrollWidth": 669,
+        "overflowPx": 0,
+        "overflowX": "visible",
+        "box": {
+          "x": 461,
+          "y": -1334,
+          "w": 669.33,
+          "h": 1064.94,
+          "right": 1130.33,
+          "bottom": -269.06
+        },
+        "ok": true
+      },
+      {
+        "selector": ".baizer-settings-provider-card.is-active",
+        "found": true,
+        "clientWidth": 652,
+        "scrollWidth": 652,
+        "overflowPx": 0,
+        "overflowX": "hidden",
+        "box": {
+          "x": 469,
+          "y": -1326,
+          "w": 653.33,
+          "h": 1048.94,
+          "right": 1122.33,
+          "bottom": -277.06
+        },
+        "ok": true
+      },
+      {
+        "selector": ".baizer-settings-provider-detail-inline",
+        "found": true,
+        "clientWidth": 652,
+        "scrollWidth": 652,
+        "overflowPx": 0,
+        "overflowX": "visible",
+        "box": {
+          "x": 469.67,
+          "y": -1295.33,
+          "w": 652,
+          "h": 1017.6,
+          "right": 1121.67,
+          "bottom": -277.73
+        },
+        "ok": true
+      },
+      {
+        "selector": ".baizer-settings-connection-flow, .baizer-settings-connection-detail-grid",
+        "found": true,
+        "clientWidth": 652,
+        "scrollWidth": 652,
+        "overflowPx": 0,
+        "overflowX": "visible",
+        "box": {
+          "x": 469.67,
+          "y": -1294.67,
+          "w": 652,
+          "h": 1016.94,
+          "right": 1121.67,
+          "bottom": -277.73
+        },
+        "ok": true
+      },
+      {
+        "selector": ".baizer-settings-connection-card[0] 服务商身份与协议",
+        "found": true,
+        "clientWidth": 635,
+        "scrollWidth": 635,
+        "overflowPx": 0,
+        "overflowX": "hidden",
+        "box": {
+          "x": 477.67,
+          "y": -1286.67,
+          "w": 636,
+          "h": 247.96,
+          "right": 1113.67,
+          "bottom": -1038.71
+        },
+        "ok": true
+      },
+      {
+        "selector": ".baizer-settings-connection-card[1] 连接地址与凭证",
+        "found": true,
+        "clientWidth": 635,
+        "scrollWidth": 635,
+        "overflowPx": 0,
+        "overflowX": "hidden",
+        "box": {
+          "x": 477.67,
+          "y": -1030.71,
+          "w": 636,
+          "h": 348.19,
+          "right": 1113.67,
+          "bottom": -682.52
+        },
+        "ok": true
+      },
+      {
+        "selector": ".baizer-settings-connection-card[2] 模型",
+        "found": true,
+        "clientWidth": 635,
+        "scrollWidth": 635,
+        "overflowPx": 0,
+        "overflowX": "hidden",
+        "box": {
+          "x": 477.67,
+          "y": -674.52,
+          "w": 636,
+          "h": 214.4,
+          "right": 1113.67,
+          "bottom": -460.13
+        },
+        "ok": true
+      },
+      {
+        "selector": ".baizer-settings-connection-card[3] 测试结果",
+        "found": true,
+        "clientWidth": 635,
+        "scrollWidth": 635,
+        "overflowPx": 0,
+        "overflowX": "hidden",
+        "box": {
+          "x": 477.67,
+          "y": -452.12,
+          "w": 636,
+          "h": 166.4,
+          "right": 1113.67,
+          "bottom": -285.73
+        },
+        "ok": true
+      }
+    ],
+    "offenders": [
+      {
+        "tag": "input",
+        "id": null,
+        "classes": "",
+        "text": null,
+        "clientWidth": 161,
+        "scrollWidth": 165,
+        "overflowPx": 4,
+        "overflowX": "clip",
+        "textOverflow": "clip",
+        "whiteSpace": "normal",
+        "clipsContent": true
+      }
+    ],
+    "offenderCount": 1,
+    "spill": [],
+    "spillCount": 0
+  },
+  "overlap": {
+    "root": {
+      "tag": "div",
+      "id": null,
+      "classes": "baizer-settings-provider-detail-inline",
+      "text": "1服务商身份与协议服务商名称必填显示在服务商列表中。名称为空会就地报错，而不是悄悄改回旧名称。协议OpenAI 兼容Anthropic Messages API该服务商使用的线协议。切换后只显示适用于该协议的字段。2连接地址与凭证服务地址（"
+    },
+    "controlCount": 11,
+    "pairs": []
+  },
+  "truncation": {
+    "fields": [
+      {
+        "name": "apiEndpoint",
+        "found": true,
+        "label": "服务地址（Base URL）必填",
+        "tag": "input",
+        "type": "text",
+        "value": "https://api.anthropic.com",
+        "valueLength": 25,
+        "clientWidth": 613,
+        "scrollWidth": 613,
+        "paddingLeft": 8,
+        "paddingRight": 8,
+        "availableTextWidth": 597,
+        "renderedTextWidth": 157.79,
+        "textOverflowsBox": false,
+        "contentScrolls": false,
+        "disabled": false,
+        "readOnly": false,
+        "titleAttribute": "https://api.anthropic.com",
+        "multiline": false,
+        "fullValueReachable": true,
+        "box": {
+          "x": 488.33,
+          "y": -946.98,
+          "w": 614.67,
+          "h": 34,
+          "right": 1103,
+          "bottom": -912.98
+        }
+      },
+      {
+        "name": "apiKey",
+        "found": true,
+        "label": "API Key",
+        "tag": "input",
+        "type": "password",
+        "value": "sk-ant-fixture-not-a-real-key",
+        "valueLength": 29,
+        "clientWidth": 613,
+        "scrollWidth": 613,
+        "paddingLeft": 8,
+        "paddingRight": 8,
+        "availableTextWidth": 597,
+        "renderedTextWidth": 176.1,
+        "textOverflowsBox": false,
+        "contentScrolls": false,
+        "disabled": false,
+        "readOnly": false,
+        "titleAttribute": null,
+        "multiline": false,
+        "fullValueReachable": true,
+        "box": {
+          "x": 488.33,
+          "y": -831.42,
+          "w": 614.67,
+          "h": 34,
+          "right": 1103,
+          "bottom": -797.42
+        }
+      },
+      {
+        "name": "customHeaders",
+        "found": true,
+        "label": "自定义请求头（高级）",
+        "tag": "textarea",
+        "type": "textarea",
+        "value": "",
+        "valueLength": 0,
+        "clientWidth": 592,
+        "scrollWidth": 592,
+        "paddingLeft": 10,
+        "paddingRight": 10,
+        "availableTextWidth": 572,
+        "renderedTextWidth": 0,
+        "textOverflowsBox": false,
+        "contentScrolls": false,
+        "disabled": false,
+        "readOnly": false,
+        "titleAttribute": null,
+        "multiline": true,
+        "fullValueReachable": true,
+        "box": {
+          "x": 499,
+          "y": -693.85,
+          "w": 593.33,
+          "h": 88,
+          "right": 1092.33,
+          "bottom": -605.85
+        }
+      },
+      {
+        "name": "providerName",
+        "found": true,
+        "label": "服务商名称必填",
+        "tag": "input",
+        "type": "text",
+        "value": "Anthropic",
+        "valueLength": 9,
+        "clientWidth": 613,
+        "scrollWidth": 613,
+        "paddingLeft": 8,
+        "paddingRight": 8,
+        "availableTextWidth": 597,
+        "renderedTextWidth": 61.33,
+        "textOverflowsBox": false,
+        "contentScrolls": false,
+        "disabled": false,
+        "readOnly": false,
+        "titleAttribute": "Anthropic",
+        "multiline": false,
+        "fullValueReachable": true,
+        "box": {
+          "x": 488.33,
+          "y": -1202.94,
+          "w": 614.67,
+          "h": 34,
+          "right": 1103,
+          "bottom": -1168.94
+        }
+      },
+      {
+        "name": "protocol",
+        "found": true,
+        "label": "协议",
+        "tag": "select",
+        "type": "select-one",
+        "value": "Anthropic Messages API",
+        "valueLength": 22,
+        "clientWidth": 613,
+        "scrollWidth": 613,
+        "paddingLeft": 10,
+        "paddingRight": 10,
+        "availableTextWidth": 593,
+        "renderedTextWidth": 150.95,
+        "textOverflowsBox": false,
+        "contentScrolls": false,
+        "disabled": false,
+        "readOnly": false,
+        "titleAttribute": null,
+        "multiline": false,
+        "fullValueReachable": true,
+        "box": {
+          "x": 488.33,
+          "y": -1105.37,
+          "w": 614.67,
+          "h": 34,
+          "right": 1103,
+          "bottom": -1071.37
+        }
+      },
+      {
+        "name": "model",
+        "found": true,
+        "label": "模型",
+        "tag": "input",
+        "type": "text",
+        "value": "claude-sonnet-4-5",
+        "valueLength": 17,
+        "clientWidth": 613,
+        "scrollWidth": 613,
+        "paddingLeft": 8,
+        "paddingRight": 8,
+        "availableTextWidth": 597,
+        "renderedTextWidth": 114.73,
+        "textOverflowsBox": false,
+        "contentScrolls": false,
+        "disabled": false,
+        "readOnly": false,
+        "titleAttribute": "claude-sonnet-4-5",
+        "multiline": false,
+        "fullValueReachable": true,
+        "box": {
+          "x": 488.33,
+          "y": -590.79,
+          "w": 614.67,
+          "h": 34,
+          "right": 1103,
+          "bottom": -556.79
+        }
+      }
+    ],
+    "ellipsizedStaticText": []
+  },
+  "transcriptionFields": {
+    "sectionFound": true,
+    "sectionTitle": "采集",
+    "fields": [
+      {
+        "name": "transcriptionEndpoint",
+        "found": true,
+        "label": "转写端点（Base URL）",
+        "tag": "input",
+        "type": "text",
+        "value": "http://127.0.0.1:8080/v1",
+        "valueLength": 24,
+        "clientWidth": 161,
+        "scrollWidth": 165,
+        "paddingLeft": 8,
+        "paddingRight": 8,
+        "availableTextWidth": 145,
+        "renderedTextWidth": 148.99,
+        "textOverflowsBox": true,
+        "contentScrolls": true,
+        "disabled": false,
+        "readOnly": false,
+        "titleAttribute": null,
+        "multiline": false,
+        "fullValueReachable": true,
+        "box": {
+          "x": 941.67,
+          "y": 109.27,
+          "w": 162.67,
+          "h": 30,
+          "right": 1104.33,
+          "bottom": 139.27
+        }
+      },
+      {
+        "name": "transcriptionApiKey",
+        "found": true,
+        "label": "转写 API Key",
+        "tag": "input",
+        "type": "password",
+        "value": "",
+        "valueLength": 0,
+        "clientWidth": 161,
+        "scrollWidth": 161,
+        "paddingLeft": 8,
+        "paddingRight": 8,
+        "availableTextWidth": 145,
+        "renderedTextWidth": 0,
+        "textOverflowsBox": false,
+        "contentScrolls": false,
+        "disabled": false,
+        "readOnly": false,
+        "titleAttribute": null,
+        "multiline": false,
+        "fullValueReachable": true,
+        "box": {
+          "x": 941.67,
+          "y": 201.35,
+          "w": 162.67,
+          "h": 30,
+          "right": 1104.33,
+          "bottom": 231.35
+        }
+      },
+      {
+        "name": "transcriptionModel",
+        "found": true,
+        "label": "转写模型",
+        "tag": "input",
+        "type": "text",
+        "value": "whisper-large-v3",
+        "valueLength": 16,
+        "clientWidth": 161,
+        "scrollWidth": 161,
+        "paddingLeft": 8,
+        "paddingRight": 8,
+        "availableTextWidth": 145,
+        "renderedTextWidth": 104.32,
+        "textOverflowsBox": false,
+        "contentScrolls": false,
+        "disabled": false,
+        "readOnly": false,
+        "titleAttribute": null,
+        "multiline": false,
+        "fullValueReachable": true,
+        "box": {
+          "x": 941.67,
+          "y": 293.44,
+          "w": 162.67,
+          "h": 30,
+          "right": 1104.33,
+          "bottom": 323.44
+        }
+      },
+      {
+        "name": "transcriptionLanguage",
+        "found": true,
+        "label": "转写语言",
+        "tag": "input",
+        "type": "text",
+        "value": "zh",
+        "valueLength": 2,
+        "clientWidth": 161,
+        "scrollWidth": 161,
+        "paddingLeft": 8,
+        "paddingRight": 8,
+        "availableTextWidth": 145,
+        "renderedTextWidth": 14.4,
+        "textOverflowsBox": false,
+        "contentScrolls": false,
+        "disabled": false,
+        "readOnly": false,
+        "titleAttribute": null,
+        "multiline": false,
+        "fullValueReachable": true,
+        "box": {
+          "x": 941.67,
+          "y": 369.93,
+          "w": 162.67,
+          "h": 30,
+          "right": 1104.33,
+          "bottom": 399.93
+        }
+      }
+    ]
+  },
+  "providerTypeSelect": {
+    "label": "协议",
+    "rowSelector": "active provider detail row whose label matches /protocol|协议|API 类型|类型/i",
+    "options": [
+      {
+        "index": 0,
+        "value": "openai-compatible",
+        "text": "OpenAI 兼容",
+        "selected": false,
+        "disabled": false
+      },
+      {
+        "index": 1,
+        "value": "anthropic",
+        "text": "Anthropic Messages API",
+        "selected": true,
+        "disabled": false
+      }
+    ],
+    "optionTexts": [
+      "OpenAI 兼容",
+      "Anthropic Messages API"
+    ],
+    "found": true,
+    "tag": "select",
+    "isSelect": true,
+    "visible": true,
+    "box": {
+      "x": 488.33,
+      "y": -1105.37,
+      "w": 614.67,
+      "h": 34,
+      "right": 1103,
+      "bottom": -1071.37
+    },
+    "value": "Anthropic Messages API",
+    "selectedIndex": 1,
+    "optionCount": 2,
+    "renderedAsList": false,
+    "sizeAttribute": null,
+    "inViewport": false,
+    "viewport": {
+      "innerWidth": 1353,
+      "innerHeight": 1053
+    },
+    "scrollContext": {
+      "selector": "div.vertical-tab-content",
+      "scrollTop": 1712,
+      "clientHeight": 1023,
+      "scrollHeight": 4400,
+      "box": {
+        "x": 250,
+        "y": 30,
+        "w": 1103.33,
+        "h": 1023.33,
+        "right": 1353.33,
+        "bottom": 1053.33
+      }
+    }
+  },
+  "wrapping": {
+    "customHeadersHelp": {
+      "found": true,
+      "tag": "div",
+      "id": null,
+      "classes": "baizer-settings-field-hint",
+      "text": "每行一条 \"Header-Name: value\"。用 {{conversationId}} 占位符发送当前会话 ID。",
+      "box": {
+        "x": 499,
+        "y": -597.85,
+        "w": 593.33,
+        "h": 18,
+        "right": 1092.33,
+        "bottom": -579.85
+      },
+      "clientWidth": 593,
+      "scrollWidth": 593,
+      "clientHeight": 18,
+      "scrollHeight": 18,
+      "lineHeight": 18,
+      "lineCount": 1,
+      "overflowsHorizontally": false,
+      "clippedVertically": false,
+      "visible": true,
+      "parentBox": {
+        "x": 489,
+        "y": -693.85,
+        "w": 613.33,
+        "h": 185.59,
+        "right": 1102.33,
+        "bottom": -508.26
+      },
+      "siblingRows": 4,
+      "blockCount": 3,
+      "blocks": [
+        {
+          "tag": "div",
+          "id": null,
+          "classes": "baizer-settings-field-hint",
+          "text": "每行一条 \"Header-Name: value\"。用 {{conversationId}} 占位符发送当前会话 ID。",
+          "box": {
+            "x": 499,
+            "y": -597.85,
+            "w": 593.33,
+            "h": 18,
+            "right": 1092.33,
+            "bottom": -579.85
+          },
+          "clientWidth": 593,
+          "scrollWidth": 593,
+          "clientHeight": 18,
+          "scrollHeight": 18,
+          "lineHeight": 18,
+          "lineCount": 1,
+          "overflowsHorizontally": false,
+          "clippedVertically": false,
+          "visible": true,
+          "parentBox": {
+            "x": 489,
+            "y": -693.85,
+            "w": 613.33,
+            "h": 185.59,
+            "right": 1102.33,
+            "bottom": -508.26
+          },
+          "siblingRows": 4
+        },
+        {
+          "tag": "pre",
+          "id": null,
+          "classes": "baizer-settings-header-example",
+          "text": "x-opencode-session: {{conversationId}}",
+          "box": {
+            "x": 499,
+            "y": -571.85,
+            "w": 593.33,
+            "h": 27.59,
+            "right": 1092.33,
+            "bottom": -544.26
+          },
+          "clientWidth": 593,
+          "scrollWidth": 593,
+          "clientHeight": 28,
+          "scrollHeight": 28,
+          "lineHeight": 15.6,
+          "lineCount": 1,
+          "overflowsHorizontally": false,
+          "clippedVertically": false,
+          "visible": true,
+          "parentBox": {
+            "x": 489,
+            "y": -693.85,
+            "w": 613.33,
+            "h": 185.59,
+            "right": 1102.33,
+            "bottom": -508.26
+          },
+          "siblingRows": 4
+        },
+        {
+          "tag": "div",
+          "id": null,
+          "classes": "baizer-settings-field-hint",
+          "text": "每次向该服务商发请求时都会带上。对于没有会话的一次性调用，{{conversationId}} 占位符会被跳过。",
+          "box": {
+            "x": 499,
+            "y": -536.26,
+            "w": 593.33,
+            "h": 18,
+            "right": 1092.33,
+            "bottom": -518.26
+          },
+          "clientWidth": 593,
+          "scrollWidth": 593,
+          "clientHeight": 18,
+          "scrollHeight": 18,
+          "lineHeight": 18,
+          "lineCount": 1,
+          "overflowsHorizontally": false,
+          "clippedVertically": false,
+          "visible": true,
+          "parentBox": {
+            "x": 489,
+            "y": -693.85,
+            "w": 613.33,
+            "h": 185.59,
+            "right": 1102.33,
+            "bottom": -508.26
+          },
+          "siblingRows": 4
+        }
+      ]
+    },
+    "secretActionButtons": {
+      "found": true,
+      "count": 2,
+      "buttons": [
+        {
+          "text": "显示",
+          "box": {
+            "x": 488.33,
+            "y": -791.42,
+            "w": 51.33,
+            "h": 32,
+            "right": 539.67,
+            "bottom": -759.42
+          }
+        },
+        {
+          "text": "清除",
+          "box": {
+            "x": 547.67,
+            "y": -791.42,
+            "w": 51.33,
+            "h": 32,
+            "right": 599,
+            "bottom": -759.42
+          }
+        }
+      ],
+      "containerBox": {
+        "x": 488.33,
+        "y": -791.42,
+        "w": 614.67,
+        "h": 32,
+        "right": 1103,
+        "bottom": -759.42
+      },
+      "containerClientWidth": 615,
+      "containerScrollWidth": 615,
+      "distinctRows": 1,
+      "wrappedOntoSeparateRows": false,
+      "overflowsContainer": false
+    },
+    "secretRow": {
+      "found": true,
+      "box": {
+        "x": 478.33,
+        "y": -862.98,
+        "w": 634.67,
+        "h": 135.56,
+        "right": 1113,
+        "bottom": -727.42
+      },
+      "clientWidth": 635,
+      "scrollWidth": 635,
+      "distinctRows": 2,
+      "wrapped": true,
+      "children": [
+        {
+          "tag": "div",
+          "id": null,
+          "classes": "baizer-settings-detail-label",
+          "text": "API Key",
+          "box": {
+            "x": 488.33,
+            "y": -854.31,
+            "w": 614.67,
+            "h": 16.9,
+            "right": 1103,
+            "bottom": -837.42
+          }
+        },
+        {
+          "tag": "div",
+          "id": null,
+          "classes": "baizer-settings-detail-value",
+          "text": "显示清除仅保存在本地，默认隐藏。用「显示」查看，用「清除」清空（会二次确认）。",
+          "box": {
+            "x": 488.33,
+            "y": -831.42,
+            "w": 614.67,
+            "h": 96,
+            "right": 1103,
+            "bottom": -735.42
+          }
+        }
+      ]
+    }
+  },
+  "alignment": {
+    "rowCount": 6,
+    "rows": [
+      {
+        "label": "服务商名称必填",
+        "gridTemplateColumns": "614.667px",
+        "rowBox": {
+          "x": 478.33,
+          "y": -1233.83,
+          "w": 634.67,
+          "h": 96.9,
+          "right": 1113,
+          "bottom": -1136.94
+        },
+        "labelBox": {
+          "x": 488.33,
+          "y": -1225.83,
+          "w": 614.67,
+          "h": 16.9,
+          "right": 1103,
+          "bottom": -1208.94
+        },
+        "valueBox": {
+          "x": 488.33,
+          "y": -1202.94,
+          "w": 614.67,
+          "h": 58,
+          "right": 1103,
+          "bottom": -1144.94
+        }
+      },
+      {
+        "label": "协议",
+        "gridTemplateColumns": "614.667px",
+        "rowBox": {
+          "x": 478.33,
+          "y": -1136.94,
+          "w": 634.67,
+          "h": 97.56,
+          "right": 1113,
+          "bottom": -1039.37
+        },
+        "labelBox": {
+          "x": 488.33,
+          "y": -1128.27,
+          "w": 614.67,
+          "h": 16.9,
+          "right": 1103,
+          "bottom": -1111.38
+        },
+        "valueBox": {
+          "x": 488.33,
+          "y": -1105.37,
+          "w": 614.67,
+          "h": 58,
+          "right": 1103,
+          "bottom": -1047.37
+        }
+      },
+      {
+        "label": "服务地址（Base URL）必填",
+        "gridTemplateColumns": "614.667px",
+        "rowBox": {
+          "x": 478.33,
+          "y": -977.87,
+          "w": 634.67,
+          "h": 114.9,
+          "right": 1113,
+          "bottom": -862.98
+        },
+        "labelBox": {
+          "x": 488.33,
+          "y": -969.87,
+          "w": 614.67,
+          "h": 16.9,
+          "right": 1103,
+          "bottom": -952.98
+        },
+        "valueBox": {
+          "x": 488.33,
+          "y": -946.98,
+          "w": 614.67,
+          "h": 76,
+          "right": 1103,
+          "bottom": -870.98
+        }
+      },
+      {
+        "label": "API Key",
+        "gridTemplateColumns": "614.667px",
+        "rowBox": {
+          "x": 478.33,
+          "y": -862.98,
+          "w": 634.67,
+          "h": 135.56,
+          "right": 1113,
+          "bottom": -727.42
+        },
+        "labelBox": {
+          "x": 488.33,
+          "y": -854.31,
+          "w": 614.67,
+          "h": 16.9,
+          "right": 1103,
+          "bottom": -837.42
+        },
+        "valueBox": {
+          "x": 488.33,
+          "y": -831.42,
+          "w": 614.67,
+          "h": 96,
+          "right": 1103,
+          "bottom": -735.42
+        }
+      },
+      {
+        "label": "模型",
+        "gridTemplateColumns": "614.667px",
+        "rowBox": {
+          "x": 478.33,
+          "y": -621.69,
+          "w": 634.67,
+          "h": 160.9,
+          "right": 1113,
+          "bottom": -460.79
+        },
+        "labelBox": {
+          "x": 488.33,
+          "y": -613.69,
+          "w": 614.67,
+          "h": 16.9,
+          "right": 1103,
+          "bottom": -596.79
+        },
+        "valueBox": {
+          "x": 488.33,
+          "y": -590.79,
+          "w": 614.67,
+          "h": 122,
+          "right": 1103,
+          "bottom": -468.79
+        }
+      },
+      {
+        "label": "测试",
+        "gridTemplateColumns": "614.667px",
+        "rowBox": {
+          "x": 478.33,
+          "y": -399.29,
+          "w": 634.67,
+          "h": 112.9,
+          "right": 1113,
+          "bottom": -286.4
+        },
+        "labelBox": {
+          "x": 488.33,
+          "y": -391.29,
+          "w": 614.67,
+          "h": 16.9,
+          "right": 1103,
+          "bottom": -374.4
+        },
+        "valueBox": {
+          "x": 488.33,
+          "y": -368.4,
+          "w": 614.67,
+          "h": 74,
+          "right": 1103,
+          "bottom": -294.4
+        }
+      }
+    ],
+    "distinctLabelWidths": [
+      614.67
+    ],
+    "distinctValueWidths": [
+      614.67
+    ],
+    "distinctGridTemplates": [
+      "614.667px"
+    ],
+    "labelColumnConsistent": true,
+    "minValueColumnWidth": 614.67,
+    "connectionGridTemplateColumns": "none",
+    "connectionGridBox": {
+      "x": 469.67,
+      "y": -1294.67,
+      "w": 652,
+      "h": 1016.94,
+      "right": 1121.67,
+      "bottom": -277.73
+    },
+    "branch": {
+      "containerSelector": ".baizer-settings-page",
+      "containerClientWidth": 688,
+      "breakpointPx": 640,
+      "heroFound": true,
+      "heroGridTemplateColumns": "316px 360px",
+      "heroGridTemplateAreas": "\"title search\" \"subtitle subtitle\"",
+      "wideBranch": true,
+      "providerCardInnerFound": true,
+      "providerCardInnerGridTemplateColumns": "237.125px 296.406px 44.4688px"
+    }
+  },
+  "verdict": {
+    "allRequiredNodesPresent": true,
+    "pluginLoaded": true,
+    "themeMatchesExpectation": true,
+    "noDocumentHorizontalOverflow": true,
+    "noContainerHorizontalOverflow": true,
+    "noInteractiveOverlap": true,
+    "noUnreachableTruncatedValues": true,
+    "noEllipsizedStaticText": true,
+    "customHeadersHelpNotClipped": true,
+    "secretActionsOnOneRow": true,
+    "labelColumnConsistent": true,
+    "providerTypeSelectFound": true,
+    "providerTypeSelectOnScreen": false,
+    "fieldsWithTextOverflow": [],
+    "unreachableTruncatedFields": [],
+    "allPass": true
+  },
+  "harness": {
+    "exe": "C:\\obs-1.14.5-installed\\Obsidian.exe",
+    "pluginDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\scratch\\asr-shots\\after-final",
+    "vaultDir": "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
+    "vaultKey": "0a1e15b13b143b33",
+    "globalConfig": {
+      "path": "C:\\Users\\Administrator\\AppData\\Roaming\\obsidian\\obsidian.json",
+      "backup": "C:\\Users\\Administrator\\AppData\\Roaming\\obsidian\\obsidian.json.dsh-backup",
+      "hadExisting": true
+    },
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.1.0",
+      "minAppVersion": "1.7.2",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    },
+    "copiedPluginFiles": [
+      {
+        "file": "main.js",
+        "bytes": 3180761
+      },
+      {
+        "file": "manifest.json",
+        "bytes": 324
+      },
+      {
+        "file": "styles.css",
+        "bytes": 113082
+      }
+    ],
+    "scenarioPath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\tools\\provider-settings-shots\\scenarios\\asr-capture.json",
+    "theme": "dark",
+    "requestedViewport": {
+      "width": 1353,
+      "height": 1053
+    },
+    "explanations": [
+      "the settings panel rendered in a separate \"popout-window\"; it was measured and captured there (it has no `app` global, so plugin facts come from the main window)"
+    ],
+    "pid": 18476,
+    "browser": "Chrome/150.0.7871.250",
+    "protocolVersion": "1.3",
+    "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.14.5 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
+    "obsidianVersionFromExe": "1.14.5",
+    "obsidianAsarFiles": [
+      {
+        "file": "C:\\Users\\Administrator\\AppData\\Roaming\\obsidian\\obsidian-1.15.0.asar",
+        "bytes": 24553884,
+        "modifiedAt": "2026-11-02T16:28:14.380Z"
+      }
+    ],
+    "target": {
+      "id": "514D47C69ECE8AAD92A37BF69E6309F6",
+      "type": "page",
+      "url": "app://obsidian.md/index.html",
+      "title": "新标签页 - obsidian - Obsidian 1.15.0"
+    },
+    "pageTargetsSeen": [
+      {
+        "id": "514D47C69ECE8AAD92A37BF69E6309F6",
+        "url": "app://obsidian.md/index.html",
+        "title": "新标签页 - obsidian - Obsidian 1.15.0"
+      }
+    ],
+    "mainWindowAsserted": true,
+    "locale": {
+      "changed": false,
+      "previous": "zh",
+      "keys": [
+        "0a1e15b13b143b33-base-font-size",
+        "0a1e15b13b143b33-plugin-automatically-check-for-updates",
+        "28c4c736d4f014af-file-explorer-unfold",
+        "28c4c736d4f014af-note-fold-Daily/2025/2025-09-15.md",
+        "28c4c736d4f014af-note-fold-Work/管理/2025年/日常工作/4月份/安全编程（开发）环境实施方案.md",
+        "28c4c736d4f014af-recent-commands",
+        "28c4c736d4f014af-recent-searches",
+        "28c4c736d4f014af-slow-startup-check",
+        "28c4c736d4f014af.terminal.settings",
+        "6e0cf05b9c81949b-base-font-size",
+        "6e0cf05b9c81949b-file-explorer-unfold",
+        "97a539975c8c1652-base-font-size",
+        "97a539975c8c1652-file-explorer-unfold",
+        "97a539975c8c1652-last-plugin-update-check",
+        "97a539975c8c1652-note-fold-Daily/2026/2026-05-13.md",
+        "97a539975c8c1652-note-fold-Daily/2026/2026-05-20.md",
+        "97a539975c8c1652-note-fold-Daily/2026/2026-07-02.md",
+        "97a539975c8c1652-note-fold-Daily/2026/2026-07-09.md",
+        "97a539975c8c1652-note-fold-Daily/2026/2026-10-26.md",
+        "97a539975c8c1652-note-fold-Excalidraw/Drawing 2024-12-08 15.07.28.excalidraw.md",
+        "97a539975c8c1652-obsidian-git:conflict",
+        "97a539975c8c1652-obsidian-git:lastAutoBackup",
+        "97a539975c8c1652-plugin-automatically-check-for-updates",
+        "97a539975c8c1652-recent-commands",
+        "97a539975c8c1652-recent-searches",
+        "97a539975c8c1652-secrets-meta",
+        "97a539975c8c1652-slow-startup-check",
+        "ai-coach-credentials:deepseek_api_key",
+        "ai-coach-mode-history",
+        "baizer.selection.floating-panel.rect",
+        "buttons",
+        "claudian.deviceSettingsKey",
+        "communityPluginSortOrder",
+        "communityThemeSortOrder",
+        "debug",
+        "enable-plugin-0a1e15b13b143b33",
+        "enable-plugin-28c4c736d4f014af",
+        "enable-plugin-6e0cf05b9c81949b",
+        "enable-plugin-97a539975c8c1652",
+        "enable-plugin-b5fea369f183cb35",
+        "excalidraw-legacy-ls-purge-v1",
+        "gemini_log_1784163560956",
+        "gemini_log_1784163560957",
+        "gemini_log_1784163561972",
+        "gemini_log_1784163561976",
+        "gemini_log_1784163561977",
+        "gemini_log_1784163562542",
+        "gemini_log_1784163562785",
+        "gemini_log_1784163562786",
+        "gemini_log_1784163563798",
+        "gemini_log_1784163563799",
+        "gemini_log_1784163563802",
+        "gemini_log_1784163563803",
+        "gemini_log_1784163564538",
+        "gemini_log_1784163564811",
+        "gemini_log_1784163564812",
+        "gemini_log_1784163565815",
+        "gemini_log_1784163565818",
+        "gemini_log_1784165077904",
+        "gemini_log_1784165078218",
+        "gemini_log_1784165078956",
+        "gemini_log_1784165080204",
+        "gemini_log_1784165080572",
+        "gemini_log_1784165080670",
+        "gemini_log_1784165080871",
+        "gemini_log_1784165080872",
+        "gemini_log_1784165081182",
+        "gemini_log_1784165081351",
+        "gemini_log_1784165081352",
+        "gemini_log_1784165081579",
+        "gemini_log_1784165082566",
+        "gemini_log_1784165082567",
+        "gemini_log_1784165083036",
+        "gemini_log_1784165084753",
+        "gemini_log_1784165084942",
+        "gemini_log_1784165090074",
+        "gemini_log_1784165090164",
+        "gemini_log_1784165090304",
+        "gemini_log_1784165091307",
+        "gemini_log_1784165091334",
+        "gemini_log_1784165091335",
+        "gemini_log_1784165091936",
+        "gemini_log_1784165092066",
+        "gemini_log_1784165092067",
+        "gemini_log_1784165092160",
+        "gemini_log_1784165093161",
+        "gemini_log_1784165093168",
+        "gemini_log_1784165093169",
+        "gemini_log_1784165093423",
+        "gemini_log_1784165093638",
+        "gemini_log_1784165093838",
+        "gemini_log_1784165094839",
+        "gemini_log_1784165094840",
+        "gemini_log_1784165094847",
+        "gemini_log_1784165095792",
+        "gemini_log_1784165096144",
+        "gemini_log_1784165096238",
+        "gemini_log_1784165096623",
+        "gemini_log_1784165096624",
+        "gemini_log_1784165097490",
+        "gemini_log_1784165097947",
+        "gemini_log_1784165098062",
+        "gemini_log_1784165098258",
+        "gemini_log_1784165098359",
+        "gemini_log_1784165098462",
+        "gemini_log_1784165098593",
+        "gemini_log_1784165099607",
+        "gemini_log_1784165099614",
+        "gemini_log_1784165099615",
+        "gemini_log_1784165138759",
+        "gemini_log_1784165139002",
+        "gemini_log_1784165139003",
+        "gemini_log_1784165140011",
+        "gemini_log_1784165140012",
+        "gemini_log_1784165140021",
+        "gemini_log_1784165140630",
+        "gemini_log_1784165141637",
+        "gemini_log_1784165141638",
+        "gemini_log_1784165141646",
+        "gemini_log_1784165141652",
+        "gemini_log_1784165141653",
+        "gemini_log_1784165141831",
+        "gemini_log_1784165141832",
+        "gemini_log_1784165142080",
+        "gemini_log_1784165142820",
+        "gemini_log_1784165142821",
+        "gemini_log_1784165142998",
+        "gemini_log_1784165143126",
+        "gemini_log_1784165143127",
+        "gemini_log_1784165144142",
+        "gemini_log_1784165144143",
+        "gemini_log_1784165144149",
+        "gemini_log_1784165144150",
+        "gemini_log_1784165144480",
+        "gemini_log_1784165145485",
+        "gemini_log_1784165145491",
+        "gemini_log_1784165145492",
+        "gemini_log_1784165241829",
+        "gemini_log_1784166614910",
+        "gemini_log_1784166615925",
+        "gemini_log_1784166615933",
+        "language",
+        "local-themes",
+        "most-recently-installed-version",
+        "mx:webview-login-notified",
+        "obsidian-account",
+        "pdfjs.history",
+        "pdfjs.sidebarView",
+        "spellcheck-languages",
+        "tg-requires-reload"
+      ]
+    },
+    "blockingModals": {
+      "trust": {
+        "present": false,
+        "clicked": null
+      },
+      "strayModalsClosed": [],
+      "releaseNotes": {
+        "detached": 0
+      }
+    },
+    "pluginActivation": {
+      "steps": [
+        "plugins.loadManifests()"
+      ],
+      "error": null,
+      "loaded": true,
+      "knownManifests": [
+        "baizer"
+      ],
+      "restrictedMode": false
+    },
+    "pluginLoaded": true,
+    "pluginSettingsWait": {
+      "instance": true,
+      "settingsLoaded": true,
+      "activeProvider": "anthropic",
+      "providers": [
+        "anthropic"
+      ],
+      "matched": true,
+      "waitedMs": 1
+    },
+    "settings": {
+      "tabId": "baizer",
+      "isOpen": true,
+      "popoutCreated": true,
+      "settingsPopoutWindowConfig": true,
+      "shouldUsePopout": true,
+      "settingsModalInMainDocument": false,
+      "providerCardsInMainDocument": 0,
+      "readyWaitedMs": 53
+    },
+    "pluginInfoFromMainWindow": {
+      "loaded": true,
+      "id": "baizer",
+      "version": "1.1.0"
+    },
+    "settingsPanelLocation": "popout-window",
+    "captureTarget": {
+      "id": "84F89D8B3B065DFCCE1F6C5D6B32E5FB",
+      "type": "page",
+      "url": "about:blank",
+      "title": "设置 - obsidian - Obsidian 1.15.0"
+    },
+    "advancedSections": {
+      "opened": [
+        "自定义请求头（高级）"
+      ],
+      "total": 1
+    },
+    "modelListRequest": {
+      "settled": false,
+      "via": "no-request",
+      "note": "no /models request seen; relying on the DOM stability wait",
+      "waitedMs": 8049
+    },
+    "modelListTrackers": [
+      {
+        "seen": 0,
+        "completed": 0,
+        "pending": 0,
+        "lastUrl": null,
+        "error": null
+      },
+      {
+        "seen": 0,
+        "completed": 0,
+        "pending": 0,
+        "lastUrl": null,
+        "error": null
+      }
+    ],
+    "domStability": {
+      "stable": true,
+      "signature": "6295|7|anthropic|false|5",
+      "settledAfterMs": 1590
+    },
+    "viewportControl": [
+      "Emulation.setDeviceMetricsOverride"
+    ],
+    "domStabilityAfterViewport": {
+      "stable": true,
+      "signature": "6295|7|anthropic|false|5",
+      "settledAfterMs": 1321
+    },
+    "advancedSectionsReopened": {
+      "opened": [
+        "自定义请求头（高级）"
+      ],
+      "total": 1
+    },
+    "sectionOpen": {
+      "found": true,
+      "index": 6,
+      "strategy": "data-section-id",
+      "cardCount": 11,
+      "contentFound": true,
+      "inViewport": true,
+      "fullyInViewport": true,
+      "scrollTop": 1712,
+      "contentTop": 23.77083396911621,
+      "contentBottom": 769.6458339691162,
+      "contentHeight": 745.875,
+      "viewportHeight": 1053,
+      "alsoOpened": [
+        "knowledge",
+        "guardian",
+        "appearance",
+        "plugin-skills"
+      ]
+    },
+    "obsidianVersionFromTitle": "1.15.0"
+  },
+  "image": {
+    "path": "docs/assets/capture-asr-2026-11-03-after-wide.png",
+    "bytes": 90399,
+    "width": 1353,
+    "height": 1053,
+    "requestedWidth": 1353,
+    "requestedHeight": 1053,
+    "sizeMatchesRequest": true
+  }
+}

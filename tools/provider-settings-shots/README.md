@@ -80,6 +80,7 @@ rebuilt revision), `--out`, `--label`, `--phase after` and `--revision`.
 | `--theme` | `dark` | `dark` or `light`; written to the vault and asserted in the report |
 | `--label` | PNG basename | Free-form label echoed into the report |
 | `--phase` | – | `before` / `after` |
+| `--open-section` | – | Comma-separated `data-section-id` list. The **first** id is opened and framed: its content is scrolled to the top of the viewport, which is what makes the two phases of a before/after pair comparable. Any further ids are only expanded, to give the page enough content below the anchor for that scroll to reach the top — a short section near the end of the page is otherwise clamped by `maxScrollTop` and each phase ends up anchored differently (measured on the video-transcription change: `contentTop` 459px before vs 33px after). Needed for any control outside the default-open `overview` / `connection` sections. |
 | `--revision` | – | Git revision the plugin was built from |
 | `--scenario` | – | JSON file installed as the plugin's `data.json` |
 | `--vault` | `%TEMP%\baizer-shots\obsidian` | Throwaway vault location |

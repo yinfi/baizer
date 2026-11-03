@@ -27,7 +27,7 @@ Baizer is not a chatbot bolted onto Obsidian. It is a single loop where every st
 AI handles ingestion, not just download.
 
 - **Web & articles**: `save_webpage` fetches a page, runs Readability to isolate the body, and converts it to clean Markdown with YAML frontmatter (`created`, `source`, `author`, `tags`), with extra handling for site-specific layouts.
-- **Video**: YouTube and Bilibili URLs are resolved to their transcripts/subtitles, then summarized by the model into a readable note.
+- **Video**: YouTube and Bilibili URLs are resolved to their transcripts/subtitles, then summarized by the model into a readable note. When a video has no subtitles, the audio is transcribed through a configurable OpenAI-compatible `/audio/transcriptions` endpoint (Settings -> Capture): the track is decoded to 16 kHz mono, split into silence-snapped chunks of at most 45 s, and the result keeps segment timestamps.
 - **Live search**: `web_search` pulls fresh results from the web (DuckDuckGo) when the answer isn't in the vault yet, returned as cited Markdown links.
 
 ### 2. Process — understand and reshape

@@ -79,6 +79,7 @@ const tests = [
   'test/clip-protocol.test.ts',
   'test/plugin-skill-generator.test.ts',
   'test/plugin-watcher.test.ts',
+  'test/asr-chunking.test.ts',
   'test/video-transcription.test.ts',
   'test/video-utils.test.ts',
   'test/web-clipper.test.ts',

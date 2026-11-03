@@ -4,10 +4,19 @@ import { Readability } from '@mozilla/readability';
 import { Tool, ToolContext } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
-import { ProviderConfig } from '../../../mcp/types';
+import {
+  NO_ASR_ENDPOINT_MESSAGE,
+  ProviderConfig,
+  ResolvedAsrConfig as ResolvedAsrConfigForExecutor,
+  resolveAsrConfig,
+} from '../../../mcp/types';
 import * as videoUtils from '../../../utils/video_utils';
 import { resolveSavedNotePath } from '../../../mcp/save-path';
-import { createVideoTranscriptionService } from '../../../services/video-transcription';
+import {
+  AudioTranscriptionResult,
+  createVideoTranscriptionService,
+  formatTimestampedTranscript,
+} from '../../../services/video-transcription';
 
 interface WebClipperDeps {
   getVideoTranscript: typeof videoUtils.getVideoTranscript;
@@ -18,7 +27,8 @@ interface WebClipperDeps {
     url: string;
     platform: 'youtube' | 'bilibili';
     provider: ProviderConfig;
-  }) => Promise<{ text: string; audioUrl: string }>;
+    asr: ResolvedAsrConfigForExecutor;
+  }) => Promise<AudioTranscriptionResult>;
 }
 
 const transcriptionService = createVideoTranscriptionService();
@@ -195,6 +205,51 @@ Task:
   }
 }
 
+/**
+ * 没有转录文本可写时的落点 —— 也就是改动前「平台没给字幕」走的同一条路：
+ * 有模型就让模型读标题/描述，没有就退化成纯链接笔记。
+ *
+ * 抽成函数是为了让「解析不出转写端点」那一支也能回到这里。门禁改动把这类用户
+ * （只配了 Anthropic、又没填转写端点）从原来的元数据摘要路径上拦了下来；
+ * 如果不显式回到这里，他们拿到的摘要会从「模型摘要」掉成
+ * buildMetadataFallbackSummary 的句子切分 —— 而他们本来什么设置都没改。
+ */
+async function buildNonTranscriptContent(params: {
+  transcript: videoUtils.VideoTranscript;
+  finalUrl: string;
+  baseTags: string[];
+  modelService: any;
+  deps: WebClipperDeps;
+}): Promise<string> {
+  const { transcript, finalUrl, baseTags, modelService, deps } = params;
+
+  if (modelService && (transcript.description || transcript.title)) {
+    deps.notice(`Summarizing ${transcript.platform} video from metadata...`);
+    const summary = await summarizeVideoMetadata(modelService, {
+      title: transcript.title,
+      description: transcript.description,
+    });
+
+    return buildVideoSummaryContent({
+      title: transcript.title,
+      finalUrl,
+      author: transcript.author || transcript.platform,
+      tags: baseTags,
+      summary: summary || buildMetadataFallbackSummary(transcript.title, transcript.description),
+      excerptText: transcript.description || transcript.title,
+      excerptHeading: 'Video Description',
+    });
+  }
+
+  deps.notice('Saving video link...');
+  return buildVideoLinkContent(
+    transcript.title,
+    finalUrl,
+    transcript.author || transcript.platform,
+    baseTags,
+  );
+}
+
 async function saveVideo(
   url: string,
   args: any,
@@ -224,63 +279,86 @@ async function saveVideo(
       excerptText: transcript.text,
       excerptHeading: 'Transcript Excerpt',
     });
-  } else if (transcript.needsTranscription && activeProvider?.type === 'openai-compatible') {
-    deps.notice(`Transcribing ${transcript.platform} audio...`);
-    try {
-      const transcription = await deps.transcribeVideoAudio({
-        url: finalUrl,
-        platform: transcript.platform,
-        provider: activeProvider,
-      });
-      const summary = await summarizeTranscript(modelService, {
-        title: transcript.title,
-        text: transcription.text,
-      });
+  } else if (transcript.needsTranscription) {
+    // 门禁从「activeProvider.type === 'openai-compatible'」改成「能否解析出转写端点」。
+    // 改动的理由：只配 Anthropic 的用户此前走不进这个分支，转写能力对他们等于不存在；
+    // 而「能不能转写」与「用哪个对话 provider」本来就是两件事 —— 转写端点是独立可配的。
+    // 什么都没配的 OpenAI 兼容用户仍然沿用 provider 的 baseUrl/apiKey，行为不变。
+    const asrConfig = resolveAsrConfig({
+      asr: ctx.settings,
+      provider: activeProvider,
+    });
 
-      content = buildVideoSummaryContent({
-        title: transcript.title,
+    if (!asrConfig) {
+      // 做不了就说做不了：明确告知原因与去处，而不是安静地退化成「只有元数据」的笔记。
+      // 但「没有转写端点」不等于「这篇笔记只能差一档」：仍然走与「平台没给字幕」
+      // 完全相同的元数据摘要路径，否则这次门禁改动会顺手把这类用户的摘要质量降一级。
+      deps.notice(NO_ASR_ENDPOINT_MESSAGE);
+      content = await buildNonTranscriptContent({
+        transcript,
         finalUrl,
-        author: transcript.author || transcript.platform,
-        tags: baseTags,
-        summary: summary || buildTranscriptFallbackSummary(transcription.text),
-        excerptText: transcription.text,
-        excerptHeading: 'Transcript Excerpt',
+        baseTags,
+        modelService,
+        deps,
       });
-    } catch (_) {
-      content = buildVideoSummaryContent({
-        title: transcript.title,
-        finalUrl,
-        author: transcript.author || transcript.platform,
-        tags: baseTags,
-        summary: buildMetadataFallbackSummary(transcript.title, transcript.description),
-        excerptText: transcript.description || transcript.title,
-        excerptHeading: 'Video Description',
-      });
+    } else {
+      deps.notice(`Transcribing ${transcript.platform} audio...`);
+      try {
+        const transcription = await deps.transcribeVideoAudio({
+          url: finalUrl,
+          platform: transcript.platform,
+          provider: activeProvider,
+          asr: asrConfig,
+        });
+
+        // 非致命说明（例如「解码失败，已回退整轨提交」）也要让用户看见。
+        for (const warning of transcription.warnings ?? []) {
+          deps.notice(warning);
+        }
+
+        const summary = await summarizeTranscript(modelService, {
+          title: transcript.title,
+          text: transcription.text,
+        });
+
+        // 有段级结果就用带时间戳的形式落进笔记（这是本次改造的可见产出之一）；
+        // 端点没回 segments 时才退回改动前的扁平文本。
+        const timestamped = formatTimestampedTranscript(transcription.segments || []);
+
+        content = buildVideoSummaryContent({
+          title: transcript.title,
+          finalUrl,
+          author: transcript.author || transcript.platform,
+          tags: baseTags,
+          summary: summary || buildTranscriptFallbackSummary(transcription.text),
+          excerptText: timestamped || transcription.text,
+          excerptHeading: timestamped ? 'Timestamped Transcript' : 'Transcript Excerpt',
+        });
+      } catch (error) {
+        // 改动前这里是 catch (_)：用户看到「Transcribing ...」之后拿到的是一篇
+        // 既没有转录、也不说明原因的笔记。失败必须可见，且必须带原因。
+        const reason = error instanceof Error && error.message ? error.message : String(error);
+        deps.notice(`Transcription failed: ${reason}`);
+        content = buildVideoSummaryContent({
+          title: transcript.title,
+          finalUrl,
+          author: transcript.author || transcript.platform,
+          tags: baseTags,
+          summary: buildMetadataFallbackSummary(transcript.title, transcript.description),
+          excerptText: `> [!warning] Audio transcription failed\n> ${reason}\n\n${transcript.description || transcript.title}`,
+          excerptHeading: 'Video Description',
+        });
+      }
     }
-  } else if (modelService && (transcript.description || transcript.title)) {
-    deps.notice(`Summarizing ${transcript.platform} video from metadata...`);
-    const summary = await summarizeVideoMetadata(modelService, {
-      title: transcript.title,
-      description: transcript.description,
-    });
-
-    content = buildVideoSummaryContent({
-      title: transcript.title,
-      finalUrl,
-      author: transcript.author || transcript.platform,
-      tags: baseTags,
-      summary: summary || buildMetadataFallbackSummary(transcript.title, transcript.description),
-      excerptText: transcript.description || transcript.title,
-      excerptHeading: 'Video Description',
-    });
   } else {
-    deps.notice('Saving video link...');
-    content = buildVideoLinkContent(
-      transcript.title,
+    // 既没有字幕、也没有可走的转写路径：模型读元数据，或者退化成纯链接。
+    content = await buildNonTranscriptContent({
+      transcript,
       finalUrl,
-      transcript.author || transcript.platform,
       baseTags,
-    );
+      modelService,
+      deps,
+    });
   }
 
   let filename = sanitizeTitle(args.filename || transcript.title);
