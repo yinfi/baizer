@@ -282,7 +282,7 @@ async function runTests() {
   await test('groups every field and keeps fields ordered inside the flow', () => {
     const groupOrder = getConnectionGroups().map(group => group.id);
 
-    for (const type of ['gemini', 'openai-compatible', 'anthropic'] as const) {
+    for (const type of ['openai-compatible', 'anthropic'] as const) {
       const fields = getConnectionFieldOrder(type);
       // 每个字段都必须归属于某个分组,否则它会掉出流程之外。
       fields.forEach(field => assert(
@@ -299,25 +299,25 @@ async function runTests() {
   });
 
   await test('only OpenAI-compatible exposes the API type (flavor) field', () => {
-    const hasFlavor = (type: 'gemini' | 'openai-compatible' | 'anthropic') =>
+    const hasFlavor = (type: 'openai-compatible' | 'anthropic') =>
       getConnectionFieldOrder(type).includes('apiFlavor');
 
     expect({
       openai: hasFlavor('openai-compatible'),
-      gemini: hasFlavor('gemini'),
       anthropic: hasFlavor('anthropic'),
-    }).toEqual({ openai: true, gemini: false, anthropic: false });
+    }).toEqual({ openai: true, anthropic: false });
   });
 
-  await test('Gemini hides the service address while Anthropic and OpenAI-compatible show it', () => {
-    const hasBaseUrl = (type: 'gemini' | 'openai-compatible' | 'anthropic') =>
+  await test('every surviving protocol shows the service address', () => {
+    // 'gemini' 被移除后不存在「地址不适用」的协议：两种协议都要填地址
+    // （各自的 SDK 在其后追加端点路径），故 baseUrl 对二者都必须出现在字段序里。
+    const hasBaseUrl = (type: 'openai-compatible' | 'anthropic') =>
       getConnectionFieldOrder(type).includes('baseUrl');
 
     expect({
-      gemini: hasBaseUrl('gemini'),
       openai: hasBaseUrl('openai-compatible'),
       anthropic: hasBaseUrl('anthropic'),
-    }).toEqual({ gemini: false, openai: true, anthropic: true });
+    }).toEqual({ openai: true, anthropic: true });
   });
 
   await test('identity and protocol fields come before address, model and test', () => {
@@ -407,10 +407,6 @@ async function runTests() {
     expect(getRequestPathSummary('openai-compatible', 'responses').pathTemplate)
       .toEqual('{baseUrl}/responses');
     expect(getRequestPathSummary('openai-compatible').baseUrlIncludesV1).toEqual(true);
-    assert(
-      getRequestPathSummary('gemini').pathTemplate.includes('generativelanguage.googleapis.com'),
-      'Gemini must show its fixed official endpoint',
-    );
   });
 
   await test('spells out the actual request path without doubling /v1', () => {
@@ -994,19 +990,17 @@ async function runTests() {
     expect({
       anthropic: getModelListEndpoint('anthropic', 'https://api.anthropic.com'),
       openai: getModelListEndpoint('openai-compatible', 'https://api.deepseek.com/'),
-      gemini: getModelListEndpoint('gemini', ''),
     }).toEqual({
       anthropic: 'https://api.anthropic.com/v1/models',
       openai: 'https://api.deepseek.com/models',
-      gemini: 'https://generativelanguage.googleapis.com/v1beta/models',
     });
   });
 
-  // ── 新增 provider 可选协议(含 Anthropic) ──
+  // ── 新增 provider 可选协议 ──
 
-  await test('offers all three protocols when adding a provider', () => {
+  await test('offers both surviving protocols when adding a provider', () => {
     expect(getProtocolOptions().map(option => option.value))
-      .toEqual(['gemini', 'openai-compatible', 'anthropic']);
+      .toEqual(['openai-compatible', 'anthropic']);
   });
 
   await test('seeds the new provider with the chosen protocol, not a hardcoded one', () => {
@@ -1034,26 +1028,28 @@ async function runTests() {
       .toEqual('https://gw.example.com');
     expect(buildNewProviderConfig('openai-compatible', 'O', '').baseUrl)
       .toEqual(DEFAULT_PROVIDERS.openai.baseUrl);
-    // Gemini 忽略服务地址,不该留一个日后会冒出来的值。
-    expect(buildNewProviderConfig('gemini', 'G', 'https://ignored.example.com').baseUrl).toEqual('');
   });
 
   await test('migrates the service address when the protocol changes', () => {
     expect({
-      // Gemini 不使用地址,清空。
-      toGemini: resolveBaseUrlOnProtocolChange('gemini', 'https://api.deepseek.com'),
-      // 从 Gemini 切过来时地址为空,填该协议的官方端点。
+      // 地址为空时填该协议的官方端点。
       toAnthropicFromEmpty: resolveBaseUrlOnProtocolChange('anthropic', ''),
       toOpenAiFromEmpty: resolveBaseUrlOnProtocolChange('openai-compatible', ''),
       // 其余情况保留用户填的值,交给就地校验提示。
       keepCustomGateway: resolveBaseUrlOnProtocolChange('anthropic', 'https://gw.example.com'),
     }).toEqual({
-      toGemini: '',
       toAnthropicFromEmpty: DEFAULT_PROVIDERS.anthropic.baseUrl,
       toOpenAiFromEmpty: DEFAULT_PROVIDERS.openai.baseUrl,
       keepCustomGateway: 'https://gw.example.com',
     });
-    expect(getDefaultBaseUrlForType('gemini')).toEqual('');
+    // 两种存活协议都有官方端点兜底——不存在「默认地址为空」的协议。
+    expect({
+      anthropic: getDefaultBaseUrlForType('anthropic'),
+      openai: getDefaultBaseUrlForType('openai-compatible'),
+    }).toEqual({
+      anthropic: DEFAULT_PROVIDERS.anthropic.baseUrl,
+      openai: DEFAULT_PROVIDERS.openai.baseUrl,
+    });
   });
 }
 

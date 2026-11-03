@@ -506,7 +506,7 @@ export function getSettingsFallbackCss(): string {
 .baizer-settings-inline-note.is-accent { color: var(--text-accent); background: color-mix(in srgb, var(--interactive-accent) 10%, transparent); }
 .baizer-settings-inline-hint { color: var(--text-muted); font-size: var(--font-smallest); }
 .baizer-full-width-textarea textarea { width: 100%; min-height: 110px; resize: vertical; }
-.gemini-danger-setting { border-left: 3px solid color-mix(in srgb, var(--text-error) 75%, transparent); padding-left: 10px; }
+.baizer-settings-danger-setting { border-left: 3px solid color-mix(in srgb, var(--text-error) 75%, transparent); padding-left: 10px; }
 
 /* ===== 记忆(Hindsight)面板 ===== */
 .baizer-memory-toolbar { display: flex; flex-direction: column; gap: 8px; }
@@ -684,7 +684,7 @@ function ensureSettingsFallbackStyles(): void {
 function getSettingsSections(): SettingsSectionMeta[] {
     return [
     { id: 'overview', title: t('Overview'), description: t('Configuration health and actions that need attention.'), keywords: ['overview', 'health', 'risk', 'status', '概览'] },
-    { id: 'connection', title: t('Connection'), description: t('Provider, API key, endpoint, model, and connection tests.'), keywords: ['provider', 'api key', 'base url', 'model', 'connection', 'openai', 'gemini', 'deepseek', 'qwen', '连接', '服务商'] },
+    { id: 'connection', title: t('Connection'), description: t('Provider, API key, endpoint, model, and connection tests.'), keywords: ['provider', 'api key', 'base url', 'model', 'connection', 'openai', 'anthropic', 'deepseek', 'qwen', '连接', '服务商'] },
     { id: 'behavior', title: t('Behavior'), description: t('Context budget, system prompt, and runtime behavior.'), keywords: ['behavior', 'runtime', 'context window', 'token', 'system prompt', 'persona', 'prompt', 'thinking', 'reasoning', '行为'] },
     { id: 'memory', title: t('Memory'), description: t('Memory retention, recall, search, and deletion.'), keywords: ['memory', 'hindsight', 'recall', 'forget', 'profile', 'privacy', 'observation', '记忆'] },
     { id: 'permissions', title: t('Permissions'), description: t('Vault write scope, file operations, plugin control, and confirmations.'), keywords: ['permissions', 'file creation', 'file modification', 'plugin control', 'confirm', '权限'] },
@@ -769,16 +769,14 @@ export const CONNECTION_FIELD_GROUP: Record<ConnectionFieldId, ConnectionGroupId
 /**
  * 按协议给出字段顺序。
  *
- * 两条显隐规则直接对应 issue 的两个验收点：
- * - 'apiFlavor' 只是 OpenAI 兼容协议的端点方言（Chat Completions / Responses），
- *   其它协议没有这个概念 —— 不渲染，才不会和「服务地址（Base URL）」再撞一次名。
- * - 'baseUrl' 对 Gemini 无意义（固定官方端点），故不渲染，而不是渲染一个禁用的空框
- *   （禁用框既读不出值也改不了，用户会以为整个字段坏了）。
+ * 显隐规则直接对应 issue 的验收点：'apiFlavor' 只是 OpenAI 兼容协议的端点方言
+ * （Chat Completions / Responses），其它协议没有这个概念 —— 不渲染，才不会和
+ * 「服务地址（Base URL）」再撞一次名。服务地址则两种协议都需要，故始终渲染。
  */
 export function getConnectionFieldOrder(type: ProviderType): ConnectionFieldId[] {
     const fields: ConnectionFieldId[] = ['providerName', 'protocol'];
     if (type === 'openai-compatible') fields.push('apiFlavor');
-    if (type !== 'gemini') fields.push('baseUrl');
+    fields.push('baseUrl');
     fields.push('apiKey', 'customHeaders', 'model', 'connectionTest');
     return fields;
 }
@@ -806,20 +804,15 @@ export function getRequestPathSummary(type: ProviderType, apiFlavor?: OpenAIApiF
             note: t('The service address must NOT include /v1 — the Anthropic SDK appends /v1/messages itself. The official endpoint is https://api.anthropic.com.'),
         };
     }
-    if (type === 'openai-compatible') {
-        const isResponses = apiFlavor === 'responses';
-        return {
-            pathTemplate: isResponses ? '{baseUrl}/responses' : '{baseUrl}/chat/completions',
-            baseUrlIncludesV1: true,
-            note: isResponses
-                ? t('The service address usually ends with /v1 — the OpenAI SDK appends /responses itself, so do not paste the full request path.')
-                : t('The service address usually ends with /v1 — the OpenAI SDK appends /chat/completions itself, so do not paste the full request path.'),
-        };
-    }
+    // 非 Anthropic 一律按 OpenAI 兼容描述（含磁盘上残留的未知 type）：
+    // 与 ModelService.buildModelForConfig 的降级方向保持一致，不凭空多出第三种说法。
+    const isResponses = apiFlavor === 'responses';
     return {
-        pathTemplate: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
-        baseUrlIncludesV1: false,
-        note: t('Gemini always uses the official endpoint, so there is no service address to configure.'),
+        pathTemplate: isResponses ? '{baseUrl}/responses' : '{baseUrl}/chat/completions',
+        baseUrlIncludesV1: true,
+        note: isResponses
+            ? t('The service address usually ends with /v1 — the OpenAI SDK appends /responses itself, so do not paste the full request path.')
+            : t('The service address usually ends with /v1 — the OpenAI SDK appends /chat/completions itself, so do not paste the full request path.'),
     };
 }
 
@@ -859,9 +852,6 @@ export function validateProviderName(value: string): FieldValidation {
  * 「连接失败」，用户根本猜不到原因。
  */
 export function validateBaseUrl(type: ProviderType, value: string): FieldValidation {
-    // Gemini 固定官方端点，服务地址不适用（该字段也不会渲染）。
-    if (type === 'gemini') return VALIDATION_OK;
-
     const trimmed = (value || '').trim();
     if (!trimmed) return invalidField(t('Base URL is required.'));
     if (!/^https?:\/\/[^\s]+$/i.test(trimmed)) {
@@ -1106,7 +1096,6 @@ export function getModelFieldState(input: {
 /** 连接测试探测的模型列表端点，用于把「测了什么」明确写进结果里。 */
 export function getModelListEndpoint(type: ProviderType, baseUrl: string): string {
     const base = (baseUrl || '').trim().replace(/\/+$/, '');
-    if (type === 'gemini') return 'https://generativelanguage.googleapis.com/v1beta/models';
     if (type === 'anthropic') {
         return `${base || DEFAULT_PROVIDERS.anthropic.baseUrl}/v1/models`;
     }
@@ -1200,31 +1189,28 @@ export interface ProtocolOption {
 
 /**
  * 协议在 UI 上的展示名。
- * 单独抽出来是因为服务商卡片此前把所有非 Gemini 协议都写成「OpenAI 兼容」——
+ * 单独抽出来是因为服务商卡片此前把所有非 OpenAI 兼容的协议都写成「OpenAI 兼容」——
  * 新增 anthropic 后卡片会直接把 Anthropic 说成 OpenAI 兼容。
  */
 export function getProtocolLabel(type: ProviderType): string {
-    if (type === 'gemini') return t('Gemini API');
     if (type === 'anthropic') return t('Anthropic Messages API');
     return t('OpenAI-compatible');
 }
 
-/** 服务商卡片上的协议标记（纯装饰，但三个协议各有各的记号）。 */
+/** 服务商卡片上的协议标记（纯装饰，但两种协议各有各的记号）。 */
 export function getProtocolGlyph(type: ProviderType): string {
-    if (type === 'gemini') return '◈';
     if (type === 'anthropic') return '⬡';
     return '◎';
 }
 
 /** 协议下拉的唯一来源：详情页与新增模态框共用，避免两处选项各自漂移。 */
 export function getProtocolOptions(): ProtocolOption[] {
-    return (['gemini', 'openai-compatible', 'anthropic'] as ProviderType[])
+    return (['openai-compatible', 'anthropic'] as ProviderType[])
         .map(value => ({ value, label: getProtocolLabel(value) }));
 }
 
 /** 各协议的官方服务地址。直接读 DEFAULT_PROVIDERS，避免与冻结接口里的默认值各写一份。 */
 export function getDefaultBaseUrlForType(type: ProviderType): string {
-    if (type === 'gemini') return '';
     if (type === 'anthropic') return DEFAULT_PROVIDERS.anthropic.baseUrl;
     return DEFAULT_PROVIDERS.openai.baseUrl;
 }
@@ -1239,19 +1225,17 @@ export function buildNewProviderConfig(type: ProviderType, label: string, baseUr
         type,
         label: (label || '').trim(),
         apiKey: '',
-        // Gemini 忽略服务地址，存下来只会在切回其它协议时冒出一个不该在的值。
-        baseUrl: type === 'gemini' ? '' : (trimmedUrl || getDefaultBaseUrlForType(type)),
+        baseUrl: trimmedUrl || getDefaultBaseUrlForType(type),
         model: '',
     };
 }
 
 /**
  * 协议切换时服务地址怎么迁移。
- * 从 Gemini 切过来时地址必为空（Gemini 不使用它），此时填官方端点；
- * 其余情况保留用户填的值 —— 不清空、不猜测，交给就地校验去提示地址是否适用于新协议。
+ * 地址为空（用户没填过）时填新协议的官方端点；其余情况保留用户填的值
+ * —— 不清空、不猜测，交给就地校验去提示地址是否适用于新协议。
  */
 export function resolveBaseUrlOnProtocolChange(nextType: ProviderType, previousBaseUrl: string): string {
-    if (nextType === 'gemini') return '';
     const trimmed = (previousBaseUrl || '').trim();
     if (!trimmed) return getDefaultBaseUrlForType(nextType);
     return trimmed;
@@ -2337,7 +2321,8 @@ export class SettingTab extends PluginSettingTab {
                         }
                         // 仅当删的是当前激活项时才需要改选激活；删其它项保持当前激活不变。
                         if (providerId === settings.activeProvider) {
-                            settings.activeProvider = settings.providers.gemini ? 'gemini' : Object.keys(settings.providers)[0];
+                            // 第一项兜底；全删光时退回出厂默认，避免 activeProvider 变成 undefined。
+                            settings.activeProvider = Object.keys(settings.providers)[0] || DEFAULT_SETTINGS.activeProvider;
                             this.revealApiKey = false;
                             this.resetConnectionTestStatus();
                         }
@@ -2517,57 +2502,47 @@ export class SettingTab extends PluginSettingTab {
 
     /** 第 2 组：连接地址与凭证。 */
     private renderCredentialsGroup(group: HTMLElement, activeConfig: ProviderConfig): void {
-        // 字段显隐取自纯函数：Gemini 没有可配置的服务地址。
-        const fields = getConnectionFieldOrder(activeConfig.type);
+        // 服务地址是两种协议都需要的字段（端点路径由各自的 SDK 追加），故这里无条件渲染；
+        // 会随协议隐藏的只有 apiFlavor，见 renderProtocolGroup。
+        this.renderConnectionField(group, t('Service address (Base URL)'), (valueEl) => {
+            const input = valueEl.createEl('input', {
+                cls: 'baizer-settings-detail-input',
+                attr: {
+                    type: 'text',
+                    placeholder: getDefaultBaseUrlForType(activeConfig.type),
+                    'aria-label': t('Service address (Base URL)'),
+                    spellcheck: 'false',
+                    autocomplete: 'off',
+                },
+            }) as HTMLInputElement;
+            input.value = activeConfig.baseUrl;
+            // 完整值可悬停查看，输入框本身可编辑全文——不靠截断当唯一手段。
+            input.title = activeConfig.baseUrl;
 
-        if (!fields.includes('baseUrl')) {
-            // 该协议没有可配置的服务地址（目前只有 Gemini）：不渲染一个禁用的空地址框
-            // （禁用框读不出也改不了），直接说明端点固定，这才是「仅显示适用字段」。
-            group.createDiv({
-                cls: 'baizer-settings-inline-note',
-                text: describeRequestPath(activeConfig.type, activeConfig.apiFlavor, ''),
-            });
-        } else {
-            this.renderConnectionField(group, t('Service address (Base URL)'), (valueEl) => {
-                const input = valueEl.createEl('input', {
-                    cls: 'baizer-settings-detail-input',
-                    attr: {
-                        type: 'text',
-                        placeholder: getDefaultBaseUrlForType(activeConfig.type),
-                        'aria-label': t('Service address (Base URL)'),
-                        spellcheck: 'false',
-                        autocomplete: 'off',
-                    },
-                }) as HTMLInputElement;
-                input.value = activeConfig.baseUrl;
-                // 完整值可悬停查看，输入框本身可编辑全文——不靠截断当唯一手段。
-                input.title = activeConfig.baseUrl;
+            const feedback = createFieldFeedback(valueEl);
+            const pathHint = valueEl.createDiv({ cls: 'baizer-settings-field-hint' });
+            const sync = (): void => {
+                feedback(validateBaseUrl(activeConfig.type, input.value));
+                pathHint.setText(describeRequestPath(activeConfig.type, activeConfig.apiFlavor, input.value));
+            };
 
-                const feedback = createFieldFeedback(valueEl);
-                const pathHint = valueEl.createDiv({ cls: 'baizer-settings-field-hint' });
-                const sync = (): void => {
-                    feedback(validateBaseUrl(activeConfig.type, input.value));
-                    pathHint.setText(describeRequestPath(activeConfig.type, activeConfig.apiFlavor, input.value));
-                };
-
-                input.addEventListener('input', () => {
-                    input.title = input.value;
-                    activeConfig.baseUrl = input.value;
-                    sync();
-                    this.debouncedPersist();
-                });
-                input.addEventListener('change', () => {
-                    activeConfig.baseUrl = input.value;
-                    this.resetConnectionTestStatus();
-                    this.flushPersistedEdits();
-                });
+            input.addEventListener('input', () => {
+                input.title = input.value;
+                activeConfig.baseUrl = input.value;
                 sync();
-            }, {
-                // 帮助文字由 sync() 实时给出（含当前地址解析出的实际请求路径），
-                // 这里不再加一条静态 hint，否则同一件事会出现两行、且静态那行会过期。
-                required: true,
+                this.debouncedPersist();
             });
-        }
+            input.addEventListener('change', () => {
+                activeConfig.baseUrl = input.value;
+                this.resetConnectionTestStatus();
+                this.flushPersistedEdits();
+            });
+            sync();
+        }, {
+            // 帮助文字由 sync() 实时给出（含当前地址解析出的实际请求路径），
+            // 这里不再加一条静态 hint，否则同一件事会出现两行、且静态那行会过期。
+            required: true,
+        });
 
         this.renderConnectionField(group, t('API Key'), (valueEl) => {
             const input = valueEl.createEl('input', {
@@ -3032,7 +3007,7 @@ export class SettingTab extends PluginSettingTab {
         new Setting(advancedBody)
             .setName(t('Allow Plugin Control'))
             .setDesc(t('Let AI execute commands from other plugins.'))
-            .setClass('gemini-danger-setting')
+            .setClass('baizer-settings-danger-setting')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.allowPluginControl)
                 .onChange(async (value: boolean) => {
@@ -3802,7 +3777,7 @@ class AddProviderModal extends Modal {
                         return;
                     }
                     // 服务地址留空时由 buildNewProviderConfig 用该协议的官方端点兜底；
-                    // 填了就按该协议的规则就地校验（Gemini 忽略地址，不校验）。
+                    // 填了就按该协议的规则就地校验。
                     const baseUrlValidation = validateBaseUrl(typeValue, baseUrlValue);
                     if (baseUrlValue.trim() && baseUrlValidation.state === 'error') {
                         new Notice(baseUrlValidation.message);

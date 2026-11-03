@@ -13,7 +13,7 @@
  * 方案（三级传输链）
  * -----------------
  * 在全局安装 fetch 垫片（main.ts onload 最早处调用），按序尝试：
- *   1. 原生 fetch —— CORS 友好的端点（DeepSeek 官方、Gemini 等）保持浏览器
+ *   1. 原生 fetch —— CORS 友好的端点（DeepSeek 官方等）保持浏览器
  *      原生语义与流式，行为完全不变；
  *   2. Node http/https 传输 —— 原生 fetch 抛 TypeError（CORS 拦截 / mixed
  *      content / 网络失败）时启用。Obsidian 桌面 renderer 的 CJS require 可
@@ -22,11 +22,10 @@
  *   3. requestUrl 兜底 —— Node 传输不可用（移动端）/失败时，用 Obsidian
  *      requestUrl 重放（绕过 CORS 但整体缓冲，功能完整、无流式）。
  *
- * 为什么能兜住 pi-ai / @google/generative-ai：
+ * 为什么能兜住 pi-ai 的 provider 实现：
  *   - openai SDK 每次 new OpenAI(...) 时通过 `options.fetch ?? getDefaultFetch()`
  *     捕获全局 fetch（pi-ai 的 createClient 每次调用都新建 client），垫片在
- *     模块加载后安装即可被后续所有请求拾取；
- *   - generative-ai 在请求时刻动态引用全局 fetch。
+ *     模块加载后安装即可被后续所有请求拾取。
  */
 
 import { requestUrl as obsidianRequestUrl } from 'obsidian';

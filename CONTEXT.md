@@ -186,7 +186,7 @@ not own the loop.
 
 **Provider** — the service an inference request goes to, plus the credentials and
 address needed to reach it. One provider offers many models; exactly one is
-active at a time. Two shapes exist: Gemini and OpenAI-compatible.
+active at a time. Two shapes exist: OpenAI-compatible and Anthropic.
 
 **Model handle** — everything needed to talk to the model for one run, rebuilt
 fresh at the start of each one. This is why a settings change takes effect on the

@@ -985,11 +985,13 @@ async function runTests() {
       expect(source.includes('// node_modules/@anthropic-ai/sdk/')).toBe(false);
     });
 
-    await test('bundle: keeps google/openai catalogs but drops the unused provider catalogs', () => {
+    await test('bundle: keeps the openai catalog and drops the unused provider catalogs', () => {
       const source = readFileSync('dist/main.js', 'utf8');
-      // 保留的两家 provider 真的读自己的目录，掏空会让 gemini/openai 退化成「没有模型」
-      expect(source.includes('providers/data/google.json')).toBe(true);
+      // 保留的那家 provider 真的读自己的目录，掏空会让 openai 退化成「没有模型」
       expect(source.includes('providers/data/openai.json')).toBe(true);
+      // 'gemini' 协议移除后 pi 的 google provider 不再保留（见 esbuild.config.mjs 的
+      // KEPT_PI_PROVIDERS），于是 google.json 与其余用不到的目录一样离开包。
+      expect(source.includes('providers/data/google.json')).toBe(false);
       // 用不到的 provider 目录（近 1MB）必须不在包里
       expect(source.includes('providers/data/openrouter.json')).toBe(false);
       expect(source.includes('providers/data/amazon-bedrock.json')).toBe(false);

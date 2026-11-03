@@ -3363,7 +3363,7 @@ textarea.shell-input {
     resize: vertical;
 }
 
-.gemini-danger-setting {
+.baizer-settings-danger-setting {
     border-left: 3px solid color-mix(in srgb, var(--text-error) 75%, transparent);
     padding-left: 10px;
 }

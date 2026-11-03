@@ -58,8 +58,8 @@ function seedSnapshot(id: string, updatedAt: number): ConversationSnapshot {
     title: `Conversation ${id}`,
     createdAt: updatedAt - 20,
     updatedAt,
-    providerId: 'gemini',
-    modelId: 'gemini-2.5-flash',
+    providerId: 'deepseek',
+    modelId: 'deepseek-chat',
     currentNote: 'Notes/seed.md',
     messages: [{ id: `m-${id}`, role: 'user', content: `seed ${id}`, timestamp: updatedAt - 10 }],
   };
@@ -74,8 +74,8 @@ async function runTests() {
     const store = new FakeStore();
     const controller = new ConversationController({
       store: store as any,
-      getProviderId: () => 'gemini',
-      getModelId: () => 'gemini-2.5-flash',
+      getProviderId: () => 'deepseek',
+      getModelId: () => 'deepseek-chat',
       getCurrentNotePath: () => 'Notes/active.md',
       now: () => 100,
     });
@@ -95,8 +95,8 @@ async function runTests() {
       title: 'Discuss long term roadmap for team collaboration and know...',
       createdAt: 100,
       updatedAt: 100,
-      providerId: 'gemini',
-      modelId: 'gemini-2.5-flash',
+      providerId: 'deepseek',
+      modelId: 'deepseek-chat',
       currentNote: 'Notes/active.md',
       messages: [
         {
@@ -117,8 +117,8 @@ async function runTests() {
     const store = new FakeStore();
     const controller = new ConversationController({
       store: store as any,
-      getProviderId: () => 'gemini',
-      getModelId: () => 'gemini-2.5-flash',
+      getProviderId: () => 'deepseek',
+      getModelId: () => 'deepseek-chat',
       now: () => 200,
     });
     const manager = new TabManager({ createId: () => 'new-tab' });
@@ -140,8 +140,8 @@ async function runTests() {
     store.conversations = [seedSnapshot('new', 50), seedSnapshot('old', 20)];
     const controller = new ConversationController({
       store: store as any,
-      getProviderId: () => 'gemini',
-      getModelId: () => 'gemini-2.5-flash',
+      getProviderId: () => 'deepseek',
+      getModelId: () => 'deepseek-chat',
       now: () => 200,
     });
 
@@ -157,8 +157,8 @@ async function runTests() {
     store.conversations = [seedSnapshot('saved-1', 80)];
     const controller = new ConversationController({
       store: store as any,
-      getProviderId: () => 'gemini',
-      getModelId: () => 'gemini-2.5-flash',
+      getProviderId: () => 'deepseek',
+      getModelId: () => 'deepseek-chat',
       now: () => 200,
     });
 

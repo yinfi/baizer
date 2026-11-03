@@ -26,14 +26,19 @@ async function runTests() {
   // 不再来自已删除的 GeminiProvider/OpenAIProvider 实例。
   const { getProviderCapabilities } = await import('../src/services/model-catalog-service');
 
-  await test('gemini config declares image and thinking support', async () => {
-    expect(getProviderCapabilities({ type: 'gemini' } as any)).toEqual({
+  await test('an unknown/removed provider type falls back to the documented defaults', async () => {
+    // 兜底分支的取值刻意沿用移除 'gemini' 之前的形态（见 model-catalog-service.ts）：
+    // 它服务的场景是「配置读不出来」，不是「还有第三种协议」。故这里连历史上
+    // 的 'gemini' 字面量一起钉住 —— 磁盘上的旧 data.json 仍可能带着它。
+    const fallback = {
       supportsThinking: true,
       supportsModelListing: true,
       supportsImageInput: true,
       supportsToolCalling: true,
       supportsCustomBaseUrl: false,
-    });
+    };
+    expect(getProviderCapabilities({ type: 'gemini' } as any)).toEqual(fallback);
+    expect(getProviderCapabilities({ type: 'something-unknown' } as any)).toEqual(fallback);
   });
 
   await test('openai-compatible config declares custom base url support', async () => {
@@ -46,7 +51,7 @@ async function runTests() {
     });
   });
 
-  await test('missing config falls back to gemini capabilities', async () => {
+  await test('missing config falls back to the documented defaults', async () => {
     expect(getProviderCapabilities(undefined)).toEqual({
       supportsThinking: true,
       supportsModelListing: true,

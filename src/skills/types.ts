@@ -22,7 +22,7 @@ export interface ToolContext {
 }
 
 /**
- * 工具参数定义（兼容 Gemini/OpenAI function calling schema）
+ * 工具参数定义（兼容 OpenAI/Anthropic function calling schema）
  */
 export interface ToolParameters {
   type: 'object';

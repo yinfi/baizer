@@ -71,9 +71,23 @@ if (!built) {
 
     expect(
       !bundledModule('@mistralai/mistralai'),
-      '@mistralai/mistralai is in the bundle. Baizer only supports Gemini and ' +
-        'OpenAI-compatible providers; the stub in esbuild.config.mjs should have ' +
-        'kept this SDK out. Did the pi-ai internals change?',
+      '@mistralai/mistralai is in the bundle. Baizer only supports ' +
+        'openai-compatible and anthropic providers; the stub in esbuild.config.mjs ' +
+        'should have kept this SDK out. Did the pi-ai internals change?',
     );
+
+    // 'gemini' 协议移除后 pi 的 google provider / google-generative-ai api 都没有
+    // 调用方,于是 @google/genai(pi 的 google api 依赖)与 @google/generative-ai
+    // (旧视频转写旁路直接依赖)都必须离开单文件 bundle —— 这是本次「减少包大小」
+    // 最主要的一笔。它们回来了就说明 KEPT_PI_PROVIDERS / KEPT_PI_APIS 或
+    // STUBBED_PI_* 被改回去了。
+    for (const pkg of ['@google/genai', '@google/generative-ai']) {
+      expect(
+        !bundledModule(pkg),
+        `${pkg} is in the bundle. Google/Gemini support was removed, so no code ` +
+          `should reach it any more; check KEPT_PI_PROVIDERS / KEPT_PI_APIS and ` +
+          `STUBBED_PI_PROVIDERS / STUBBED_PI_APIS in esbuild.config.mjs.`,
+      );
+    }
   });
 }

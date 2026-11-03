@@ -163,6 +163,24 @@ addRow('secret action button rows', before.wrapping?.secretActionButtons?.distin
 addRow('secret action buttons wrapped', before.wrapping?.secretActionButtons?.wrappedOntoSeparateRows, after.wrapping?.secretActionButtons?.wrappedOntoSeparateRows);
 addRow('secret action container overflow', before.wrapping?.secretActionButtons?.overflowsContainer, after.wrapping?.secretActionButtons?.overflowsContainer);
 
+// ---- provider type dropdown -------------------------------------------------
+// The control this change is about. Its OPTION LIST is the claim ("the Gemini option is gone"), so
+// the option texts are compared as a row of their own rather than leaving the reader to infer it
+// from the selected value — a closed <select> only ever paints the selected option.
+const typeSelect = (report) => report.providerTypeSelect || {};
+const geminiOption = (report) => {
+  const texts = typeSelect(report).optionTexts || [];
+  return texts.some((text) => /gemini|google/i.test(text));
+};
+addRow('provider type select found', typeSelect(before).found, typeSelect(after).found);
+addRow('provider type select on screen', typeSelect(before).inViewport, typeSelect(after).inViewport);
+addRow('provider type select rendered as list', typeSelect(before).renderedAsList, typeSelect(after).renderedAsList);
+addRow('provider type option count', typeSelect(before).optionCount, typeSelect(after).optionCount);
+addRow('provider type options', typeSelect(before).optionTexts, typeSelect(after).optionTexts);
+addRow('provider type selected value', typeSelect(before).value, typeSelect(after).value);
+addRow('Gemini/Google option present', geminiOption(before), geminiOption(after));
+addRow('pane scrollTop after focus', num(typeSelect(before).scrollContext?.scrollTop), num(typeSelect(after).scrollContext?.scrollTop), 'px');
+
 // ---- overflow / overlap ----------------------------------------------------
 addRow('document horizontal overflow', num(before.overflow?.document?.overflowPx), num(after.overflow?.document?.overflowPx), 'px');
 addRow('containers checked', (before.overflow?.containers || []).filter((c) => c.found).length, (after.overflow?.containers || []).filter((c) => c.found).length);
@@ -179,7 +197,8 @@ const VERDICT_KEYS = [
   'allRequiredNodesPresent', 'pluginLoaded', 'themeMatchesExpectation',
   'noDocumentHorizontalOverflow', 'noContainerHorizontalOverflow', 'noInteractiveOverlap',
   'noUnreachableTruncatedValues', 'noEllipsizedStaticText', 'customHeadersHelpNotClipped',
-  'secretActionsOnOneRow', 'labelColumnConsistent', 'allPass',
+  'secretActionsOnOneRow', 'labelColumnConsistent',
+  'providerTypeSelectFound', 'providerTypeSelectOnScreen', 'allPass',
 ];
 const verdictRows = VERDICT_KEYS.map((k) => ({
   key: k,

@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Knowledge Wiki**: Ontology-driven note compilation into a searchable, self-updating knowledge base
 - **Hindsight Memory**: Local semantic memory (facts/experiences/observations) with recall, consolidation, and feedback lessons
 
-> Provider abstraction: `ProviderConfig` (in `src/mcp/types.ts`) supports `gemini`, `openai-compatible` and `anthropic` types. There is no longer a per-provider API wrapper — `pi-native-model.ts` maps each config to a pi-ai `Model` + `streamFn`. Anthropic uses pi-ai's native `anthropic-messages` api; the `@anthropic-ai/sdk` it expects is aliased at build time to `src/runtime/pi/anthropic-sdk-shim.ts` (see `esbuild.config.mjs`), because bundling the real SDK pushes the single-file output past Obsidian Sync's 5 MB limit.
+> Provider abstraction: `ProviderConfig` (in `src/mcp/types.ts`) supports `openai-compatible` and `anthropic` types. There is no longer a per-provider API wrapper — `pi-native-model.ts` maps each config to a pi-ai `Model` + `streamFn`. Anthropic uses pi-ai's native `anthropic-messages` api; the `@anthropic-ai/sdk` it expects is aliased at build time to `src/runtime/pi/anthropic-sdk-shim.ts` (see `esbuild.config.mjs`), because bundling the real SDK pushes the single-file output past Obsidian Sync's 5 MB limit.
 
 ## Build Commands
 
@@ -45,7 +45,7 @@ The system is layered: **UI entry points → `ModelService` (facade) → pi runt
 | `src/runtime/runtime-types.ts` | `ChatRuntime`/`ChatRuntimeDeps`/`PreparedChatTurn` interfaces |
 | `src/runtime/base-chat-runtime.ts` | `BaseChatRuntime` — the preparation layer: `prepareTurn` (prompt assembly: memory recall + time + context + skill list + slash contract + generation plan), skill resolution, short-confirmation/continuation handling, `retainCompletedTurn` |
 | `src/runtime/pi/harness-chat-runtime.ts` | `HarnessChatRuntime` — drives pi `agentLoop`, maps pi events → `StreamEvent`, handles approval termination, steering, and dynamic tool sets |
-| `src/runtime/pi/pi-native-model.ts` | Maps `ProviderConfig` → pi-ai `Model` + injects apiKey into `streamFn`/`completeFn` (`buildGeminiModel`/`buildOpenAICompatModel`/`createNativeStreamFn`/`createNativeCompleteFn`) |
+| `src/runtime/pi/pi-native-model.ts` | Maps `ProviderConfig` → pi-ai `Model` + injects apiKey into `streamFn`/`completeFn` (`buildOpenAICompatModel`/`buildAnthropicModel`/`createNativeStreamFn`/`createNativeCompleteFn`) |
 | `src/runtime/pi/pi-tool-adapter.ts` | Wraps Baizer tools as pi `AgentTool` (timeout, execution mode, approval `terminate`) |
 | `src/runtime/pi/pi-event-adapter.ts` / `pi-approval-policy.ts` | pi event → `StreamEvent` mapping; approval detection and final-text resolution |
 | `src/runtime/active-run-controller.ts` | Mid-run "steering": queue user follow-ups (next turn) and swap the active tool set |
@@ -94,7 +94,7 @@ The system is layered: **UI entry points → `ModelService` (facade) → pi runt
 
 5. **Guardian dual-path single-flight**: Fast completion (lightweight, aborted on each keystroke) and deep completion (manual or auto-escalated after a 1.2s dwell, reads knowledge-base summary text, not interrupted by typing) use two independent `AbortController`s. Each anchor escalates to deep at most once.
 
-6. **Settings Architecture**: All settings defined in `src/mcp/types.ts` with `DEFAULT_SETTINGS`, UI in `src/settings.ts`. Providers are a `providers: Record<string, ProviderConfig>` map with `activeProvider`; `loadSettings()` migrates the old flat format.
+6. **Settings Architecture**: All settings defined in `src/mcp/types.ts` with `DEFAULT_SETTINGS`, UI in `src/settings.ts`. Providers are a `providers: Record<string, ProviderConfig>` map with `activeProvider`; `loadSettings()` migrates the old flat format and prunes entries whose `type` is no longer supported (`pruneUnsupportedProviders`), repairing `activeProvider` to the first remaining provider if it pointed at a dropped entry.
 
 ## Shell Commands
 

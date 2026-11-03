@@ -5,7 +5,7 @@ import { logger } from '../utils/logger';
 import { ChatController, MessageAddedOptions } from './chat-controller';
 import { ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
-import { IPlugin, PLUGIN_ID, PLUGIN_NAME, VIEW_TYPE_SHELL } from '../mcp/types';
+import { DEFAULT_SETTINGS, IPlugin, PLUGIN_ID, PLUGIN_NAME, VIEW_TYPE_SHELL } from '../mcp/types';
 import { StreamEvent } from '../models/interfaces';
 import { buildCommandSuggestions, CommandSuggestion } from './command-suggestions';
 import { t } from '../i18n/zh';
@@ -1462,7 +1462,7 @@ export class ShellView extends ItemView {
         const settings = this.getPluginInstance()?.settings;
         if (!settings?.providers || !this.inputToolbar) return;
 
-        const activeProviderId = settings.activeProvider || 'gemini';
+        const activeProviderId = settings.activeProvider || DEFAULT_SETTINGS.activeProvider;
         const activeModelId = settings.providers[activeProviderId]?.model || '';
 
         const requestId = ++this.modelLoadRequestId;
@@ -1994,7 +1994,7 @@ export class ShellView extends ItemView {
     }
 
     private getActiveProviderId(): string {
-        return this.getPluginInstance()?.settings?.activeProvider || 'gemini';
+        return this.getPluginInstance()?.settings?.activeProvider || DEFAULT_SETTINGS.activeProvider;
     }
 
     private getActiveModelId(): string {

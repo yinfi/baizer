@@ -1,0 +1,149 @@
+{
+  "schema": "baizer-baseline-provenance/1",
+  "generatedAt": "2026-11-03T06:13:36.778Z",
+  "worktree": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff",
+  "revision": "c6b99e7",
+  "revisionTree": "fa4d502deef73e7b362c66f070e9be7d31a6a95f",
+  "head": "c6b99e791df391f5af5d8651da3e2d715e0e1d4f",
+  "headMatchesRevision": true,
+  "gitStatusPorcelain": "M CHANGELOG.md\n M CLAUDE.md\n M CONTEXT.md\n M README.md\n M README.zh-CN.md\n M THIRD-PARTY-LICENSES.md\n M docs/architecture/providers.md\n M test/anthropic-protocol.test.ts\n M test/bundle-size.test.ts\n M test/conversation-controller.test.ts\n M test/conversation-store.test.ts\n M test/history-menu.test.ts\n M test/input-toolbar.test.ts\n M test/knowledge-status-panel.test.ts\n M test/message-projection.test.ts\n M test/model-service.test.ts\n M test/pi-native-model.test.ts\n M test/provider-capabilities.test.ts\n M test/run-tests.ts\n M test/settings-connection-validation.test.ts\n M test/settings-provider-layout.test.ts\n M test/settings-state.test.ts\n M test/tab-manager.test.ts\n M test/video-transcription.test.ts\n M tools/provider-settings-shots/capture.mjs\n M tools/provider-settings-shots/compare-layout.mjs\n M tools/provider-settings-shots/lib/probe.mjs\n?? docs/assets/provider-settings-2026-11-03-nogoogle-after-narrow520.layout.json\n?? docs/assets/provider-settings-2026-11-03-nogoogle-after-narrow520.png\n?? docs/assets/provider-settings-2026-11-03-nogoogle-after-typeoptions-wide.layout.json\n?? docs/assets/provider-settings-2026-11-03-nogoogle-after-typeoptions-wide.png\n?? docs/assets/provider-settings-2026-11-03-nogoogle-after-wide.layout.json\n?? docs/assets/provider-settings-2026-11-03-nogoogle-after-wide.png\n?? docs/assets/provider-settings-2026-11-03-nogoogle-before-narrow520.layout.json\n?? docs/assets/provider-settings-2026-11-03-nogoogle-before-narrow520.png\n?? docs/assets/provider-settings-2026-11-03-nogoogle-before-typeoptions-wide.layout.json\n?? docs/assets/provider-settings-2026-11-03-nogoogle-before-typeoptions-wide.png\n?? docs/assets/provider-settings-2026-11-03-nogoogle-before-wide.layout.json\n?? docs/assets/provider-settings-2026-11-03-nogoogle-before-wide.png\n?? test/settings-provider-migration.test.ts\n?? tools/provider-settings-shots/baseline-provenance.mjs\n?? tools/provider-settings-shots/bundle-size-diff.mjs\n?? tools/provider-settings-shots/capture-summary.mjs\n?? tools/provider-settings-shots/metrics/nogoogle-after-provenance.metrics.json\n?? tools/provider-settings-shots/metrics/nogoogle-baseline-provenance.metrics.json\n?? tools/provider-settings-shots/metrics/nogoogle-bundle-size.metrics.json\n?? tools/provider-settings-shots/metrics/nogoogle-bundle-size.metrics.md\n?? tools/provider-settings-shots/metrics/nogoogle-captures.metrics.json\n?? tools/provider-settings-shots/metrics/nogoogle-captures.metrics.md\n?? tools/provider-settings-shots/metrics/nogoogle-narrow520.metrics.json\n?? tools/provider-settings-shots/metrics/nogoogle-narrow520.metrics.md\n?? tools/provider-settings-shots/metrics/nogoogle-typeoptions-wide.metrics.json\n?? tools/provider-settings-shots/metrics/nogoogle-typeoptions-wide.metrics.md\n?? tools/provider-settings-shots/metrics/nogoogle-wide.metrics.json\n?? tools/provider-settings-shots/metrics/nogoogle-wide.metrics.md\n?? tsc-test-full.txt",
+  "gitStatusPorcelainBundledInputs": null,
+  "artifact": {
+    "path": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\dist\\main.js",
+    "bytes": 3162611,
+    "sha256": "87D4B012FC0DDDFAE2FFCE642E04B59EEBAC73A140F9A1A82E3642C635F2A42A",
+    "mtime": "2026-11-03T06:05:55.832Z",
+    "metafilePath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\dist\\esbuild-meta.json",
+    "metafileBytes": 3162611,
+    "metafileMatchesArtifact": true,
+    "inputCount": 1228
+  },
+  "builtInPlace": {
+    "nodeModulesModuleComments": 1010,
+    "escapingModuleComments": 0,
+    "note": "a build that reaches node_modules through a junction emits `// ../../…` paths and is ~158 KB larger for this repo"
+  },
+  "markers": [
+    {
+      "marker": "@google/genai",
+      "occurrences": 0
+    },
+    {
+      "marker": "@google/generative-ai",
+      "occurrences": 0
+    },
+    {
+      "marker": "generativelanguage",
+      "occurrences": 0
+    },
+    {
+      "marker": "Gemini API",
+      "occurrences": 0
+    },
+    {
+      "marker": "generativelanguage.googleapis.com",
+      "occurrences": 0
+    },
+    {
+      "marker": "// node_modules/@google/",
+      "occurrences": 0
+    },
+    {
+      "marker": "Gemini",
+      "occurrences": 1
+    },
+    {
+      "marker": "gemini",
+      "occurrences": 4
+    }
+  ],
+  "markerNote": "Counts are case-sensitive and are taken from the built artifact. They are assertions about what the BUNDLE contains, not about the source tree: this build is not minified, so comments ship. A surviving `gemini` in a comment is not Google support, and a surviving api id is expected even after removal because pi-ai's compat registry names every api factory (the removed one is replaced by a stub that throws a readable error). Read them together with the module table in the bundle-size record.",
+  "notes": [
+    "After revision: c6b99e7, tree fa4d502deef73e7b362c66f070e9be7d31a6a95f, identical to pre-rebase 1f29a77 (same tree hash), so the artifact built before the rebase is this revision's build; it was also rebuilt here and came out byte-identical (sha256 87D4B012FC0DDDFAE2FFCE642E04B59EEBAC73A140F9A1A82E3642C635F2A42A).",
+    "ACCURATE CLAIM: no Google IMPLEMENTATION is bundled. @google/genai=0, @google/generative-ai=0, generativelanguage=0, 'Gemini API'=0, '// node_modules/@google/'=0. It is NOT true that the string appears nowhere: the build is unminified so comments ship. The single capital-G 'Gemini' is pi-ai's own comment '// Google (Gemini)' in node_modules/@earendil-works/pi-ai/dist/utils/overflow.js above a generic context-overflow regex (/maximum prompt length is \\\\d+/i) - third-party, not ours. The four lowercase 'gemini' are our own removal-documenting comments: src/mcp/types.ts (why 'openai' is now the factory default) and src/services/model-service.ts (why the default: branch stays a runtime safety net for types pruned from disk).",
+    "The 4 remaining occurrences of the string 'google-generative-ai' are the replacement STUB, not support: pi-ai's compat registry calls every api factory, so the id must still be named; the stubbed factory throws 'Baizer does not bundle the google-generative-ai api implementation' (530 B in the bundle, vs 14,258 B for the real module before)."
+  ],
+  "metafileInputs": {
+    "bundledSourceInputs": 124,
+    "sourceFilesOnDisk": 131,
+    "onDiskButNotBundled": [
+      "src/models/interfaces.ts",
+      "src/runtime/provider-capabilities.ts",
+      "src/runtime/runtime-types.ts",
+      "src/skills/md.d.ts",
+      "src/skills/types.ts",
+      "src/ui/tabs/types.ts",
+      "src/ui/types.ts"
+    ],
+    "unbundledClassification": [
+      {
+        "file": "src/models/interfaces.ts",
+        "typeOnly": true,
+        "bytes": 2889
+      },
+      {
+        "file": "src/runtime/provider-capabilities.ts",
+        "typeOnly": true,
+        "bytes": 201
+      },
+      {
+        "file": "src/runtime/runtime-types.ts",
+        "typeOnly": true,
+        "bytes": 8053
+      },
+      {
+        "file": "src/skills/md.d.ts",
+        "typeOnly": true,
+        "bytes": 123
+      },
+      {
+        "file": "src/skills/types.ts",
+        "typeOnly": true,
+        "bytes": 4139
+      },
+      {
+        "file": "src/ui/tabs/types.ts",
+        "typeOnly": true,
+        "bytes": 617
+      },
+      {
+        "file": "src/ui/types.ts",
+        "typeOnly": true,
+        "bytes": 2038
+      }
+    ],
+    "note": "a module is absent from the bundle only if it declares no runtime construct; that is scanned, not guessed from the filename",
+    "bundledButNotOnDisk": []
+  },
+  "sameBundleAs": [
+    {
+      "otherRevision": "1f29a77",
+      "bundledInputsIdentical": true,
+      "diffStat": null
+    }
+  ],
+  "treeIdenticalTo": [
+    {
+      "otherRevision": "1f29a77",
+      "otherTree": "fa4d502deef73e7b362c66f070e9be7d31a6a95f",
+      "revisionTree": "fa4d502deef73e7b362c66f070e9be7d31a6a95f",
+      "treesIdentical": true,
+      "fullTreeDiffStat": null
+    }
+  ],
+  "newestSourceMtime": {
+    "file": "src/skills/types.ts",
+    "mtime": "2026-11-03T05:58:33.970Z"
+  },
+  "artifactNewerThanSources": true,
+  "checks": {
+    "bundledInputsMatchRevisionTree": true,
+    "bundledInputsUnmodified": true,
+    "metafileMatchesArtifact": true,
+    "builtInPlace": true,
+    "bundledInputsIdenticalToComparedRevision": true,
+    "metafileInputsAllExistOnDisk": true,
+    "everyUnbundledSourceFileIsTypeOnly": true
+  },
+  "allChecksPass": true
+}

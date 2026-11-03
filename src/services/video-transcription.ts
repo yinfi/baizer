@@ -4,14 +4,18 @@
  * ⚠️ 这是全项目唯一有意保留的「非 pi runtime」LLM 调用点，属于显式例外：
  * pi-ai 的 Model.input 只支持 ("text" | "image")，没有 audio 模态，
  * UserMessage.content 也只接受 text/image 块，无法承载音频转写任务。
- * 因此这里直接用 @google/generative-ai SDK（Gemini）或 OpenAI-compatible 的
- * /audio/transcriptions 端点（Whisper），绕过 model-service 与 pi runtime。
+ * 因此这里直接打 OpenAI-compatible 的 /audio/transcriptions 端点（Whisper），
+ * 绕过 model-service 与 pi runtime。
+ *
+ * 历史上这里还有一条 Gemini 分支（直接用 @google/generative-ai SDK 以 inlineData
+ * 提交音频）。'gemini' 协议整体移除后，该分支与那个依赖一起删除：调用方
+ * （web-clipper/executor.ts）本来就在 activeProvider.type === 'openai-compatible'
+ * 时才走到这里，故删除它不改变任何可达路径的行为。
  *
  * 不依赖 src/models 旧 provider 层——只用 ProviderConfig 读取凭证/端点。
  * 若将来 pi-ai 支持 audio 输入，应将此并入统一 runtime。
  */
 import { requestUrl } from 'obsidian';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ProviderConfig } from '../mcp/types';
 import { extractJsonAssignment } from '../utils/video_utils';
 
@@ -20,37 +24,15 @@ interface AudioTranscriptionResult {
   audioUrl: string;
 }
 
-interface GeminiModelLike {
-  generateContent(parts: any): Promise<{ response: { text(): string } }>;
-}
-
 interface VideoTranscriptionDeps {
   requestUrl: typeof requestUrl;
   fetchImpl: typeof fetch;
-  createGeminiModel: (provider: ProviderConfig) => GeminiModelLike;
 }
 
 const defaultDeps: VideoTranscriptionDeps = {
   requestUrl: (options) => requestUrl(options),
   fetchImpl: (input, init) => fetch(input, init),
-  createGeminiModel: (provider) => {
-    const genAI = new GoogleGenerativeAI(provider.apiKey);
-    return genAI.getGenerativeModel({ model: provider.model });
-  },
 };
-
-function toBase64(buffer: ArrayBuffer): string {
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(new Uint8Array(buffer)).toString('base64');
-  }
-
-  let binary = '';
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
 
 function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, '')}${path}`;
@@ -158,29 +140,6 @@ async function transcribeWithOpenAICompatible(params: {
   return text;
 }
 
-async function transcribeWithGemini(params: {
-  provider: ProviderConfig;
-  audioBuffer: ArrayBuffer;
-  deps: VideoTranscriptionDeps;
-}): Promise<string> {
-  const model = params.deps.createGeminiModel(params.provider);
-  const base64Audio = toBase64(params.audioBuffer);
-  const result = await model.generateContent([
-    'Transcribe the speech in this audio. Return only the transcript text.',
-    {
-      inlineData: {
-        data: base64Audio,
-        mimeType: 'audio/mp4',
-      },
-    },
-  ]);
-  const text = result.response.text().trim();
-  if (!text) {
-    throw new Error('Gemini transcription returned empty text');
-  }
-  return text;
-}
-
 export function createVideoTranscriptionService(partialDeps: Partial<VideoTranscriptionDeps> = {}) {
   const deps: VideoTranscriptionDeps = {
     ...defaultDeps,
@@ -199,17 +158,11 @@ export function createVideoTranscriptionService(partialDeps: Partial<VideoTransc
         deps,
       });
 
-      const text = params.provider.type === 'gemini'
-        ? await transcribeWithGemini({
-            provider: params.provider,
-            audioBuffer,
-            deps,
-          })
-        : await transcribeWithOpenAICompatible({
-            provider: params.provider,
-            audioBuffer,
-            deps,
-          });
+      const text = await transcribeWithOpenAICompatible({
+        provider: params.provider,
+        audioBuffer,
+        deps,
+      });
 
       return {
         text,

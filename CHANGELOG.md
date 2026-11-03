@@ -7,6 +7,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- **Google Gemini support removed** to shrink the bundle. `ProviderConfig.type`
+  is now `openai-compatible` or `anthropic`; the Gemini protocol, its built-in
+  provider entry, and the Google SDKs it pulled in are gone. Video transcription
+  now uses the OpenAI-compatible `/audio/transcriptions` (Whisper) path only.
+- **Breaking:** a saved provider of the removed type is dropped when settings
+  load. Its API key and model are not migrated, and if it was the active
+  provider, the active provider is repaired to the first remaining one (normally
+  `openai`, unconfigured). The drop is in memory only — the entry leaves
+  `data.json` on the next settings save, so downgrading does not lose it.
+- `dist/main.js` shrinks from 4,137,811 B (3.95 MiB) to 3,162,611 B (3.02 MiB):
+  -975,200 B (-952.34 KiB, -23.57%). 916,486 B of that is the two removed Google
+  SDKs (`@google/genai` 876,277 B and `@google/generative-ai` 40,209 B).
+
 ## [1.0.1]
 
 - `authorUrl` now points at the author's profile instead of the plugin's own
@@ -40,6 +55,20 @@ _[English](#changelog) · 简体中文_
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),并遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [Unreleased]
+
+- **移除 Google Gemini 支持**以缩减包体积。`ProviderConfig.type` 现在只有
+  `openai-compatible` 与 `anthropic`;Gemini 协议、其内置 provider 条目以及它
+  引入的 Google SDK 一并删除。视频转写改为只走 OpenAI 兼容的
+  `/audio/transcriptions`(Whisper)路径。
+- **破坏性变更:** 已保存的、类型为已移除协议的 provider 会在设置加载时被丢弃。
+  其 API 密钥与模型不会被迁移;若它正是当前激活的 provider,激活项会被修复为
+  剩余的第一个 provider(通常是尚未配置的 `openai`)。丢弃只发生在内存中 ——
+  该条目要到下次保存设置时才会从 `data.json` 消失,因此降级回旧版本不会丢失它。
+- `dist/main.js` 从 4,137,811 B(3.95 MiB)缩减到 3,162,611 B(3.02 MiB):
+  减少 975,200 B(-952.34 KiB,-23.57%)。其中 916,486 B 来自被移除的两个
+  Google SDK(`@google/genai` 876,277 B、`@google/generative-ai` 40,209 B)。
 
 ## [1.0.1]
 

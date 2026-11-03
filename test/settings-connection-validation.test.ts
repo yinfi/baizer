@@ -1,5 +1,6 @@
 import { setLocaleForTesting } from '../src/i18n/zh';
 import {
+  getProtocolOptions,
   validateBaseUrl,
   validateCustomHeaders,
   validateProviderName,
@@ -54,9 +55,16 @@ async function runTests() {
 
   // ── 服务地址：格式、必填、以及「不能带端点路径」 ──
 
-  await test('treats the service address as not applicable to Gemini', () => {
-    expect(validateBaseUrl('gemini', '')).toEqual({ state: 'ok', message: '' });
-    expect(validateBaseUrl('gemini', 'not a url at all')).toEqual({ state: 'ok', message: '' });
+  // 'gemini' 被移除后不存在「地址不适用」的协议：每一种可选协议都必须填地址，
+  // 否则用户能选出一个永远发不出请求的配置。
+  await test('treats the service address as required for every offered protocol', () => {
+    for (const option of getProtocolOptions()) {
+      expect({
+        type: option.value,
+        empty: validateBaseUrl(option.value, '').state,
+        garbage: validateBaseUrl(option.value, 'not a url at all').state,
+      }).toEqual({ type: option.value, empty: 'error', garbage: 'error' });
+    }
   });
 
   await test('requires a service address for protocols that use one', () => {

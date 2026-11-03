@@ -305,8 +305,8 @@ async function runTests() {
       title: 'Restored',
       createdAt: 1,
       updatedAt: 2,
-      providerId: 'gemini',
-      modelId: 'gemini-2.5-flash',
+      providerId: 'deepseek',
+      modelId: 'deepseek-chat',
       messages: [
         { id: 'u-restored', role: 'user', content: 'Explain the decision', timestamp: 1 },
         {

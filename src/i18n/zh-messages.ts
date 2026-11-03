@@ -89,8 +89,6 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Sent with every request to this provider. The {{conversationId}} placeholder is skipped for one-off calls that have no conversation.':
         '每次向该服务商发请求时都会带上。对于没有会话的一次性调用，{{conversationId}} 占位符会被跳过。',
     'API Endpoint': 'API 端点',
-    'Default Gemini endpoint': '默认 Gemini 端点',
-    'Gemini API': 'Gemini API',
     'OpenAI-compatible': 'OpenAI 兼容',
     'Select a model': '选择模型',
     'Loading models...': '加载模型列表中…',
@@ -139,8 +137,6 @@ export const ZH_MESSAGES: Record<string, string> = {
         '服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /chat/completions，不要把完整请求路径粘进来。',
     'The service address usually ends with /v1 — the OpenAI SDK appends /responses itself, so do not paste the full request path.':
         '服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /responses，不要把完整请求路径粘进来。',
-    'Gemini always uses the official endpoint, so there is no service address to configure.':
-        'Gemini 固定使用官方端点，没有需要配置的服务地址。',
     'The wire protocol this provider speaks.': '该服务商使用的线协议。',
     'The wire protocol this provider speaks. Switching it only shows the fields that apply.':
         '该服务商使用的线协议。切换后只显示适用于该协议的字段。',

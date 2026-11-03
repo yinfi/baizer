@@ -753,19 +753,13 @@ async function runTests() {
     expect(models.some((model: any) => model.value === 'gpt-4o')).toEqual(true);
   });
 
-  // ---- Anthropic Messages 三分支接线 ----
-  // 这三条合起来锁住 issue #58 part 2 的核心回归：'anthropic' 绝不能静默落到
+  // ---- 协议分派接线 ----
+  // 这几条合起来锁住 issue #58 part 2 的核心回归：'anthropic' 绝不能静默落到
   // OpenAI-compatible 分支（那会发 /chat/completions 而不是 /v1/messages）。
 
-  await test('buildModelForConfig dispatches gemini / anthropic / openai-compatible explicitly', async () => {
+  await test('buildModelForConfig dispatches anthropic / openai-compatible explicitly', async () => {
     const service: any = Object.create(ModelService.prototype);
     service.settings = { contextWindow: 100000, thinkingLevel: 'medium' };
-
-    const gemini = service.buildModelForConfig({
-      type: 'gemini', label: 'Gemini', apiKey: 'k', baseUrl: '', model: 'gemini-2.5-flash',
-    });
-    expect(gemini.api).toEqual('google-generative-ai');
-    expect(gemini.provider).toEqual('google');
 
     const anthropic = service.buildModelForConfig({
       type: 'anthropic', label: 'Anthropic', apiKey: 'k',
@@ -784,6 +778,31 @@ async function runTests() {
     });
     expect(openai.api).toEqual('openai-completions');
     expect(openai.provider).toEqual('openai');
+  });
+
+  // 'gemini' 协议移除后，磁盘上残留的旧 type（如历史 data.json 里的 'gemini'）
+  // 会落到 default 分支。那条安全网是刻意的：宁可降级成 OpenAI-compatible 并
+  // warn，也不要让整个插件炸掉。注意 loadSettings 的 pruneUnsupportedProviders
+  // 已在正常路径上丢弃这些条目，故这里是「配置读不出来」时的最后一道防线。
+  await test('buildModelForConfig degrades an unknown/removed type to OpenAI-compatible instead of throwing', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.settings = { contextWindow: 100000, thinkingLevel: 'medium' };
+
+    const legacyGemini = service.buildModelForConfig({
+      type: 'gemini', label: 'Gemini', apiKey: 'k', baseUrl: '', model: 'gemini-2.5-flash',
+    });
+    // 不再有任何 google api：降级后走 OpenAI-compatible，端点回落到 OpenAI 官方地址。
+    expect(legacyGemini.api).toEqual('openai-completions');
+    expect(legacyGemini.provider).toEqual('openai');
+    expect(legacyGemini.baseUrl).toEqual('https://api.openai.com');
+    expect(legacyGemini.id).toEqual('gemini-2.5-flash');
+
+    const unknown = service.buildModelForConfig({
+      type: 'not-a-protocol', label: 'Mystery', apiKey: 'k',
+      baseUrl: 'https://gw.example.com/v1', model: 'm-1',
+    });
+    expect(unknown.api).toEqual('openai-completions');
+    expect(unknown.baseUrl).toEqual('https://gw.example.com/v1');
   });
 
   await test('buildModelForConfig threads settings.contextWindow/thinkingLevel into the anthropic model', async () => {

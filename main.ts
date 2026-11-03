@@ -1,7 +1,7 @@
 import { Plugin, Notice, MarkdownView, TFile, addIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
-import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, mergeProviderDefaults } from './src/mcp/types';
+import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, mergeProviderDefaults, pruneUnsupportedProviders } from './src/mcp/types';
 import { setLocale, Locale } from './src/i18n/zh';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
@@ -71,7 +71,7 @@ export default class BaizerPlugin extends Plugin {
     };
 
     async onload() {
-        // 必须在任何 LLM/HTTP 请求前安装：pi-ai 与 @google/generative-ai 都走全局
+        // 必须在任何 LLM/HTTP 请求前安装：pi-ai 的 provider/api 实现都走全局
         // fetch。部分 OpenAI-compatible 端点（如 opencode.ai）不返回 CORS 头，
         // 原生 fetch 失败后依次回退 Node http/https（无 CORS、真流式）与
         // requestUrl（Electron 主进程、绕过 CORS 但缓冲）。
@@ -328,15 +328,13 @@ export default class BaizerPlugin extends Plugin {
         // 数据迁移：旧扁平格式 → 新 providers map
         if (!raw.providers && (raw as any).provider) {
             const old = raw as any;
-            this.settings.activeProvider = old.provider || 'gemini';
+            // 旧格式的 provider 可能是已移除的 'gemini'：原样记下来即可，
+            // 下面的 activeProvider 修复步骤会把它挪到仍然存在的 provider 上。
+            this.settings.activeProvider = old.provider || 'openai';
+            // 旧格式里的 Google 凭证（old.apiKey / old.primaryModel）不再迁移：
+            // 'gemini' 协议已移除，把 Google 的 key 塞进一个 openai-compatible 条目
+            // 只会得到一个看着配好了、实际必然失败的 provider。
             this.settings.providers = {
-                'gemini': {
-                    type: 'gemini' as const,
-                    label: 'Google Gemini',
-                    apiKey: old.apiKey || '',
-                    baseUrl: '',
-                    model: old.primaryModel || 'gemini-2.5-flash'
-                },
                 'openai': {
                     type: 'openai-compatible' as const,
                     label: 'OpenAI',
@@ -377,8 +375,15 @@ export default class BaizerPlugin extends Plugin {
             this.settings.deletedProviderIds
         );
 
+        // 丢弃协议已不支持的 provider（历史 data.json 里的 type:'gemini'）。
+        // 必须排在修复 activeProvider 之前：否则 activeProvider 可能被修到一个
+        // 紧接着就要被删掉的 provider 上，用户看到的是「选中项不存在」。
+        // 这里只改内存，不落盘：条目要等用户下次保存设置时才从 data.json 里消失，
+        // 使降级回旧版本的用户不至于丢掉自己的配置。
+        this.settings.providers = pruneUnsupportedProviders(this.settings.providers);
+
         if (!this.settings.providers[this.settings.activeProvider]) {
-            this.settings.activeProvider = Object.keys(this.settings.providers)[0] || 'gemini';
+            this.settings.activeProvider = Object.keys(this.settings.providers)[0] || DEFAULT_SETTINGS.activeProvider;
         }
 
         // 应用用户设定的界面语言（默认 'auto' 跟随系统），供 t() 全局生效。

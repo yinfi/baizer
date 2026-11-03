@@ -34,12 +34,17 @@ if you want to view the source, please visit the github repository of this plugi
  * provider 是惰性 `import()`、且只有 9 个，故旧的「只存根 mistral」够用；
  * 1.3.0 下这 42 条链路（含各自的 SDK 与 `data/*.json` 模型目录）全被内联进单文件。
  *
- * Baizer 的 ProviderConfig 有 'gemini' / 'openai-compatible' / 'anthropic' 三种
- * （见 src/mcp/types.ts），`buildGeminiModel`/`buildOpenAICompatModel` 给出的
- * provider 是 'google' 与 'openai'，故这两家必须保留真实实现；
+ * Baizer 的 ProviderConfig 只有 'openai-compatible' / 'anthropic' 两种
+ * （见 src/mcp/types.ts），`buildOpenAICompatModel` 给出的 provider 是 'openai'，
+ * 故只有这一家必须保留真实实现；
  * 'anthropic' 走的是 **api 实现**（anthropic-messages，见下方 KEPT_PI_APIS），
  * 不需要 pi 的 anthropic provider（那份只提供静态模型目录数据，Baizer 自己造 Model），
- * 所以 anthropic.js 仍然存根 —— 其余 40 家（含 Mistral 的 1.2MB SDK）都是纯死重量。
+ * 所以 anthropic.js 仍然存根 —— 其余 41 家（含 google 背后的 @google/genai、
+ * Mistral 的 1.2MB SDK）都是纯死重量。
+ *
+ * google.js 曾经也在这份保留名单里：'gemini' 协议走的正是 pi 的 google provider。
+ * 该协议被移除后它再无调用方，于是与 google.json / google.models.js 及
+ * api/google-generative-ai.js 背后的 @google/genai 一起离开 bundle。
  *
  * 存根的返回值形状（关键，与 0.75.5 时代的"被调用就抛错"不同）：
  * `compat.js` 顶层会**立刻调用**每个 `<x>Provider()`，所以存根不能再靠抛错来占位
@@ -54,7 +59,7 @@ if you want to view the source, please visit the github repository of this plugi
  * 为什么在意体积：Obsidian Sync Standard 计划不同步超过 5MB 的文件，
  * 超限会让付费同步用户拿不到插件更新。
  */
-const KEPT_PI_PROVIDERS = ["google.js", "openai.js"];
+const KEPT_PI_PROVIDERS = ["openai.js"];
 
 const PI_PROVIDER_EXPORTS = [
 	{ file: "amazon-bedrock.js", exports: ["amazonBedrockProvider"] },
@@ -131,7 +136,7 @@ const stubUnusedPiProviders = {
 				// createProvider 走包根导出（index.js 不反向依赖 providers/，无循环）。
 				'import { createProvider } from "@earendil-works/pi-ai";',
 				`const BAIZER_STUB_MESSAGE =
-	"Baizer does not bundle the '${id}' provider. Configure a Gemini, OpenAI-compatible, or Anthropic provider instead.";`,
+	"Baizer does not bundle the '${id}' provider. Configure an OpenAI-compatible or Anthropic provider instead.";`,
 				...entry.exports.map(
 					(fn) => `export function ${fn}() {
 	return createProvider({
@@ -172,14 +177,18 @@ const stubUnusedPiProviders = {
  *   外加可去除的 <x>.models.js 代码            21,651 B
  * 这是 5 MB 硬限下唯一一块「近 1 MB 且零风险」的死重量，比 KEPT_PI_APIS 的取舍重要得多。
  *
+ * 上面两行是收窄 KEPT_PI_PROVIDERS 之前测的：'gemini' 协议移除后 google.js 也离开名单，
+ * 于是 google.json（磁盘上 14,532 B）与 google.models.js 一并进入「可去除」一侧。
+ * 方向不变，可去除的总量更大。
+ *
  * 今天为什么安全：这些目录只被两处消费，且都容忍空目录 ——
  *   - `providers/all.js` 的 getBuiltinModel/getBuiltinModels/getBuiltinProviders
  *     （`MODELS[p]?.[id]` 与 `Object.values(MODELS[p] ?? {})`）；
  *   - `image-models.js`（`Object.values(models)` 后 size > 0 才注册）。
- * Baizer 侧也不消费它们：Model 由 buildGeminiModel/buildOpenAICompatModel/
- * buildAnthropicModel 自建，模型清单走 model-catalog-service 的 REST。
+ * Baizer 侧也不消费它们：Model 由 buildOpenAICompatModel/buildAnthropicModel
+ * 自建，模型清单走 model-catalog-service 的 REST。
  *
- * ⚠️ 未来风险（下一个人必须先读这一段）：本插件让**非 google/openai 的那 40 家**
+ * ⚠️ 未来风险（下一个人必须先读这一段）：本插件让**非 openai 的那 41 家**
  * provider 在 pi 的静态目录里变成空的 —— `getBuiltinModels('<x>')` 返回 `[]`、
  * `getBuiltinModel('<x>', id)` 返回 `undefined`、`getBuiltinImageModels` 同理。
  * 今天完全看不出来（Baizer 不读它们），但**如果将来有人想用 pi 的静态目录**
@@ -189,9 +198,9 @@ const stubUnusedPiProviders = {
  * 而不是报错。判断依据就是 KEPT_PI_MODEL_CATALOGS：凡是被真正用到的 provider，
  * 必须同时出现在 KEPT_PI_PROVIDERS 与 KEPT_PI_MODEL_CATALOGS 里。
  *
- * 保留下来的两家必须留数据：`google.js` / `openai.js` 的工厂写作
- * `models: Object.values(GOOGLE_MODELS)`，掏空会让 gemini / openai 两个已支持
- * 协议当场退化成「没有模型」。故 KEPT_PI_MODEL_CATALOGS 与 KEPT_PI_PROVIDERS 同源。
+ * 保留下来的那一家必须留数据：`openai.js` 的工厂写作
+ * `models: Object.values(OPENAI_MODELS)`，掏空会让 openai-compatible 协议
+ * 当场退化成「没有模型」。故 KEPT_PI_MODEL_CATALOGS 与 KEPT_PI_PROVIDERS 同源。
  *
  * 导出名照抄真实文件：`models.generated.js` 按名字 import，少一个就 "No matching export"；
  * 若 pi-ai 换了生成写法导致解析不到导出名，这里出声失败而不是打出一个坏包。
@@ -243,9 +252,14 @@ const stubUnusedPiModelCatalogs = {
  * `openai`(25M)、`@anthropic-ai`(13M)、`@google/genai`(11M)、`@aws-sdk`(5.2M) 的
  * 相关子集就是 main.js 突破 5MB 的主因。
  *
- * Baizer 会用到四种 api（见 `buildGeminiModel`/`buildOpenAICompatModel`/`buildAnthropicModel`）：
- * `google-generative-ai`、`openai-completions`、`openai-responses`、`anthropic-messages`。
- * 其余 6 个存根。
+ * Baizer 会用到三种 api（见 `buildOpenAICompatModel`/`buildAnthropicModel`）：
+ * `openai-completions`、`openai-responses`、`anthropic-messages`。
+ * 其余 7 个存根。
+ *
+ * `google-generative-ai` 曾经是第四种（'gemini' 协议走它），它也是上面那串里最贵的
+ * 一个：pi 的 api/google-generative-ai.js 顶层依赖 @google/genai（实测 metafile
+ * 856 KB）。'gemini' 协议移除后它没有调用方，于是也进了存根名单 —— 这是本次
+ * 「减少包大小」最主要的一笔。
  *
  * 为什么可以直接替换 `.lazy.js` 而不必知道 `<x>.js` 的导出面：`lazyApi(load)` 只在
  * `stream`/`streamSimple` 被调用时才执行 `load()`（见 api/lazy.js），故存根只需保持
@@ -281,7 +295,6 @@ const stubUnusedPiModelCatalogs = {
  * pi-ai 升级若改了用法会让构建红掉，而不是打出一个悄悄坏掉的包。
  */
 const KEPT_PI_APIS = [
-	"google-generative-ai",
 	"openai-completions",
 	"openai-responses",
 	"anthropic-messages",
@@ -319,7 +332,7 @@ const stubUnusedPiApis = {
 			const file = args.path.replace("pi-api-stub:", "");
 			const entry = STUBBED_PI_APIS.find((p) => p.file === file);
 			// 不引入真实的 lazyApi：这些 api 只被 compat.js 的 `export *` 重新导出，
-			// 没有任何调用方（Baizer 保留的 google/openai provider 用的是各自 KEPT 的 api）。
+			// 没有任何调用方（Baizer 保留的 openai provider 用的是自己 KEPT 的 api）。
 			// 故直接给出同名导出 + 抛错的 stream/streamSimple 即可，无需 resolveDir。
 			const contents = `export const ${entry.export} = () => ({
 	stream: () => { throw new Error(BAIZER_STUB_MESSAGE); },
@@ -327,7 +340,7 @@ const stubUnusedPiApis = {
 });
 const BAIZER_STUB_MESSAGE =
 	"Baizer does not bundle the '${file}' api implementation. " +
-	"Configure a Gemini, OpenAI-compatible, or Anthropic provider instead.";`;
+	"Configure an OpenAI-compatible or Anthropic provider instead.";`;
 			return { contents, loader: "js" };
 		});
 	},

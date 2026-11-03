@@ -5,7 +5,7 @@
  * StreamFn 工厂。这是 Phase 1 的纯构造层——不改任何现有文件，只新增。
  *
  * 使用场景（Phase 2 接入时调用）：
- *   const model = buildGeminiModel(config, settings.contextWindow, settings.thinkingLevel);
+ *   const model = buildOpenAICompatModel(config, settings.contextWindow, settings.thinkingLevel);
  *   const streamFn = createNativeStreamFn(config.apiKey);
  *   // 然后把 model 和 streamFn 传给 pi agentLoop。
  */
@@ -93,47 +93,6 @@ const ANTHROPIC_THINKING_LEVEL_MAP = {
 const ANTHROPIC_MAX_TOKENS = 8192;
 
 /**
- * 把 Gemini provider 配置映射成 pi-ai Model。
- *
- * @param config        - 项目 ProviderConfig（type 必须为 'gemini'）
- * @param contextWindow - 模型上下文窗口 token 数；缺省回落到 DEFAULT_CONTEXT_WINDOW
- * @param thinkingLevel - 推理深度档位；'off' 关闭 reasoning，其余（含 undefined）开启
- */
-export function buildGeminiModel(
-  config: ProviderConfig,
-  contextWindow?: number,
-  thinkingLevel?: string,
-): Model<'google-generative-ai'> {
-  return {
-    id: config.model,
-    name: config.model,
-    // google-generative-ai：pi 使用此 api 值路由到 Google Generative AI provider
-    api: 'google-generative-ai',
-    provider: 'google',
-    // Gemini 官方端点，pi 会在此基础上拼接模型路径
-    baseUrl: 'https://generativelanguage.googleapis.com',
-    // thinkingLevel !== 'off' 时开启 reasoning（undefined 也视为开启）。
-    // 与 pi-provider-bridge.ts 的逻辑完全一致。
-    reasoning: thinkingLevel !== 'off',
-    // Gemini 支持文本和图像输入
-    input: ['text', 'image'],
-    // 成本字段全置 0：项目内部不做费用核算，pi 用于显示用途
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-    },
-    // 取真实配置的上下文窗口；缺省回落到默认值，避免 pi 内部预算判断出错
-    contextWindow: contextWindow && contextWindow > 0 ? contextWindow : DEFAULT_CONTEXT_WINDOW,
-    // Gemini 输出 token 上限（Phase 0 验证值）
-    maxTokens: 8192,
-    // Gemini 的 thinkingLevelMap 不显式设置，让 pi google provider 使用内置的
-    // thinking budget 默认值。reasoning flag（上方）控制是否开启思考。
-  };
-}
-
-/**
  * 把 OpenAI-compatible provider 配置映射成 pi-ai Model。
  * 覆盖 OpenAI 官方及所有兼容接口（DeepSeek、Qwen、自建 OpenAI-compat 服务等）。
  *
@@ -163,7 +122,7 @@ export function buildOpenAICompatModel(
     api,
     provider: 'openai',
     baseUrl,
-    // 同 Gemini：thinkingLevel !== 'off' 时开启 reasoning
+    // thinkingLevel !== 'off' 时开启 reasoning（undefined 也视为开启）
     reasoning: thinkingLevel !== 'off',
     // OpenAI-compat 同样支持文本和图像输入
     input: ['text', 'image'],
@@ -186,7 +145,7 @@ export function buildOpenAICompatModel(
 /**
  * 把 Anthropic 原生 Messages provider 配置映射成 pi-ai Model。
  *
- * 与 Gemini/OpenAI 两个构造器的关键差异：baseUrl 语义是「SDK 会在其上追加 /v1/messages」，
+ * 与 OpenAI-compatible 构造器的关键差异：baseUrl 语义是「SDK 会在其上追加 /v1/messages」，
  * 故官方端点**不带 /v1**（见 src/mcp/types.ts DEFAULT_PROVIDERS.anthropic 的注释）。
  * 用户填 https://api.anthropic.com 或任何兼容网关的根地址即可。
  *
@@ -213,7 +172,7 @@ export function buildAnthropicModel(
     api: 'anthropic-messages',
     provider: 'anthropic',
     baseUrl,
-    // 同 Gemini/OpenAI：thinkingLevel !== 'off' 时开启 reasoning
+    // 同 OpenAI-compatible：thinkingLevel !== 'off' 时开启 reasoning
     reasoning: thinkingLevel !== 'off',
     // Anthropic Messages 支持文本与图像 content block
     input: ['text', 'image'],
@@ -331,7 +290,7 @@ export type NativeCompleteFn = (
  * completeSimple 经动态 import 加载（与 createNativeStreamFn 同模式，规避 ESM-only 包
  * 在 CJS 测试环境的加载问题）。
  *
- * @param model  - 由 buildGeminiModel / buildOpenAICompatModel 构造的 pi-ai Model
+ * @param model  - 由 buildOpenAICompatModel / buildAnthropicModel 构造的 pi-ai Model
  * @param apiKey - 用户配置的 API 密钥（不存入 Model，每次调用经 options 透传）
  */
 export function createNativeCompleteFn(model: Model<any>, apiKey: string): NativeCompleteFn {

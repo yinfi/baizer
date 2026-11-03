@@ -9,8 +9,8 @@ import { logger } from '../utils/logger';
  *
  * pi-agent runtime 只覆盖「LLM 推理」；provider 的元能力（列模型 / 探活 / 能力声明）
  * pi 不提供动态版本（pi-ai 只有编译期静态 getModels()，无运行时 REST 探测）。
- * 为保留「用户自定义 baseUrl 下动态列模型」的能力，这些元能力从旧 GeminiProvider/
- * OpenAIProvider 剥离到此处，作为独立的 HTTP 元数据查询层。
+ * 为保留「用户自定义 baseUrl 下动态列模型」的能力，这些元能力从旧的 per-provider
+ * 包装层（已被 pi runtime 取代）剥离到此处，作为独立的 HTTP 元数据查询层。
  *
  * 关键区别：这里的调用都是纯 REST 元数据请求，**不触发任何 LLM 推理**，
  * 因此不属于 runtime 迁移范畴。checkAvailability 也改为轻量的端点 200 探测，
@@ -65,7 +65,7 @@ export interface ModelCatalogDeps {
   requestUrl: (options: any) => Promise<any>;
 }
 
-/** provider 类型 → 静态能力声明。原 GeminiProvider/OpenAIProvider.getCapabilities 是硬编码常量，此处按 type 直接返回。 */
+/** provider 类型 → 静态能力声明。旧 provider 层的 getCapabilities 是硬编码常量，此处按 type 直接返回。 */
 export function getProviderCapabilities(config: ProviderConfig | undefined): ProviderCapabilities {
   if (config?.type === 'openai-compatible') {
     return {
@@ -87,7 +87,9 @@ export function getProviderCapabilities(config: ProviderConfig | undefined): Pro
       supportsCustomBaseUrl: true,
     };
   }
-  // gemini（含未知类型的安全兜底）
+  // 未配置 / 未知 type 的安全兜底。取值沿用移除 'gemini' 之前的兜底分支，
+  // 以免为「配置读不出来」这种情况顺手改掉既有 UI 行为；loadSettings 已经用
+  // pruneUnsupportedProviders 丢掉不受支持的 type，所以正常路径不会落到这里。
   return {
     supportsThinking: true,
     supportsModelListing: true,
@@ -99,15 +101,13 @@ export function getProviderCapabilities(config: ProviderConfig | undefined): Pro
 
 /**
  * 拉取 provider 当前可用的模型列表（纯 REST，无 LLM）。
- * gemini 用 Generative Language models 端点；openai-compatible 用 /models；
- * anthropic 用 Anthropic Messages 的 /v1/models。
+ * openai-compatible 用 /models；anthropic 用 Anthropic Messages 的 /v1/models。
  * 失败抛错，由调用方回落到 fallback 列表。
  */
 export async function listModels(config: ProviderConfig, deps?: ModelCatalogDeps): Promise<ModelOption[]> {
   if (!config?.apiKey?.trim()) {
     throw new Error(`${config?.label || 'Provider'} API Key not configured`);
   }
-  if (config.type === 'gemini') return listGeminiModels(config);
   if (config.type === 'anthropic') return listAnthropicModels(config, deps);
   return listOpenAICompatModels(config);
 }
@@ -136,7 +136,7 @@ export interface AvailabilityStatus {
  *  - 404 / 405 / 501 → `{reachable:true, listingUnsupported:true}` —— 端点应答了，
  *    只是不提供模型清单；生成能力**未被验证**（真发一次推理会烧 token，故不在这里证伪）；
  *  - 其他任何失败（401、网络、解析）→ `{reachable:false, error}`。
- * gemini/openai 永远抛不出 ModelListingUnsupportedError，故它们恒为前两种之一，
+ * openai-compatible 永远抛不出 ModelListingUnsupportedError，故它恒为前两种之一，
  * 行为与改动前完全一致。
  */
 export async function checkAvailabilityWithStatus(
@@ -169,40 +169,6 @@ export async function checkAvailabilityWithStatus(
  */
 export async function checkAvailability(config: ProviderConfig, deps?: ModelCatalogDeps): Promise<boolean> {
   return (await checkAvailabilityWithStatus(config, deps)).reachable;
-}
-
-async function listGeminiModels(config: ProviderConfig): Promise<ModelOption[]> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(config.apiKey)}`;
-  const response = await requestUrl({ url, method: 'GET' });
-  if (response.status !== 200) {
-    throw new Error(`Gemini models API error: ${response.status}`);
-  }
-
-  const data = JSON.parse(response.text || '{}');
-  const models = Array.isArray(data?.models) ? data.models : [];
-
-  const options: ModelOption[] = models
-    .filter((model: any) => {
-      const methods = Array.isArray(model?.supportedGenerationMethods) ? model.supportedGenerationMethods : [];
-      const name = typeof model?.name === 'string' ? model.name : '';
-      return name.startsWith('models/') && methods.includes('generateContent');
-    })
-    .map((model: any) => {
-      const value = String(model.name).replace(/^models\//, '');
-      const displayName = typeof model?.displayName === 'string' && model.displayName.trim().length > 0
-        ? model.displayName.trim()
-        : value;
-      const label = displayName === value ? value : `${displayName} (${value})`;
-      return { value, label };
-    })
-    // 与 openai / anthropic 两个 lister 保持一致：丢掉空 id。
-    // `{"name":"models/"}` 会 map 出 value === '' 的选项，而 model-service 的
-    // `listed` 是在归一化之前按「原始清单非空」判定的，于是会得到「已列出 0 个模型」
-    // 却被标成可信来源的空下拉。空 id 不是模型，任何协议都不该保留。
-    .filter((option: ModelOption) => option.value.length > 0)
-    .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
-
-  return dedupeByValue(options);
 }
 
 async function listOpenAICompatModels(config: ProviderConfig): Promise<ModelOption[]> {
@@ -247,7 +213,7 @@ async function listOpenAICompatModels(config: ProviderConfig): Promise<ModelOpti
  * 这正是 src/mcp/types.ts 里把默认值定成不带 /v1 的原因。
  *
  * 响应形状：`{ data: [{ id, display_name?, ... }], has_more, ... }`。
- * display_name 可选，缺失时 label 退回 id（与 gemini 的处理方式一致）。
+ * display_name 可选，缺失时 label 退回 id。
  */
 async function listAnthropicModels(config: ProviderConfig, deps?: ModelCatalogDeps): Promise<ModelOption[]> {
   const doRequest = deps?.requestUrl ?? requestUrl;

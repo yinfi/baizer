@@ -28,14 +28,17 @@ declare module "obsidian" {
 // --- Provider 配置 ---
 /**
  * provider 使用的线协议（wire protocol）。
- * - 'gemini'            : Google Generative AI（api = 'google-generative-ai'）
  * - 'openai-compatible' : OpenAI 兼容接口，端点方言由 apiFlavor 决定
  * - 'anthropic'         : Anthropic 原生 Messages 协议（api = 'anthropic-messages'，
  *                         POST {baseUrl}/v1/messages，认证头 x-api-key + anthropic-version）
  *
- * 三种协议各自独立，互不伪装：anthropic 不是 openai-compatible 的一个 flavor。
+ * 两种协议各自独立，互不伪装：anthropic 不是 openai-compatible 的一个 flavor。
+ *
+ * 历史上还有第三种 'gemini'（Google Generative AI），已被移除 —— 它会把
+ * @google/genai 与 pi-ai 的 google-generative-ai api 拖进单文件 bundle，而
+ * Obsidian Sync Standard 不同步超过 5MB 的文件。见 pruneUnsupportedProviders。
  */
-export type ProviderType = 'gemini' | 'openai-compatible' | 'anthropic';
+export type ProviderType = 'openai-compatible' | 'anthropic';
 
 /**
  * OpenAI 兼容协议下的具体 API 端点方言。
@@ -53,7 +56,6 @@ export interface ProviderConfig {
     apiKey: string;
     /**
      * 服务地址（Base URL）——**不含端点路径**，端点由各协议 SDK/实现自行追加。
-     * - gemini            : 忽略（固定走官方端点）
      * - openai-compatible : OpenAI SDK 的 baseURL，SDK 追加 /chat/completions 或 /responses
      * - anthropic         : Anthropic SDK 的 baseURL，SDK 追加 /v1/messages
      *                       （故官方端点写 https://api.anthropic.com，不要再带 /v1）
@@ -72,13 +74,6 @@ export interface ProviderConfig {
 }
 
 export const DEFAULT_PROVIDERS: Record<string, ProviderConfig> = {
-    'gemini': {
-        type: 'gemini',
-        label: 'Google Gemini',
-        apiKey: '',
-        baseUrl: '',
-        model: 'gemini-2.5-flash'
-    },
     'openai': {
         type: 'openai-compatible',
         label: 'OpenAI',
@@ -238,7 +233,8 @@ export interface PluginSettings {
 
 export const DEFAULT_SETTINGS: PluginSettings = {
     // Core
-    activeProvider: 'gemini',
+    // 'openai' 是 DEFAULT_PROVIDERS 的第一项：'gemini' 被移除后它就是新的出厂默认。
+    activeProvider: 'openai',
     providers: { ...DEFAULT_PROVIDERS },
     deletedProviderIds: [],
     contextWindow: 100000,
@@ -325,6 +321,43 @@ export function mergeProviderDefaults(
     }
 
     return merged;
+}
+
+/**
+ * 判断一个持久化配置里的 provider.type 是否仍受支持。
+ *
+ * 入参刻意收成 unknown：它直接面对 data.json 的内容，可能是历史类型、
+ * 拼错的值或干脆不是字符串，调用方不该为了调用它先做一次不安全的断言。
+ */
+export function isSupportedProviderType(type: unknown): type is ProviderType {
+    return type === 'openai-compatible' || type === 'anthropic';
+}
+
+/**
+ * 丢弃协议已不支持的 provider 条目（历史上 type:'gemini' 的配置是主要来源）。
+ *
+ * 为什么是「丢弃」而不是「留着」：留下的条目会在 ModelService.buildModelForConfig
+ * 的 default 分支被降级成 OpenAI-compatible，于是用户得到一个「名字还叫 Gemini、
+ * 实际按 OpenAI 协议去请求 Google 端点」的坏 provider —— 报错指向的是协议错误，
+ * 而真正的原因是这份配置已经不可能工作。
+ *
+ * 判据只看 config.type，不看 map 的 key：用户把一个自建 OpenAI 兼容服务命名为
+ * "my-gemini" 是完全合法的，不该被误删。
+ *
+ * 纯函数，loadSettings 与测试共用同一份判据。
+ */
+export function pruneUnsupportedProviders(
+    providers: Record<string, ProviderConfig> = {}
+): Record<string, ProviderConfig> {
+    const kept: Record<string, ProviderConfig> = {};
+
+    for (const [id, config] of Object.entries(providers)) {
+        if (config && isSupportedProviderType(config.type)) {
+            kept[id] = config;
+        }
+    }
+
+    return kept;
 }
 
 export interface IPlugin extends Plugin {
