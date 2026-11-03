@@ -56,4 +56,43 @@ export default tseslint.config(
 			'prefer-const': 'warn',
 		},
 	},
+	{
+		// 截图/断言工具(tools/provider-settings-shots)不随插件发布,但与 src 一样
+		// 是我们自己写的代码,所以选择「显式声明全局」而不是整块 ignores:
+		// 变量名写错仍然会被 no-undef 抓到。
+		// 它们有两个运行环境:主流程跑在 Node 下,另有一些函数会被序列化后送进
+		// Obsidian 渲染进程求值(所以要看得到 window/document)。两套全局都声明。
+		// `globals` 包只是 eslint 的传递依赖、未在本仓库声明,故不 import 它,
+		// 以免 CI 的 npm ci 行为随上游 hoisting 变化。
+		files: ['tools/**/*.mjs'],
+		languageOptions: {
+			ecmaVersion: 2022,
+			sourceType: 'module',
+			globals: {
+				process: 'readonly',
+				console: 'readonly',
+				Buffer: 'readonly',
+				setTimeout: 'readonly',
+				clearTimeout: 'readonly',
+				URL: 'readonly',
+				AbortController: 'readonly',
+				fetch: 'readonly',
+				WebSocket: 'readonly',
+				window: 'readonly',
+				document: 'readonly',
+				getComputedStyle: 'readonly',
+			},
+		},
+		rules: {
+			// 与 src/**/*.ts 保持一致:未使用变量保持可见,但不阻断 CI。
+			'@typescript-eslint/no-unused-vars': [
+				'warn',
+				{
+					argsIgnorePattern: '^_',
+					varsIgnorePattern: '^_',
+					caughtErrorsIgnorePattern: '^_',
+				},
+			],
+		},
+	},
 );

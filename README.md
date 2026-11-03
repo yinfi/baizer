@@ -174,9 +174,12 @@ Baizer keeps operational data inside the vault:
 ## Supported Providers
 
 - Google Gemini
-- OpenAI-compatible providers, including OpenAI, DeepSeek, Qwen, and custom base URLs
+- OpenAI-compatible providers, including OpenAI, DeepSeek, Qwen, and custom base URLs — Chat Completions or Responses
+- Anthropic, over the native Messages protocol — the official `api.anthropic.com` or any compatible gateway
 
 Provider capabilities (image input, custom base URL, etc.) are declared in code, so available features can differ by backend. Settings changes (provider/model/key/context window/thinking level) take effect on the next turn because the model handle is rebuilt each call.
+
+See [docs/architecture/providers.md](docs/architecture/providers.md) for the protocol mapping, the base-URL rules (Anthropic takes no `/v1`), how thinking and prompt caching are gated, and the known limits.
 
 ## Development
 

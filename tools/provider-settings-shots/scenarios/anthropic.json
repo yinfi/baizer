@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "Provider fixture for the AFTER captures: an Anthropic provider selected and expanded so the",
+    "protocol-conditional fields of issue #58 are on screen (type 'anthropic' => Anthropic Messages",
+    "protocol, and the OpenAI-only knobs such as apiFlavor / dialect must be hidden or disabled).",
+    "cch and opencode are kept from scenarios/cch-opencode.json so the provider list still looks",
+    "like the committed baseline's list, and the four stock providers are deleted for the same reason.",
+    "baseUrl deliberately has NO /v1 suffix: the Anthropic SDK appends /v1/messages itself, and the",
+    "settings help text is supposed to spell out the real request path.",
+    "model and apiKey are intentionally long-ish real-shaped values so the capture exercises the",
+    "'long value must stay readable and editable' requirement rather than a trivially short string."
+  ],
+  "language": "zh",
+  "activeProvider": "anthropic",
+  "deletedProviderIds": ["gemini", "openai", "deepseek", "qwen"],
+  "providers": {
+    "cch": {
+      "type": "openai-compatible",
+      "label": "cch",
+      "apiKey": "sk-cch-fixture-not-a-real-key",
+      "baseUrl": "http://127.0.0.1:8082/v1",
+      "model": "gpt-5.6-sol"
+    },
+    "opencode": {
+      "type": "openai-compatible",
+      "label": "opencode",
+      "apiKey": "sk-opencode-fixture-not-a-real-key",
+      "baseUrl": "https://opencode.ai/zen/go/v1",
+      "model": "deepseek-v4.1-flash",
+      "customHeaders": {
+        "x-opencode-session": "{{conversationId}}"
+      }
+    },
+    "anthropic": {
+      "type": "anthropic",
+      "label": "Anthropic",
+      "apiKey": "sk-ant-api03-fixture-not-a-real-key-000000000000",
+      "baseUrl": "https://api.anthropic.com",
+      "model": "claude-sonnet-4-5-20250929",
+      "customHeaders": {
+        "anthropic-beta": "prompt-caching-2024-07-31",
+        "x-session-id": "{{conversationId}}"
+      }
+    }
+  }
+}

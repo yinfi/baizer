@@ -289,6 +289,120 @@ async function runTests() {
     expect(result).toEqual({ 'x-api-version': '2024-01' });
   });
 
+  // (f) Anthropic Messages：buildAnthropicModel
+
+  const { buildAnthropicModel, supportsAdaptiveThinking } = await import('../src/runtime/pi/pi-native-model');
+
+  function makeAnthropicConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
+    return {
+      type: 'anthropic',
+      label: 'Anthropic',
+      apiKey: 'sk-ant-test',
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-sonnet-4-5',
+      ...overrides,
+    };
+  }
+
+  await test('buildAnthropicModel: api / provider / baseUrl 字段正确', () => {
+    const model = buildAnthropicModel(makeAnthropicConfig(), 100000, 'medium');
+    expect(model.api).toBe('anthropic-messages');
+    expect(model.provider).toBe('anthropic');
+    expect(model.baseUrl).toBe('https://api.anthropic.com');
+  });
+
+  await test('buildAnthropicModel: baseUrl 缺省/纯空白回落到官方端点，且不带 /v1', () => {
+    // pi 的 SDK 自己拼 /v1/messages；baseUrl 若已含 /v1 会变成 /v1/v1/messages
+    expect(buildAnthropicModel(makeAnthropicConfig({ baseUrl: '' }), 100000, 'medium').baseUrl)
+      .toBe('https://api.anthropic.com');
+    expect(buildAnthropicModel(makeAnthropicConfig({ baseUrl: '   ' }), 100000, 'medium').baseUrl)
+      .toBe('https://api.anthropic.com');
+  });
+
+  await test('buildAnthropicModel: 自定义 baseUrl 去掉首尾空白后保留', () => {
+    const model = buildAnthropicModel(makeAnthropicConfig({ baseUrl: ' https://gw.example.com ' }), 100000, 'medium');
+    expect(model.baseUrl).toBe('https://gw.example.com');
+  });
+
+  await test('buildAnthropicModel: id / name 取自 config.model', () => {
+    const model = buildAnthropicModel(makeAnthropicConfig({ model: 'claude-opus-4-5' }), 100000, 'medium');
+    expect(model.id).toBe('claude-opus-4-5');
+    expect(model.name).toBe('claude-opus-4-5');
+  });
+
+  await test('buildAnthropicModel: input 支持 text + image，成本字段全 0', () => {
+    const model = buildAnthropicModel(makeAnthropicConfig(), 100000, 'medium');
+    expect(model.input).toEqual(['text', 'image']);
+    expect(model.cost.input).toBe(0);
+    expect(model.cost.output).toBe(0);
+    expect(model.cost.cacheRead).toBe(0);
+    expect(model.cost.cacheWrite).toBe(0);
+  });
+
+  await test('buildAnthropicModel: thinkingLevelMap 的值是 Anthropic effort 档位', () => {
+    const m = buildAnthropicModel(makeAnthropicConfig(), 100000, 'medium').thinkingLevelMap!;
+    expect(m.off).toBe(null);
+    expect(m.minimal).toBe('low');
+    expect(m.low).toBe('low');
+    expect(m.medium).toBe('medium');
+    expect(m.high).toBe('high');
+    expect(m.xhigh).toBe('xhigh');
+  });
+
+  await test('buildAnthropicModel: maxTokens 固定 8192（跨任意兼容网关的安全值）', () => {
+    expect(buildAnthropicModel(makeAnthropicConfig(), 100000, 'medium').maxTokens).toBe(8192);
+  });
+
+  await test('buildAnthropicModel: contextWindow 缺省回落 100000，传入值优先', () => {
+    expect(buildAnthropicModel(makeAnthropicConfig(), undefined, 'medium').contextWindow).toBe(100000);
+    expect(buildAnthropicModel(makeAnthropicConfig(), 0, 'medium').contextWindow).toBe(100000);
+    expect(buildAnthropicModel(makeAnthropicConfig(), 200000, 'medium').contextWindow).toBe(200000);
+  });
+
+  await test("buildAnthropicModel: thinkingLevel='off' → reasoning=false，其余为 true", () => {
+    expect(buildAnthropicModel(makeAnthropicConfig(), 100000, 'off').reasoning).toBe(false);
+    expect(buildAnthropicModel(makeAnthropicConfig(), 100000, 'medium').reasoning).toBe(true);
+    expect(buildAnthropicModel(makeAnthropicConfig(), 100000, undefined).reasoning).toBe(true);
+  });
+
+  await test('buildAnthropicModel: 仅 adaptive 家族带 compat.forceAdaptiveThinking', () => {
+    // budget_tokens 家族不加 compat：pi 走 thinking:{type:'enabled', budget_tokens}
+    const budget = buildAnthropicModel(makeAnthropicConfig({ model: 'claude-sonnet-4-5' }), 100000, 'medium');
+    expect(budget.compat).toBeUndefined();
+    // adaptive 家族：pi 走 thinking:{type:'adaptive'} + output_config.effort
+    const adaptive = buildAnthropicModel(makeAnthropicConfig({ model: 'claude-sonnet-5' }), 100000, 'medium');
+    expect((adaptive.compat as any)?.forceAdaptiveThinking).toBe(true);
+  });
+
+  await test('supportsAdaptiveThinking: 命中 adaptive 家族', () => {
+    expect(supportsAdaptiveThinking('claude-fable-5')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-haiku-5-5')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-opus-4-6')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-opus-4-7')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-opus-4-8')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-opus-5')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-sonnet-4-6')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-sonnet-5')).toBe(true);
+  });
+
+  await test('supportsAdaptiveThinking: 网关前缀 / 大小写 / 空白都能识别', () => {
+    expect(supportsAdaptiveThinking('anthropic/claude-sonnet-5')).toBe(true);
+    expect(supportsAdaptiveThinking('CLAUDE-SONNET-5')).toBe(true);
+    expect(supportsAdaptiveThinking('openrouter:claude-opus-5')).toBe(true);
+    expect(supportsAdaptiveThinking('  claude-sonnet-5  ')).toBe(true);
+  });
+
+  await test('supportsAdaptiveThinking: 不误伤 budget_tokens 家族与空值', () => {
+    expect(supportsAdaptiveThinking('claude-sonnet-4-5')).toBe(false);
+    expect(supportsAdaptiveThinking('claude-sonnet-4-5-20250929')).toBe(false);
+    expect(supportsAdaptiveThinking('claude-opus-4-5')).toBe(false);
+    expect(supportsAdaptiveThinking('claude-haiku-4-5')).toBe(false);
+    expect(supportsAdaptiveThinking('gpt-4o')).toBe(false);
+    expect(supportsAdaptiveThinking('gemini-2.5-flash')).toBe(false);
+    expect(supportsAdaptiveThinking(undefined)).toBe(false);
+    expect(supportsAdaptiveThinking('')).toBe(false);
+  });
+
 }
 
 runTests().catch((e) => {

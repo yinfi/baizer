@@ -63,6 +63,36 @@ const OPENAI_COMPAT_THINKING_LEVEL_MAP = {
 } as const;
 
 /**
+ * Anthropic 的 thinking 档位映射表。
+ *
+ * 值的语义是 **Anthropic effort**（`output_config.effort`），由 pi 的
+ * mapThinkingLevelToEffort 在 adaptive 模型上读取；budget 模型不看这张表。
+ * 因此绝不能复用上面的 OpenAI reasoning_effort 表 —— 两者只是名字像，
+ * 一旦把 reasoning_effort 发给 Anthropic，请求会因未知字段被拒。
+ *
+ * - off → null：关闭思考。pi 的 thinkingDisabled 判据是 `thinkingLevelMap.off !== null`，
+ *   给 null 表示「off 这一档由调用方彻底不发 thinking 字段」，而不是发 disabled。
+ * - minimal → 'low'：Anthropic effort 没有 minimal 这一档，pi 的默认 switch 也把
+ *   minimal/low 都落到 'low'，这里显式写出来是为了让映射可读、可测。
+ * - xhigh → 'xhigh'：pi 的注释说明 xhigh 只在 Opus 4.7/4.8、Sonnet 5、Fable 5 上原生可用；
+ *   非 adaptive 模型走 budget 路径，pi 的 clampReasoning 会把 xhigh 收敛成 high。
+ */
+const ANTHROPIC_THINKING_LEVEL_MAP = {
+  off: null,
+  minimal: 'low',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+} as const;
+
+/**
+ * Anthropic 的 max_tokens 上限。Anthropic Messages 协议要求该字段必填；
+ * 取 8192 是「所有 Claude 模型都接受」的安全值（见 buildAnthropicModel 注释）。
+ */
+const ANTHROPIC_MAX_TOKENS = 8192;
+
+/**
  * 把 Gemini provider 配置映射成 pi-ai Model。
  *
  * @param config        - 项目 ProviderConfig（type 必须为 'gemini'）
@@ -151,6 +181,87 @@ export function buildOpenAICompatModel(
     // minimal/low → 'low'，medium → 'medium'，high/xhigh → 'high'
     thinkingLevelMap: { ...OPENAI_COMPAT_THINKING_LEVEL_MAP },
   };
+}
+
+/**
+ * 把 Anthropic 原生 Messages provider 配置映射成 pi-ai Model。
+ *
+ * 与 Gemini/OpenAI 两个构造器的关键差异：baseUrl 语义是「SDK 会在其上追加 /v1/messages」，
+ * 故官方端点**不带 /v1**（见 src/mcp/types.ts DEFAULT_PROVIDERS.anthropic 的注释）。
+ * 用户填 https://api.anthropic.com 或任何兼容网关的根地址即可。
+ *
+ * @param config        - 项目 ProviderConfig（type 必须为 'anthropic'）
+ * @param contextWindow - 模型上下文窗口 token 数；缺省回落到 DEFAULT_CONTEXT_WINDOW
+ * @param thinkingLevel - 推理深度档位；'off' 关闭 reasoning，其余（含 undefined）开启
+ */
+export function buildAnthropicModel(
+  config: ProviderConfig,
+  contextWindow?: number,
+  thinkingLevel?: string,
+): Model<'anthropic-messages'> {
+  // 用户没有配置 baseUrl 时回落到 Anthropic 官方端点（不含 /v1，pi 会追加 /v1/messages）
+  const baseUrl = config.baseUrl?.trim() || 'https://api.anthropic.com';
+
+  // 自适应思考（type:'adaptive' + output_config.effort）只有新一批 Claude 支持；
+  // 其余模型走 budget_tokens。判据来自 pi-ai 自带的模型目录，见函数注释。
+  const adaptiveThinking = supportsAdaptiveThinking(config.model);
+
+  return {
+    id: config.model,
+    name: config.model,
+    // anthropic-messages：pi 路由到 api/anthropic-messages.js（原生 Messages 协议）
+    api: 'anthropic-messages',
+    provider: 'anthropic',
+    baseUrl,
+    // 同 Gemini/OpenAI：thinkingLevel !== 'off' 时开启 reasoning
+    reasoning: thinkingLevel !== 'off',
+    // Anthropic Messages 支持文本与图像 content block
+    input: ['text', 'image'],
+    // 成本字段全置 0：项目内部不做费用核算，pi 用于显示用途
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+    contextWindow: contextWindow && contextWindow > 0 ? contextWindow : DEFAULT_CONTEXT_WINDOW,
+    // Anthropic 的 max_tokens 是**必填**（pi 的 buildParams 会带上去）。
+    // 取 8192 而不是按模型目录取 64000/128000：Baizer 允许用户指向任意兼容网关，
+    // 而 8192 是所有 Claude 模型都接受的最小安全值；thinking budget 由 pi 的
+    // adjustMaxTokensForThinking 在这个上限内自动收敛，不会出现 budget ≥ max_tokens。
+    maxTokens: ANTHROPIC_MAX_TOKENS,
+    // thinkingLevelMap 的值是 **Anthropic effort**（low/medium/high/xhigh/max），
+    // 不是 OpenAI 的 reasoning_effort —— pi 的 mapThinkingLevelToEffort 只在
+    // adaptive 模型上读它，budget 模型直接按档位算 budget_tokens。
+    // off: null 让 pi 在关闭思考时不发 `thinking: { type: "disabled" }`（本构造器在
+    // thinkingLevel==='off' 时已把 reasoning 置 false，请求里根本不会有 thinking 字段）。
+    thinkingLevelMap: { ...ANTHROPIC_THINKING_LEVEL_MAP },
+    ...(adaptiveThinking ? { compat: { forceAdaptiveThinking: true } } : {}),
+  };
+}
+
+/**
+ * 判断某个模型 id 是否属于「自适应思考」家族。
+ *
+ * 依据：pi-ai 1.3.0 的 dist/providers/data/anthropic.json —— 该目录里
+ * `compat.forceAdaptiveThinking === true` 的模型恰好是这些家族（括号内为实测 maxTokens/ctx）：
+ *   fable-5, haiku-5-5, opus-4-6, opus-4-7, opus-4-8, opus-5, sonnet-4-6, sonnet-5
+ * 而 claude-sonnet-4-5 / claude-opus-4-5 / claude-haiku-4-5 走 budget_tokens。
+ *
+ * 为什么按家族前缀而不是精确 id：网关常带前缀（`anthropic/claude-sonnet-5`）或日期后缀
+ * （`claude-sonnet-4-5-20250929`）。前缀匹配同时覆盖两者，且上面这些前缀不会误伤
+ * 非 adaptive 的 sonnet-4-5 / opus-4-5 / haiku-4-5。
+ *
+ * 为什么默认走 budget_tokens：`thinking: { type: "enabled", budget_tokens }` 是
+ * Anthropic 与各类兼容网关都实现的老形式（新模型上仅被标记 deprecated，仍被接受），
+ * 而 `type: "adaptive"` 是较新的线格式。把 adaptive 限定在「确认支持的家族」上，
+ * 可以让指向老网关/第三方模型的用户不至于因为一个不被识别的字段直接 400。
+ */
+export function supportsAdaptiveThinking(modelId: string | undefined): boolean {
+  const id = (modelId ?? '').trim().toLowerCase();
+  if (!id) return false;
+  // 去掉网关前缀（openrouter 风格 `anthropic/`、bedrock 风格 `.../`），再要求出现 claude- 家族名
+  return /(?:^|[/:])claude-(?:fable-5|haiku-5-5|opus-4-[678]|opus-5|sonnet-4-6|sonnet-5)/.test(id);
 }
 
 /**

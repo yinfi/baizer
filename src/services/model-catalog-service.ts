@@ -17,6 +17,54 @@ import { logger } from '../utils/logger';
  * 不再像旧 provider 那样发一次 generateContent('Hello') 烧 token。
  */
 
+/** Anthropic 要求的 API 版本头（SDK 0.129.0 与官方 REST 文档一致）。 */
+const ANTHROPIC_VERSION = '2023-06-01';
+/** Anthropic 官方端点。注意官方 baseUrl **不带** /v1（见 src/mcp/types.ts 的说明）。 */
+const ANTHROPIC_DEFAULT_BASE_URL = 'https://api.anthropic.com';
+
+/**
+ * 「这个端点没有列模型能力」——与「这个端点不能推理」是两件事，必须可区分。
+ *
+ * 理由：Anthropic 兼容网关里只实现 POST /v1/messages 的很多，GET /v1/models 常常没做。
+ * 若把它和 401/网络错误一视同仁当成「provider 不可用」，UI 就会既不给模型下拉、
+ * 又不让用户手输模型 —— 用户明明能聊天却被挡住。
+ * 故单独成类 + 提供 isModelListingUnsupported 谓词，让 UI（WP-B 的 settings.ts）能区分：
+ * 列表不可用 → 允许手输 model id；其余错误 → 照常报错。
+ */
+export class ModelListingUnsupportedError extends Error {
+  /** 稳定标识，便于 UI 不依赖 message 文案做判断。 */
+  readonly code = 'model-listing-unsupported';
+  readonly status: number;
+  readonly url: string;
+
+  constructor(providerLabel: string, status: number, url: string) {
+    super(`${providerLabel} does not expose a model listing endpoint (HTTP ${status}): ${url}`);
+    this.name = 'ModelListingUnsupportedError';
+    this.status = status;
+    this.url = url;
+  }
+}
+
+/** 判断错误是否为「端点不支持列模型」（而非 key / 网络 / 限流问题）。 */
+export function isModelListingUnsupported(error: unknown): error is ModelListingUnsupportedError {
+  return error instanceof ModelListingUnsupportedError
+    || (typeof error === 'object' && error !== null && (error as any).code === 'model-listing-unsupported');
+}
+
+/**
+ * 哪些 HTTP 状态码意味着「端点根本没实现列模型」。
+ * 404/405/501 是网关缺路由时的典型回法；400/401/403/429/5xx 仍按真实错误上报，
+ * 因为那些更可能是 key、配额或服务端故障，误判成「不支持列表」会掩盖真问题。
+ */
+function isListingUnsupportedStatus(status: number): boolean {
+  return status === 404 || status === 405 || status === 501;
+}
+
+/** 可注入的 REST 依赖（沿用 request-url-fetch.ts / web-search 的 deps 模式，便于测试）。 */
+export interface ModelCatalogDeps {
+  requestUrl: (options: any) => Promise<any>;
+}
+
 /** provider 类型 → 静态能力声明。原 GeminiProvider/OpenAIProvider.getCapabilities 是硬编码常量，此处按 type 直接返回。 */
 export function getProviderCapabilities(config: ProviderConfig | undefined): ProviderCapabilities {
   if (config?.type === 'openai-compatible') {
@@ -24,6 +72,17 @@ export function getProviderCapabilities(config: ProviderConfig | undefined): Pro
       supportsThinking: true,
       supportsModelListing: true,
       supportsImageInput: false,
+      supportsToolCalling: true,
+      supportsCustomBaseUrl: true,
+    };
+  }
+  if (config?.type === 'anthropic') {
+    // Anthropic Messages 原生支持 extended thinking、图像 content block 与 tool_use；
+    // 用户会指向官方端点或各类兼容网关，故自定义 baseUrl 同样支持。
+    return {
+      supportsThinking: true,
+      supportsModelListing: true,
+      supportsImageInput: true,
       supportsToolCalling: true,
       supportsCustomBaseUrl: true,
     };
@@ -40,30 +99,76 @@ export function getProviderCapabilities(config: ProviderConfig | undefined): Pro
 
 /**
  * 拉取 provider 当前可用的模型列表（纯 REST，无 LLM）。
- * gemini 用 Generative Language models 端点；openai-compatible 用 /models。
+ * gemini 用 Generative Language models 端点；openai-compatible 用 /models；
+ * anthropic 用 Anthropic Messages 的 /v1/models。
  * 失败抛错，由调用方回落到 fallback 列表。
  */
-export async function listModels(config: ProviderConfig): Promise<ModelOption[]> {
+export async function listModels(config: ProviderConfig, deps?: ModelCatalogDeps): Promise<ModelOption[]> {
   if (!config?.apiKey?.trim()) {
     throw new Error(`${config?.label || 'Provider'} API Key not configured`);
   }
-  return config.type === 'gemini'
-    ? listGeminiModels(config)
-    : listOpenAICompatModels(config);
+  if (config.type === 'gemini') return listGeminiModels(config);
+  if (config.type === 'anthropic') return listAnthropicModels(config, deps);
+  return listOpenAICompatModels(config);
+}
+
+/**
+ * 探活结果的三态。存在的理由：`checkAvailability()` 把「端点活着但不会列模型」
+ * 和「端点真的能列模型」都压成 `true`，于是连接测试会对一个刚回 404 的 URL 报
+ * 「model list reachable at <url>」—— 而同一屏的模型输入框却说列不了模型。
+ * 这里把「活着」与「列模型可用」拆开，UI 才能说人话。
+ */
+export interface AvailabilityStatus {
+    /** 端点应答了（哪怕答的是 404/405/501）。网络层失败才是 false。 */
+    reachable: boolean;
+    /** 端点明确表示没有列模型能力（404 / 405 / 501）。此时 reachable 仍为 true。 */
+    listingUnsupported: boolean;
+    /** reachable === false 时的原因。 */
+    error?: Error;
 }
 
 /**
  * 轻量探活：验证 key/端点是否可用。
  * 不发 LLM 推理，改用列模型端点的 200 判定（更快、不烧 token）。
+ *
+ * 映射规则：
+ *  - 列模型成功（无论清单是否为空）→ `{reachable:true, listingUnsupported:false}`；
+ *  - 404 / 405 / 501 → `{reachable:true, listingUnsupported:true}` —— 端点应答了，
+ *    只是不提供模型清单；生成能力**未被验证**（真发一次推理会烧 token，故不在这里证伪）；
+ *  - 其他任何失败（401、网络、解析）→ `{reachable:false, error}`。
+ * gemini/openai 永远抛不出 ModelListingUnsupportedError，故它们恒为前两种之一，
+ * 行为与改动前完全一致。
  */
-export async function checkAvailability(config: ProviderConfig): Promise<boolean> {
+export async function checkAvailabilityWithStatus(
+  config: ProviderConfig,
+  deps?: ModelCatalogDeps,
+): Promise<AvailabilityStatus> {
   try {
-    await listModels(config);
-    return true;
+    await listModels(config, deps);
+    return { reachable: true, listingUnsupported: false };
   } catch (e) {
+    if (isModelListingUnsupported(e)) {
+      logger.warn(
+        `Model listing unavailable for ${config?.label || config?.type}; assuming the endpoint can still generate`,
+        'ModelCatalogService',
+      );
+      return { reachable: true, listingUnsupported: true };
+    }
     logger.error('Availability check failed', e, 'ModelCatalogService');
-    return false;
+    return {
+      reachable: false,
+      listingUnsupported: false,
+      error: e instanceof Error ? e : new Error(String(e)),
+    };
   }
+}
+
+/**
+ * 薄包装：只要「端点是否活着」这一个布尔量的既有调用方无需改动。
+ * 需要区分「活着但不列模型」请用 checkAvailabilityWithStatus。
+ */
+export async function checkAvailability(config: ProviderConfig, deps?: ModelCatalogDeps): Promise<boolean> {
+  return (await checkAvailabilityWithStatus(config, deps)).reachable;
 }
 
 async function listGeminiModels(config: ProviderConfig): Promise<ModelOption[]> {
@@ -90,6 +195,11 @@ async function listGeminiModels(config: ProviderConfig): Promise<ModelOption[]> 
       const label = displayName === value ? value : `${displayName} (${value})`;
       return { value, label };
     })
+    // 与 openai / anthropic 两个 lister 保持一致：丢掉空 id。
+    // `{"name":"models/"}` 会 map 出 value === '' 的选项，而 model-service 的
+    // `listed` 是在归一化之前按「原始清单非空」判定的，于是会得到「已列出 0 个模型」
+    // 却被标成可信来源的空下拉。空 id 不是模型，任何协议都不该保留。
+    .filter((option: ModelOption) => option.value.length > 0)
     .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
 
   return dedupeByValue(options);
@@ -122,6 +232,59 @@ async function listOpenAICompatModels(config: ProviderConfig): Promise<ModelOpti
       return !excludedKeywords.some(keyword => lower.includes(keyword));
     })
     .map((id: string) => ({ value: id, label: id }))
+    .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
+
+  return dedupeByValue(options);
+}
+
+/**
+ * Anthropic Messages 的模型清单：`GET {baseUrl}/v1/models`，用 `x-api-key` 认证
+ * （不是 Bearer），并必须带 `anthropic-version`。
+ *
+ * baseUrl 语义与 runtime 侧一致：官方端点不含 /v1，由这里拼 `/v1/models`
+ * （runtime 侧由 SDK 拼 `/v1/messages`）。故这里只去掉尾部斜杠，不做 /v1 猜测 ——
+ * 用户若把 baseUrl 填成 `https://api.anthropic.com/v1`，会得到 /v1/v1/models 而 404，
+ * 这正是 src/mcp/types.ts 里把默认值定成不带 /v1 的原因。
+ *
+ * 响应形状：`{ data: [{ id, display_name?, ... }], has_more, ... }`。
+ * display_name 可选，缺失时 label 退回 id（与 gemini 的处理方式一致）。
+ */
+async function listAnthropicModels(config: ProviderConfig, deps?: ModelCatalogDeps): Promise<ModelOption[]> {
+  const doRequest = deps?.requestUrl ?? requestUrl;
+  const baseUrl = (config.baseUrl?.trim() || ANTHROPIC_DEFAULT_BASE_URL).replace(/\/+$/, '');
+  const url = `${baseUrl}/v1/models`;
+
+  const response = await doRequest({
+    url,
+    method: 'GET',
+    headers: {
+      'x-api-key': config.apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+    },
+  });
+
+  if (response.status !== 200) {
+    // 端点没有列模型能力 → 单独的错误类，让 UI 能区分「列不了模型」与「用不了」。
+    if (isListingUnsupportedStatus(response.status)) {
+      throw new ModelListingUnsupportedError(config.label || 'Anthropic', response.status, url);
+    }
+    throw new Error(`Anthropic models API error: ${response.status}`);
+  }
+
+  const data = JSON.parse(response.text || '{}');
+  const rows = Array.isArray(data?.data) ? data.data : [];
+
+  const options: ModelOption[] = rows
+    .map((row: any): ModelOption | null => {
+      const value = typeof row?.id === 'string' ? row.id.trim() : '';
+      if (!value) return null;
+      const displayName = typeof row?.display_name === 'string' && row.display_name.trim().length > 0
+        ? row.display_name.trim()
+        : value;
+      const label = displayName === value ? value : `${displayName} (${value})`;
+      return { value, label };
+    })
+    .filter((option: ModelOption | null): option is ModelOption => option !== null)
     .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
 
   return dedupeByValue(options);

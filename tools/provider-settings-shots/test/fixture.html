@@ -1,0 +1,263 @@
+<!doctype html>
+<!--
+  Offline smoke-test fixture for the CAPTURE PIPELINE (test/smoke.mjs) — it is NOT a layout oracle
+  and it is NOT the source of any Before/After evidence. Real evidence comes from capture.mjs, which
+  drives the actual Obsidian app with the real built plugin (main.js + styles.css + the fallback CSS
+  the plugin injects at runtime).
+
+  What this fixture is for: proving the harness can launch a browser, apply a viewport, run the
+  probe, resolve the probe's selectors, and detect a deliberately clipped value — offline, with no
+  Obsidian install. Its API-endpoint value is intentionally longer than any value column so the
+  truncation detector has something real to fire on.
+
+  Deliberate, not stale: the class names below are the PRE-rework ones
+  (`.baizer-settings-connection-detail-grid`, `.baizer-settings-detail-secret-actions`, the
+  `基本`/`Credentials` cards, `API 端点` for both meanings). That means the smoke test exercises the
+  probe's revision-agnostic fallback selectors — the code path that keeps the 154e483 baseline
+  captures measurable — rather than only the new names.
+
+  Drift risk: the CSS here is copied from the shipped sheet, and a copied layout rule can silently
+  fall out of date (that is exactly the dual-source trap that hid the subtitle defect: styles.css
+  had the fix, but the fallback CSS injected last still had nowrap/ellipsis and won). Anything copied
+  here must be re-checked whenever styles.css or the fallback string in src/settings.ts changes.
+-->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>设置 - obsidian - Obsidian 1.14.5</title>
+<style>
+/* Global reset that Obsidian applies, and which the layout numbers depend on. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: #1e1e1e; color: #dadada;
+  font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans SC", sans-serif; font-size: 16px; }
+button { font: inherit; }
+.modal.mod-settings { width: 100%; height: 100vh; background: #202020; display: block; padding: 0; }
+.vertical-tab-content { padding: 0 24px 24px; overflow-y: auto; height: 100vh; }
+
+/* ---- verbatim layout rules copied from the plugin's styles.css ---- */
+.baizer-settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 24px;
+  container-type: inline-size;
+}
+.baizer-settings-provider-shell, .baizer-settings-provider-card, .baizer-settings-connection-card {
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #242424;
+}
+.baizer-settings-provider-list { display: flex; flex-direction: column; gap: 6px; padding: 8px; }
+.baizer-settings-provider-card { width: 100%; padding: 0; }
+.baizer-settings-provider-card.is-active { border-color: #6b8afd; background: #232833; }
+.baizer-settings-provider-card-main {
+  width: 100%; display: block; padding: 0; border: 0; background: transparent;
+  color: inherit; text-align: left; cursor: pointer;
+}
+.baizer-settings-provider-card-main-inner {
+  width: 100%; display: grid;
+  grid-template-columns: minmax(120px, .8fr) minmax(0, 1fr) auto;
+  gap: 8px; align-items: center; padding: 8px 10px;
+}
+.baizer-settings-provider-card-title { min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.baizer-settings-provider-card-meta { min-width: 0; margin: 0; color: #9a9a9a; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.baizer-settings-provider-card-delete { border: 0; background: transparent; color: #9a9a9a; }
+.baizer-settings-provider-detail-inline { border-top: 1px solid #3a3a3a; }
+.baizer-settings-connection-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px; }
+.baizer-settings-connection-card-header { padding: 8px 14px; border-bottom: 1px solid #3a3a3a; }
+.baizer-settings-connection-card-title { margin: 0; font-size: 14px; font-weight: 600; }
+.baizer-settings-detail-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  padding: 10px 14px;
+  border-bottom: 1px solid #3a3a3a;
+}
+.baizer-settings-detail-row:last-child { border-bottom: none; }
+.baizer-settings-detail-label { padding-top: 6px; font-size: 13px; font-weight: 600; }
+.baizer-settings-detail-value { min-width: 0; }
+.baizer-settings-detail-input {
+  display: block; width: 100%; min-height: 34px; padding: 0 10px;
+  border: 1px solid #4a4a4a; border-radius: 8px; background: #1b1b1b;
+  color: #dadada; font-size: 13px; box-shadow: none;
+}
+.baizer-settings-detail-textarea { padding: 8px 10px; min-height: 68px; resize: vertical; }
+.baizer-settings-detail-secret, .baizer-settings-detail-secret-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.baizer-settings-detail-secret .baizer-settings-detail-input { flex: 1 1 240px; }
+.baizer-settings-inline-note { padding: 10px 12px; border-radius: 8px; font-size: 13px; color: #a8a8a8; background: #262626; }
+.baizer-settings-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.baizer-settings-action { min-height: 30px; padding: 0 10px; border: 1px solid #4a4a4a; border-radius: 8px; background: #262626; color: #dadada; }
+.baizer-settings-badge { padding: 1px 8px; border-radius: 999px; font-size: 11px; border: 1px solid #4a4a4a; }
+
+/* ---- hero: mirrors the shipped .baizer-settings-hero fix (styles.css ~2887) ----
+   The subtitle spans both columns. Before the fix it sat in the 316px left column with
+   nowrap+ellipsis and lost 74px of unreachable text at the wide viewport, so this block is
+   what lets the fixture model that defect at all. */
+.baizer-settings-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+  grid-template-areas: "title search" "subtitle subtitle";
+  column-gap: 12px;
+  row-gap: 4px;
+  align-items: center;
+}
+.baizer-settings-title { grid-area: title; margin: 0; font-weight: 600; }
+.baizer-settings-subtitle {
+  grid-area: subtitle; min-width: 0; margin: 0; color: #9a9a9a;
+  white-space: normal; overflow-wrap: anywhere;
+}
+.baizer-settings-search-row { grid-area: search; display: flex; align-items: center; min-width: 0; }
+.baizer-settings-search {
+  width: min(420px, 100%); height: 34px; padding: 0 12px;
+  border: 1px solid #4a4a4a; border-radius: 8px; background: #1b1b1b; color: #dadada;
+}
+
+/* Breakpoint 640, matching the shipped sheet. The settings popout declares minWidth: 600
+   (Setting#getPopoutOptions()), so 600 is the narrowest window a user can reach; a breakpoint
+   sitting exactly on 600 would hand that window the WIDE layout. 640 keeps it on the narrow
+   branch with margin. Keep this in sync with styles.css and the fallback CSS in src/settings.ts. */
+@container (max-width: 640px) {
+  .baizer-settings-hero { grid-template-columns: 1fr; grid-template-areas: "title" "subtitle" "search"; }
+  .baizer-settings-provider-card-main-inner,
+  .baizer-settings-connection-detail-grid,
+  .baizer-settings-detail-row { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body class="theme-dark">
+<div class="modal mod-settings">
+  <div class="vertical-tab-content">
+    <div class="baizer-settings-page">
+      <div class="baizer-settings-hero">
+        <h2 class="baizer-settings-title">Baizer 配置</h2>
+        <div class="baizer-settings-search-row">
+          <input class="baizer-settings-search" type="text" aria-label="搜索设置">
+        </div>
+        <!-- The real subtitle, verbatim (it needs ~390px and is the element that used to be
+             ellipsized at the wide viewport). -->
+        <p class="baizer-settings-subtitle">更清爽的控制中心：服务商配置、运行时行为与插件能力。</p>
+      </div>
+      <div class="baizer-settings-provider-shell">
+        <div class="baizer-settings-provider-list">
+
+          <div class="baizer-settings-provider-card">
+            <div class="baizer-settings-provider-card-header">
+              <button class="baizer-settings-provider-card-main">
+                <div class="baizer-settings-provider-card-main-inner">
+                  <div class="baizer-settings-provider-card-title">cch</div>
+                  <div class="baizer-settings-provider-card-meta">模型：gpt-5.6-sol</div>
+                  <span class="baizer-settings-badge">Ready</span>
+                </div>
+              </button>
+              <button class="baizer-settings-provider-card-delete" aria-label="Delete">×</button>
+            </div>
+          </div>
+
+          <div class="baizer-settings-provider-card is-active">
+            <div class="baizer-settings-provider-card-header">
+              <button class="baizer-settings-provider-card-main">
+                <div class="baizer-settings-provider-card-main-inner">
+                  <div class="baizer-settings-provider-card-title">opencode</div>
+                  <div class="baizer-settings-provider-card-meta">模型：deepseek-v4.1-flash</div>
+                  <span class="baizer-settings-badge">Active</span>
+                </div>
+              </button>
+              <button class="baizer-settings-provider-card-delete" aria-label="Delete">×</button>
+            </div>
+
+            <div class="baizer-settings-provider-detail-inline">
+              <div class="baizer-settings-connection-detail-grid">
+
+                <div class="baizer-settings-connection-card">
+                  <div class="baizer-settings-connection-card-header"><h4 class="baizer-settings-connection-card-title">基本</h4></div>
+                  <div class="baizer-settings-detail-row">
+                    <div class="baizer-settings-detail-label">服务商名称</div>
+                    <div class="baizer-settings-detail-value">
+                      <input class="baizer-settings-detail-input" type="text" value="opencode" aria-label="服务商名称">
+                    </div>
+                  </div>
+                  <div class="baizer-settings-detail-row">
+                    <div class="baizer-settings-detail-label">协议</div>
+                    <div class="baizer-settings-detail-value">
+                      <select class="baizer-settings-detail-input" aria-label="服务商协议">
+                        <option value="openai-compatible" selected>OpenAI 兼容</option>
+                        <option value="gemini">Gemini API</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="baizer-settings-detail-row">
+                    <div class="baizer-settings-detail-label">API 端点</div>
+                    <div class="baizer-settings-detail-value">
+                      <select class="baizer-settings-detail-input" aria-label="API 端点">
+                        <option value="completions" selected>Chat Completions (/chat/completions)</option>
+                        <option value="responses">Responses (/responses)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="baizer-settings-detail-row">
+                    <div class="baizer-settings-detail-label">模型</div>
+                    <div class="baizer-settings-detail-value">
+                      <select class="baizer-settings-detail-input" aria-label="模型">
+                        <option value="deepseek-v4.1-flash" selected>deepseek-v4.1-flash</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="baizer-settings-connection-card">
+                  <div class="baizer-settings-connection-card-header"><h4 class="baizer-settings-connection-card-title">Credentials</h4></div>
+                  <div class="baizer-settings-detail-row">
+                    <div class="baizer-settings-detail-label">API 端点</div>
+                    <div class="baizer-settings-detail-value">
+                      <!-- Deliberately longer than the value column at every tested
+                           width, so the smoke test can prove the truncation
+                           detector actually fires (and not merely reports nothing). -->
+                      <input class="baizer-settings-detail-input" type="text" value="https://opencode.ai/zen/go/v1/deliberately-overlong-segment/so-the-truncation-detector-fires/v1" aria-label="API 端点">
+                    </div>
+                  </div>
+                  <div class="baizer-settings-detail-row">
+                    <div class="baizer-settings-detail-label">API Key</div>
+                    <div class="baizer-settings-detail-value">
+                      <div class="baizer-settings-detail-secret">
+                        <input class="baizer-settings-detail-input" type="password" value="sk-opencode-fixture-not-a-real-key" aria-label="API key">
+                        <div class="baizer-settings-detail-secret-actions">
+                          <button class="baizer-settings-action">显示</button>
+                          <button class="baizer-settings-action is-danger">清除</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="baizer-settings-detail-row">
+                    <div class="baizer-settings-detail-label">自定义请求头</div>
+                    <div class="baizer-settings-detail-value">
+                      <textarea class="baizer-settings-detail-input baizer-settings-detail-textarea" rows="3" aria-label="自定义请求头">x-opencode-session: {{conversationId}}</textarea>
+                      <div class="baizer-settings-inline-note">每行一条 "Header-Name: value"。用 {{conversationId}} 占位符发送当前会话 ID（例如 opencode.ai Go 要求：x-opencode-session: {{conversationId}}）。</div>
+                    </div>
+                  </div>
+                  <div class="baizer-settings-detail-row">
+                    <div class="baizer-settings-detail-label">测试</div>
+                    <div class="baizer-settings-detail-value">
+                      <div class="baizer-settings-actions"><button class="baizer-settings-action is-primary">运行测试</button></div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  // Minimal stand-in for the Obsidian API surface the probe reads.
+  window.app = {
+    plugins: { plugins: { baizer: { manifest: { id: 'baizer', version: '1.1.0' } } } },
+    workspace: { layoutReady: true },
+  };
+</script>
+</body>
+</html>
