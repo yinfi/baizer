@@ -1,8 +1,9 @@
 import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from "module";
-import { dirname, sep } from "path";
-import { copyFile, mkdir, readFile } from "fs/promises";
+import { dirname, resolve, sep } from "path";
+import { fileURLToPath } from "url";
+import { copyFile, mkdir, readFile, writeFile } from "fs/promises";
 
 const outputDir = "dist";
 
@@ -22,7 +23,10 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 /**
- * 把用不到的 pi-ai provider 换成存根，避免它们的 SDK 与模型数据进入 bundle。
+ * 把用不到的 pi-ai provider 换成存根，避免它们的 SDK 进入 bundle。
+ * 注意：模型目录 `data/*.json` 走的是**另一条链路**（models.generated.js），
+ * 由下方的 stubUnusedPiModelCatalogs 负责；两个插件必须成对存在，
+ * 只留这一个的话近 1MB 的目录数据仍会留在包里。
  *
  * 背景（1.3.0 起更严重）：`providers/all.js` 现在**静态** import 全部 42 个
  * provider，`compat.js` 又在模块顶层 `const compatModels = builtinModels();`
@@ -30,10 +34,12 @@ if you want to view the source, please visit the github repository of this plugi
  * provider 是惰性 `import()`、且只有 9 个，故旧的「只存根 mistral」够用；
  * 1.3.0 下这 42 条链路（含各自的 SDK 与 `data/*.json` 模型目录）全被内联进单文件。
  *
- * Baizer 的 ProviderConfig 只有 'gemini' 与 'openai-compatible' 两种
+ * Baizer 的 ProviderConfig 有 'gemini' / 'openai-compatible' / 'anthropic' 三种
  * （见 src/mcp/types.ts），`buildGeminiModel`/`buildOpenAICompatModel` 给出的
- * provider 只会是 'google' 与 'openai'，故这两家必须保留真实实现，
- * 其余 40 家（含 Mistral 的 1.2MB SDK）都是纯死重量。
+ * provider 是 'google' 与 'openai'，故这两家必须保留真实实现；
+ * 'anthropic' 走的是 **api 实现**（anthropic-messages，见下方 KEPT_PI_APIS），
+ * 不需要 pi 的 anthropic provider（那份只提供静态模型目录数据，Baizer 自己造 Model），
+ * 所以 anthropic.js 仍然存根 —— 其余 40 家（含 Mistral 的 1.2MB SDK）都是纯死重量。
  *
  * 存根的返回值形状（关键，与 0.75.5 时代的"被调用就抛错"不同）：
  * `compat.js` 顶层会**立刻调用**每个 `<x>Provider()`，所以存根不能再靠抛错来占位
@@ -125,7 +131,7 @@ const stubUnusedPiProviders = {
 				// createProvider 走包根导出（index.js 不反向依赖 providers/，无循环）。
 				'import { createProvider } from "@earendil-works/pi-ai";',
 				`const BAIZER_STUB_MESSAGE =
-	"Baizer does not bundle the '${id}' provider. Configure a Gemini or OpenAI-compatible provider instead.";`,
+	"Baizer does not bundle the '${id}' provider. Configure a Gemini, OpenAI-compatible, or Anthropic provider instead.";`,
 				...entry.exports.map(
 					(fn) => `export function ${fn}() {
 	return createProvider({
@@ -145,6 +151,89 @@ const stubUnusedPiProviders = {
 	},
 };
 
+/* ------------------------------------------------------------------ */
+/* pi-ai 模型目录数据（bundle 体积的真正大头）                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 把用不到的 pi-ai **模型目录**（`providers/<x>.models.js` + 它背后几百 KB 的
+ * `providers/data/<x>.json`）换成空目录。
+ *
+ * 为什么上游 stubUnusedPiProviders 不够：那只换掉了 `providers/<x>.js`（provider 工厂），
+ * 而 `models.generated.js` 是**另一条独立链路** —— 它在顶部逐个
+ * `import { X_MODELS } from "./providers/<x>.models.js"`（42 个），
+ * 每个 `<x>.models.js` 又 `import values from "./data/<x>.json"`。
+ * 于是 40 个用不到的 provider，其完整模型目录 JSON 依旧被内联进单文件。
+ *
+ * 实测（esbuild metafile，bytesInOutput / dist/main.js）：
+ *   providers/data/*.json 合计            1,002,584 B
+ *     其中 google.json + openai.json 必需     44,623 B（google.js / openai.js 真的读它们）
+ *     可去除                                957,961 B
+ *   外加可去除的 <x>.models.js 代码            21,651 B
+ * 这是 5 MB 硬限下唯一一块「近 1 MB 且零风险」的死重量，比 KEPT_PI_APIS 的取舍重要得多。
+ *
+ * 今天为什么安全：这些目录只被两处消费，且都容忍空目录 ——
+ *   - `providers/all.js` 的 getBuiltinModel/getBuiltinModels/getBuiltinProviders
+ *     （`MODELS[p]?.[id]` 与 `Object.values(MODELS[p] ?? {})`）；
+ *   - `image-models.js`（`Object.values(models)` 后 size > 0 才注册）。
+ * Baizer 侧也不消费它们：Model 由 buildGeminiModel/buildOpenAICompatModel/
+ * buildAnthropicModel 自建，模型清单走 model-catalog-service 的 REST。
+ *
+ * ⚠️ 未来风险（下一个人必须先读这一段）：本插件让**非 google/openai 的那 40 家**
+ * provider 在 pi 的静态目录里变成空的 —— `getBuiltinModels('<x>')` 返回 `[]`、
+ * `getBuiltinModel('<x>', id)` 返回 `undefined`、`getBuiltinImageModels` 同理。
+ * 今天完全看不出来（Baizer 不读它们），但**如果将来有人想用 pi 的静态目录**
+ * （做模型元数据、做 provider 下拉、做图像模型选择、或把某家 provider 接成
+ * 第三/第四种协议），必须先把那一家从 STUBBED_PI_MODEL_CATALOGS 里摘出去
+ * （或整体回退本插件），否则会拿到一份「静默为空」的目录 —— 症状是下拉框空掉，
+ * 而不是报错。判断依据就是 KEPT_PI_MODEL_CATALOGS：凡是被真正用到的 provider，
+ * 必须同时出现在 KEPT_PI_PROVIDERS 与 KEPT_PI_MODEL_CATALOGS 里。
+ *
+ * 保留下来的两家必须留数据：`google.js` / `openai.js` 的工厂写作
+ * `models: Object.values(GOOGLE_MODELS)`，掏空会让 gemini / openai 两个已支持
+ * 协议当场退化成「没有模型」。故 KEPT_PI_MODEL_CATALOGS 与 KEPT_PI_PROVIDERS 同源。
+ *
+ * 导出名照抄真实文件：`models.generated.js` 按名字 import，少一个就 "No matching export"；
+ * 若 pi-ai 换了生成写法导致解析不到导出名，这里出声失败而不是打出一个坏包。
+ */
+const KEPT_PI_MODEL_CATALOGS = KEPT_PI_PROVIDERS;
+
+const PI_AI_PROVIDERS_DIR = "node_modules/@earendil-works/pi-ai/dist/providers";
+
+const STUBBED_PI_MODEL_CATALOGS = PI_PROVIDER_EXPORTS
+	.filter(({ file }) => !KEPT_PI_MODEL_CATALOGS.includes(file))
+	.map(({ file }) => file.replace(/\.js$/, ".models.js"));
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const stubUnusedPiModelCatalogs = {
+	name: "stub-unused-pi-model-catalogs",
+	setup(build) {
+		for (const base of STUBBED_PI_MODEL_CATALOGS) {
+			// 两种写法都要覆盖：`models.generated.js` 用 `./providers/<x>.models.js`，
+			// `<x>.js` 用 `./<x>.models.js`。故只锚定结尾，并用 importer 限定在 pi-ai 内。
+			build.onResolve({ filter: new RegExp(`${escapeRegExp(base)}$`) }, (args) => {
+				if (!args.importer.includes("pi-ai")) return null;
+				return { path: `pi-model-catalog-stub:${base}`, namespace: "pi-model-catalog-stub" };
+			});
+		}
+
+		build.onLoad({ filter: /.*/, namespace: "pi-model-catalog-stub" }, async (args) => {
+			const base = args.path.replace("pi-model-catalog-stub:", "");
+			const source = await readFile(resolve(PI_AI_PROVIDERS_DIR, base), "utf8");
+			const names = [...source.matchAll(/^export const ([A-Za-z0-9_$]+)/gm)].map((match) => match[1]);
+			if (names.length === 0) {
+				throw new Error(
+					`stub-unused-pi-model-catalogs: 没能从 ${base} 解析出任何 export const。`
+					+ "pi-ai 的 generate-models 脚本可能改了写法，请重新核对本插件。",
+				);
+			}
+			const contents = names.map((name) => `export const ${name} = {};`).join("\n");
+			return { contents, loader: "js" };
+		});
+	},
+};
+
 /**
  * 把用不到的 pi-ai **api 实现**换成存根（bundle 体积的第二大头）。
  *
@@ -154,8 +243,9 @@ const stubUnusedPiProviders = {
  * `openai`(25M)、`@anthropic-ai`(13M)、`@google/genai`(11M)、`@aws-sdk`(5.2M) 的
  * 相关子集就是 main.js 突破 5MB 的主因。
  *
- * Baizer 只会用到三种 api（见 `buildGeminiModel`/`buildOpenAICompatModel`）：
- * `google-generative-ai`、`openai-completions`、`openai-responses`。其余 7 个存根。
+ * Baizer 会用到四种 api（见 `buildGeminiModel`/`buildOpenAICompatModel`/`buildAnthropicModel`）：
+ * `google-generative-ai`、`openai-completions`、`openai-responses`、`anthropic-messages`。
+ * 其余 6 个存根。
  *
  * 为什么可以直接替换 `.lazy.js` 而不必知道 `<x>.js` 的导出面：`lazyApi(load)` 只在
  * `stream`/`streamSimple` 被调用时才执行 `load()`（见 api/lazy.js），故存根只需保持
@@ -165,11 +255,36 @@ const stubUnusedPiProviders = {
  * 与 `stubNodeBuiltinDynamicImports` 的关系：`openai-codex-responses.js` 被存根后不再
  * 进 bundle，那个针对它的启动期 unhandled-rejection 补丁自然失效也无害（问题本身不存在了）；
  * 该插件对 `env-api-keys.js` 的修补不受影响，仍照常生效。
+ *
+ * ## anthropic-messages 为什么要保留、又为什么必须配合 shim（实测数字）
+ *
+ * issue #58 要求复用 pi-ai 现成的 Anthropic 适配（不另建平行推理栈），所以协议逻辑
+ * 必须来自 `api/anthropic-messages.js`，它就进了 KEPT 名单。
+ *
+ * 但那个文件顶层 `import Anthropic from "@anthropic-ai/sdk"`。实测（`BAIZER_METAFILE=1 npm run build` + `npm run build`）：
+ *   - 基线（不含 anthropic-messages）                      dist/main.js = 5,006,087 B (4.774 MB)
+ *   - 只把它加进 KEPT_PI_APIS（真 SDK 进包）                dist/main.js = 5,658,476 B (5.396 MB) ← 越过 5MB 硬限
+ *     （SDK metafile input 716.7 KB，还拖来 fast-sha256 / @stablelib/base64 / standardwebhooks）
+ *   - 加进 KEPT_PI_APIS + 本文件的 SDK shim 别名            dist/main.js = 5,097,060 B (4.861 MB) ← 仍超 4.8MiB 预算
+ *   - 再加 stubUnusedPiModelCatalogs（空掉用不到的模型目录）dist/main.js = 4,125,799 B (3.935 MB)
+ *   - WP-A 收尾（getAvailableModelsWithStatus 等）           dist/main.js ≈ 4.13 MB ← 低于 4.8MiB 预算约 0.90 MB
+ * 净效果：相对基线约 -0.88 MB，把 5MB 硬限的余量从 0.23 MB 拉回到约 1.06 MB。
+ *
+ * 注意：绝对字节数会随并行开发漂移 —— src/settings.ts 单独就占输出 ~120KB，
+ * 它每次落盘都会改变总数（实测同一份本文件源码两次构建相差 1.2KB，来源就是并行改动）。
+ * 上面各档是同机对照实测，用途是判断「策略是否达标」；需要精确数字时请自己跑一次
+ * `npm run build`，不要把这里的字面值当契约。
+ *
+ * 因此必须把 `@anthropic-ai/sdk` 别名到 `src/runtime/pi/anthropic-sdk-shim.ts`：
+ * 只补「拼 URL + 拼 header + fetch + 非 2xx 抛 APIError」，SSE 与消息转换仍归 pi。
+ * 该 shim 的覆盖面由 `verifyAnthropicSdkUsage` 在构建期逐条核对（见下），
+ * pi-ai 升级若改了用法会让构建红掉，而不是打出一个悄悄坏掉的包。
  */
 const KEPT_PI_APIS = [
 	"google-generative-ai",
 	"openai-completions",
 	"openai-responses",
+	"anthropic-messages",
 ];
 
 const PI_API_EXPORTS = [
@@ -212,8 +327,114 @@ const stubUnusedPiApis = {
 });
 const BAIZER_STUB_MESSAGE =
 	"Baizer does not bundle the '${file}' api implementation. " +
-	"Configure a Gemini or OpenAI-compatible provider instead.";`;
+	"Configure a Gemini, OpenAI-compatible, or Anthropic provider instead.";`;
 			return { contents, loader: "js" };
+		});
+	},
+};
+
+/* ------------------------------------------------------------------ */
+/* Anthropic SDK shim                                                  */
+/* ------------------------------------------------------------------ */
+
+const ANTHROPIC_SDK_SPECIFIER = "@anthropic-ai/sdk";
+const ANTHROPIC_SHIM_PATH = "src/runtime/pi/anthropic-sdk-shim.ts";
+const ANTHROPIC_API_FILE = "node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js";
+
+/**
+ * pi-ai 对 `@anthropic-ai/sdk` 的用法指纹，逐条在构建期核对。
+ *
+ * 每一条都对应 shim（src/runtime/pi/anthropic-sdk-shim.ts）里刻意实现的一个面。
+ * 只要有一条消失，就说明 pi-ai 改了实现，shim 的覆盖面不再成立 —— 必须让构建红掉。
+ * 这正是仓库里 stripJsonImportAttributes / stubNodeBuiltinDynamicImports 用的
+ * 「出声失败」模式：宁可构建失败，也不要打出一个能装但一调用就坏的单文件。
+ */
+const ANTHROPIC_SDK_USAGE_FINGERPRINTS = [
+	{
+		pattern: /^import Anthropic, \{\} from "@anthropic-ai\/sdk";$/m,
+		describe: "默认导入 Anthropic（shim 必须提供 default 导出）",
+	},
+	{
+		pattern: /class PiAnthropic extends Anthropic \{/,
+		describe: "把 Anthropic 当基类继承（shim 必须可 new、可 extends）",
+	},
+	{
+		pattern: /new PiAnthropic\(\{/,
+		describe: "new PiAnthropic({...})（shim 构造函数入参面）",
+	},
+	{
+		pattern: /baseURL: model\.baseUrl/,
+		describe: "构造参数 baseURL: model.baseUrl（shim 用它拼 /v1/messages）",
+	},
+	{
+		pattern: /dangerouslyAllowBrowser: true/,
+		describe: "构造参数 dangerouslyAllowBrowser（shim 据此加浏览器直连头）",
+	},
+	{
+		pattern: /defaultHeaders/,
+		describe: "构造参数 defaultHeaders（shim 的 header 合并顺序依赖它）",
+	},
+	{
+		pattern: /\.withOptions\(\{ defaultHeaders \}\)/,
+		describe: "client.withOptions({ defaultHeaders })（shim 的克隆方法）",
+	},
+	{
+		pattern: /client\.beta\.messages\.create\(params, requestOptions\)\.asResponse\(\)/,
+		describe: "client.beta.messages.create(params, opts).asResponse()（shim 的核心调用面）",
+	},
+	{
+		pattern: /error instanceof Anthropic\.APIError/,
+		describe: "instanceof Anthropic.APIError（shim 必须挂静态 APIError）",
+	},
+];
+
+let anthropicSdkUsageVerified;
+
+/** 构建期核对 pi-ai 的 SDK 用法；结果（含成功）缓存，避免每个 importer 重读文件。 */
+async function verifyAnthropicSdkUsage() {
+	if (!anthropicSdkUsageVerified) {
+		anthropicSdkUsageVerified = (async () => {
+			const source = await readFile(ANTHROPIC_API_FILE, "utf8");
+			const missing = ANTHROPIC_SDK_USAGE_FINGERPRINTS.filter(({ pattern }) => !pattern.test(source));
+			if (missing.length > 0) {
+				throw new Error(
+					`alias-anthropic-sdk-to-shim: ${ANTHROPIC_API_FILE} 里少了 ${missing.length} 处预期的 SDK 用法：\n`
+					+ missing.map(({ describe }) => `  - ${describe}`).join("\n")
+					+ "\npi-ai 可能改了 anthropic-messages 的实现，请重新核对 "
+					+ `${ANTHROPIC_SHIM_PATH} 是否仍然覆盖它的用法。`,
+				);
+			}
+		})();
+	}
+	return anthropicSdkUsageVerified;
+}
+
+/**
+ * 把 `@anthropic-ai/sdk` 别名到本地 shim（体积策略见 KEPT_PI_APIS 的注释与实测数字）。
+ *
+ * 为什么不直接用 esbuild 的 `alias` 选项：这里需要**知道谁在 import**。
+ * 只有 pi-ai 的 `api/anthropic-messages.js` 允许引 SDK；一旦冒出第二个 importer
+ * （或 pi 改用子路径 `@anthropic-ai/sdk/resources/...`），就说明 shim 覆盖不到，
+ * 此时必须让构建失败 —— 这正是本插件比一行 alias 更有价值的地方。
+ */
+const aliasAnthropicSdkToShim = {
+	name: "alias-anthropic-sdk-to-shim",
+	setup(build) {
+		build.onResolve({ filter: /^@anthropic-ai\/sdk(\/.*)?$/ }, async (args) => {
+			if (args.path !== ANTHROPIC_SDK_SPECIFIER) {
+				throw new Error(
+					`alias-anthropic-sdk-to-shim: 出现了子路径 import "${args.path}"（来自 ${args.importer}）。`
+					+ `${ANTHROPIC_SHIM_PATH} 只实现了包根导出，请先补上对应实现或改回包根导入。`,
+				);
+			}
+			if (!/pi-ai[\\/]dist[\\/]api[\\/]anthropic-messages\.js$/.test(args.importer)) {
+				throw new Error(
+					`alias-anthropic-sdk-to-shim: 意料之外的 importer "${args.importer}" 引用了 @anthropic-ai/sdk。`
+					+ "shim 只按 pi-ai anthropic-messages 的用法面实现，请核对这个新调用方需要什么。",
+				);
+			}
+			await verifyAnthropicSdkUsage();
+			return { path: resolve(dirname(fileURLToPath(import.meta.url)), ANTHROPIC_SHIM_PATH) };
 		});
 	},
 };
@@ -346,18 +567,30 @@ const context = await esbuild.context({
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
+	// 始终产出 metafile（只是一个内存对象），供 BAIZER_METAFILE=1 时落盘做体积分析。
+	metafile: true,
 	outfile: `${outputDir}/main.js`,
 	loader: { '.md': 'text' },
 	plugins: [
 		stubUnusedPiProviders,
+		stubUnusedPiModelCatalogs,
 		stubUnusedPiApis,
+		aliasAnthropicSdkToShim,
 		stripJsonImportAttributes,
 		stubNodeBuiltinDynamicImports,
 	],
 });
 
 if (prod) {
-	await context.rebuild();
+	const result = await context.rebuild();
+	// 体积是这个仓库的硬约束（见 test/bundle-size.test.ts 与 KEPT_PI_APIS 的实测注释），
+	// 故保留一条按需产出 metafile 的通道：BAIZER_METAFILE=1 npm run build 会写出
+	// dist/esbuild-meta.json，用于回答「这 90KB 是谁进来的 / 还能砍哪里」。
+	// 默认不写，避免每次构建都多一个产物文件。
+	if (process.env.BAIZER_METAFILE) {
+		await writeFile(`${outputDir}/esbuild-meta.json`, JSON.stringify(result.metafile));
+		console.log(`wrote ${outputDir}/esbuild-meta.json`);
+	}
 	await copyStaticAssets();
 	process.exit(0);
 } else {

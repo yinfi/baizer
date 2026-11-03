@@ -3084,6 +3084,37 @@ textarea.shell-input {
     color: var(--text-faint);
 }
 
+/* 折叠的「高级」块（自定义请求头等）。基础字段优先，高级配置默认收起。
+   注：此前的样式只存在于内联兜底 CSS，styles.css 缺失；两处需保持一致
+   （兜底 CSS 把 .baizer-settings-advanced 归入卡片组，故这里同样给卡片外观）。 */
+.baizer-settings-advanced {
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--background-secondary) 45%, transparent);
+    overflow: hidden;
+}
+
+/* 只有连接面板里的请求头块需要外边距（它嵌在连接卡片里）；其它分区的
+   advanced 块是分区直属子元素，加 margin 会改动它们的既有布局。 */
+.baizer-settings-advanced-headers {
+    margin: 0 10px 10px;
+}
+
+.baizer-settings-advanced summary {
+    padding: 10px 14px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-semibold);
+}
+
+.baizer-settings-advanced-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 14px 12px;
+}
+
 /* P0-4: 删除旧「双栏 workspace」设计的死选择器(当前 DOM 为 accordion,src 中 0 引用)。 */
 
 .baizer-settings-provider-list {
@@ -3134,28 +3165,47 @@ textarea.shell-input {
     text-overflow: ellipsis;
 }
 
+/* 字段行：标签列宽一点，控件列拿到剩余整行宽度。
+   此前标签 130px 且控件被挤在双栏的窄栏里，长 URL 只能显示 `https://openc…`。
+   分隔线用 border-top + :first-child（与内联兜底 CSS 一致），首行不会多出一条线。 */
 .baizer-settings-detail-row {
     display: grid;
-    grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
-    gap: 18px;
+    grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
+    gap: 6px 14px;
     align-items: start;
     padding: 10px 14px;
-    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
 }
 
-.baizer-settings-detail-row:last-child {
-    border-bottom: none;
+.baizer-settings-detail-row:first-child {
+    border-top: none;
 }
 
 .baizer-settings-detail-label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
     padding-top: 6px;
     color: var(--text-normal);
     font-size: var(--font-ui-small);
     font-weight: var(--font-semibold);
 }
 
+.baizer-settings-detail-required {
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    font-weight: var(--font-medium);
+    color: var(--text-warning);
+    background: color-mix(in srgb, var(--color-yellow) 18%, transparent);
+}
+
 .baizer-settings-detail-value {
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
 .baizer-settings-detail-input {
@@ -3171,6 +3221,11 @@ textarea.shell-input {
     box-shadow: none;
 }
 
+/* 长地址/长模型名：输入框可编辑全文，悬停另有 title 提供完整值——不靠截断当唯一手段。 */
+.baizer-settings-detail-input[type="text"] {
+    text-overflow: ellipsis;
+}
+
 .baizer-settings-detail-input:focus {
     outline: none;
     border-color: var(--interactive-accent);
@@ -3182,28 +3237,102 @@ textarea.shell-input {
 }
 
 .baizer-settings-detail-textarea {
-    min-height: 72px;
+    min-height: 88px;
     padding: 8px 10px;
     font-family: var(--font-monospace);
+    font-size: var(--font-smallest);
     resize: vertical;
-    white-space: pre;
+    /* pre-wrap + anywhere：多行 header 换行显示，不再撑出横向滚动条。 */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-x: hidden;
 }
 
-.baizer-settings-detail-secret {
+.baizer-settings-secret-input {
+    font-family: var(--font-monospace);
+}
+
+/* 密钥操作独占一行：不再和输入框挤同一窄栏导致按钮竖向堆叠、撑高整行。 */
+.baizer-settings-field-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
 }
 
-.baizer-settings-detail-secret .baizer-settings-detail-input {
-    flex: 1 1 360px;
+.baizer-settings-field-hint {
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    line-height: 1.5;
+    /* 帮助文字占满整行并连续换行：此前被挤在窄 value 列里折成多行短句、顶到右边缘。 */
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
-.baizer-settings-detail-secret-actions {
+.baizer-settings-field-hint.is-warning {
+    color: color-mix(in srgb, var(--color-yellow) 62%, var(--text-normal));
+}
+
+/* 真故障（401/网络/解析）用 error 色；能力缺口仍走 is-warning，两者必须一眼可分。 */
+.baizer-settings-field-hint.is-error {
+    color: var(--text-error);
+}
+
+.baizer-settings-field-feedback {
+    font-size: var(--font-smallest);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.baizer-settings-field-feedback:empty {
+    display: none;
+}
+
+.baizer-settings-field-feedback.is-error {
+    color: var(--text-error);
+}
+
+.baizer-settings-field-feedback.is-warning {
+    color: var(--text-warning);
+}
+
+/* 模型字段：文本输入是唯一真源，下拉只是省打字的候选——拉不到列表也绝不置灰。 */
+.baizer-settings-model-input {
+    font-family: var(--font-monospace);
+}
+
+.baizer-settings-model-picker {
     display: flex;
-    gap: 8px;
     flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.baizer-settings-model-select {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+/* 兜底列表不是该端点的结论：降调 + 虚线边，别让用户以为这些模型一定被支持。 */
+.baizer-settings-model-select.is-untrusted {
+    border-style: dashed;
+    color: var(--text-muted);
+}
+
+.baizer-settings-model-picker .baizer-settings-action {
+    flex: 0 0 auto;
+}
+
+.baizer-settings-header-example {
+    margin: 0;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--background-modifier-border) 32%, transparent);
+    color: var(--text-muted);
+    font-family: var(--font-monospace);
+    font-size: var(--font-smallest);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .baizer-settings-empty-state {
@@ -3237,7 +3366,7 @@ textarea.shell-input {
 @container (max-width: 840px) {
     .baizer-settings-detail-row {
         grid-template-columns: 1fr;
-        gap: 10px;
+        gap: 6px;
     }
 
     .baizer-settings-detail-label {
@@ -3867,11 +3996,50 @@ textarea.shell-input {
     border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
 }
 
-.baizer-settings-connection-detail-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+/* 单列四组流程：身份与协议 → 地址与凭证 → 模型 → 测试结果。
+   此前是 Basic/Credentials 两栏栅格：左栏四个短字段留大片空白，右栏塞着地址/密钥/
+   请求头/帮助文字/测试区被压成窄条（地址只显示得出 https://openc…、Reveal/Clear 竖向堆叠）。 */
+.baizer-settings-connection-flow {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+}
+
+/* 连接卡片标题栏左侧是「序号徽章 + 标题」两个子项：
+   - 不能用 space-between（会把标题顶到最右），故这里改回 flex-start；
+   - Setting 不再是 :first-child，Obsidian 默认的 .setting-item 上边框与内边距会冒出来，需清零。 */
+.baizer-settings-connection-card-header {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
     gap: 8px;
-    padding: 8px;
+}
+
+.baizer-settings-connection-card-header .setting-item {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0;
+    border-top: none;
+}
+
+.baizer-settings-connection-card-index {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    font-weight: var(--font-semibold);
+    color: var(--text-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+
+.baizer-settings-connection-card-body {
+    display: flex;
+    flex-direction: column;
 }
 
 @container (max-width: 560px) {
@@ -3882,10 +4050,13 @@ textarea.shell-input {
 
     .baizer-settings-section-summary,
     .baizer-settings-provider-card-main-inner,
-    .baizer-settings-connection-detail-grid,
     .baizer-settings-detail-row,
     .baizer-settings-preset-grid {
         grid-template-columns: 1fr;
+    }
+
+    .baizer-settings-detail-label {
+        padding-top: 0;
     }
 
     .baizer-settings-section-copy {

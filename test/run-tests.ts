@@ -1,4 +1,4 @@
-﻿import { execSync } from 'child_process';
+import { execSync } from 'child_process';
 
 const tests = [
   'test/brand.test.ts',
@@ -66,6 +66,9 @@ const tests = [
   'test/request-url-fetch.test.ts',
   'test/context-manager.test.ts',
   'test/settings-state.test.ts',
+  'test/settings-provider-layout.test.ts',
+  'test/settings-connection-validation.test.ts',
+  'test/anthropic-protocol.test.ts',
   'test/memory-manager.test.ts',
   'test/hindsight-memory.test.ts',
   'test/save-path.test.ts',

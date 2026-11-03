@@ -1,4 +1,4 @@
-﻿import { DEFAULT_SETTINGS, PluginSettings, mergeProviderDefaults } from '../src/mcp/types';
+import { DEFAULT_SETTINGS, PluginSettings, mergeProviderDefaults } from '../src/mcp/types';
 import { setLocaleForTesting } from '../src/i18n/zh';
 import {
   getConnectionTestStatusPresentation,
@@ -203,11 +203,26 @@ async function runTests() {
     settings.providers.openai.apiKey = '';
     settings.providers.qwen.apiKey = '';
 
+    // 5 个内置 provider：gemini/deepseek 有 key，openai/qwen/anthropic 没有。
     expect(getProviderListSummary(settings)).toEqual({
-      total: 4,
+      total: 5,
       configured: 2,
-      missingKey: 2,
-      label: '4 providers / 2 configured / 2 missing key',
+      missingKey: 3,
+      label: '5 providers / 2 configured / 3 missing key',
+    });
+  });
+
+  await test('labels an Anthropic provider as Anthropic, not as OpenAI-compatible', () => {
+    const settings = cloneSettings();
+
+    expect({
+      anthropic: getProviderCardMeta(settings, 'anthropic').protocolLabel,
+      gemini: getProviderCardMeta(settings, 'gemini').protocolLabel,
+      openai: getProviderCardMeta(settings, 'openai').protocolLabel,
+    }).toEqual({
+      anthropic: 'Anthropic Messages API',
+      gemini: 'Gemini API',
+      openai: 'OpenAI-compatible',
     });
   });
 
@@ -239,7 +254,7 @@ async function runTests() {
       gemini: settings.providers.gemini,
     }, ['openai', 'deepseek']);
 
-    expect(Object.keys(restored)).toEqual(['gemini', 'qwen']);
+    expect(Object.keys(restored)).toEqual(['gemini', 'qwen', 'anthropic']);
   });
 
   await test('exposes an explicit vault write scope default for permission controls', () => {
@@ -302,6 +317,7 @@ async function runTests() {
       { label: 'Google Gemini missing API key', sectionId: 'connection', tone: 'warning' },
       { label: 'OpenAI missing API key', sectionId: 'connection', tone: 'warning' },
       { label: 'Qwen missing API key', sectionId: 'connection', tone: 'warning' },
+      { label: 'Anthropic missing API key', sectionId: 'connection', tone: 'warning' },
     ]);
   });
 
@@ -322,7 +338,13 @@ async function runTests() {
       hasAccordion: css.includes('.baizer-settings-accordion'),
       hasSectionSummary: css.includes('.baizer-settings-section-summary'),
       hasInlineProviderDetail: css.includes('.baizer-settings-provider-detail-inline'),
-      hasConnectionDetailGrid: css.includes('.baizer-settings-connection-detail-grid'),
+      // 连接详情改为单列四组流程（身份与协议 → 地址与凭证 → 模型 → 测试结果），
+      // 不再是 Basic/Credentials 两栏栅格。
+      hasConnectionFlow: css.includes('.baizer-settings-connection-flow'),
+      hasConnectionCardBody: css.includes('.baizer-settings-connection-card-body'),
+      hasFieldHint: css.includes('.baizer-settings-field-hint'),
+      hasFieldFeedback: css.includes('.baizer-settings-field-feedback'),
+      hasModelPicker: css.includes('.baizer-settings-model-picker'),
       hasCompactSectionRow: css.includes('grid-template-columns: minmax(0, 1fr) auto 18px'),
       hasNarrowOnlyBreakpoint: css.includes('@container (max-width: 560px)'),
       removedSectionIcon: css.includes('.baizer-settings-section-icon'),
@@ -330,12 +352,19 @@ async function runTests() {
       removedNavLayout: css.includes('.baizer-settings-nav-list'),
       removedWorkspaceSplit: css.includes('.baizer-settings-workspace {'),
       removedMetricCards: css.includes('.baizer-settings-metric'),
+      // 两栏栅格与其密钥并排布局已删除：正是它们把地址/密钥操作挤成窄条。
+      removedDetailGrid: css.includes('.baizer-settings-connection-detail-grid'),
+      removedSecretRow: css.includes('.baizer-settings-detail-secret'),
     }).toEqual({
       hasRoot: true,
       hasAccordion: true,
       hasSectionSummary: true,
       hasInlineProviderDetail: true,
-      hasConnectionDetailGrid: true,
+      hasConnectionFlow: true,
+      hasConnectionCardBody: true,
+      hasFieldHint: true,
+      hasFieldFeedback: true,
+      hasModelPicker: true,
       hasCompactSectionRow: true,
       hasNarrowOnlyBreakpoint: true,
       removedSectionIcon: false,
@@ -343,6 +372,8 @@ async function runTests() {
       removedNavLayout: false,
       removedWorkspaceSplit: false,
       removedMetricCards: false,
+      removedDetailGrid: false,
+      removedSecretRow: false,
     });
   });
   await test('exposes thinkingLevel default for behavior controls', () => {

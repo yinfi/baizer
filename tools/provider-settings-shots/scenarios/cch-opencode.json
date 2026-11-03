@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "Provider fixture reproducing the scenario shown by the committed baseline",
+    "docs/assets/provider-settings-obsidian-2026-11-03.png (Obsidian 1.14.5, dark, zh).",
+    "Read from that PNG via Windows OCR: cards 'cch' and 'opencode', badges 'Ready' and",
+    "'Active', card meta '模型：gpt-5.6-sol' and '模型：deepseek-v4.1-flash', and an",
+    "expanded opencode detail showing 服务商名称/API 端点/OpenAI 兼容/Chat Completions/",
+    "deepseek-v4.1/…/自定义请求头 with the {{conversationId}} help note.",
+    "Keys that cannot be recovered from a bitmap are marked _unverified below."
+  ],
+  "language": "zh",
+  "activeProvider": "opencode",
+  "deletedProviderIds": ["gemini", "openai", "deepseek", "qwen"],
+  "providers": {
+    "cch": {
+      "type": "openai-compatible",
+      "label": "cch",
+      "apiKey": "sk-cch-fixture-not-a-real-key",
+      "baseUrl": "http://127.0.0.1:8082/v1",
+      "model": "gpt-5.6-sol",
+      "_unverified": {
+        "type": "not visible on the collapsed card; openai-compatible assumed",
+        "baseUrl": "not visible on the collapsed card; a loopback placeholder is used",
+        "apiKey": "only its presence is inferable, from the 'Ready' badge (badge is 'Needs key' when empty)"
+      }
+    },
+    "opencode": {
+      "type": "openai-compatible",
+      "label": "opencode",
+      "apiKey": "sk-opencode-fixture-not-a-real-key",
+      "baseUrl": "https://opencode.ai/zen/go/v1",
+      "model": "deepseek-v4.1-flash",
+      "customHeaders": {
+        "x-opencode-session": "{{conversationId}}"
+      },
+      "_unverified": {
+        "baseUrl": "the baseline input is clipped to 'https://opencc…'; the value here follows src/runtime/pi/pi-native-model.ts (host opencode.ai + path prefix /zen/go)"
+      }
+    }
+  }
+}

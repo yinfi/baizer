@@ -55,6 +55,28 @@ async function runTests() {
       supportsCustomBaseUrl: false,
     });
   });
+
+  // Anthropic Messages：原生协议支持 thinking / 图像 content block / tool_use，
+  // 且用户可指向任意兼容网关（故 supportsCustomBaseUrl 为 true）。
+  await test('anthropic config declares full native Messages capabilities', async () => {
+    expect(getProviderCapabilities({ type: 'anthropic' } as any)).toEqual({
+      supportsThinking: true,
+      supportsModelListing: true,
+      supportsImageInput: true,
+      supportsToolCalling: true,
+      supportsCustomBaseUrl: true,
+    });
+  });
+
+  await test('anthropic capabilities do not depend on apiKey/baseUrl being filled in', async () => {
+    expect(getProviderCapabilities({ type: 'anthropic', apiKey: '', baseUrl: '' } as any)).toEqual({
+      supportsThinking: true,
+      supportsModelListing: true,
+      supportsImageInput: true,
+      supportsToolCalling: true,
+      supportsCustomBaseUrl: true,
+    });
+  });
 }
 
 runTests().catch((e) => {

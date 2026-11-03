@@ -752,6 +752,287 @@ async function runTests() {
     expect(listModelsCalled).toEqual(false);
     expect(models.some((model: any) => model.value === 'gpt-4o')).toEqual(true);
   });
+
+  // ---- Anthropic Messages 三分支接线 ----
+  // 这三条合起来锁住 issue #58 part 2 的核心回归：'anthropic' 绝不能静默落到
+  // OpenAI-compatible 分支（那会发 /chat/completions 而不是 /v1/messages）。
+
+  await test('buildModelForConfig dispatches gemini / anthropic / openai-compatible explicitly', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.settings = { contextWindow: 100000, thinkingLevel: 'medium' };
+
+    const gemini = service.buildModelForConfig({
+      type: 'gemini', label: 'Gemini', apiKey: 'k', baseUrl: '', model: 'gemini-2.5-flash',
+    });
+    expect(gemini.api).toEqual('google-generative-ai');
+    expect(gemini.provider).toEqual('google');
+
+    const anthropic = service.buildModelForConfig({
+      type: 'anthropic', label: 'Anthropic', apiKey: 'k',
+      baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-5',
+    });
+    expect(anthropic.api).toEqual('anthropic-messages');
+    expect(anthropic.provider).toEqual('anthropic');
+    expect(anthropic.baseUrl).toEqual('https://api.anthropic.com');
+    expect(anthropic.id).toEqual('claude-sonnet-4-5');
+    // Anthropic Messages 协议要求 max_tokens 必填
+    expect(anthropic.maxTokens).toEqual(8192);
+
+    const openai = service.buildModelForConfig({
+      type: 'openai-compatible', label: 'OpenAI', apiKey: 'k',
+      baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o',
+    });
+    expect(openai.api).toEqual('openai-completions');
+    expect(openai.provider).toEqual('openai');
+  });
+
+  await test('buildModelForConfig threads settings.contextWindow/thinkingLevel into the anthropic model', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.settings = { contextWindow: 200000, thinkingLevel: 'off' };
+
+    const model = service.buildModelForConfig({
+      type: 'anthropic', label: 'Anthropic', apiKey: 'k',
+      baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-5',
+    });
+    expect(model.contextWindow).toEqual(200000);
+    // thinkingLevel='off' → 不发 thinking 字段
+    expect(model.reasoning).toEqual(false);
+  });
+
+  await test('getAvailableModels falls back to Claude models for anthropic without an api key', async () => {
+    const service: any = Object.create(ModelService.prototype);
+
+    service.settings = {
+      activeProvider: 'anthropic',
+      providers: {
+        anthropic: {
+          type: 'anthropic',
+          label: 'Anthropic',
+          apiKey: '',
+          baseUrl: 'https://api.anthropic.com',
+          model: 'claude-sonnet-4-5',
+        },
+      },
+    };
+    service.modelListCache = new Map();
+    service.modelListCacheTtlMs = 10 * 60 * 1000;
+    service.getActiveProviderConfig = () => service.settings.providers.anthropic;
+
+    // apiKey 为空 → 不走网络列模型，回落到内置 Claude 列表，
+    // 保证下拉框非空（兼容网关常常没有 GET /v1/models）。
+    const models = await service.getAvailableModels(true);
+
+    expect(models.some((model: any) => model.value === 'claude-sonnet-4-5')).toEqual(true);
+    expect(models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+    expect(models.some((model: any) => model.value === 'claude-haiku-4-5')).toEqual(true);
+  });
+
+  // ---- 模型列表状态：让 settings 面板不必再靠数组形状猜 ----
+  // 契约：listingUnsupported 为 true **仅当** listModels 抛 ModelListingUnsupportedError
+  // （列模型端点 404/405/501）；其他失败进 error；两者都空 = models 是端点真实清单。
+
+  function serviceWithListingEndpoint(requestUrlImpl: (opts: any) => any) {
+    const service: any = Object.create(ModelService.prototype);
+    service.settings = {
+      activeProvider: 'anthropic',
+      providers: {
+        anthropic: {
+          type: 'anthropic',
+          label: 'Anthropic',
+          apiKey: 'sk-ant-test',
+          baseUrl: 'https://api.anthropic.com',
+          model: 'claude-sonnet-4-5',
+        },
+      },
+    };
+    service.modelListCache = new Map();
+    service.modelListCacheTtlMs = 10 * 60 * 1000;
+    service.getActiveProviderConfig = () => service.settings.providers.anthropic;
+    return { service, deps: { requestUrl: requestUrlImpl } as any };
+  }
+
+  await test('getAvailableModelsWithStatus: 404 列表端点 → listingUnsupported=true 且不带 error', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({ status: 404, text: 'not found' }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listingUnsupported).toEqual(true);
+    expect(result.error).toEqual(undefined);
+    // 仍然给出可渲染的兜底列表（UI 不能空着）
+    expect(result.models.some((model: any) => model.value === 'claude-sonnet-4-5')).toEqual(true);
+  });
+
+  await test('getAvailableModelsWithStatus: 405 / 501 也算 listingUnsupported', async () => {
+    for (const status of [405, 501]) {
+      const { service, deps } = serviceWithListingEndpoint(() => ({ status, text: '' }));
+      const result = await service.getAvailableModelsWithStatus(true, deps);
+      expect(result.listingUnsupported).toEqual(true);
+    }
+  });
+
+  await test('getAvailableModelsWithStatus: 401 是故障而不是能力缺口 → error 有值、listingUnsupported=false', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({ status: 401, text: '{"error":{"message":"bad key"}}' }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error instanceof Error).toEqual(true);
+    expect(result.error.message.includes('401')).toEqual(true);
+    expect(result.models.some((model: any) => model.value === 'claude-sonnet-4-5')).toEqual(true);
+  });
+
+  await test('getAvailableModelsWithStatus: 未配置 apiKey → error 有值、listingUnsupported=false、不发请求', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 200, text: '{"data":[]}' };
+    });
+    service.settings.providers.anthropic.apiKey = '';
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(requests).toEqual(0);
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error.message.includes('API Key')).toEqual(true);
+    expect(result.models.some((model: any) => model.value === 'claude-sonnet-4-5')).toEqual(true);
+  });
+
+  await test('getAvailableModelsWithStatus: 端点正常列模型 → 两者都空，models 来自端点', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({
+      status: 200,
+      text: JSON.stringify({ data: [{ id: 'claude-opus-4-5', display_name: 'Claude Opus 4.5' }] }),
+    }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error).toEqual(undefined);
+    expect(result.models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
+
+  await test('getAvailableModelsWithStatus: listingUnsupported 走缓存，第二次不再打端点', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 404, text: 'not found' };
+    });
+
+    const first = await service.getAvailableModelsWithStatus(true, deps);
+    const second = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(1);
+    expect(first.listingUnsupported).toEqual(true);
+    expect(second.listingUnsupported).toEqual(true);
+  });
+
+  await test('getAvailableModels stays a thin wrapper over getAvailableModelsWithStatus', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({
+      status: 200,
+      text: JSON.stringify({ data: [{ id: 'claude-opus-4-5' }] }),
+    }));
+
+    // 先用注入的 deps 把「端点真实清单」灌进缓存（缓存键与调用方无关）
+    const withStatus = await service.getAvailableModelsWithStatus(true, deps);
+    // 薄包装只接受 forceRefresh，此处命中同一份缓存，必须给出同一个列表
+    const plain = await service.getAvailableModels(false);
+
+    expect(plain).toEqual(withStatus.models);
+    expect(plain.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
+
+  // ---- 缓存命中路径必须复现「失败」状态（WP-B 集成时抓到的 bug）----
+  // 症状：失败结果进缓存时只存了 models，丢掉 error；于是第一次（forceRefresh）报错，
+  // 之后每次非 forceRefresh 的调用都既无 error 也无 listingUnsupported → UI 谎报 listed。
+  // 非 forceRefresh 正是每次重渲染走的路，所以这几条必须直接盯住缓存命中路径。
+
+  await test('cached failure replays error on a non-forced call (401 must not become "listed")', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 401, text: '{"error":{"message":"bad key"}}' };
+    });
+
+    const forced = await service.getAvailableModelsWithStatus(true, deps);
+    // 关键：不传 forceRefresh，模拟「重渲染」
+    const cached = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(1);
+    expect(forced.error instanceof Error).toEqual(true);
+    expect(forced.listingUnsupported).toEqual(false);
+    // 缓存命中必须给出同样的判定，而不是「两者皆空 = 已列出」
+    expect(cached.error instanceof Error).toEqual(true);
+    expect(cached.error.message.includes('401')).toEqual(true);
+    expect(cached.listingUnsupported).toEqual(false);
+    expect(cached.models).toEqual(forced.models);
+  });
+
+  await test('cached listingUnsupported replays as true with no error on a non-forced call', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 404, text: 'not found' };
+    });
+
+    await service.getAvailableModelsWithStatus(true, deps);
+    const cached = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(1);
+    expect(cached.listingUnsupported).toEqual(true);
+    expect(cached.error).toEqual(undefined);
+  });
+
+  await test('cached success replays as neither error nor listingUnsupported', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 200, text: JSON.stringify({ data: [{ id: 'claude-opus-4-5' }] }) };
+    });
+
+    await service.getAvailableModelsWithStatus(true, deps);
+    const cached = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(1);
+    expect(cached.error).toEqual(undefined);
+    expect(cached.listingUnsupported).toEqual(false);
+    expect(cached.models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
+
+  await test('cached "missing api key" failure also replays on a non-forced call', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 200, text: '{"data":[]}' };
+    });
+    service.settings.providers.anthropic.apiKey = '';
+
+    await service.getAvailableModelsWithStatus(true, deps);
+    const cached = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(0);
+    expect(cached.error instanceof Error).toEqual(true);
+    expect(cached.error.message.includes('API Key')).toEqual(true);
+    expect(cached.listingUnsupported).toEqual(false);
+  });
+
+  await test('forceRefresh escapes a cached failure and retries the endpoint', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      // 第一次失败，之后恢复：证明缓存不是「失败粘住 10 分钟」的死结
+      return requests === 1
+        ? { status: 401, text: '{"error":{"message":"bad key"}}' }
+        : { status: 200, text: JSON.stringify({ data: [{ id: 'claude-opus-4-5' }] }) };
+    });
+
+    const failed = await service.getAvailableModelsWithStatus(true, deps);
+    const retried = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(requests).toEqual(2);
+    expect(failed.error instanceof Error).toEqual(true);
+    expect(retried.error).toEqual(undefined);
+    expect(retried.listingUnsupported).toEqual(false);
+    expect(retried.models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
 }
 
 runTests().catch((e) => {

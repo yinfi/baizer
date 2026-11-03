@@ -8,7 +8,9 @@ import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry, SkillSummary } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
-import { buildGeminiModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn, resolveCustomHeaders } from '../runtime/pi/pi-native-model';
+import { buildAnthropicModel, buildGeminiModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn, resolveCustomHeaders } from '../runtime/pi/pi-native-model';
+// 仅类型导入（编译期擦除），不把 ESM-only 的 pi-ai 主入口拉进 CJS 测试环境。
+import type { Model } from '@earendil-works/pi-ai';
 import { createHarnessExecutionEnv } from '../runtime/pi/harness-env';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import * as modelCatalog from './model-catalog-service';
@@ -29,9 +31,37 @@ import { ObsidianContextSnapshot } from './obsidian-context-service';
 import { OperationAuditLog } from './operation-audit-log';
 import { WorkspaceEditService } from './workspace-edit-service';
 
+/**
+ * 「模型列表 + 它为什么是这个列表」。
+ *
+ * 存在的理由：`getAvailableModels()` 在抓取失败时会静默回落到 `getFallbackModels()`，
+ * 于是调用方无法区分「端点真的列出了模型」与「列不出来、给了一份兜底」——
+ * settings 面板只能靠数组形状去猜（例如「只有一项且恰好是当前模型」），
+ * 而那会误伤「端点确实只暴露一个模型」的合法情况。
+ *
+ * 字段含义：
+ *  - `listingUnsupported === true`：**仅当** `listModels()` 抛出
+ *    `ModelListingUnsupportedError`（列模型端点返回 404 / 405 / 501）。
+ *    这是能力缺口而非故障 —— 端点可能照样能生成，UI 应提示「手动输入模型名」
+ *    而不是报「配置错误」。此时 `error` 不设置。
+ *  - `error`：没拿到真实列表的其他原因（未配置 apiKey、401、网络错误…）。
+ *  - 两者都为默认值时，`models` 就是端点返回的真实清单。
+ *  - 无论哪种情况，`models` 都非空（回落到内置列表），调用方可以直接渲染。
+ *
+ * 缓存语义（重要）：整个判定结果（含 `listingUnsupported` 与 `error`）一起缓存 10 分钟，
+ * 非 `forceRefresh` 的调用会**原样重放**上一次的判定 —— 失败也重放。
+ * 否则「失败一次之后，每次重渲染都退回 listed」这种谎报就落在最常见路径上
+ * （重渲染从不传 forceRefresh）。需要真正重试请传 `forceRefresh: true`（UI 的 Refresh 即如此）。
+ */
+export interface AvailableModelsResult {
+    models: ModelOption[];
+    listingUnsupported: boolean;
+    error?: Error;
+}
+
 export class ModelService {
     private memoryManager: MemoryManager | null = null;
-    private readonly modelListCache = new Map<string, { timestamp: number; models: ModelOption[] }>();
+    private readonly modelListCache = new Map<string, { timestamp: number; models: ModelOption[]; listingUnsupported: boolean; error?: Error }>();
     private readonly modelListCacheTtlMs = 10 * 60 * 1000;
     private readonly generationStrategyService = new GenerationStrategyService();
     private providerChangedCallbacks: Array<() => void> = [];
@@ -276,13 +306,32 @@ export class ModelService {
         return await modelCatalog.checkAvailability(config);
     }
 
-    async getAvailableModels(forceRefresh: boolean = false): Promise<ModelOption[]> {
+    /**
+     * 与 `getAvailableModels` 同源，但把「列表是不是真的来自端点」一并返回。
+     * settings 面板据此决定是否提示「手动输入模型名」，不再靠数组形状猜。
+     * 保留 `getAvailableModels` 作为薄包装，既有调用方无需改动。
+     *
+     * @param forceRefresh - 跳过 10 分钟缓存
+     * @param deps         - 可选注入，与 `modelCatalog.checkAvailability(config, deps?)` 同一个缝
+     *                       （换掉 requestUrl 以便测试/复用），生产调用不传。
+     */
+    async getAvailableModelsWithStatus(
+        forceRefresh: boolean = false,
+        deps?: modelCatalog.ModelCatalogDeps,
+    ): Promise<AvailableModelsResult> {
         const providerId = this.settings.activeProvider;
         const config = this.getActiveProviderConfig();
-        if (!config) return [];
+        if (!config) return { models: [], listingUnsupported: false };
 
-        const models = await this.fetchModelsForProvider(providerId, config, forceRefresh);
-        return this.ensureModelInList(models, config.model || '');
+        const fetched = await this.fetchModelsForProvider(providerId, config, forceRefresh, deps);
+        return {
+            ...fetched,
+            models: this.ensureModelInList(fetched.models, config.model || ''),
+        };
+    }
+
+    async getAvailableModels(forceRefresh: boolean = false): Promise<ModelOption[]> {
+        return (await this.getAvailableModelsWithStatus(forceRefresh)).models;
     }
 
     /**
@@ -297,7 +346,7 @@ export class ModelService {
 
         const groups = await Promise.all(
             entries.map(async ([providerId, config]) => {
-                let models = await this.fetchModelsForProvider(providerId, config, forceRefresh);
+                let models = (await this.fetchModelsForProvider(providerId, config, forceRefresh)).models;
                 // 当前选中的模型置顶保证一定可选中(即便该 provider 抓取失败只剩 fallback)。
                 if (providerId === this.settings.activeProvider) {
                     models = this.ensureModelInList(models, config.model || '');
@@ -309,32 +358,56 @@ export class ModelService {
         return groups.filter(group => group.models.length > 0);
     }
 
-    /** 抓取单个 provider 的模型列表(带缓存 + fallback 兜底),不做「当前模型置顶」——由调用方按需处理。 */
+    /**
+     * 抓取单个 provider 的模型列表(带缓存 + fallback 兜底),不做「当前模型置顶」——由调用方按需处理。
+     * 返回值额外带上「列表是否真的来自端点」(见 AvailableModelsResult)，供 UI 使用。
+     */
     private async fetchModelsForProvider(
         providerId: string,
         config: ProviderConfig,
         forceRefresh: boolean,
-    ): Promise<ModelOption[]> {
+        deps?: modelCatalog.ModelCatalogDeps,
+    ): Promise<AvailableModelsResult> {
         const cacheKey = `${providerId}:${config.baseUrl}:${(config.apiKey || '').slice(0, 8)}`;
         const now = Date.now();
 
         if (!forceRefresh) {
             const cached = this.modelListCache.get(cacheKey);
             if (cached && now - cached.timestamp < this.modelListCacheTtlMs) {
-                return cached.models;
+                // 失败也原样重放：缓存若只存 models 而丢掉 error，
+                // 一次 401 之后所有非 forceRefresh 的调用都会谎报成「已列出」。
+                return {
+                    models: cached.models,
+                    listingUnsupported: cached.listingUnsupported,
+                    error: cached.error,
+                };
             }
         }
 
         let models: ModelOption[] = [];
+        let listingUnsupported = false;
+        let error: Error | undefined;
+
         if (config.apiKey?.trim()) {
             try {
-                models = await modelCatalog.listModels(config);
-            } catch (error: any) {
+                models = await modelCatalog.listModels(config, deps);
+            } catch (caught: any) {
+                // 「端点不支持列模型」是能力缺口而非故障：它同样回落到内置列表，
+                // 但必须把真实原因透出去，UI 才能提示手输模型名，
+                // 而不是让用户以为 apiKey/网络出了问题。
+                if (modelCatalog.isModelListingUnsupported(caught)) {
+                    listingUnsupported = true;
+                } else {
+                    error = caught instanceof Error ? caught : new Error(String(caught));
+                }
                 logger.warn(
-                    `Failed to fetch model list for provider ${providerId}: ${error?.message || 'Unknown error'}`,
+                    `Failed to fetch model list for provider ${providerId}: ${caught?.message || 'Unknown error'}`,
                     'ModelService.getAvailableModels'
                 );
             }
+        } else {
+            // 未配置 key 时根本不发请求：这属于「没拿到真实列表」，不是「端点不支持列模型」。
+            error = new Error(`${config.label || providerId} API Key not configured`);
         }
 
         if (!models.length) {
@@ -342,8 +415,10 @@ export class ModelService {
         }
 
         const normalized = this.normalizeModelOptions(models);
-        this.modelListCache.set(cacheKey, { timestamp: now, models: normalized });
-        return normalized;
+        // 判定结果整体缓存：10 分钟内重复问同一个端点不必再打一次 404 / 401。
+        // error 必须一起存 —— 缓存命中路径要靠它复现失败状态（见上方缓存语义）。
+        this.modelListCache.set(cacheKey, { timestamp: now, models: normalized, listingUnsupported, error });
+        return { models: normalized, listingUnsupported, error };
     }
 
     private getFallbackModels(providerId: string): ModelOption[] {
@@ -353,6 +428,14 @@ export class ModelService {
                 { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
                 { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
                 { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+            ],
+            // Anthropic 官方端点能列模型，但很多兼容网关没有实现 GET /v1/models。
+            // 那条路径下 listModels 会抛「列表不可用」，这里给一份手选兜底，
+            // 免得下拉框空掉、用户无法把已保存的 model 选回来（WP-B 还允许直接手输）。
+            anthropic: [
+                { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
+                { value: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
+                { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
             ],
             openai: [
                 { value: 'gpt-4o', label: 'GPT-4o' },
@@ -858,9 +941,7 @@ export class ModelService {
         if (!config) {
             throw new Error(`Unknown provider: ${this.settings.activeProvider}`);
         }
-        const model = config.type === 'gemini'
-            ? buildGeminiModel(config, this.settings.contextWindow, this.settings.thinkingLevel)
-            : buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
+        const model = this.buildModelForConfig(config);
         return {
             model,
             // AgentHarness 通过 getApiKeyAndHeaders 按需取 key;取当前 provider 的最新 apiKey。
@@ -868,6 +949,26 @@ export class ModelService {
             getApiKey: () => this.getActiveProviderConfig()?.apiKey ?? '',
             getHeaders: () => resolveCustomHeaders(this.getActiveProviderConfig()?.customHeaders, conversationId),
         };
+    }
+
+    /**
+     * 依 ProviderConfig.type 选择 pi Model 构造器。
+     *
+     * 必须是显式三分支：早先写成 `type === 'gemini' ? gemini : openai`，
+     * 于是新增的 'anthropic' 会静默落到 OpenAI-compatible 分支 —— 用户以为在打
+     * Messages 协议，实际发的是 /chat/completions，报错完全指错方向。
+     * 这里用 switch + 穷尽兜底，让类型层面新增 provider 时立刻暴露。
+     */
+    private buildModelForConfig(config: ProviderConfig): Model<any> {
+        switch (config.type) {
+            case 'gemini':
+                return buildGeminiModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
+            case 'anthropic':
+                return buildAnthropicModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
+            case 'openai-compatible':
+            default:
+                return buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
+        }
     }
 
     /**
@@ -880,10 +981,7 @@ export class ModelService {
         if (!config) {
             throw new Error(`Unknown provider: ${this.settings.activeProvider}`);
         }
-        const model = config.type === 'gemini'
-            ? buildGeminiModel(config, this.settings.contextWindow, this.settings.thinkingLevel)
-            : buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
-        return createNativeCompleteFn(model, config.apiKey);
+        return createNativeCompleteFn(this.buildModelForConfig(config), config.apiKey);
     }
 
     /**

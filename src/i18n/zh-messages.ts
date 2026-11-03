@@ -118,6 +118,76 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Connection failed': '连接失败',
     'Connection failed. Check API key, base URL, and model.': '连接失败。请检查 API Key、Base URL 与模型。',
 
+    // ── 连接：重做后的分组、字段命名与就地校验 ──
+    // 分组标题即配置流程顺序：身份与协议 → 地址与凭证 → 模型 → 测试结果。
+    'Provider identity and protocol': '服务商身份与协议',
+    'Connection address and credentials': '连接地址与凭证',
+    'Test result': '测试结果',
+    // 「API 类型」= OpenAI 方言；「服务地址（Base URL）」= 地址。此前两侧都叫「API 端点」。
+    'API type (Chat Completions / Responses)': 'API 类型（Chat Completions / Responses）',
+    'Service address (Base URL)': '服务地址（Base URL）',
+    'Anthropic Messages API': 'Anthropic Messages API',
+    'Custom headers (advanced)': '自定义请求头（高级）',
+    // 与权限区的 'Required'(需要) 分开：这里是「必填」字段标记，语义不同。
+    'Required field': '必填',
+    'Actual request path: {path}': '实际请求路径：{path}',
+    'The service address must NOT include /v1 — the Anthropic SDK appends /v1/messages itself. The official endpoint is https://api.anthropic.com.':
+        '服务地址**不要**带 /v1 —— Anthropic SDK 会自行追加 /v1/messages。官方端点是 https://api.anthropic.com。',
+    'The service address usually ends with /v1 — the OpenAI SDK appends /chat/completions itself, so do not paste the full request path.':
+        '服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /chat/completions，不要把完整请求路径粘进来。',
+    'The service address usually ends with /v1 — the OpenAI SDK appends /responses itself, so do not paste the full request path.':
+        '服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /responses，不要把完整请求路径粘进来。',
+    'Gemini always uses the official endpoint, so there is no service address to configure.':
+        'Gemini 固定使用官方端点，没有需要配置的服务地址。',
+    'The wire protocol this provider speaks.': '该服务商使用的线协议。',
+    'The wire protocol this provider speaks. Switching it only shows the fields that apply.':
+        '该服务商使用的线协议。切换后只显示适用于该协议的字段。',
+    'Shown in the provider list. An empty name is rejected instead of silently keeping the old one.':
+        '显示在服务商列表中。名称为空会就地报错，而不是悄悄改回旧名称。',
+    'Stored locally and hidden by default. Use Reveal to check it; Clear asks for confirmation.':
+        '仅保存在本地，默认隐藏。用「显示」查看，用「清除」清空（会二次确认）。',
+    // 就地校验
+    'Provider name is required.': '服务商名称不能为空。',
+    'Base URL is required.': '服务地址不能为空。',
+    'Base URL must start with http:// or https:// and must not contain spaces.':
+        '服务地址必须以 http:// 或 https:// 开头，且不能包含空格。',
+    'Base URL must not include the request path — remove /chat/completions or /responses.':
+        '服务地址不能包含请求路径 —— 请去掉 /chat/completions 或 /responses。',
+    'Base URL must not include the request path — remove /v1/messages.':
+        '服务地址不能包含请求路径 —— 请去掉 /v1/messages。',
+    'For Anthropic the base URL must not include /v1 — the SDK appends /v1/messages. Use https://api.anthropic.com.':
+        'Anthropic 的服务地址不能带 /v1 —— SDK 会追加 /v1/messages。请使用 https://api.anthropic.com。',
+    'missing ":" — write "Header-Name: value"': '缺少「:」——请写成 "Header-Name: value"',
+    'missing header name': '缺少请求头名称',
+    'duplicate header name, the last one wins': '请求头名称重复，以最后一行为准',
+    'Custom headers: {issues}. Those lines are ignored; the rest are kept.':
+        '自定义请求头：{issues}。这些行会被忽略，其余行照常保存。',
+    // 模型字段
+    'Model ID': '模型 ID',
+    'Model list': '模型列表',
+    'Refresh list': '刷新列表',
+    'No models listed': '没有列出模型',
+    'No API key yet — you can type the model ID by hand; the list loads once a key is set.':
+        '尚未配置 API Key —— 可以直接手填模型 ID；配置密钥后即可拉取列表。',
+    // 模型列表的四种来源状态（listed / listing-unsupported / missing-key / error）文案各不相同：
+    // 能力缺口不能被说成故障，真故障也不能被"手动输入即可"糊过去。
+    'This endpoint does not support listing models. Type the model ID by hand — this does not mean the model cannot generate.':
+        '该端点不支持列出模型。可直接手填模型 ID —— 这不代表该模型无法生成。',
+    'Could not load the model list: {reason}. Type the model ID by hand.':
+        '未能获取模型列表：{reason}。可直接手填模型 ID。',
+    'unknown error': '未知错误',
+    'Suggested models (not listed by this endpoint)': '候选模型（并非该端点列出）',
+    '{count} models listed. Pick one or type an ID.': '已列出 {count} 个模型。可从中选择，也可直接输入 ID。',
+    'Type the model ID directly, or pick one from the list once the endpoint returns it.':
+        '可直接输入模型 ID；端点返回列表后也可从列表中选择。',
+    // 连接测试：区分「列不出模型」与「无法生成」
+    'Checks whether the model list is reachable at {url}. It does not run a generation, so a pass means "the endpoint answers", not "the model can generate".':
+        '检查 {url} 的模型列表是否可达。它不会真正发起生成，所以通过只说明「端点有响应」，不代表「模型能生成」。',
+    '{label}: model list reachable at {url}. Only the endpoint was verified, not generation.':
+        '{label}：模型列表可达（{url}）。这里只验证了端点，未验证生成。',
+    '{label}: could not reach the model list at {url}. Models cannot be listed — this does not prove the model cannot generate. Check the API key and service address, or type the model ID by hand.':
+        '{label}：无法访问模型列表（{url}）。这只能说明「列不出模型」，不能证明「模型无法生成」。请检查 API Key 与服务地址，或直接手填模型 ID。',
+
     // ── 行为（运行时）──
     'Context Window Limit': '上下文窗口上限',
     'Limit token usage. Higher values allow reading larger files but cost more.': '限制 token 用量。数值越高可读取的文件越大，但成本也越高。',
@@ -271,6 +341,7 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Off': '关闭',
 
     // ── 新增服务商模态框 ──
+    'Add Provider': '新增服务商',
     'Add OpenAI Compatible Provider': '添加 OpenAI 兼容服务商',
     'Provider Name': '服务商名称',
     'Display name (for example: SiliconFlow, Groq, Ollama)': '显示名称（例如：SiliconFlow、Groq、Ollama）',

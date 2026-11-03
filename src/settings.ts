@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting, Notice, Modal, debounce, Debouncer, setIcon } from 'obsidian';
-import { BUILTIN_PROVIDER_KEYS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, PluginSettings, ProviderConfig, VaultWriteScope } from './mcp/types';
+import { BUILTIN_PROVIDER_KEYS, DEFAULT_PROVIDERS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, OpenAIApiFlavor, PluginSettings, ProviderConfig, ProviderType, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
+import type { AvailableModelsResult } from './services/model-service';
 import { OntologyUpdateMode } from './knowledge/types';
 import type {
     DerivedSkillRegenerateBlocker,
@@ -253,6 +254,16 @@ export function getSettingsFallbackCss(): string {
     border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
     background: color-mix(in srgb, var(--background-secondary) 74%, transparent);
 }
+/* 连接卡片标题栏左侧是「序号徽章 + 标题」两个子项：
+   - space-between 会把标题顶到最右，必须改回 flex-start；
+   - Setting 不再是 :first-child，Obsidian 默认的 .setting-item 上边框与内边距会冒出来，需清零。 */
+.baizer-settings-connection-card-header { justify-content: flex-start; }
+.baizer-settings-connection-card-header .setting-item {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0;
+    border-top: none;
+}
 .baizer-settings-panel-title,
 .baizer-settings-connection-card-title {
     margin: 0;
@@ -309,23 +320,68 @@ export function getSettingsFallbackCss(): string {
     border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
     background: color-mix(in srgb, var(--background-primary) 68%, transparent);
 }
-.baizer-settings-connection-detail-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+/* 单列四组流程：身份与协议 → 地址与凭证 → 模型 → 测试结果。
+   此前是 Basic/Credentials 两栏栅格，右栏被长地址/密钥/请求头/帮助文字压成窄条。 */
+.baizer-settings-connection-flow {
+    display: flex;
+    flex-direction: column;
     gap: 8px;
     padding: 8px;
 }
+.baizer-settings-connection-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.baizer-settings-connection-card-index {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    font-weight: var(--font-semibold);
+    color: var(--text-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+.baizer-settings-connection-card-body {
+    display: flex;
+    flex-direction: column;
+}
 .baizer-settings-detail-row {
     display: grid;
-    grid-template-columns: 130px minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
+    gap: 6px 14px;
     align-items: start;
     padding: 8px 10px;
     border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
 }
 .baizer-settings-detail-row:first-child { border-top: 0; }
-.baizer-settings-detail-label { padding-top: 6px; font-size: var(--font-ui-small); font-weight: var(--font-semibold); }
-.baizer-settings-detail-value { min-width: 0; }
+.baizer-settings-detail-label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    padding-top: 6px;
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-semibold);
+}
+.baizer-settings-detail-required {
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    font-weight: var(--font-medium);
+    color: var(--text-warning);
+    background: color-mix(in srgb, var(--color-yellow) 18%, transparent);
+}
+.baizer-settings-detail-value {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
 .baizer-settings-detail-input {
     display: block;
     width: 100%;
@@ -336,14 +392,74 @@ export function getSettingsFallbackCss(): string {
     background: var(--background-primary);
     color: var(--text-normal);
 }
-.baizer-settings-detail-secret,
-.baizer-settings-detail-secret-actions {
+/* 长地址/长模型名：输入框本身可编辑全文，悬停另有 title 给完整值。 */
+.baizer-settings-detail-input[type="text"] {
+    text-overflow: ellipsis;
+}
+.baizer-settings-detail-textarea {
+    min-height: 88px;
+    padding: 8px 10px;
+    font-family: var(--font-monospace);
+    font-size: var(--font-smallest);
+    resize: vertical;
+    /* pre-wrap + anywhere：多行 header 在窄栏里换行而不是撑出横向滚动条。 */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-x: hidden;
+}
+.baizer-settings-secret-input {
+    font-family: var(--font-monospace);
+}
+/* 密钥操作独占一行：不再和输入框挤同一窄栏导致按钮竖向堆叠、撑高整行。 */
+.baizer-settings-field-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
 }
-.baizer-settings-detail-secret .baizer-settings-detail-input { flex: 1 1 240px; }
+.baizer-settings-field-hint {
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    line-height: 1.5;
+    /* 帮助文字占满整行并连续换行，不再被窄列折成碎句。 */
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.baizer-settings-field-hint.is-warning { color: var(--text-warning); }
+/* 真故障（401/网络/解析）用 error 色；能力缺口仍走 is-warning，两者必须一眼可分。 */
+.baizer-settings-field-hint.is-error { color: var(--text-error); }
+.baizer-settings-field-feedback:empty { display: none; }
+.baizer-settings-field-feedback {
+    font-size: var(--font-smallest);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.baizer-settings-field-feedback.is-error { color: var(--text-error); }
+.baizer-settings-field-feedback.is-warning { color: var(--text-warning); }
+.baizer-settings-model-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.baizer-settings-model-select { flex: 1 1 220px; min-width: 0; }
+/* 兜底列表不是该端点的结论：降调 + 虚线边，别让用户以为这些模型一定被支持。 */
+.baizer-settings-model-select.is-untrusted {
+    border-style: dashed;
+    color: var(--text-muted);
+}
+.baizer-settings-model-picker .baizer-settings-action { flex: 0 0 auto; }
+.baizer-settings-header-example {
+    margin: 0;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--background-modifier-border) 32%, transparent);
+    color: var(--text-muted);
+    font-family: var(--font-monospace);
+    font-size: var(--font-smallest);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
 .baizer-settings-summary-list,
 .baizer-settings-skill-list {
     display: flex;
@@ -372,7 +488,9 @@ export function getSettingsFallbackCss(): string {
 .baizer-settings-preset { padding: 8px 10px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-secondary); color: var(--text-normal); text-align: left; }
 .baizer-settings-preset.is-active { border-color: color-mix(in srgb, var(--interactive-accent) 46%, var(--background-modifier-border)); background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary)); }
 .baizer-settings-advanced summary { padding: 8px 10px; cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-small); font-weight: var(--font-semibold); }
-.baizer-settings-advanced-body { padding: 0 10px 10px; }
+.baizer-settings-advanced-body { display: flex; flex-direction: column; gap: 8px; padding: 0 10px 10px; }
+/* 只有连接面板里的请求头块需要外边距（它嵌在连接卡片里）。 */
+.baizer-settings-advanced-headers { margin: 0 10px 10px; }
 .baizer-settings-inline-note { padding: 10px 12px; border-radius: 8px; font-size: var(--font-ui-small); }
 .baizer-settings-inline-note.is-warning { color: var(--text-warning); background: color-mix(in srgb, var(--color-yellow) 16%, transparent); }
 .baizer-settings-inline-note.is-success { color: var(--color-green); background: color-mix(in srgb, var(--color-green) 10%, transparent); }
@@ -489,6 +607,13 @@ export function getSettingsFallbackCss(): string {
     white-space: pre-wrap;
     word-break: break-word;
 }
+@container (max-width: 840px) {
+    .baizer-settings-detail-row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+    .baizer-settings-detail-label { padding-top: 0; }
+}
 @container (max-width: 560px) {
     .baizer-settings-hero {
         grid-template-columns: 1fr;
@@ -496,11 +621,11 @@ export function getSettingsFallbackCss(): string {
     }
     .baizer-settings-section-summary,
     .baizer-settings-provider-card-main-inner,
-    .baizer-settings-connection-detail-grid,
     .baizer-settings-detail-row,
     .baizer-settings-preset-grid {
         grid-template-columns: 1fr;
     }
+    .baizer-settings-detail-label { padding-top: 0; }
     .baizer-settings-section-copy { flex-direction: column; align-items: flex-start; gap: 2px; }
     .baizer-settings-top-status,
     .baizer-settings-section-meta { justify-content: flex-start; }
@@ -514,11 +639,11 @@ export function getSettingsFallbackCss(): string {
     }
     .baizer-settings-section-summary,
     .baizer-settings-provider-card-main-inner,
-    .baizer-settings-connection-detail-grid,
     .baizer-settings-detail-row,
     .baizer-settings-preset-grid {
         grid-template-columns: 1fr;
     }
+    .baizer-settings-detail-label { padding-top: 0; }
     .baizer-settings-section-copy { flex-direction: column; align-items: flex-start; gap: 2px; }
     .baizer-settings-top-status,
     .baizer-settings-section-meta { justify-content: flex-start; }
@@ -577,20 +702,645 @@ function serializeCustomHeaders(headers: Record<string, string> | undefined): st
     return Object.entries(headers).map(([key, value]) => `${key}: ${value}`).join('\n');
 }
 
-/** 解析每行一条 "Header-Name: value" 的文本为 customHeaders。空行/无冒号的行忽略。 */
-function parseCustomHeaders(text: string): Record<string, string> | undefined {
-    const result: Record<string, string> = {};
-    for (const line of text.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const sepIndex = trimmed.indexOf(':');
-        if (sepIndex === -1) continue;
-        const key = trimmed.slice(0, sepIndex).trim();
-        const value = trimmed.slice(sepIndex + 1).trim();
-        if (!key) continue;
-        result[key] = value;
+// ─────────────────────────────────────────────────────────────────────────────
+// 连接面板的纯决策层。
+//
+// 分组顺序、字段显隐、就地校验、模型列表状态与连接测试文案都在这里定死，
+// DOM 那层只负责把结果放进元素。抽成纯函数的原因和 getDerivedSkillRows 一样：
+// 这些正是 issue 的验收点（显隐正确 / 顺序正确 / 有就地反馈 / 列表不可用仍可手填），
+// 而 renderConnectionSection 依赖 Obsidian 的 Setting 与真实 DOM，单测里跑不起来。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 配置流程的四个分组，数组顺序即渲染顺序：身份与协议 → 地址与凭证 → 模型 → 测试结果。 */
+export type ConnectionGroupId = 'identity' | 'credentials' | 'model' | 'test';
+
+export interface ConnectionGroupMeta {
+    id: ConnectionGroupId;
+    title: string;
+}
+
+/**
+ * 分组标题惰性求值（t() 依赖当前 locale，模块级常量会把初次结果冻结）。
+ * 顺序即用户在面板上看到的配置流程顺序。
+ */
+export function getConnectionGroups(): ConnectionGroupMeta[] {
+    return [
+        { id: 'identity', title: t('Provider identity and protocol') },
+        { id: 'credentials', title: t('Connection address and credentials') },
+        { id: 'model', title: t('Model') },
+        { id: 'test', title: t('Test result') },
+    ];
+}
+
+/** 连接面板里的字段标识。渲染顺序由 getConnectionFieldOrder 决定。 */
+export type ConnectionFieldId =
+    | 'providerName'
+    | 'protocol'
+    | 'apiFlavor'
+    | 'baseUrl'
+    | 'apiKey'
+    | 'customHeaders'
+    | 'model'
+    | 'connectionTest';
+
+/** 字段归属的分组，用于断言「字段落在正确的分组、且分组顺序正确」。 */
+export const CONNECTION_FIELD_GROUP: Record<ConnectionFieldId, ConnectionGroupId> = {
+    providerName: 'identity',
+    protocol: 'identity',
+    apiFlavor: 'identity',
+    baseUrl: 'credentials',
+    apiKey: 'credentials',
+    customHeaders: 'credentials',
+    model: 'model',
+    connectionTest: 'test',
+};
+
+/**
+ * 按协议给出字段顺序。
+ *
+ * 两条显隐规则直接对应 issue 的两个验收点：
+ * - 'apiFlavor' 只是 OpenAI 兼容协议的端点方言（Chat Completions / Responses），
+ *   其它协议没有这个概念 —— 不渲染，才不会和「服务地址（Base URL）」再撞一次名。
+ * - 'baseUrl' 对 Gemini 无意义（固定官方端点），故不渲染，而不是渲染一个禁用的空框
+ *   （禁用框既读不出值也改不了，用户会以为整个字段坏了）。
+ */
+export function getConnectionFieldOrder(type: ProviderType): ConnectionFieldId[] {
+    const fields: ConnectionFieldId[] = ['providerName', 'protocol'];
+    if (type === 'openai-compatible') fields.push('apiFlavor');
+    if (type !== 'gemini') fields.push('baseUrl');
+    fields.push('apiKey', 'customHeaders', 'model', 'connectionTest');
+    return fields;
+}
+
+export interface RequestPathSummary {
+    /** 实际请求路径模板；{baseUrl} / {model} 为占位符 */
+    pathTemplate: string;
+    /** 该协议的服务地址是否通常包含 /v1 */
+    baseUrlIncludesV1: boolean;
+    /** 说明「地址该不该带 /v1」的一句话 */
+    note: string;
+}
+
+/**
+ * 各协议实际请求到哪个路径。
+ *
+ * 这是「API 类型」与「服务地址」不再混淆的关键：地址由 SDK 追加端点路径，
+ * 用户必须知道地址里要不要写 /v1，以及最终打到哪里。
+ */
+export function getRequestPathSummary(type: ProviderType, apiFlavor?: OpenAIApiFlavor): RequestPathSummary {
+    if (type === 'anthropic') {
+        return {
+            pathTemplate: '{baseUrl}/v1/messages',
+            baseUrlIncludesV1: false,
+            note: t('The service address must NOT include /v1 — the Anthropic SDK appends /v1/messages itself. The official endpoint is https://api.anthropic.com.'),
+        };
     }
-    return Object.keys(result).length > 0 ? result : undefined;
+    if (type === 'openai-compatible') {
+        const isResponses = apiFlavor === 'responses';
+        return {
+            pathTemplate: isResponses ? '{baseUrl}/responses' : '{baseUrl}/chat/completions',
+            baseUrlIncludesV1: true,
+            note: isResponses
+                ? t('The service address usually ends with /v1 — the OpenAI SDK appends /responses itself, so do not paste the full request path.')
+                : t('The service address usually ends with /v1 — the OpenAI SDK appends /chat/completions itself, so do not paste the full request path.'),
+        };
+    }
+    return {
+        pathTemplate: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
+        baseUrlIncludesV1: false,
+        note: t('Gemini always uses the official endpoint, so there is no service address to configure.'),
+    };
+}
+
+/** 把协议说明与实际请求路径拼成一行可连续阅读的帮助文字。 */
+export function describeRequestPath(type: ProviderType, apiFlavor: OpenAIApiFlavor | undefined, baseUrl: string): string {
+    const summary = getRequestPathSummary(type, apiFlavor);
+    const base = (baseUrl || '').trim().replace(/\/+$/, '');
+    const actual = summary.pathTemplate.replace('{baseUrl}', base || '{baseUrl}');
+    return `${summary.note} ${fillPlaceholders(t('Actual request path: {path}'), { path: actual })}`;
+}
+
+export type FieldValidationState = 'ok' | 'warning' | 'error';
+
+export interface FieldValidation {
+    state: FieldValidationState;
+    /** state 为 'ok' 时为空串 */
+    message: string;
+}
+
+const VALIDATION_OK: FieldValidation = { state: 'ok', message: '' };
+
+function invalidField(message: string): FieldValidation {
+    return { state: 'error', message };
+}
+
+/** 服务商名称必填。此前空值静默回退旧名，用户以为改名成功、实际没改。 */
+export function validateProviderName(value: string): FieldValidation {
+    if (!(value || '').trim()) return invalidField(t('Provider name is required.'));
+    return VALIDATION_OK;
+}
+
+/**
+ * 服务地址校验。
+ *
+ * 核心是「地址里不能再带端点路径」：各协议 SDK 自己追加端点，粘了完整路径就会请求
+ * {baseUrl}/chat/completions/chat/completions 这类不存在的地址，而报错信息只会说
+ * 「连接失败」，用户根本猜不到原因。
+ */
+export function validateBaseUrl(type: ProviderType, value: string): FieldValidation {
+    // Gemini 固定官方端点，服务地址不适用（该字段也不会渲染）。
+    if (type === 'gemini') return VALIDATION_OK;
+
+    const trimmed = (value || '').trim();
+    if (!trimmed) return invalidField(t('Base URL is required.'));
+    if (!/^https?:\/\/[^\s]+$/i.test(trimmed)) {
+        return invalidField(t('Base URL must start with http:// or https:// and must not contain spaces.'));
+    }
+
+    // 先剥掉查询串/锚点，避免把 ?key=... 当成路径的一部分误判。
+    const withoutQuery = trimmed.replace(/[?#].*$/, '').replace(/\/+$/, '');
+
+    if (type === 'anthropic') {
+        if (/\/v1\/messages$/i.test(withoutQuery)) {
+            return invalidField(t('Base URL must not include the request path — remove /v1/messages.'));
+        }
+        if (/\/v1$/i.test(withoutQuery)) {
+            return invalidField(t('For Anthropic the base URL must not include /v1 — the SDK appends /v1/messages. Use https://api.anthropic.com.'));
+        }
+        return VALIDATION_OK;
+    }
+
+    if (/\/(chat\/completions|responses|completions)$/i.test(withoutQuery)) {
+        return invalidField(t('Base URL must not include the request path — remove /chat/completions or /responses.'));
+    }
+    return VALIDATION_OK;
+}
+
+export interface CustomHeaderIssue {
+    /** 1 起算的行号，与 textarea 里数到的行号一致 */
+    line: number;
+    text: string;
+    reason: 'missing-colon' | 'empty-name' | 'duplicate-name';
+}
+
+export interface CustomHeadersValidation {
+    state: FieldValidationState;
+    message: string;
+    issues: CustomHeaderIssue[];
+    /** 可用的 header；非法行被跳过，但其余行照常保留 */
+    headers: Record<string, string> | undefined;
+}
+
+/** 非法行的成因文案。写成短句，多条时用「;」串起来仍可读。 */
+const CUSTOM_HEADER_ISSUE_REASONS: Record<CustomHeaderIssue['reason'], string> = {
+    'missing-colon': 'missing ":" — write "Header-Name: value"',
+    'empty-name': 'missing header name',
+    'duplicate-name': 'duplicate header name, the last one wins',
+};
+
+/**
+ * 校验并解析多行 header（取代此前静默忽略非法行的 parseCustomHeaders）。
+ *
+ * 有意保持宽松解析：非法行跳过而不是整段丢弃——用户逐行编辑时，正在敲的那一行不该把
+ * 已经配好的其它 header 一起清空。但「跳过」必须出声，故逐行给出行号与成因，由 UI 就地显示
+ * （此前是静默忽略，用户以为保存成功了）。
+ *
+ * 只有「名字重复」算 warning——它不会让请求发不出去，只是后一行会覆盖前一行。
+ */
+export function validateCustomHeaders(text: string): CustomHeadersValidation {
+    const issues: CustomHeaderIssue[] = [];
+    const headers: Record<string, string> = {};
+    const seen = new Set<string>();
+
+    (text || '').split('\n').forEach((raw, index) => {
+        const trimmed = raw.trim();
+        if (!trimmed) return;
+
+        const separator = trimmed.indexOf(':');
+        if (separator === -1) {
+            issues.push({ line: index + 1, text: trimmed, reason: 'missing-colon' });
+            return;
+        }
+
+        const name = trimmed.slice(0, separator).trim();
+        const value = trimmed.slice(separator + 1).trim();
+        if (!name) {
+            issues.push({ line: index + 1, text: trimmed, reason: 'empty-name' });
+            return;
+        }
+
+        // header 名大小写不敏感，重复判定也要按小写比。
+        const normalized = name.toLowerCase();
+        if (seen.has(normalized)) {
+            issues.push({ line: index + 1, text: trimmed, reason: 'duplicate-name' });
+        }
+        seen.add(normalized);
+        headers[name] = value;
+    });
+
+    const resolvedHeaders = Object.keys(headers).length > 0 ? headers : undefined;
+    if (!issues.length) {
+        return { state: 'ok', message: '', issues, headers: resolvedHeaders };
+    }
+
+    const details = issues
+        .map(issue => `L${issue.line} ${t(CUSTOM_HEADER_ISSUE_REASONS[issue.reason])}`)
+        .join('; ');
+    const hasHardError = issues.some(issue => issue.reason !== 'duplicate-name');
+
+    return {
+        state: hasHardError ? 'error' : 'warning',
+        message: fillPlaceholders(
+            t('Custom headers: {issues}. Those lines are ignored; the rest are kept.'),
+            { issues: details },
+        ),
+        issues,
+        headers: resolvedHeaders,
+    };
+}
+
+/**
+ * 模型列表的四种来源状态。此前只有一个 `listUnavailable` 布尔量，把
+ * 「端点不具备列模型能力」和「未配 key / 401 / 网络故障」塌成同一件事，
+ * 于是真正的故障被说成「手动输入即可」，能力缺口又被当成配置错误。
+ */
+export type ModelListStatus =
+    /** 端点真的返回了模型清单 */
+    | 'listed'
+    /** 端点不具备列模型能力（/models 返回 404/405/501）—— 能力缺口，不是故障 */
+    | 'listing-unsupported'
+    /** 还没配 API Key，请求根本没发出去 */
+    | 'missing-key'
+    /** 其他失败：401、网络、JSON 解析……这是真错误，必须原样说出来 */
+    | 'error';
+
+export interface ModelFieldState {
+    /** 下拉里的候选模型（可能为空） */
+    options: ModelOption[];
+    status: ModelListStatus;
+    note: string;
+    noteTone: 'muted' | 'warning' | 'error';
+    /**
+     * 手填模型 ID 是否可用。恒为 true：兼容网关常常没实现 /models，
+     * 手填是唯一能配置模型的途径，下拉拉不到绝不代表字段不可用。
+     */
+    manualEntry: true;
+    /**
+     * 列表能不能当成「端点的真实结论」。
+     * 只有真列出来时才可信：其余状态下 `models` 是内置兜底列表，
+     * 把兜底值当候选渲染、或自动写进 config.model，等于替用户编了一个
+     * 端点未必支持的模型。
+     */
+    trustList: boolean;
+}
+
+/**
+ * 错误原因可能是一整页 HTML 或超长 JSON。截断后再展示，
+ * 避免一条帮助文字把整行撑成好几屏（窄面板下尤其明显）。
+ */
+function summarizeModelListError(error: Error): string {
+    const raw = (error?.message || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return t('unknown error');
+    return raw.length > 160 ? `${raw.slice(0, 157)}…` : raw;
+}
+
+/**
+ * 模型字段的状态。
+ *
+ * 三态直接取自 ModelService.getAvailableModelsWithStatus 的语义化信号
+ * （`listingUnsupported` / `error`），不再靠数组形状去猜「是不是列不出来」。
+ * 旧启发式（「除当前模型外空无一物」= 列不出）会误伤「端点确实只暴露一个模型」
+ * 的合法情况，也会把兜底列表误报成端点的真实清单。
+ */
+export function getModelFieldState(input: {
+    result: Pick<AvailableModelsResult, 'models' | 'listingUnsupported' | 'error'>;
+    currentModel: string;
+    hasApiKey: boolean;
+}): ModelFieldState {
+    const options = (input.result.models || [])
+        .filter(option => option && typeof option.value === 'string' && option.value.trim().length > 0);
+
+    // 未配 key 时 ModelService 压根不发请求，它会把「没配 key」当 error 报回来。
+    // 这属于「还没配好」而非故障，说清该做什么比抛一个错误串有用。
+    if (!input.hasApiKey) {
+        return {
+            options,
+            status: 'missing-key',
+            note: t('No API key yet — you can type the model ID by hand; the list loads once a key is set.'),
+            noteTone: 'warning',
+            manualEntry: true,
+            trustList: false,
+        };
+    }
+
+    // 能力缺口优先于故障：端点不实现列模型，不代表它不能生成。
+    if (input.result.listingUnsupported) {
+        return {
+            options,
+            status: 'listing-unsupported',
+            // 「列不出模型」≠「模型不能生成」：网关没实现 /models 很常见，/chat/completions 照样能用。
+            // 不把这句话说清，用户会把可用的网关当成配错了。
+            note: t('This endpoint does not support listing models. Type the model ID by hand — this does not mean the model cannot generate.'),
+            noteTone: 'warning',
+            manualEntry: true,
+            trustList: false,
+        };
+    }
+
+    if (input.result.error) {
+        return {
+            options,
+            status: 'error',
+            // 真错误就照实说，不再笼统化成「列表不可用」——原因决定了下一步该改什么。
+            note: fillPlaceholders(
+                t('Could not load the model list: {reason}. Type the model ID by hand.'),
+                { reason: summarizeModelListError(input.result.error) },
+            ),
+            noteTone: 'error',
+            manualEntry: true,
+            trustList: false,
+        };
+    }
+
+    return {
+        options,
+        status: 'listed',
+        note: fillPlaceholders(
+            t('{count} models listed. Pick one or type an ID.'),
+            { count: String(options.length) },
+        ),
+        noteTone: 'muted',
+        manualEntry: true,
+        trustList: true,
+    };
+}
+
+/** 连接测试探测的模型列表端点，用于把「测了什么」明确写进结果里。 */
+export function getModelListEndpoint(type: ProviderType, baseUrl: string): string {
+    const base = (baseUrl || '').trim().replace(/\/+$/, '');
+    if (type === 'gemini') return 'https://generativelanguage.googleapis.com/v1beta/models';
+    if (type === 'anthropic') {
+        return `${base || DEFAULT_PROVIDERS.anthropic.baseUrl}/v1/models`;
+    }
+    return `${base || DEFAULT_PROVIDERS.openai.baseUrl}/models`;
+}
+
+/**
+ * 连接测试的阶段。测试只探模型列表端点（不烧 token），故它只能证明「列得出/列不出模型」，
+ * 证明不了「能不能生成」——这两个结论必须分开说。
+ */
+export type ConnectionTestStage = 'missing-key' | 'model-list-unavailable' | 'endpoint-reachable';
+
+export interface ConnectionTestReport {
+    state: ConnectionTestState;
+    message: string;
+}
+
+export function getConnectionTestReport(input: {
+    label: string;
+    stage: ConnectionTestStage;
+    endpoint: string;
+}): ConnectionTestReport {
+    const label = input.label || 'AI provider';
+
+    if (input.stage === 'missing-key') {
+        return { state: 'error', message: `${label}${t(': no API key configured.')}` };
+    }
+
+    if (input.stage === 'endpoint-reachable') {
+        return {
+            state: 'success',
+            message: fillPlaceholders(
+                t('{label}: model list reachable at {url}. Only the endpoint was verified, not generation.'),
+                { label, url: input.endpoint },
+            ),
+        };
+    }
+
+    return {
+        state: 'error',
+        message: fillPlaceholders(
+            t('{label}: could not reach the model list at {url}. Models cannot be listed — this does not prove the model cannot generate. Check the API key and service address, or type the model ID by hand.'),
+            { label, url: input.endpoint },
+        ),
+    };
+}
+
+export interface ProtocolOption {
+    value: ProviderType;
+    label: string;
+}
+
+/**
+ * 协议在 UI 上的展示名。
+ * 单独抽出来是因为服务商卡片此前把所有非 Gemini 协议都写成「OpenAI 兼容」——
+ * 新增 anthropic 后卡片会直接把 Anthropic 说成 OpenAI 兼容。
+ */
+export function getProtocolLabel(type: ProviderType): string {
+    if (type === 'gemini') return t('Gemini API');
+    if (type === 'anthropic') return t('Anthropic Messages API');
+    return t('OpenAI-compatible');
+}
+
+/** 服务商卡片上的协议标记（纯装饰，但三个协议各有各的记号）。 */
+export function getProtocolGlyph(type: ProviderType): string {
+    if (type === 'gemini') return '◈';
+    if (type === 'anthropic') return '⬡';
+    return '◎';
+}
+
+/** 协议下拉的唯一来源：详情页与新增模态框共用，避免两处选项各自漂移。 */
+export function getProtocolOptions(): ProtocolOption[] {
+    return (['gemini', 'openai-compatible', 'anthropic'] as ProviderType[])
+        .map(value => ({ value, label: getProtocolLabel(value) }));
+}
+
+/** 各协议的官方服务地址。直接读 DEFAULT_PROVIDERS，避免与冻结接口里的默认值各写一份。 */
+export function getDefaultBaseUrlForType(type: ProviderType): string {
+    if (type === 'gemini') return '';
+    if (type === 'anthropic') return DEFAULT_PROVIDERS.anthropic.baseUrl;
+    return DEFAULT_PROVIDERS.openai.baseUrl;
+}
+
+/**
+ * 新增自定义 provider 的初始配置。
+ * 此前硬编码 openai-compatible —— 想加 Anthropic 网关只能先建好再改协议。
+ */
+export function buildNewProviderConfig(type: ProviderType, label: string, baseUrl: string): ProviderConfig {
+    const trimmedUrl = (baseUrl || '').trim();
+    return {
+        type,
+        label: (label || '').trim(),
+        apiKey: '',
+        // Gemini 忽略服务地址，存下来只会在切回其它协议时冒出一个不该在的值。
+        baseUrl: type === 'gemini' ? '' : (trimmedUrl || getDefaultBaseUrlForType(type)),
+        model: '',
+    };
+}
+
+/**
+ * 协议切换时服务地址怎么迁移。
+ * 从 Gemini 切过来时地址必为空（Gemini 不使用它），此时填官方端点；
+ * 其余情况保留用户填的值 —— 不清空、不猜测，交给就地校验去提示地址是否适用于新协议。
+ */
+export function resolveBaseUrlOnProtocolChange(nextType: ProviderType, previousBaseUrl: string): string {
+    if (nextType === 'gemini') return '';
+    const trimmed = (previousBaseUrl || '').trim();
+    if (!trimmed) return getDefaultBaseUrlForType(nextType);
+    return trimmed;
+}
+
+/** 模型字段的渲染依赖。以参数传入而非闭包 this，这样它能脱离 SettingTab 单测。 */
+export interface ModelFieldDeps {
+    currentModel: string;
+    hasApiKey: boolean;
+    /**
+     * 拉取可用模型**及其来源状态**。
+     * 必须用 `getAvailableModelsWithStatus`：它把「端点不支持列模型」与
+     * 「401/网络/未配 key」分开报，UI 才不必靠数组形状猜。
+     */
+    loadModels: (forceRefresh: boolean) => Promise<AvailableModelsResult>;
+    /** 用户改定模型后落盘 */
+    onModelChange: (modelId: string) => Promise<void> | void;
+    /** 局部重绘后旧 DOM 已作废，异步回调据此放弃写入 */
+    isStale: () => boolean;
+}
+
+/**
+ * 渲染模型字段：一个**始终可编辑**的文本输入（真源）+ 一个来自服务端的候选下拉 + 刷新按钮。
+ *
+ * 关键取舍：输入框是唯一真源。此前列表拉不到就把 select 置灰、只显示「模型列表不可用」，
+ * 用户既看不到当前模型也改不了它 —— 没实现 /models 的兼容网关就此无法配置。
+ * 下拉只是省打字的便利，拉不到时仍然照常显示（只是没有候选），绝不置灰。
+ */
+export function renderModelField(container: HTMLElement, deps: ModelFieldDeps): void {
+    const input = container.createEl('input', {
+        cls: 'baizer-settings-detail-input baizer-settings-model-input',
+        attr: {
+            type: 'text',
+            spellcheck: 'false',
+            autocomplete: 'off',
+            'aria-label': t('Model ID'),
+        },
+    }) as HTMLInputElement;
+    input.value = deps.currentModel;
+    // 长模型名不该只能靠截断看：悬停给完整值，输入框本身可编辑全文。
+    input.title = deps.currentModel;
+
+    const picker = container.createDiv({ cls: 'baizer-settings-model-picker' });
+    const select = picker.createEl('select', {
+        cls: 'baizer-settings-detail-input baizer-settings-model-select',
+        attr: { 'aria-label': t('Model list') },
+    }) as HTMLSelectElement;
+    const refresh = picker.createEl('button', {
+        cls: 'baizer-settings-action',
+        text: t('Refresh list'),
+        attr: { type: 'button' },
+    }) as HTMLButtonElement;
+
+    const note = container.createDiv({ cls: 'baizer-settings-field-hint' });
+
+    let committed = deps.currentModel;
+
+    const commitModel = async (): Promise<void> => {
+        const value = input.value.trim();
+        input.title = input.value;
+        if (value === committed) return;
+        committed = value;
+        await deps.onModelChange(value);
+    };
+
+    input.addEventListener('input', () => {
+        // 只同步 title，不落盘：模型 ID 半途的中间态没有保存价值，落盘还会重建 LLM 客户端。
+        input.title = input.value;
+    });
+    input.addEventListener('change', () => { void commitModel(); });
+    input.addEventListener('blur', () => { void commitModel(); });
+
+    const applyState = (result: AvailableModelsResult): void => {
+        const state = getModelFieldState({
+            result,
+            currentModel: input.value.trim(),
+            hasApiKey: deps.hasApiKey,
+        });
+
+        select.empty();
+        if (state.options.length === 0) {
+            select.createEl('option', { value: '', text: t('No models listed') });
+            select.value = '';
+        } else {
+            state.options.forEach(option => select.createEl('option', { value: option.value, text: option.label }));
+            const current = input.value.trim();
+            select.value = state.options.some(option => option.value === current)
+                ? current
+                : state.options[0].value;
+        }
+        // 有意不置灰：置灰的下拉既读不出候选也点不动，用户会以为整个模型字段坏了。
+        select.disabled = false;
+        // 兜底列表不是这个端点的结论，不能冒充「模型列表」；改称「候选建议」并降调，
+        // 否则用户会以为下拉里那些模型一定被当前端点支持。
+        select.toggleClass('is-untrusted', !state.trustList);
+        select.setAttribute(
+            'aria-label',
+            state.trustList ? t('Model list') : t('Suggested models (not listed by this endpoint)'),
+        );
+
+        note.setText(state.note);
+        note.toggleClass('is-warning', state.noteTone === 'warning');
+        note.toggleClass('is-error', state.noteTone === 'error');
+
+        // P0-2 保留，但只在列表可信时回填：新增/自定义 provider 的 model 为空时把真实列到的
+        // 第一个模型写回 config，避免「下拉看着选了模型、config.model 仍是空」。
+        // 列表不可信时绝不回填——兜底值未必被该端点支持，写进去等于替用户编了个模型。
+        if (state.trustList && !input.value.trim() && state.options.length > 0) {
+            input.value = state.options[0].value;
+            input.title = input.value;
+            committed = input.value;
+            void deps.onModelChange(input.value);
+        }
+    };
+
+    const load = async (forceRefresh: boolean): Promise<void> => {
+        select.disabled = true;
+        select.empty();
+        select.createEl('option', { value: '__loading__', text: t('Loading models...') });
+        select.value = '__loading__';
+        try {
+            const result = await deps.loadModels(forceRefresh);
+            if (deps.isStale()) return;
+            applyState(result);
+        } catch (caught: any) {
+            // getAvailableModelsWithStatus 自己吞异常并回落，这里只兜底意外抛出：
+            // 仍然保持可手填，但如实报成 error，不假装「列表可用」。
+            if (deps.isStale()) return;
+            applyState({
+                models: [],
+                listingUnsupported: false,
+                error: caught instanceof Error ? caught : new Error(String(caught)),
+            });
+        }
+    };
+
+    refresh.addEventListener('click', () => { void load(true); });
+    select.addEventListener('change', () => {
+        const value = select.value;
+        if (!value || value === '__loading__') return;
+        if (value === input.value.trim()) return;
+        input.value = value;
+        void commitModel();
+    });
+
+    void load(false);
+}
+
+/** 就地校验反馈节点：只改文案与色调，不重建 DOM —— 重建会打断正在输入的焦点。 */
+function createFieldFeedback(parent: HTMLElement): (validation: FieldValidation) => void {
+    const element = parent.createDiv({ cls: 'baizer-settings-field-feedback' });
+    return (validation: FieldValidation) => {
+        element.toggleClass('is-error', validation.state === 'error');
+        element.toggleClass('is-warning', validation.state === 'warning');
+        element.setText(validation.state === 'ok' ? '' : validation.message);
+    };
 }
 
 export function getMatchingSettingsSections(query: string): SettingsSectionId[] {
@@ -814,7 +1564,7 @@ export function getProviderCardMeta(settings: PluginSettings, providerId: string
     }
 
     // P1-4: 服务商卡片文案走 i18n(连接卡片是配置主战场,此前成片英文与已译字段标签混排)。
-    const protocolLabel = config.type === 'gemini' ? 'Gemini API' : 'OpenAI-compatible';
+    const protocolLabel = getProtocolLabel(config.type);
     const hasApiKey = !!config.apiKey?.trim();
     const rawEndpoint = config.baseUrl?.trim() || t('Default provider endpoint');
     const endpointSummary = rawEndpoint.replace(/^https?:\/\//, '');
@@ -832,7 +1582,7 @@ export function getProviderCardMeta(settings: PluginSettings, providerId: string
         statusTone: hasApiKey ? 'success' : 'warning',
         isActive: settings.activeProvider === providerId,
         compactMeta: modelSummary,
-        protocolGlyph: config.type === 'gemini' ? '◈' : '◎',
+        protocolGlyph: getProtocolGlyph(config.type),
         statusGlyph: hasApiKey ? '●' : '!',
     };
 }
@@ -1422,15 +2172,11 @@ export class SettingTab extends PluginSettingTab {
         const toolbar = shell.createDiv({ cls: 'baizer-settings-provider-toolbar' });
         toolbar.createDiv({ cls: 'baizer-settings-panel-title', text: t('Providers') });
         this.createActionButton(toolbar, t('+ Add'), async () => {
-            new AddProviderModal(this.app, async (label, baseUrl) => {
+            new AddProviderModal(this.app, async (draft) => {
                 const key = `custom-${Date.now()}`;
-                settings.providers[key] = {
-                    type: 'openai-compatible',
-                    label,
-                    apiKey: '',
-                    baseUrl,
-                    model: '',
-                };
+                // 协议由用户在模态框里选（含 Anthropic）；此前硬编码 openai-compatible，
+                // 想加 Anthropic 网关只能先建好再回详情页改协议。
+                settings.providers[key] = buildNewProviderConfig(draft.type, draft.label, draft.baseUrl);
                 settings.activeProvider = key;
                 this.resetConnectionTestStatus();
                 this.openSectionIds.add('connection');
@@ -1535,148 +2281,243 @@ export class SettingTab extends PluginSettingTab {
         });
     }
 
+    /**
+     * 连接卡片的标题栏。标题仍走 renderSettingHeading（Obsidian 要求标题用 Setting.setHeading），
+     * 序号徽章让「身份与协议 → 地址与凭证 → 模型 → 测试结果」这条流程一眼可读。
+     */
+    private renderConnectionCard(
+        containerEl: HTMLElement,
+        title: string,
+        index: number,
+        group: ConnectionGroupId,
+    ): HTMLElement {
+        const card = containerEl.createDiv({ cls: 'baizer-settings-connection-card' });
+        card.setAttribute('data-connection-group', group);
+        const header = card.createDiv({ cls: 'baizer-settings-connection-card-header' });
+        header.createSpan({
+            cls: 'baizer-settings-connection-card-index',
+            text: String(index),
+            attr: { 'aria-hidden': 'true' },
+        });
+        renderSettingHeading(header, title, { nameClass: 'baizer-settings-connection-card-title' });
+        return card.createDiv({ cls: 'baizer-settings-connection-card-body' });
+    }
+
+    /**
+     * 激活 provider 的详情。
+     *
+     * 布局取舍（对应 issue 的「两栏严重失衡」）：改为**单列四组流程**，而不是 Basic/Credentials 两栏。
+     * 两栏时左栏四个短字段、右栏塞着地址/密钥/请求头/帮助文字/测试区，右栏被压成窄条
+     * ——地址只显示得出 `https://openc…`、Reveal/Clear 竖向堆叠、header 帮助文字挤成多行短句。
+     * 单列后每个控件都拿到整行宽度，长 URL / 模型名 / 多行 header 都不再溢出。
+     */
     private renderActiveProviderDetail(parent: HTMLElement, activeConfig: ProviderConfig, token: number): void {
         const detail = parent.createDiv({ cls: 'baizer-settings-provider-detail-inline' });
-        const grid = detail.createDiv({ cls: 'baizer-settings-connection-detail-grid' });
-        const basic = grid.createDiv({ cls: 'baizer-settings-connection-card' });
-        renderSettingHeading(
-            basic.createDiv({ cls: 'baizer-settings-connection-card-header' }),
-            t('Basic'),
-            { nameClass: 'baizer-settings-connection-card-title' },
-        );
+        const flow = detail.createDiv({ cls: 'baizer-settings-connection-flow' });
 
-        this.renderConnectionField(basic, t('Provider Name'), (valueEl) => {
+        // 分组、顺序与标题都取自 getConnectionGroups()（纯函数，有单测覆盖），
+        // 而不是在这里再写一遍字面量——两处各写一份，改了一处就会悄悄错位。
+        getConnectionGroups().forEach((group, index) => {
+            const body = this.renderConnectionCard(flow, group.title, index + 1, group.id);
+            this.renderConnectionGroupBody(body, group.id, activeConfig, token);
+        });
+    }
+
+    private renderConnectionGroupBody(
+        body: HTMLElement,
+        groupId: ConnectionGroupId,
+        activeConfig: ProviderConfig,
+        token: number,
+    ): void {
+        switch (groupId) {
+            case 'identity':
+                this.renderIdentityGroup(body, activeConfig);
+                return;
+            case 'credentials':
+                this.renderCredentialsGroup(body, activeConfig);
+                return;
+            case 'model':
+                this.renderModelGroup(body, activeConfig, token);
+                return;
+            case 'test':
+                this.renderTestGroup(body, activeConfig);
+                return;
+        }
+    }
+
+    /** 第 1 组：服务商身份与协议。 */
+    private renderIdentityGroup(group: HTMLElement, activeConfig: ProviderConfig): void {
+        // 字段显隐同样取自纯函数：apiFlavor 只属于 OpenAI 兼容协议。
+        const fields = getConnectionFieldOrder(activeConfig.type);
+
+        this.renderConnectionField(group, t('Provider Name'), (valueEl) => {
             const input = valueEl.createEl('input', {
                 cls: 'baizer-settings-detail-input',
-                attr: { type: 'text', value: activeConfig.label, 'aria-label': t('Provider name') },
+                attr: { type: 'text', 'aria-label': t('Provider name') },
             }) as HTMLInputElement;
+            input.value = activeConfig.label;
+            input.title = activeConfig.label;
+            const feedback = createFieldFeedback(valueEl);
+
+            input.addEventListener('input', () => {
+                input.title = input.value;
+                const validation = validateProviderName(input.value);
+                feedback(validation);
+                if (validation.state !== 'ok') return;
+                activeConfig.label = input.value.trim();
+                // 逐击键落盘代价高（saveSettings 会重建 provider），走 400ms debounce；
+                // 但不再像此前那样只在 change 时保存——切走或面板重绘都不会丢名字。
+                this.debouncedPersist();
+            });
             input.addEventListener('change', async () => {
-                activeConfig.label = input.value.trim() || activeConfig.label;
+                // 名称非法时只保留就地报错，不改动已保存的名字（此前是静默回退旧值）。
+                if (validateProviderName(input.value).state !== 'ok') return;
+                activeConfig.label = input.value.trim();
                 this.openSectionIds.add('connection');
                 await this.persistSettings();
+                // 卡片标题要跟着改名走，否则用户看不到改名已生效。
                 this.renderAccordion();
             });
+        }, {
+            required: true,
+            // 明确「必填」而不是静默回退旧名：此前清空名字后离开输入框，名字会悄悄变回旧值，
+            // 用户以为改成功了。现在空值就地报错、且不改动已保存的名字。
+            hint: t('Shown in the provider list. An empty name is rejected instead of silently keeping the old one.'),
         });
 
-        this.renderConnectionField(basic, t('Protocol'), (valueEl) => {
+        this.renderConnectionField(group, t('Protocol'), (valueEl) => {
             const select = valueEl.createEl('select', {
                 cls: 'baizer-settings-detail-input',
                 attr: { 'aria-label': t('Provider protocol') },
             }) as HTMLSelectElement;
-            select.createEl('option', { value: 'gemini', text: t('Gemini API') });
-            select.createEl('option', { value: 'openai-compatible', text: t('OpenAI-compatible') });
+            getProtocolOptions().forEach(option => {
+                select.createEl('option', { value: option.value, text: option.label });
+            });
             select.value = activeConfig.type;
             select.addEventListener('change', async () => {
-                activeConfig.type = select.value as ProviderConfig['type'];
-                if (activeConfig.type === 'gemini') activeConfig.baseUrl = '';
+                const nextType = select.value as ProviderType;
+                activeConfig.type = nextType;
+                // 服务地址的语义随协议变（Anthropic 不带 /v1、OpenAI 兼容通常带 /v1），
+                // 故按新协议迁移，而不是把上一个协议的地址原样留着冒充可用。
+                activeConfig.baseUrl = resolveBaseUrlOnProtocolChange(nextType, activeConfig.baseUrl);
+                // apiFlavor 只对 openai-compatible 有意义，切走时清掉，避免残留值日后被误读。
+                if (nextType !== 'openai-compatible') delete activeConfig.apiFlavor;
+                this.flushPersistedEdits();
                 this.resetConnectionTestStatus();
                 this.openSectionIds.add('connection');
                 await this.plugin.modelService.updateSettings(this.plugin.settings);
                 await this.persistSettings();
                 this.renderAccordion();
             });
+        }, {
+            hint: t('The wire protocol this provider speaks. Switching it only shows the fields that apply.'),
         });
 
-        // 仅 OpenAI 兼容协议下暴露 API 端点方言选择（Chat Completions / Responses）。
-        // Gemini 无此概念，隐藏该字段。缺省视为 completions。
-        if (activeConfig.type === 'openai-compatible') {
-            this.renderConnectionField(basic, t('API endpoint'), (valueEl) => {
+        // 仅 OpenAI 兼容协议下暴露 API 类型（Chat Completions / Responses）。
+        // 命名刻意与「服务地址（Base URL）」区分：此前两侧都叫「API 端点」，同名不同义。
+        if (fields.includes('apiFlavor')) {
+            this.renderConnectionField(group, t('API type (Chat Completions / Responses)'), (valueEl) => {
                 const select = valueEl.createEl('select', {
                     cls: 'baizer-settings-detail-input',
-                    attr: { 'aria-label': t('API endpoint') },
+                    attr: { 'aria-label': t('API type (Chat Completions / Responses)') },
                 }) as HTMLSelectElement;
                 select.createEl('option', { value: 'completions', text: t('Chat Completions (/chat/completions)') });
                 select.createEl('option', { value: 'responses', text: t('Responses (/responses)') });
                 select.value = activeConfig.apiFlavor ?? 'completions';
                 select.addEventListener('change', async () => {
-                    activeConfig.apiFlavor = select.value as NonNullable<ProviderConfig['apiFlavor']>;
+                    activeConfig.apiFlavor = select.value as OpenAIApiFlavor;
+                    this.flushPersistedEdits();
                     this.resetConnectionTestStatus();
                     this.openSectionIds.add('connection');
                     await this.plugin.modelService.updateSettings(this.plugin.settings);
                     await this.persistSettings();
                     this.renderAccordion();
                 });
+            }, {
+                // 只说方言与端点的关系，不写死当前地址——地址由下面「服务地址」那一行
+                // 实时给出实际请求路径，这里再抄一份会变成过期信息。
+                hint: getRequestPathSummary('openai-compatible', activeConfig.apiFlavor).note,
+            });
+        }
+    }
+
+    /** 第 2 组：连接地址与凭证。 */
+    private renderCredentialsGroup(group: HTMLElement, activeConfig: ProviderConfig): void {
+        // 字段显隐取自纯函数：Gemini 没有可配置的服务地址。
+        const fields = getConnectionFieldOrder(activeConfig.type);
+
+        if (!fields.includes('baseUrl')) {
+            // 该协议没有可配置的服务地址（目前只有 Gemini）：不渲染一个禁用的空地址框
+            // （禁用框读不出也改不了），直接说明端点固定，这才是「仅显示适用字段」。
+            group.createDiv({
+                cls: 'baizer-settings-inline-note',
+                text: describeRequestPath(activeConfig.type, activeConfig.apiFlavor, ''),
+            });
+        } else {
+            this.renderConnectionField(group, t('Service address (Base URL)'), (valueEl) => {
+                const input = valueEl.createEl('input', {
+                    cls: 'baizer-settings-detail-input',
+                    attr: {
+                        type: 'text',
+                        placeholder: getDefaultBaseUrlForType(activeConfig.type),
+                        'aria-label': t('Service address (Base URL)'),
+                        spellcheck: 'false',
+                        autocomplete: 'off',
+                    },
+                }) as HTMLInputElement;
+                input.value = activeConfig.baseUrl;
+                // 完整值可悬停查看，输入框本身可编辑全文——不靠截断当唯一手段。
+                input.title = activeConfig.baseUrl;
+
+                const feedback = createFieldFeedback(valueEl);
+                const pathHint = valueEl.createDiv({ cls: 'baizer-settings-field-hint' });
+                const sync = (): void => {
+                    feedback(validateBaseUrl(activeConfig.type, input.value));
+                    pathHint.setText(describeRequestPath(activeConfig.type, activeConfig.apiFlavor, input.value));
+                };
+
+                input.addEventListener('input', () => {
+                    input.title = input.value;
+                    activeConfig.baseUrl = input.value;
+                    sync();
+                    this.debouncedPersist();
+                });
+                input.addEventListener('change', () => {
+                    activeConfig.baseUrl = input.value;
+                    this.resetConnectionTestStatus();
+                    this.flushPersistedEdits();
+                });
+                sync();
+            }, {
+                // 帮助文字由 sync() 实时给出（含当前地址解析出的实际请求路径），
+                // 这里不再加一条静态 hint，否则同一件事会出现两行、且静态那行会过期。
+                required: true,
             });
         }
 
-        this.renderConnectionField(basic, t('Model'), (valueEl) => {
-            const select = valueEl.createEl('select', {
-                cls: 'baizer-settings-detail-input',
-                attr: { 'aria-label': t('Model') },
-            }) as HTMLSelectElement;
-            if (activeConfig.model) {
-                select.createEl('option', { value: activeConfig.model, text: activeConfig.model });
-            } else {
-                select.createEl('option', { value: '__empty__', text: t('Select a model') });
-            }
-            this.loadDynamicModelSelect(select, token).catch(() => undefined);
-            select.value = activeConfig.model || '__empty__';
-            select.addEventListener('change', async () => {
-                const value = select.value;
-                if (value === '__loading__' || value === '__failed__' || value === '__empty__') return;
-                this.resetConnectionTestStatus();
-                this.openSectionIds.add('connection');
-                await this.plugin.modelService.switchModel(value, () => this.persistSettings());
-                this.renderAccordion();
-            });
-        });
-
-        const credentials = grid.createDiv({ cls: 'baizer-settings-connection-card' });
-        renderSettingHeading(
-            credentials.createDiv({ cls: 'baizer-settings-connection-card-header' }),
-            t('Credentials'),
-            { nameClass: 'baizer-settings-connection-card-title' },
-        );
-
-        this.renderConnectionField(credentials, t('API Endpoint'), (valueEl) => {
-            const supportsCustomBaseUrl = this.plugin.modelService.getProviderCapabilities().supportsCustomBaseUrl;
+        this.renderConnectionField(group, t('API Key'), (valueEl) => {
             const input = valueEl.createEl('input', {
-                cls: 'baizer-settings-detail-input',
-                attr: {
-                    type: 'text',
-                    placeholder: 'https://api.openai.com/v1',
-                    value: supportsCustomBaseUrl ? activeConfig.baseUrl : (activeConfig.baseUrl || t('Default Gemini endpoint')),
-                    'aria-label': t('API endpoint'),
-                },
-            }) as HTMLInputElement;
-            // disabled 只在「不支持自定义 baseUrl」(如 gemini) 时才设。
-            // 注意：不能走 attr.disabled=undefined —— Obsidian createEl 会把 undefined 当字符串
-            // 写成 disabled="undefined"，HTML 里 disabled 属性只要存在即生效，导致 openai-compatible
-            // 的端点也被锁死（用户反馈「api端点不允许修改」的根因）。
-            input.disabled = !supportsCustomBaseUrl;
-            input.addEventListener('change', async () => {
-                activeConfig.baseUrl = input.value;
-                this.resetConnectionTestStatus();
-                await this.persistSettings();
-            });
-        });
-
-        this.renderConnectionField(credentials, t('API Key'), (valueEl) => {
-            const keyRow = valueEl.createDiv({ cls: 'baizer-settings-detail-secret' });
-            const input = keyRow.createEl('input', {
-                cls: 'baizer-settings-detail-input',
+                cls: 'baizer-settings-detail-input baizer-settings-secret-input',
                 attr: {
                     type: this.revealApiKey ? 'text' : 'password',
                     placeholder: 'sk-...',
-                    value: activeConfig.apiKey,
                     autocomplete: 'off',
                     spellcheck: 'false',
                     'aria-label': t('API key'),
                 },
             }) as HTMLInputElement;
-            input.addEventListener('change', async () => {
-                activeConfig.apiKey = input.value;
-                this.resetConnectionTestStatus();
-                await this.persistSettings();
-            });
+            input.value = activeConfig.apiKey;
 
-            const secretActions = keyRow.createDiv({ cls: 'baizer-settings-detail-secret-actions' });
-            this.createActionButton(secretActions, this.revealApiKey ? t('Hide') : t('Reveal'), async () => {
+            // 操作按钮独占一行：此前按钮和输入框挤在同一窄栏里，Reveal/Clear 被挤成竖向堆叠、
+            // 把整行撑高。独占一行后按钮永不与输入框争宽度。
+            const actions = valueEl.createDiv({ cls: 'baizer-settings-field-actions' });
+            this.createActionButton(actions, this.revealApiKey ? t('Hide') : t('Reveal'), async () => {
+                this.flushPersistedEdits();
                 this.revealApiKey = !this.revealApiKey;
                 this.openSectionIds.add('connection');
                 this.renderAccordion();
             });
-            this.createActionButton(secretActions, t('Clear'), () => {
+            this.createActionButton(actions, t('Clear'), () => {
                 if (!activeConfig.apiKey.trim()) return;
                 // P1-1: 清空 API Key 不可逆（需重去服务商后台复制），与删除 Provider 等操作一致做二次确认。
                 new MemoryConfirmModal(
@@ -1693,35 +2534,103 @@ export class SettingTab extends PluginSettingTab {
                     },
                 ).open();
             }, 'danger');
-        });
 
-        this.renderConnectionField(credentials, t('Custom Headers'), (valueEl) => {
-            const textarea = valueEl.createEl('textarea', {
-                cls: 'baizer-settings-detail-input baizer-settings-detail-textarea',
-                attr: {
-                    placeholder: 'x-opencode-session: {{conversationId}}',
-                    rows: '3',
-                    'aria-label': t('Custom headers'),
-                },
-            }) as HTMLTextAreaElement;
-            textarea.value = serializeCustomHeaders(activeConfig.customHeaders);
-            textarea.addEventListener('change', async () => {
-                activeConfig.customHeaders = parseCustomHeaders(textarea.value);
+            input.addEventListener('input', () => {
+                activeConfig.apiKey = input.value;
+                // 此前只在 change 时保存：切走 provider 或面板重绘就丢掉刚粘贴的 key。
+                this.debouncedPersist();
+            });
+            input.addEventListener('change', () => {
+                activeConfig.apiKey = input.value;
                 this.resetConnectionTestStatus();
-                await this.persistSettings();
+                this.flushPersistedEdits();
             });
-            valueEl.createDiv({
-                cls: 'baizer-settings-inline-note',
-                text: t('One "Header-Name: value" per line. Use {{conversationId}} to send the current conversation ID (e.g. for opencode.ai Go: x-opencode-session: {{conversationId}}).'),
-            });
+        }, {
+            hint: t('Stored locally and hidden by default. Use Reveal to check it; Clear asks for confirmation.'),
         });
 
-        this.renderConnectionField(credentials, t('Test'), (valueEl) => {
+        // 高级配置：折叠起来，基础字段优先。
+        const advanced = group.createEl('details', { cls: 'baizer-settings-advanced baizer-settings-advanced-headers' });
+        advanced.createEl('summary', { text: t('Custom headers (advanced)') });
+        this.trackAdvancedDetails(advanced, 'connection-custom-headers');
+        const advancedBody = advanced.createDiv({ cls: 'baizer-settings-advanced-body' });
+
+        const textarea = advancedBody.createEl('textarea', {
+            cls: 'baizer-settings-detail-input baizer-settings-detail-textarea',
+            attr: {
+                rows: '4',
+                spellcheck: 'false',
+                'aria-label': t('Custom headers'),
+            },
+        }) as HTMLTextAreaElement;
+        textarea.value = serializeCustomHeaders(activeConfig.customHeaders);
+        const feedback = createFieldFeedback(advancedBody);
+
+        const sync = (): void => {
+            const validation = validateCustomHeaders(textarea.value);
+            feedback(validation);
+            // 非法行被跳过，但其余行照常保存——不能因为正在敲的一行把已配好的 header 全清掉。
+            activeConfig.customHeaders = validation.headers;
+        };
+
+        textarea.addEventListener('input', () => {
+            sync();
+            this.debouncedPersist();
+        });
+        textarea.addEventListener('change', () => {
+            sync();
+            this.resetConnectionTestStatus();
+            this.flushPersistedEdits();
+        });
+        sync();
+
+        // 帮助文字与示例放在折叠体里、占满整行宽度：此前挤在窄 value 列里，
+        // 「Header-Name: value」、占位符说明和示例被折成很多短行、一路顶到右边缘。
+        advancedBody.createDiv({
+            cls: 'baizer-settings-field-hint',
+            text: t('One "Header-Name: value" per line. Use {{conversationId}} to send the current conversation ID.'),
+        });
+        advancedBody.createEl('pre', {
+            cls: 'baizer-settings-header-example',
+            text: 'x-opencode-session: {{conversationId}}',
+        });
+        advancedBody.createDiv({
+            cls: 'baizer-settings-field-hint',
+            text: t('Sent with every request to this provider. The {{conversationId}} placeholder is skipped for one-off calls that have no conversation.'),
+        });
+    }
+
+    /** 第 3 组：模型。 */
+    private renderModelGroup(group: HTMLElement, activeConfig: ProviderConfig, token: number): void {
+        this.renderConnectionField(group, t('Model'), (valueEl) => {
+            renderModelField(valueEl, {
+                currentModel: activeConfig.model || '',
+                hasApiKey: !!activeConfig.apiKey?.trim(),
+                // 用带状态的版本：靠 listingUnsupported/error 区分能力缺口与真故障，
+                // 不再从数组形状反推「是不是列不出来」。
+                loadModels: (forceRefresh) => this.plugin.modelService.getAvailableModelsWithStatus(forceRefresh),
+                onModelChange: async (modelId) => {
+                    this.resetConnectionTestStatus();
+                    this.openSectionIds.add('connection');
+                    await this.plugin.modelService.switchModel(modelId, () => this.persistSettings());
+                },
+                isStale: () => token !== this.renderToken,
+            });
+        }, {
+            hint: t('Type the model ID directly, or pick one from the list once the endpoint returns it.'),
+        });
+    }
+
+    /** 第 4 组：测试结果。 */
+    private renderTestGroup(group: HTMLElement, activeConfig: ProviderConfig): void {
+        const endpoint = getModelListEndpoint(activeConfig.type, activeConfig.baseUrl);
+
+        this.renderConnectionField(group, t('Test'), (valueEl) => {
             const actions = valueEl.createDiv({ cls: 'baizer-settings-actions' });
             this.createActionButton(actions, this.connectionTestStatus.state === 'testing' ? t('Testing...') : t('Run test'), async () => {
                 const label = activeConfig.label || 'AI provider';
                 if (!activeConfig.apiKey.trim()) {
-                    this.connectionTestStatus = { state: 'error', message: `${label}${t(': no API key configured.')}` };
+                    this.connectionTestStatus = getConnectionTestReport({ label, stage: 'missing-key', endpoint });
                     this.openSectionIds.add('connection');
                     this.renderAccordion();
                     return;
@@ -1732,12 +2641,21 @@ export class SettingTab extends PluginSettingTab {
                     this.openSectionIds.add('connection');
                     this.renderAccordion();
                     await this.plugin.modelService.updateSettings(this.plugin.settings);
-                    const success = await this.plugin.modelService.checkAvailability();
-                    this.connectionTestStatus = success
-                        ? { state: 'success', message: `${label}${t(': connection successful.')}` }
-                        : { state: 'error', message: t('Connection failed. Check API key, base URL, and model.') };
+                    const reachable = await this.plugin.modelService.checkAvailability();
+                    // 测试只探模型列表端点（不烧 token），所以结论只能是「列得出/列不出模型」，
+                    // 不能说成「能不能生成」——这两件事此前被同一句「连接失败」混为一谈。
+                    this.connectionTestStatus = getConnectionTestReport({
+                        label,
+                        stage: reachable ? 'endpoint-reachable' : 'model-list-unavailable',
+                        endpoint,
+                    });
                 } catch (error: any) {
-                    this.connectionTestStatus = { state: 'error', message: `${t('Connection failed')}: ${error.message}` };
+                    this.connectionTestStatus = getConnectionTestReport({
+                        label,
+                        stage: 'model-list-unavailable',
+                        endpoint,
+                    });
+                    this.connectionTestStatus.message += ` (${error?.message || t('unknown reason')})`;
                 }
 
                 this.openSectionIds.add('connection');
@@ -1754,68 +2672,39 @@ export class SettingTab extends PluginSettingTab {
                     attr: { role: 'status', 'aria-live': status.tone === 'danger' ? 'assertive' : 'polite' },
                 });
             }
+        }, {
+            hint: fillPlaceholders(
+                t('Checks whether the model list is reachable at {url}. It does not run a generation, so a pass means "the endpoint answers", not "the model can generate".'),
+                { url: endpoint },
+            ),
         });
+    }
+
+    /**
+     * 立即落盘 debounce 里挂着的编辑。
+     * 切换协议/重绘前必须调用：否则刚刚输入的地址或密钥会被随后重建的 DOM 丢回旧值。
+     */
+    private flushPersistedEdits(): void {
+        this.debouncedPersist.run();
     }
 
     private renderConnectionField(
         containerEl: HTMLElement,
         label: string,
-        renderValue: (valueEl: HTMLElement) => void
+        renderValue: (valueEl: HTMLElement) => void,
+        options: { hint?: string; required?: boolean } = {},
     ): void {
         const row = containerEl.createDiv({ cls: 'baizer-settings-detail-row' });
-        row.createDiv({ cls: 'baizer-settings-detail-label', text: label });
+        const labelEl = row.createDiv({ cls: 'baizer-settings-detail-label' });
+        labelEl.createSpan({ text: label });
+        if (options.required) {
+            labelEl.createSpan({ cls: 'baizer-settings-detail-required', text: t('Required field') });
+        }
         const value = row.createDiv({ cls: 'baizer-settings-detail-value' });
         renderValue(value);
-    }
-
-    private async loadDynamicModelSelect(select: HTMLSelectElement, token: number, forceRefresh: boolean = false): Promise<void> {
-        const config = this.getActiveConfig();
-        const currentModel = config?.model || '';
-
-        select.empty();
-        select.createEl('option', { value: '__loading__', text: t('Loading models...') });
-        select.value = '__loading__';
-        select.disabled = true;
-
-        try {
-            const models = await this.plugin.modelService.getAvailableModels(forceRefresh);
-            if (token !== this.renderToken) return;
-
-            select.empty();
-            const options: ModelOption[] = models.length > 0
-                ? models
-                : [{ value: currentModel, label: `${currentModel} (${t('Current')})` }];
-
-            options.forEach(option => select.createEl('option', { value: option.value, text: option.label }));
-
-            if (currentModel && !options.some(option => option.value === currentModel)) {
-                select.createEl('option', { value: currentModel, text: `${currentModel} (${t('Current')})` });
-            }
-
-            const resolved = currentModel || options[0]?.value || '';
-            select.value = resolved;
-            select.disabled = false;
-
-            // P0-2: 新增/自定义 provider 的 model 为空时，下拉「视觉上」显示了第一个模型，
-            // 但 config.model 仍是空——赋 select.value 不触发 change，也不落盘。
-            // 这里主动把自动选中的模型写回 config 并持久化，避免用户看到「已选模型」的假象、
-            // 而 Run test / 对话却拿空模型发请求。仅当真实拿到了模型列表(非仅回退当前值)时写回。
-            if (!currentModel && resolved && resolved !== '__failed__' && resolved !== '__loading__' && models.length > 0) {
-                await this.plugin.modelService.switchModel(resolved, () => this.persistSettings());
-            }
-        } catch {
-            if (token !== this.renderToken) return;
-
-            select.empty();
-            if (currentModel) {
-                select.createEl('option', { value: currentModel, text: `${currentModel} (${t('Current')})` });
-                select.value = currentModel;
-                select.disabled = false;
-            } else {
-                select.createEl('option', { value: '__failed__', text: t('Model list unavailable') });
-                select.value = '__failed__';
-                select.disabled = true;
-            }
+        // 帮助文字排在控件之后、占满整行：可连续阅读，不被窄列折成碎句。
+        if (options.hint) {
+            value.createDiv({ cls: 'baizer-settings-field-hint', text: options.hint });
         }
     }
 
@@ -2772,18 +3661,26 @@ class MemoryConfirmModal extends Modal {
     }
 }
 
-class AddProviderModal extends Modal {
-    private onSubmit: (label: string, baseUrl: string) => void;
+/** 新增服务商模态框收集到的草稿；type 由用户在框内选择。 */
+export interface AddProviderDraft {
+    type: ProviderType;
+    label: string;
+    baseUrl: string;
+}
 
-    constructor(app: App, onSubmit: (label: string, baseUrl: string) => void) {
+class AddProviderModal extends Modal {
+    private onSubmit: (draft: AddProviderDraft) => void;
+
+    constructor(app: App, onSubmit: (draft: AddProviderDraft) => void) {
         super(app);
         this.onSubmit = onSubmit;
     }
 
     onOpen() {
         const { contentEl } = this;
-        renderSettingHeading(contentEl, t('Add OpenAI Compatible Provider'));
+        renderSettingHeading(contentEl, t('Add Provider'));
 
+        let typeValue: ProviderType = 'openai-compatible';
         let labelValue = '';
         let baseUrlValue = '';
 
@@ -2796,11 +3693,23 @@ class AddProviderModal extends Modal {
                     labelValue = value;
                 }));
 
+        // 协议可选（含 Anthropic）：此前新 provider 固定 openai-compatible。
         new Setting(contentEl)
-            .setName(t('Base URL'))
-            .setDesc(t('API endpoint URL'))
+            .setName(t('Protocol'))
+            .setDesc(t('The wire protocol this provider speaks.'))
+            .addDropdown(dropdown => {
+                getProtocolOptions().forEach(option => dropdown.addOption(option.value, option.label));
+                dropdown.setValue(typeValue);
+                dropdown.onChange((value: string) => {
+                    typeValue = value as ProviderType;
+                });
+            });
+
+        new Setting(contentEl)
+            .setName(t('Service address (Base URL)'))
+            .setDesc(describeRequestPath('openai-compatible', 'completions', ''))
             .addText(text => text
-                .setPlaceholder('https://api.example.com/v1')
+                .setPlaceholder(getDefaultBaseUrlForType('openai-compatible'))
                 .onChange((value: string) => {
                     baseUrlValue = value;
                 }));
@@ -2810,15 +3719,22 @@ class AddProviderModal extends Modal {
                 .setButtonText(t('Add'))
                 .setCta()
                 .onClick(() => {
-                    if (!labelValue.trim()) {
-                        new Notice(t('Please enter a provider name'));
+                    if (validateProviderName(labelValue).state !== 'ok') {
+                        new Notice(t('Provider name is required.'));
                         return;
                     }
-                    if (!baseUrlValue.trim()) {
-                        new Notice(t('Please enter a base URL'));
+                    // 服务地址留空时由 buildNewProviderConfig 用该协议的官方端点兜底；
+                    // 填了就按该协议的规则就地校验（Gemini 忽略地址，不校验）。
+                    const baseUrlValidation = validateBaseUrl(typeValue, baseUrlValue);
+                    if (baseUrlValue.trim() && baseUrlValidation.state === 'error') {
+                        new Notice(baseUrlValidation.message);
                         return;
                     }
-                    this.onSubmit(labelValue.trim(), baseUrlValue.trim());
+                    this.onSubmit({
+                        type: typeValue,
+                        label: labelValue.trim(),
+                        baseUrl: baseUrlValue.trim(),
+                    });
                     this.close();
                 }));
     }

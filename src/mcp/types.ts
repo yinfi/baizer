@@ -26,7 +26,16 @@ declare module "obsidian" {
 }
 
 // --- Provider 配置 ---
-export type ProviderType = 'gemini' | 'openai-compatible';
+/**
+ * provider 使用的线协议（wire protocol）。
+ * - 'gemini'            : Google Generative AI（api = 'google-generative-ai'）
+ * - 'openai-compatible' : OpenAI 兼容接口，端点方言由 apiFlavor 决定
+ * - 'anthropic'         : Anthropic 原生 Messages 协议（api = 'anthropic-messages'，
+ *                         POST {baseUrl}/v1/messages，认证头 x-api-key + anthropic-version）
+ *
+ * 三种协议各自独立，互不伪装：anthropic 不是 openai-compatible 的一个 flavor。
+ */
+export type ProviderType = 'gemini' | 'openai-compatible' | 'anthropic';
 
 /**
  * OpenAI 兼容协议下的具体 API 端点方言。
@@ -42,9 +51,16 @@ export interface ProviderConfig {
     type: ProviderType;
     label: string;
     apiKey: string;
+    /**
+     * 服务地址（Base URL）——**不含端点路径**，端点由各协议 SDK/实现自行追加。
+     * - gemini            : 忽略（固定走官方端点）
+     * - openai-compatible : OpenAI SDK 的 baseURL，SDK 追加 /chat/completions 或 /responses
+     * - anthropic         : Anthropic SDK 的 baseURL，SDK 追加 /v1/messages
+     *                       （故官方端点写 https://api.anthropic.com，不要再带 /v1）
+     */
     baseUrl: string;
     model: string;
-    /** OpenAI 兼容协议的 API 端点方言；缺省 = 'completions'。见 OpenAIApiFlavor。 */
+    /** OpenAI 兼容协议的 API 端点方言；缺省 = 'completions'。见 OpenAIApiFlavor。仅对 type='openai-compatible' 有意义。 */
     apiFlavor?: OpenAIApiFlavor;
     /**
      * 随每次 LLM 请求附带的自定义 header（某些 OpenAI 兼容端点要求的非标准 header，
@@ -83,6 +99,15 @@ export const DEFAULT_PROVIDERS: Record<string, ProviderConfig> = {
         apiKey: '',
         baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         model: 'qwen-turbo'
+    },
+    'anthropic': {
+        type: 'anthropic',
+        label: 'Anthropic',
+        apiKey: '',
+        // 官方端点不带 /v1：Anthropic SDK 会自行追加 /v1/messages。
+        // 兼容网关（实现 Anthropic Messages 协议）改这里即可。
+        baseUrl: 'https://api.anthropic.com',
+        model: 'claude-sonnet-4-5'
     }
 };
 
