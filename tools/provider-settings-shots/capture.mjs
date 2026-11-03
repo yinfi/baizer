@@ -500,7 +500,7 @@ const SECTION_TITLES = {
   'plugin-skills': ['Plugin Skills', '插件技能'],
 };
 
-async function openSettingsSection(session, sectionId, { timeoutMs = 30000 } = {}) {
+async function openSettingsSection(session, sectionId, { timeoutMs = 30000, alsoOpen = [] } = {}) {
   // Locate the section ONCE and then address it by its positional index: the click triggers a
   // re-render that replaces every card node, and an index survives that while a node reference
   // does not.
@@ -548,6 +548,44 @@ async function openSettingsSection(session, sectionId, { timeoutMs = 30000 } = {
     { timeoutMs, label: `settings section "${sectionId}" content` },
   );
 
+  // Extra sections are expanded for ONE reason: to give the page enough content below the anchor
+  // for the framing scroll to actually reach it. A short section near the end of the page is clamped
+  // by maxScrollTop, so the same command produces a different anchor in each phase of a before/after
+  // pair (measured on this change: contentTop 459px before vs 33px after, i.e. exactly the height
+  // the new panel adds). These sections are NOT framed and are recorded in the report, so the two
+  // phases cannot look like they were driven differently.
+  const openedExtras = [];
+  for (const extraId of alsoOpen) {
+    const extraTitles = SECTION_TITLES[extraId] ?? [];
+    const opened = await session.evaluate(`(() => {
+      const cards = Array.from(document.querySelectorAll('details.baizer-settings-section-card'));
+      const titleOf = (card) => {
+        const node = card.querySelector('.baizer-settings-section-title');
+        return node ? (node.textContent || '').trim() : '';
+      };
+      const wanted = ${JSON.stringify(extraTitles)};
+      const card = cards.find((c) => c.getAttribute('data-section-id') === ${JSON.stringify(extraId)})
+        || cards.find((c) => wanted.includes(titleOf(c)));
+      if (!card) return false;
+      if (!card.open) {
+        const summary = card.querySelector('summary');
+        if (summary) summary.click();
+      }
+      return true;
+    })()`);
+    if (opened) openedExtras.push(extraId);
+  }
+  if (openedExtras.length > 0) {
+    // Expanding re-renders the accordion; wait for the DOM to settle before framing.
+    await session.waitFor(
+      `${JSON.stringify(openedExtras)}.every((id) => {
+        const card = document.querySelector('details[data-section-id="' + id + '"]');
+        return !card || card.open;
+      })`,
+      { timeoutMs, label: 'additional settings sections' },
+    );
+  }
+
   const framed = await session.evaluate(`(() => {
     const card = ${cardExpr};
     const content = card && card.querySelector('.baizer-settings-section-content');
@@ -582,7 +620,7 @@ async function openSettingsSection(session, sectionId, { timeoutMs = 30000 } = {
     };
   })()`);
 
-  return { ...located, ...framed };
+  return { ...located, ...framed, alsoOpened: openedExtras };
 }
 
 /**
@@ -1135,8 +1173,16 @@ async function main() {
 
     // Last, so its scroll framing is the one that survives into the measurement.
     if (values['open-section']) {
-      runInfo.sectionOpen = await openSettingsSection(panelSession, values['open-section'], {
+      // `--open-section` takes a comma-separated list. The FIRST id is the one that gets framed; any
+      // others are only expanded, so that the page has enough content below the anchor for the
+      // framing scroll to reach the top (see openSettingsSection).
+      const sectionIds = String(values['open-section'])
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+      runInfo.sectionOpen = await openSettingsSection(panelSession, sectionIds[0], {
         timeoutMs: Math.min(readyTimeout, 30000),
+        alsoOpen: sectionIds.slice(1),
       });
       if (!runInfo.sectionOpen.found) {
         throw new Error(

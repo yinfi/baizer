@@ -372,6 +372,42 @@ export function collectLayoutReport(cfg) {
     ],
     ellipsizedStaticText: [],
   };
+
+  // The video-transcription fields live in the `capture` accordion section, not in the provider
+  // detail, and `overlap` is deliberately scoped to the detail area -- so none of the checks above
+  // covers them. Measure them explicitly. When the section is not rendered (a capture taken without
+  // --open-section capture) or the revision predates these fields, every row reports found:false,
+  // which is the honest reading for "this build has no such control".
+  const captureSection = (() => {
+    const byAttr = document.querySelector('details[data-section-id="capture"]');
+    if (byAttr) return byAttr.querySelector('.baizer-settings-section-content');
+    // Revisions predating the data-section-id attribute are matched by section title instead.
+    for (const card of document.querySelectorAll('details.baizer-settings-section-card')) {
+      if (/^(capture|采集)$/.test(textOf(card.querySelector('.baizer-settings-section-title')))) {
+        return card.querySelector('.baizer-settings-section-content');
+      }
+    }
+    return null;
+  })();
+  const findCaptureField = (re) => {
+    if (!captureSection) return null;
+    for (const row of captureSection.querySelectorAll('.setting-item')) {
+      const label = textOf(row.querySelector('.setting-item-name'));
+      if (re.test(label)) return { row, label, control: row.querySelector('input, select, textarea') };
+    }
+    return null;
+  };
+  const captureCard = captureSection ? captureSection.closest('details') : null;
+  report.transcriptionFields = {
+    sectionFound: !!captureSection,
+    sectionTitle: captureCard ? textOf(captureCard.querySelector('.baizer-settings-section-title')) : null,
+    fields: [
+      measureField('transcriptionEndpoint', findCaptureField(/endpoint|端点|地址/i)),
+      measureField('transcriptionApiKey', findCaptureField(/api|密钥/i)),
+      measureField('transcriptionModel', findCaptureField(/模型|model/i)),
+      measureField('transcriptionLanguage', findCaptureField(/语言|language/i)),
+    ],
+  };
   for (const el of scope.querySelectorAll('*')) {
     const cs = getComputedStyle(el);
     if (cs.textOverflow !== 'ellipsis' || cs.whiteSpace !== 'nowrap') continue;
