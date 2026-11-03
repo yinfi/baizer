@@ -321,6 +321,70 @@ async function runTests() {
     assert(postedBody.get('file').type === 'audio/mp4', 'fallback must keep the original MIME type');
   });
 
+  await test('retries without response_format when the endpoint rejects that parameter', async () => {
+    // 有的 OpenAI 方言实现会对不认识的 response_format 直接回 400。改动前这个 POST 只带
+    // model，所以「参数被拒」必须降级重试，而不是让升级后的用户彻底转写不了。
+    const formats: Array<string | null> = [];
+    const service = createVideoTranscriptionService({
+      requestUrl: bilibiliAudioStub('https://www.bilibili.com/video/BVnoformat', [4, 4]),
+      decodeAudio: async () => fakeDecoded(100, 100),
+      fetchImpl: async (_url: any, init: any) => {
+        const format = init.body.get('response_format');
+        formats.push(format);
+        if (format === 'verbose_json') {
+          return { ok: false, status: 400, text: async () => 'unknown parameter: response_format' } as any;
+        }
+        return { ok: true, status: 200, json: async () => ({ text: 'plain text' }) } as any;
+      },
+    });
+
+    const result = await service.transcribeFromVideoUrl({
+      url: 'https://www.bilibili.com/video/BVnoformat',
+      platform: 'bilibili',
+      provider: DEFAULT_PROVIDERS.openai,
+    });
+
+    assert(result.mode === 'chunked', `expected chunked mode, got ${result.mode}`);
+    assert(formats[0] === 'verbose_json', `the first request must try verbose_json, got ${formats[0]}`);
+    // 第一片确认端点不收这个参数之后，后面每一片都不该再撞一次 400。
+    assert(
+      formats.slice(1).every((format) => format === null),
+      `later requests must drop the rejected parameter: ${JSON.stringify(formats)}`,
+    );
+    assert(formats.length === 4, `expected 1 rejected + 3 successful requests, got ${formats.length}`);
+    assert(
+      result.warnings.some((warning) => warning.includes('verbose_json')),
+      `the degradation must be reported to the user: ${JSON.stringify(result.warnings)}`,
+    );
+    // 没有 segments 时退化成「一片一个时间戳」，时间轴本身仍然在。
+    assert(result.segments.length === 3, `expected one segment per chunk, got ${result.segments.length}`);
+  });
+
+  await test('does not retry a rejection that has nothing to do with response_format', async () => {
+    let calls = 0;
+    const service = createVideoTranscriptionService({
+      requestUrl: bilibiliAudioStub('https://www.bilibili.com/video/BVunauth', [6]),
+      decodeAudio: async () => fakeDecoded(100, 100),
+      fetchImpl: async () => {
+        calls += 1;
+        return { ok: false, status: 401, text: async () => 'invalid api key' } as any;
+      },
+    });
+
+    try {
+      await service.transcribeFromVideoUrl({
+        url: 'https://www.bilibili.com/video/BVunauth',
+        platform: 'bilibili',
+        provider: DEFAULT_PROVIDERS.openai,
+      });
+      throw new Error('Expected transcription to fail');
+    } catch (e: any) {
+      assert(e.message.includes('401'), `must carry the status: ${e.message}`);
+      // 鉴权失败与 response_format 无关：去掉参数重试只会把同一个 401 再打一遍。
+      assert(calls === 1, `must not retry a 401, got ${calls} calls`);
+    }
+  });
+
   await test('names the failing chunk and the endpoint response when one chunk request fails', async () => {
     let calls = 0;
     const service = createVideoTranscriptionService({

@@ -16,14 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   provider: a vault configured only with Anthropic can transcribe as soon as an
   endpoint is set. Existing OpenAI-compatible users need no migration — with the
   new fields empty the plugin still uses the active provider's base URL and key
-  with `whisper-1`.
+  with `whisper-1`. When no endpoint can be resolved at all, the note keeps the
+  same model-summarised metadata fallback it had before, and the user is told why
+  transcription was skipped.
 - Audio is decoded to 16 kHz mono PCM and submitted as silence-snapped chunks of
   at most 45 s, instead of one unbounded request carrying the whole track. If the
   audio cannot be decoded, the plugin falls back to the previous single request
   and reports that it did.
+- An endpoint that rejects `response_format=verbose_json` (some OpenAI-dialect
+  implementations answer 400 to a parameter they do not know) is retried once
+  without that parameter, and the degradation is reported. A request shape that
+  worked before this change cannot break on upgrade.
 - Transcription returns segment-level results with timestamps, and the saved
   note carries them as `[mm:ss] text` lines under a `Timestamped Transcript`
-  heading.
+  heading; the note's excerpt is still subject to the pre-existing
+  1000-character cap.
 - Transcription failures are surfaced with their reason, in a notice and in the
   note, instead of being swallowed by an empty catch block.
 - **Google Gemini support removed** to shrink the bundle. `ProviderConfig.type`
@@ -80,12 +87,16 @@ _[English](#changelog) · 简体中文_
   不再写死 `whisper-1` 并强制复用当前 provider 的地址；转写也不再要求
   provider 类型是 `openai-compatible` —— 只配了 Anthropic 的用户只要填上端点就能转写。
   既有的 OpenAI 兼容用户零迁移：新字段留空时，行为与改动前一致（沿用 provider 的
-  地址与 key，模型 `whisper-1`）。
+  地址与 key，模型 `whisper-1`）。完全解析不出端点时，笔记仍然走改动前那条
+  「模型读元数据」的回退路径，并明确告诉用户为什么跳过了转写。
 - 音频先解码成 16 kHz 单声道 PCM，再按「不超过 45 s、以静音段中点为切点」分片提交，
   不再把整条音轨塞进一个不设上限的请求。解码不可用时回退为改动前的整轨请求，
   并把这次回退明确告诉用户。
+- 端点若拒绝 `response_format=verbose_json`（有的 OpenAI 方言实现会对不认识的
+  参数回 400），会去掉该参数重试一次，并把这次降级告诉用户。改动前能用的请求
+  形状不会因为升级而失败。
 - 转写返回带时间戳的段级结果，笔记里以 `[mm:ss] 文本` 逐行写入
-  `Timestamped Transcript` 小节。
+  `Timestamped Transcript` 小节；笔记里的摘录仍受改动前就存在的 1000 字符上限约束。
 - 转写失败会连同原因一起暴露（通知 + 笔记正文），不再被空 catch 吞掉。
 - **移除 Google Gemini 支持**以缩减包体积。`ProviderConfig.type` 现在只有
   `openai-compatible` 与 `anthropic`;Gemini 协议、其内置 provider 条目以及它

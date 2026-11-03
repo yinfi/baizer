@@ -132,6 +132,35 @@ function truncate(text: string, max: number): string {
   return clean.length > max ? `${clean.slice(0, max)}...` : clean;
 }
 
+/**
+ * 端点返回非 2xx 时抛出，并保留状态码。
+ *
+ * 为什么需要状态码：response_format=verbose_json 是本次改造新增的参数，而改动前这里
+ * 只发 model —— 有的 OpenAI 方言实现会对不认识的 response_format 直接回 400。
+ * 那会让「本来能用」的用户被这次改动打挂，所以调用方要能分辨「参数被拒」并降级重试
+ * （见 isParameterRejection / postWithFormatFallback）。
+ */
+export class TranscriptionHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'TranscriptionHttpError';
+    this.status = status;
+  }
+}
+
+/**
+ * 参数类拒绝：400 / 415 / 422。
+ *
+ * 鉴权(401/403)、找不到(404)、限流(429) 与服务端错误(5xx) 都跟 response_format 无关，
+ * 去掉参数重试只会把同一个错误再打一遍，所以这里必须按状态码收窄。
+ */
+export function isParameterRejection(error: unknown): boolean {
+  return error instanceof TranscriptionHttpError
+    && (error.status === 400 || error.status === 415 || error.status === 422);
+}
+
 function pickBilibiliAudioUrl(html: string): string | null {
   const playInfo = extractJsonAssignment(html, 'window.__playinfo__=')
     || extractJsonAssignment(html, '__playinfo__=');
@@ -252,7 +281,7 @@ export function formatTimestampedTranscript(segments: TranscriptSegment[]): stri
     .join('\n');
 }
 
-async function postTranscriptionRequest(params: {
+interface TranscriptionRequestParams {
   endpoint: string;
   apiKey: string;
   model: string;
@@ -260,14 +289,21 @@ async function postTranscriptionRequest(params: {
   bytes: Uint8Array;
   mimeType: string;
   filename: string;
+  /**
+   * 请求的 response_format。null = 不发送这个参数。
+   * 只有 verbose_json 会带回 segments；没有它就只剩一个扁平字符串，时间轴无从谈起，
+   * 因此默认发 verbose_json，仅在端点明确拒绝它时降级为 null。
+   */
+  responseFormat: string | null;
   deps: VideoTranscriptionDeps;
-}): Promise<any> {
+}
+
+async function postTranscriptionRequest(params: TranscriptionRequestParams): Promise<any> {
   const formData = new FormData();
   const blob = new Blob([params.bytes as unknown as BlobPart], { type: params.mimeType });
   formData.append('file', blob, params.filename);
   formData.append('model', params.model);
-  // 只有 verbose_json 会带回 segments；没有它就只剩一个扁平字符串，时间轴无从谈起。
-  formData.append('response_format', 'verbose_json');
+  if (params.responseFormat) formData.append('response_format', params.responseFormat);
   if (params.language) formData.append('language', params.language);
 
   const headers: Record<string, string> = {};
@@ -285,10 +321,53 @@ async function postTranscriptionRequest(params: {
     const details = typeof (response as any).text === 'function'
       ? await (response as any).text()
       : '';
-    throw new Error(`HTTP ${response.status}${details ? ` - ${truncate(details, 300)}` : ''}`);
+    throw new TranscriptionHttpError(
+      response.status,
+      `HTTP ${response.status}${details ? ` - ${truncate(details, 300)}` : ''}`,
+    );
   }
 
   return typeof (response as any).json === 'function' ? await (response as any).json() : {};
+}
+
+/** 本次运行里 response_format 的协商状态。`degraded` 会被写成一条用户可见的 warning。 */
+interface ResponseFormatState {
+  verboseJson: boolean;
+  degraded: boolean;
+}
+
+const RESPONSE_FORMAT_DEGRADED_WARNING =
+  'The endpoint rejected response_format=verbose_json, so timestamps fall back to one entry per chunk '
+  + 'instead of one per segment.';
+
+/**
+ * 发一次请求；若端点明确因为参数被拒（400/415/422），去掉 response_format 重试一次。
+ *
+ * 为什么值得多这 15 行：改动前这个 POST 只带 model，任何 OpenAI 方言的端点都能收。
+ * 本次新增了 response_format=verbose_json，而它并非所有实现都认 —— 一个会因为
+ * 「不认识的参数」回 400 的服务，会让原本可用的用户在升级后彻底转写不了。
+ * 降级后时间戳退化成「一片一个时间戳」，但那仍然远好过失败，且用户会被告知。
+ *
+ * 状态记在 state 上而不是每次重试：第一个分片确认端点不收该参数后，
+ * 后面 99 个分片不应该再各撞一次 400。
+ */
+async function postWithFormatFallback(
+  params: Omit<TranscriptionRequestParams, 'responseFormat'>,
+  state: ResponseFormatState,
+): Promise<any> {
+  if (!state.verboseJson) {
+    return postTranscriptionRequest({ ...params, responseFormat: null });
+  }
+
+  try {
+    return await postTranscriptionRequest({ ...params, responseFormat: 'verbose_json' });
+  } catch (error) {
+    if (!isParameterRejection(error)) throw error;
+    state.verboseJson = false;
+    state.degraded = true;
+    // 重试仍然失败时，抛出的是重试的错误：它才是「去掉那个参数之后」的真实原因。
+    return postTranscriptionRequest({ ...params, responseFormat: null });
+  }
 }
 
 export function createVideoTranscriptionService(partialDeps: Partial<VideoTranscriptionDeps> = {}) {
@@ -319,6 +398,7 @@ export function createVideoTranscriptionService(partialDeps: Partial<VideoTransc
       const warnings: string[] = [];
       const segments: TranscriptSegment[] = [];
       const chunkTexts: string[] = [];
+      const formatState: ResponseFormatState = { verboseJson: true, degraded: false };
 
       let decoded: PcmSource | null = null;
       try {
@@ -350,7 +430,7 @@ export function createVideoTranscriptionService(partialDeps: Partial<VideoTransc
           const wav = encodeWav16(samples, sampleRate);
           let payload: any;
           try {
-            payload = await postTranscriptionRequest({
+            payload = await postWithFormatFallback({
               endpoint,
               apiKey: config.apiKey,
               model: config.model,
@@ -359,7 +439,7 @@ export function createVideoTranscriptionService(partialDeps: Partial<VideoTransc
               mimeType: 'audio/wav',
               filename: `chunk-${String(index + 1).padStart(3, '0')}.wav`,
               deps,
-            });
+            }, formatState);
           } catch (error) {
             throw new Error(
               `Audio transcription failed on chunk ${index + 1}/${windows.length} `
@@ -371,6 +451,8 @@ export function createVideoTranscriptionService(partialDeps: Partial<VideoTransc
           if (parsed.text) chunkTexts.push(parsed.text);
           segments.push(...parsed.segments);
         }
+
+        if (formatState.degraded) warnings.push(RESPONSE_FORMAT_DEGRADED_WARNING);
 
         // 每一片都返回空 = 端点其实什么也没转写出来。不能把空字符串当成成功往下传，
         // 否则用户拿到的是一篇「有摘要、没转录」的笔记，与改动前被吞掉的失败同一种症状。
@@ -392,7 +474,7 @@ export function createVideoTranscriptionService(partialDeps: Partial<VideoTransc
       // 整轨回退：与改动前的请求形状保持一致（原容器、原 MIME）。
       let payload: any;
       try {
-        payload = await postTranscriptionRequest({
+        payload = await postWithFormatFallback({
           endpoint,
           apiKey: config.apiKey,
           model: config.model,
@@ -401,13 +483,14 @@ export function createVideoTranscriptionService(partialDeps: Partial<VideoTransc
           mimeType: 'audio/mp4',
           filename: 'video-audio.m4a',
           deps,
-        });
+        }, formatState);
       } catch (error) {
         throw new Error(`Audio transcription failed: ${describeError(error)}`);
       }
 
       const parsed = parseTranscriptionPayload(payload, { startSec: 0, endSec: 0 });
       if (!parsed.text) throw new Error('Audio transcription returned empty text');
+      if (formatState.degraded) warnings.push(RESPONSE_FORMAT_DEGRADED_WARNING);
 
       return {
         text: parsed.text,

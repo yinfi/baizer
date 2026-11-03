@@ -205,6 +205,51 @@ Task:
   }
 }
 
+/**
+ * 没有转录文本可写时的落点 —— 也就是改动前「平台没给字幕」走的同一条路：
+ * 有模型就让模型读标题/描述，没有就退化成纯链接笔记。
+ *
+ * 抽成函数是为了让「解析不出转写端点」那一支也能回到这里。门禁改动把这类用户
+ * （只配了 Anthropic、又没填转写端点）从原来的元数据摘要路径上拦了下来；
+ * 如果不显式回到这里，他们拿到的摘要会从「模型摘要」掉成
+ * buildMetadataFallbackSummary 的句子切分 —— 而他们本来什么设置都没改。
+ */
+async function buildNonTranscriptContent(params: {
+  transcript: videoUtils.VideoTranscript;
+  finalUrl: string;
+  baseTags: string[];
+  modelService: any;
+  deps: WebClipperDeps;
+}): Promise<string> {
+  const { transcript, finalUrl, baseTags, modelService, deps } = params;
+
+  if (modelService && (transcript.description || transcript.title)) {
+    deps.notice(`Summarizing ${transcript.platform} video from metadata...`);
+    const summary = await summarizeVideoMetadata(modelService, {
+      title: transcript.title,
+      description: transcript.description,
+    });
+
+    return buildVideoSummaryContent({
+      title: transcript.title,
+      finalUrl,
+      author: transcript.author || transcript.platform,
+      tags: baseTags,
+      summary: summary || buildMetadataFallbackSummary(transcript.title, transcript.description),
+      excerptText: transcript.description || transcript.title,
+      excerptHeading: 'Video Description',
+    });
+  }
+
+  deps.notice('Saving video link...');
+  return buildVideoLinkContent(
+    transcript.title,
+    finalUrl,
+    transcript.author || transcript.platform,
+    baseTags,
+  );
+}
+
 async function saveVideo(
   url: string,
   args: any,
@@ -246,15 +291,15 @@ async function saveVideo(
 
     if (!asrConfig) {
       // 做不了就说做不了：明确告知原因与去处，而不是安静地退化成「只有元数据」的笔记。
+      // 但「没有转写端点」不等于「这篇笔记只能差一档」：仍然走与「平台没给字幕」
+      // 完全相同的元数据摘要路径，否则这次门禁改动会顺手把这类用户的摘要质量降一级。
       deps.notice(NO_ASR_ENDPOINT_MESSAGE);
-      content = buildVideoSummaryContent({
-        title: transcript.title,
+      content = await buildNonTranscriptContent({
+        transcript,
         finalUrl,
-        author: transcript.author || transcript.platform,
-        tags: baseTags,
-        summary: buildMetadataFallbackSummary(transcript.title, transcript.description),
-        excerptText: transcript.description || transcript.title,
-        excerptHeading: 'Video Description',
+        baseTags,
+        modelService,
+        deps,
       });
     } else {
       deps.notice(`Transcribing ${transcript.platform} audio...`);
@@ -305,30 +350,15 @@ async function saveVideo(
         });
       }
     }
-  } else if (modelService && (transcript.description || transcript.title)) {
-    deps.notice(`Summarizing ${transcript.platform} video from metadata...`);
-    const summary = await summarizeVideoMetadata(modelService, {
-      title: transcript.title,
-      description: transcript.description,
-    });
-
-    content = buildVideoSummaryContent({
-      title: transcript.title,
-      finalUrl,
-      author: transcript.author || transcript.platform,
-      tags: baseTags,
-      summary: summary || buildMetadataFallbackSummary(transcript.title, transcript.description),
-      excerptText: transcript.description || transcript.title,
-      excerptHeading: 'Video Description',
-    });
   } else {
-    deps.notice('Saving video link...');
-    content = buildVideoLinkContent(
-      transcript.title,
+    // 既没有字幕、也没有可走的转写路径：模型读元数据，或者退化成纯链接。
+    content = await buildNonTranscriptContent({
+      transcript,
       finalUrl,
-      transcript.author || transcript.platform,
       baseTags,
-    );
+      modelService,
+      deps,
+    });
   }
 
   let filename = sanitizeTitle(args.filename || transcript.title);

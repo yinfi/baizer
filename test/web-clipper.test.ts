@@ -357,6 +357,13 @@ async function runTests() {
     );
     // 仍然落一篇笔记（元数据摘要），只是明确说明了没有转录。
     expect(notes[result.path]).toContain('## Summary');
+    // 而且必须仍然走「模型读元数据」那条路：门禁改动不该顺手把这类用户的摘要
+    // 降级成 buildMetadataFallbackSummary 的句子切分。
+    expect(notes[result.path]).toContain('- Metadata summary.');
+    check(
+      notices.some((message) => message.includes('from metadata')),
+      `expected the metadata summarisation notice, got: ${JSON.stringify(notices)}`,
+    );
   });
 
   await test('surfaces a transcription failure instead of swallowing it', async () => {

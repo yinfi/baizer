@@ -689,7 +689,7 @@ function getSettingsSections(): SettingsSectionMeta[] {
     { id: 'memory', title: t('Memory'), description: t('Memory retention, recall, search, and deletion.'), keywords: ['memory', 'hindsight', 'recall', 'forget', 'profile', 'privacy', 'observation', '记忆'] },
     { id: 'permissions', title: t('Permissions'), description: t('Vault write scope, file operations, plugin control, and confirmations.'), keywords: ['permissions', 'file creation', 'file modification', 'plugin control', 'confirm', '权限'] },
     { id: 'skills', title: t('Skills'), description: t('Enable or disable individual skills (availability, separate from permissions).'), keywords: ['skills', 'skill', 'enable', 'disable', 'workflow', 'available', '技能'] },
-    { id: 'capture', title: t('Capture'), description: t('Inbox, clipping storage, WeChat import, and URL capture.'), keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper', 'transcription', 'transcribe', 'asr', 'whisper', 'audio', 'video', '字幕', '转写', '语音', '采集', '微信'] },
+    { id: 'capture', title: t('Capture'), description: t('Inbox, clipping storage, WeChat import, URL capture, and video transcription.'), keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper', 'transcription', 'transcribe', 'asr', 'whisper', 'audio', 'video', '字幕', '转写', '语音', '采集', '微信'] },
     { id: 'knowledge', title: t('Knowledge'), description: t('Source folders, output folder, compile state, and ontology.'), keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema', '知识'] },
     { id: 'guardian', title: t('Guardian'), description: t('Inline writing assistance, trigger mode, and ignored folders.'), keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity', 'selection', 'toolbar', 'selection toolbar', '守护', '行内补全', '幽灵文本', '灵敏度', '补全', '选中', '工具条', '选中工具条'] },
     { id: 'appearance', title: t('Appearance'), description: t('Workbench theme, font size, and opacity.'), keywords: ['appearance', 'theme', 'font', 'opacity', 'terminal', 'workbench', 'language', 'locale', '外观', '语言'] },
@@ -3301,8 +3301,11 @@ export class SettingTab extends PluginSettingTab {
             t('Video transcription'),
             { nameClass: 'baizer-settings-panel-title' },
         );
+        // 字段挂在 panel-body 上，与页面里其它每个分区一致：.baizer-settings-panel 带边框且
+        // overflow:hidden，直接挂在卡片上的行会贴着卡片边缘，对不齐 panel-body 的 8px/10px 内边距。
+        const asrBody = asrPanel.createDiv({ cls: 'baizer-settings-panel-body' });
 
-        new Setting(asrPanel)
+        new Setting(asrBody)
             .setName(t('Transcription endpoint (Base URL)'))
             .setDesc(t('Base URL of an OpenAI-compatible /audio/transcriptions service. Leave empty to reuse the active OpenAI-compatible provider. The endpoint path is appended by the plugin, so include /v1 if your service needs it.'))
             .addText(text => text
@@ -3313,9 +3316,9 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
-        new Setting(asrPanel)
+        new Setting(asrBody)
             .setName(t('Transcription API key'))
-            .setDesc(t('Leave empty to reuse the active provider API key. Services on localhost usually need no key.'))
+            .setDesc(t('Leave empty to reuse the API key of the active provider when it is OpenAI-compatible. Services on localhost usually need no key.'))
             .addText(text => {
                 text.inputEl.type = 'password';
                 text.setPlaceholder(t('(reuse provider key)'))
@@ -3326,7 +3329,7 @@ export class SettingTab extends PluginSettingTab {
                     });
             });
 
-        new Setting(asrPanel)
+        new Setting(asrBody)
             .setName(t('Transcription model'))
             .setDesc(t('Model name sent to the endpoint. Defaults to whisper-1, which is what earlier versions hardcoded.'))
             .addText(text => text
@@ -3337,7 +3340,7 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
-        new Setting(asrPanel)
+        new Setting(asrBody)
             .setName(t('Transcription language'))
             .setDesc(t('ISO-639-1 code such as zh or en. Leave empty to let the endpoint detect the language.'))
             .addText(text => text
@@ -3348,9 +3351,17 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
-        renderSettingHeading(containerEl, t('WeChat capture'), { nameClass: 'baizer-settings-panel-title' });
+        // 微信这一组同样按「panel + header + body」渲染：本文件里每个分区都是这个形状，
+        // 而它此前是唯一一组直接挂在 containerEl 上的字段，加上标题后会和上面的转写卡片不对称。
+        const wechatPanel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
+        renderSettingHeading(
+            wechatPanel.createDiv({ cls: 'baizer-settings-panel-header' }),
+            t('WeChat capture'),
+            { nameClass: 'baizer-settings-panel-title' },
+        );
+        const wechatBody = wechatPanel.createDiv({ cls: 'baizer-settings-panel-body' });
 
-        new Setting(containerEl)
+        new Setting(wechatBody)
             .setName(t('WeChat Inbox Path'))
             .setDesc(t('The file to monitor for new WeChat links.'))
             .addText(text => text
@@ -3361,7 +3372,7 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
 
-        new Setting(containerEl)
+        new Setting(wechatBody)
             .setName(t('WeChat Storage Path'))
             .setDesc(t('The folder to store saved articles.'))
             .addText(text => text
@@ -3372,7 +3383,7 @@ export class SettingTab extends PluginSettingTab {
                     await this.persistSettings();
                 }));
         const mobileSchemeTemplate = 'obsidian://baizer-clip?text=<encoded-share-text>';
-        new Setting(containerEl)
+        new Setting(wechatBody)
             .setName(t('Mobile WeChat Capture'))
             .setDesc(t('Use this URL scheme from iOS Shortcuts or Android automation. Fallback command: Save URL from clipboard.'))
             .addButton(btn => btn
