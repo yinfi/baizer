@@ -1,0 +1,753 @@
+{
+  "title": "cch-opencode narrow520 stress (520x900)",
+  "before": "docs/assets/provider-settings-2026-11-03-before-narrow520.layout.json",
+  "after": "docs/assets/provider-settings-2026-11-03-after-narrow520.layout.json",
+  "rows": [
+    {
+      "metric": "revision",
+      "before": "154e483",
+      "after": "53fbb25",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "phase",
+      "before": "before",
+      "after": "after",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "label",
+      "before": "before-narrow520",
+      "after": "after-narrow520",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "captured at",
+      "before": "2026-11-03T04:43:30.809Z",
+      "after": "2026-11-03T04:42:01.367Z",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "image size",
+      "before": "520x900",
+      "after": "520x900",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "viewport innerWidth x innerHeight",
+      "before": "520x900",
+      "after": "520x900",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "Obsidian version",
+      "before": "1.14.5",
+      "after": "1.14.5",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "plugin",
+      "before": "baizer@1.1.0",
+      "after": "baizer@1.1.0",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "theme",
+      "before": "dark",
+      "after": "dark",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "settings panel location",
+      "before": "popout-window",
+      "after": "popout-window",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "settings page width",
+      "before": "244",
+      "after": "244",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "settings page x",
+      "before": "232",
+      "after": "232",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "active provider card width",
+      "before": "209.33",
+      "after": "209.33",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "layout branch: wide (hero spans 2 cols)",
+      "before": "no",
+      "after": "no",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "branch container width (.baizer-settings-page)",
+      "before": "244",
+      "after": "244",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "hero grid-template-areas",
+      "before": "\"title\" \"subtitle\" \"search\"",
+      "after": "\"title\" \"subtitle\" \"search\"",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "provider card inner columns",
+      "before": "150px",
+      "after": "150px",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "connection container columns",
+      "before": "192px",
+      "after": "none",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "connection container width",
+      "before": "208",
+      "after": "208",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "connection card widths",
+      "before": "192, 192",
+      "after": "192, 192, 192, 192",
+      "changed": true,
+      "note": "px"
+    },
+    {
+      "metric": "connection card titles",
+      "before": "基本, 凭据",
+      "after": "服务商身份与协议, 连接地址与凭证, 模型, 测试结果",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "detail-row grid template(s)",
+      "before": "170.667px",
+      "after": "170.667px",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "detail label column width(s)",
+      "before": "170.67",
+      "after": "170.67",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "detail value column width(s)",
+      "before": "170.67",
+      "after": "170.67",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "min value column width",
+      "before": "170.67",
+      "after": "170.67",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "detail row count",
+      "before": "8",
+      "after": "7",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "subtitle clientWidth (ellipsized)",
+      "before": "not clipped",
+      "after": "not clipped",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "subtitle scrollWidth (needs)",
+      "before": "not clipped",
+      "after": "not clipped",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "ellipsized static text count",
+      "before": "0",
+      "after": "0",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "apiEndpoint: label",
+      "before": "API 端点",
+      "after": "服务地址（Base URL）必填",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "apiEndpoint: found",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "apiEndpoint: needed text width",
+      "before": "191.92",
+      "after": "191.92",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "apiEndpoint: available text width",
+      "before": "153",
+      "after": "153",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "apiEndpoint: overflows box",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "apiEndpoint: editable / enabled",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "apiEndpoint: title tooltip",
+      "before": "—",
+      "after": "https://opencode.ai/zen/go/v1",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "apiEndpoint: value scrolls",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "apiKey: label",
+      "before": "API Key",
+      "after": "API Key",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "apiKey: found",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "apiKey: needed text width",
+      "before": "219.27",
+      "after": "219.27",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "apiKey: available text width",
+      "before": "153",
+      "after": "153",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "apiKey: overflows box",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "apiKey: editable / enabled",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "apiKey: title tooltip",
+      "before": "—",
+      "after": "—",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "apiKey: value scrolls",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "model: label",
+      "before": "模型",
+      "after": "模型",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "model: found",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "model: needed text width",
+      "before": "183.1",
+      "after": "123.89",
+      "changed": true,
+      "note": "px"
+    },
+    {
+      "metric": "model: available text width",
+      "before": "149",
+      "after": "153",
+      "changed": true,
+      "note": "px"
+    },
+    {
+      "metric": "model: overflows box",
+      "before": "yes",
+      "after": "no",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "model: editable / enabled",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "model: title tooltip",
+      "before": "—",
+      "after": "deepseek-v4.1-flash",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "model: value scrolls",
+      "before": "yes",
+      "after": "no",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "protocol: label",
+      "before": "协议",
+      "after": "协议",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "protocol: found",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "protocol: needed text width",
+      "before": "77.1",
+      "after": "77.1",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "protocol: available text width",
+      "before": "149",
+      "after": "149",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "protocol: overflows box",
+      "before": "no",
+      "after": "no",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "protocol: editable / enabled",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "protocol: title tooltip",
+      "before": "—",
+      "after": "—",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "protocol: value scrolls",
+      "before": "no",
+      "after": "no",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "providerName: label",
+      "before": "服务商名称",
+      "after": "服务商名称必填",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "providerName: found",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "providerName: needed text width",
+      "before": "62.43",
+      "after": "62.43",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "providerName: available text width",
+      "before": "153",
+      "after": "153",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "providerName: overflows box",
+      "before": "no",
+      "after": "no",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "providerName: editable / enabled",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "providerName: title tooltip",
+      "before": "—",
+      "after": "opencode",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "providerName: value scrolls",
+      "before": "no",
+      "after": "no",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "customHeaders: label",
+      "before": "自定义请求头",
+      "after": "自定义请求头（高级）",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "customHeaders: found",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "customHeaders: needed text width",
+      "before": "289.45",
+      "after": "267.19",
+      "changed": true,
+      "note": "px"
+    },
+    {
+      "metric": "customHeaders: available text width",
+      "before": "149",
+      "after": "128",
+      "changed": true,
+      "note": "px"
+    },
+    {
+      "metric": "customHeaders: overflows box",
+      "before": "no",
+      "after": "no",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "customHeaders: editable / enabled",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "customHeaders: title tooltip",
+      "before": "—",
+      "after": "—",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "customHeaders: value scrolls",
+      "before": "yes",
+      "after": "no",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "help block count",
+      "before": "1",
+      "after": "3",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "help block widths",
+      "before": "171",
+      "after": "149, 149, 149",
+      "changed": true,
+      "note": "px"
+    },
+    {
+      "metric": "help block line counts",
+      "before": "8",
+      "after": "4, 4, 5",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "help block overflow-x",
+      "before": "false",
+      "after": "false, false, false",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "help block clipped-y",
+      "before": "false",
+      "after": "false, false, false",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "help block laid out (not collapsed)",
+      "before": "true",
+      "after": "true, true, true",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "help block total height",
+      "before": "155.17",
+      "after": "220.78",
+      "changed": true,
+      "note": "px"
+    },
+    {
+      "metric": "secret action buttons found",
+      "before": "yes",
+      "after": "yes",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "secret action button rows",
+      "before": "1",
+      "after": "1",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "secret action buttons wrapped",
+      "before": "no",
+      "after": "no",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "secret action container overflow",
+      "before": "no",
+      "after": "no",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "document horizontal overflow",
+      "before": "0",
+      "after": "0",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "containers checked",
+      "before": "10",
+      "after": "12",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "containers overflowing",
+      "before": "—",
+      "after": "—",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "max container overflow",
+      "before": "0",
+      "after": "0",
+      "changed": false,
+      "note": "px"
+    },
+    {
+      "metric": "overflow offenders",
+      "before": "5",
+      "after": "4",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "elements spilling outside panel",
+      "before": "0",
+      "after": "0",
+      "changed": false,
+      "note": "unchanged"
+    },
+    {
+      "metric": "interactive control count",
+      "before": "10",
+      "after": "12",
+      "changed": true,
+      "note": "changed"
+    },
+    {
+      "metric": "overlapping control pairs",
+      "before": "0",
+      "after": "0",
+      "changed": false,
+      "note": "unchanged"
+    }
+  ],
+  "verdicts": [
+    {
+      "key": "allRequiredNodesPresent",
+      "before": true,
+      "after": true,
+      "changed": false
+    },
+    {
+      "key": "pluginLoaded",
+      "before": true,
+      "after": true,
+      "changed": false
+    },
+    {
+      "key": "themeMatchesExpectation",
+      "before": true,
+      "after": true,
+      "changed": false
+    },
+    {
+      "key": "noDocumentHorizontalOverflow",
+      "before": true,
+      "after": true,
+      "changed": false
+    },
+    {
+      "key": "noContainerHorizontalOverflow",
+      "before": true,
+      "after": true,
+      "changed": false
+    },
+    {
+      "key": "noInteractiveOverlap",
+      "before": true,
+      "after": true,
+      "changed": false
+    },
+    {
+      "key": "noUnreachableTruncatedValues",
+      "before": true,
+      "after": true,
+      "changed": false
+    },
+    {
+      "key": "noEllipsizedStaticText",
+      "before": true,
+      "after": true,
+      "changed": false
+    },
+    {
+      "key": "customHeadersHelpNotClipped",
+      "before": true,
+      "after": true,
+      "changed": false
+    },
+    {
+      "key": "secretActionsOnOneRow",
+      "before": true,
+      "after": true,
+      "changed": false
+    },
+    {
+      "key": "labelColumnConsistent",
+      "before": true,
+      "after": true,
+      "changed": false
+    },
+    {
+      "key": "allPass",
+      "before": true,
+      "after": true,
+      "changed": false
+    }
+  ]
+}

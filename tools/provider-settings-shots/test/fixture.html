@@ -1,4 +1,26 @@
 <!doctype html>
+<!--
+  Offline smoke-test fixture for the CAPTURE PIPELINE (test/smoke.mjs) — it is NOT a layout oracle
+  and it is NOT the source of any Before/After evidence. Real evidence comes from capture.mjs, which
+  drives the actual Obsidian app with the real built plugin (main.js + styles.css + the fallback CSS
+  the plugin injects at runtime).
+
+  What this fixture is for: proving the harness can launch a browser, apply a viewport, run the
+  probe, resolve the probe's selectors, and detect a deliberately clipped value — offline, with no
+  Obsidian install. Its API-endpoint value is intentionally longer than any value column so the
+  truncation detector has something real to fire on.
+
+  Deliberate, not stale: the class names below are the PRE-rework ones
+  (`.baizer-settings-connection-detail-grid`, `.baizer-settings-detail-secret-actions`, the
+  `基本`/`Credentials` cards, `API 端点` for both meanings). That means the smoke test exercises the
+  probe's revision-agnostic fallback selectors — the code path that keeps the 154e483 baseline
+  captures measurable — rather than only the new names.
+
+  Drift risk: the CSS here is copied from the shipped sheet, and a copied layout rule can silently
+  fall out of date (that is exactly the dual-source trap that hid the subtitle defect: styles.css
+  had the fix, but the fallback CSS injected last still had nowrap/ellipsis and won). Anything copied
+  here must be re-checked whenever styles.css or the fallback string in src/settings.ts changes.
+-->
 <html lang="zh">
 <head>
 <meta charset="utf-8">
@@ -68,7 +90,35 @@ button { font: inherit; }
 .baizer-settings-action { min-height: 30px; padding: 0 10px; border: 1px solid #4a4a4a; border-radius: 8px; background: #262626; color: #dadada; }
 .baizer-settings-badge { padding: 1px 8px; border-radius: 999px; font-size: 11px; border: 1px solid #4a4a4a; }
 
-@container (max-width: 560px) {
+/* ---- hero: mirrors the shipped .baizer-settings-hero fix (styles.css ~2887) ----
+   The subtitle spans both columns. Before the fix it sat in the 316px left column with
+   nowrap+ellipsis and lost 74px of unreachable text at the wide viewport, so this block is
+   what lets the fixture model that defect at all. */
+.baizer-settings-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+  grid-template-areas: "title search" "subtitle subtitle";
+  column-gap: 12px;
+  row-gap: 4px;
+  align-items: center;
+}
+.baizer-settings-title { grid-area: title; margin: 0; font-weight: 600; }
+.baizer-settings-subtitle {
+  grid-area: subtitle; min-width: 0; margin: 0; color: #9a9a9a;
+  white-space: normal; overflow-wrap: anywhere;
+}
+.baizer-settings-search-row { grid-area: search; display: flex; align-items: center; min-width: 0; }
+.baizer-settings-search {
+  width: min(420px, 100%); height: 34px; padding: 0 12px;
+  border: 1px solid #4a4a4a; border-radius: 8px; background: #1b1b1b; color: #dadada;
+}
+
+/* Breakpoint 640, matching the shipped sheet. The settings popout declares minWidth: 600
+   (Setting#getPopoutOptions()), so 600 is the narrowest window a user can reach; a breakpoint
+   sitting exactly on 600 would hand that window the WIDE layout. 640 keeps it on the narrow
+   branch with margin. Keep this in sync with styles.css and the fallback CSS in src/settings.ts. */
+@container (max-width: 640px) {
+  .baizer-settings-hero { grid-template-columns: 1fr; grid-template-areas: "title" "subtitle" "search"; }
   .baizer-settings-provider-card-main-inner,
   .baizer-settings-connection-detail-grid,
   .baizer-settings-detail-row { grid-template-columns: 1fr; }
@@ -79,6 +129,15 @@ button { font: inherit; }
 <div class="modal mod-settings">
   <div class="vertical-tab-content">
     <div class="baizer-settings-page">
+      <div class="baizer-settings-hero">
+        <h2 class="baizer-settings-title">Baizer 配置</h2>
+        <div class="baizer-settings-search-row">
+          <input class="baizer-settings-search" type="text" aria-label="搜索设置">
+        </div>
+        <!-- The real subtitle, verbatim (it needs ~390px and is the element that used to be
+             ellipsized at the wide viewport). -->
+        <p class="baizer-settings-subtitle">更清爽的控制中心：服务商配置、运行时行为与插件能力。</p>
+      </div>
       <div class="baizer-settings-provider-shell">
         <div class="baizer-settings-provider-list">
 

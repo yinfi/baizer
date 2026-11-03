@@ -284,7 +284,21 @@ export function collectLayoutReport(cfg) {
     for (const row of root.querySelectorAll('.baizer-settings-detail-row')) {
       const label = textOf(row.querySelector('.baizer-settings-detail-label'));
       if (re.test(label)) return { row, label, control: row.querySelector('input, select, textarea') };
+    }
     
+    return null;
+  };
+  // The rework moved Custom headers out of a detail row and into a collapsible
+  // `<details class="baizer-settings-advanced">` whose `<summary>` carries the label, so a
+  // detail-row search alone would report the field as "not found" (i.e. a phantom regression).
+  const findAdvancedField = (re) => {
+    for (const details of document.querySelectorAll('details.baizer-settings-advanced')) {
+      const summary = details.querySelector('summary');
+      const label = textOf(summary);
+      if (re.test(label)) {
+        return { row: details, label, control: details.querySelector('textarea, input, select') };
+      }
+    }
     return null;
   };
   const controlValue = (el) =>
@@ -335,7 +349,7 @@ export function collectLayoutReport(cfg) {
     fields: [
       measureField('apiEndpoint', findField(credentialsCard, /endpoint|端点|服务地址|base\s*url|地址/i)),
       measureField('apiKey', findField(credentialsCard, /api\s*key/i)),
-      measureField('customHeaders', findField(credentialsCard, /header|请求头/i)),
+      measureField('customHeaders', findField(credentialsCard, /header|请求头/i) || findAdvancedField(/header|请求头/i)),
       measureField('providerName', findField(identityCard, /name|名称/i)),
       measureField('protocol', findField(identityCard, /protocol|协议|api\s*类型|类型/i)),
       // 模型 moved out of the basic card into its own group; fall back for the old revision.
@@ -482,6 +496,37 @@ export function collectLayoutReport(cfg) {
   const grid = nodes.connectionGrid;
   report.alignment.connectionGridTemplateColumns = grid ? getComputedStyle(grid).gridTemplateColumns : null;
   report.alignment.connectionGridBox = grid ? boxOf(grid) : null;
+
+  // ------------------------------------------------------------ layout branch ----
+  // The hero-collapsing rule is a `@container` query on the settings PAGE width, not on the
+  // viewport, so "which branch am I in" is a question about the page box. Record the resolved
+  // values so the branch is auditable from the report instead of inferred from the window width.
+  // (In the reworked layout the connection grid is a single-column flow at EVERY width, so its
+  // column count can no longer be used to tell the two branches apart.)
+  const heroEl = document.querySelector('.baizer-settings-hero');
+  const cardInnerEl = document.querySelector('.baizer-settings-provider-card-main-inner');
+  const pageEl = document.querySelector('.baizer-settings-page');
+  const heroStyle = heroEl ? getComputedStyle(heroEl) : null;
+  const heroAreas = heroStyle ? heroStyle.gridTemplateAreas : null;
+  report.alignment.branch = {
+    containerSelector: '.baizer-settings-page',
+    containerClientWidth: pageEl ? pageEl.clientWidth : null,
+    breakpointPx: 640,
+    heroFound: !!heroEl,
+    heroGridTemplateColumns: heroStyle ? heroStyle.gridTemplateColumns : null,
+    heroGridTemplateAreas: heroAreas,
+    // Wide branch keeps `"title search" / "subtitle subtitle"`; the narrow branch collapses to
+    // `"title" "subtitle" "search"`. Matching the two-token subtitle row is the direct read.
+    // `gridTemplateAreas` computes to the string "none" when no areas are declared — which is the
+    // case for the PRE-rework layout — so that must report null ("no areas, branch not expressed
+    // this way") rather than false ("narrow branch"), which would be a wrong answer.
+    wideBranch:
+      heroAreas && heroAreas !== 'none' ? /subtitle\s+subtitle/.test(heroAreas) : null,
+    providerCardInnerFound: !!cardInnerEl,
+    providerCardInnerGridTemplateColumns: cardInnerEl
+      ? getComputedStyle(cardInnerEl).gridTemplateColumns
+      : null,
+  };
 
   // ------------------------------------------------------------- verdict ----
   const truncationFields = report.truncation.fields.filter((f) => f.found);

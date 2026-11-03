@@ -376,6 +376,30 @@ async function expandActiveProviderDetail(session, { timeoutMs = 60000 } = {}) {
   );
 }
 
+/**
+ * Open the collapsed advanced sections (e.g. the reworked Custom headers block lives in a
+ * `<details>`). Without this, the help text inside has clientWidth 0 and the layout probe would
+ * report it as "not clipped" vacuously — a false pass. Idempotent, and a no-op on the revision
+ * where those fields were always visible.
+ */
+async function expandAdvancedSections(session) {
+  return session.evaluate(`(() => {
+    const opened = [];
+    for (const details of document.querySelectorAll('details.baizer-settings-advanced')) {
+      const summary = details.querySelector('summary');
+      const label = summary ? (summary.textContent || '').trim() : '';
+      if (!details.open) {
+        details.open = true;
+        // A real click also updates the plugin's own open/closed bookkeeping, so a later
+        // re-render keeps it open; setting .open alone can be undone by the next render.
+        if (summary) summary.click();
+        opened.push(label);
+      }
+    }
+    return { opened, total: document.querySelectorAll('details.baizer-settings-advanced').length };
+  })()`);
+}
+
 /** Wait until the settings DOM stops mutating (the model list loads async). */
 async function waitForStableDom(session, { quietMs = 1500, timeoutMs = 45000 } = {}) {
   const deadline = Date.now() + timeoutMs;
@@ -547,6 +571,10 @@ async function main() {
 
     await expandActiveProviderDetail(panelSession, { timeoutMs: readyTimeout });
 
+    // Open collapsed advanced blocks (Custom headers) so their help text is laid out and the
+    // probe measures real geometry rather than a hidden 0-width box.
+    runInfo.advancedSections = await expandAdvancedSections(panelSession);
+
     // Give the async model-list load a chance to settle before measuring.
     runInfo.domStability = await waitForStableDom(panelSession);
     if (!runInfo.domStability.stable) {
@@ -556,6 +584,13 @@ async function main() {
     runInfo.viewportControl = await applyViewport(panelSession, { width, height });
     await delay(600);
     runInfo.domStabilityAfterViewport = await waitForStableDom(panelSession, { quietMs: 1200, timeoutMs: 30000 });
+
+    // Re-assert: a viewport change can trigger a re-render that closes the <details> again.
+    const reopened = await expandAdvancedSections(panelSession);
+    if (reopened.opened.length) {
+      runInfo.advancedSectionsReopened = reopened;
+      await waitForStableDom(panelSession, { quietMs: 800, timeoutMs: 15000 });
+    }
 
     const layout = await panelSession.evaluate(buildProbeExpression({
       label,

@@ -184,12 +184,34 @@ evidence behind them.
 Raw sections: `overflow.{document,containers,offenders,spill}`,
 `overlap.{controlCount,pairs}`, `truncation.{fields,ellipsizedStaticText}`,
 `wrapping.{customHeadersHelp,secretActionButtons,secretRow}`,
-`alignment.{rows,distinctLabelWidths,distinctValueWidths,connectionGridTemplateColumns}`,
+`alignment.{rows,distinctLabelWidths,distinctValueWidths,connectionGridTemplateColumns,branch}`,
 plus `providerCards`, `connectionCards`, `presence`, `viewport`, `theme`,
 `language`, `plugin`, `windowTitle`, `appGlobalAvailable` and `harness` (exe
 path, vault, scenario, copied plugin file sizes, launch/stability timings, which
 window the panel rendered in, the browser UA, and which blocking modals were
 cleared).
+
+### `alignment.branch`: which side of the hero breakpoint a capture landed on
+
+The hero-collapsing rule is a `@container` query on the **settings page** width, not on the
+viewport, so which branch a capture exercised is not a function of the window size alone. The probe
+records the resolved values (`heroGridTemplateColumns`, `heroGridTemplateAreas`,
+`providerCardInnerGridTemplateColumns`, and the container's `clientWidth`) and derives
+`wideBranch`.
+
+**Do not use the connection grid's column count to tell the branches apart.** The reworked layout
+renders `.baizer-settings-connection-flow` as a single-column flow at *every* width, so it reports
+`grid-template-columns: none` even at 1353px. The discriminators are the hero areas
+(`"title search" "subtitle subtitle"` wide vs `"title" "subtitle" "search"` narrow) and the
+provider-card inner grid (3 columns wide vs 1 narrow).
+
+`wideBranch` is **three-valued**: `true`/`false` when the layout declares `grid-template-areas`, and
+`null` when it does not, because `getComputedStyle().gridTemplateAreas` returns the string `"none"`
+in that case — reporting `false` there would wrongly claim the narrow branch. Note also that
+`wideBranch` answers "does the subtitle span **both** hero columns", not "is the viewport wide": the
+pre-rework hero declared `"title search" / "subtitle search"`, confining the subtitle to the left
+column, so `before-wide` reports `false` while still being the wide branch of the old breakpoint.
+That difference is precisely the subtitle fix, which is why the field is worth reading.
 
 `plugin.loaded`/`plugin.version` and `windowTitle` are the two fields to sanity
 check first: a popped-out settings window has no `app` global, so `plugin` is
@@ -271,6 +293,74 @@ So treat the committed PNG as a **scenario reference** (which providers, which
 one active and expanded, dark theme, 1353x1053), and compare `before-*` against
 `after-*`, which share scenario, viewport, theme, presentation and harness.
 
+## Canonical viewport set
+
+| label suffix | viewport | why this width |
+| --- | --- | --- |
+| `-wide` | 1353x1053 | desktop, matching the committed baseline capture |
+| `-narrow` | **600x900** | the canonical narrow: exactly the settings popout's declared `minWidth: 600`, i.e. the narrowest window the app itself will ever produce |
+| `-narrow520` | 520x900 | stress: below the app's declared floor, but the viewport where the pre-rework layout actually truncated fields |
+| `-mobile` | 400x800 | a desktop window squeezed via `Emulation.setDeviceMetricsOverride` — **not** Obsidian mobile; diagnostic only |
+
+**Why 600 is the canonical narrow and not 520:** a pass at 520 does not imply a pass at 600, because a
+breakpoint can sit between them. A `@media (min-width: 600px)` wide-branch would hand the
+minimum-width window the *desktop* layout — the one configuration most likely to leak and the one a
+520-only test cannot see. Measure at 600 to test that boundary, and keep 520 as the stress case.
+
+**Why the two narrow widths rank differently:** baseline field truncation is *not* monotonic in
+viewport width. At 1353px the connection grid is two columns (`314px 314px`) and squeezes the value
+column to 150.67px, so three fields truncate; at 600px the grid has already collapsed to one 272px
+column (value column 250.67px), so nothing truncates; at 520px the single column is down to 170.67px
+and three fields truncate again. A wider window is therefore not automatically the safer one.
+
+Obsidian did not clamp either 400 or 520 (the override sets `innerWidth` to exactly what was
+requested), but the popout declares `minWidth: 600`, so both are below the app's supported floor —
+treat their verdict failures as diagnostics, not as user-facing regressions.
+
+## Comparing two reports
+
+`compare-layout.mjs` turns a before/after pair of `.layout.json` files into the metric table used
+as the machine-readable half of the PR's visual evidence, so those numbers are reproduced from the
+committed evidence rather than retyped:
+
+```bash
+node tools/provider-settings-shots/compare-layout.mjs \
+  --before docs/assets/provider-settings-2026-11-03-before-wide.layout.json \
+  --after  docs/assets/provider-settings-2026-11-03-after-wide.layout.json \
+  --title  "cch-opencode wide (1353x1053)" \
+  --out    tools/provider-settings-shots/metrics/cch-opencode-wide.metrics.md
+```
+
+It writes a `.md` plus a `.json` twin, marks every row that changed, and lists the verdict keys
+that flipped. It tolerates a report that predates a field, so a pair never fails to render just
+because the probe grew a field in between.
+
+### Measuring both revisions with one probe
+
+The probe must find the *same logical field* in both revisions, or a pure rename shows up as
+"field not found" — which reads like a regression that never happened. So the selectors match
+either wording, and the field lookup falls back positionally:
+
+| Concept | Pre-rework | Post-rework |
+| --- | --- | --- |
+| connection container | `.baizer-settings-connection-detail-grid` | `.baizer-settings-connection-flow` |
+| API-key actions | `.baizer-settings-detail-secret-actions` | `.baizer-settings-field-actions` |
+| connection cards | `基本`, `凭据` | `服务商身份与协议`, `连接地址与凭证`, `模型`, `测试结果` |
+| model field | inside the basic card | its own `模型` card |
+| endpoint / protocol labels | `API 端点`, `协议` | `服务地址（Base URL）`, `API 类型` |
+| custom-headers help | `.baizer-settings-inline-note` | `.baizer-settings-field-hint` + a `<pre>` example, inside a `<details>` |
+
+Two consequences worth knowing:
+
+* **Collapsed `<details>` blocks must be opened before measuring.** A closed advanced block has
+  `clientWidth: 0`, so a naive clipping check passes vacuously. `capture.mjs` clicks the
+  `details.baizer-settings-advanced` summaries open (twice — a viewport change can trigger a
+  re-render that closes them again) and the probe requires every help block to be `visible`
+  before it will pass `customHeadersHelpNotClipped`.
+* **The help text may be split across several blocks.** Post-rework it is two hints plus a `<pre>`
+  example, so the report carries `customHeadersHelp.blocks[]` (each with its own width, line count
+  and overflow flags) and the verdict requires *all* of them to be unclipped.
+
 ## Troubleshooting
 
 * **`Start-Process : 已添加项。字典中的关键字:"HTTPS_PROXY"…`** — this host's
@@ -285,6 +375,15 @@ one active and expanded, dark theme, 1353x1053), and compare `before-*` against
   concurrently running Obsidian can rewrite the file.
 * **Image size ≠ requested** — viewport control failed; the run exits non-zero
   and says so.
+* **A build from a copy reports a bigger `dist/main.js` than the same revision built in place** —
+  esbuild embeds every module's resolved path, both as a `// <path>` comment and as the string key
+  in `__esm({ "<path>"() {…} })`. If the copy reaches the repo's `node_modules` through a junction,
+  those paths become long relative paths (`../../…/node_modules/…`) instead of `node_modules/…`,
+  and the bundle grows by roughly the number of modules times the prefix length — about **+158 KB**
+  for this repo (~1,974 paths). The *code* is identical: normalising that prefix back to
+  `node_modules/` reproduces the in-place byte count exactly (verified: 5,176,487 → 5,006,087 and
+  4,289,379 → 4,131,459). So quote byte counts only from an in-place build; `test/bundle-size.test.ts`
+  must run in place, and it does.
 * **The run hangs waiting for `.baizer-settings-provider-card`** — historically
   caused by the first-open **trust dialog** (`你是否信任这个仓库的作者？`,
   `.modal.mod-trust-folder`). Until it is accepted, Obsidian never loads the

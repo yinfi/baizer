@@ -4,7 +4,7 @@
   "phase": "before",
   "revision": "154e483",
   "pluginDir": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\baizer-baseline-154e483\\dist",
-  "capturedAt": "2026-11-03T04:08:40.118Z",
+  "capturedAt": "2026-11-03T04:43:10.650Z",
   "limitations": [
     "Colour, contrast, font rendering, iconography and animation are NOT asserted; this probe only measures geometry and text reachability.",
     "Overlap is checked only between interactive controls (input/select/textarea/button) inside the active provider detail area, as agreed.",
@@ -240,7 +240,7 @@
         "ok": true
       },
       {
-        "selector": ".baizer-settings-connection-detail-grid",
+        "selector": ".baizer-settings-connection-flow, .baizer-settings-connection-detail-grid",
         "found": true,
         "clientWidth": 652,
         "scrollWidth": 652,
@@ -583,6 +583,9 @@
   "wrapping": {
     "customHeadersHelp": {
       "found": true,
+      "tag": "div",
+      "id": null,
+      "classes": "baizer-settings-inline-note",
       "text": "每行一条 \"Header-Name: value\"。用 {{conversationId}} 占位符发送当前会话 ID（例如 opencode.ai Go 要求：x-opencode-session: {{conversationId}}）。",
       "box": {
         "x": 952.33,
@@ -600,6 +603,7 @@
       "lineCount": 8,
       "overflowsHorizontally": false,
       "clippedVertically": false,
+      "visible": true,
       "parentBox": {
         "x": 952.33,
         "y": 666.83,
@@ -608,7 +612,42 @@
         "right": 1103,
         "bottom": 874.02
       },
-      "siblingRows": 2
+      "siblingRows": 2,
+      "blockCount": 1,
+      "blocks": [
+        {
+          "tag": "div",
+          "id": null,
+          "classes": "baizer-settings-inline-note",
+          "text": "每行一条 \"Header-Name: value\"。用 {{conversationId}} 占位符发送当前会话 ID（例如 opencode.ai Go 要求：x-opencode-session: {{conversationId}}）。",
+          "box": {
+            "x": 952.33,
+            "y": 718.85,
+            "w": 150.67,
+            "h": 155.17,
+            "right": 1103,
+            "bottom": 874.02
+          },
+          "clientWidth": 151,
+          "scrollWidth": 151,
+          "clientHeight": 155,
+          "scrollHeight": 155,
+          "lineHeight": 16.9,
+          "lineCount": 8,
+          "overflowsHorizontally": false,
+          "clippedVertically": false,
+          "visible": true,
+          "parentBox": {
+            "x": 952.33,
+            "y": 666.83,
+            "w": 150.67,
+            "h": 207.19,
+            "right": 1103,
+            "bottom": 874.02
+          },
+          "siblingRows": 2
+        }
+      ]
     },
     "secretActionButtons": {
       "found": true,
@@ -944,6 +983,17 @@
       "h": 485.35,
       "right": 1121.67,
       "bottom": 940.02
+    },
+    "branch": {
+      "containerSelector": ".baizer-settings-page",
+      "containerClientWidth": 688,
+      "breakpointPx": 640,
+      "heroFound": true,
+      "heroGridTemplateColumns": "316px 360px",
+      "heroGridTemplateAreas": "\"title search\" \"subtitle search\"",
+      "wideBranch": false,
+      "providerCardInnerFound": true,
+      "providerCardInnerGridTemplateColumns": "237.208px 296.51px 44.2812px"
     }
   },
   "verdict": {
@@ -1009,19 +1059,19 @@
     "explanations": [
       "the settings panel rendered in a separate \"popout-window\"; it was measured and captured there (it has no `app` global, so plugin facts come from the main window)"
     ],
-    "pid": 18648,
+    "pid": 5780,
     "browser": "Chrome/150.0.7871.250",
     "protocolVersion": "1.3",
     "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.14.5 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
     "target": {
-      "id": "C3AB97769D795C24E7835B39F3423067",
+      "id": "4567F1702D226D93F9C975EE27429BB6",
       "type": "page",
       "url": "app://obsidian.md/index.html",
       "title": "新标签页 - obsidian - Obsidian 1.14.5"
     },
     "pageTargetsSeen": [
       {
-        "id": "C3AB97769D795C24E7835B39F3423067",
+        "id": "4567F1702D226D93F9C975EE27429BB6",
         "url": "app://obsidian.md/index.html",
         "title": "新标签页 - obsidian - Obsidian 1.14.5"
       }
@@ -1218,15 +1268,19 @@
     },
     "settingsPanelLocation": "popout-window",
     "captureTarget": {
-      "id": "5B9DD1D87D1D11116170F957FBB3B371",
+      "id": "C1F2ABAB41FD6E79FDEA12049D87A709",
       "type": "page",
       "url": "about:blank",
       "title": "设置 - obsidian - Obsidian 1.14.5"
     },
+    "advancedSections": {
+      "opened": [],
+      "total": 0
+    },
     "domStability": {
       "stable": true,
       "signature": "3635|7|openai-compatible|false|5",
-      "settledAfterMs": 2636
+      "settledAfterMs": 2105
     },
     "viewportControl": [
       "Emulation.setDeviceMetricsOverride"
@@ -1234,13 +1288,13 @@
     "domStabilityAfterViewport": {
       "stable": true,
       "signature": "3635|7|openai-compatible|false|5",
-      "settledAfterMs": 1321
+      "settledAfterMs": 1320
     },
     "obsidianVersionFromTitle": "1.14.5"
   },
   "image": {
     "path": "docs/assets/provider-settings-2026-11-03-before-wide.png",
-    "bytes": 96546,
+    "bytes": 96500,
     "width": 1353,
     "height": 1053,
     "requestedWidth": 1353,
