@@ -87,6 +87,10 @@ rebuilt revision), `--out`, `--label`, `--phase after` and `--revision`.
 | `--port` | `9333` | DevTools port |
 | `--locale` | `zh` | Obsidian UI language (`localStorage.language`); reloads once if it changes |
 | `--ready-timeout` | `180000` | ms to wait for Obsidian's DevTools endpoint |
+| `--expect-active` | – | Provider id the scenario's `activeProvider` must load as, asserted before the settings tab opens (see *Waiting for the plugin's settings*) |
+| `--expect-providers` | – | Comma-separated provider ids that must be loaded, same guard |
+| `--focus-type-select` | off | Reset the pane's scroll and scroll the minimum needed to put the provider **type** `<select>` on screen (see *Capturing the provider-type dropdown*) |
+| `--expand-type-select` | off | As above, plus a `size` on that `<select>` so every option renders inline. Bare = `size = <option count>`; pass a number (`--expand-type-select 3`) to pin the same row count in both phases (implies the focus behaviour) |
 | `--keep-open` | off | Leave Obsidian running (useful for manual poking) |
 
 ## What a run does
@@ -180,16 +184,74 @@ evidence behind them.
 | `customHeadersHelpNotClipped` | The `{{conversationId}}` help note neither overflows horizontally nor is clipped vertically |
 | `secretActionsOnOneRow` | The Reveal/Clear buttons share a row |
 | `labelColumnConsistent` | All detail rows use one `grid-template-columns` |
+| `providerTypeSelectFound` | The active provider's detail has a **type** `<select>` |
+| `providerTypeSelectOnScreen` | That `<select>` is fully inside the viewport (`--focus-type-select` arranges this) |
+
+The last two are **not** part of `allPass`: they answer a different question
+("is the dropdown whose option list changed on screen?") from the layout
+criteria this harness was built to assert, and adding them to `allPass` would
+have made every older report/consumer start failing for an unrelated reason.
 
 Raw sections: `overflow.{document,containers,offenders,spill}`,
 `overlap.{controlCount,pairs}`, `truncation.{fields,ellipsizedStaticText}`,
 `wrapping.{customHeadersHelp,secretActionButtons,secretRow}`,
 `alignment.{rows,distinctLabelWidths,distinctValueWidths,connectionGridTemplateColumns,branch}`,
+`providerTypeSelect.{options,optionTexts,optionCount,value,inViewport,renderedAsList,sizeAttribute,scrollContext}`,
 plus `providerCards`, `connectionCards`, `presence`, `viewport`, `theme`,
 `language`, `plugin`, `windowTitle`, `appGlobalAvailable` and `harness` (exe
 path, vault, scenario, copied plugin file sizes, launch/stability timings, which
-window the panel rendered in, the browser UA, and which blocking modals were
-cleared).
+window the panel rendered in, the browser UA, which blocking modals were
+cleared, and the settings/scroll guards described below).
+
+### Which app version produced a capture
+
+`report.obsidianVersionInPage` is the version of the app that **actually ran**,
+with `report.obsidianVersionSource` saying how it was obtained. The settings panel
+usually renders in a popout window that has no `app` global, so the in-page
+globals are unavailable there and the version comes from the window title
+(`… - Obsidian 1.15.0`), which Obsidian maintains. `report.obsidianVersionFromExe`
+is a *different* fact: the FileVersion of the binary `--obsidian` named, read from
+its PE version resource. They legitimately disagree here — a 1.14.5 executable runs
+1.15.0 app code because `%APPDATA%\obsidian\obsidian-1.15.0.asar` is preferred
+over the app's own `resources/obsidian.asar`; `harness.obsidianAsarFiles` records
+which downloaded bundles were present, so the discrepancy is evidenced rather than
+asserted. Quote `obsidianVersionInPage` when stating which version produced
+evidence.
+
+### Capturing the provider-type dropdown
+
+A **closed** `<select>` paints only its selected option, so an option that was
+removed from the provider-type dropdown cannot be seen in a screenshot no matter
+how the capture is framed — two revisions that differ only in that option list
+produce byte-identical PNGs. So:
+
+* `--focus-type-select` puts the control on screen and `providerTypeSelect` in
+  the report carries the **option list itself**, which is the machine-checkable
+  form of the claim ("the Gemini option is present before and absent after").
+* `--expand-type-select` additionally sets `size = <option count>` on that one
+  `<select>`, turning it into a native list box so every option is rendered into
+  the bitmap. That is a presentation-modified view — the report records
+  `renderedAsList: true` and `sizeAttribute`, so it can never be mistaken for the
+  stock rendering — and it is the only way the removal is *visible* in a PNG.
+
+Both flags scroll the pane only when the control is actually outside the
+viewport, and they **reset `scrollTop` to 0 first**: Obsidian persists the
+settings pane's scroll position (`workspace.json`), so a reused vault otherwise
+starts a run wherever the previous one ended (observed: 0 vs 1228 px, which moves
+the same control by 1200 px and makes before/after frames incomparable).
+
+### Waiting for the plugin's settings
+
+`--expect-active` / `--expect-providers` close a race that silently produced
+worthless evidence: on a vault Obsidian has not seen before, the first-open trust
+dialog is what enables the plugin, and the settings tab could then render before
+`loadSettings()` replaced the defaults. The tab does not re-read settings, so the
+capture showed the *first* provider as active — and the plugin persisted that
+back to `data.json`, so the evidence looked self-consistent while documenting the
+wrong provider. The harness now waits until the plugin's loaded
+`settings.activeProvider`/`settings.providers` match the flags before opening the
+tab, and records `harness.pluginSettingsWait` plus a `limitations` note if they
+never do.
 
 ### `alignment.branch`: which side of the hero breakpoint a capture landed on
 
@@ -335,6 +397,79 @@ It writes a `.md` plus a `.json` twin, marks every row that changed, and lists t
 that flipped. It tolerates a report that predates a field, so a pair never fails to render just
 because the probe grew a field in between.
 
+Its table includes the provider-type rows above, so a pair whose only difference is the dropdown's
+option list still reports `Gemini/Google option present: yes -> no` instead of "no row changed".
+
+### Bundle-size evidence
+
+`bundle-size-diff.mjs` diffs two `dist/esbuild-meta.json` files and writes the Before/After byte
+counts plus per-module attribution (`.md` + `.json`):
+
+```bash
+BAIZER_METAFILE=1 npm run build          # in each worktree, writes dist/esbuild-meta.json
+node tools/provider-settings-shots/bundle-size-diff.mjs \
+  --before-meta <before>/dist/esbuild-meta.json --before-main <before>/dist/main.js --before-revision <sha> \
+  --after-meta  <after>/dist/esbuild-meta.json  --after-main  <after>/dist/main.js  --after-revision  <sha> \
+  --out-json tools/provider-settings-shots/metrics/<name>.metrics.json \
+  --out-md   tools/provider-settings-shots/metrics/<name>.metrics.md
+```
+
+* Attribution comes from `outputs["dist/main.js"].inputs[].bytesInOutput` — the bytes a module
+  actually occupies in the bundle. The top-level `inputs` map only carries the module's own source
+  size, which is a *different* number; using it overstates a dependency's contribution. The script
+  exits non-zero if a metafile ever stops emitting `bytesInOutput`, so an empty attribution can
+  never be reported as a result.
+* It cross-checks each metafile's own output size against the real `dist/main.js` on disk and
+  records a sha256 of both artifacts, so the two builds being compared are identifiable.
+* `--before-label` / `--after-label` carry the human context a bare SHA cannot (e.g. "tree-identical
+  to main @ <sha>", or "pre-rebase; replaced by <sha> with the same tree").
+
+`baseline-provenance.mjs` answers the other half of the question — *why should anyone believe the
+Before artifact is the revision it claims to be*:
+
+```bash
+node tools/provider-settings-shots/baseline-provenance.mjs \
+  --worktree <dir> --dist <dir>/dist --revision <sha> \
+  --tree-identical-to <other-sha> --same-bundle-as <other-sha> \
+  --marker '@google/genai' --marker 'Gemini API' \
+  --note "..." --out-json tools/provider-settings-shots/metrics/<name>.json
+```
+
+It records the revision's **tree** hash, whether the worktree's bundled inputs match that tree
+(asserted against the tree, not HEAD — a rebase rewrites HEAD without changing a byte), whether the
+metafile agrees with the artifact on disk, whether the bundle was built in place (module comments
+say `// node_modules/…` rather than `// ../…`), a sha256, substring marker counts, and which
+on-disk source files are absent from the metafile with a proof that each is type-only. `--note` is
+free text that lands in the record, which is where a caveat belongs if a bare marker count could be
+misread (see *Marker counts are not a support check* below).
+
+`capture-summary.mjs` turns N layout reports into one environment/parity record:
+
+```bash
+node tools/provider-settings-shots/capture-summary.mjs \
+  --capture docs/assets/<before>.layout.json --capture docs/assets/<after>.layout.json \
+  --out-json tools/provider-settings-shots/metrics/<name>.metrics.json \
+  --out-md   tools/provider-settings-shots/metrics/<name>.metrics.md
+```
+
+It asserts the properties that make a before/after pair meaningful at all — same Obsidian version,
+theme, locale, scenario, plugin version and viewport set across every capture, the type dropdown on
+screen in all of them, and Gemini present before / absent after — and exits non-zero if any fails.
+The Obsidian version is taken from the running window title, because the executable named by
+`--obsidian` can be older than the app code Obsidian actually loads (`obsidian-<version>.asar` in
+`%APPDATA%\obsidian` wins over the exe).
+
+### Marker counts are not a support check
+
+`--marker` counts are case-sensitive substring counts over the **bundle**, and this build is not
+minified, so **comments ship**. A revision that fully removed a provider can still contain the
+provider's name in a comment, and a revision that removed an api *implementation* still names its id
+because pi-ai's compat registry calls every api factory. Read the counts next to the module table:
+`@google/genai` / `@google/generative-ai` / `// node_modules/@google/` at 0 is the real assertion;
+a surviving `Gemini` inside `node_modules/@earendil-works/pi-ai/...` or inside one of our own
+comments is not support. That is why the size record — not a string search — is the evidence that
+the implementation is gone.
+
 ### Measuring both revisions with one probe
 
 The probe must find the *same logical field* in both revisions, or a pure rename shows up as
@@ -406,3 +541,20 @@ Two consequences worth knowing:
   impossible to recreate (e.g. replace it with a directory), otherwise a 1.14.5
   executable will quietly run 1.15.0 code. `report.harness.browserUserAgent` and
   `report.windowTitle` are recorded so the version actually used is auditable.
+* **A run fails with `DevTools endpoint … unreachable within 180000 ms (fetch
+  failed)` and no Obsidian window appears** — the previous run left an orphan
+  `Obsidian.exe` holding the vault. Loading the downloaded `.asar` makes Obsidian
+  **relaunch itself**, and the harness's `taskkill /T /F` targets the process it
+  spawned, so the relaunched one survives; the next launch then hands the vault
+  off to that orphan (which has no `--remote-debugging-port`) and exits. Kill
+  every instance before each run:
+  `Get-Process Obsidian -ErrorAction SilentlyContinue | Stop-Process -Force`.
+* **Two revisions that differ only in a dropdown's option list produce
+  byte-identical PNGs** — expected, not a harness bug: a closed `<select>` paints
+  only its selected option. See *Capturing the provider-type dropdown* for the
+  option list in the report and the `--expand-type-select` view that makes it
+  visible.
+* **The same control lands at a different Y between runs** — Obsidian persists the
+  settings pane's scroll offset in `workspace.json`, so a reused `--vault`
+  resumes wherever the last run left it (observed: 0 vs 1228 px). Pass
+  `--focus-type-select`, which resets `scrollTop` before scrolling minimally.

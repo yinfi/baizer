@@ -70,10 +70,20 @@ export function collectLayoutReport(cfg) {
   };
 
   // ---------------------------------------------------------------- meta ----
+  // The panel usually renders in a popout window (`about:blank`) that has NO `app` global, so the
+  // in-page candidates are all undefined there and this used to be null in every capture — which
+  // left the artifacts unable to say which app version produced them. Obsidian puts its running
+  // version in the window title, so fall back to that and record WHICH route answered.
   report.obsidianVersionInPage = (() => {
     const candidates = [window.OBSIDIAN_VERSION, app && app.version, app && app.appVersion];
     for (const candidate of candidates) if (typeof candidate === 'string' && candidate) return candidate;
-    return null;
+    const fromTitle = (document.title || '').match(/Obsidian\s+(\d+(?:\.\d+)+)/);
+    return fromTitle ? fromTitle[1] : null;
+  })();
+  report.obsidianVersionSource = (() => {
+    const inPage = [window.OBSIDIAN_VERSION, app && app.version, app && app.appVersion];
+    for (const candidate of inPage) if (typeof candidate === 'string' && candidate) return 'page-global';
+    return /Obsidian\s+\d+(?:\.\d+)+/.test(document.title || '') ? 'window-title' : null;
   })();
   report.obsidianVersionFromExe = cfg.obsidianVersion ?? null;
   report.theme = document.body.classList.contains('theme-dark')
@@ -345,13 +355,18 @@ export function collectLayoutReport(cfg) {
     };
   };
 
+  // The provider "type" dropdown is looked up once and reused: `truncation.fields` measures its
+  // geometry, and `providerTypeSelect` below records its OPTION LIST (the thing that changes when
+  // a protocol is added or removed). Same element, same DOM state as the screenshot.
+  const protocolField = findField(identityCard, /protocol|协议|api\s*类型|类型/i);
+
   report.truncation = {
     fields: [
       measureField('apiEndpoint', findField(credentialsCard, /endpoint|端点|服务地址|base\s*url|地址/i)),
       measureField('apiKey', findField(credentialsCard, /api\s*key/i)),
       measureField('customHeaders', findField(credentialsCard, /header|请求头/i) || findAdvancedField(/header|请求头/i)),
       measureField('providerName', findField(identityCard, /name|名称/i)),
-      measureField('protocol', findField(identityCard, /protocol|协议|api\s*类型|类型/i)),
+      measureField('protocol', protocolField),
       // 模型 moved out of the basic card into its own group; fall back for the old revision.
       measureField('model', findField(modelCard || identityCard, /^(model|模型)$/i)),
     ],
@@ -370,6 +385,78 @@ export function collectLayoutReport(cfg) {
     });
   }
   report.truncation.ellipsizedStaticText = report.truncation.ellipsizedStaticText.slice(0, 30);
+
+  // ------------------------------------------------- provider type select ----
+  // A closed `<select>` renders ONLY its selected option, so an option that was removed from the
+  // provider-type dropdown is invisible in a PNG no matter how the capture is framed. The option
+  // list is therefore recorded here, from the same DOM state as the screenshot, and the control is
+  // required to be on screen (`inViewport`) — `capture.mjs --focus-type-select` arranges that by
+  // scrolling the settings pane only when the control is actually outside the viewport.
+  const scrollContextOf = (el) => {
+    let node = el.parentElement;
+    while (node && node !== document.documentElement) {
+      const cs = getComputedStyle(node);
+      if (/(auto|scroll|overlay)/.test(`${cs.overflowY}`) && node.scrollHeight > node.clientHeight + 1) {
+        const cls = typeof node.className === 'string' ? node.className.trim().split(/\s+/).filter(Boolean) : [];
+        return {
+          selector: `${node.tagName.toLowerCase()}${cls.length ? `.${cls.join('.')}` : ''}`,
+          scrollTop: round(node.scrollTop),
+          clientHeight: node.clientHeight,
+          scrollHeight: node.scrollHeight,
+          box: boxOf(node),
+        };
+      }
+      node = node.parentElement;
+    }
+    return null;
+  };
+  report.providerTypeSelect = (() => {
+    const el = protocolField && protocolField.control;
+    const base = {
+      label: protocolField ? protocolField.label : null,
+      rowSelector: 'active provider detail row whose label matches /protocol|协议|API 类型|类型/i',
+      options: [],
+      optionTexts: [],
+    };
+    if (!el) return { ...base, found: false };
+    const tag = el.tagName.toLowerCase();
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const options = Array.from(el.options || []).map((option, index) => ({
+      index,
+      value: option.value,
+      text: (option.text || '').trim(),
+      selected: !!option.selected,
+      disabled: !!option.disabled,
+    }));
+    return {
+      ...base,
+      found: tag === 'select',
+      tag,
+      isSelect: tag === 'select',
+      visible: isVisible(el),
+      box: boxOf(el),
+      value: controlValue(el) ?? '',
+      selectedIndex: typeof el.selectedIndex === 'number' ? el.selectedIndex : null,
+      optionCount: options.length,
+      options,
+      optionTexts: options.map((o) => o.text),
+      // A closed <select> shows only the selected option; `size > 1` turns it into an inline list
+      // box that renders every option (the harness can request that with `--expand-type-select`).
+      renderedAsList: typeof el.size === 'number' && el.size > 1,
+      sizeAttribute: el.getAttribute('size'),
+      inViewport:
+        rect.width > 0
+        && rect.height > 0
+        && rect.top >= -0.5
+        && rect.left >= -0.5
+        && rect.bottom <= vh + 0.5
+        && rect.right <= vw + 0.5,
+      viewport: { innerWidth: vw, innerHeight: vh },
+      scrollContext: scrollContextOf(el),
+    };
+  })();
 
   // ------------------------------------------------------------ wrapping ----
   // The custom-headers help used to be one `.baizer-settings-inline-note`; the rework moved it
@@ -550,6 +637,11 @@ export function collectLayoutReport(cfg) {
     })(),
     secretActionsOnOneRow: !!report.wrapping.secretActionButtons.found && !report.wrapping.secretActionButtons.wrappedOntoSeparateRows,
     labelColumnConsistent: report.alignment.labelColumnConsistent,
+    // Deliberately NOT part of `allPass` (see the filter below): these describe the provider-type
+    // dropdown's OPTION LIST, which is a different question from the layout criteria the harness
+    // was built to assert, and older revisions/other consumers must not start failing because of it.
+    providerTypeSelectFound: !!report.providerTypeSelect.found,
+    providerTypeSelectOnScreen: !!report.providerTypeSelect.inViewport,
   };
   report.verdict.fieldsWithTextOverflow = truncationFields.filter((f) => f.textOverflowsBox).map((f) => f.name);
   report.verdict.unreachableTruncatedFields = unreachableTruncated.map((f) => f.name);

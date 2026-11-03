@@ -1,0 +1,610 @@
+{
+  "schema": "baizer-capture-summary/1",
+  "generatedAt": "2026-11-03T06:22:12.691Z",
+  "captures": [
+    {
+      "layout": "docs/assets/provider-settings-2026-11-03-nogoogle-before-wide.layout.json",
+      "image": "docs/assets/provider-settings-2026-11-03-nogoogle-before-wide.png",
+      "imageBytes": 101628,
+      "imageSha256": "728c503903a687ecd2b7c52423f411275a7d2318e3357a574848540307085359",
+      "label": "before-wide",
+      "phase": "before",
+      "revision": "caf9703",
+      "capturedAt": "2026-11-03T06:20:31.685Z",
+      "obsidianVersion": "1.15.0",
+      "obsidianVersionSource": "window-title",
+      "obsidianVersionFromTitle": "1.15.0",
+      "obsidianVersionFromExe": "1.14.5",
+      "obsidianAsarFiles": [
+        {
+          "file": "C:\\Users\\Administrator\\AppData\\Roaming\\obsidian\\obsidian-1.15.0.asar",
+          "bytes": 24553884,
+          "modifiedAt": "2026-11-02T16:28:14.380Z"
+        }
+      ],
+      "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.14.5 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
+      "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+      "theme": "dark",
+      "expectedTheme": "dark",
+      "language": "zh",
+      "viewport": {
+        "width": 1353,
+        "height": 1053
+      },
+      "requestedViewport": {
+        "width": 1353,
+        "height": 1053
+      },
+      "imageSize": {
+        "width": 1353,
+        "height": 1053,
+        "matchesRequest": true
+      },
+      "settingsPanelLocation": "popout-window",
+      "plugin": {
+        "id": "baizer",
+        "version": "1.1.0",
+        "loaded": true
+      },
+      "scenario": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
+      "pluginBuildDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\provider-settings-anthropic-29c5dba52d61\\dist",
+      "pluginBuildBytes": 4137811,
+      "providerCards": [
+        {
+          "title": "cch",
+          "active": false
+        },
+        {
+          "title": "opencode",
+          "active": true
+        },
+        {
+          "title": "Anthropic",
+          "active": false
+        }
+      ],
+      "activeProvider": "opencode",
+      "typeSelect": {
+        "found": true,
+        "onScreen": true,
+        "renderedAsList": false,
+        "sizeAttribute": null,
+        "optionCount": 3,
+        "optionTexts": [
+          "Gemini API",
+          "OpenAI 兼容",
+          "Anthropic Messages API"
+        ],
+        "value": "OpenAI 兼容",
+        "geminiOptionPresent": true,
+        "paneScrollTop": 0,
+        "boxY": 701.29
+      },
+      "allPass": true,
+      "failedVerdicts": []
+    },
+    {
+      "layout": "docs/assets/provider-settings-2026-11-03-nogoogle-before-narrow520.layout.json",
+      "image": "docs/assets/provider-settings-2026-11-03-nogoogle-before-narrow520.png",
+      "imageBytes": 62673,
+      "imageSha256": "ef18229515fe8f249ca202298b7e9b365a93488aaec599a7f8f44ce8b39f0250",
+      "label": "before-narrow520",
+      "phase": "before",
+      "revision": "caf9703",
+      "capturedAt": "2026-11-03T06:20:49.968Z",
+      "obsidianVersion": "1.15.0",
+      "obsidianVersionSource": "window-title",
+      "obsidianVersionFromTitle": "1.15.0",
+      "obsidianVersionFromExe": "1.14.5",
+      "obsidianAsarFiles": [
+        {
+          "file": "C:\\Users\\Administrator\\AppData\\Roaming\\obsidian\\obsidian-1.15.0.asar",
+          "bytes": 24553884,
+          "modifiedAt": "2026-11-02T16:28:14.380Z"
+        }
+      ],
+      "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.14.5 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
+      "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+      "theme": "dark",
+      "expectedTheme": "dark",
+      "language": "zh",
+      "viewport": {
+        "width": 520,
+        "height": 900
+      },
+      "requestedViewport": {
+        "width": 520,
+        "height": 900
+      },
+      "imageSize": {
+        "width": 520,
+        "height": 900,
+        "matchesRequest": true
+      },
+      "settingsPanelLocation": "popout-window",
+      "plugin": {
+        "id": "baizer",
+        "version": "1.1.0",
+        "loaded": true
+      },
+      "scenario": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
+      "pluginBuildDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\provider-settings-anthropic-29c5dba52d61\\dist",
+      "pluginBuildBytes": 4137811,
+      "providerCards": [
+        {
+          "title": "cch",
+          "active": false
+        },
+        {
+          "title": "opencode",
+          "active": true
+        },
+        {
+          "title": "Anthropic",
+          "active": false
+        }
+      ],
+      "activeProvider": "opencode",
+      "typeSelect": {
+        "found": true,
+        "onScreen": true,
+        "renderedAsList": false,
+        "sizeAttribute": null,
+        "optionCount": 3,
+        "optionTexts": [
+          "Gemini API",
+          "OpenAI 兼容",
+          "Anthropic Messages API"
+        ],
+        "value": "OpenAI 兼容",
+        "geminiOptionPresent": true,
+        "paneScrollTop": 105.33,
+        "boxY": 842.03
+      },
+      "allPass": true,
+      "failedVerdicts": []
+    },
+    {
+      "layout": "docs/assets/provider-settings-2026-11-03-nogoogle-before-typeoptions-wide.layout.json",
+      "image": "docs/assets/provider-settings-2026-11-03-nogoogle-before-typeoptions-wide.png",
+      "imageBytes": 103471,
+      "imageSha256": "fadfb946a24cd7d3e6c50865e306059a01234f275e8d0a50819f2854530688d6",
+      "label": "before-typeoptions-wide",
+      "phase": "before",
+      "revision": "caf9703",
+      "capturedAt": "2026-11-03T06:21:08.040Z",
+      "obsidianVersion": "1.15.0",
+      "obsidianVersionSource": "window-title",
+      "obsidianVersionFromTitle": "1.15.0",
+      "obsidianVersionFromExe": "1.14.5",
+      "obsidianAsarFiles": [
+        {
+          "file": "C:\\Users\\Administrator\\AppData\\Roaming\\obsidian\\obsidian-1.15.0.asar",
+          "bytes": 24553884,
+          "modifiedAt": "2026-11-02T16:28:14.380Z"
+        }
+      ],
+      "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.14.5 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
+      "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+      "theme": "dark",
+      "expectedTheme": "dark",
+      "language": "zh",
+      "viewport": {
+        "width": 1353,
+        "height": 1053
+      },
+      "requestedViewport": {
+        "width": 1353,
+        "height": 1053
+      },
+      "imageSize": {
+        "width": 1353,
+        "height": 1053,
+        "matchesRequest": true
+      },
+      "settingsPanelLocation": "popout-window",
+      "plugin": {
+        "id": "baizer",
+        "version": "1.1.0",
+        "loaded": true
+      },
+      "scenario": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
+      "pluginBuildDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\provider-settings-anthropic-29c5dba52d61\\dist",
+      "pluginBuildBytes": 4137811,
+      "providerCards": [
+        {
+          "title": "cch",
+          "active": false
+        },
+        {
+          "title": "opencode",
+          "active": true
+        },
+        {
+          "title": "Anthropic",
+          "active": false
+        }
+      ],
+      "activeProvider": "opencode",
+      "typeSelect": {
+        "found": true,
+        "onScreen": true,
+        "renderedAsList": true,
+        "sizeAttribute": "3",
+        "optionCount": 3,
+        "optionTexts": [
+          "Gemini API",
+          "OpenAI 兼容",
+          "Anthropic Messages API"
+        ],
+        "value": "OpenAI 兼容",
+        "geminiOptionPresent": true,
+        "paneScrollTop": 0,
+        "boxY": 701.29
+      },
+      "allPass": true,
+      "failedVerdicts": []
+    },
+    {
+      "layout": "docs/assets/provider-settings-2026-11-03-nogoogle-after-wide.layout.json",
+      "image": "docs/assets/provider-settings-2026-11-03-nogoogle-after-wide.png",
+      "imageBytes": 101628,
+      "imageSha256": "728c503903a687ecd2b7c52423f411275a7d2318e3357a574848540307085359",
+      "label": "after-wide",
+      "phase": "after",
+      "revision": "c6b99e7",
+      "capturedAt": "2026-11-03T06:21:26.237Z",
+      "obsidianVersion": "1.15.0",
+      "obsidianVersionSource": "window-title",
+      "obsidianVersionFromTitle": "1.15.0",
+      "obsidianVersionFromExe": "1.14.5",
+      "obsidianAsarFiles": [
+        {
+          "file": "C:\\Users\\Administrator\\AppData\\Roaming\\obsidian\\obsidian-1.15.0.asar",
+          "bytes": 24553884,
+          "modifiedAt": "2026-11-02T16:28:14.380Z"
+        }
+      ],
+      "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.14.5 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
+      "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+      "theme": "dark",
+      "expectedTheme": "dark",
+      "language": "zh",
+      "viewport": {
+        "width": 1353,
+        "height": 1053
+      },
+      "requestedViewport": {
+        "width": 1353,
+        "height": 1053
+      },
+      "imageSize": {
+        "width": 1353,
+        "height": 1053,
+        "matchesRequest": true
+      },
+      "settingsPanelLocation": "popout-window",
+      "plugin": {
+        "id": "baizer",
+        "version": "1.1.0",
+        "loaded": true
+      },
+      "scenario": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
+      "pluginBuildDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\dist",
+      "pluginBuildBytes": 3162611,
+      "providerCards": [
+        {
+          "title": "cch",
+          "active": false
+        },
+        {
+          "title": "opencode",
+          "active": true
+        },
+        {
+          "title": "Anthropic",
+          "active": false
+        }
+      ],
+      "activeProvider": "opencode",
+      "typeSelect": {
+        "found": true,
+        "onScreen": true,
+        "renderedAsList": false,
+        "sizeAttribute": null,
+        "optionCount": 2,
+        "optionTexts": [
+          "OpenAI 兼容",
+          "Anthropic Messages API"
+        ],
+        "value": "OpenAI 兼容",
+        "geminiOptionPresent": false,
+        "paneScrollTop": 0,
+        "boxY": 701.29
+      },
+      "allPass": true,
+      "failedVerdicts": []
+    },
+    {
+      "layout": "docs/assets/provider-settings-2026-11-03-nogoogle-after-narrow520.layout.json",
+      "image": "docs/assets/provider-settings-2026-11-03-nogoogle-after-narrow520.png",
+      "imageBytes": 62673,
+      "imageSha256": "ef18229515fe8f249ca202298b7e9b365a93488aaec599a7f8f44ce8b39f0250",
+      "label": "after-narrow520",
+      "phase": "after",
+      "revision": "c6b99e7",
+      "capturedAt": "2026-11-03T06:21:44.540Z",
+      "obsidianVersion": "1.15.0",
+      "obsidianVersionSource": "window-title",
+      "obsidianVersionFromTitle": "1.15.0",
+      "obsidianVersionFromExe": "1.14.5",
+      "obsidianAsarFiles": [
+        {
+          "file": "C:\\Users\\Administrator\\AppData\\Roaming\\obsidian\\obsidian-1.15.0.asar",
+          "bytes": 24553884,
+          "modifiedAt": "2026-11-02T16:28:14.380Z"
+        }
+      ],
+      "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.14.5 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
+      "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+      "theme": "dark",
+      "expectedTheme": "dark",
+      "language": "zh",
+      "viewport": {
+        "width": 520,
+        "height": 900
+      },
+      "requestedViewport": {
+        "width": 520,
+        "height": 900
+      },
+      "imageSize": {
+        "width": 520,
+        "height": 900,
+        "matchesRequest": true
+      },
+      "settingsPanelLocation": "popout-window",
+      "plugin": {
+        "id": "baizer",
+        "version": "1.1.0",
+        "loaded": true
+      },
+      "scenario": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
+      "pluginBuildDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\dist",
+      "pluginBuildBytes": 3162611,
+      "providerCards": [
+        {
+          "title": "cch",
+          "active": false
+        },
+        {
+          "title": "opencode",
+          "active": true
+        },
+        {
+          "title": "Anthropic",
+          "active": false
+        }
+      ],
+      "activeProvider": "opencode",
+      "typeSelect": {
+        "found": true,
+        "onScreen": true,
+        "renderedAsList": false,
+        "sizeAttribute": null,
+        "optionCount": 2,
+        "optionTexts": [
+          "OpenAI 兼容",
+          "Anthropic Messages API"
+        ],
+        "value": "OpenAI 兼容",
+        "geminiOptionPresent": false,
+        "paneScrollTop": 105.33,
+        "boxY": 842.03
+      },
+      "allPass": true,
+      "failedVerdicts": []
+    },
+    {
+      "layout": "docs/assets/provider-settings-2026-11-03-nogoogle-after-typeoptions-wide.layout.json",
+      "image": "docs/assets/provider-settings-2026-11-03-nogoogle-after-typeoptions-wide.png",
+      "imageBytes": 103284,
+      "imageSha256": "aaeb95f809ac82998d81700d5c183874a50498cf951577c75dca82ba88746dc7",
+      "label": "after-typeoptions-wide",
+      "phase": "after",
+      "revision": "c6b99e7",
+      "capturedAt": "2026-11-03T06:22:02.857Z",
+      "obsidianVersion": "1.15.0",
+      "obsidianVersionSource": "window-title",
+      "obsidianVersionFromTitle": "1.15.0",
+      "obsidianVersionFromExe": "1.14.5",
+      "obsidianAsarFiles": [
+        {
+          "file": "C:\\Users\\Administrator\\AppData\\Roaming\\obsidian\\obsidian-1.15.0.asar",
+          "bytes": 24553884,
+          "modifiedAt": "2026-11-02T16:28:14.380Z"
+        }
+      ],
+      "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.14.5 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
+      "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+      "theme": "dark",
+      "expectedTheme": "dark",
+      "language": "zh",
+      "viewport": {
+        "width": 1353,
+        "height": 1053
+      },
+      "requestedViewport": {
+        "width": 1353,
+        "height": 1053
+      },
+      "imageSize": {
+        "width": 1353,
+        "height": 1053,
+        "matchesRequest": true
+      },
+      "settingsPanelLocation": "popout-window",
+      "plugin": {
+        "id": "baizer",
+        "version": "1.1.0",
+        "loaded": true
+      },
+      "scenario": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
+      "pluginBuildDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\dist",
+      "pluginBuildBytes": 3162611,
+      "providerCards": [
+        {
+          "title": "cch",
+          "active": false
+        },
+        {
+          "title": "opencode",
+          "active": true
+        },
+        {
+          "title": "Anthropic",
+          "active": false
+        }
+      ],
+      "activeProvider": "opencode",
+      "typeSelect": {
+        "found": true,
+        "onScreen": true,
+        "renderedAsList": true,
+        "sizeAttribute": "3",
+        "optionCount": 2,
+        "optionTexts": [
+          "OpenAI 兼容",
+          "Anthropic Messages API"
+        ],
+        "value": "OpenAI 兼容",
+        "geminiOptionPresent": false,
+        "paneScrollTop": 0,
+        "boxY": 701.29
+      },
+      "allPass": true,
+      "failedVerdicts": []
+    }
+  ],
+  "pairs": [
+    {
+      "slot": "wide",
+      "viewport": "1353x1053",
+      "before": "before-wide",
+      "after": "after-wide",
+      "beforeBytes": 101628,
+      "afterBytes": 101628,
+      "beforeSha256": "728c503903a687ecd2b7c52423f411275a7d2318e3357a574848540307085359",
+      "afterSha256": "728c503903a687ecd2b7c52423f411275a7d2318e3357a574848540307085359",
+      "identical": true,
+      "rendersOptionListInline": false,
+      "beforeOptions": [
+        "Gemini API",
+        "OpenAI 兼容",
+        "Anthropic Messages API"
+      ],
+      "afterOptions": [
+        "OpenAI 兼容",
+        "Anthropic Messages API"
+      ],
+      "reading": "IDENTICAL, and correctly so: a closed <select> paints only its selected option, and the selected option is the same in both phases, so removing a protocol cannot appear in this bitmap. This pair documents that the surrounding layout is unchanged — it is NOT evidence that nothing changed. The option-list change is evidenced by providerTypeSelect.optionTexts in these layout reports and by the expanded (renderedAsList) pair."
+    },
+    {
+      "slot": "narrow520",
+      "viewport": "520x900",
+      "before": "before-narrow520",
+      "after": "after-narrow520",
+      "beforeBytes": 62673,
+      "afterBytes": 62673,
+      "beforeSha256": "ef18229515fe8f249ca202298b7e9b365a93488aaec599a7f8f44ce8b39f0250",
+      "afterSha256": "ef18229515fe8f249ca202298b7e9b365a93488aaec599a7f8f44ce8b39f0250",
+      "identical": true,
+      "rendersOptionListInline": false,
+      "beforeOptions": [
+        "Gemini API",
+        "OpenAI 兼容",
+        "Anthropic Messages API"
+      ],
+      "afterOptions": [
+        "OpenAI 兼容",
+        "Anthropic Messages API"
+      ],
+      "reading": "IDENTICAL, and correctly so: a closed <select> paints only its selected option, and the selected option is the same in both phases, so removing a protocol cannot appear in this bitmap. This pair documents that the surrounding layout is unchanged — it is NOT evidence that nothing changed. The option-list change is evidenced by providerTypeSelect.optionTexts in these layout reports and by the expanded (renderedAsList) pair."
+    },
+    {
+      "slot": "typeoptions-wide",
+      "viewport": "1353x1053",
+      "before": "before-typeoptions-wide",
+      "after": "after-typeoptions-wide",
+      "beforeBytes": 103471,
+      "afterBytes": 103284,
+      "beforeSha256": "fadfb946a24cd7d3e6c50865e306059a01234f275e8d0a50819f2854530688d6",
+      "afterSha256": "aaeb95f809ac82998d81700d5c183874a50498cf951577c75dca82ba88746dc7",
+      "identical": false,
+      "rendersOptionListInline": true,
+      "beforeOptions": [
+        "Gemini API",
+        "OpenAI 兼容",
+        "Anthropic Messages API"
+      ],
+      "afterOptions": [
+        "OpenAI 兼容",
+        "Anthropic Messages API"
+      ],
+      "reading": "the two phases differ, and this pair renders the option list inline, so the removed option is visible in the bitmap"
+    }
+  ],
+  "environment": {
+    "obsidianVersionsRunning": [
+      "1.15.0"
+    ],
+    "obsidianVersionSources": [
+      "window-title"
+    ],
+    "obsidianVersionsFromExe": [
+      "1.14.5"
+    ],
+    "preferredAsarFilesPresent": [
+      "C:\\Users\\Administrator\\AppData\\Roaming\\obsidian\\obsidian-1.15.0.asar (24553884 B, 2026-11-02T16:28:14.380Z)"
+    ],
+    "themes": [
+      "dark"
+    ],
+    "languages": [
+      "zh"
+    ],
+    "scenarios": [
+      "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json"
+    ],
+    "pluginVersions": [
+      "baizer@1.1.0"
+    ],
+    "note": "obsidianVersion is the version of the app that actually ran, taken from the running window title (Obsidian writes it there) because the settings panel renders in a popout window with no `app` global. It is NOT the version of the executable: Obsidian prefers a downloaded %APPDATA%\\obsidian\\obsidian-<version>.asar over its own resources/obsidian.asar, so the 1.14.5 binary in this environment ran 1.15.0 app code (see preferredAsarFilesPresent). Both phases of every pair were captured from the same running version."
+  },
+  "pixelComparison": {
+    "identicalStockPairs": [
+      "wide",
+      "narrow520"
+    ],
+    "pairsWithVisibleDifference": [
+      "typeoptions-wide"
+    ],
+    "summary": "The stock (closed-dropdown) pair(s) \"wide\", \"narrow520\" are byte-identical between phases. That is expected and is not a broken capture: a closed <select> paints only its selected option, so a change to the option list cannot appear in the bitmap. The removal is evidenced by providerTypeSelect.optionTexts in the layout reports and by the pair that renders the option list inline."
+  },
+  "parity": {
+    "sameObsidianVersionAcrossAllCaptures": true,
+    "obsidianVersionRecordedInEveryCapture": true,
+    "sameThemeAcrossAllCaptures": true,
+    "sameLocaleAcrossAllCaptures": true,
+    "sameScenarioAcrossAllCaptures": true,
+    "samePluginVersionAcrossAllCaptures": true,
+    "everyCaptureHasTypeSelectOnScreen": true,
+    "everyCaptureAllPass": true,
+    "beforeHasGeminiOption": true,
+    "afterHasNoGeminiOption": true,
+    "beforeAndAfterShareViewports": true,
+    "everySlotHasBothPhases": true,
+    "atLeastOnePairDiffersInPixels": true
+  },
+  "allParityChecksPass": true
+}

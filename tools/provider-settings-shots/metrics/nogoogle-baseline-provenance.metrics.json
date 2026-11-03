@@ -1,0 +1,144 @@
+{
+  "schema": "baizer-baseline-provenance/1",
+  "generatedAt": "2026-11-03T06:13:36.083Z",
+  "worktree": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\provider-settings-anthropic-29c5dba52d61",
+  "revision": "caf9703",
+  "revisionTree": "d05a9be6f447cb4fb7d1117902a8e7e9705aa27f",
+  "head": "caf97035f5cd01fdcfef70790e18af9b11399560",
+  "headMatchesRevision": true,
+  "gitStatusPorcelain": null,
+  "gitStatusPorcelainBundledInputs": null,
+  "artifact": {
+    "path": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\provider-settings-anthropic-29c5dba52d61\\dist\\main.js",
+    "bytes": 4137811,
+    "sha256": "C622438F7B33AC975E07BAE5F822D8AE24BD0CCE96E9F261E77DC170EB13C5C2",
+    "mtime": "2026-11-03T05:46:43.452Z",
+    "metafilePath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\provider-settings-anthropic-29c5dba52d61\\dist\\esbuild-meta.json",
+    "metafileBytes": 4137811,
+    "metafileMatchesArtifact": true,
+    "inputCount": 1237
+  },
+  "builtInPlace": {
+    "nodeModulesModuleComments": 1022,
+    "escapingModuleComments": 0,
+    "note": "a build that reaches node_modules through a junction emits `// ../../…` paths and is ~158 KB larger for this repo"
+  },
+  "markers": [
+    {
+      "marker": "@google/genai",
+      "occurrences": 4
+    },
+    {
+      "marker": "google-generative-ai",
+      "occurrences": 32
+    },
+    {
+      "marker": "generativelanguage",
+      "occurrences": 33
+    },
+    {
+      "marker": "Gemini API",
+      "occurrences": 11
+    },
+    {
+      "marker": "generativelanguage.googleapis.com",
+      "occurrences": 31
+    },
+    {
+      "marker": "Gemini",
+      "occurrences": 607
+    },
+    {
+      "marker": "gemini",
+      "occurrences": 130
+    }
+  ],
+  "markerNote": "Counts are case-sensitive and are taken from the built artifact. They are assertions about what the BUNDLE contains, not about the source tree: this build is not minified, so comments ship. A surviving `gemini` in a comment is not Google support, and a surviving api id is expected even after removal because pi-ai's compat registry names every api factory (the removed one is replaced by a stub that throws a readable error). Read them together with the module table in the bundle-size record.",
+  "notes": [
+    "Baseline for the remove-Google ticket. main @ 1f4c695 is tree-identical to caf9703 (git diff caf9703 origin/main is empty; both trees d05a9be6f447cb4fb7d1117902a8e7e9705aa27f), so the artifact built in this pristine caf9703 worktree is a faithful baseline for what users have on main.",
+    "The Google markers are all non-zero here BECAUSE this revision still supports Gemini: the real @google/genai and @google/generative-ai SDKs, pi-ai's google api/provider/catalog modules and the 'Gemini API' option label are all in the bundle."
+  ],
+  "metafileInputs": {
+    "bundledSourceInputs": 124,
+    "sourceFilesOnDisk": 131,
+    "onDiskButNotBundled": [
+      "src/models/interfaces.ts",
+      "src/runtime/provider-capabilities.ts",
+      "src/runtime/runtime-types.ts",
+      "src/skills/md.d.ts",
+      "src/skills/types.ts",
+      "src/ui/tabs/types.ts",
+      "src/ui/types.ts"
+    ],
+    "unbundledClassification": [
+      {
+        "file": "src/models/interfaces.ts",
+        "typeOnly": true,
+        "bytes": 2889
+      },
+      {
+        "file": "src/runtime/provider-capabilities.ts",
+        "typeOnly": true,
+        "bytes": 201
+      },
+      {
+        "file": "src/runtime/runtime-types.ts",
+        "typeOnly": true,
+        "bytes": 8044
+      },
+      {
+        "file": "src/skills/md.d.ts",
+        "typeOnly": true,
+        "bytes": 123
+      },
+      {
+        "file": "src/skills/types.ts",
+        "typeOnly": true,
+        "bytes": 4136
+      },
+      {
+        "file": "src/ui/tabs/types.ts",
+        "typeOnly": true,
+        "bytes": 617
+      },
+      {
+        "file": "src/ui/types.ts",
+        "typeOnly": true,
+        "bytes": 2038
+      }
+    ],
+    "note": "a module is absent from the bundle only if it declares no runtime construct; that is scanned, not guessed from the filename",
+    "bundledButNotOnDisk": []
+  },
+  "sameBundleAs": [
+    {
+      "otherRevision": "b4fb0b5",
+      "bundledInputsIdentical": true,
+      "diffStat": null
+    }
+  ],
+  "treeIdenticalTo": [
+    {
+      "otherRevision": "1f4c695",
+      "otherTree": "d05a9be6f447cb4fb7d1117902a8e7e9705aa27f",
+      "revisionTree": "d05a9be6f447cb4fb7d1117902a8e7e9705aa27f",
+      "treesIdentical": true,
+      "fullTreeDiffStat": null
+    }
+  ],
+  "newestSourceMtime": {
+    "file": "src/services/model-service.ts",
+    "mtime": "2026-11-03T04:50:22.162Z"
+  },
+  "artifactNewerThanSources": true,
+  "checks": {
+    "bundledInputsMatchRevisionTree": true,
+    "bundledInputsUnmodified": true,
+    "metafileMatchesArtifact": true,
+    "builtInPlace": true,
+    "bundledInputsIdenticalToComparedRevision": true,
+    "metafileInputsAllExistOnDisk": true,
+    "everyUnbundledSourceFileIsTypeOnly": true
+  },
+  "allChecksPass": true
+}

@@ -23,7 +23,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 
@@ -63,6 +63,50 @@ function pngSize(buffer) {
   if (buffer.length < 24) return null;
   if (buffer.readUInt32BE(0) !== 0x89504e47) return null;
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+}
+
+/**
+ * The launched binary's own FileVersion, read from its PE version resource.
+ *
+ * Windows only, and deliberately best-effort: the version that actually RAN comes from the window
+ * title (recorded as `obsidianVersionFromTitle` / `obsidianVersionInPage`), and this field exists to
+ * show that the two can legitimately disagree.
+ */
+function readExeFileVersion(exe) {
+  if (process.platform !== 'win32' || !exe) return null;
+  try {
+    const out = execFileSync(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', `(Get-Item -LiteralPath '${String(exe).replace(/'/g, "''")}').VersionInfo.FileVersion`],
+      { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    const version = String(out).trim();
+    return version || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Downloaded app bundles Obsidian will prefer over its own `resources/obsidian.asar`.
+ *
+ * This is the mechanism behind "the 1.14.5 executable ran 1.15.0 code", so it is recorded next to
+ * the versions rather than left as folklore.
+ */
+function listPreferredAsarFiles() {
+  const dir = process.env.APPDATA ? path.join(process.env.APPDATA, 'obsidian') : null;
+  if (!dir || !fs.existsSync(dir)) return [];
+  try {
+    return fs.readdirSync(dir)
+      .filter((name) => /^obsidian-.*\.asar$/i.test(name))
+      .map((name) => {
+        const full = path.join(dir, name);
+        const stat = fs.statSync(full);
+        return { file: full, bytes: stat.size, modifiedAt: stat.mtime.toISOString() };
+      });
+  } catch {
+    return [];
+  }
 }
 
 function launchObsidian(exe, port) {
@@ -422,6 +466,138 @@ async function expandAdvancedSections(session) {
   })()`);
 }
 
+/**
+ * Bring the provider-type `<select>` into view, and optionally render its options inline.
+ *
+ * The type dropdown is the control whose OPTION LIST changes when a protocol is added or removed,
+ * so both phases must show it. At 520x900 it sits below the fold, so the settings pane is scrolled
+ * the minimum amount needed; at 1353x1053 it is already visible and nothing is scrolled, which
+ * keeps the framing identical to this harness's earlier captures.
+ *
+ * `--expand-type-select` sets `size`, which turns the closed dropdown into a native list box that
+ * renders every option — the only way a removed option can appear in a bitmap, because a closed
+ * `<select>` paints just its selected option. That is a DOM-only change: the control, its value and
+ * its options are untouched, and the layout report records it (`providerTypeSelect.renderedAsList` /
+ * `sizeAttribute`), so the evidence cannot be mistaken for the unmodified presentation.
+ *
+ * Pass a NUMBER (`--expand-type-select 3`) to pin the list box to that many rows. That matters for a
+ * before/after pair: with the default `size = option count` the box is one row shorter in the phase
+ * that has one option fewer, which pushes everything BELOW the control up by a row height (measured:
+ * 17.66px, and 106,549 of the 131,375 differing pixels were that shift rather than the option list).
+ * Pinning the same `size` in both phases keeps the geometry identical, so the only pixels that differ
+ * are the option rows themselves.
+ */
+async function focusProviderTypeSelect(session, { expand = false, expandSize = null } = {}) {
+  return session.evaluate(`(() => {
+    const findSelect = () => {
+      const detail = document.querySelector('.baizer-settings-provider-detail-inline') || document;
+      for (const row of detail.querySelectorAll('.baizer-settings-detail-row')) {
+        const label = row.querySelector('.baizer-settings-detail-label');
+        const text = label ? (label.textContent || '').trim() : '';
+        if (/protocol|协议|API\\s*类型|类型/i.test(text)) {
+          const control = row.querySelector('select');
+          if (control) return control;
+        }
+      }
+      return detail.querySelector('select') || null;
+    };
+    const el = findSelect();
+    if (!el) return { found: false, scrolled: false, expanded: false, inViewport: false };
+    const scrollable = (() => {
+      let node = el.parentElement;
+      while (node && node !== document.documentElement) {
+        const cs = getComputedStyle(node);
+        if (/(auto|scroll|overlay)/.test(String(cs.overflowY)) && node.scrollHeight > node.clientHeight + 1) return node;
+        node = node.parentElement;
+      }
+      return null;
+    })();
+    const container = scrollable || document.scrollingElement || document.documentElement;
+    // The settings pane's scroll position is PERSISTED by Obsidian (workspace.json), so a run that
+    // reuses a vault starts wherever the previous run left it — observed: 1228px on one wide run and
+    // 0 on another, which moves the same control by 1200px and makes before/after frames
+    // incomparable. Reset first, then scroll the minimum needed: a control that already fits is left
+    // where the committed captures had it (scrollTop 0).
+    const scrollTopInitial = container.scrollTop;
+    container.scrollTop = 0;
+    const scrollTopBefore = container.scrollTop;
+    const margin = 24;
+    let rect = el.getBoundingClientRect();
+    let delta = 0;
+    if (rect.top < margin) delta = rect.top - margin;
+    else if (rect.bottom > window.innerHeight - margin) delta = rect.bottom - (window.innerHeight - margin);
+    if (delta !== 0) container.scrollTop = Math.max(0, scrollTopBefore + delta);
+    rect = el.getBoundingClientRect();
+    if (rect.top < 0 || rect.bottom > window.innerHeight) {
+      el.scrollIntoView({ block: 'center' });
+    }
+    let expanded = false;
+    if (${expand ? 'true' : 'false'} && el.tagName.toLowerCase() === 'select' && el.options.length > 1) {
+      const requested = ${expandSize === null ? 'null' : Number(expandSize)};
+      el.size = requested === null ? el.options.length : requested;
+      el.style.height = 'auto';
+      expanded = true;
+    }
+    const finalRect = el.getBoundingClientRect();
+    const name = container === document.scrollingElement
+      ? 'document.scrollingElement'
+      : (typeof container.className === 'string' && container.className.trim() ? container.className.trim() : container.tagName.toLowerCase());
+    return {
+      found: true,
+      scrolled: Math.abs(container.scrollTop - scrollTopBefore) > 0.5,
+      scrollTopInitial,
+      scrollTopBefore,
+      scrollTopAfter: container.scrollTop,
+      container: name,
+      expanded,
+      box: { x: finalRect.left, y: finalRect.top, w: finalRect.width, h: finalRect.height, bottom: finalRect.bottom },
+      inViewport: finalRect.top >= -0.5 && finalRect.bottom <= window.innerHeight + 0.5,
+      optionTexts: Array.from(el.options).map((o) => (o.text || '').trim()),
+    };
+  })()`);
+}
+
+/**
+ * Wait until the plugin has actually LOADED the scenario's settings.
+ *
+ * On a vault Obsidian has never seen, the first-open trust dialog is what enables the plugin — and
+ * the settings tab can then be rendered before `loadSettings()` has replaced the defaults. Observed
+ * symptom (fresh `--vault`, scenario `activeProvider: "opencode"`): the panel showed the first
+ * provider (`cch`) as active and the plugin even persisted that back to `data.json`, so the
+ * "before" capture silently documented the wrong provider. Waiting here removes the race instead of
+ * hiding it, and `--expect-active` / `--expect-providers` make the expectation explicit.
+ */
+async function waitForPluginSettings(session, { expectActive = null, expectProviders = null, timeoutMs = 30000 } = {}) {
+  const started = Date.now();
+  const deadline = started + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await session.evaluate(`(() => {
+      const app = window.app;
+      const plugin = app && app.plugins && app.plugins.plugins && app.plugins.plugins.baizer;
+      const settings = plugin && plugin.settings;
+      return {
+        instance: !!plugin,
+        settingsLoaded: !!settings,
+        activeProvider: (settings && settings.activeProvider) || null,
+        providers: settings && settings.providers ? Object.keys(settings.providers) : null,
+      };
+    })()`);
+    if (last && last.settingsLoaded) {
+      const activeOk = !expectActive || last.activeProvider === expectActive;
+      const providersOk = !expectProviders || expectProviders.every((id) => (last.providers || []).includes(id));
+      if (activeOk && providersOk) return { ...last, matched: true, waitedMs: Date.now() - started };
+    }
+    await delay(200);
+  }
+  return {
+    ...(last || {}),
+    matched: false,
+    waitedMs: Date.now() - started,
+    expected: { activeProvider: expectActive, providers: expectProviders },
+  };
+}
+
 /** Wait until the settings DOM stops mutating (the model list loads async). */
 async function waitForStableDom(session, { quietMs = 1500, timeoutMs = 45000 } = {}) {
   const deadline = Date.now() + timeoutMs;
@@ -599,7 +775,16 @@ async function applyViewport(session, { width, height }) {
 // ------------------------------------------------------------------ main ----
 
 async function main() {
+  // `--expand-type-select` is a string option so it can carry an optional row count, but Node's
+  // parseArgs throws on a bare string option. Normalise the bare form to an empty value so
+  // `--expand-type-select` (meaning "size = option count") keeps working as documented.
+  const argv = process.argv.slice(2).map((arg, i, all) => (
+    arg === '--expand-type-select' && (all[i + 1] === undefined || all[i + 1].startsWith('--'))
+      ? '--expand-type-select='
+      : arg
+  ));
   const { values } = parseArgs({
+    args: argv,
     options: {
       'plugin-dir': { type: 'string' },
       out: { type: 'string' },
@@ -616,6 +801,13 @@ async function main() {
       port: { type: 'string', default: '9333' },
       locale: { type: 'string', default: 'zh' },
       'ready-timeout': { type: 'string', default: '180000' },
+      'focus-type-select': { type: 'boolean', default: false },
+      // string, not boolean: an optional row count (`--expand-type-select 3`) lets a before/after
+      // pair pin the same list-box height, so the phase with one option fewer does not also shift
+      // everything below the control. A bare `--expand-type-select` means size = option count.
+      'expand-type-select': { type: 'string' },
+      'expect-active': { type: 'string' },
+      'expect-providers': { type: 'string' },
       'keep-open': { type: 'boolean', default: false },
     },
     allowPositionals: false,
@@ -679,6 +871,13 @@ async function main() {
     // be older than the app code it loads (Obsidian prefers a downloaded
     // `obsidian-<version>.asar` in %APPDATA% over its own resources/obsidian.asar).
     runInfo.browserUserAgent = devtools['User-Agent'] ?? null;
+    // The binary named by `--obsidian` is NOT necessarily the app code that runs: Obsidian prefers a
+    // downloaded `%APPDATA%\obsidian\obsidian-<version>.asar` over its own resources/obsidian.asar.
+    // Record the launched binary's own FileVersion and which downloaded asars were present, so the
+    // "exe says 1.14.5, the app reports 1.15.0" discrepancy is evidenced in the artifact rather than
+    // living in someone's memory. Both are best-effort: a null here is a fact, not a failure.
+    runInfo.obsidianVersionFromExe = readExeFileVersion(exe);
+    runInfo.obsidianAsarFiles = listPreferredAsarFiles();
 
     const connected = await connectToDrivablePage(port, { timeoutMs: readyTimeout });
     session = connected.session;
@@ -695,6 +894,25 @@ async function main() {
     runInfo.blockingModals = await handleBlockingModals(session);
     runInfo.pluginActivation = await ensurePluginEnabled(session, PLUGIN_ID);
     runInfo.pluginLoaded = await waitForPluginLoaded(session, PLUGIN_ID, { timeoutMs: Math.min(readyTimeout, 90000) });
+
+    // The plugin instance existing is not the same as its settings being loaded — see
+    // waitForPluginSettings. Only then is it safe to open the settings tab, which renders from
+    // `plugin.settings` once and does not re-read it.
+    runInfo.pluginSettingsWait = await waitForPluginSettings(session, {
+      expectActive: values['expect-active'] ?? null,
+      expectProviders: values['expect-providers']
+        ? String(values['expect-providers']).split(',').map((s) => s.trim()).filter(Boolean)
+        : null,
+      timeoutMs: Math.min(readyTimeout, 45000),
+    });
+    if (!runInfo.pluginSettingsWait.matched) {
+      notes.push(
+        `the plugin's loaded settings never matched the expectation before the settings tab opened `
+        + `(activeProvider=${runInfo.pluginSettingsWait.activeProvider}, providers=${(runInfo.pluginSettingsWait.providers || []).join('/')}, `
+        + `expected activeProvider=${runInfo.pluginSettingsWait.expected.activeProvider}, providers=${(runInfo.pluginSettingsWait.expected.providers || []).join('/')}); `
+        + 'the capture may document a different provider than the scenario asked for',
+      );
+    }
 
     // Start watching for the model-list request before the settings tab opens, so
     // the request cannot slip past us.
@@ -762,12 +980,43 @@ async function main() {
       await waitForStableDom(panelSession, { quietMs: 800, timeoutMs: 15000 });
     }
 
+    // The provider-type dropdown is the control whose option list changes when a protocol is
+    // removed. Put it on screen (and optionally render its options inline) before measuring, so
+    // the screenshot and the report describe the same DOM state.
+    // `--expand-type-select` is a string option, so test for presence rather than truthiness: a bare
+    // flag parses to '' (which is falsy) and would otherwise silently skip the expansion.
+    const expandTypeSelectRaw = values['expand-type-select'];
+    const wantsExpand = expandTypeSelectRaw !== undefined;
+    const expandSize = wantsExpand && String(expandTypeSelectRaw).trim() !== ''
+      ? Number.parseInt(String(expandTypeSelectRaw), 10)
+      : null;
+    if (wantsExpand && expandSize !== null && (!Number.isFinite(expandSize) || expandSize < 2)) {
+      throw new Error(`--expand-type-select expects a row count of 2 or more, got "${expandTypeSelectRaw}"`);
+    }
+    if (values['focus-type-select'] || wantsExpand) {
+      runInfo.typeSelectFocus = await focusProviderTypeSelect(panelSession, {
+        expand: wantsExpand,
+        expandSize,
+      });
+      if (!runInfo.typeSelectFocus.found) {
+        notes.push('the provider-type <select> could not be located, so --focus-type-select had nothing to scroll to');
+      } else if (!runInfo.typeSelectFocus.inViewport) {
+        notes.push('the provider-type <select> is still outside the viewport after scrolling; the capture cannot show it');
+      }
+      if (runInfo.typeSelectFocus.expanded) {
+        notes.push(
+          `--expand-type-select was used: the provider-type <select> was given size=${expandSize === null ? '<option count>' : expandSize} so every option renders inline in the bitmap (a DOM-only change; the control, its value and its options are unmodified)`,
+        );
+      }
+      await delay(300);
+    }
+
     const layout = await panelSession.evaluate(buildProbeExpression({
       label,
       phase: values.phase ?? null,
       revision: values.revision ?? null,
       pluginDir,
-      obsidianVersion: null,
+      obsidianVersion: runInfo.obsidianVersionFromExe ?? null,
       expectedTheme: theme,
       pluginInfo: runInfo.pluginInfoFromMainWindow,
     }), { timeoutMs: 120000 });
@@ -807,7 +1056,7 @@ async function main() {
     console.log(`layout     ${layoutPath}`);
     console.log(`title      ${report.windowTitle ?? '(n/a)'}`);
     console.log(`panel      ${report.harness.settingsPanelLocation} (${report.harness.captureTarget?.url ?? '?'})`);
-    console.log(`obsidian   ${report.harness.obsidianVersionFromTitle ?? 'unknown'}`);
+    console.log(`obsidian   running=${report.obsidianVersionInPage ?? 'unknown'} (from ${report.obsidianVersionSource ?? 'n/a'}) exe=${report.obsidianVersionFromExe ?? 'unknown'}${report.obsidianVersionFromExe && report.obsidianVersionInPage && report.obsidianVersionFromExe !== report.obsidianVersionInPage ? '  <-- exe is NOT the app code that ran (see harness.obsidianAsarFiles)' : ''}`);
     console.log(`plugin     ${report.plugin?.id ?? '?'} v${report.plugin?.version ?? '?'} loaded=${report.plugin?.loaded}`);
     console.log(`theme      ${report.theme} (expected ${theme})`);
     console.log(`viewport   innerWidth=${report.viewport?.innerWidth} innerHeight=${report.viewport?.innerHeight} requested=${width}x${height}`);
@@ -815,6 +1064,11 @@ async function main() {
     console.log(`overflow   document=${report.overflow?.document?.overflowPx}px offenders=${report.overflow?.offenderCount} spill=${report.overflow?.spillCount}`);
     console.log(`overlap    controls=${report.overlap?.controlCount} overlappingPairs=${report.overlap?.pairs?.length}`);
     console.log(`truncation ${(report.truncation?.fields ?? []).filter((f) => f.found && f.textOverflowsBox).map((f) => f.name).join(', ') || 'none'}`);
+    console.log(
+      `typeselect ${report.providerTypeSelect?.found
+        ? `value="${report.providerTypeSelect.value}" onScreen=${report.providerTypeSelect.inViewport} options=[${(report.providerTypeSelect.optionTexts ?? []).join(' | ')}]`
+        : 'NOT FOUND'}`,
+    );
     console.log(`verdict    ${Object.entries(v).filter(([k]) => typeof v[k] === 'boolean').map(([k, val]) => `${val ? 'PASS' : 'FAIL'}:${k}`).join(' ')}`);
 
     if (size && (Math.abs(size.width - width) > 2 || Math.abs(size.height - height) > 2)) {
