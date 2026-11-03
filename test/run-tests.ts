@@ -66,6 +66,7 @@ const tests = [
   'test/request-url-fetch.test.ts',
   'test/context-manager.test.ts',
   'test/settings-state.test.ts',
+  'test/settings-provider-migration.test.ts',
   'test/settings-provider-layout.test.ts',
   'test/settings-connection-validation.test.ts',
   'test/anthropic-protocol.test.ts',

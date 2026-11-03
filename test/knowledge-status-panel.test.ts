@@ -187,7 +187,7 @@ async function runTests() {
               state: 'failed',
               summaryPath: 'Knowledge Wiki/Windows.md',
               compiledAt: '2026-05-13T10:00:00Z',
-              error: '[GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent: [429 ] You exceeded your current quota. * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests',
+              error: '[OpenAI API Error]: 429 You exceeded your current quota. Please check your plan and billing details. Request URL: https://api.openai.com/v1/chat/completions',
             }),
             getGlobalCounts: async () => ({
               pending: 2,
@@ -207,7 +207,7 @@ async function runTests() {
     expect(strip?.hasClass('is-failed')).toBe(true);
     expect(strip?.attributes.title).toBe(undefined);
     expect(strip?.attributes['aria-label']).toContain('Failed: quota exceeded');
-    expect(text.includes('https://generativelanguage.googleapis.com')).toBe(false);
+    expect(text.includes('https://api.openai.com')).toBe(false);
     expect(text.includes('Backlinks')).toBe(false);
     expect(text.includes('Pending 2')).toBe(false);
     expect(text.includes('Knowledge Wiki/Windows.md')).toBe(false);

@@ -133,18 +133,18 @@ async function runTests() {
     toolbar.updateModels({
       loading: false,
       groups: [
-        { providerId: 'gemini', providerLabel: 'Gemini', models: [{ value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' }] },
+        { providerId: 'anthropic', providerLabel: 'Anthropic', models: [{ value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' }] },
         { providerId: 'deepseek', providerLabel: 'DeepSeek', models: [{ value: 'deepseek-chat', label: 'DeepSeek Chat' }] },
       ],
-      activeProviderId: 'gemini',
-      activeModelId: 'gemini-2.5-flash',
+      activeProviderId: 'anthropic',
+      activeModelId: 'claude-sonnet-4-5',
     });
 
     const modelSelect = toolbar.getModelSelectEl() as any as FakeElement;
     // 两个 optgroup,label 为 provider 名。
-    expect(modelSelect.children.map(group => group.attributes.label)).toEqual(['Gemini', 'DeepSeek']);
+    expect(modelSelect.children.map(group => group.attributes.label)).toEqual(['Anthropic', 'DeepSeek']);
     // 每个 optgroup 下有对应模型 option。
-    expect(modelSelect.children[0].children[0].textContent).toBe('Gemini 2.5 Flash');
+    expect(modelSelect.children[0].children[0].textContent).toBe('Claude Sonnet 4.5');
     expect(modelSelect.children[1].children[0].textContent).toBe('DeepSeek Chat');
     expect(modelSelect.disabled).toBe(false);
   });
@@ -159,11 +159,11 @@ async function runTests() {
     toolbar.updateModels({
       loading: false,
       groups: [
-        { providerId: 'gemini', providerLabel: 'Gemini', models: [{ value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' }] },
+        { providerId: 'anthropic', providerLabel: 'Anthropic', models: [{ value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' }] },
         { providerId: 'deepseek', providerLabel: 'DeepSeek', models: [{ value: 'deepseek-chat', label: 'DeepSeek Chat' }] },
       ],
-      activeProviderId: 'gemini',
-      activeModelId: 'gemini-2.5-flash',
+      activeProviderId: 'anthropic',
+      activeModelId: 'claude-sonnet-4-5',
     });
 
     const modelSelect = toolbar.getModelSelectEl() as any as FakeElement;
@@ -180,12 +180,12 @@ async function runTests() {
       onModelSelect: () => { },
     });
 
-    toolbar.updateModels({ loading: true, groups: [], activeProviderId: 'gemini', activeModelId: '' });
+    toolbar.updateModels({ loading: true, groups: [], activeProviderId: 'anthropic', activeModelId: '' });
     let modelSelect = toolbar.getModelSelectEl() as any as FakeElement;
     expect(modelSelect.disabled).toBe(true);
     expect(modelSelect.children[0].textContent).toBe('Loading models...');
 
-    toolbar.updateModels({ loading: false, groups: [], activeProviderId: 'gemini', activeModelId: '' });
+    toolbar.updateModels({ loading: false, groups: [], activeProviderId: 'anthropic', activeModelId: '' });
     modelSelect = toolbar.getModelSelectEl() as any as FakeElement;
     expect(modelSelect.disabled).toBe(true);
     expect(modelSelect.children[0].textContent).toBe('No models available');

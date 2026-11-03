@@ -198,17 +198,17 @@ async function runTests() {
 
   await test('builds provider list summary counts for the connection workspace', () => {
     const settings = cloneSettings();
-    settings.providers.gemini.apiKey = 'gm-key';
     settings.providers.deepseek.apiKey = 'ds-key';
     settings.providers.openai.apiKey = '';
     settings.providers.qwen.apiKey = '';
+    settings.providers.anthropic.apiKey = '';
 
-    // 5 个内置 provider：gemini/deepseek 有 key，openai/qwen/anthropic 没有。
+    // 4 个内置 provider：deepseek 有 key，openai/qwen/anthropic 没有。
     expect(getProviderListSummary(settings)).toEqual({
-      total: 5,
-      configured: 2,
+      total: 4,
+      configured: 1,
       missingKey: 3,
-      label: '5 providers / 2 configured / 3 missing key',
+      label: '4 providers / 1 configured / 3 missing key',
     });
   });
 
@@ -217,11 +217,9 @@ async function runTests() {
 
     expect({
       anthropic: getProviderCardMeta(settings, 'anthropic').protocolLabel,
-      gemini: getProviderCardMeta(settings, 'gemini').protocolLabel,
       openai: getProviderCardMeta(settings, 'openai').protocolLabel,
     }).toEqual({
       anthropic: 'Anthropic Messages API',
-      gemini: 'Gemini API',
       openai: 'OpenAI-compatible',
     });
   });
@@ -249,12 +247,19 @@ async function runTests() {
 
   await test('restores missing default providers unless they were deliberately deleted', () => {
     const settings = cloneSettings();
+    settings.providers['my-gateway'] = {
+      type: 'openai-compatible',
+      label: 'My Gateway',
+      apiKey: 'sk-gw',
+      baseUrl: 'https://gw.example.com/v1',
+      model: 'gw-model',
+    };
 
     const restored = mergeProviderDefaults({
-      gemini: settings.providers.gemini,
+      'my-gateway': settings.providers['my-gateway'],
     }, ['openai', 'deepseek']);
 
-    expect(Object.keys(restored)).toEqual(['gemini', 'qwen', 'anthropic']);
+    expect(Object.keys(restored)).toEqual(['my-gateway', 'qwen', 'anthropic']);
   });
 
   await test('exposes an explicit vault write scope default for permission controls', () => {
@@ -307,14 +312,12 @@ async function runTests() {
 
   await test('overview actions surface only actionable configuration issues', () => {
     const settings = cloneSettings();
-    settings.providers.gemini.apiKey = '';
     settings.providers.deepseek.apiKey = 'ds-key';
     settings.activeProvider = 'deepseek';
     settings.allowPluginControl = true;
 
     expect(getSettingsOverviewActions(settings)).toEqual([
       { label: 'Permissions too broad', sectionId: 'permissions', tone: 'danger' },
-      { label: 'Google Gemini missing API key', sectionId: 'connection', tone: 'warning' },
       { label: 'OpenAI missing API key', sectionId: 'connection', tone: 'warning' },
       { label: 'Qwen missing API key', sectionId: 'connection', tone: 'warning' },
       { label: 'Anthropic missing API key', sectionId: 'connection', tone: 'warning' },

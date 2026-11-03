@@ -120,51 +120,76 @@ async function runTests() {
     }
   });
 
-  await test('uses Gemini inline audio input when provider type is gemini', async () => {
-    let capturedParts: any[] = [];
+  await test('transcribes through the OpenAI-compatible endpoint of the configured provider', async () => {
+    // 自定义网关：端点必须是「该 provider 的 baseUrl + /audio/transcriptions」，
+    // 而不是硬编码的 OpenAI 官方地址（旧的 Gemini inlineData 旁路已随协议移除）。
+    let transcriptionRequestUrl = '';
     const service = createVideoTranscriptionService({
       requestUrl: async (options: any) => {
-        if (options.url === 'https://www.bilibili.com/video/BVgemini') {
+        if (options.url === 'https://www.bilibili.com/video/BVgateway') {
           return {
             status: 200,
-            text: '<script>window.__playinfo__={"data":{"dash":{"audio":[{"baseUrl":"https://media.example/gemini-audio.m4a"}]}}}</script>',
+            text: '<script>window.__playinfo__={"data":{"dash":{"audio":[{"baseUrl":"https://media.example/gw-audio.m4a"}]}}}</script>',
             headers: {},
             arrayBuffer: new ArrayBuffer(0),
             json: {},
           };
         }
-        if (options.url === 'https://media.example/gemini-audio.m4a') {
+        if (options.url === 'https://media.example/gw-audio.m4a') {
           return {
             status: 200,
             text: '',
             headers: {},
-            arrayBuffer: new Uint8Array([9, 8, 7]).buffer,
+            arrayBuffer: new Uint8Array([5, 5]).buffer,
             json: {},
           };
         }
         throw new Error(`Unexpected URL ${options.url}`);
       },
-      createGeminiModel: (_provider: any) => ({
-        generateContent: async (parts: any[]) => {
-          capturedParts = parts;
-          return {
-            response: {
-              text: () => 'gemini transcript text',
-            },
-          };
-        },
-      }),
+      fetchImpl: async (url: string, _init: any) => {
+        transcriptionRequestUrl = String(url);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ text: 'gateway transcript text' }),
+        } as any;
+      },
     });
 
     const result = await service.transcribeFromVideoUrl({
-      url: 'https://www.bilibili.com/video/BVgemini',
+      url: 'https://www.bilibili.com/video/BVgateway',
       platform: 'bilibili',
-      provider: DEFAULT_PROVIDERS.gemini,
+      provider: {
+        type: 'openai-compatible',
+        label: 'Gateway',
+        apiKey: 'sk-gw',
+        baseUrl: 'https://gw.example.com/v1/',
+        model: 'whisper-1',
+      },
     });
 
-    expect(capturedParts.length).toBe(2);
-    expect(capturedParts[1].inlineData.mimeType).toContain('audio');
-    expect(result.text).toContain('gemini transcript text');
+    expect(transcriptionRequestUrl).toBe('https://gw.example.com/v1/audio/transcriptions');
+    expect(result.text).toContain('gateway transcript text');
+  });
+
+  await test('has no Gemini / Google inline-audio path left', async () => {
+    // 协议移除后这里只剩 Whisper 一条路。若有人把 google SDK 分支加回来，
+    // 这条断言会连同 bundle-size 里的「Google SDK 不在包里」一起变红。
+    const { readFileSync } = await import('fs');
+    const source = readFileSync('src/services/video-transcription.ts', 'utf8');
+    // 只看代码：该文件头部仍会说明「历史上有一条 Gemini 分支，已随协议移除」，
+    // 那是变更记录，不是可达路径。故块注释与行注释都要先去掉。
+    const code = source
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .map(line => line.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+    for (const forbidden of ['gemini', 'generative-ai', 'inlineData', 'generateContent', 'toBase64']) {
+      expect(code.toLowerCase().includes(forbidden.toLowerCase())).toBe(false);
+    }
+    // 依赖面里也不该再有注入 Gemini 模型的口子。
+    expect(code.includes('createGeminiModel')).toBe(false);
   });
 }
 

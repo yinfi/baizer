@@ -228,8 +228,8 @@ async function runTests() {
       title: 'Saved chat',
       createdAt: 1,
       updatedAt: 2,
-      providerId: 'gemini',
-      modelId: 'gemini-2.5-flash',
+      providerId: 'deepseek',
+      modelId: 'deepseek-chat',
       messages: [{ id: 'm1', role: 'user', content: 'saved', timestamp: 1 }],
     });
 

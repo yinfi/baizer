@@ -152,7 +152,7 @@ async function runTests() {
     });
 
     menu.update([
-      { id: 'c-1', title: 'Roadmap chat', updatedAt: 20, providerId: 'gemini' },
+      { id: 'c-1', title: 'Roadmap chat', updatedAt: 20, providerId: 'deepseek' },
       { id: 'c-2', title: 'Daily note', updatedAt: 10, providerId: 'openai' },
     ]);
 
@@ -179,7 +179,7 @@ async function runTests() {
     } as any);
 
     menu.update([
-      { id: 'c-1', title: 'Roadmap chat', updatedAt: 20, providerId: 'gemini', modelId: 'gemini-2.5-pro', currentNote: 'Projects/roadmap.md' } as any,
+      { id: 'c-1', title: 'Roadmap chat', updatedAt: 20, providerId: 'deepseek', modelId: 'deepseek-reasoner', currentNote: 'Projects/roadmap.md' } as any,
       { id: 'c-2', title: 'Daily note', updatedAt: 10, providerId: 'openai', modelId: 'gpt-4o', currentNote: 'Daily/2026-05-12.md' } as any,
     ]);
 
@@ -217,7 +217,7 @@ async function runTests() {
 
     const now = Date.now();
     menu.update([
-      { id: 'c-1', title: 'Pinned roadmap', updatedAt: now - 1_000, providerId: 'gemini', pinnedAt: now - 500 } as any,
+      { id: 'c-1', title: 'Pinned roadmap', updatedAt: now - 1_000, providerId: 'deepseek', pinnedAt: now - 500 } as any,
       { id: 'c-2', title: 'Today note', updatedAt: now - 60_000, providerId: 'openai' } as any,
       { id: 'c-3', title: 'Old backlog', updatedAt: now - (8 * 24 * 60 * 60 * 1000), providerId: 'openai' } as any,
     ]);
@@ -246,7 +246,7 @@ async function runTests() {
     } as any);
 
     menu.update([
-      { id: 'c-1', title: 'Roadmap chat', updatedAt: 20, providerId: 'gemini' },
+      { id: 'c-1', title: 'Roadmap chat', updatedAt: 20, providerId: 'deepseek' },
       { id: 'c-2', title: 'Daily note', updatedAt: 10, providerId: 'openai' },
     ]);
 
@@ -270,7 +270,7 @@ async function runTests() {
     } as any);
 
     menu.update([
-      { id: 'c-1', title: 'Roadmap chat', updatedAt: 20, providerId: 'gemini' },
+      { id: 'c-1', title: 'Roadmap chat', updatedAt: 20, providerId: 'deepseek' },
       { id: 'c-2', title: 'Daily note', updatedAt: 10, providerId: 'openai' },
     ]);
 

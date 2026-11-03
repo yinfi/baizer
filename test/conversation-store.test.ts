@@ -63,8 +63,8 @@ function snapshot(id: string, updatedAt: number): ConversationSnapshot {
     title: `Conversation ${id}`,
     createdAt: updatedAt - 10,
     updatedAt,
-    providerId: 'gemini',
-    modelId: 'gemini-2.5-flash',
+    providerId: 'deepseek',
+    modelId: 'deepseek-chat',
     messages: [{ id: `m-${id}`, role: 'user', content: id, timestamp: updatedAt }],
   };
 }
