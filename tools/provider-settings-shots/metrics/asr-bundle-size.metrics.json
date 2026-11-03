@@ -1,0 +1,95 @@
+{
+  "schema": "baizer-bundle-size-evidence/1",
+  "generatedAt": "2026-11-03T08:13:04.378Z",
+  "artifact": "dist/main.js",
+  "before": {
+    "revision": "ba078c8",
+    "label": "origin/main @ ba078c8, built in place in this worktree",
+    "mainJs": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\scratch\\asr-shots\\before-final\\main.js",
+    "bytes": 3160865,
+    "sha256": "C74A6EC6F76CB7553075745811CA858A4DFA8AAF264EDBEB99772C7E74593579",
+    "metafile": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\scratch\\asr-shots\\before-final\\esbuild-meta.json",
+    "metafileOutputBytes": 3160865,
+    "metafileMatchesArtifact": true,
+    "inputCount": 1224,
+    "inputsWithBytesInOutput": 1224
+  },
+  "after": {
+    "revision": "965ab79",
+    "label": "branch head @ 965ab79 (code fixes + tooling), built in place in this worktree",
+    "mainJs": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\scratch\\asr-shots\\after-final\\main.js",
+    "bytes": 3180761,
+    "sha256": "215A631F930A3491E046A2318F4F8C5DD9DAE327F1CD7E6281FA53E313837A13",
+    "metafile": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\scratch\\asr-shots\\after-final\\esbuild-meta.json",
+    "metafileOutputBytes": 3180761,
+    "metafileMatchesArtifact": true,
+    "inputCount": 1225,
+    "inputsWithBytesInOutput": 1225
+  },
+  "delta": {
+    "bytes": 19896,
+    "kib": 19.43,
+    "mib": 0.019,
+    "percent": 0.6294,
+    "attributedByInputsBytes": 19823,
+    "unattributedBytes": 73
+  },
+  "removedModules": [],
+  "addedModules": [
+    {
+      "input": "src/services/asr-chunking.ts",
+      "before": 0,
+      "after": 5933,
+      "delta": 5933
+    }
+  ],
+  "shrunkModules": [],
+  "grownModules": [
+    {
+      "input": "src/skills/builtin/web-clipper/executor.ts",
+      "before": 13793,
+      "after": 14875,
+      "delta": 1082
+    },
+    {
+      "input": "src/mcp/types.ts",
+      "before": 4621,
+      "after": 5894,
+      "delta": 1273
+    },
+    {
+      "input": "src/i18n/zh-messages.ts",
+      "before": 48990,
+      "after": 50785,
+      "delta": 1795
+    },
+    {
+      "input": "src/settings.ts",
+      "before": 126579,
+      "after": 129329,
+      "delta": 2750
+    },
+    {
+      "input": "src/services/asr-chunking.ts",
+      "before": 0,
+      "after": 5933,
+      "delta": 5933
+    },
+    {
+      "input": "src/services/video-transcription.ts",
+      "before": 3828,
+      "after": 10818,
+      "delta": 6990
+    }
+  ],
+  "owners": [
+    {
+      "owner": "plugin source",
+      "before": 197811,
+      "after": 217634,
+      "delta": 19823,
+      "inputs": 6
+    }
+  ],
+  "problems": []
+}
