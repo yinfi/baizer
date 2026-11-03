@@ -1,14 +1,13 @@
 # Provider Architecture
 
-Baizer speaks three wire protocols. `ProviderConfig` (`src/mcp/types.ts`) carries a
-`type` of `gemini`, `openai-compatible` or `anthropic`, and
+Baizer speaks two wire protocols. `ProviderConfig` (`src/mcp/types.ts`) carries a
+`type` of `openai-compatible` or `anthropic`, and
 `src/runtime/pi/pi-native-model.ts` maps each config to a pi-ai `Model` whose `api`
 field selects the implementation inside pi-ai. There is no per-provider API wrapper
 in this repository — the mapping table below *is* the routing.
 
 | `ProviderConfig.type` | pi-ai `Model.api` | Request |
 |---|---|---|
-| `gemini` | `google-generative-ai` | `{baseUrl}/models/{model}:streamGenerateContent` |
 | `openai-compatible` + `apiFlavor: 'completions'` (default) | `openai-completions` | `{baseUrl}/chat/completions` |
 | `openai-compatible` + `apiFlavor: 'responses'` | `openai-responses` | `{baseUrl}/responses` |
 | `anthropic` | `anthropic-messages` | `{baseUrl}/v1/messages` |
@@ -22,7 +21,50 @@ body and stream shapes differ, not just the path.
 The `default:` branch of `ModelService.buildModelForConfig` logs a warning and
 degrades to OpenAI-compatible rather than throwing, so a `ProviderConfig` on disk
 with an unknown `type` still yields a usable (if possibly wrong) provider instead of
-a hard failure.
+a hard failure. Since the prune described below runs at load, this branch is a second
+safety net rather than the first line of defence.
+
+## Provider types that are no longer supported
+
+Google Gemini (`type: 'gemini'`, pi-ai `api: 'google-generative-ai'`) is no longer
+supported: it was removed to cut bundle size, and with it the third wire protocol.
+OpenAI-compatible and Anthropic are what remains.
+
+The removal is enforced when settings load, not when a request is built.
+`pruneUnsupportedProviders()` (`src/mcp/types.ts`) drops every entry whose `type`
+fails `isSupportedProviderType()` — a malformed null entry is dropped too. The test
+is on the config's `type`, **not** on its key in the `providers` map — a provider
+saved under the key `gemini` but carrying `type: 'openai-compatible'` survives, while
+an entry of the removed type is dropped whatever it is called. `loadSettings()`
+(`main.ts`) applies the prune after `mergeProviderDefaults()` and before the
+`activeProvider` repair.
+
+What an existing install sees:
+
+- The dropped entry is gone from settings. Its API key and model are not migrated to
+  another provider, and nothing is shown to the user — no notice, no error. The
+  Google credentials are simply dropped.
+- If `activeProvider` named the dropped entry, the repair moves it to the first
+  remaining provider (`Object.keys(providers)[0]`, falling back to
+  `DEFAULT_SETTINGS.activeProvider`, i.e. `openai`). That provider is typically
+  unconfigured, so requests fail until one is set up.
+- The prune runs on **every** load and is in-memory only: `loadSettings()` does not
+  write it back. The dead entry therefore remains in `data.json` until the next
+  settings save rewrites the file, which keeps the drop reversible for a user who
+  downgrades. A stale `type` still present in `data.json` is not evidence that the
+  plugin accepted it.
+- The dropped id is *not* added to `deletedProviderIds`; that list is unnecessary
+  here because the removed key no longer exists in `DEFAULT_PROVIDERS`, so
+  `mergeProviderDefaults()` cannot re-add it. Pre-existing stale ids in that list are
+  left untouched.
+- The legacy flat-format branch (`raw.provider` present, `raw.providers` absent) no
+  longer synthesises a Gemini entry, and the old Google credentials
+  (`old.apiKey` / `old.primaryModel`) are not migrated into any surviving entry.
+  `activeProvider` is set from `old.provider`, and if that id does not exist among the
+  surviving providers the repair above moves it to the first one — so a Gemini-only
+  user lands on OpenAI, whose credentials come solely from the old
+  `openaiApiKey` / `openaiBaseUrl` / `openaiModel` fields. Unlike the prune, that
+  branch persists its result (`saveData`), as it always did.
 
 ## Base URL semantics
 
@@ -66,6 +108,13 @@ refuses a single file over 5 MB. Measured on this tree:
 | with the real SDK | 5,658,476 B — **over the hard limit** |
 | with `anthropic-sdk-shim.ts` | 5,097,060 B — still over the 4.8 MiB budget |
 | after also stubbing unused pi model catalogs | 4,125,799 B |
+| after removing the Google/Gemini provider | 3,162,611 B |
+
+The first four rows are measurements taken at points during the #58 work, not a
+chain of immediate predecessors. The tree this change starts from (`main`) builds to
+4,137,811 B, and removing the Google provider brings it to 3,162,611 B (-975,200 B,
+-23.6%) — see `tools/provider-settings-shots/metrics/nogoogle-bundle-size.metrics.md`
+for the per-module attribution.
 
 So `esbuild.config.mjs` aliases `@anthropic-ai/sdk` to
 `src/runtime/pi/anthropic-sdk-shim.ts`, which implements only the surface pi
@@ -138,12 +187,12 @@ declared per model, not per provider; text is always supported.
 - **Custom headers are not forwarded on the stateless generation path.**
   `createNativeCompleteFn()` only injects the api key (and the opencode session
   header); unlike `createNativeStreamFn()`, it has no `getHeaders` hook. This is
-  pre-existing and affects all three protocols equally, not just Anthropic. Chat and
+  pre-existing and affects both protocols equally, not just Anthropic. Chat and
   streaming are unaffected.
 - **`deps` injection is Anthropic-only.** `model-catalog-service.ts` threads the
-  injectable `requestUrl` only into the Anthropic listing path, so the Gemini and
-  OpenAI-compatible listers cannot be driven by an injected fake in tests.
-- **`stubUnusedPiModelCatalogs`** (`esbuild.config.mjs`) reclaims ~958 KB by
-  emptying the model catalogs of the 40 pi providers Baizer does not use. If a future
+  injectable `requestUrl` only into the Anthropic listing path, so the
+  OpenAI-compatible lister cannot be driven by an injected fake in tests.
+- **`stubUnusedPiModelCatalogs`** (`esbuild.config.mjs`) reclaims ~973 KB by
+  emptying the model catalogs of the 41 pi providers Baizer does not use. If a future
   change needs pi's static catalog for one of those providers, that plugin must be
   narrowed — see the comment in the build config.
