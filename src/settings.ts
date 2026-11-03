@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting, Notice, Modal, debounce, Debouncer, setIcon } from 'obsidian';
-import { BUILTIN_PROVIDER_KEYS, DEFAULT_PROVIDERS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, OpenAIApiFlavor, PluginSettings, ProviderConfig, ProviderType, VaultWriteScope } from './mcp/types';
+import { BUILTIN_PROVIDER_KEYS, DEFAULT_ASR_MODEL, DEFAULT_PROVIDERS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, OpenAIApiFlavor, PluginSettings, ProviderConfig, ProviderType, VaultWriteScope } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 import type { AvailableModelsResult } from './services/model-service';
 import { checkAvailabilityWithStatus } from './services/model-catalog-service';
@@ -689,7 +689,7 @@ function getSettingsSections(): SettingsSectionMeta[] {
     { id: 'memory', title: t('Memory'), description: t('Memory retention, recall, search, and deletion.'), keywords: ['memory', 'hindsight', 'recall', 'forget', 'profile', 'privacy', 'observation', '记忆'] },
     { id: 'permissions', title: t('Permissions'), description: t('Vault write scope, file operations, plugin control, and confirmations.'), keywords: ['permissions', 'file creation', 'file modification', 'plugin control', 'confirm', '权限'] },
     { id: 'skills', title: t('Skills'), description: t('Enable or disable individual skills (availability, separate from permissions).'), keywords: ['skills', 'skill', 'enable', 'disable', 'workflow', 'available', '技能'] },
-    { id: 'capture', title: t('Capture'), description: t('Inbox, clipping storage, WeChat import, and URL capture.'), keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper', '采集', '微信'] },
+    { id: 'capture', title: t('Capture'), description: t('Inbox, clipping storage, WeChat import, and URL capture.'), keywords: ['wechat', 'capture', 'inbox', 'storage', 'clippings', 'web clipper', 'transcription', 'transcribe', 'asr', 'whisper', 'audio', 'video', '字幕', '转写', '语音', '采集', '微信'] },
     { id: 'knowledge', title: t('Knowledge'), description: t('Source folders, output folder, compile state, and ontology.'), keywords: ['knowledge', 'wiki', 'compile', 'source folders', 'batch', 'ontology', 'schema', '知识'] },
     { id: 'guardian', title: t('Guardian'), description: t('Inline writing assistance, trigger mode, and ignored folders.'), keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity', 'selection', 'toolbar', 'selection toolbar', '守护', '行内补全', '幽灵文本', '灵敏度', '补全', '选中', '工具条', '选中工具条'] },
     { id: 'appearance', title: t('Appearance'), description: t('Workbench theme, font size, and opacity.'), keywords: ['appearance', 'theme', 'font', 'opacity', 'terminal', 'workbench', 'language', 'locale', '外观', '语言'] },
@@ -1835,7 +1835,12 @@ export class SettingTab extends PluginSettingTab {
         visibleSections.forEach(sectionId => {
             const meta = getSectionMeta(sectionId);
             const status = statuses[sectionId];
-            const card = accordion.createEl('details', { cls: 'baizer-settings-section-card' }) as HTMLDetailsElement;
+            // data-section-id 是给工具看的（tools/provider-settings-shots 用它打开指定分区）。
+            // 用属性而不是标题文本：标题随 locale 变，属性不变。
+            const card = accordion.createEl('details', {
+                cls: 'baizer-settings-section-card',
+                attr: { 'data-section-id': sectionId },
+            }) as HTMLDetailsElement;
             card.open = this.openSectionIds.has(sectionId);
             card.addEventListener('toggle', () => {
                 if (card.open) {
@@ -3285,6 +3290,66 @@ export class SettingTab extends PluginSettingTab {
     }
 
     private renderCaptureSection(containerEl: HTMLElement): void {
+        // ── 视频转写（ASR）───────────────────────────────────────────────
+        // 这一组字段是「平台没给字幕时的兜底转写」的端点配置。四项默认全空
+        // （模型除外，默认 whisper-1）= 沿用当前 openai-compatible provider 的地址与 key，
+        // 与改动前完全一致，老用户不需要动任何设置；
+        // 只配了 Anthropic 的用户在这里填一个 OpenAI 方言的转写服务，就能转写了。
+        const asrPanel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
+        renderSettingHeading(
+            asrPanel.createDiv({ cls: 'baizer-settings-panel-header' }),
+            t('Video transcription'),
+            { nameClass: 'baizer-settings-panel-title' },
+        );
+
+        new Setting(asrPanel)
+            .setName(t('Transcription endpoint (Base URL)'))
+            .setDesc(t('Base URL of an OpenAI-compatible /audio/transcriptions service. Leave empty to reuse the active OpenAI-compatible provider. The endpoint path is appended by the plugin, so include /v1 if your service needs it.'))
+            .addText(text => text
+                .setPlaceholder('https://api.openai.com/v1')
+                .setValue(this.plugin.settings.asrBaseUrl)
+                .onChange(async (value: string) => {
+                    this.plugin.settings.asrBaseUrl = value.trim();
+                    await this.persistSettings();
+                }));
+
+        new Setting(asrPanel)
+            .setName(t('Transcription API key'))
+            .setDesc(t('Leave empty to reuse the active provider API key. Services on localhost usually need no key.'))
+            .addText(text => {
+                text.inputEl.type = 'password';
+                text.setPlaceholder(t('(reuse provider key)'))
+                    .setValue(this.plugin.settings.asrApiKey)
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.asrApiKey = value.trim();
+                        await this.persistSettings();
+                    });
+            });
+
+        new Setting(asrPanel)
+            .setName(t('Transcription model'))
+            .setDesc(t('Model name sent to the endpoint. Defaults to whisper-1, which is what earlier versions hardcoded.'))
+            .addText(text => text
+                .setPlaceholder(DEFAULT_ASR_MODEL)
+                .setValue(this.plugin.settings.asrModel)
+                .onChange(async (value: string) => {
+                    this.plugin.settings.asrModel = value.trim();
+                    await this.persistSettings();
+                }));
+
+        new Setting(asrPanel)
+            .setName(t('Transcription language'))
+            .setDesc(t('ISO-639-1 code such as zh or en. Leave empty to let the endpoint detect the language.'))
+            .addText(text => text
+                .setPlaceholder('auto')
+                .setValue(this.plugin.settings.asrLanguage)
+                .onChange(async (value: string) => {
+                    this.plugin.settings.asrLanguage = value.trim();
+                    await this.persistSettings();
+                }));
+
+        renderSettingHeading(containerEl, t('WeChat capture'), { nameClass: 'baizer-settings-panel-title' });
+
         new Setting(containerEl)
             .setName(t('WeChat Inbox Path'))
             .setDesc(t('The file to monitor for new WeChat links.'))

@@ -80,6 +80,7 @@ rebuilt revision), `--out`, `--label`, `--phase after` and `--revision`.
 | `--theme` | `dark` | `dark` or `light`; written to the vault and asserted in the report |
 | `--label` | PNG basename | Free-form label echoed into the report |
 | `--phase` | – | `before` / `after` |
+| `--open-section` | – | Open the settings accordion section whose `data-section-id` matches (e.g. `capture`), then scroll its content to the top of the viewport. Needed for any control outside the default-open `overview` / `connection` sections. |
 | `--revision` | – | Git revision the plugin was built from |
 | `--scenario` | – | JSON file installed as the plugin's `data.json` |
 | `--vault` | `%TEMP%\baizer-shots\obsidian` | Throwaway vault location |

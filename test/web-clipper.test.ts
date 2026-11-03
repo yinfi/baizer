@@ -48,6 +48,10 @@ function createMockApp(noteStore: Record<string, string>) {
   } as unknown as App;
 }
 
+function check(condition: boolean, message: string) {
+  if (!condition) throw new Error(message);
+}
+
 async function runTests() {
   console.log('=== web-clipper Tests ===');
 
@@ -254,6 +258,146 @@ async function runTests() {
     expect(result.aborted).toBe(true);
     // 关键:笔记未被创建(副作用被拦下)。
     expect(Object.keys(notes).length).toBe(0);
+  });
+  // 门禁改动：转写此前要求 activeProvider.type === 'openai-compatible'，
+  // 只配 Anthropic 的用户因此完全无法转写。现在门禁是「能否解析出转写端点」。
+  await test('transcribes an Anthropic-configured vault once a transcription endpoint is set', async () => {
+    const notes: Record<string, string> = {};
+    const app = createMockApp(notes);
+    transcriptImpl = async (url: string) => ({
+      text: '',
+      title: 'Anthropic Vault Video',
+      description: 'Subtitles are missing, so audio transcription is required.',
+      platform: 'bilibili',
+      author: 'Tester',
+      url,
+      needsTranscription: true,
+      transcriptSource: 'metadata',
+    });
+
+    let captured: any = null;
+    deps.transcribeVideoAudio = async (params: any) => {
+      captured = params;
+      return {
+        text: 'hello world',
+        segments: [
+          { start: 0, end: 3, text: 'hello' },
+          { start: 65, end: 68, text: 'world' },
+        ],
+        audioUrl: 'https://media.example/audio.m4a',
+        mode: 'chunked',
+        chunkCount: 2,
+        durationSec: 68,
+        warnings: [],
+      };
+    };
+
+    const modelService = { generate: async () => '## Summary\n\n- From the transcription.' };
+    const tool = createSaveWebpageTool(modelService, deps);
+    const result = await tool.execute(
+      { url: 'https://www.bilibili.com/video/BVanthropic' },
+      {
+        app,
+        settings: {
+          ...DEFAULT_SETTINGS,
+          activeProvider: 'anthropic',
+          asrBaseUrl: 'http://127.0.0.1:8080/v1',
+        },
+      } as any,
+    );
+
+    expect(result.success).toBe(true);
+    check(!!captured, 'transcription must have been attempted');
+    check(captured.provider.type === 'anthropic', 'the chat provider is still the Anthropic one');
+    check(captured.asr.baseUrl === 'http://127.0.0.1:8080/v1', 'the configured ASR endpoint must be passed down');
+
+    const saved = notes[result.path];
+    expect(saved).toContain('## Timestamped Transcript');
+    expect(saved).toContain('[00:00] hello');
+    expect(saved).toContain('[01:05] world');
+  });
+
+  await test('says why it skipped transcription when no endpoint can be resolved', async () => {
+    const notes: Record<string, string> = {};
+    const app = createMockApp(notes);
+    transcriptImpl = async (url: string) => ({
+      text: '',
+      title: 'No Endpoint Video',
+      description: 'Metadata only.',
+      platform: 'bilibili',
+      author: 'Tester',
+      url,
+      needsTranscription: true,
+      transcriptSource: 'metadata',
+    });
+
+    let attempted = false;
+    deps.transcribeVideoAudio = async () => {
+      attempted = true;
+      throw new Error('must not be called without an endpoint');
+    };
+
+    const notices: string[] = [];
+    deps.notice = (message: string) => {
+      notices.push(message);
+    };
+
+    const modelService = { generate: async () => '## Summary\n\n- Metadata summary.' };
+    const tool = createSaveWebpageTool(modelService, deps);
+    const result = await tool.execute(
+      { url: 'https://www.bilibili.com/video/BVnoendpoint' },
+      { app, settings: { ...DEFAULT_SETTINGS, activeProvider: 'anthropic' } } as any,
+    );
+
+    expect(result.success).toBe(true);
+    check(!attempted, 'no request may be attempted without a resolvable endpoint');
+    check(
+      notices.some((message) => message.includes('No transcription endpoint is configured')),
+      `expected an explanatory notice, got: ${JSON.stringify(notices)}`,
+    );
+    // 仍然落一篇笔记（元数据摘要），只是明确说明了没有转录。
+    expect(notes[result.path]).toContain('## Summary');
+  });
+
+  await test('surfaces a transcription failure instead of swallowing it', async () => {
+    const notes: Record<string, string> = {};
+    const app = createMockApp(notes);
+    transcriptImpl = async (url: string) => ({
+      text: '',
+      title: 'Failing Transcription Video',
+      description: 'The endpoint is going to reject us.',
+      platform: 'bilibili',
+      author: 'Tester',
+      url,
+      needsTranscription: true,
+      transcriptSource: 'metadata',
+    });
+
+    deps.transcribeVideoAudio = async () => {
+      throw new Error('HTTP 500 - upstream exploded');
+    };
+
+    const notices: string[] = [];
+    deps.notice = (message: string) => {
+      notices.push(message);
+    };
+
+    const modelService = { generate: async () => '## Summary\n\n- Metadata summary.' };
+    const tool = createSaveWebpageTool(modelService, deps);
+    const result = await tool.execute(
+      { url: 'https://www.bilibili.com/video/BVfailing' },
+      { app, settings: { ...DEFAULT_SETTINGS, activeProvider: 'openai' } } as any,
+    );
+
+    expect(result.success).toBe(true);
+    check(
+      notices.some((message) => message.includes('Transcription failed') && message.includes('upstream exploded')),
+      `the failure must be announced with its reason, got: ${JSON.stringify(notices)}`,
+    );
+    const saved = notes[result.path];
+    // 改动前这里是 catch (_)：笔记里既没有转录也不说明原因。
+    expect(saved).toContain('Audio transcription failed');
+    expect(saved).toContain('upstream exploded');
   });
 }
 

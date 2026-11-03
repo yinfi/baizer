@@ -290,6 +290,17 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Preview': '预览',
 
     // ── 采集 ──
+    'Video transcription': '视频转写',
+    'Transcription endpoint (Base URL)': '转写端点（Base URL）',
+    'Base URL of an OpenAI-compatible /audio/transcriptions service. Leave empty to reuse the active OpenAI-compatible provider. The endpoint path is appended by the plugin, so include /v1 if your service needs it.': 'OpenAI 方言的 /audio/transcriptions 服务的 Base URL。留空则沿用当前 OpenAI 兼容 provider。端点路径由插件追加，因此服务需要 /v1 时要自己写上。',
+    'Transcription API key': '转写 API Key',
+    'Leave empty to reuse the active provider API key. Services on localhost usually need no key.': '留空则沿用当前 provider 的 API Key。跑在本机的服务通常不需要 Key。',
+    '(reuse provider key)': '（沿用 provider 的 Key）',
+    'Transcription model': '转写模型',
+    'Model name sent to the endpoint. Defaults to whisper-1, which is what earlier versions hardcoded.': '发送给端点的模型名。默认 whisper-1，即旧版本写死的值。',
+    'Transcription language': '转写语言',
+    'ISO-639-1 code such as zh or en. Leave empty to let the endpoint detect the language.': 'ISO-639-1 语言代码，如 zh、en。留空则由端点自行判断。',
+    'WeChat capture': '微信采集',
     'WeChat Inbox Path': '微信收件箱路径',
     'The file to monitor for new WeChat links.': '用于监测新微信链接的文件。',
     'WeChat Storage Path': '微信存储路径',

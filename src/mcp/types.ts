@@ -202,6 +202,21 @@ export interface PluginSettings {
     wechatInboxPath: string;
     wechatStoragePath: string;
 
+    // --- 🎧 Video Transcription (ASR) ---
+    /**
+     * 转写端点（Base URL，**不含端点路径**，插件追加 /audio/transcriptions）。
+     * 留空 = 沿用当前 provider 的 baseUrl，但仅当它是 openai-compatible ——
+     * Anthropic 的地址上没有 /audio/transcriptions，回退过去只会得到 404。
+     * 只配了 Anthropic 的用户在这里填一个 OpenAI 方言的转写服务即可转写。
+     */
+    asrBaseUrl: string;
+    /** 转写端点的 API Key。留空 = 沿用当前 provider 的 apiKey（回环/自建服务通常不需要）。 */
+    asrApiKey: string;
+    /** 转写模型。留空 = 'whisper-1'（改动前写死的值）。 */
+    asrModel: string;
+    /** 音频语言（ISO-639-1，如 'zh' / 'en'）。留空 = 交给端点自动判断。 */
+    asrLanguage: string;
+
     // --- 📚 Knowledge Compiler ---
     knowledgeSourceFolders: string[];
     knowledgeAutoCompile: boolean;
@@ -230,6 +245,9 @@ export interface PluginSettings {
     autoGeneratePluginSkills: boolean;
     pluginSkillExcludeList: string[];
 }
+
+/** 转写模型的内置默认值。改动前它被写死在 video-transcription.ts 里。 */
+export const DEFAULT_ASR_MODEL = 'whisper-1';
 
 export const DEFAULT_SETTINGS: PluginSettings = {
     // Core
@@ -286,6 +304,14 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     // WeChat
     wechatInboxPath: 'Inbox.md',
     wechatStoragePath: 'Clippings',
+
+    // Video transcription (ASR)
+    // 两个空串 + 空模型 = 与改动前完全一致的行为：沿用 provider 的地址与 key，模型 whisper-1。
+    // 既有 OpenAI 兼容用户不需要做任何事；只配 Anthropic 的用户填上 asrBaseUrl 即可转写。
+    asrBaseUrl: '',
+    asrApiKey: '',
+    asrModel: DEFAULT_ASR_MODEL,
+    asrLanguage: '',
 
     // Knowledge Compiler
     knowledgeSourceFolders: [],
@@ -358,6 +384,65 @@ export function pruneUnsupportedProviders(
     }
 
     return kept;
+}
+
+/** 转写端点与模型的可配置覆盖项。空字符串一律表示「沿用 provider / 内置默认」。 */
+export interface AsrOverrides {
+    asrBaseUrl?: string;
+    asrApiKey?: string;
+    asrModel?: string;
+    asrLanguage?: string;
+}
+
+export interface ResolvedAsrConfig {
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    language: string;
+    /** 'settings' = 用户在设置里显式配了端点；'provider' = 沿用 openai-compatible provider。 */
+    source: 'settings' | 'provider';
+}
+
+/**
+ * 无法解析出转写端点时的说明。
+ *
+ * 门禁从「provider 类型」改成「有没有端点」之后，这句话就是用户唯一能看到的线索，
+ * 因此它必须同时说清「为什么没做」与「怎么才能做」。
+ */
+export const NO_ASR_ENDPOINT_MESSAGE =
+    'No transcription endpoint is configured. Set the transcription endpoint (Base URL) in Settings -> Capture, '
+    + 'or switch to an OpenAI-compatible provider whose base URL serves /audio/transcriptions.';
+
+/**
+ * 解析实际要打的转写端点。
+ *
+ * 顺序刻意如此：用户显式配置 > 沿用当前 openai-compatible provider > 放弃。
+ * 「沿用 provider」这一条是既有用户零迁移的保证：什么都没配的 OpenAI 兼容用户，
+ * 行为与改动前完全一致（同一个 baseUrl、同一个 key、同一个 whisper-1）。
+ *
+ * 反过来，Anthropic provider 的 baseUrl 上没有 /audio/transcriptions，所以**不**回退到它 ——
+ * 否则用户会收到一个指向 api.anthropic.com 的 404，而真正的原因是「没配转写端点」。
+ *
+ * 纯函数，与 mergeProviderDefaults / pruneUnsupportedProviders 同类：只看配置，不碰 DOM、不碰网络。
+ */
+export function resolveAsrConfig(params: {
+    asr?: AsrOverrides | null;
+    provider?: ProviderConfig | null;
+}): ResolvedAsrConfig | null {
+    const explicitBaseUrl = (params.asr?.asrBaseUrl ?? '').trim();
+    const provider = params.provider ?? null;
+    const providerFallback = provider && provider.type === 'openai-compatible' ? provider : null;
+
+    const baseUrl = explicitBaseUrl || (providerFallback?.baseUrl ?? '').trim();
+    if (!baseUrl) return null;
+
+    return {
+        baseUrl,
+        apiKey: (params.asr?.asrApiKey ?? '').trim() || (providerFallback?.apiKey ?? '').trim(),
+        model: (params.asr?.asrModel ?? '').trim() || DEFAULT_ASR_MODEL,
+        language: (params.asr?.asrLanguage ?? '').trim(),
+        source: explicitBaseUrl ? 'settings' : 'provider',
+    };
 }
 
 export interface IPlugin extends Plugin {
