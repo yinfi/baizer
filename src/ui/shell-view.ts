@@ -30,6 +30,7 @@ import { TabData, TabId } from './tabs/types';
 import { ConversationController } from './history/conversation-controller';
 import { ConversationStore } from './history/conversation-store';
 import { showGhostText } from './ghost-text';
+import { GrowthToken, ScrollFollowController } from './scroll/scroll-follow-controller';
 import { debounce } from '../utils/throttle';
 
 export { VIEW_TYPE_SHELL };
@@ -68,6 +69,11 @@ export class ShellView extends ItemView {
     private timelineDelegationBound = false;
     // 后台(非活动)tab 收到新消息/流事件时标脏,切回时强制重建以补齐 DOM。
     private dirtyTabs = new Set<TabId>();
+    // 滚动跟随策略:每会话的跟随/未读/阅读位置,以及延迟滚动回调的会话身份校验。
+    private scrollFollow: ScrollFollowController | null = null;
+    // 「有新输出 · 回到最新」入口:仅当活动会话暂停跟随后确有新输出时显示。
+    private unreadBarEl: HTMLElement | null = null;
+    private unreadButtonEl: HTMLButtonElement | null = null;
     // T14 消息 DOM 虚拟化:监听每条消息 entry,滚出视口+缓冲区即脱水为等高占位,滚入再挂回。
     private messageObserver: IntersectionObserver | null = null;
     // 脱水态 entry → 其被摘下的子树(等高占位期间寄存于此,滚入时挂回)。WeakMap 随节点回收自动清理。
@@ -183,6 +189,12 @@ export class ShellView extends ItemView {
 
     private handlePasteBound = (e: ClipboardEvent) => this.handlePaste(e);
     private handleDropBound = (e: DragEvent) => this.handleDrop(e);
+    // 停止无条件贴底后,scroll 事件负责「上翻暂停 / 回到底部恢复」。
+    private handleOutputScrollBound = () => this.scrollFollow?.handleScroll();
+    // 滚轮向上是明确的阅读意图:立即暂停,不等 scroll 事件或下一次 token。
+    private handleOutputWheelBound = (e: WheelEvent) => {
+        if (e.deltaY < 0) this.scrollFollow?.handleUserScrollIntentUp();
+    };
 
     constructor(leaf: WorkspaceLeaf, modelService: ModelService, private plugin?: IPlugin) {
         super(leaf);
@@ -204,12 +216,15 @@ export class ShellView extends ItemView {
         });
         this.streamController = new StreamController({
             onThinking: (content) => {
+                const growth = this.captureScrollGrowth();
                 this.ensureStreamContainer();
                 this.flushPendingStepDivider();
                 this.thinkingRenderer?.appendThinking(content);
                 this.streamNodeCount = this.getStreamNodeCount();
+                this.afterScrollGrowth(growth, true);
             },
             onToolCall: (name, args) => {
+                const growth = this.captureScrollGrowth();
                 this.ensureStreamContainer();
                 // 工具调用出现 = 此前回复区的正文是「这一步的过程叙述」,
                 // 把它毕业进时间线作为思路节点,并清空回复区为下一轮腾空。
@@ -217,9 +232,13 @@ export class ShellView extends ItemView {
                 this.thinkingRenderer?.finalizeCurrentThinking();
                 this.toolRenderer?.addToolCall(name, args);
                 this.streamNodeCount = this.getStreamNodeCount();
+                this.afterScrollGrowth(growth, true);
             },
             onToolResult: (name, result, error) => {
+                const growth = this.captureScrollGrowth();
                 this.toolRenderer?.updateToolResult(name, result, error);
+                // 工具结果也是新输出；暂停中的读者应看到返回入口。
+                this.afterScrollGrowth(growth, true);
             },
             onTextDelta: (content) => {
                 this.ensureStreamContainer();
@@ -234,7 +253,7 @@ export class ShellView extends ItemView {
             },
             onDone: (finalText) => this.finalizeStream(finalText),
             onError: () => this.finalizeStream(),
-            onScrollRequest: () => this.scrollToEnd(),
+            onScrollRequest: () => this.followScrollIfEnabled(),
         });
     }
 
@@ -287,6 +306,9 @@ export class ShellView extends ItemView {
         // think-summary 折叠交互采用事件委托(避免每轮流式在 summary 上累积监听器)。
         // 抽成幂等方法,onOpen 与流式入口都会确保绑定,不依赖初始化路径是否完整走过。
         this.ensureTimelineDelegation();
+        this.bindScrollFollowListeners();
+        this.createUnreadBar(container);
+        this.createScrollFollowController();
 
         this.tabBar = new TabBar(this.tabBarContainerEl, {
             onTabClick: (id) => {
@@ -310,6 +332,8 @@ export class ShellView extends ItemView {
         }
         this.updateTabBar();
         this.renderActiveTabMessages();
+        // 首次打开:新会话定位到最新(与「切回已有会话恢复阅读位置」明确区分)。
+        if (activeTab) this.scrollFollow?.activateSession(activeTab.id, 'new');
 
         // 3. Input Area (Fixed at bottom)
         const inputContainer = this.createShellScaffold(container);
@@ -580,10 +604,18 @@ export class ShellView extends ItemView {
         }
     }
 
-    appendMessage(msg: ChatMessage) {
+    /**
+     * @param markUnread 该消息是否算「新输出」。全量重建旧消息时传 false,
+     *   否则切回暂停中的会话会凭空点亮「有新输出」。
+     */
+    appendMessage(msg: ChatMessage, markUnread = true) {
+        const growth = this.captureScrollGrowth();
         void this.getMessageRenderer()
             .renderMessage(this.getActiveMessageContainer(), msg)
-            .then((entry) => this.observeMessageEntry(entry));
+            .then((entry) => {
+                this.observeMessageEntry(entry);
+                this.afterScrollGrowth(growth, markUnread);
+            });
         this.updateActivity();
     }
 
@@ -619,11 +651,59 @@ export class ShellView extends ItemView {
         }
     }
 
-    private scrollToEnd() {
-        // Use setTimeout to ensure DOM is ready
-        window.setTimeout(() => {
-            this.outputContainer.scrollTop = this.outputContainer.scrollHeight;
-        }, 50);
+    // ==================== 滚动跟随（issue #64） ====================
+
+    private createScrollFollowController() {
+        this.scrollFollow?.dispose();
+        this.scrollFollow = new ScrollFollowController({
+            getContainer: () => this.outputContainer ?? null,
+            onUnreadChange: (sessionId, unread) => {
+                if (this.tabManager.getActiveTab()?.id !== sessionId) return;
+                this.updateUnreadBar(unread);
+            },
+        });
+    }
+
+    private bindScrollFollowListeners() {
+        this.outputContainer.addEventListener('scroll', this.handleOutputScrollBound, { passive: true });
+        this.outputContainer.addEventListener('wheel', this.handleOutputWheelBound, { passive: true });
+    }
+
+    /**
+     * 「有新输出 · 回到最新」入口。放在消息区与输入区之间、不覆盖任何一侧：
+     * 隐藏时不占布局，显示时是独立一行，窄侧栏下也不会横向溢出。
+     */
+    private createUnreadBar(container: HTMLElement) {
+        const bar = container.createDiv({ cls: 'shell-unread-bar baizer-hidden' });
+        bar.setAttribute('aria-live', 'polite');
+        const button = bar.createEl('button', {
+            cls: 'shell-unread-button',
+            text: t('New output · Back to latest'),
+        }) as HTMLButtonElement;
+        button.setAttr('type', 'button');
+        button.addEventListener('click', () => this.scrollFollow?.scrollToLatest());
+        this.unreadBarEl = bar;
+        this.unreadButtonEl = button;
+    }
+
+    private updateUnreadBar(unread: boolean = this.scrollFollow?.hasUnread() ?? false) {
+        if (!this.unreadBarEl) return;
+        this.unreadBarEl.toggleClass('baizer-hidden', !unread);
+        this.unreadButtonEl?.setAttr('aria-hidden', String(!unread));
+    }
+
+    /** 内容增长前捕获会话身份,增长后交给策略决定是否贴底/点亮未读。 */
+    private captureScrollGrowth(): GrowthToken | null {
+        return this.scrollFollow?.captureGrowth() ?? null;
+    }
+
+    private afterScrollGrowth(token: GrowthToken | null, markUnread: boolean) {
+        this.scrollFollow?.afterGrowth(token, { markUnread });
+    }
+
+    /** 跟随中才贴底;已暂停时保持阅读锚点。 */
+    private followScrollIfEnabled() {
+        this.scrollFollow?.followActiveIfEnabled();
     }
 
     // ==================== T14: 消息 DOM 虚拟化 ====================
@@ -706,6 +786,7 @@ export class ShellView extends ItemView {
         this.updateInputToolbarCapabilities();
         if (isResponding) {
             // Show loading indicator (instance-scoped to avoid cross-view collisions)
+            const growth = this.captureScrollGrowth();
             if (!this.loadingIndicatorEl) {
                 const loadingDiv = this.getActiveMessageContainer().createDiv({ cls: 'shell-entry system' });
                 loadingDiv.setAttribute('role', 'status');
@@ -714,7 +795,8 @@ export class ShellView extends ItemView {
                 loadingDiv.createSpan({ text: 'Thinking...' });
                 this.loadingIndicatorEl = loadingDiv;
             }
-            this.scrollToEnd();
+            // 加载指示不是新输出,不点亮未读;跟随中仍贴底。
+            this.afterScrollGrowth(growth, false);
         } else {
             // Remove loading indicator
             this.loadingIndicatorEl?.remove();
@@ -851,6 +933,8 @@ export class ShellView extends ItemView {
      */
     private renderStreamContent() {
         if (!this.streamContent) return;
+        // 增长前捕获:是否跟随只由此刻的跟随状态决定,不能用增长后的新高度重新判断。
+        const growth = this.captureScrollGrowth();
 
         // 首帧:建立稳定块容器 + 尾部纯文本 + 光标三段结构。
         if (!this.streamTailEl) {
@@ -875,7 +959,7 @@ export class ShellView extends ItemView {
 
         // 尾部只做纯文本更新(浏览器只 diff 这一个文本节点),开销与尾部长度线性。
         this.streamTailEl.textContent = this.streamAccumulatedText.slice(this.streamRenderedLen);
-        this.scrollToEnd();
+        this.afterScrollGrowth(growth, true);
     }
 
     /** 把一段已闭合的 Markdown 文本渲染进一个新的稳定块节点并追加,冻结不再重渲。 */
@@ -883,10 +967,13 @@ export class ShellView extends ItemView {
         if (!this.streamStableEl) return;
         const blockEl = this.streamStableEl.createDiv({ cls: 'shell-stream-block' });
         await this.getMessageRenderer().renderAiContent(blockEl, markdown);
+        // Markdown 渲染完成可能再改变高度:跟随中补一次贴底;暂停时不动作。
+        this.followScrollIfEnabled();
     }
 
 
     private finalizeStream(finalText?: string) {
+        const growth = this.captureScrollGrowth();
         this.debouncedRenderStream.flush();
 
         this.thinkingRenderer?.finalizeCurrentThinking();
@@ -906,7 +993,8 @@ export class ShellView extends ItemView {
                 this.streamContent,
                 resolvedText,
             ).then(() => {
-                this.scrollToEnd();
+                // 定型渲染不是「新输出」:暂停时不得点亮未读,也不能把读者拉回底部。
+                this.afterScrollGrowth(growth, false);
             });
         }
 
@@ -1009,7 +1097,7 @@ export class ShellView extends ItemView {
                 onInternalLinkClick: (href) => {
                     void this.app.workspace.openLinkText(href, '', false);
                 },
-                onScrollRequest: () => this.scrollToEnd(),
+                onScrollRequest: () => this.followScrollIfEnabled(),
                 onRenderError: (error) => {
                     logger.error('Markdown rendering failed', error, 'ShellView');
                 },
@@ -1115,6 +1203,15 @@ export class ShellView extends ItemView {
         // 断开消息虚拟化观察,避免视图关闭后 observer 泄漏。
         this.messageObserver?.disconnect();
         this.messageObserver = null;
+        // 视图关闭后不能再有任何延迟滚动回调影响会话。
+        this.scrollFollow?.dispose();
+        this.scrollFollow = null;
+        if (this.outputContainer) {
+            this.outputContainer.removeEventListener('scroll', this.handleOutputScrollBound);
+            this.outputContainer.removeEventListener('wheel', this.handleOutputWheelBound as EventListener);
+        }
+        this.unreadBarEl = null;
+        this.unreadButtonEl = null;
         if (this.inputEl) {
             this.inputEl.removeEventListener('input', this.handleInputBound);
             this.inputEl.removeEventListener('keydown', this.handleKeyDownBound);
@@ -1576,12 +1673,15 @@ export class ShellView extends ItemView {
     }
 
     private async createAndShowTab() {
+        this.scrollFollow?.prepareForSessionSwitch();
         await this.persistActiveTab();
         const tab = this.tabManager.createTab();
         this.activateTabSession(tab.id);
         this.applyTabMetadata(tab);
         this.resetStreamState();
         this.renderActiveTabMessages();
+        // 新会话:定位到最新并开始跟随。
+        this.scrollFollow?.activateSession(tab.id, 'new');
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
@@ -1592,6 +1692,8 @@ export class ShellView extends ItemView {
             return;
         }
 
+        // 先记下离开会话的阅读位置,再切身份;延迟回调带会话校验,不会滚到目标 tab。
+        this.scrollFollow?.prepareForSessionSwitch();
         await this.persistActiveTab();
         if (!this.tabManager.switchTab(id)) return;
 
@@ -1609,15 +1711,19 @@ export class ShellView extends ItemView {
         } else {
             this.renderActiveTabMessages();
         }
+        // 恢复该会话自己的跟随/未读/阅读位置(新会话已在创建时定位)。
+        this.scrollFollow?.activateSession(id, 'restore');
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
 
     private async closeTab(id: TabId) {
+        this.scrollFollow?.prepareForSessionSwitch();
         const tabToClose = this.tabManager.getAllTabs().find(item => item.id === id) ?? null;
         await this.persistTab(tabToClose);
         const wasActive = this.tabManager.getActiveTab()?.id === id;
         if (!this.tabManager.closeTab(id)) return;
+        this.scrollFollow?.removeSession(id);
 
         const session = this.tabSessions.get(id);
         session?.chatController.cleanup();
@@ -1641,6 +1747,7 @@ export class ShellView extends ItemView {
                 await this.syncProviderStateForTab(activeTab);
                 this.resetStreamState();
                 this.renderActiveTabMessages();
+                this.scrollFollow?.activateSession(activeTab.id, 'restore');
             }
         }
     }
@@ -1719,6 +1826,8 @@ export class ShellView extends ItemView {
             this.tabManager.markAttention(tabId, true);
             // 后台 tab 有新消息:标脏,切回时强制重建以补齐 DOM。
             this.dirtyTabs.add(tabId);
+            // 该会话若已暂停跟随,后台到达的输出点亮它自己的未读;跟随中的会话切回自然贴底。
+            this.scrollFollow?.noteOutputInSession(tabId);
         }
     }
 
@@ -1729,6 +1838,8 @@ export class ShellView extends ItemView {
         if (this.tabManager.getActiveTab()?.id === tabId) {
             this.resetStreamState();
             this.renderActiveTabMessages();
+            // /clear 是显式重置:回到最新并恢复跟随。
+            this.scrollFollow?.activateSession(tabId, 'new');
         }
     }
 
@@ -1767,6 +1878,7 @@ export class ShellView extends ItemView {
             // 这也是流式 ai 回复在后台 tab 的标脏来源——它在 handleTabMessageAdded
             // 里带 alreadyRendered 早退,不走那边的标脏分支。
             this.dirtyTabs.add(tabId);
+            this.scrollFollow?.noteOutputInSession(tabId);
         }
     }
 
@@ -1793,6 +1905,7 @@ export class ShellView extends ItemView {
             this.tabManager.markAttention(tabId, true);
             // 后台 tab 的工作区编辑消息:标脏,切回时重建。
             this.dirtyTabs.add(tabId);
+            this.scrollFollow?.noteOutputInSession(tabId);
         }
     }
 
@@ -1868,12 +1981,15 @@ export class ShellView extends ItemView {
             return;
         }
 
+        this.scrollFollow?.prepareForSessionSwitch();
         await this.persistActiveTab();
         const restoredTab = this.conversationController.restoreConversation(snapshot, this.tabManager);
         this.activateTabSession(restoredTab.id);
         await this.syncProviderStateForTab(restoredTab);
         this.resetStreamState();
         this.renderActiveTabMessages();
+        // 已有会话:恢复其阅读位置;首次恢复（无记录）落在最新输出。
+        this.scrollFollow?.activateSession(restoredTab.id, 'restore');
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
@@ -2161,7 +2277,8 @@ export class ShellView extends ItemView {
                 role: 'system',
                 content: 'Kernel initialized.',
                 timestamp: Date.now(),
-            });
+            }, false);
+            if (activeId != null) this.scrollFollow?.activateSession(activeId, 'restore');
             return;
         }
 
@@ -2175,11 +2292,14 @@ export class ShellView extends ItemView {
                     ...message,
                     branch: message.branch ?? prevUser?.branch,
                     forkSourceText: message.forkSourceText ?? prevUser?.content,
-                });
+                }, false);
             } else {
-                this.appendMessage(message);
+                this.appendMessage(message, false);
             }
         }
+        // 全量重建会把滚动位置清零。停在原会话的阅读位置(跟随中则回到底部),
+        // 避免分支切换、撤销工作区编辑等纯重画把读者弹出阅读锚点。
+        if (activeId != null) this.scrollFollow?.activateSession(activeId, 'restore');
     }
 
     /** 在给定消息数组中,找到 index 之前紧邻的一条 user 消息。 */

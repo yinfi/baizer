@@ -2017,6 +2017,49 @@ textarea.shell-input::placeholder {
     gap: 12px;
 }
 
+/*
+ * 「有新输出 · 回到最新」入口。
+ * 独立占一行、夹在消息区与输入区之间：显示时不覆盖消息或输入框；隐藏时不占布局。
+ * 窄侧栏（300px）下按钮以 max-width + ellipsis 收口，不产生横向溢出。
+ */
+.shell-unread-bar {
+    display: flex;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    min-width: 0;
+    padding: 4px 2px 2px;
+}
+
+.shell-unread-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    max-width: 100%;
+    min-width: 0;
+    padding: 4px 12px;
+    overflow: hidden;
+    border: 1px solid var(--baizer-border, var(--background-modifier-border));
+    border-radius: 999px;
+    background: var(--baizer-surface-strong, var(--background-secondary));
+    color: var(--text-normal);
+    font-size: var(--font-ui-smaller, 12px);
+    line-height: 1.3;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    box-shadow: var(--baizer-shadow, var(--shadow-s));
+}
+
+.shell-unread-button:hover {
+    background: var(--background-modifier-hover);
+}
+
+.shell-unread-button:focus-visible {
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: 2px;
+}
+
 .shell-entry.user {
     align-self: flex-end;
     max-width: 92%;
