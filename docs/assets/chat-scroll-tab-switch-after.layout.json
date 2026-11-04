@@ -1,9 +1,9 @@
 {
   "label": "chat-scroll-tab-switch-after",
   "phase": "after",
-  "revision": "0bffb39",
-  "capturedAt": "2026-11-04T11:44:16.096Z",
-  "out": "D:\\code\\.baizer-shots-ticket\\out\\chat-scroll-tab-switch-after.png",
+  "revision": "2212d6f",
+  "capturedAt": "2026-11-04T14:26:56.749Z",
+  "out": "chat-scroll-tab-switch-after.png",
   "scenario": {
     "name": "tab-switch-clamp",
     "seedCount": 12,
@@ -21,7 +21,7 @@
   "host": {
     "platform": "win32",
     "node": "v24.16.0",
-    "exe": "C:\\Program Files\\Obsidian\\Obsidian.exe",
+    "exe": "Obsidian.exe",
     "exeFileVersion": "1.7.7"
   },
   "steps": [
@@ -83,7 +83,7 @@
         "appVersion": null,
         "pluginVersion": "1.5.0",
         "locale": "zh",
-        "activeTabId": "tab-1793792659611-zoyud5",
+        "activeTabId": "tab-1793802420449-8rp4ct",
         "tabCount": 1,
         "viewRect": {
           "x": 908,
@@ -139,7 +139,7 @@
         "appVersion": null,
         "pluginVersion": "1.5.0",
         "locale": "zh",
-        "activeTabId": "tab-1793792662520-6h7neb",
+        "activeTabId": "tab-1793802423364-3skg3l",
         "tabCount": 2,
         "viewRect": {
           "x": 908,
@@ -211,7 +211,6 @@
   ],
   "limitations": [],
   "vault": {
-    "dir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
     "pluginManifest": {
       "id": "baizer",
       "name": "Baizer",
@@ -221,25 +220,14 @@
       "author": "yinfie",
       "authorUrl": "https://github.com/yinfi",
       "isDesktopOnly": false
-    },
-    "profile": {
-      "userDataDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\chat-profile",
-      "configPath": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\chat-profile\\obsidian.json",
-      "vaultKey": "f230a63f4db30aad"
     }
-  },
-  "pid": 257056,
-  "target": {
-    "id": "12A46847EDBFBF15F9F4E83B5F6F819C",
-    "url": "app://obsidian.md/index.html",
-    "title": "新标签页 - obsidian - Obsidian 1.15.0"
   },
   "scenarioData": {
     "beforeSwitchA": {
       "appVersion": null,
       "pluginVersion": "1.5.0",
       "locale": "zh",
-      "activeTabId": "tab-1793792659611-zoyud5",
+      "activeTabId": "tab-1793802420449-8rp4ct",
       "tabCount": 1,
       "viewRect": {
         "x": 908,
@@ -293,7 +281,7 @@
       "appVersion": null,
       "pluginVersion": "1.5.0",
       "locale": "zh",
-      "activeTabId": "tab-1793792662520-6h7neb",
+      "activeTabId": "tab-1793802423364-3skg3l",
       "tabCount": 2,
       "viewRect": {
         "x": 908,
@@ -348,7 +336,7 @@
     "appVersion": null,
     "pluginVersion": "1.5.0",
     "locale": "zh",
-    "activeTabId": "tab-1793792659611-zoyud5",
+    "activeTabId": "tab-1793802420449-8rp4ct",
     "tabCount": 1,
     "viewRect": {
       "x": 908,
@@ -402,7 +390,7 @@
     "appVersion": null,
     "pluginVersion": "1.5.0",
     "locale": "zh",
-    "activeTabId": "tab-1793792659611-zoyud5",
+    "activeTabId": "tab-1793802420449-8rp4ct",
     "tabCount": 2,
     "viewRect": {
       "x": 908,
@@ -463,7 +451,7 @@
     "readingAnchorIsNotBottom": true
   },
   "screenshot": {
-    "path": "D:\\code\\.baizer-shots-ticket\\out\\chat-scroll-tab-switch-after.png",
+    "path": "chat-scroll-tab-switch-after.png",
     "bytes": 76919,
     "width": 520,
     "height": 846,

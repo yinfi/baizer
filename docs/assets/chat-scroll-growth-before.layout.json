@@ -2,8 +2,8 @@
   "label": "chat-scroll-growth-before",
   "phase": "before",
   "revision": "cc33a19",
-  "capturedAt": "2026-11-04T11:45:19.733Z",
-  "out": "D:\\code\\.baizer-shots-ticket\\out\\chat-scroll-growth-before.png",
+  "capturedAt": "2026-11-04T14:28:02.520Z",
+  "out": "chat-scroll-growth-before.png",
   "scenario": {
     "name": "layout-growth-threshold",
     "seedCount": 12,
@@ -21,7 +21,7 @@
   "host": {
     "platform": "win32",
     "node": "v24.16.0",
-    "exe": "C:\\Program Files\\Obsidian\\Obsidian.exe",
+    "exe": "Obsidian.exe",
     "exeFileVersion": "1.7.7"
   },
   "steps": [
@@ -92,7 +92,6 @@
     "failed assertions: viewportStayedAtReadingAnchor, pausedAfterGrowth, unreadEntryVisible"
   ],
   "vault": {
-    "dir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
     "pluginManifest": {
       "id": "baizer",
       "name": "Baizer",
@@ -102,25 +101,14 @@
       "author": "yinfie",
       "authorUrl": "https://github.com/yinfi",
       "isDesktopOnly": false
-    },
-    "profile": {
-      "userDataDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\chat-profile",
-      "configPath": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\chat-profile\\obsidian.json",
-      "vaultKey": "f230a63f4db30aad"
     }
-  },
-  "pid": 174952,
-  "target": {
-    "id": "7E46413D720945A080FFEF2A99FF0195",
-    "url": "app://obsidian.md/index.html",
-    "title": "新标签页 - obsidian - Obsidian 1.15.0"
   },
   "scenarioData": {
     "beforeStream": {
       "appVersion": null,
       "pluginVersion": "1.5.0",
       "locale": "zh",
-      "activeTabId": "tab-1793792723250-4s5uez",
+      "activeTabId": "tab-1793802487630-wwat9s",
       "tabCount": 1,
       "viewRect": {
         "x": 908,
@@ -175,7 +163,7 @@
     "appVersion": null,
     "pluginVersion": "1.5.0",
     "locale": "zh",
-    "activeTabId": "tab-1793792723250-4s5uez",
+    "activeTabId": "tab-1793802487630-wwat9s",
     "tabCount": 1,
     "viewRect": {
       "x": 908,
@@ -229,7 +217,7 @@
     "appVersion": null,
     "pluginVersion": "1.5.0",
     "locale": "zh",
-    "activeTabId": "tab-1793792723250-4s5uez",
+    "activeTabId": "tab-1793802487630-wwat9s",
     "tabCount": 1,
     "viewRect": {
       "x": 908,
@@ -288,7 +276,7 @@
     "unreadEntryVisible": false
   },
   "screenshot": {
-    "path": "D:\\code\\.baizer-shots-ticket\\out\\chat-scroll-growth-before.png",
+    "path": "chat-scroll-growth-before.png",
     "bytes": 40229,
     "width": 520,
     "height": 846,
