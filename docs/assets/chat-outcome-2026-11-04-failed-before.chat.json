@@ -1,0 +1,89 @@
+{
+  "label": "chat-failed-before",
+  "phase": "before",
+  "revision": "65020a8",
+  "scenario": "failure",
+  "viewport": {
+    "requested": {
+      "width": 1100,
+      "height": 900
+    },
+    "actual": {
+      "width": 1100,
+      "height": 900
+    }
+  },
+  "theme": "dark",
+  "plugin": {
+    "dir": "C:\\Users\\Public\\baizer-shots\\before",
+    "files": [
+      {
+        "file": "main.js",
+        "bytes": 3180761
+      },
+      {
+        "file": "manifest.json",
+        "bytes": 324
+      },
+      {
+        "file": "styles.css",
+        "bytes": 113082
+      }
+    ],
+    "manifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.5.0",
+      "minAppVersion": "1.7.2",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    }
+  },
+  "userDataDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-chat-outcome-65\\userdata",
+  "vaultDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-chat-outcome-65\\vault",
+  "logPath": "C:\\Users\\Admin\\AppData\\Local\\Temp\\chat-outcome-shot-250308.log",
+  "modals": {
+    "trust": {
+      "present": true,
+      "clicked": "Trust author and enable plugins"
+    },
+    "releaseNotesDetached": 0
+  },
+  "pluginEnable": {
+    "steps": [
+      "plugins.loadManifests()"
+    ],
+    "error": null,
+    "loaded": true
+  },
+  "serverLog": [
+    {
+      "mode": "failure",
+      "url": "/v1/chat/completions",
+      "model": "fake-model",
+      "at": "2026-11-04T10:03:39.810Z"
+    }
+  ],
+  "facts": [
+    {
+      "hasFailureCard": false,
+      "hasCancelledCard": false,
+      "outcomeTitle": "",
+      "outcomeReason": "",
+      "hasRetryButton": false,
+      "hasRestoreDraftButton": false,
+      "inputValue": "",
+      "systemMessages": [
+        "[System] Kernel initialized.",
+        "[System] Error: network error"
+      ],
+      "answerText": "Here is the partial answer that was already streamed. The provider will drop the connection before finishing.",
+      "timelineCollapsed": false,
+      "timelineSummary": "Thinking in progress...",
+      "aiEntries": 1
+    }
+  ],
+  "capturedAt": "2026-11-04T10:03:41.899Z"
+}

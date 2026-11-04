@@ -1,3 +1,10 @@
+(global as any).window = {
+  setInterval: () => 0,
+  clearInterval: () => { },
+  setTimeout: (callback: () => void, ms?: number) => setTimeout(callback, ms),
+  clearTimeout: (handle: any) => clearTimeout(handle),
+};
+
 function expect(actual: any) {
   return {
     toBe: (expected: any) => {
@@ -517,6 +524,72 @@ async function runTests() {
     expect(summary.attributes['aria-expanded']).toBe('true');
   });
 
+  // issue #65:失败保留过程展开(不再显示成功摘要),并渲染失败卡。
+  await test('ShellView keeps the process timeline expanded when the turn fails', async () => {
+    const { ShellView } = await import('../src/ui/shell-view');
+    const view = new ShellView({} as any, {
+      getSkillCommands: () => [],
+    } as any);
+    const output = new FakeElement();
+    (globalThis as any).document = {
+      createElement: () => new FakeElement(),
+      getElementById: () => null,
+    };
+    (view as any).outputContainer = output;
+    (view as any).getMessageRenderer = () => ({
+      renderAiContent: async () => undefined,
+      addActionToolbar: () => undefined,
+      renderTurnOutcome: (container: any) => {
+        container.createDiv({ cls: 'shell-turn-outcome shell-turn-failed' });
+        return null;
+      },
+    });
+    (view as any).persistActiveTab = async () => undefined;
+    (view as any).tabManager.createTab();
+
+    (view as any).ensureStreamContainer();
+    const timeline = output.querySelector('.shell-think-timeline')!;
+    (view as any).streamNodeCount = 2;
+    (view as any).streamAccumulatedText = 'partial';
+
+    (view as any).finalizeStream('failed', 'partial', 'network down');
+
+    expect(timeline.hasClass('is-collapsed')).toBe(false);
+    expect(timeline.hasClass('is-failed')).toBe(true);
+    expect(timeline.querySelector('.think-summary-text')?.textContent).toBe('Failed after 2 steps');
+    expect(output.querySelector('.shell-turn-failed') !== null).toBe(true);
+  });
+
+  // issue #65:首 token 前失败也要有失败卡,不能留下永久 Thinking / 空白。
+  await test('ShellView renders a failure card when the stream never started', async () => {
+    const { ShellView } = await import('../src/ui/shell-view');
+    const view = new ShellView({} as any, {
+      getSkillCommands: () => [],
+    } as any);
+    const output = new FakeElement();
+    (globalThis as any).document = {
+      createElement: () => new FakeElement(),
+      getElementById: () => null,
+    };
+    (view as any).outputContainer = output;
+    (view as any).getMessageRenderer = () => ({
+      renderAiContent: async () => undefined,
+      addActionToolbar: () => undefined,
+      renderTurnOutcome: (container: any) => {
+        container.createDiv({ cls: 'shell-turn-outcome shell-turn-failed' });
+        return null;
+      },
+    });
+    (view as any).persistActiveTab = async () => undefined;
+    (view as any).tabManager.createTab();
+
+    // 没有 ensureStreamContainer():模拟错误在首 token 之前就到达。
+    (view as any).finalizeStream('failed', undefined, 'provider unavailable');
+
+    expect(output.querySelector('.shell-turn-failed') !== null).toBe(true);
+    expect(output.querySelector('.shell-loading') === null).toBe(true);
+  });
+
   await test('ShellView helper actions add related context and prepare edit input', async () => {
     const { ShellView } = await import('../src/ui/shell-view');
 
@@ -546,6 +619,44 @@ async function runTests() {
     (view as any).openPluginSettings();
 
     expect(settingCalls).toEqual(['open', 'baizer']);
+  });
+
+  // issue #65:发送失败恢复原草稿与附件,但不覆盖等待期间新输入的内容。
+  await test('ShellView restores a failed draft without overwriting newer input', async () => {
+    const { ShellView } = await import('../src/ui/shell-view');
+    const view = new ShellView({} as any, {
+      getSkillCommands: () => [],
+      getProviderCapabilities: () => ({ supportsImageInput: false }),
+    } as any);
+
+    const inputEl = {
+      value: '',
+      scrollHeight: 10,
+      setCssStyles: () => { },
+      focus: () => { },
+    };
+    (view as any).inputEl = inputEl;
+    (view as any).outputContainer = null;
+
+    const request = {
+      query: 'original draft',
+      context: [{ id: 'ctx-file', type: 'file', data: 'note.md', content: 'body' }],
+      selection: '',
+      source: 'shell',
+    };
+
+    (view as any).restoreDraft(request);
+    expect(inputEl.value).toBe('original draft');
+    expect((view as any).contextManager.getContexts().map((ctx: any) => ctx.id)).toEqual(['ctx-file']);
+
+    // 用户等待期间已经输入了新内容:自动恢复不覆盖它。
+    inputEl.value = 'new draft typed while waiting';
+    (view as any).restoreDraft(request);
+    expect(inputEl.value).toBe('new draft typed while waiting');
+
+    // 失败卡片的「恢复草稿」是显式动作,才允许取回原草稿。
+    (view as any).restoreDraft(request, true);
+    expect(inputEl.value).toBe('original draft');
   });
 }
 

@@ -1,4 +1,5 @@
 import { ApprovalRequest } from './approval-card';
+import type { ChatTurnOutcome } from '../models/interfaces';
 import type { WorkspaceEditSummary } from '../services/workspace-edit-service';
 
 export type ShellMessageRole = 'user' | 'ai' | 'system';
@@ -32,6 +33,14 @@ export interface ChatMessage {
         providerId?: string;
         modelId?: string;
         durationMs?: number;
+        /**
+         * 本轮终态。completed / failed / cancelled 与 StreamEvent 同源，
+         * 随消息一起持久化，切换会话/重开视图/刷新后仍能还原终态，不把失败画成成功。
+         * 缺省（历史消息）按 completed 处理。
+         */
+        outcome?: ChatTurnOutcome;
+        /** 失败原因（outcome === 'failed' 时存在），随消息持久化，回放时仍需可见。 */
+        failureReason?: string;
         interrupted?: boolean;
         workspaceEdit?: WorkspaceEditSummary;
     };

@@ -82,6 +82,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       yield {
         type: 'error',
         message: '该会话的历史记录无法迁移（文件格式无法识别或已损坏），已降级为只读：只能查看历史，不能继续对话。',
+        outcome: 'failed',
       };
       return;
     }
@@ -154,12 +155,20 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
 
     const unsubscribe = agent.subscribe((event: any) => {
       // Provider 错误不会让 prompt() reject,而是以 message_end(stopReason:'error') 出现。
-      // 中断(aborted)由 runError 分支处理,这里只转 error。
-      if (event?.type === 'message_end' && event.message?.stopReason === 'error') {
-        if (!approvalMessage) {
-          if (!runErrorBox.value) runErrorBox.value = { message: event.message?.errorMessage || 'Provider error', aborted: false };
+      // 用户中断同样以 message_end(stopReason:'aborted') 出现:pi 会把这次 run 正常收尾
+      // (prompt 不 reject),若只看 signal.aborted 或 catch,取消会被当成正常完成——
+      // 这正是「手动停止后仍显示成功」的根因。故这里显式转成 aborted runError。
+      if (event?.type === 'message_end') {
+        if (event.message?.stopReason === 'aborted') {
+          if (!runErrorBox.value) runErrorBox.value = { message: 'Request aborted', aborted: true };
+          return;
         }
-        return;
+        if (event.message?.stopReason === 'error') {
+          if (!approvalMessage) {
+            if (!runErrorBox.value) runErrorBox.value = { message: event.message?.errorMessage || 'Provider error', aborted: false };
+          }
+          return;
+        }
       }
 
       const mapped = mapHarnessEvent(event);
@@ -231,15 +240,6 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
         yield event;
       }
       await runPromise;
-      // 本轮消息落盘(pi 1.3.0 的 Agent 不写持久层,故由本 runtime 负责)。
-      // 失败不静默:并入既有的错误通道,由下方 runError 分支产出 error 事件。
-      try {
-        await persistTurnMessages(session, agent.state.messages.slice(transcriptBaseline));
-      } catch (error: any) {
-        if (!runErrorBox.value) {
-          runErrorBox.value = { message: `Failed to persist turn: ${error?.message || 'unknown error'}`, aborted: false };
-        }
-      }
     } finally {
       unsubscribe();
       signal?.removeEventListener('abort', onAbort);
@@ -250,19 +250,35 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     const runError = runErrorBox.value;
     if (runError) {
       if (runError.aborted) {
-        yield { type: 'done', text: fullResponseText, interrupted: true };
+        // 取消:显式终态,且不落盘——残缺轮次不属于「真正完成的一轮」。
+        yield { type: 'done', text: fullResponseText, outcome: 'cancelled', interrupted: true };
         return;
       }
       if (!approvalMessage) {
-        yield { type: 'error', message: runError.message };
+        yield { type: 'error', message: runError.message, outcome: 'failed' };
         return;
       }
+    }
+
+    // 本轮消息落盘(pi 1.3.0 的 Agent 不写持久层,故由本 runtime 负责)。
+    // 只落「真正完成」的轮次(成功或审批终止):失败/取消的残缺轮次不写进会话树,
+    // 否则重试会在 transcript 里重复同一条 user 消息,历史里也会留下一条假答案。
+    // 落盘失败不静默:并入错误通道,由 UI 以失败终态呈现。
+    let persistFailure = '';
+    try {
+      await persistTurnMessages(session, agent.state.messages.slice(transcriptBaseline));
+    } catch (error: any) {
+      persistFailure = `Failed to persist turn: ${error?.message || 'unknown error'}`;
+    }
+    if (persistFailure && !approvalMessage) {
+      yield { type: 'error', message: persistFailure, outcome: 'failed' };
+      return;
     }
 
     if (approvalMessage) {
       await this.retainCompletedTurn(turn, approvalMessage, turnToolResults);
       if (!approvalToolResultYielded) fullResponseText = '';
-      yield { type: 'done', text: '' };
+      yield { type: 'done', text: '', outcome: 'completed' };
       return;
     }
 
@@ -282,7 +298,9 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
         yield { type: 'compaction', foldedEntryCount: compactionResult.foldedEntryCount ?? 0 };
       }
     }
-    yield entryIds ? { type: 'done', text: fullResponseText, entryIds } : { type: 'done', text: fullResponseText };
+    yield entryIds
+      ? { type: 'done', text: fullResponseText, outcome: 'completed', entryIds }
+      : { type: 'done', text: fullResponseText, outcome: 'completed' };
   }
 }
 

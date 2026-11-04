@@ -159,6 +159,41 @@ async function runTests() {
     }]);
   });
 
+  await test('persists terminal outcome and failure reason for replay', async () => {
+    const { adapter, store } = createStore(ConversationStore);
+    const terminalSnapshot = {
+      ...snapshot('outcome', 45),
+      messages: [
+        { id: 'm-user', role: 'user', content: 'question', timestamp: 44 },
+        {
+          id: 'm-failed',
+          role: 'ai',
+          content: 'partial answer',
+          timestamp: 45,
+          metadata: { outcome: 'failed', failureReason: 'network down' },
+        },
+        {
+          id: 'm-cancelled',
+          role: 'ai',
+          content: '',
+          timestamp: 46,
+          metadata: { outcome: 'cancelled', interrupted: true },
+        },
+      ],
+    } as any;
+
+    await store.save(terminalSnapshot);
+
+    const saved = JSON.parse(adapter.files.get(CONVERSATION_STORE_PATH) || '{}');
+    expect(saved.conversations[0].messages[1].metadata.outcome).toBe('failed');
+    expect(saved.conversations[0].messages[1].metadata.failureReason).toBe('network down');
+
+    const restored = await store.list();
+    expect(restored[0].messages[1].metadata?.outcome).toBe('failed');
+    expect(restored[0].messages[1].metadata?.failureReason).toBe('network down');
+    expect(restored[0].messages[2].metadata?.outcome).toBe('cancelled');
+  });
+
   await test('persists approval previews in stored conversations', async () => {
     const { adapter, store } = createStore(ConversationStore);
     const previewSnapshot = {

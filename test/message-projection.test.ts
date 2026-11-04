@@ -167,11 +167,12 @@ async function runTests() {
 
     // 中断路径过去只落 tab.state、不落 owner,两份内容因此分叉。
     expect(owned.map((m: ChatMessage) => m.id)).toEqual(projected.map((m: ChatMessage) => m.id));
-    expect(owned.map((m: ChatMessage) => m.role)).toEqual(['user', 'ai', 'system']);
+    expect(owned.map((m: ChatMessage) => m.role)).toEqual(['user', 'ai']);
 
     const ai = owned.find((m: ChatMessage) => m.role === 'ai');
     expect(ai.content).toBe('partial');
     expect(ai.metadata?.interrupted).toBe(true);
+    expect(ai.metadata?.outcome).toBe('cancelled');
 
     controller.cleanup();
   });
@@ -223,9 +224,14 @@ async function runTests() {
     await run;
 
     expect(shown).toEqual([]);
-    // 记下这条就成了幽灵回复:它标 alreadyRendered、宿主不画,只在切 tab 重渲时冒出来。
-    expect(controller.getMessages().map((m: ChatMessage) => m.role)).toEqual(['user', 'system']);
-    expect(host.state.getMessages().map((m: ChatMessage) => m.role)).toEqual(['user', 'system']);
+    // 被缓冲、从未上屏的正文仍不能落进消息(否则切 tab 重渲会冒出来);
+    // 但要落一条「空正文 + cancelled」的终态消息,让回放仍显示「已停止,答案不完整」。
+    const owned = controller.getMessages();
+    expect(owned.map((m: ChatMessage) => m.role)).toEqual(['user', 'ai']);
+    expect(host.state.getMessages().map((m: ChatMessage) => m.role)).toEqual(['user', 'ai']);
+    const cancelled = owned.find((m: ChatMessage) => m.role === 'ai');
+    expect(cancelled.content).toBe('');
+    expect(cancelled.metadata?.outcome).toBe('cancelled');
     // done 事件也不能带这段正文:宿主的 finalizeStream 会把 done.text 渲染进流容器,
     // 并给它挂一个 id 对不上任何列表的操作栏——同一类缺陷,只是走视觉定型那条路。
     expect(doneEvents.map(e => e.text)).toEqual(['']);
