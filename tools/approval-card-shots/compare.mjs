@@ -50,7 +50,7 @@ function text(value) {
 const rows = [
   ['Phase', metric(before, (r) => r.phase), metric(after, (r) => r.phase)],
   ['Revision', metric(before, (r) => r.revision), metric(after, (r) => r.revision)],
-  ['Obsidian', metric(before, (r) => r.obsidian), metric(after, (r) => r.obsidian)],
+  ['Browser (CDP)', metric(before, (r) => r.obsidian), metric(after, (r) => r.obsidian)],
   ['Theme / locale', metric(before, (r) => `${r.theme} / ${r.locale}`), metric(after, (r) => `${r.theme} / ${r.locale}`)],
   ['Sidebar width', metric(before, (r) => `${r.requestedSidebarWidth}px`), metric(after, (r) => `${r.requestedSidebarWidth}px`)],
   ['Rendered view width', metric(before, (r) => `${r.viewport.viewRect.width}px`), metric(after, (r) => `${r.viewport.viewRect.width}px`)],
