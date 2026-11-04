@@ -1,6 +1,6 @@
 ﻿import { App, MarkdownView, TFile } from 'obsidian';
 import { ModelService } from '../services/model-service';
-import { StreamEvent } from '../models/interfaces';
+import { ChatTurnOutcome, StreamEvent } from '../models/interfaces';
 import { logger } from '../utils/logger';
 import { t } from '../i18n/zh';
 import {
@@ -23,6 +23,19 @@ export interface MessageAddedOptions {
     alreadyRendered?: boolean;
 }
 
+/**
+ * 一轮请求的完整现场:原文、上下文(含文件/图片附件)、选区。
+ * 失败/取消后据此恢复草稿并按原请求重试;不把「用户等待期间的新输入」覆盖掉。
+ */
+export interface ChatTurnRequest {
+    query: string;
+    context: any[];
+    selection: string;
+    source: 'shell' | 'selection-menu';
+    /** 失败/取消时记下的 AI 消息 id,重试时用于原地替换它。 */
+    messageId?: string;
+}
+
 export interface ChatControllerOptions {
     app: App;
     api: ModelService;
@@ -34,6 +47,8 @@ export interface ChatControllerOptions {
     conversationId?: string;
     /** 消息已记入本控制器的列表(唯一作者)。宿主据此更新自己的只读投影。 */
     onMessageAdded?: (message: ChatMessage, options?: MessageAddedOptions) => void;
+    /** 消息已从本控制器的列表移除(重试替换失败消息时)。宿主同步删投影。 */
+    onMessageRemoved?: (messageId: string) => void;
     onStatusChanged?: (isResponding: boolean) => void;
     onStreamEvent?: (event: StreamEvent) => void;
     /** /clear 时触发:宿主清空该 tab 的可见历史(tab.state)并重渲。 */
@@ -50,6 +65,7 @@ export class ChatController {
     private messages: ChatMessage[] = [];
     // private isResponding: boolean = false; // Unused
     private onMessageAdded?: (message: ChatMessage, options?: MessageAddedOptions) => void;
+    private onMessageRemoved?: (messageId: string) => void;
     private onStatusChanged?: (isResponding: boolean) => void;
     private onStreamEvent?: (event: StreamEvent) => void;
     private onClear?: () => void;
@@ -57,6 +73,12 @@ export class ChatController {
     private onWorkspaceEditUndone?: (edit: WorkspaceEditSummary) => void;
     private onWorkspaceEditUndoFailed?: (message: string) => void;
     private activeStreamController: AbortController | null = null;
+    /**
+     * 失败/取消的请求现场,按落下的 AI 消息 id 索引。
+     * 重试按原请求与上下文恢复;只在内存里保留最近若干条,刷新后由 UI 从相邻
+     * user 消息回退推导(上下文不可恢复时至少原文可重试)。
+     */
+    private retryRequests = new Map<string, ChatTurnRequest>();
 
     // 文件搜索缓存
     private fileSearchCache: { term: string; results: any[]; timestamp: number } | null = null;
@@ -68,6 +90,7 @@ export class ChatController {
         this.api = options.api;
         this.conversationId = options.conversationId;
         this.onMessageAdded = options.onMessageAdded;
+        this.onMessageRemoved = options.onMessageRemoved;
         this.onStatusChanged = options.onStatusChanged;
         this.onStreamEvent = options.onStreamEvent;
         this.onClear = options.onClear;
@@ -135,34 +158,109 @@ export class ChatController {
         selection: string = '',
         source: 'shell' | 'selection-menu' = 'shell',
         displayText?: string,
-    ) {
-        if (!query.trim()) return;
+    ): Promise<ChatTurnOutcome | undefined> {
+        if (!query.trim()) return undefined;
         const normalizedContext = this.normalizeContextItems(context);
 
         // 1. Handle Commands
         if (query.startsWith('/')) {
             await this.handleSlashCommand(query);
-            return;
+            return undefined;
         }
 
         // 2. Normal Chat
-        // 显示层与 prompt 层分离:query 是发给模型的完整 prompt(可能已装配上下文),
-        // displayText 是给用户看的干净意图(如「解释:xxx」)。缺省时二者一致(shell 场景)。
-        this.addMessage('user', displayText ?? query);
+        return this.runTurn(query, normalizedContext, selection, source, displayText ?? query, true);
+    }
+
+    /**
+     * 按原请求重试一次失败/取消的轮次。
+     * - 不重复插入 user 消息:同一请求只应出现一次;
+     * - 先移除失败/取消时落下的 AI 消息,让新答案原地替换它;
+     * - 处理中调用直接返回(幂等),双击不会产生两个在途请求。
+     */
+    public async retryTurn(request: ChatTurnRequest): Promise<ChatTurnOutcome | undefined> {
+        if (this.isRunActive()) return undefined;
+        if (request.messageId) {
+            this.retryRequests.delete(request.messageId);
+            if (this.messages.some(message => message.id === request.messageId)) {
+                this.removeMessage(request.messageId);
+            }
+        }
+        return this.runTurn(
+            request.query,
+            this.normalizeContextItems(request.context),
+            request.selection,
+            request.source,
+            undefined,
+            false,
+        );
+    }
+
+    /** 取某条失败/取消消息对应的原请求现场(含附件上下文)。无记录时返回 null。 */
+    public getRetryRequest(messageId: string): ChatTurnRequest | null {
+        const request = this.retryRequests.get(messageId);
+        if (!request) return null;
+        return { ...request, context: request.context.map(item => ({ ...item })) };
+    }
+
+    /** 记下失败/取消请求现场,供失败卡片的「重试 / 恢复草稿」使用。 */
+    private rememberRetryRequest(messageId: string, request: ChatTurnRequest) {
+        this.retryRequests.set(messageId, {
+            ...request,
+            context: request.context.map(item => ({ ...item })),
+            messageId,
+        });
+        // 只保留最近 20 条,避免长会话里失败记录无限增长。
+        while (this.retryRequests.size > 20) {
+            const oldest = this.retryRequests.keys().next().value;
+            if (oldest === undefined) break;
+            this.retryRequests.delete(oldest);
+        }
+    }
+
+    /** 从唯一作者列表移除一条消息,并通知宿主同步投影(重试替换失败消息时用)。 */
+    private removeMessage(messageId: string) {
+        const index = this.messages.findIndex(message => message.id === messageId);
+        if (index < 0) return;
+        this.messages.splice(index, 1);
+        this.onMessageRemoved?.(messageId);
+    }
+
+    /**
+     * 单轮流式执行。processCommand 与 retryTurn 共用同一实现,保证终态记录、
+     * 错误处理与 ADR 0002 的「先记录后发 done」顺序只有一份。
+     * @param recordUserMessage 重试时为 false:原 user 消息已在列表里,不再重复插入。
+     */
+    private async runTurn(
+        query: string,
+        normalizedContext: any[],
+        selection: string,
+        source: 'shell' | 'selection-menu',
+        displayText: string | undefined,
+        recordUserMessage: boolean,
+    ): Promise<ChatTurnOutcome> {
+        if (recordUserMessage) {
+            // 显示层与 prompt 层分离:query 是发给模型的完整 prompt(可能已装配上下文),
+            // displayText 是给用户看的干净意图(如「解释:xxx」)。缺省时二者一致(shell 场景)。
+            this.addMessage('user', displayText ?? query);
+        }
         // 阶段B:记住本轮 user 消息 id,done 事件带回 entryIds 后回填 sessionEntryId 锚定。
-        const userMessageId = this.messages[this.messages.length - 1]?.id;
+        const userMessageId = recordUserMessage ? this.messages[this.messages.length - 1]?.id : undefined;
         this.setResponding(true);
         const streamController = new AbortController();
         this.activeStreamController = streamController;
+        const request: ChatTurnRequest = { query, context: normalizedContext, selection, source };
         let fullText = '';
         let turnEntryIds: { userEntryId?: string; assistantEntryId?: string } | undefined;
-        // 本轮是否已记过 ai 回复。正常收尾在 done 时记,中断在 catch 里记,二者互斥。
+        // 本轮是否已记过 ai 回复。正常收尾在 done 时记,中断/失败在 catch 里记,二者互斥。
         let assistantRecorded = false;
         // 正文是否被缓冲(待审批 / 写请求未落地),即屏幕上还没显示过。
         // 必须提到与 fullText 同一作用域:catch 里的中断路径也要读它,
         // 否则会记下一条用户从未见过的回复(它标 alreadyRendered,宿主不画,
         // 于是只在切 tab 重渲时凭空出现)。
         let textWithheld = false;
+        // 本轮终态:唯一来源是 runtime 的 done/error 事件;异常路径在此显式收口。
+        let turnOutcome: ChatTurnOutcome = 'completed';
 
         try {
             if (this.onStreamEvent) {
@@ -227,6 +325,7 @@ export class ChatController {
                         const suppressed = !!approvalRequest || (isWriteRequest && !successfulFileWrite);
                         fullText = approvalRequest ? '' : event.text;
                         turnEntryIds = event.entryIds;
+                        turnOutcome = event.outcome ?? (event.interrupted ? 'cancelled' : 'completed');
                         // 回填 user 消息的 entry 锚定(ai 消息紧随其后创建时一并打)。
                         if (turnEntryIds?.userEntryId && userMessageId) {
                             const userMsg = this.messages.find(m => m.id === userMessageId);
@@ -236,25 +335,39 @@ export class ChatController {
                         // 所以记录必须先于 done 事件发出,否则它只能拿到上一轮的消息。
                         // 抑制态(待审批 / 写请求未落地)不落 ai 消息:审批由卡片承载,
                         // 写失败在循环后落一条 system 警告。
-                        // 空正文也不落:该列表现在是渲染来源,一条空 ai 消息会在重渲时
-                        // 变成一个带操作栏的空气泡(纯工具轮次可能没有最终正文)。
-                        if (!suppressed && fullText) {
-                            this.recordStreamedReply(fullText, {
+                        // 空正文的取消也要落:否则回放时看不到「已停止,答案不完整」的终态。
+                        const cancelled = turnOutcome === 'cancelled';
+                        if (!suppressed && (fullText || cancelled)) {
+                            const messageId = this.recordStreamedReply(fullText, {
                                 assistantEntryId: turnEntryIds?.assistantEntryId,
+                                outcome: turnOutcome,
+                                interrupted: cancelled,
                             });
                             assistantRecorded = true;
+                            if (cancelled) this.rememberRetryRequest(messageId, request);
                         }
                         this.onStreamEvent(suppressed ? { ...event, text: '' } : event);
-                    } else if (event.type === 'tool_call' || event.type === 'tool_result' || event.type === 'step_boundary') {
-                        this.onStreamEvent(event);
                     } else if (event.type === 'error') {
+                        // 失败终态:即使首 token 前失败、没有任何正文,也落一条 ai 消息,
+                        // 让回放/切会话后仍有「失败原因 + 重试」入口,而不是永久 Thinking。
+                        if (!assistantRecorded) {
+                            const messageId = this.recordStreamedReply(textWithheld ? '' : fullText, {
+                                outcome: 'failed',
+                                failureReason: event.message,
+                            });
+                            assistantRecorded = true;
+                            this.rememberRetryRequest(messageId, request);
+                        }
+                        this.onStreamEvent(event);
+                        turnOutcome = 'failed';
+                        // shell 由失败卡承载原因;其他宿主没有卡片时保留旧提示。
+                        if (source !== 'shell') this.addMessage('system', `Error: ${event.message}`);
+                        break;
+                    } else if (event.type === 'tool_call' || event.type === 'tool_result' || event.type === 'step_boundary') {
                         this.onStreamEvent(event);
                     }
 
-                    if (event.type === 'error') {
-                        this.addMessage('system', `Error: ${event.message}`);
-                        return;
-                    } else if (event.type === 'text_delta') {
+                    if (event.type === 'text_delta') {
                         fullText += event.content;
                     } else if (event.type === 'tool_call') {
                         // 与底层 runtime 对齐:工具调用前的正文是该步过程叙述,
@@ -263,16 +376,30 @@ export class ChatController {
                         fullText = '';
                     }
                 }
-                if (!approvalRequest) {
+                if (turnOutcome !== 'failed' && !approvalRequest) {
                     if (isWriteRequest && !successfulFileWrite) {
                         this.addMessage(
                             'system',
                             this.getFileWriteFailureMessage(attemptedFileWrite, lastWriteError)
                         );
                     } else if (!assistantRecorded && fullText && !textWithheld) {
-                        // 流正常收尾但没有 done 事件(runtime 提前结束):仍把已有正文记为
-                        // 一条中断的回复,否则这段文字只存在于屏幕上、不在任何列表里。
-                        this.recordStreamedReply(fullText, { interrupted: true });
+                        // 流正常收尾但没有 done 事件(runtime 提前结束):按「不完整」处理,
+                        // 记一条取消终态的回复,不伪装成成功完成。
+                        const messageId = this.recordStreamedReply(fullText, {
+                            outcome: 'cancelled',
+                            interrupted: true,
+                        });
+                        assistantRecorded = true;
+                        this.rememberRetryRequest(messageId, request);
+                        turnOutcome = 'cancelled';
+                        // 没有 done 事件时也要通知宿主收尾,否则流容器停在半路、
+                        // 不渲染终态卡片,输入区也不会恢复。
+                        this.onStreamEvent?.({
+                            type: 'done',
+                            text: fullText,
+                            outcome: 'cancelled',
+                            interrupted: true,
+                        });
                     }
                 }
             } else {
@@ -283,32 +410,52 @@ export class ChatController {
                 this.addMessage('ai', response);
             }
         } catch (error: any) {
-            if (this.isAbortError(error)) {
-                // 中断路径过去只发 done 事件、不记消息:宿主的投影里有这条回复,
-                // 本列表里没有,两份内容因此分叉(ADR 0002)。改为走同一个记录入口。
-                // textWithheld 时不记:那段正文还在缓冲里、屏幕上从没出现过,
+            // 用户中止时 SDK 可能抛 APIUserAbortError(name 不是 'AbortError'),
+            // 但 controller 自己的 signal 一定已 aborted —— 以它为准,别把取消记成失败。
+            if (this.isAbortError(error) || streamController.signal.aborted) {
+                // 中断路径走同一个记录入口(ADR 0002),并显式标 cancelled 终态。
+                // textWithheld 时不记正文:那段内容还在缓冲里、屏幕上从没出现过,
                 // 记下来就成了一条只在重渲时冒出来的幽灵回复。
-                if (!assistantRecorded && fullText && !textWithheld) {
-                    this.recordStreamedReply(fullText, { interrupted: true });
+                if (!assistantRecorded) {
+                    const messageId = this.recordStreamedReply(textWithheld ? '' : fullText, {
+                        outcome: 'cancelled',
+                        interrupted: true,
+                    });
+                    assistantRecorded = true;
+                    this.rememberRetryRequest(messageId, request);
                 }
-                // done.text 同样要挡:宿主的 finalizeStream 会把它渲染进流容器,
-                // 并给它挂一个 id 对不上任何列表的操作栏(👍/👎/重试全部空操作)。
-                // 与正常 done 路径的抑制态一致——那里也是发 text: ''。
+                // done.text 同样要挡:宿主的 finalizeStream 会把它渲染进流容器。
                 this.onStreamEvent?.({
                     type: 'done',
                     text: textWithheld ? '' : fullText,
+                    outcome: 'cancelled',
                     interrupted: true,
                 });
-                this.addMessage('system', 'Response stopped.');
-                return;
+                turnOutcome = 'cancelled';
+                return turnOutcome;
             }
-            this.handleError(error);
+            // 非中止异常:显式失败终态 + 失败原因。shell 由失败卡呈现,不再叠加 system 行。
+            const failureMessage = error?.message || 'Unknown error occurred.';
+            if (!assistantRecorded) {
+                const messageId = this.recordStreamedReply(textWithheld ? '' : fullText, {
+                    outcome: 'failed',
+                    failureReason: failureMessage,
+                });
+                assistantRecorded = true;
+                this.rememberRetryRequest(messageId, request);
+                // 与流内 error 事件一致:通知宿主收尾并渲染失败卡。
+                this.onStreamEvent?.({ type: 'error', message: failureMessage, outcome: 'failed' });
+            }
+            logger.error('Chat error', error, 'ChatController');
+            if (source !== 'shell') this.addMessage('system', `Error: ${failureMessage}`);
+            turnOutcome = 'failed';
         } finally {
             if (this.activeStreamController === streamController) {
                 this.activeStreamController = null;
             }
             this.setResponding(false);
         }
+        return turnOutcome;
     }
 
     private async handleSlashCommand(query: string) {
@@ -749,7 +896,7 @@ export class ChatController {
             sessionEntryId?: string;
             metadata?: ChatMessage['metadata'];
         },
-    ) {
+    ): ChatMessage {
         const msg: ChatMessage = {
             id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
             role,
@@ -763,21 +910,34 @@ export class ChatController {
         if (this.onMessageAdded) {
             this.onMessageAdded(msg, { alreadyRendered: extra?.alreadyRendered === true });
         }
+        return msg;
     }
 
     /**
      * 记录一条流式 ai 回复。正文已随 text_delta 上屏,故标 alreadyRendered——
      * 宿主只把它写进投影,不再画第二遍(ADR 0002)。
+     * 终态(outcome)与失败原因随消息持久化,回放时才能还原失败/取消,而不是默认成功。
+     * @returns 新消息 id,供失败卡片按消息定位重试现场。
      */
     private recordStreamedReply(
         text: string,
-        options: { assistantEntryId?: string; interrupted?: boolean } = {},
-    ) {
-        this.addMessage('ai', text, undefined, {
+        options: {
+            assistantEntryId?: string;
+            interrupted?: boolean;
+            outcome?: ChatTurnOutcome;
+            failureReason?: string;
+        } = {},
+    ): string {
+        const metadata: ChatMessage['metadata'] = {};
+        if (options.outcome) metadata.outcome = options.outcome;
+        if (options.failureReason) metadata.failureReason = options.failureReason;
+        if (options.interrupted) metadata.interrupted = true;
+        const msg = this.addMessage('ai', text, undefined, {
             sessionEntryId: options.assistantEntryId,
-            metadata: options.interrupted ? { interrupted: true } : undefined,
+            metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
             alreadyRendered: true,
         });
+        return msg.id;
     }
 
     private addApprovalMessage(request: ApprovalRequest) {

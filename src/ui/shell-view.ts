@@ -2,11 +2,11 @@ import { ItemView, WorkspaceLeaf, Notice, MarkdownView, setIcon } from 'obsidian
 import { EditorView } from '@codemirror/view';
 import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
-import { ChatController, MessageAddedOptions } from './chat-controller';
+import { ChatController, ChatTurnRequest, MessageAddedOptions } from './chat-controller';
 import { ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
 import { DEFAULT_SETTINGS, IPlugin, PLUGIN_ID, PLUGIN_NAME, VIEW_TYPE_SHELL } from '../mcp/types';
-import { StreamEvent } from '../models/interfaces';
+import { ChatTurnOutcome, StreamEvent } from '../models/interfaces';
 import { buildCommandSuggestions, CommandSuggestion } from './command-suggestions';
 import { t } from '../i18n/zh';
 import { ContextController } from './controllers/context-controller';
@@ -116,6 +116,16 @@ export class ShellView extends ItemView {
      * 挂到上一轮的回复上,👍/👎/重试全部作用在错误的消息。
      */
     private streamPriorLastAiId: string | null = null;
+    /**
+     * 进行中轮次的请求现场(原文 + 附件上下文),按 tab 暂存。
+     * 失败/取消时据此恢复输入区与上下文;成功则丢弃。
+     */
+    private pendingDrafts = new Map<TabId, ChatTurnRequest>();
+    /**
+     * 失败/取消轮次的原请求现场,按落下的 AI 消息 id 索引。
+     * 失败卡片的「恢复草稿」用它;刷新后内存丢失,按钮自然不出现(不提供死入口)。
+     */
+    private draftRequests = new Map<string, ChatTurnRequest>();
     private streamNodeCount = 0;
     /** 智能体工具循环回合数(step_boundary 计数),用于时间线「Step N」分组标签。 */
     private streamStepCount = 0;
@@ -251,8 +261,8 @@ export class ShellView extends ItemView {
                 // 末轮(只出答案、无工具/思考)不产生时间线内容 → 不会留下空分隔。
                 this.pendingStepDivider = true;
             },
-            onDone: (finalText) => this.finalizeStream(finalText),
-            onError: () => this.finalizeStream(),
+            onDone: (finalText, outcome) => this.finalizeStream(outcome ?? 'completed', finalText),
+            onError: (message) => this.finalizeStream('failed', undefined, message),
             onScrollRequest: () => this.followScrollIfEnabled(),
         });
     }
@@ -577,31 +587,106 @@ export class ShellView extends ItemView {
     }
 
     async processCommand(query: string) {
+        const session = this.ensureActiveTabSession();
+        const tabId = this.tabManager.getActiveTab()?.id;
+        let request: ChatTurnRequest | null = null;
         try {
-            this.ensureActiveTabSession();
             const { contextItems, selection } = await this.contextController.collectCommandContext({
                 includeCurrent: this.shouldIncludeCurrentNoteContext(),
             });
             this.currentSelection = selection;
+            // 发送前留一份现场:失败/取消时按它恢复草稿与附件,重试也按它还原原请求。
+            request = {
+                query,
+                context: contextItems.map(item => ({ ...item })),
+                selection,
+                source: 'shell',
+            };
+            if (tabId != null) this.pendingDrafts.set(tabId, request);
 
             this.updateActivity();
-            await this.chatController.processCommand(query, contextItems, this.currentSelection);
+            const outcome = await session.chatController.processCommand(query, contextItems, this.currentSelection);
 
-            // Clear context after sending (optional, maybe keep for multi-turn?)
-            // Smart Composer clears context after send usually, unless pinned.
-            // Let's clear for now.
-            this.contextManager.clearContexts();
-            this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
-            await this.refreshKnowledgeStatusPanel();
+            const stillActive = this.tabManager.getActiveTab()?.id === tabId;
+            if (outcome === 'failed' || outcome === 'cancelled') {
+                // 失败/取消:上下文保留在 chips 里,输入区按现场恢复;等待期间的新输入不覆盖。
+                if (stillActive && request) this.restoreDraft(request);
+            } else if (stillActive) {
+                // 成功才清空上下文(现有行为)。
+                session.contextManager.clearContexts();
+                const chipsContainer = this.getContextChipsContainer();
+                if (chipsContainer) this.renderContextChips(chipsContainer);
+                await this.refreshKnowledgeStatusPanel();
+            }
         } catch (error) {
             logger.error('Command processing failed', error, 'ShellView.processCommand');
+            if (request) this.restoreDraft(request);
             this.appendMessage({
                 id: 'error-' + Date.now(),
                 role: 'system',
                 content: `Error processing command: ${error.message}`,
                 timestamp: Date.now()
             });
+        } finally {
+            if (tabId != null) this.pendingDrafts.delete(tabId);
         }
+    }
+
+    /**
+     * 恢复失败/取消轮次的原草稿。
+     * 输入区已有新内容时绝不覆盖(只保留现场,由失败卡片的「恢复草稿」显式取回);
+     * 上下文附件按 id 合并,避免把等待期间新加的 chip 冲掉。
+     */
+    private restoreDraft(request: ChatTurnRequest, force = false) {
+        if (!this.inputEl) return;
+        if (force || !this.inputEl.value.trim()) {
+            this.inputEl.value = request.query;
+            this.adjustHeight();
+        }
+
+        // 只在活动 tab 上恢复;contextManager 就是活动 tab 的实例。
+        const existing = new Set(this.contextManager.getContexts().map(item => item.id));
+        for (const item of request.context) {
+            if (!item?.id || existing.has(item.id)) continue;
+            this.contextManager.addContext(item);
+            existing.add(item.id);
+        }
+        const chipsContainer = this.getContextChipsContainer();
+        if (chipsContainer) this.renderContextChips(chipsContainer);
+        this.updateInputToolbarCapabilities();
+    }
+
+    /** 失败卡片「恢复草稿」:显式用户动作,允许覆盖当前输入。 */
+    private handleRestoreDraft(message: ChatMessage) {
+        const request = this.draftRequests.get(message.id);
+        if (!request) return;
+        this.restoreDraft(request, true);
+        this.inputEl?.focus();
+    }
+
+    /** 失败卡片「重试」:按原请求与上下文重跑;处理中拒绝重复触发。 */
+    private async handleRetryTurn(message: ChatMessage) {
+        if (!this.chatController || this.chatController.isRunActive()) return;
+        const request = this.chatController.getRetryRequest(message.id) ?? this.deriveRetryRequest(message);
+        if (!request) {
+            new Notice(t('Cannot locate the question to retry.'));
+            return;
+        }
+        this.draftRequests.delete(message.id);
+        await this.chatController.retryTurn(request);
+        await this.persistActiveTab();
+    }
+
+    /** 刷新/重开视图后内存现场已丢:从相邻 user 消息还原原文,至少原文可重试。 */
+    private deriveRetryRequest(message: ChatMessage): ChatTurnRequest | null {
+        const userMessage = this.findPrecedingUserMessage(message);
+        if (!userMessage?.content.trim()) return null;
+        return {
+            query: userMessage.content,
+            context: [],
+            selection: '',
+            source: 'shell',
+        };
     }
 
     /**
@@ -972,11 +1057,27 @@ export class ShellView extends ItemView {
     }
 
 
-    private finalizeStream(finalText?: string) {
+    /**
+     * 收尾一轮流。outcome 是本轮唯一终态来源(completed / failed / cancelled):
+     * - 成功才自动折叠过程;
+     * - 失败/取消保留过程展开,就地渲染「原因 + 已保留内容 + 重试/恢复草稿」;
+     * - 无论有没有正文都清掉流式状态,不留永久 Thinking。
+     */
+    private finalizeStream(
+        outcome: ChatTurnOutcome = 'completed',
+        finalText?: string,
+        error?: string,
+    ) {
         const growth = this.captureScrollGrowth();
         this.debouncedRenderStream.flush();
 
         this.thinkingRenderer?.finalizeCurrentThinking();
+
+        // 首 token 前就失败/取消时还没有流容器;终态卡片仍需要一个落点。
+        const createdLate = !this.streamContainer;
+        if (createdLate && outcome !== 'completed') {
+            this.ensureStreamContainer();
+        }
 
         // runtime 可能在结束前替换正文(如 generation quality failure):done.text 才是
         // 入库/重建所见。有非空 finalText 时用它定型 DOM,使屏幕与保存一致;
@@ -984,6 +1085,17 @@ export class ShellView extends ItemView {
         const resolvedText = (typeof finalText === 'string' && finalText.length > 0)
             ? finalText
             : this.streamAccumulatedText;
+
+        // ChatController 在发出终态事件之前就把本轮消息记进了投影(ADR 0002),
+        // 这里按同一 id 找回它,操作栏/失败卡片/重试才能作用在真实消息上。
+        const activeMessages = this.tabManager.getActiveTab()?.state.getMessages() ?? [];
+        const candidate = [...activeMessages].reverse().find(m => m.role === 'ai');
+        const terminalMessage = candidate && candidate.metadata?.outcome === outcome
+            ? candidate
+            : undefined;
+        const lastAiMessage = candidate && (createdLate || candidate.id !== this.streamPriorLastAiId)
+            ? candidate
+            : undefined;
 
         if (this.streamContent && resolvedText) {
             // 流结束:把回复区切回 polite,让读屏把完成的整段回复播报一次(流式途中是 off)。
@@ -1000,39 +1112,60 @@ export class ShellView extends ItemView {
 
         if (this.streamTimeline && this.streamNodeCount > 0) {
             const summaryText = this.streamTimeline.querySelector('.think-summary-text') as HTMLElement;
-            if (summaryText) summaryText.textContent = `Thought through ${this.streamNodeCount} steps`;
-            this.streamTimeline.addClass('is-collapsed');
             const summary = this.streamTimeline.querySelector('.shell-think-summary') as HTMLElement;
-            summary?.setAttribute('aria-expanded', 'false');
+            if (outcome === 'completed') {
+                if (summaryText) summaryText.textContent = `Thought through ${this.streamNodeCount} steps`;
+                this.streamTimeline.addClass('is-collapsed');
+                summary?.setAttribute('aria-expanded', 'false');
+            } else {
+                // 失败/取消:保留过程默认展开,用户仍可点击/键盘折叠。
+                if (summaryText) {
+                    summaryText.textContent = outcome === 'cancelled'
+                        ? `Stopped after ${this.streamNodeCount} steps`
+                        : `Failed after ${this.streamNodeCount} steps`;
+                }
+                this.streamTimeline.removeClass('is-collapsed');
+                this.streamTimeline.addClass(outcome === 'cancelled' ? 'is-cancelled' : 'is-failed');
+                summary?.setAttribute('aria-expanded', 'true');
+            }
         } else if (this.streamTimeline && this.streamNodeCount === 0) {
             this.streamTimeline.addClass('baizer-hidden');
         }
 
         if (this.streamContainer) {
+            // 失败/取消卡片:原因 + 已保留内容(正文在卡片之上)+ 重试/恢复草稿。
+            // 用同一份渲染逻辑服务实时收尾与回放(renderMessage 也调用它)。
+            if (outcome !== 'completed') {
+                const outcomeMessage: ChatMessage = terminalMessage ?? {
+                    id: `stream-outcome-${Date.now()}`,
+                    role: 'ai',
+                    content: resolvedText,
+                    timestamp: Date.now(),
+                    metadata: { outcome, failureReason: error },
+                };
+                const tabId = this.tabManager.getActiveTab()?.id;
+                const draft = (tabId != null ? this.pendingDrafts.get(tabId) : undefined)
+                    ?? this.chatController?.getRetryRequest(outcomeMessage.id)
+                    ?? undefined;
+                if (draft) this.draftRequests.set(outcomeMessage.id, draft);
+                this.getMessageRenderer().renderTurnOutcome(this.streamContainer, outcomeMessage);
+            }
+
             // 阶段C:用投影里刚落下的真实 ai 消息(已带 assistantEntryId)渲染操作栏,
             // 而非临时空壳——否则 sessionEntryId 缺失,重试按钮的显示条件永不满足。
-            // ChatController 在发出 done 之前就把该消息记进了投影(ADR 0002),
-            // 它的 id 与 ChatController 列表里的同一条一致,故 👍/👎 能回查到。
             // 但「最后一条 ai」未必属于本轮:纯工具轮次没有最终正文、不落消息,
             // 那时它是上一轮的残留。与开流前记下的 id 比对,不同才是本轮新落的。
-            const activeMessages = this.tabManager.getActiveTab()?.state.getMessages() ?? [];
-            const candidate = [...activeMessages].reverse().find(m => m.role === 'ai');
-            const lastAiMessage = candidate && candidate.id !== this.streamPriorLastAiId
-                ? candidate
-                : undefined;
-            // 就近填充分叉源问题文本:该 ai 回复紧邻其前的 user 消息原文,供底部「分叉」输入预填。
-            // 兜底空壳仅在无持久会话时出现(投影里没有本轮消息);它的 id 与任何列表都对不上,
-            // 只有复制可用——与本轮无正文可言时(纯工具轮次)一并不渲染操作栏。
-            const toolbarMessage: ChatMessage | null = lastAiMessage
-                ? { ...lastAiMessage, forkSourceText: this.findPrecedingUserMessage(lastAiMessage)?.content }
-                : resolvedText
-                    ? {
+            // 失败且无正文时只显示失败卡(不渲染空操作栏/空气泡)。
+            const toolbarMessage: ChatMessage | null = resolvedText.trim()
+                ? (lastAiMessage
+                    ? { ...lastAiMessage, forkSourceText: this.findPrecedingUserMessage(lastAiMessage)?.content }
+                    : {
                         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
                         role: 'ai',
                         content: resolvedText,
                         timestamp: Date.now(),
-                    }
-                    : null;
+                    })
+                : null;
             if (toolbarMessage) {
                 this.getMessageRenderer().addActionToolbar(this.streamContainer, toolbarMessage);
             }
@@ -1089,6 +1222,9 @@ export class ShellView extends ItemView {
                     await this.chatController.recordNegativeFeedback(message.id, reason);
                 },
                 onRetry: (message) => this.handleRetryMessage(message),
+                onRetryTurn: (message) => this.handleRetryTurn(message),
+                canRestoreDraft: (message) => this.draftRequests.has(message.id),
+                onRestoreDraft: (message) => this.handleRestoreDraft(message),
                 onEdit: (message, newText) => this.handleEditMessage(message, newText),
                 onFork: (message, newText) => this.handleForkFromAi(message, newText),
                 onSwitchBranch: (message, targetLeafId) => this.handleSwitchBranch(message, targetLeafId),
@@ -1788,6 +1924,7 @@ export class ShellView extends ItemView {
             api: this.modelService,
             conversationId: id,
             onMessageAdded: (msg, options) => this.handleTabMessageAdded(id, msg, options),
+            onMessageRemoved: (messageId) => this.handleTabMessageRemoved(id, messageId),
             onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
             onStreamEvent: (event) => this.handleTabStreamEvent(id, event),
             onClear: () => this.handleTabClear(id),
@@ -1828,6 +1965,17 @@ export class ShellView extends ItemView {
             this.dirtyTabs.add(tabId);
             // 该会话若已暂停跟随,后台到达的输出点亮它自己的未读;跟随中的会话切回自然贴底。
             this.scrollFollow?.noteOutputInSession(tabId);
+        }
+    }
+
+    /** 重试替换失败消息:同步删投影并重渲(活动 tab)或标脏(后台 tab)。 */
+    private handleTabMessageRemoved(tabId: TabId, messageId: string) {
+        const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
+        tab?.state.removeMessage(messageId);
+        if (this.tabManager.getActiveTab()?.id === tabId) {
+            this.renderActiveTabMessages();
+        } else {
+            this.dirtyTabs.add(tabId);
         }
     }
 
