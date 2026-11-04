@@ -1,0 +1,230 @@
+{
+  "label": "after-wide",
+  "phase": "after",
+  "revision": "8c3b5e1",
+  "capturedAt": "2026-11-04T09:37:02.965Z",
+  "out": "\\\\wsl.localhost\\Ubuntu\\home\\yinfei\\.dsh\\state\\superagent\\work\\scroll-follow-7cf6055b4e7d\\docs\\assets\\chat-scroll-2026-11-04-after-wide.png",
+  "scenario": {
+    "seedCount": 12,
+    "streamChunks": 3,
+    "scrollAnchorFraction": 0.35,
+    "viewport": {
+      "width": 1440,
+      "height": 960
+    },
+    "viewWidth": 520,
+    "sidebarHeight": 900,
+    "theme": "dark",
+    "locale": "zh"
+  },
+  "host": {
+    "platform": "win32",
+    "node": "v24.16.0",
+    "exe": "C:\\Program Files\\Obsidian\\Obsidian.exe",
+    "exeFileVersion": "1.7.7"
+  },
+  "steps": [
+    {
+      "locale": {
+        "changed": false,
+        "previous": "zh"
+      }
+    },
+    {
+      "modals": {
+        "trust": {
+          "present": false,
+          "clicked": null
+        },
+        "closed": [],
+        "releaseNotes": 0
+      }
+    },
+    {
+      "plugin": {
+        "steps": [
+          "loadManifests"
+        ],
+        "error": null,
+        "loaded": true
+      }
+    },
+    {
+      "pluginLoaded": true
+    },
+    {
+      "openView": {
+        "viewType": "baizer-shell-view"
+      }
+    },
+    {
+      "fitViewWidth": {
+        "splitWidth": 544,
+        "viewWidth": 520
+      }
+    },
+    {
+      "seed": {
+        "messagesSeen": 13,
+        "scrollHeight": 3018,
+        "clientHeight": 580
+      }
+    },
+    {
+      "scrollUp": {
+        "anchor": 853,
+        "max": 2438,
+        "scrollTop": 853
+      }
+    }
+  ],
+  "limitations": [],
+  "vault": {
+    "dir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.5.0",
+      "minAppVersion": "1.7.2",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    },
+    "profile": {
+      "userDataDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\chat-profile",
+      "configPath": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\chat-profile\\obsidian.json",
+      "vaultKey": "f230a63f4db30aad"
+    }
+  },
+  "pid": 256312,
+  "target": {
+    "id": "112BD3A5DBE5CC57ED3F5902C17865D6",
+    "url": "app://obsidian.md/index.html",
+    "title": "新标签页 - obsidian - Obsidian 1.15.0"
+  },
+  "beforeStream": {
+    "appVersion": null,
+    "pluginVersion": "1.5.0",
+    "locale": "zh",
+    "viewRect": {
+      "x": 908,
+      "y": 82,
+      "width": 520,
+      "height": 846
+    },
+    "splitRect": {
+      "x": 896,
+      "y": 30,
+      "width": 544,
+      "height": 930
+    },
+    "outputRect": {
+      "x": 922,
+      "y": 183,
+      "width": 492,
+      "height": 580
+    },
+    "scrollTop": 853,
+    "maxScrollTop": 2438,
+    "distanceFromBottom": 1585,
+    "scrollHeight": 3018,
+    "clientHeight": 580,
+    "unreadBar": {
+      "present": true,
+      "visible": false,
+      "text": "有新输出 · 回到最新",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "buttonRect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "withinViewport": false
+    },
+    "follow": {
+      "following": false,
+      "unread": false
+    },
+    "horizontalOverflow": false,
+    "documentOverflow": false
+  },
+  "afterStream": {
+    "appVersion": null,
+    "pluginVersion": "1.5.0",
+    "locale": "zh",
+    "viewRect": {
+      "x": 908,
+      "y": 82,
+      "width": 520,
+      "height": 846
+    },
+    "splitRect": {
+      "x": 896,
+      "y": 30,
+      "width": 544,
+      "height": 930
+    },
+    "outputRect": {
+      "x": 922,
+      "y": 183,
+      "width": 492,
+      "height": 532
+    },
+    "scrollTop": 853,
+    "maxScrollTop": 2795,
+    "distanceFromBottom": 1942,
+    "scrollHeight": 3327,
+    "clientHeight": 532,
+    "unreadBar": {
+      "present": true,
+      "visible": true,
+      "text": "有新输出 · 回到最新",
+      "rect": {
+        "x": 922,
+        "y": 727,
+        "width": 492,
+        "height": 36
+      },
+      "buttonRect": {
+        "x": 1102,
+        "y": 731,
+        "width": 132,
+        "height": 30
+      },
+      "withinViewport": true
+    },
+    "follow": {
+      "following": false,
+      "unread": true
+    },
+    "horizontalOverflow": false,
+    "documentOverflow": false
+  },
+  "assertions": {
+    "viewportStayedAtReadingAnchor": true,
+    "unreadEntryVisible": true,
+    "unreadEntryText": "有新输出 · 回到最新",
+    "unreadEntryWithinViewport": true,
+    "noHorizontalOverflow": true,
+    "viewWidthMatchesRequested": true
+  },
+  "screenshot": {
+    "path": "\\\\wsl.localhost\\Ubuntu\\home\\yinfei\\.dsh\\state\\superagent\\work\\scroll-follow-7cf6055b4e7d\\docs\\assets\\chat-scroll-2026-11-04-after-wide.png",
+    "bytes": 83866,
+    "width": 520,
+    "height": 846,
+    "clip": {
+      "x": 936,
+      "y": 82,
+      "width": 520,
+      "height": 846
+    }
+  }
+}
