@@ -54,6 +54,7 @@ class FakeElement {
   children: FakeElement[] = [];
   className = '';
   textContent = '';
+  tagName = 'div';
   attributes: Record<string, string> = {};
   listeners: Record<string, Function[]> = {};
   disabled = false;
@@ -66,8 +67,9 @@ class FakeElement {
     return child;
   }
 
-  createEl(_tag: string, attr?: any) {
+  createEl(tag: string, attr?: any) {
     const child = new FakeElement();
+    child.tagName = tag;
     child.className = attr?.cls || '';
     child.textContent = attr?.text || '';
     if (attr?.title) child.attributes.title = attr.title;
@@ -189,8 +191,8 @@ async function runTests() {
             },
           };
         },
-        executeApprovedAction: async (action: string, args: any) => {
-          apiCalls.executeApprovedAction.push({ action, args });
+        executeApprovedAction: async (action: string, args: any, _conversationId?: string, options?: any) => {
+          apiCalls.executeApprovedAction.push({ action, args, options });
           return {
             success: true,
             path: 'Clippings/example.md',
@@ -205,6 +207,10 @@ async function runTests() {
         getAvailableTools: () => [],
       } as any,
       onMessageAdded: (message) => messages.push(message),
+      onMessageUpdated: (message) => {
+        const index = messages.findIndex(item => item.id === message.id);
+        if (index >= 0) messages[index] = message;
+      },
     });
 
     await controller.processCommand('/save https://example.com');
@@ -212,29 +218,25 @@ async function runTests() {
     expect(apiCalls.executeSlashSkillCommand).toEqual([
       { command: '/save', input: 'https://example.com' },
     ]);
-    expect(messages[messages.length - 1].approval).toEqual({
-      action: 'create_note',
-      target: 'Clippings/example.md',
-      args: { filename: 'Clippings/example.md', content: '# Saved' },
-      message: 'Approval required to create note: Clippings/example.md',
-      preview: {
-        kind: 'note-create',
-        target: 'Clippings/example.md',
-        summary: 'Create note',
-        newContent: '# Saved',
-        risk: 'medium',
-        supportsPartialApply: false,
-        undoable: true,
-      },
-    });
+    const approval = messages[messages.length - 1].approval;
+    expect(approval.action).toBe('create_note');
+    expect(approval.target).toBe('Clippings/example.md');
+    expect(approval.args).toEqual({ filename: 'Clippings/example.md', content: '# Saved' });
+    expect(approval.message).toBe('Approval required to create note: Clippings/example.md');
+    expect(approval.preview.kind).toBe('note-create');
+    expect(typeof approval.id).toBe('string');
 
-    await controller.approveApproval(messages[messages.length - 1].approval);
+    await controller.approveApproval(messages[messages.length - 1].id);
 
     expect(apiCalls.executeApprovedAction).toEqual([{
       action: 'create_note',
       args: { filename: 'Clippings/example.md', content: '# Saved' },
+      options: { requestId: approval.id, retry: false },
     }]);
-    expect(messages[messages.length - 1].content).toBe('Approved and executed');
+    const resolved = messages[messages.length - 1];
+    expect(resolved.approvalState.status).toBe('succeeded');
+    expect(resolved.approvalState.outcome.detail).toBe('Approved and executed');
+    expect(resolved.content).toBe(approval.message);
     expect(opened).toEqual(['Clippings/example.md']);
 
     controller.cleanup();
@@ -296,82 +298,30 @@ async function runTests() {
     await controller.processCommand('Create a canvas file');
 
     expect(messages.map(message => message.role)).toEqual(['user', 'system']);
-    expect(messages[messages.length - 1].approval).toEqual({
-      action: 'create_file',
-      target: 'Assets/Canvas/summary.canvas',
-      args: {
-        path: 'Assets/Canvas/summary.canvas',
-        content: '{"nodes":[],"edges":[]}',
-      },
-      message: 'Approval required to create file: Assets/Canvas/summary.canvas',
-      preview: {
-        kind: 'note-create',
-        target: 'Assets/Canvas/summary.canvas',
-        summary: 'Create file',
-        newContent: '{"nodes":[],"edges":[]}',
-        risk: 'medium',
-        supportsPartialApply: false,
-        undoable: true,
-      },
+    const approval = messages[messages.length - 1].approval;
+    expect(approval.action).toBe('create_file');
+    expect(approval.target).toBe('Assets/Canvas/summary.canvas');
+    expect(approval.args).toEqual({
+      path: 'Assets/Canvas/summary.canvas',
+      content: '{"nodes":[],"edges":[]}',
     });
+    expect(approval.message).toBe('Approval required to create file: Assets/Canvas/summary.canvas');
+    expect(approval.preview.kind).toBe('note-create');
+    expect(typeof approval.id).toBe('string');
     expect(streamEvents.map(event => event.type)).toEqual(['tool_call', 'tool_result', 'done']);
     expect(streamEvents[streamEvents.length - 1].text).toBe('');
 
     controller.cleanup();
   });
 
-  await test('renderApprovalCard wires approve and cancel buttons', async () => {
-    const container = new FakeElement();
-    let approved = 0;
-    let cancelled = 0;
-    let approveResolves: (() => void) | null = null;
-
-    renderApprovalCard(
-      container as any,
-      {
-        action: 'create_note',
-        target: 'Clippings/example.md',
-        args: { filename: 'Clippings/example.md' },
-        message: 'Approval required to create note: Clippings/example.md',
-        preview: {
-          kind: 'note-create',
-          target: 'Clippings/example.md',
-          summary: 'Create note',
-          risk: 'medium',
-          supportsPartialApply: false,
-          undoable: true,
-        },
-      },
-      {
-        onApprove: async () => {
-          approved += 1;
-          await new Promise<void>((resolve) => { approveResolves = resolve; });
-        },
-        onCancel: () => { cancelled += 1; },
-      },
-    );
-
-    const approveButton = container.querySelector('.shell-approval-confirm');
-    const cancelButton = container.querySelector('.shell-approval-cancel');
-
-    approveButton?.click();
-    approveButton?.click();
-    cancelButton?.click();
-
-    expect(approved).toBe(1);
-    expect(cancelled).toBe(0);
-    expect(approveButton?.disabled).toBe(true);
-    expect(cancelButton?.disabled).toBe(true);
-    if (approveResolves) approveResolves();
-  });
-
-  await test('renderApprovalCard renders compact icon actions with hover labels', async () => {
+  await test('renderApprovalCard shows visible action and reject text buttons', async () => {
     const container = new FakeElement();
     const calls: string[] = [];
 
     renderApprovalCard(
       container as any,
       {
+        id: 'req-create',
         action: 'create_note',
         target: 'Clippings/example.md',
         args: { filename: 'Clippings/example.md' },
@@ -387,19 +337,235 @@ async function runTests() {
       },
       {
         onApprove: () => { calls.push('approve'); },
-        onCancel: () => { calls.push('cancel'); },
+        onReject: () => { calls.push('reject'); },
         onFocusPreview: () => { calls.push('focus'); },
       },
     );
 
-    const buttons = container.querySelectorAll('.shell-approval-icon-btn');
-    expect(buttons.length).toBe(3);
-    expect(buttons.map(button => button.textContent)).toEqual(['', '', '']);
-    expect(buttons.map(button => button.attributes.title)).toEqual(['Show editor preview', 'Cancel', 'Approve create']);
-    expect(buttons.map(button => button.attributes['aria-label'])).toEqual(['Show editor preview', 'Cancel', 'Approve create']);
-    expect(buttons.map(button => button.attributes['data-icon'])).toEqual(['locate-fixed', 'x', 'check']);
-    buttons[0].click();
+    const approveButton = container.querySelector('.shell-approval-confirm');
+    const rejectButton = container.querySelector('.shell-approval-cancel');
+    expect(approveButton?.textContent).toBe('Approve this create');
+    expect(rejectButton?.textContent).toBe('Reject');
+    expect(approveButton?.attributes.title).toBe('Approve this create');
+    expect(approveButton?.attributes['aria-label']).toBe('Approve this create');
+    expect(rejectButton?.attributes['aria-label']).toBe('Reject');
+    expect(approveButton?.attributes.type).toBe('button');
+    // 决策按钮是原生 <button>：Tab/Shift+Tab 可聚焦，Enter/Space 触发 click；
+    // 禁用时用原生 disabled，Tab 会跳过。
+    expect(approveButton?.tagName).toBe('button');
+    expect(rejectButton?.tagName).toBe('button');
+    expect(approveButton?.disabled).toBe(false);
+    expect(rejectButton?.disabled).toBe(false);
+    // 预览仍是辅助图标按钮；决策按钮必须是可见文字。
+    const previewButton = container.querySelector('.shell-approval-focus-preview');
+    expect(previewButton?.attributes.title).toBe('Show editor preview');
+    previewButton?.click();
     expect(calls).toEqual(['focus']);
+  });
+
+  await test('renderApprovalCard blocks repeat clicks while the request is in flight', async () => {
+    const container = new FakeElement();
+    let approved = 0;
+    let rejected = 0;
+
+    renderApprovalCard(
+      container as any,
+      {
+        id: 'req-double',
+        action: 'create_note',
+        target: 'Clippings/example.md',
+        args: { filename: 'Clippings/example.md' },
+        message: 'Approval required to create note: Clippings/example.md',
+        preview: {
+          kind: 'note-create',
+          target: 'Clippings/example.md',
+          summary: 'Create note',
+          risk: 'medium',
+          supportsPartialApply: false,
+          undoable: true,
+        },
+      },
+      {
+        onApprove: () => { approved += 1; },
+        onReject: () => { rejected += 1; },
+      },
+    );
+
+    const approveButton = container.querySelector('.shell-approval-confirm');
+    const rejectButton = container.querySelector('.shell-approval-cancel');
+    approveButton?.click();
+    approveButton?.click();
+    rejectButton?.click();
+
+    expect(approved).toBe(1);
+    expect(rejected).toBe(0);
+    expect(approveButton?.disabled).toBe(true);
+    expect(rejectButton?.disabled).toBe(true);
+    expect(approveButton?.attributes['aria-disabled']).toBe('true');
+  });
+
+  await test('renderApprovalCard shows a running state without dropping the card', async () => {
+    const container = new FakeElement();
+    let approved = 0;
+
+    renderApprovalCard(
+      container as any,
+      {
+        id: 'req-running',
+        action: 'delete_note',
+        target: 'Docs/current.md',
+        args: { path: 'Docs/current.md' },
+        message: 'Approval required to delete note: Docs/current.md',
+      },
+      { onApprove: () => { approved += 1; }, onReject: () => { } },
+      { status: 'running' },
+    );
+
+    const processing = container.querySelector('.shell-approval-processing');
+    expect(processing?.textContent).toBe('Processing…');
+    expect(processing?.attributes.role).toBe('status');
+    const approveButton = container.querySelector('.shell-approval-confirm');
+    const rejectButton = container.querySelector('.shell-approval-cancel');
+    expect(approveButton?.disabled).toBe(true);
+    expect(rejectButton?.disabled).toBe(true);
+    approveButton?.click();
+    expect(approved).toBe(0);
+  });
+
+  await test('renderApprovalCard renders a persisted success outcome without action buttons', async () => {
+    const container = new FakeElement();
+
+    renderApprovalCard(
+      container as any,
+      {
+        id: 'req-success',
+        action: 'create_note',
+        target: 'Clippings/example.md',
+        args: { filename: 'Clippings/example.md' },
+        message: 'Approval required to create note: Clippings/example.md',
+      },
+      { onApprove: () => { }, onReject: () => { } },
+      {
+        status: 'succeeded',
+        outcome: {
+          status: 'succeeded',
+          detail: 'Approved and executed',
+          target: 'Clippings/example.md',
+          completedAt: 1,
+        },
+      },
+    );
+
+    const outcome = container.querySelector('.shell-approval-outcome');
+    expect(outcome?.className).toContain('is-succeeded');
+    expect(container.querySelector('.shell-approval-outcome-title')?.textContent).toBe('Approved and executed successfully');
+    expect(container.querySelector('.shell-approval-outcome-detail')?.textContent).toBe('Approved and executed');
+    expect(!!container.querySelector('.shell-approval-confirm')).toBe(false);
+    expect(!!container.querySelector('.shell-approval-cancel')).toBe(false);
+    expect(!!container.querySelector('.shell-approval-retry')).toBe(false);
+  });
+
+  await test('renderApprovalCard shows a failure reason and a retry action', async () => {
+    const container = new FakeElement();
+    let retried = 0;
+
+    renderApprovalCard(
+      container as any,
+      {
+        id: 'req-failed',
+        action: 'delete_note',
+        target: 'Docs/current.md',
+        args: { path: 'Docs/current.md' },
+        message: 'Approval required to delete note: Docs/current.md',
+      },
+      { onApprove: () => { }, onReject: () => { }, onRetry: () => { retried += 1; } },
+      {
+        status: 'failed',
+        outcome: {
+          status: 'failed',
+          error: 'File is locked',
+          detail: 'File is locked',
+          completedAt: 1,
+          retryable: true,
+        },
+      },
+    );
+
+    const outcome = container.querySelector('.shell-approval-outcome');
+    expect(outcome?.className).toContain('is-failed');
+    expect(container.querySelector('.shell-approval-outcome-title')?.textContent).toBe('Approved but execution failed');
+    expect(container.querySelector('.shell-approval-outcome-detail')?.textContent).toBe('File is locked');
+    const retryButton = container.querySelector('.shell-approval-retry');
+    expect(retryButton?.textContent).toBe('Retry');
+    retryButton?.click();
+    retryButton?.click();
+    expect(retried).toBe(1);
+    expect(!!container.querySelector('.shell-approval-confirm')).toBe(false);
+  });
+
+  await test('renderApprovalCard renders a rejected outcome with no write action', async () => {
+    const container = new FakeElement();
+
+    renderApprovalCard(
+      container as any,
+      {
+        id: 'req-rejected',
+        action: 'delete_note',
+        target: 'Docs/current.md',
+        args: { path: 'Docs/current.md' },
+        message: 'Approval required to delete note: Docs/current.md',
+      },
+      { onApprove: () => { }, onReject: () => { } },
+      {
+        status: 'rejected',
+        outcome: {
+          status: 'rejected',
+          detail: 'No write was performed.',
+          target: 'Docs/current.md',
+          completedAt: 1,
+        },
+      },
+    );
+
+    const outcome = container.querySelector('.shell-approval-outcome');
+    expect(outcome?.className).toContain('is-rejected');
+    expect(container.querySelector('.shell-approval-outcome-title')?.textContent).toBe('Rejected — no changes were made');
+    expect(container.querySelector('.shell-approval-outcome-detail')?.textContent).toBe('No write was performed.');
+    expect(!!container.querySelector('.shell-approval-confirm')).toBe(false);
+    expect(!!container.querySelector('.shell-approval-retry')).toBe(false);
+  });
+
+  await test('renderApprovalCard asks to verify an unknown result before retrying', async () => {
+    const container = new FakeElement();
+    let rechecked = 0;
+
+    renderApprovalCard(
+      container as any,
+      {
+        id: 'req-unknown',
+        action: 'delete_note',
+        target: 'Docs/current.md',
+        args: { path: 'Docs/current.md' },
+        message: 'Approval required to delete note: Docs/current.md',
+      },
+      { onApprove: () => { }, onReject: () => { }, onRecheck: () => { rechecked += 1; } },
+      {
+        status: 'unknown',
+        outcome: {
+          status: 'unknown',
+          detail: 'Check the target before retrying.',
+          completedAt: 1,
+          retryable: false,
+        },
+      },
+    );
+
+    expect(container.querySelector('.shell-approval-outcome-title')?.textContent).toBe('Execution result is unknown');
+    const recheckButton = container.querySelector('.shell-approval-recheck');
+    expect(recheckButton?.textContent).toBe('Check result');
+    recheckButton?.click();
+    expect(rechecked).toBe(1);
+    expect(!!container.querySelector('.shell-approval-retry')).toBe(false);
   });
 
   // rename_note 同时是「重命名」和「移动」:父目录变了 = 移动。审批卡必须显示去向(从→到)、
@@ -411,6 +577,7 @@ async function runTests() {
     renderApprovalCard(
       container as any,
       {
+        id: 'req-move',
         action: 'rename_note',
         target: 'AI开发指南.md',
         args: { oldPath: 'AI开发指南.md', newPath: 'study/AI/AI开发指南.md' },
@@ -426,7 +593,7 @@ async function runTests() {
       },
       {
         onApprove: () => { calls.push('approve'); },
-        onCancel: () => { calls.push('cancel'); },
+        onReject: () => { calls.push('reject'); },
         onFocusPreview: () => { calls.push('focus'); },
       },
     );
@@ -435,9 +602,9 @@ async function runTests() {
     expect(container.querySelector('.shell-approval-action-value')?.textContent).toBe('Move');
     expect(container.querySelector('.shell-approval-target-value')?.textContent).toBe('AI开发指南.md');
     expect(container.querySelector('.shell-approval-newpath-value')?.textContent).toBe('study/AI/AI开发指南.md');
-    expect(container.querySelector('.shell-approval-confirm')?.attributes.title).toBe('Approve move');
-    // 移动无正文可在编辑器预览:🎯 按钮不渲染,只剩 取消 + 确认。
-    expect(container.querySelectorAll('.shell-approval-icon-btn').length).toBe(2);
+    expect(container.querySelector('.shell-approval-confirm')?.textContent).toBe('Approve this move');
+    // 移动无正文可在编辑器预览:🎯 按钮不渲染,只剩 拒绝 + 批准。
+    expect(container.querySelectorAll('.shell-approval-icon-btn').length).toBe(0);
     expect(!!container.querySelector('.shell-approval-focus-preview')).toBe(false);
     // rename 不再嵌入重复 summary+路径的预览子卡。
     expect(!!container.querySelector('.shell-change-preview-card')).toBe(false);
@@ -450,6 +617,7 @@ async function runTests() {
     renderApprovalCard(
       container as any,
       {
+        id: 'req-rename',
         action: 'rename_note',
         target: 'notes/draft.md',
         args: { oldPath: 'notes/draft.md', newPath: 'notes/final.md' },
@@ -463,20 +631,21 @@ async function runTests() {
           undoable: true,
         },
       },
-      { onApprove: () => { }, onCancel: () => { } },
+      { onApprove: () => { }, onReject: () => { } },
     );
 
     expect(container.querySelector('.shell-approval-title')?.textContent).toBe('Approval needed: rename file');
     expect(container.querySelector('.shell-approval-action-value')?.textContent).toBe('Rename');
-    expect(container.querySelector('.shell-approval-confirm')?.attributes.title).toBe('Approve rename');
+    expect(container.querySelector('.shell-approval-confirm')?.textContent).toBe('Approve this rename');
   });
 
-  await test('renderApprovalCard exposes risk target action and concrete approve label', async () => {
+  await test('renderApprovalCard exposes risk target action and a high-risk warning', async () => {
     const container = new FakeElement();
 
     renderApprovalCard(
       container as any,
       {
+        id: 'req-delete',
         action: 'delete_note',
         target: 'Docs/current.md',
         args: { path: 'Docs/current.md' },
@@ -494,7 +663,7 @@ async function runTests() {
       },
       {
         onApprove: () => { },
-        onCancel: () => { },
+        onReject: () => { },
       },
     );
 
@@ -504,7 +673,12 @@ async function runTests() {
     expect(container.querySelector('.shell-approval-target-value')?.textContent).toBe('Docs/current.md');
     expect(container.querySelector('.shell-approval-precondition')?.textContent).toContain('target file');
     expect(container.querySelector('.shell-change-preview-precondition')?.textContent).toBeUndefined();
-    expect(container.querySelector('.shell-approval-confirm')?.attributes.title).toBe('Approve delete');
+    expect(container.querySelector('.shell-approval-confirm')?.textContent).toBe('Approve this delete');
+    // 高风险动作 + 对象写在确认区域,不依赖悬停。
+    const warning = container.querySelector('.shell-approval-warning');
+    expect(warning?.textContent).toContain('delete');
+    expect(warning?.textContent).toContain('Docs/current.md');
+    expect(warning?.textContent).toContain('may not be undoable');
   });
 
   await test('renderApprovalCard shows compact diff preview instead of full side-by-side content', async () => {
@@ -513,6 +687,7 @@ async function runTests() {
     renderApprovalCard(
       container as any,
       {
+        id: 'req-edit',
         action: 'update_note',
         target: 'Docs/current.md',
         args: { path: 'Docs/current.md', content: '# New title\n\nImproved body' },
@@ -530,11 +705,12 @@ async function runTests() {
       },
       {
         onApprove: () => { },
-        onCancel: () => { },
+        onReject: () => { },
       },
     );
 
     expect(container.querySelector('.shell-approval-title')?.textContent).toBe('Approval needed: modify current note');
+    expect(container.querySelector('.shell-approval-confirm')?.textContent).toBe('Approve this edit');
     expect(container.querySelector('.shell-change-preview-diff-count')?.textContent).toContain('changed lines');
     expect(!!container.querySelector('.shell-change-preview-diff-line-removed')).toBe(true);
     expect(!!container.querySelector('.shell-change-preview-diff-line-added')).toBe(true);
@@ -550,6 +726,7 @@ async function runTests() {
     renderApprovalCard(
       container as any,
       {
+        id: 'req-large',
         action: 'update_note',
         target: 'Docs/large.md',
         args: { path: 'Docs/large.md', content: newContent },
@@ -567,7 +744,7 @@ async function runTests() {
       },
       {
         onApprove: () => { },
-        onCancel: () => { },
+        onReject: () => { },
       },
     );
 

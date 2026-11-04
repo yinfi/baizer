@@ -1067,14 +1067,16 @@ export class ShellView extends ItemView {
                 app: this.app,
                 component: this,
                 onApprove: async (message) => {
-                    if (message.approval) {
-                        await this.chatController.approveApproval(message.approval);
-                    }
+                    await this.chatController.approveApproval(message.id);
                 },
-                onCancel: (message) => {
-                    if (message.approval) {
-                        this.chatController.cancelApproval(message.approval);
-                    }
+                onReject: (message) => {
+                    this.chatController.rejectApproval(message.id);
+                },
+                onApprovalRetry: async (message) => {
+                    await this.chatController.retryApproval(message.id);
+                },
+                onApprovalRecheck: async (message) => {
+                    await this.chatController.recheckApproval(message.id);
                 },
                 onFocusApprovalPreview: async (message) => {
                     if (message.approval) {
@@ -1164,7 +1166,7 @@ export class ShellView extends ItemView {
         const line = Math.max(1, editor?.getCursor?.()?.line + 1 || 1);
         const ch = Math.max(0, editor?.getCursor?.()?.ch || 0);
         showGhostText(cmView, this.buildApprovalGhostPreview(previewText), line, ch);
-        new Notice('Preview shown in the editor. Hover approval icons for actions.');
+        new Notice('Preview shown in the editor. Use the approval card buttons to approve or reject.');
     }
 
     private async openApprovalTarget(path: string) {
@@ -1788,6 +1790,7 @@ export class ShellView extends ItemView {
             api: this.modelService,
             conversationId: id,
             onMessageAdded: (msg, options) => this.handleTabMessageAdded(id, msg, options),
+            onMessageUpdated: (msg) => this.handleTabMessageUpdated(id, msg),
             onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
             onStreamEvent: (event) => this.handleTabStreamEvent(id, event),
             onClear: () => this.handleTabClear(id),
@@ -1829,6 +1832,55 @@ export class ShellView extends ItemView {
             // 该会话若已暂停跟随,后台到达的输出点亮它自己的未读;跟随中的会话切回自然贴底。
             this.scrollFollow?.noteOutputInSession(tabId);
         }
+    }
+
+    /**
+     * 审批状态变化：更新只读投影，并只重画这一张卡片。
+     *
+     * 不重排整条消息流，既避免长对话在点击后跳到最底部，也保住键盘焦点上下文。
+     * 卡片元素按 `data-message-id` 定位；视图重挂载后由 renderActiveTabMessages
+     * 从投影里的 approvalState 重建，不依赖旧 DOM 是否存在。
+     */
+    private handleTabMessageUpdated(tabId: TabId, msg: ChatMessage) {
+        const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
+        tab?.state.updateMessage(msg.id, msg);
+        // 审批结果要能跨视图关闭/应用重启回看：状态一变就落一次快照。
+        if (tab) void this.persistTab(tab);
+
+        if (this.tabManager.getActiveTab()?.id !== tabId) {
+            this.dirtyTabs.add(tabId);
+            return;
+        }
+
+        const container = this.getActiveMessageContainer();
+        const entry = container.querySelector(`.shell-entry[data-message-id="${msg.id}"]`) as HTMLElement | null;
+        const body = entry?.querySelector('.shell-approval-message-body') as HTMLElement | null;
+        if (!body) return;
+
+        // 只有焦点原本就在这张卡片里时才把焦点移到新状态区：
+        // 后台 reconcile 完成时用户可能在输入框里打字，不能抢焦点。
+        const active = document.activeElement as HTMLElement | null;
+        const hadFocus = !!active && !!entry && entry.contains(active);
+
+        body.empty();
+        this.getMessageRenderer().renderApproval(body, msg);
+        if (hadFocus) this.focusApprovalState(entry, msg);
+    }
+
+    /**
+     * 状态流转后把焦点留在卡片内：处理中/终态聚焦状态区（读屏会播报），
+     * 失败/未知聚焦重试或核实按钮，键盘用户可以继续操作。
+     */
+    private focusApprovalState(entry: HTMLElement | null, msg: ChatMessage) {
+        if (!entry) return;
+        const status = msg.approvalState?.status;
+        const selector = status === 'failed'
+            ? '.shell-approval-retry'
+            : status === 'unknown'
+                ? '.shell-approval-recheck'
+                : '.shell-approval-processing, .shell-approval-outcome';
+        const target = entry.querySelector(selector) as HTMLElement | null;
+        target?.focus?.();
     }
 
     /** /clear:清空该 tab 的可见历史(tab.state)并重渲(修 /clear 不清屏)。 */

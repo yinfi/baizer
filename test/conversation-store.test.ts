@@ -194,6 +194,45 @@ async function runTests() {
     expect(restored[0].messages[0].approval.preview.target).toBe('Plans/Native-AI.md');
   });
 
+  await test('persists approval lifecycle state so remount can restore it', async () => {
+    const { adapter, store } = createStore(ConversationStore);
+    await store.save({
+      ...snapshot('approval-state', 55),
+      messages: [{
+        id: 'm-approval-state',
+        role: 'system',
+        content: 'Approval required',
+        timestamp: 55,
+        approval: {
+          id: 'req-persisted',
+          conversationId: 'approval-state',
+          action: 'delete_note',
+          target: 'Docs/a.md',
+          args: { path: 'Docs/a.md' },
+          message: 'Approval required',
+        },
+        approvalState: {
+          status: 'succeeded',
+          outcome: {
+            status: 'succeeded',
+            detail: 'Deleted',
+            target: 'Docs/a.md',
+            completedAt: 56,
+            retryable: false,
+          },
+        },
+      }],
+    } as any);
+
+    const saved = JSON.parse(adapter.files.get(CONVERSATION_STORE_PATH) || '{}');
+    expect(saved.conversations[0].messages[0].approval.id).toBe('req-persisted');
+    expect(saved.conversations[0].messages[0].approvalState.status).toBe('succeeded');
+
+    const restored = await store.list();
+    expect(restored[0].messages[0].approvalState.outcome.detail).toBe('Deleted');
+    expect(restored[0].messages[0].approvalState.outcome.retryable).toBe(false);
+  });
+
   await test('returns defensive copies for approval previews in listed conversations', async () => {
     const { store } = createStore(ConversationStore);
 
