@@ -558,6 +558,12 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Improve answer': '改进重答',
     'Undo': '撤销',
 
+    // ── 终态横幅(issue #65:completed/failed/cancelled 三态可辨)──
+    // 注:'Retry' 已在下方「选区 AI」区块定义(第 554 行),同词同义,此处复用不再重复声明。
+    'Stopped — the answer is incomplete.': '已停止,答案不完整。',
+    'Failed to generate a response.': '生成回答失败。',
+    'Failed:': '失败原因:',
+
     // ── 选区 AI(action-registry / inline-diff / rewrite-runner / selection-menu)──
     'Polish': '润色',
     'Proofread': '校对',

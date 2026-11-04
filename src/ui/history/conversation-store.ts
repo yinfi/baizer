@@ -155,6 +155,12 @@ export class ConversationStore {
                 metadata: message.metadata
                     ? {
                         ...message.metadata,
+                        // 失败轮次的「原样重试」快照只在本次会话内有效,不落盘:
+                        // 它的 context 里可能带整张图片的 base64 或整篇文件正文,
+                        // 而本文件每次保存都会整体重写,存进去会让会话库迅速膨胀。
+                        // 落盘的只有终态与失败原因,故刷新/重开后失败态照样可辨,
+                        // 只是不再提供重试入口(草稿与附件已在会话内恢复过)。
+                        retryDraft: undefined,
                         workspaceEdit: message.metadata.workspaceEdit
                             ? { ...message.metadata.workspaceEdit }
                             : undefined,

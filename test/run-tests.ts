@@ -108,6 +108,7 @@ const tests = [
   'test/prompt-template-service.test.ts',
   'test/knowledge/compile-concurrency.test.ts',
   'test/cross-phase-smoke.test.ts',
+  'test/outcome-states.test.ts',
 ];
 
 for (const testFile of tests) {

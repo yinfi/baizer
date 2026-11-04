@@ -1363,6 +1363,102 @@ textarea.shell-input::placeholder {
     gap: 0;
 }
 
+/* ── 终态横幅(issue #65:completed/failed/cancelled 三态可辨)──
+   失败要保留现场(过程展开、正文可读、原因可见、可重试);取消要明说「不完整」,
+   两者都不能长得像一次成功完成。 */
+.shell-outcome-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 6px 0;
+    padding: 8px 10px;
+    border-radius: var(--baizer-radius-s, 6px);
+    font-size: var(--font-smaller);
+    line-height: 1.45;
+}
+
+.shell-outcome-banner-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    padding-top: 1px;
+}
+
+.shell-outcome-banner-icon .svg-icon {
+    width: 15px;
+    height: 15px;
+}
+
+.shell-outcome-banner-body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    min-width: 0;
+}
+
+.shell-outcome-banner-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.shell-outcome-banner-failed {
+    border: 1px solid color-mix(in srgb, var(--text-error) 38%, transparent);
+    background: color-mix(in srgb, var(--text-error) 9%, transparent);
+    color: var(--text-normal);
+}
+
+.shell-outcome-banner-failed .shell-outcome-banner-icon {
+    color: var(--text-error);
+}
+
+.shell-outcome-banner-cancelled {
+    border: 1px solid color-mix(in srgb, var(--text-muted) 32%, transparent);
+    background: color-mix(in srgb, var(--background-secondary) 60%, transparent);
+    color: var(--text-muted);
+}
+
+/* 失败态容器:左侧留一条提示边,与正常回答区分开(正文/过程仍完整可读可复制)。 */
+.shell-outcome-failed {
+    border-left: 2px solid color-mix(in srgb, var(--text-error) 55%, transparent);
+    padding-left: 10px;
+}
+
+.shell-outcome-cancelled {
+    border-left: 2px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
+    padding-left: 10px;
+}
+
+.shell-outcome-retry-btn {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    height: auto;
+    padding: 2px 9px;
+    border: 1px solid color-mix(in srgb, var(--text-error) 40%, transparent);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-normal);
+    font-size: var(--font-smaller);
+    cursor: pointer;
+}
+
+.shell-outcome-retry-btn:hover {
+    background: color-mix(in srgb, var(--text-error) 14%, transparent);
+}
+
+.shell-outcome-retry-btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.shell-outcome-retry-btn .svg-icon {
+    width: 13px;
+    height: 13px;
+}
+
 .shell-think-timeline {
     position: relative;
     padding: 8px 0 8px 20px;

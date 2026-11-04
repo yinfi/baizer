@@ -85,5 +85,14 @@ export type StreamEvent =
          */
         entryIds?: { userEntryId?: string; assistantEntryId?: string };
       }
-    | { type: 'error'; message: string };
+    | {
+        type: 'error';
+        message: string;
+        /**
+         * 失败前已经生成、上过屏的部分正文(若有)。失败终态要「保留现场」:
+         * 不能让这段文字随错误事件一起消失——用户已经看到的内容必须留在屏幕上。
+         * 首 token 前失败(未产出任何正文)时缺省。
+         */
+        text?: string;
+      };
 

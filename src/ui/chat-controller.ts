@@ -18,7 +18,7 @@ import {
     ApprovalState,
 } from '../services/approval-execution';
 import { buildSelectionPreview } from './diff/change-preview';
-import { ChatMessage } from './types';
+import { ChatMessage, TurnOutcome } from './types';
 import { WorkspaceEditSummary } from '../services/workspace-edit-service';
 import { PLUGIN_ID } from '../mcp/types';
 
@@ -26,6 +26,19 @@ import { PLUGIN_ID } from '../mcp/types';
 export interface MessageAddedOptions {
     /** 该消息已随 stream 事件上屏,宿主只记录、不重画。 */
     alreadyRendered?: boolean;
+}
+
+/**
+ * 一次失败轮次的「原始请求」快照,供宿主在失败终态上渲染重试入口。
+ * 首 token 前失败(未落 ai 消息、无 sessionEntryId 可锚定)时,重试只能靠这份快照
+ * 原样重发,而不能走阶段C 依赖 entryId 的 forkAndRerun 路径。
+ */
+export interface RetryDraft {
+    query: string;
+    context: any[];
+    selection: string;
+    source: 'shell' | 'selection-menu';
+    displayText?: string;
 }
 
 export interface ChatControllerOptions {
@@ -159,20 +172,25 @@ export class ChatController {
         this.fileSearchCache = null;
     }
 
+    /**
+     * 跑一轮对话。
+     * @returns 本轮终态(issue #65):completed/failed/cancelled,slash 命令等非生成轮次返回 undefined。
+     * 宿主据此决定是否恢复草稿、是否清理上下文——过去无论成败都清上下文,失败时草稿/附件就丢了。
+     */
     public async processCommand(
         query: string,
         context: any[] | string = [],
         selection: string = '',
         source: 'shell' | 'selection-menu' = 'shell',
         displayText?: string,
-    ) {
-        if (!query.trim()) return;
+    ): Promise<TurnOutcome | undefined> {
+        if (!query.trim()) return undefined;
         const normalizedContext = this.normalizeContextItems(context);
 
         // 1. Handle Commands
         if (query.startsWith('/')) {
             await this.handleSlashCommand(query);
-            return;
+            return undefined;
         }
 
         // 2. Normal Chat
@@ -193,6 +211,8 @@ export class ChatController {
         // 否则会记下一条用户从未见过的回复(它标 alreadyRendered,宿主不画,
         // 于是只在切 tab 重渲时凭空出现)。
         let textWithheld = false;
+        // 本轮终态(issue #65)。缺省按成功算;失败/取消分支各自改写。
+        let outcome: TurnOutcome = 'completed';
 
         try {
             if (this.onStreamEvent) {
@@ -278,12 +298,27 @@ export class ChatController {
                     } else if (event.type === 'tool_call' || event.type === 'tool_result' || event.type === 'step_boundary') {
                         this.onStreamEvent(event);
                     } else if (event.type === 'error') {
-                        this.onStreamEvent(event);
+                        // ADR 0002 与 done 分支同一条规矩:记录必须先于事件发出,否则宿主的
+                        // finalizeStream 在投影里还查不到这条失败消息(查到的是上一轮残留),
+                        // 取不到 retryDraft——首次上屏就会少一个重试按钮,得等切 tab 重渲才出现。
+                        // 失败终态记一条失败的 ai 消息(而非灰色系统提示),承载错误原因 +
+                        // 已保留的正文 + 重试快照。alreadyRendered:宿主已经把失败态画进了
+                        // 流容器,这里只负责记录进投影。
+                        this.addMessage('ai', fullText, undefined, {
+                            alreadyRendered: true,
+                            metadata: {
+                                outcome: 'failed',
+                                errorMessage: event.message,
+                                retryDraft: { query, context: normalizedContext, selection, source, displayText },
+                            },
+                        });
+                        // 失败保留现场:把已上屏的部分正文(若有)随错误事件一起带给宿主,
+                        // 使失败态容器仍能显示「已生成的内容」,而不是连屏幕上的字也抹掉。
+                        this.onStreamEvent({ ...event, text: fullText || undefined });
                     }
 
                     if (event.type === 'error') {
-                        this.addMessage('system', `Error: ${event.message}`);
-                        return;
+                        return 'failed';
                     } else if (event.type === 'text_delta') {
                         fullText += event.content;
                     } else if (event.type === 'tool_call') {
@@ -303,6 +338,9 @@ export class ChatController {
                         // 流正常收尾但没有 done 事件(runtime 提前结束):仍把已有正文记为
                         // 一条中断的回复,否则这段文字只存在于屏幕上、不在任何列表里。
                         this.recordStreamedReply(fullText, { interrupted: true });
+                        // 没有 done 收尾就不是一次完整生成:终态按「取消/不完整」算,
+                        // 免得界面上把它当成功折叠起来(与上面记录的中断标记保持一致)。
+                        outcome = 'cancelled';
                     }
                 }
             } else {
@@ -330,15 +368,24 @@ export class ChatController {
                     interrupted: true,
                 });
                 this.addMessage('system', 'Response stopped.');
-                return;
+                outcome = 'cancelled';
+            } else {
+                // 失败路径(网络断开/超时/首 token 前失败等,均在走到任何 stream 事件前或途中抛出):
+                // 保留现场 + 开重试入口。textWithheld 时屏幕上从未显示过这段正文,不传给失败态,
+                // 避免与抑制态(待审批/写请求未落地)语义混淆。
+                this.handleError(error, {
+                    partialText: textWithheld ? undefined : fullText,
+                    retryDraft: { query, context: normalizedContext, selection, source, displayText },
+                });
+                outcome = 'failed';
             }
-            this.handleError(error);
         } finally {
             if (this.activeStreamController === streamController) {
                 this.activeStreamController = null;
             }
             this.setResponding(false);
         }
+        return outcome;
     }
 
     private async handleSlashCommand(query: string) {
@@ -1041,11 +1088,14 @@ export class ChatController {
      */
     private recordStreamedReply(
         text: string,
-        options: { assistantEntryId?: string; interrupted?: boolean } = {},
+        options: { assistantEntryId?: string; interrupted?: boolean; outcome?: 'completed' | 'failed' | 'cancelled' } = {},
     ) {
+        const outcome = options.outcome ?? (options.interrupted ? 'cancelled' : undefined);
         this.addMessage('ai', text, undefined, {
             sessionEntryId: options.assistantEntryId,
-            metadata: options.interrupted ? { interrupted: true } : undefined,
+            metadata: (options.interrupted || outcome)
+                ? { interrupted: options.interrupted, outcome }
+                : undefined,
             alreadyRendered: true,
         });
     }
@@ -1066,10 +1116,31 @@ export class ChatController {
         }
     }
 
-    private handleError(error: any) {
+    private handleError(
+        error: any,
+        turn?: { partialText?: string; retryDraft?: RetryDraft },
+    ) {
         logger.error('Chat error', error, 'ChatController');
         let msg = 'Unknown error occurred.';
         if (error.message) msg = error.message;
+
+        // 这类错误发生在 chatStream/chat 抛出异常时(网络断开、超时、首 token 前失败等,
+        // 从未产出过任何 StreamEvent)。turn 存在(有重试快照)时走与 in-stream error 一致的
+        // 失败终态记录:失败的 ai 消息(非灰色系统提示)+ 补发 error 事件驱动宿主的
+        // finalizeStream——否则没有 onStreamEvent 的话流容器会卡死在「Thinking...」。
+        // turn 缺省(无重试上下文的旧调用方/测试)时退回朴素系统提示,维持原有行为。
+        if (turn) {
+            this.addMessage('ai', turn.partialText || '', undefined, {
+                alreadyRendered: true,
+                metadata: {
+                    outcome: 'failed',
+                    errorMessage: msg,
+                    retryDraft: turn.retryDraft,
+                },
+            });
+            this.onStreamEvent?.({ type: 'error', message: msg, text: turn.partialText || undefined });
+            return;
+        }
         this.addMessage('system', `Error: ${msg}`);
     }
 

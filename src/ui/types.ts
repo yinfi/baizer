@@ -1,8 +1,16 @@
-import { ApprovalRequest } from './approval-card';
+import type { ApprovalRequest } from './approval-card';
 import type { ApprovalState } from '../services/approval-execution';
 import type { WorkspaceEditSummary } from '../services/workspace-edit-service';
+import type { RetryDraft } from './chat-controller';
 
 export type ShellMessageRole = 'user' | 'ai' | 'system';
+
+/**
+ * 一轮生成的终态(issue #65):completed/failed/cancelled 必须真实可辨,
+ * 而不是像过去那样全部收尾进同一个 finalizeStream 分支、看起来都「完成」了。
+ * 缺省(旧数据/未流式的轮次)等价于 completed。
+ */
+export type TurnOutcome = 'completed' | 'failed' | 'cancelled';
 
 export interface ChatMessage {
     id: string;
@@ -41,6 +49,15 @@ export interface ChatMessage {
         durationMs?: number;
         interrupted?: boolean;
         workspaceEdit?: WorkspaceEditSummary;
+        /** 本轮终态(issue #65)。仅在该气泡承载一整轮生成结果时有意义。 */
+        outcome?: TurnOutcome;
+        /** outcome === 'failed' 时的失败原因,供失败态横幅显示 + 持久化回放。 */
+        errorMessage?: string;
+        /**
+         * outcome === 'failed' 时的原始请求快照,供「一键重试」原样重发——
+         * 首 token 前失败没有 sessionEntryId 可锚定,只能靠这份快照重跑(不走分支 fork)。
+         */
+        retryDraft?: RetryDraft;
     };
 }
 

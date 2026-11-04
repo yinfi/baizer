@@ -22,7 +22,7 @@ import { ThinkingRenderer } from './renderers/thinking-renderer';
 import { ToolRenderer } from './renderers/tool-renderer';
 import { MessageRenderer } from './renderers/message-renderer';
 import { findBlockBoundary } from './renderers/stream-block-splitter';
-import { ConversationSnapshot, ChatMessage } from './types';
+import { ConversationSnapshot, ChatMessage, TurnOutcome } from './types';
 import { WorkspaceEditSummary } from '../services/workspace-edit-service';
 import { TabBar } from './tabs/tab-bar';
 import { TabManager } from './tabs/tab-manager';
@@ -251,8 +251,8 @@ export class ShellView extends ItemView {
                 // 末轮(只出答案、无工具/思考)不产生时间线内容 → 不会留下空分隔。
                 this.pendingStepDivider = true;
             },
-            onDone: (finalText) => this.finalizeStream(finalText),
-            onError: () => this.finalizeStream(),
+            onDone: (finalText, interrupted) => this.finalizeStream(interrupted ? 'cancelled' : 'completed', finalText),
+            onError: (message, text) => this.finalizeStream('failed', text, message),
             onScrollRequest: () => this.followScrollIfEnabled(),
         });
     }
@@ -577,6 +577,8 @@ export class ShellView extends ItemView {
     }
 
     async processCommand(query: string) {
+        // 记下发起时的 tab:请求在途时用户可能已切走,失败恢复不能落到别的 tab 的输入区。
+        const originTabId = this.tabManager.getActiveTab()?.id;
         try {
             this.ensureActiveTabSession();
             const { contextItems, selection } = await this.contextController.collectCommandContext({
@@ -585,7 +587,15 @@ export class ShellView extends ItemView {
             this.currentSelection = selection;
 
             this.updateActivity();
-            await this.chatController.processCommand(query, contextItems, this.currentSelection);
+            const outcome = await this.chatController.processCommand(query, contextItems, this.currentSelection);
+
+            if (outcome === 'failed') {
+                // 失败保留现场(issue #65):上下文(含图片/文件附件)不清,草稿按需恢复。
+                // 上下文本身就是用户挂上的那些 chip,留着即为「可恢复」,无需重建也免去重复。
+                this.restoreDraftAfterFailure(query, originTabId);
+                await this.refreshKnowledgeStatusPanel();
+                return;
+            }
 
             // Clear context after sending (optional, maybe keep for multi-turn?)
             // Smart Composer clears context after send usually, unless pinned.
@@ -601,6 +611,26 @@ export class ShellView extends ItemView {
                 content: `Error processing command: ${error.message}`,
                 timestamp: Date.now()
             });
+        }
+    }
+
+    /**
+     * 发送失败后恢复原草稿(issue #65 需求 4)。
+     *
+     * 只在输入区为空时回填:用户等待期间新输入的内容是更晚的意图,不能被旧草稿静默覆盖。
+     * 有冲突时不覆盖,原草稿仍可通过失败横幅上的「重试」原样重发——即「提供可恢复的原草稿」
+     * 而非丢失。失败发生在已切走的 tab 时不动当前 tab 的输入区(输入区是全视图共用一个)。
+     */
+    private restoreDraftAfterFailure(query: string, originTabId: TabId | undefined) {
+        if (!this.inputEl) return;
+        if (originTabId !== this.tabManager.getActiveTab()?.id) return;
+        if (this.inputEl.value.trim().length > 0) return;
+        this.inputEl.value = query;
+        this.adjustHeight();
+        this.updateInputToolbarCapabilities();
+        // 仅当用户本就在工作台里操作时才聚焦,避免抢走编辑器/笔记里的焦点。
+        if (this.containerEl.contains(document.activeElement)) {
+            this.inputEl.focus();
         }
     }
 
@@ -972,7 +1002,15 @@ export class ShellView extends ItemView {
     }
 
 
-    private finalizeStream(finalText?: string) {
+    /**
+     * 收尾本轮流(issue #65):终态必须显式传入,不能再像过去那样「成功/失败/取消
+     * 都走同一个无参收尾」——那会让失败和取消看起来都像正常完成。
+     *
+     * - completed:自动折叠过程时间线(只有成功才自动折叠),渲染操作栏。
+     * - failed:保留现场——过程保持展开、就地显示失败原因 + 已保留正文 + 重试。
+     * - cancelled:显示「已停止,答案不完整」,保留已生成内容,不记为成功完成。
+     */
+    private finalizeStream(outcome: TurnOutcome, finalText?: string, errorMessage?: string) {
         const growth = this.captureScrollGrowth();
         this.debouncedRenderStream.flush();
 
@@ -980,10 +1018,29 @@ export class ShellView extends ItemView {
 
         // runtime 可能在结束前替换正文(如 generation quality failure):done.text 才是
         // 入库/重建所见。有非空 finalText 时用它定型 DOM,使屏幕与保存一致;
-        // 否则回退到 UI 逐字累计(onError 无 text、以及 runtime 未替换时二者本就相同)。
+        // 失败/取消时没有 done.text,回退到 UI 逐字累计——那正是要「保留的现场」。
         const resolvedText = (typeof finalText === 'string' && finalText.length > 0)
             ? finalText
             : this.streamAccumulatedText;
+
+        // 本轮新落的 ai 消息(成功/失败/取消都会落一条,见 ChatController)。
+        // 「最后一条 ai」未必属于本轮:纯工具轮次没有最终正文、不落消息,那时它是上一轮的
+        // 残留。与开流前记下的 id 比对,不同才是本轮新落的。
+        const activeMessages = this.tabManager.getActiveTab()?.state.getMessages() ?? [];
+        const candidate = [...activeMessages].reverse().find(m => m.role === 'ai');
+        const lastAiMessage = candidate && candidate.id !== this.streamPriorLastAiId
+            ? candidate
+            : undefined;
+
+        // 首 token 前就失败/被取消:此前没有任何流内容,流容器可能根本没建起来。
+        // 补建一个,让终态(错误卡 + 重试)有处可落——否则用户只看到一条灰色系统提示,
+        // 没有任何「重试」入口,也分不清这是失败还是普通提示。
+        if (!this.streamContainer && outcome !== 'completed') {
+            this.ensureStreamContainer();
+        }
+        if (this.streamContainer) {
+            this.streamContainer.addClass(`shell-outcome-${outcome}`);
+        }
 
         if (this.streamContent && resolvedText) {
             // 流结束:把回复区切回 polite,让读屏把完成的整段回复播报一次(流式途中是 off)。
@@ -998,29 +1055,55 @@ export class ShellView extends ItemView {
             });
         }
 
+        // 只有成功才自动折叠过程:失败要保留现场(展开着才能看到失败前跑了什么),
+        // 取消同理——用户手动停止后仍需要能读到过程。两种情况下用户仍可手动折叠。
         if (this.streamTimeline && this.streamNodeCount > 0) {
             const summaryText = this.streamTimeline.querySelector('.think-summary-text') as HTMLElement;
             if (summaryText) summaryText.textContent = `Thought through ${this.streamNodeCount} steps`;
-            this.streamTimeline.addClass('is-collapsed');
             const summary = this.streamTimeline.querySelector('.shell-think-summary') as HTMLElement;
-            summary?.setAttribute('aria-expanded', 'false');
+            if (outcome === 'completed') {
+                this.streamTimeline.addClass('is-collapsed');
+                summary?.setAttribute('aria-expanded', 'false');
+            } else {
+                this.streamTimeline.removeClass('is-collapsed');
+                summary?.setAttribute('aria-expanded', 'true');
+            }
         } else if (this.streamTimeline && this.streamNodeCount === 0) {
             this.streamTimeline.addClass('baizer-hidden');
         }
 
         if (this.streamContainer) {
+            const renderer = this.getMessageRenderer();
+            // 终态横幅与回放路径共用 MessageRenderer 的同一套渲染,保证「屏幕上看到的」
+            // 与「切走再切回来/刷新后重建的」一致。
+            const bannerMessage: ChatMessage = lastAiMessage ?? {
+                id: `outcome-${Date.now()}`,
+                role: 'ai',
+                content: resolvedText,
+                timestamp: Date.now(),
+                metadata: {
+                    outcome,
+                    errorMessage,
+                    interrupted: outcome === 'cancelled',
+                },
+            };
+            if (outcome === 'cancelled') {
+                renderer.renderCancelledBanner(this.streamContainer, true);
+            } else if (outcome === 'failed') {
+                renderer.renderFailedBanner(this.streamContainer, {
+                    ...bannerMessage,
+                    metadata: {
+                        ...bannerMessage.metadata,
+                        outcome: 'failed',
+                        errorMessage: bannerMessage.metadata?.errorMessage ?? errorMessage,
+                    },
+                });
+            }
+
             // 阶段C:用投影里刚落下的真实 ai 消息(已带 assistantEntryId)渲染操作栏,
             // 而非临时空壳——否则 sessionEntryId 缺失,重试按钮的显示条件永不满足。
             // ChatController 在发出 done 之前就把该消息记进了投影(ADR 0002),
             // 它的 id 与 ChatController 列表里的同一条一致,故 👍/👎 能回查到。
-            // 但「最后一条 ai」未必属于本轮:纯工具轮次没有最终正文、不落消息,
-            // 那时它是上一轮的残留。与开流前记下的 id 比对,不同才是本轮新落的。
-            const activeMessages = this.tabManager.getActiveTab()?.state.getMessages() ?? [];
-            const candidate = [...activeMessages].reverse().find(m => m.role === 'ai');
-            const lastAiMessage = candidate && candidate.id !== this.streamPriorLastAiId
-                ? candidate
-                : undefined;
-            // 就近填充分叉源问题文本:该 ai 回复紧邻其前的 user 消息原文,供底部「分叉」输入预填。
             // 兜底空壳仅在无持久会话时出现(投影里没有本轮消息);它的 id 与任何列表都对不上,
             // 只有复制可用——与本轮无正文可言时(纯工具轮次)一并不渲染操作栏。
             const toolbarMessage: ChatMessage | null = lastAiMessage
@@ -1034,7 +1117,7 @@ export class ShellView extends ItemView {
                     }
                     : null;
             if (toolbarMessage) {
-                this.getMessageRenderer().addActionToolbar(this.streamContainer, toolbarMessage);
+                renderer.addActionToolbar(this.streamContainer, toolbarMessage);
             }
         }
 
@@ -1091,6 +1174,7 @@ export class ShellView extends ItemView {
                     await this.chatController.recordNegativeFeedback(message.id, reason);
                 },
                 onRetry: (message) => this.handleRetryMessage(message),
+                onRetryDraft: (message) => this.handleRetryDraft(message),
                 onEdit: (message, newText) => this.handleEditMessage(message, newText),
                 onFork: (message, newText) => this.handleForkFromAi(message, newText),
                 onSwitchBranch: (message, targetLeafId) => this.handleSwitchBranch(message, targetLeafId),
@@ -2235,6 +2319,60 @@ export class ShellView extends ItemView {
         }
         // 重试:同一问题重生成,新答案换掉旧的、不保留旧分支(supersede=true)。
         await this.forkAndRerun(cid, userMessage.sessionEntryId, userMessage.content, true);
+    }
+
+    /**
+     * 失败态重试(issue #65):用失败轮次保存的原始请求快照重跑。
+     *
+     * 与 handleRetryMessage 的区别:后者锚定在已落盘的 user entry 上走分支重跑;
+     * 失败轮次(尤其首 token 前失败)在 UI 里拿不到 user entry id,只能靠快照重发。
+     * 若该轮其实已落盘(持久会话记了 user entry),则先定位到该 user 之前再重跑,
+     * 避免同一提问在会话树里出现两次(需求 5:不重复提交同一条用户请求)。
+     */
+    private async handleRetryDraft(aiMessage: ChatMessage) {
+        const draft = aiMessage.metadata?.retryDraft;
+        const cid = this.tabManager.getActiveTab()?.id;
+        if (!draft || !cid) {
+            new Notice(t('Cannot locate the question to retry.'));
+            return;
+        }
+        // 处理中禁用重复重试:连点/双击只允许一个在途请求。
+        if (this.chatController.isRunActive()) return;
+
+        // 已落盘的情况:投影里最后一条 user 就是本轮提问,定位到它之前重跑(旧分支作废),
+        // 而不是把同一提问再追加一次。
+        const persistedUserEntryId = await this.findPersistedTurnUserEntryId(cid, draft);
+        if (persistedUserEntryId) {
+            await this.forkAndRerun(cid, persistedUserEntryId, draft.query, true);
+            return;
+        }
+
+        // 未落盘(无持久会话/首 token 前即失败):直接按快照原样重发,保留原上下文与选区。
+        this.updateActivity();
+        await this.chatController.processCommand(
+            draft.query,
+            draft.context,
+            draft.selection,
+            draft.source,
+            draft.displayText,
+        );
+    }
+
+    /**
+     * 在持久会话投影里找失败轮次对应的 user entry:
+     * 仅当投影最后一条 user 消息的正文与本轮提问一致时才认账,避免误把更早的
+     * 同文提问当成这一轮(否则重试会作用到错误的轮次上)。
+     */
+    private async findPersistedTurnUserEntryId(
+        conversationId: string,
+        draft: { query: string; displayText?: string },
+    ): Promise<string | null> {
+        const projection = await this.modelService.getBranchProjection(conversationId);
+        if (!projection?.length) return null;
+        const lastUser = [...projection].reverse().find(m => m.role === 'user');
+        if (!lastUser?.sessionEntryId) return null;
+        const expected = [draft.displayText, draft.query].filter((v): v is string => !!v);
+        return expected.includes(lastUser.content) ? lastUser.sessionEntryId : null;
     }
 
     /** 编辑重问某条 user 消息:定位到它之前,用新文本重跑,产生兄弟分支。 */

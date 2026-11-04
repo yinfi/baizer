@@ -28,6 +28,12 @@ interface MessageRendererOptions {
   onFeedbackDown?: (message: ChatMessage, reason: string) => void | Promise<void>;
   /** 重试(阶段C):对某条 ai 回复重新生成,产生兄弟分支。 */
   onRetry?: (message: ChatMessage) => void | Promise<void>;
+  /**
+   * 失败态重试(issue #65):用失败轮次保存的原始请求快照原样重发。
+   * 首 token 前失败没有落 ai 消息、没有 sessionEntryId,onRetry 的分叉重跑走不通,
+   * 只能靠这份快照。message.metadata.retryDraft 存在时才渲染该入口。
+   */
+  onRetryDraft?: (message: ChatMessage) => void | Promise<void>;
   /** 编辑重问(阶段C):改写某条 user 消息文本后重跑,产生兄弟分支。 */
   onEdit?: (message: ChatMessage, newText: string) => void | Promise<void>;
   /** 分叉(阶段C):在 ai 回复底部操作栏触发,编辑对应问题后重跑,产生兄弟分支。 */
@@ -76,7 +82,17 @@ export class MessageRenderer {
         const approvalBody = (entry as any).createDiv({ cls: 'shell-approval-message-body' }) as HTMLElement;
         this.renderApproval(approvalBody, message);
       } else if (message.role === 'ai') {
-        await this.renderAiContent(entry, message.content);
+        const outcome = message.metadata?.outcome;
+        (entry as any).addClass?.(`shell-outcome-${outcome ?? 'completed'}`) ?? entry.classList.add(`shell-outcome-${outcome ?? 'completed'}`);
+        if (outcome === 'cancelled') {
+          this.renderCancelledBanner(entry);
+        }
+        if (message.content) {
+          await this.renderAiContent(entry, message.content);
+        }
+        if (outcome === 'failed') {
+          this.renderFailedBanner(entry, message);
+        }
         this.addActionToolbar(entry, message);
       } else if (message.role === 'user') {
         this.setText(entry, message.content);
@@ -141,6 +157,13 @@ export class MessageRenderer {
 
   addActionToolbar(container: HTMLElement, message: ChatMessage) {
     const toolbar = (container as any).createDiv({ cls: 'shell-feedback-bar shell-message-actions' }) as HTMLElement;
+
+    // 失败且没有正文:复制/点赞/点踩/分叉都没有对象可作用,全部跳过,只留失败横幅里的重试。
+    const isEmptyFailure = message.metadata?.outcome === 'failed' && !message.content;
+    if (isEmptyFailure) {
+      return toolbar;
+    }
+
     const copyButton = (toolbar as any).createEl('button', {
       cls: 'shell-message-action-btn shell-copy-btn clickable-icon',
       title: t('Copy message'),
@@ -164,9 +187,13 @@ export class MessageRenderer {
       });
     }
 
+    // 「满意/不满意」「分叉」只对一次完整生成有意义;失败/取消的半截回答不构成一次
+    // 可评价的回答,点赞点踩语义不成立,分叉也会把半截内容误当正式答案派生分支。
+    const isCompleteAnswer = (message.metadata?.outcome ?? 'completed') === 'completed';
+
     // 点赞:用户认可该回答 → 归档到知识库(onFeedbackUp 内部走 file-back)。
     // 仅在宿主接入归档通路时渲染,避免点了无反应的死按钮。
-    if (this.options.onFeedbackUp) {
+    if (isCompleteAnswer && this.options.onFeedbackUp) {
       const upButton = (toolbar as any).createEl('button', {
         cls: 'shell-feedback-btn shell-thumbs-up clickable-icon',
         title: t('Approve and save to knowledge base'),
@@ -183,7 +210,7 @@ export class MessageRenderer {
     }
 
     // 点踩:用户不满意 → 展开内联输入问「哪里不好」,提交后回调 onFeedbackDown(message, reason)。
-    if (this.options.onFeedbackDown) {
+    if (isCompleteAnswer && this.options.onFeedbackDown) {
       const downButton = (toolbar as any).createEl('button', {
         cls: 'shell-feedback-btn shell-thumbs-down clickable-icon',
         title: t('Not satisfied — tell AI what to improve'),
@@ -198,7 +225,7 @@ export class MessageRenderer {
     // 分叉(阶段C):在底部操作栏直接给一个「分叉」入口——展开预填原问题的输入,
     // 改写后从该问题重新提问,原问答保留为兄弟分支。放在 ai 操作栏是因为流结束时才渲染,
     // 能拿到真实 entryId(user 消息在发送时渲染,拿不到);统一入口也更直观。
-    if (this.options.onFork && message.sessionEntryId) {
+    if (isCompleteAnswer && this.options.onFork && message.sessionEntryId) {
       const forkButton = (toolbar as any).createEl('button', {
         cls: 'shell-message-action-btn shell-fork-btn clickable-icon',
         title: t('Fork: edit the question and regenerate (keep current conversation as a branch)'),
@@ -449,6 +476,68 @@ export class MessageRenderer {
 
   private isCancelledSystemMessage(content: string) {
     return /^Cancelled:/i.test(content.trim());
+  }
+
+  /**
+   * 取消终态(issue #65):「已停止,答案不完整」横幅。不冒充成功,也不吞掉已生成内容。
+   * prepend 用于流式收尾:容器里已有过程时间线/正文,横幅要落在最上面才醒目。
+   */
+  renderCancelledBanner(entry: HTMLElement, prepend = false) {
+    const banner = (entry as any).createDiv({ cls: 'shell-outcome-banner shell-outcome-banner-cancelled' }) as HTMLElement;
+    this.setAttribute(banner, 'role', 'status');
+    const icon = (banner as any).createSpan({ cls: 'shell-outcome-banner-icon' }) as HTMLElement;
+    setIcon(icon, 'octagon-pause');
+    (banner as any).createSpan({ cls: 'shell-outcome-banner-text', text: t('Stopped — the answer is incomplete.') });
+    if (prepend) this.prependChild(entry, banner);
+    return banner;
+  }
+
+  /**
+   * 失败终态(issue #65):失败原因 + 保留的部分正文(由调用方在 renderAiContent 里渲染)+
+   * 一键重试。无正文时也要有错误卡与重试入口,不留永久 Thinking。
+   */
+  renderFailedBanner(entry: HTMLElement, message: ChatMessage) {
+    const banner = (entry as any).createDiv({ cls: 'shell-outcome-banner shell-outcome-banner-failed' }) as HTMLElement;
+    this.setAttribute(banner, 'role', 'alert');
+    const icon = (banner as any).createSpan({ cls: 'shell-outcome-banner-icon' }) as HTMLElement;
+    setIcon(icon, 'alert-triangle');
+    const body = (banner as any).createDiv({ cls: 'shell-outcome-banner-body' }) as HTMLElement;
+    (body as any).createSpan({
+      cls: 'shell-outcome-banner-text',
+      text: message.metadata?.errorMessage
+        ? `${t('Failed:')} ${message.metadata.errorMessage}`
+        : t('Failed to generate a response.'),
+    });
+
+    // 原样重发(无 sessionEntryId 的首 token 前失败走此路,与阶段C 的分叉重试互斥)。
+    if (this.options.onRetryDraft && message.metadata?.retryDraft) {
+      const retryButton = (body as any).createEl('button', {
+        cls: 'shell-outcome-retry-btn clickable-icon',
+        attr: { type: 'button', title: t('Retry'), 'aria-label': t('Retry') },
+      }) as HTMLElement;
+      setIcon(retryButton, 'refresh-cw');
+      (retryButton as any).createSpan({ text: t('Retry') });
+      retryButton.addEventListener('click', () => {
+        if ((retryButton as HTMLButtonElement).disabled) return;
+        (retryButton as HTMLButtonElement).disabled = true;
+        void this.options.onRetryDraft?.(message);
+      });
+    }
+    return banner;
+  }
+
+  /** 把节点插到 entry 的最前面(Obsidian 的 prepend 在 FakeElement 测试替身里没有)。 */
+  private prependChild(entry: HTMLElement, child: HTMLElement) {
+    if (typeof (entry as any).prepend === 'function') {
+      (entry as any).prepend(child);
+      return;
+    }
+    const first = (entry as any).firstChild ?? (entry as any).children?.[0];
+    if (first && typeof (entry as any).insertBefore === 'function') {
+      (entry as any).insertBefore(child, first);
+    } else if (Array.isArray((entry as any).children)) {
+      (entry as any).children.unshift(child);
+    }
   }
 
   private parseSystemStatus(content: string): ParsedSystemStatus | null {

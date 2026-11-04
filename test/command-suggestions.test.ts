@@ -507,7 +507,8 @@ async function runTests() {
     const summary = timeline.querySelector('.shell-think-summary')!;
     (view as any).streamNodeCount = 1;
 
-    (view as any).finalizeStream();
+    // issue #65:终态改为显式参数——只有成功(completed)才自动折叠过程时间线。
+    (view as any).finalizeStream('completed');
     expect(timeline.hasClass('is-collapsed')).toBe(true);
     expect(summary.attributes['aria-expanded']).toBe('false');
 
