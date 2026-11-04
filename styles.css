@@ -319,10 +319,25 @@
    它会跟着上方内容一起被滚出屏幕外(经 CDP 实测验证过这个具体失败模式)。
    sticky 以同一个滚动容器为参照,始终贴在当前可见区域底部,这才是「可见、
    可点击、不盖输入区」(验收标准3、5)真正需要的效果。
+   但 sticky 光改属性不够:它的「能贴到哪」被限制在自己的 flow(正常文档流)
+   位置到目标偏移之间,必须有排在它*前面*、足够高的兄弟内容可以被滚过去,
+   否则跟 absolute 效果一样会被滚走。本元素的 DOM 位置本身在它构造时就是
+   outputContainer 的第一个(当时唯一)子节点,而消息子树是之后才惰性创建、
+   被插到它后面的——因此 BackToLatestAffordance 还提供 moveToEnd(),
+   ShellView 在每次冒出新的消息子树兄弟节点时都要调用它,把本元素重新挪到
+   DOM 流的最后(同样经 CDP 实测复现、修复过这个具体回归,见 shell-view.ts
+   里 getActiveMessageContainer() 的调用点)。
    随 output area 一起被裁切,因此也不会在窄侧栏(验收标准5,300px)下产生
    横向溢出;output area 的 flex 布局使其自身永远停在输入区上方,按钮也就
    永远盖不到输入区。 */
 .shell-back-to-latest {
+    /* .shell-output-area 是 flex-direction: column,交叉轴默认 stretch——
+       本元素会被拉伸成 100% 宽。继续用 left:50% + translateX(-50%) 居中
+       「未知宽度的盒子」这个技巧,要求盒子宽度就是其内容宽度,而不是被拉伸
+       成撑满容器,所以用 align-self: center 退出 stretch,宽度收缩为内容宽度
+       (配合下面的 width: fit-content),再用 left/transform 做水平居中。 */
+    align-self: center;
+    width: fit-content;
     position: sticky;
     left: 50%;
     bottom: var(--size-4-2);

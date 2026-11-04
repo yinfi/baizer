@@ -645,6 +645,10 @@ export class ShellView extends ItemView {
         if (!el) {
             el = this.outputContainer.createDiv({ cls: 'shell-tab-messages' });
             this.tabContainers.set(activeId, el);
+            // issue #64:「回到最新」用 position: sticky 钉在可见视口底部,这要求它在
+            // DOM 流里排在所有消息子树*之后*。子树是惰性创建的,会被插到它后面——
+            // 每次冒出一个新子树,就把它重新挪回最后,维持“子树都在它前面”这个前提。
+            this.backToLatestAffordance?.moveToEnd();
         }
         return el;
     }

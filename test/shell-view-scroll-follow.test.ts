@@ -93,6 +93,15 @@ class FakeScrollElement {
   }
 
   appendChild(child: FakeScrollElement) {
+    // 真实 DOM 的 appendChild 对已经是本节点子节点的元素是"移到末尾"而不是
+    // 重复插入——moveToEnd() 依赖这个语义(用它把「回到最新」按钮挪到消息
+    // 子树之后),这里必须先从旧父节点里摘掉,否则假 DOM 会产生重复子节点,
+    // 测不出真实场景下的 DOM 顺序 bug。
+    if (child.parentElement) {
+      const oldSiblings = child.parentElement.children;
+      const index = oldSiblings.indexOf(child);
+      if (index !== -1) oldSiblings.splice(index, 1);
+    }
     child.parentElement = this;
     this.children.push(child);
   }
@@ -585,6 +594,39 @@ async function runTests() {
     if (!/overflow:\s*hidden/.test(buttonRule[0])) {
       throw new Error('affordance button must clip long labels instead of overflowing');
     }
+  });
+
+  // ── 验收标准3/5(DOM 顺序回归):sticky 要求「回到最新」排在消息子树之后 ──
+  await test('the affordance element is moved after the tab message subtree in DOM order', async () => {
+    const { view, output } = await createHarness();
+
+    // onOpen 的真实顺序:outputContainer 先有 scroll 监听 + 挂「回到最新」按钮,
+    // 此刻还没有任何 tab 的消息子树——按钮天然是第一个(也是唯一一个)子节点。
+    const affordanceIndexBeforeAnyTab = output.children.indexOf((view.backToLatestAffordance as any).el);
+    expect(affordanceIndexBeforeAnyTab).toBe(0);
+
+    // 消息子树是惰性创建的(第一条消息渲染时才 createDiv),发生在按钮构造*之后*,
+    // 默认会被插到按钮后面。position: sticky 只有排在"正常流里更早的高内容兄弟
+    // 节点"之后才贴得住可见视口底部——如果按钮还留在最前面,sticky 会退化成
+    // 和 absolute 一样,用户往上翻时跟着内容一起滚出屏幕(issue #64 的真实回归)。
+    view.getActiveMessageContainer();
+
+    const tabMessagesIndex = output.children.findIndex((child: any) => child.hasClass('shell-tab-messages'));
+    const affordanceIndexAfter = output.children.indexOf((view.backToLatestAffordance as any).el);
+    if (tabMessagesIndex === -1) throw new Error('expected a .shell-tab-messages subtree to have been created');
+    if (!(affordanceIndexAfter > tabMessagesIndex)) {
+      throw new Error(
+        `affordance must come after the message subtree in DOM order for position:sticky to stick ` +
+        `(tabMessagesIndex=${tabMessagesIndex}, affordanceIndex=${affordanceIndexAfter})`
+      );
+    }
+
+    // 还要对第二个 tab 成立:每次冒出新的子树兄弟节点都要把按钮重新挪到最后。
+    const tabB = view.tabManager.createTab();
+    view.tabManager.switchTab(tabB.id);
+    view.getActiveMessageContainer();
+    const affordanceIndexFinal = output.children.indexOf((view.backToLatestAffordance as any).el);
+    expect(affordanceIndexFinal).toBe(output.children.length - 1);
   });
 
   await test('the affordance label is translated through t() (no hardcoded Chinese in shell-view)', async () => {
