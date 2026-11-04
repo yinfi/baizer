@@ -419,14 +419,14 @@ async function runTests() {
     expect(!!container.querySelector('.shell-feedback-reason')).toBe(false);
   });
 
-  await test('renders approval cards and delegates approve and cancel callbacks', async () => {
+  await test('renders approval cards and delegates approve and reject callbacks', async () => {
     const container = new FakeElement();
     const calls: string[] = [];
     const renderer = new MessageRenderer({
       app: {},
       component: {},
       onApprove: async () => { calls.push('approve'); },
-      onCancel: () => { calls.push('cancel'); },
+      onReject: () => { calls.push('reject'); },
       onFocusApprovalPreview: () => { calls.push('focus'); },
     });
 
@@ -436,6 +436,7 @@ async function runTests() {
       content: 'approval',
       timestamp: 4,
       approval: {
+        id: 'req-renderer-1',
         action: 'create_note',
         target: 'Clippings/example.md',
         args: {},
@@ -453,17 +454,19 @@ async function runTests() {
     });
 
     const approveButton = container.querySelector('.shell-approval-confirm');
-    const cancelButton = container.querySelector('.shell-approval-cancel');
+    const rejectButton = container.querySelector('.shell-approval-cancel');
     const focusButton = container.querySelector('.shell-approval-focus-preview');
     const approvalEntry = container.querySelector('.shell-approval-entry');
     const approvalAvatar = container.querySelector('.shell-approval-avatar');
     const previewTarget = container.querySelector('.shell-change-preview-target');
     focusButton?.click();
     approveButton?.click();
-    cancelButton?.click();
+    rejectButton?.click();
 
     expect(calls).toEqual(['focus', 'approve']);
-    expect(!!container.querySelector('.shell-approval-card')).toBe(false);
+    // 点击后卡片仍在原位（结果由宿主更新 approvalState 后原位重画），不因 DOM 释放丢请求。
+    expect(!!container.querySelector('.shell-approval-card')).toBe(true);
+    expect(approveButton?.disabled).toBe(true);
     expect(!!approvalEntry).toBe(true);
     expect(approvalAvatar?.textContent).toBe('AI');
     expect(previewTarget?.textContent).toBe('Clippings/example.md');

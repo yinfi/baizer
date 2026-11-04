@@ -10,6 +10,11 @@ import { DEFAULT_SETTINGS } from '../src/mcp/types';
 
 function expect(actual: any) {
   return {
+    toBe: (expected: any) => {
+      if (actual !== expected) {
+        throw new Error(`Expected ${expected} but got ${actual}`);
+      }
+    },
     toEqual: (expected: any) => {
       const actualStr = JSON.stringify(actual);
       const expectedStr = JSON.stringify(expected);
@@ -360,7 +365,21 @@ async function runTests() {
       content: '# Approved',
     }, 'tab-1');
 
-    expect(result).toEqual({ success: true, message: 'approved execution' });
+    expect({
+      kind: result.kind,
+      status: result.status,
+      detail: result.detail,
+      target: result.target,
+      retryable: result.retryable,
+      result: result.result,
+    }).toEqual({
+      kind: 'approval-execution',
+      status: 'succeeded',
+      detail: 'approved execution',
+      target: 'approved.md',
+      retryable: false,
+      result: { success: true, message: 'approved execution' },
+    });
     expect(calls).toEqual([{
       name: 'create_note',
       args: {
@@ -427,7 +446,65 @@ async function runTests() {
       content: 'y',
     });
 
-    expect(result).toEqual({ success: true, message: 'ok' });
+    expect({ kind: result.kind, status: result.status, detail: result.detail }).toEqual({
+      kind: 'approval-execution',
+      status: 'succeeded',
+      detail: 'ok',
+    });
+  });
+
+  await test('executeApprovedAction deduplicates by request id and only retries after failure', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const service: any = Object.create(ModelService.prototype);
+    service.approvalExecutionRegistry = new ApprovalExecutionRegistry();
+    let calls = 0;
+    service.toolRegistry = {
+      execute: async () => {
+        calls += 1;
+        if (calls === 1) return { success: false, error: 'locked' };
+        return { success: true, message: 'done' };
+      },
+    };
+    service.operationAuditLog = { record: async () => { }, list: async () => [] };
+    service.settings = { activeProvider: 'openai' };
+    service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
+    service.sessionManager = null;
+
+    const first = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-dedupe' });
+    expect(first.status).toBe('failed');
+    expect(calls).toBe(1);
+
+    // 失败未显式 retry：复用失败结果，不重复执行。
+    const again = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-dedupe' });
+    expect(again.status).toBe('failed');
+    expect(calls).toBe(1);
+
+    const retried = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-dedupe', retry: true });
+    expect(retried.status).toBe('succeeded');
+    expect(calls).toBe(2);
+
+    // 成功后再 retry 也不能重放写入。
+    const replay = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-dedupe', retry: true });
+    expect(replay.status).toBe('succeeded');
+    expect(calls).toBe(2);
+  });
+
+  await test('reconcileApprovedAction distinguishes executed-but-unrecorded from never-executed', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const service: any = Object.create(ModelService.prototype);
+    service.approvalExecutionRegistry = new ApprovalExecutionRegistry();
+    service.settings = { activeProvider: 'openai' };
+    service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
+
+    service.operationAuditLog = {
+      list: async () => [{ id: 'req-executed', action: 'delete_note', target: 'a.md', timestamp: 1, approvalSource: 'user-click', undoable: false }],
+    };
+    const executed = await service.reconcileApprovedAction('req-executed', 'delete_note', { path: 'a.md' }, 'tab-1');
+    expect({ status: executed.status, retryable: executed.retryable }).toEqual({ status: 'unknown', retryable: false });
+
+    service.operationAuditLog = { list: async () => [] };
+    const neverExecuted = await service.reconcileApprovedAction('req-never', 'delete_note', { path: 'a.md' }, 'tab-1');
+    expect({ status: neverExecuted.status, retryable: neverExecuted.retryable }).toEqual({ status: 'failed', retryable: true });
   });
 
   await test('chat delegates prepared turn execution to ChatRuntime', async () => {

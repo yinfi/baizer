@@ -76,6 +76,21 @@ When a pre-approval tool is called under `confirmExecutions`:
    (as a `custom_message` entry) so the next model turn sees that the action was
    approved and what it produced — the session, not the UI history, is the
    cross-turn source of truth.
+7. Every request carries a stable `id`. `ApprovalExecutionRegistry` keys
+   execution by that id, so a double click, a repeated Enter, or a second
+   controller after the view was remounted reuses the in-flight promise or the
+   recorded result instead of writing twice. A successful result is never
+   replayed; an explicit retry is only accepted after a reported failure.
+8. The approval message keeps an `approvalState` snapshot (`pending` / `running` /
+   `succeeded` / `failed` / `rejected` / `unknown`) in the conversation
+   projection. The card is a rendering of that snapshot: it stays in place while
+   the action runs, records the outcome (including "approved but failed") and
+   survives tab switches or a view remount. Rejection records
+   `rejected` without calling the tool at all.
+9. If execution throws (or the app is interrupted mid-run) the outcome is
+   `unknown`; the card offers a "check result" step that consults the execution
+   registry and the operation audit log before any retry, because the side
+   effect may already have happened.
 
 ## Design Rule
 
