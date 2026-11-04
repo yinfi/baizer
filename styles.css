@@ -288,6 +288,9 @@
 
 /* 2. Output Area */
 .shell-output-area {
+    /* issue #64:承载「回到最新」浮动按钮的定位上下文——按钮绝对定位于本容器
+       底部内侧,容器本身不在输入区内,因此按钮永远不会盖住输入区。 */
+    position: relative;
     flex-grow: 1;
     overflow-y: auto;
     scroll-behavior: smooth;
@@ -307,6 +310,54 @@
 .shell-output-area::-webkit-scrollbar-thumb {
     background: var(--scrollbar-thumb-bg);
     border-radius: 3px;
+}
+
+/* issue #64:「有新输出 · 回到最新」浮动按钮。
+   绝对定位在 output area 底部内侧居中,随 output area 一起被裁切,
+   因此不会在窄侧栏(验收标准5,300px)下产生横向溢出;
+   output area 的 flex 布局使其自身永远停在输入区上方,按钮也就永远盖不到输入区。 */
+.shell-back-to-latest {
+    position: absolute;
+    left: 50%;
+    bottom: var(--size-4-2);
+    transform: translateX(-50%);
+    max-width: calc(100% - var(--size-4-4));
+    z-index: 5;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.shell-back-to-latest.baizer-hidden {
+    display: none;
+}
+
+.shell-back-to-latest-button {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-4-1);
+    max-width: 100%;
+    padding: var(--size-4-1) var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    font-size: var(--font-ui-small);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-shadow: var(--shadow-s);
+    cursor: pointer;
+}
+
+.shell-back-to-latest-button:hover {
+    background: var(--interactive-accent-hover);
+}
+
+.shell-back-to-latest-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Chat Entries */

@@ -48,6 +48,8 @@ const tests = [
   'test/input-toolbar.test.ts',
   'test/shell-input-layout.test.ts',
   'test/stream-controller.test.ts',
+  'test/scroll-follow-controller.test.ts',
+  'test/shell-view-scroll-follow.test.ts',
   'test/stream-block-splitter.test.ts',
   'test/thinking-renderer.test.ts',
   'test/tool-renderer.test.ts',

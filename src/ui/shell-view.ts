@@ -31,6 +31,9 @@ import { ConversationController } from './history/conversation-controller';
 import { ConversationStore } from './history/conversation-store';
 import { showGhostText } from './ghost-text';
 import { debounce } from '../utils/throttle';
+import { ScrollFollowController, ScrollGeometry } from './scroll/scroll-follow-controller';
+import { ScrollRequestScheduler, ScrollRequestSchedulerRegistry } from './scroll/scroll-request-scheduler';
+import { BackToLatestAffordance } from './scroll/back-to-latest-affordance';
 
 export { VIEW_TYPE_SHELL };
 
@@ -39,6 +42,14 @@ interface ShellTabSession {
     contextManager: ContextManager;
     contextController: ContextController;
 }
+
+/**
+ * `.shell-output-area` 的 CSS 设了 `scroll-behavior: smooth`,程序化把 scrollTop
+ * 设到底部后浏览器会花几帧才真正滚到位,期间触发的 scroll 事件几何都不是终态。
+ * 这段时间内收到的 scroll 事件一律视为程序化滚动的噪声,而非用户上翻——
+ * 300ms 比典型的 smooth 滚动动画(通常 < 250ms)留了一点余量。
+ */
+const SMOOTH_SCROLL_SETTLE_MS = 300;
 
 export class ShellView extends ItemView {
     private modelService: ModelService;
@@ -72,6 +83,23 @@ export class ShellView extends ItemView {
     private messageObserver: IntersectionObserver | null = null;
     // 脱水态 entry → 其被摘下的子树(等高占位期间寄存于此,滚入时挂回)。WeakMap 随节点回收自动清理。
     private dehydratedEntries = new WeakMap<HTMLElement, DocumentFragment>();
+
+    // ==================== issue #64:滚动跟随(按 tab 隔离) ====================
+    // 每个 tab 自己的跟随/未读/近底锚点状态,随 tab 创建惰性生成,关闭时随之移除。
+    private scrollFollowControllers = new Map<TabId, ScrollFollowController>();
+    // 把「延迟滚动」绑定到发起它的 tab 身份上:50ms 后触发时若活动 tab 已变,整条跳过。
+    private readonly scrollRequestSchedulers = new ScrollRequestSchedulerRegistry<TabId>((tabId) =>
+        new ScrollRequestScheduler<TabId>(tabId, {
+            getActiveSessionId: () => this.tabManager.getActiveTab()?.id ?? null,
+            run: () => this.performScrollToEnd(),
+        }),
+    );
+    // 「有新输出 · 回到最新」浮动按钮,挂在 outputContainer 内部(其底部,不盖输入区)。
+    private backToLatestAffordance: BackToLatestAffordance | null = null;
+    // 是否正处于一次程序化滚动(scrollToEnd/jumpToLatest 发起)之中:期间的 scroll 事件不算用户意图。
+    // 用普通 timer(而非 scrollend)收尾,因为 scrollend 在部分 Obsidian WebView 内核上不可用。
+    private programmaticScrollTimer: number | null = null;
+
     private conversationController: ConversationController;
     private historyMenu: HistoryMenu | null = null;
     private historyMenuContainerEl: HTMLElement | null = null;
@@ -183,6 +211,8 @@ export class ShellView extends ItemView {
 
     private handlePasteBound = (e: ClipboardEvent) => this.handlePaste(e);
     private handleDropBound = (e: DragEvent) => this.handleDrop(e);
+    private handleOutputScrollBound = () => this.handleOutputScroll();
+    private handleUserScrollIntentBound = () => this.handleUserScrollIntent();
 
     constructor(leaf: WorkspaceLeaf, modelService: ModelService, private plugin?: IPlugin) {
         super(leaf);
@@ -287,6 +317,18 @@ export class ShellView extends ItemView {
         // think-summary 折叠交互采用事件委托(避免每轮流式在 summary 上累积监听器)。
         // 抽成幂等方法,onOpen 与流式入口都会确保绑定,不依赖初始化路径是否完整走过。
         this.ensureTimelineDelegation();
+        // issue #64:监听真实滚动事件,驱动按 tab 隔离的跟随策略;
+        // 「回到最新」浮动按钮挂在 outputContainer 内部底部,不占用/遮挡输入区。
+        this.outputContainer.addEventListener('scroll', this.handleOutputScrollBound);
+        // wheel / touchstart / 方向键只可能由用户产生(程序化滚动绝不会触发),
+        // 因此可作为「用户此刻真的在滚动」的硬信号:一旦收到就立刻结束任何进行中的
+        // 程序化滚动忽略窗口,保证「用户上翻立即暂停」不被 smooth 动画的收尾时长吞掉。
+        this.outputContainer.addEventListener('wheel', this.handleUserScrollIntentBound, { passive: true });
+        this.outputContainer.addEventListener('touchstart', this.handleUserScrollIntentBound, { passive: true });
+        this.outputContainer.addEventListener('keydown', this.handleUserScrollIntentBound);
+        this.backToLatestAffordance = new BackToLatestAffordance(this.outputContainer, {
+            onJumpToLatest: () => this.handleBackToLatestClick(),
+        });
 
         this.tabBar = new TabBar(this.tabBarContainerEl, {
             onTabClick: (id) => {
@@ -310,6 +352,10 @@ export class ShellView extends ItemView {
         }
         this.updateTabBar();
         this.renderActiveTabMessages();
+        // issue #64:视图刚打开——这是本次实例对该 tab 的第一次接触,从底部开始、跟随。
+        // （rerender() 走 onClose→onOpen 整套生命周期，语言切换重建视图也经过这里，
+        // 旧实例的 scrollFollowControllers 已在 onClose 清空，天然不会带着过期状态。）
+        this.restoreScrollForActiveTab();
 
         // 3. Input Area (Fixed at bottom)
         const inputContainer = this.createShellScaffold(container);
@@ -619,11 +665,179 @@ export class ShellView extends ItemView {
         }
     }
 
+    /**
+     * 新输出到达时的滚动请求入口(issue #64)。替换旧的「无条件延迟滚到底」:
+     * 延迟 50ms 给 DOM 更新留出时间这一点保留,但延迟回调现在绑定到*发起时的活动 tab*——
+     * 50ms 内用户切走了 tab,回调触发时会发现活动 tab 已不是发起者而整体跳过,
+     * 不会去挪别的会话的滚动位置。是否真的要滚到底,则取决于该会话当时的跟随状态
+     * (由 ScrollFollowController 根据「增长前」的近底锚点判断,而不是这里重新测量)。
+     */
     private scrollToEnd() {
-        // Use setTimeout to ensure DOM is ready
-        window.setTimeout(() => {
-            this.outputContainer.scrollTop = this.outputContainer.scrollHeight;
-        }, 50);
+        const tabId = this.tabManager.getActiveTab()?.id;
+        if (tabId == null) return;
+        this.scrollRequestSchedulers.request(tabId);
+    }
+
+    /** scrollToEnd() 的延迟回调到期且未过期时真正执行:按跟随策略决定滚或不滚。 */
+    private performScrollToEnd() {
+        const tabId = this.tabManager.getActiveTab()?.id;
+        if (tabId == null) return;
+
+        const follow = this.getOrCreateScrollFollow(tabId);
+        const shouldFollow = follow.onContentWillGrow();
+        this.refreshBackToLatestVisibility(tabId);
+        if (!shouldFollow) return;
+
+        this.jumpOutputToBottom(follow);
+    }
+
+    /** 该 tab 是否已有跟随状态(不存在则说明是「这次视图实例里第一次见到」,即将惰性创建)。 */
+    private getOrCreateScrollFollow(tabId: TabId): ScrollFollowController {
+        let follow = this.scrollFollowControllers.get(tabId);
+        if (!follow) {
+            // 一个本次视图实例里从未见过的 tab(新建会话,或从历史恢复的会话):
+            // 没有可恢复的「上次阅读位置」,按验收标准4明确定义——从底部开始、处于跟随。
+            follow = new ScrollFollowController({ initialFollowing: true });
+            this.scrollFollowControllers.set(tabId, follow);
+        }
+        return follow;
+    }
+
+    /**
+     * 把 outputContainer 真正滚到底部。整段操作包在 begin/endProgrammaticScroll 之间:
+     * `.shell-output-area` 的 `scroll-behavior: smooth` 会让这次赋值触发若干帧中间态的
+     * scroll 事件,这些事件不代表用户意图,必须让 onScroll() 完整忽略掉。
+     * 用定时器(而非 scrollend 事件)收尾,兼容不支持 scrollend 的 Obsidian WebView 内核。
+     * 收尾时把「底部」这个落点显式记进该 tab 的阅读锚点——程序化滚动期间 onScroll
+     * 被整段忽略,锚点不会自己更新,不在这里补记的话,切到别的 tab 再切回来就会
+     * 拿着一个过期的 scrollTop 把视口拽回半屏之前的位置。
+     */
+    private jumpOutputToBottom(follow: ScrollFollowController) {
+        // 视图尚未走过 onOpen()(例如某些测试场景只构造 ShellView 实例做纯逻辑断言)
+        // 时 outputContainer 为空,没有真实滚动盒可操作,直接跳过。
+        if (!this.outputContainer) return;
+        const settledScrollTop = this.outputContainer.scrollHeight;
+        // 把目标位置一并告诉策略:一旦观测到已经落到这里,忽略窗口立刻解除,
+        // 用户在动画刚结束时马上上翻也能被立刻识别(而不是等满兜底时长)。
+        follow.beginProgrammaticScroll(settledScrollTop);
+        if (this.programmaticScrollTimer !== null) {
+            window.clearTimeout(this.programmaticScrollTimer);
+        }
+        this.outputContainer.scrollTop = settledScrollTop;
+        this.programmaticScrollTimer = window.setTimeout(() => {
+            this.programmaticScrollTimer = null;
+            // 忽略窗口若已被提前解除,说明要么动画已落到目标(那次 scroll 事件已经把
+            // 真实落点记进锚点),要么用户中途插手把视口拉走了——两种情况下都不能再用
+            // 这里预设的「底部」去覆盖锚点,否则会把用户的阅读位置改回底部。
+            if (!follow.isProgrammaticScrollInFlight()) return;
+            follow.endProgrammaticScroll();
+            follow.recordScrollPosition(settledScrollTop);
+        }, SMOOTH_SCROLL_SETTLE_MS);
+    }
+
+    /**
+     * 恢复「当前活动 tab」在 outputContainer 里的阅读位置(验收标准4)。
+     * outputContainer 是所有 tab 共享的同一个滚动盒——切 tab 时无论走的是
+     * display 切换(零重建)还是 renderActiveTabMessages 全量重建,DOM 高度变了,
+     * 滚动盒的 scrollTop 却不会自己恢复成「这个 tab 上次停在哪」,必须显式设回去。
+     * 调用时机:必须在目标 tab 的内容已经可见(display 已切 / 重建已完成)之后,
+     * 否则量到的 scrollHeight 还是旧子树的,会把新子树滚到错误位置。
+     * 新建 / 本次视图实例首次见到的 tab 没有已存的锚点,从 0(视觉上即底部,
+     * 因为此刻内容还没塞进去;真正渲染后由跟随逻辑把它带到底部)开始。
+     */
+    private restoreScrollForActiveTab() {
+        if (!this.outputContainer) return;
+        const tabId = this.tabManager.getActiveTab()?.id;
+        if (tabId == null) return;
+        const follow = this.getOrCreateScrollFollow(tabId);
+        const target = Math.min(follow.getLastKnownScrollTop(), this.outputContainer.scrollHeight);
+        // 这次赋值本身也是「程序化」的(不是用户刚刚做的滚动动作),同样要防止被
+        // smooth 滚动的中间帧污染成一次假的用户上翻,复用同一套 begin/end 保护。
+        follow.beginProgrammaticScroll(target);
+        this.outputContainer.scrollTop = target;
+        if (this.programmaticScrollTimer !== null) {
+            window.clearTimeout(this.programmaticScrollTimer);
+        }
+        this.programmaticScrollTimer = window.setTimeout(() => {
+            this.programmaticScrollTimer = null;
+            follow.endProgrammaticScroll();
+        }, SMOOTH_SCROLL_SETTLE_MS);
+        this.refreshBackToLatestVisibility(tabId);
+    }
+
+    /**
+     * 当前活动 tab 在原地发生了「内容变化导致需要全量重渲」的事件时调用
+     * (工作区编辑卡片更新、分支切换/重试/编辑后从投影重建等)——这些都是对
+     * *活动* 会话的一次「内容增长/替换」,必须像流式 token 一样遵守跟随策略
+     * (验收标准2):暂停中不能被这类重渲拽回底部,只标未读;跟随中才跟去底部。
+     * `renderActiveTabMessages()` 会清空容器重建,DOM 清空这一步本身会把浏览器的
+     * scrollTop 顺带归零,所以这里必须在重渲*之后*显式按策略结果重新定位,
+     * 而不能指望浏览器保留旧位置。
+     */
+    private rerenderActiveTabPreservingScroll() {
+        const tabId = this.tabManager.getActiveTab()?.id;
+        if (tabId == null || !this.outputContainer) {
+            this.renderActiveTabMessages();
+            return;
+        }
+
+        const follow = this.getOrCreateScrollFollow(tabId);
+        const shouldFollow = follow.onContentWillGrow();
+        this.renderActiveTabMessages();
+
+        if (shouldFollow) {
+            this.jumpOutputToBottom(follow);
+        } else {
+            // 暂停中:重建清空容器时 scrollTop 被浏览器归零了,这里按该会话记住的
+            // 阅读锚点重新定位回去,不让这次重渲表现成「跳回顶部」或「跳到底部」。
+            this.outputContainer.scrollTop = Math.min(follow.getLastKnownScrollTop(), this.outputContainer.scrollHeight);
+        }
+        this.refreshBackToLatestVisibility(tabId);
+    }
+
+    /** outputContainer 的 scroll 事件:转发给当前活动 tab 的跟随策略,并刷新「回到最新」可见性。 */
+    private handleOutputScroll() {
+        const tabId = this.tabManager.getActiveTab()?.id;
+        if (tabId == null) return;
+        const follow = this.getOrCreateScrollFollow(tabId);
+        follow.onScroll(this.readOutputGeometry());
+        this.refreshBackToLatestVisibility(tabId);
+    }
+
+    /**
+     * wheel / touchstart / keydown 到达:确定的用户滚动意图。
+     * 立即解除程序化滚动的忽略窗口,让随后的 scroll 事件被当作真实用户操作处理
+     * (「用户上翻立即暂停」不能因为一次 smooth 动画的收尾时长而延迟)。
+     */
+    private handleUserScrollIntent() {
+        const tabId = this.tabManager.getActiveTab()?.id;
+        if (tabId == null) return;
+        this.getOrCreateScrollFollow(tabId).noteUserScrollIntent();
+    }
+
+    private readOutputGeometry(): ScrollGeometry {
+        return {
+            scrollTop: this.outputContainer.scrollTop,
+            scrollHeight: this.outputContainer.scrollHeight,
+            clientHeight: this.outputContainer.clientHeight,
+        };
+    }
+
+    /** 点击「回到最新」:恢复跟随、清未读,并真正滚到底。 */
+    private handleBackToLatestClick() {
+        const tabId = this.tabManager.getActiveTab()?.id;
+        if (tabId == null) return;
+        const follow = this.getOrCreateScrollFollow(tabId);
+        follow.jumpToLatest();
+        this.refreshBackToLatestVisibility(tabId);
+        this.jumpOutputToBottom(follow);
+    }
+
+    /** 仅当「当前活动 tab 处于暂停跟随 且 有未读」时显示「回到最新」。 */
+    private refreshBackToLatestVisibility(tabId: TabId) {
+        if (this.tabManager.getActiveTab()?.id !== tabId) return;
+        const follow = this.scrollFollowControllers.get(tabId);
+        this.backToLatestAffordance?.setVisible(!!follow && !follow.isFollowing() && follow.hasUnread());
     }
 
     // ==================== T14: 消息 DOM 虚拟化 ====================
@@ -1115,6 +1329,21 @@ export class ShellView extends ItemView {
         // 断开消息虚拟化观察,避免视图关闭后 observer 泄漏。
         this.messageObserver?.disconnect();
         this.messageObserver = null;
+        // issue #64:视图关闭 = 所有会话一并失效。失效所有挂起的延迟滚动请求
+        // (不会有回调在视图关闭后还去动一个已经不存在的 outputContainer),
+        // 并释放每 tab 的跟随状态与「回到最新」按钮/平滑滚动收尾计时器。
+        this.scrollRequestSchedulers.disposeAll();
+        this.scrollFollowControllers.clear();
+        if (this.programmaticScrollTimer !== null) {
+            window.clearTimeout(this.programmaticScrollTimer);
+            this.programmaticScrollTimer = null;
+        }
+        this.outputContainer?.removeEventListener('scroll', this.handleOutputScrollBound);
+        this.outputContainer?.removeEventListener('wheel', this.handleUserScrollIntentBound);
+        this.outputContainer?.removeEventListener('touchstart', this.handleUserScrollIntentBound);
+        this.outputContainer?.removeEventListener('keydown', this.handleUserScrollIntentBound);
+        this.backToLatestAffordance?.destroy();
+        this.backToLatestAffordance = null;
         if (this.inputEl) {
             this.inputEl.removeEventListener('input', this.handleInputBound);
             this.inputEl.removeEventListener('keydown', this.handleKeyDownBound);
@@ -1582,6 +1811,8 @@ export class ShellView extends ItemView {
         this.applyTabMetadata(tab);
         this.resetStreamState();
         this.renderActiveTabMessages();
+        // issue #64:全新会话,无保存位置可恢复——明确从底部开始、处于跟随。
+        this.restoreScrollForActiveTab();
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
@@ -1609,6 +1840,9 @@ export class ShellView extends ItemView {
         } else {
             this.renderActiveTabMessages();
         }
+        // issue #64:切到这个 tab 后,outputContainer(所有 tab 共享的滚动盒)要
+        // 恢复成这个 tab 自己的阅读位置,而不是沿用刚切走那个 tab 遗留的 scrollTop。
+        this.restoreScrollForActiveTab();
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
@@ -1632,6 +1866,11 @@ export class ShellView extends ItemView {
         }
         this.tabContainers.delete(id);
         this.dirtyTabs.delete(id);
+        // issue #64:该会话已关闭——失效其挂起的延迟滚动请求并释放跟随状态,
+        // 避免一个本就不该存在的 50ms 回调在关闭后才触发(即使活动 tab 判断已经会
+        // 挡住它,这里显式释放也避免 Map 里挂着一条再也用不到的记录)。
+        this.scrollRequestSchedulers.dispose(id);
+        this.scrollFollowControllers.delete(id);
         this.hideHistoryMenu();
 
         if (wasActive) {
@@ -1641,6 +1880,8 @@ export class ShellView extends ItemView {
                 await this.syncProviderStateForTab(activeTab);
                 this.resetStreamState();
                 this.renderActiveTabMessages();
+                // issue #64:关闭 tab 后新落在的这个 tab,也要恢复它自己的阅读位置。
+                this.restoreScrollForActiveTab();
             }
         }
     }
@@ -1726,9 +1967,14 @@ export class ShellView extends ItemView {
     private handleTabClear(tabId: TabId) {
         const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
         tab?.state.clearMessages();
+        // issue #64:/clear 清空了这个会话的全部历史——没有「阅读位置」这个概念了,
+        // 重置该会话的跟随状态,下次渲染从底部、跟随开始,不残留清空前的暂停/未读。
+        this.scrollRequestSchedulers.dispose(tabId);
+        this.scrollFollowControllers.delete(tabId);
         if (this.tabManager.getActiveTab()?.id === tabId) {
             this.resetStreamState();
             this.renderActiveTabMessages();
+            this.restoreScrollForActiveTab();
         }
     }
 
@@ -1785,7 +2031,8 @@ export class ShellView extends ItemView {
 
         if (this.tabManager.getActiveTab()?.id === tabId) {
             if (alreadyRendered) {
-                this.renderActiveTabMessages();
+                // issue #64:对已上屏消息的原地更新,算一次「内容变化」,遵守跟随策略。
+                this.rerenderActiveTabPreservingScroll();
             } else {
                 this.appendMessage(message);
             }
@@ -1804,7 +2051,8 @@ export class ShellView extends ItemView {
         });
 
         if (this.tabManager.getActiveTab()?.id === tabId) {
-            this.renderActiveTabMessages();
+            // issue #64:撤销编辑是对活动会话内容的一次更新,同样遵守跟随策略。
+            this.rerenderActiveTabPreservingScroll();
         }
         new Notice(`Reverted ${this.basename(edit.path)}.`);
     }
@@ -1874,6 +2122,9 @@ export class ShellView extends ItemView {
         await this.syncProviderStateForTab(restoredTab);
         this.resetStreamState();
         this.renderActiveTabMessages();
+        // issue #64:从历史恢复的会话在本次视图实例里也是「第一次见到」,没有可恢复的
+        // 阅读位置——明确从底部开始、处于跟随(与「全新会话」同一条规则,见验收标准4)。
+        this.restoreScrollForActiveTab();
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
@@ -2025,6 +2276,12 @@ export class ShellView extends ItemView {
         // 旧 id 已不在屏幕上,owner 若不同步,操作栏上的 👍/👎 会再次查不到。
         this.tabSessions.get(tab.id)?.chatController.adoptMessages(windowed);
         this.renderActiveTabMessages();
+        // issue #64:分支切换/重试把整个可见窗口换成了不同内容(不是「旧内容基础上
+        // 来了新输出」),视为用户主动切到了一屏新内容——重置该会话的跟随状态为
+        // 「底部、跟随」,而不是套用切换前的暂停/未读(那是对*旧*那组消息的阅读状态)。
+        this.scrollRequestSchedulers.dispose(tab.id);
+        this.scrollFollowControllers.delete(tab.id);
+        this.restoreScrollForActiveTab();
     }
 
     /** 切换到某兄弟分支:纯投影切换,不发起生成。保持当前可见窗口(不翻出隐藏祖先)。 */

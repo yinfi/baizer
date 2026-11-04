@@ -590,5 +590,8 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Cannot locate the question to retry.': '无法定位要重试的问题。',
     'Cannot edit this message.': '无法编辑该消息。',
     'Cannot locate the fork point; rerun cancelled.': '无法定位分叉点,已取消重跑。',
+
+    // ── 聊天滚动跟随(issue #64)──
+    'New messages \u00b7 Back to latest': '有新输出 \u00b7 回到最新',
 };
 
