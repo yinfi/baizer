@@ -369,6 +369,7 @@ const TIMING_SCENARIOS = new Set([
     'tab-switch-clamp',
     'async-render-identity',
     'layout-growth-threshold',
+    'approval-card-resize',
 ]);
 
 const INSTALL_TIMING_HELPERS = `(() => {
@@ -459,7 +460,52 @@ const INSTALL_TIMING_HELPERS = `(() => {
     state.release();
     return { released: true };
   };
-  window.__timing = { getView, measure, seed, pause, appendFixtureImage, armRenderGate, releaseRenderGate };
+  const approvalMessage = (id, approvalState) => ({
+    id,
+    role: 'ai',
+    content: '',
+    timestamp: Date.now(),
+    approval: {
+      id: 'req-' + id,
+      conversationId: getView().tabManager.getActiveTab() ? getView().tabManager.getActiveTab().id : 'capture',
+      action: 'delete_note',
+      target: 'Projects/季度计划.md',
+      args: { path: 'Projects/季度计划.md' },
+      message: 'Approval required to delete note: Projects/季度计划.md',
+      preview: {
+        kind: 'note-delete',
+        target: 'Projects/季度计划.md',
+        summary: 'Delete note',
+        oldContent: '# 季度计划\\n\\n- 目标一\\n- 目标二',
+        risk: 'high',
+        preconditions: ['The target file must still exist.'],
+        supportsPartialApply: false,
+        undoable: false,
+      },
+    },
+    approvalState: approvalState || { status: 'pending' },
+  });
+  const appendApprovalCard = (id, approvalState) => {
+    const view = getView();
+    const msg = approvalMessage(id, approvalState);
+    view.appendMessage(msg, false);
+    return { id, status: msg.approvalState.status };
+  };
+  const updateApprovalCard = (id, approvalState) => {
+    const view = getView();
+    const tab = view.tabManager.getActiveTab();
+    if (!tab) return false;
+    view.handleTabMessageUpdated(tab.id, approvalMessage(id, approvalState));
+    return true;
+  };
+  const approvalCardHeight = (id) => {
+    const card = document.querySelector('.shell-entry[data-message-id="' + id + '"] .shell-approval-card');
+    return card ? Math.round(card.getBoundingClientRect().height) : null;
+  };
+  window.__timing = {
+    getView, measure, seed, pause, appendFixtureImage, armRenderGate, releaseRenderGate,
+    approvalMessage, appendApprovalCard, updateApprovalCard, approvalCardHeight,
+  };
   return true;
 })()`;
 
@@ -650,6 +696,109 @@ async function runTimingScenario(name, { session, delay }) {
                 viewportStayedAtReadingAnchor: Math.abs(after.scrollTop - before.scrollTop) <= 2,
                 pausedAfterGrowth: after.follow ? after.follow.following === false : null,
                 unreadEntryVisible: after.unreadBar.visible === true,
+            },
+        };
+    }
+
+    if (name === 'approval-card-resize') {
+        steps.push({ seedA: await session.evaluate(`window.__timing.seed(8, 'a')`) });
+        await delay(1100);
+        steps.push({
+            followBottom: await session.evaluate(`(() => {
+              const out = window.__timing.getView().outputContainer;
+              out.scrollTo({ top: Math.max(0, out.scrollHeight - out.clientHeight), behavior: 'instant' });
+              out.dispatchEvent(new Event('scroll'));
+              return { scrollTop: Math.round(out.scrollTop) };
+            })()`),
+        });
+        await delay(200);
+
+        // 变矮：pending 卡片（预览 + 操作按钮）就地重画成 succeeded。
+        steps.push({ appendPendingShrink: await session.evaluate(`window.__timing.appendApprovalCard('approval-shrink', { status: 'pending' })`) });
+        await delay(700);
+        steps.push({
+            followBottomBeforeShrink: await session.evaluate(`(() => {
+              const out = window.__timing.getView().outputContainer;
+              out.scrollTo({ top: Math.max(0, out.scrollHeight - out.clientHeight), behavior: 'instant' });
+              out.dispatchEvent(new Event('scroll'));
+              return { scrollTop: Math.round(out.scrollTop) };
+            })()`),
+        });
+        await delay(200);
+        const shrinkBefore = await session.evaluate(`({
+          height: window.__timing.approvalCardHeight('approval-shrink'),
+          metrics: window.__timing.measure(),
+        })`);
+        steps.push({
+            shrinkToSucceeded: await session.evaluate(`window.__timing.updateApprovalCard('approval-shrink', {
+              status: 'succeeded',
+              outcome: {
+                status: 'succeeded',
+                detail: 'Deleted successfully.',
+                target: 'Projects/季度计划.md',
+                completedAt: Date.now(),
+                retryable: false,
+              },
+            })`),
+        });
+        await delay(500);
+        const shrinkAfter = await session.evaluate(`({
+          height: window.__timing.approvalCardHeight('approval-shrink'),
+          metrics: window.__timing.measure(),
+        })`);
+
+        // 变高：另一张 pending 卡片就地重画成 failed（长错误 + 重试按钮）。
+        steps.push({ appendPendingGrow: await session.evaluate(`window.__timing.appendApprovalCard('approval-grow', { status: 'pending' })`) });
+        await delay(700);
+        steps.push({
+            followBottomBeforeGrow: await session.evaluate(`(() => {
+              const out = window.__timing.getView().outputContainer;
+              out.scrollTo({ top: Math.max(0, out.scrollHeight - out.clientHeight), behavior: 'instant' });
+              out.dispatchEvent(new Event('scroll'));
+              return { scrollTop: Math.round(out.scrollTop) };
+            })()`),
+        });
+        await delay(200);
+        const growBefore = await session.evaluate(`({
+          height: window.__timing.approvalCardHeight('approval-grow'),
+          metrics: window.__timing.measure(),
+        })`);
+        steps.push({
+            growToFailed: await session.evaluate(`window.__timing.updateApprovalCard('approval-grow', {
+              status: 'failed',
+              outcome: {
+                status: 'failed',
+                detail: '删除失败（夹具）。',
+                error: 'Permission denied while deleting Projects/季度计划.md. The file may be open in another pane, locked by the vault indexer, or protected by a read-only workspace. Retry after closing the file or restoring write permission.',
+                completedAt: Date.now(),
+                retryable: true,
+              },
+            })`),
+        });
+        await delay(500);
+        const growAfter = await session.evaluate(`({
+          height: window.__timing.approvalCardHeight('approval-grow'),
+          metrics: window.__timing.measure(),
+        })`);
+
+        return {
+            steps,
+            before: growBefore.metrics,
+            after: growAfter.metrics,
+            data: { shrinkBefore, shrinkAfter, growBefore, growAfter },
+            assertions: {
+                scenario: name,
+                cardShrank: shrinkBefore.height != null && shrinkAfter.height != null
+                    ? shrinkBefore.height - shrinkAfter.height > 20
+                    : null,
+                shrinkKeptFollowing: shrinkAfter.metrics.follow ? shrinkAfter.metrics.follow.following === true : null,
+                shrinkNoUnread: shrinkAfter.metrics.follow ? shrinkAfter.metrics.follow.unread === false : null,
+                shrinkAtBottom: shrinkAfter.metrics.distanceFromBottom <= 2,
+                cardGrew: growBefore.height != null && growAfter.height != null
+                    ? growAfter.height - growBefore.height > 10
+                    : null,
+                growAtBottom: growAfter.metrics.distanceFromBottom <= 2,
+                growStillFollowing: growAfter.metrics.follow ? growAfter.metrics.follow.following === true : null,
             },
         };
     }

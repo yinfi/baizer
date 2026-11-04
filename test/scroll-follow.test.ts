@@ -110,6 +110,12 @@ function createScheduler() {
                 for (const task of tasks) task();
             }
         },
+        /** 只跑当前这一拍，不执行回调里新排的定时器（用于恢复重试的分步断言）。 */
+        flushOnce() {
+            const tasks = [...pending.values()];
+            pending.clear();
+            for (const task of tasks) task();
+        },
         size() {
             return pending.size;
         },
@@ -385,6 +391,83 @@ async function runTests() {
         expect(h.container.scrollTop).toBe(700);
         expect(h.container.scrollCalls).toBe(callsBefore);
         expect(h.controller.isFollowing()).toBe(false);
+    });
+
+    await test('a plain click during restore does not lose the saved anchor', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1600);
+        h.activate('a', 'new');
+        h.container.scrollTop = 500;
+        h.controller.handleScroll();
+        h.controller.prepareForSessionSwitch();
+        h.activate('b', 'new');
+
+        h.controller.activateSession('a', 'restore');
+        // 点击/选文本：pointerdown 取消了恢复，但 pointerup 时视口没有移动。
+        h.container.scrollTop = 1300;
+        h.controller.handleUserScrollIntent();
+        h.controller.handleUserScrollIntentEnd();
+        h.flush();
+
+        expect(h.container.scrollTop).toBe(500);
+    });
+
+    await test('a pointer drag that moved the viewport is not replayed on pointerup', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1600);
+        h.activate('a', 'new');
+        h.container.scrollTop = 500;
+        h.controller.handleScroll();
+        h.controller.prepareForSessionSwitch();
+        h.activate('b', 'new');
+
+        h.controller.activateSession('a', 'restore');
+        h.container.scrollTop = 900;
+        h.controller.handleUserScrollIntent();
+        h.container.scrollTop = 400;
+        h.controller.handleScroll();
+        h.controller.handleUserScrollIntentEnd();
+        h.flush();
+
+        expect(h.container.scrollTop).toBe(400);
+        expect(h.controller.isFollowing()).toBe(false);
+    });
+
+    await test('restore retries when the content has not grown enough to reach the anchor', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1200);
+        h.activate('a', 'new');
+        h.container.scrollTop = 500;
+        h.controller.handleScroll();
+        h.controller.prepareForSessionSwitch();
+        h.activate('b', 'new');
+
+        // 切回 A 时内容还没长回来：max=0，500 被 clamp 到 0。
+        h.container.setScrollHeight(200);
+        h.controller.activateSession('a', 'restore');
+        h.scheduler.flushOnce();
+        expect(h.container.scrollTop).toBe(0);
+
+        // 异步 Markdown 把内容补上后，重试把读者放回 500。
+        h.container.setScrollHeight(1000);
+        h.flush();
+
+        expect(h.container.scrollTop).toBe(500);
+    });
+
+    await test('a restore timer that fires after switching away leaves the phase idle', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1600);
+        h.activate('a', 'new');
+        h.container.scrollTop = 500;
+        h.controller.handleScroll();
+        h.controller.prepareForSessionSwitch();
+
+        h.controller.activateSession('a', 'restore');
+        h.activate('b', 'new');
+        h.flush();
+
+        expect(h.controller.getSessionState('a')?.restorePhase).toBe('idle');
     });
 
     await test('a clamp scroll during restore is layout noise, not a user scroll', () => {

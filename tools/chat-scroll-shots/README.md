@@ -52,12 +52,17 @@ still present after #70; each writes the same PNG + layout JSON pair and adds a
 | `tab-switch-clamp` | A tall tab B (following, at the bottom) -> a short tab A that was left paused at `scrollTop=150` with an unread entry. While A's `scrollTop` is clamped from B's bottom to A's new max, a real `scroll` event is dispatched inside the 50 ms restore window. | A returns to 150, stays paused, keeps its unread entry; the clamp scroll is treated as layout noise. |
 | `async-render-identity` | A's Markdown block render is held open (the harness wraps `MessageRenderer.renderAiContent` once), the user switches to B, then A's render resolves. | B's viewport does not move; the stale completion callback is dropped by session/render-generation identity. |
 | `layout-growth-threshold` | A simulated delayed image grows the content 600 px with no user scroll (so `following` stays `true` while the reader is 600 px from the bottom), then a new token arrives. | The viewport stays put, follow pauses and the unread entry appears instead of snapping to the bottom. |
+| `approval-card-resize` | A pending approval card at the bottom is redrawn in place to `succeeded` (the card shrinks, so `scrollTop` clamps) and a second pending card is redrawn to `failed` with a long error (the card grows). | Shrinking keeps `following` and does not light the unread entry; growing keeps the viewport at the new bottom. |
 
 Both extra fixtures are explicit and local to the harness: the "image" is a
 bordered placeholder div appended to the active message container, and the
 render gate wraps only the next `renderAiContent` call so B's normal message
 rendering is unaffected. They stand in for the real async image load and
 Markdown render, which cannot be held open deterministically otherwise.
+
+The approval card is injected as a `ChatMessage` into the real renderer, then
+updated through the production `handleTabMessageUpdated()` path, so the height
+change comes from the production card markup and `styles.css`.
 
 Determinism note: occluded/headless Chromium may coalesce or drop the
 browser-generated scroll event that follows a `scrollTop` clamp. `tab-switch-clamp`
@@ -85,9 +90,14 @@ node tools/chat-scroll-shots/capture.mjs --plugin-dir <baseline-dist> `
   --out docs/assets/chat-scroll-tab-switch-before.png --view-width 520
 ```
 
-Repeat with `async-render-identity` and `layout-growth-threshold`. On the
-baseline the `assertions` block is expected to contain `false` values: that is
-the reproduction. On the fixed revision every boolean must be `true`.
+Repeat with `async-render-identity`, `layout-growth-threshold` and
+`approval-card-resize`. On the baseline the `assertions` block is expected to
+contain `false` values: that is the reproduction. On the fixed revision every
+boolean must be `true`.
+
+Committed `*.layout.json` evidence is sanitized before commit: host paths, PID,
+the CDP target id, the vault directory and `vaultKey` are removed; the scenario,
+measurements, steps and assertions are kept.
 
 
 ## Isolation

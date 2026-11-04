@@ -196,6 +196,8 @@ export class ShellView extends ItemView {
     private handleOutputScrollBound = () => this.scrollFollow?.handleScroll();
     // 真实输入:恢复位置还没执行时取消它。布局/切 tab 产生的 scroll 不经过这里。
     private handleOutputScrollIntentBound = () => this.scrollFollow?.handleUserScrollIntent();
+    // 真实输入结束:普通点击/选文本没有移动视口时,把被取消的恢复重新排上。
+    private handleOutputScrollIntentEndBound = () => this.scrollFollow?.handleUserScrollIntentEnd();
     // 滚轮向上是明确的阅读意图:立即暂停,不等 scroll 事件或下一次 token。
     private handleOutputWheelBound = (e: WheelEvent) => {
         if (e.deltaY < 0) this.scrollFollow?.handleUserScrollIntentUp();
@@ -203,6 +205,9 @@ export class ShellView extends ItemView {
     };
     // 键盘滚动键同样是真实输入(ArrowUp/Down、PageUp/Down、Home/End、空格)。
     private handleOutputKeyDownBound = (e: KeyboardEvent) => {
+        // 焦点在按钮/链接/输入框上时，空格与方向键是控件操作，不是滚动视口。
+        const target = e.target as HTMLElement | null;
+        if (target?.closest('button, a, input, textarea, select, [role="button"]')) return;
         if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) {
             this.scrollFollow?.handleUserScrollIntent();
         }
@@ -683,6 +688,9 @@ export class ShellView extends ItemView {
         this.outputContainer.addEventListener('pointerdown', this.handleOutputScrollIntentBound, { passive: true });
         this.outputContainer.addEventListener('touchstart', this.handleOutputScrollIntentBound, { passive: true });
         this.outputContainer.addEventListener('keydown', this.handleOutputKeyDownBound);
+        // 普通点击/选文本结束时若视口没动,恢复原阅读锚点(见 handleUserScrollIntentEnd)。
+        this.outputContainer.addEventListener('pointerup', this.handleOutputScrollIntentEndBound, { passive: true });
+        this.outputContainer.addEventListener('touchend', this.handleOutputScrollIntentEndBound, { passive: true });
     }
 
     /**
@@ -1229,6 +1237,8 @@ export class ShellView extends ItemView {
             this.outputContainer.removeEventListener('pointerdown', this.handleOutputScrollIntentBound);
             this.outputContainer.removeEventListener('touchstart', this.handleOutputScrollIntentBound);
             this.outputContainer.removeEventListener('keydown', this.handleOutputKeyDownBound);
+            this.outputContainer.removeEventListener('pointerup', this.handleOutputScrollIntentEndBound);
+            this.outputContainer.removeEventListener('touchend', this.handleOutputScrollIntentEndBound);
         }
         this.unreadBarEl = null;
         this.unreadButtonEl = null;
@@ -1880,9 +1890,13 @@ export class ShellView extends ItemView {
         const active = document.activeElement as HTMLElement | null;
         const hadFocus = !!active && !!entry && entry.contains(active);
 
+        // 就地重画会改变卡片高度（按钮区消失/详情行数变化）。与内容增长同样处理：
+        // 跟随且近底才贴底，暂停时保持锚点；不是新输出，不点亮未读。
+        const growth = this.captureScrollGrowth();
         body.empty();
         this.getMessageRenderer().renderApproval(body, msg);
         if (hadFocus) this.focusApprovalState(entry, msg);
+        this.afterScrollGrowth(growth, false);
     }
 
     /**

@@ -25,6 +25,9 @@ const FOLLOW_SCROLL_DELAY_MS = 0;
 /** 切换/重建会话后恢复阅读位置的延迟：等异步 Markdown 渲染把高度补上。 */
 const RESTORE_POSITION_DELAY_MS = 50;
 
+/** 恢复落位被 clamp 时最多顺延重试的次数（高度可能还在异步长出来）。 */
+const RESTORE_RETRY_LIMIT = 2;
+
 export interface ScrollMetrics {
     scrollTop: number;
     scrollHeight: number;
@@ -53,6 +56,10 @@ export interface ScrollSessionState {
      * scrollTop clamp 的产物，不是用户意图：既不能取消恢复，也不能改写跟随/未读。
      */
     restorePhase: RestorePhase;
+    /** 待恢复的目标；被真实输入取消后仍保留，普通点击未移动视口时可重放。 */
+    restoreTarget: number | 'bottom' | null;
+    /** 真实输入取消恢复时的 scrollTop；pointerup/touchend 未移动视口时据此重放。 */
+    restoreIntentTop: number | null;
 }
 
 /** 内容增长前捕获的状态快照。增长后回调必须带上它，过期即丢弃。 */
@@ -99,6 +106,8 @@ export function createScrollSessionState(): ScrollSessionState {
         initialized: false,
         restoreBlocked: false,
         restorePhase: 'idle',
+        restoreTarget: null,
+        restoreIntentTop: null,
     };
 }
 
@@ -197,6 +206,29 @@ export class ScrollFollowController {
         if (!state || state.restorePhase !== 'restoring') return;
         state.restoreBlocked = true;
         state.restorePhase = 'idle';
+        const metrics = this.readMetrics();
+        state.restoreIntentTop = metrics ? metrics.scrollTop : null;
+        this.cancelTimer(this.activeSessionId as string);
+    }
+
+    /**
+     * 真实输入结束（pointerup / touchend）。若这次交互没有移动视口（普通点击、选文本、
+     * 点链接），把被取消的恢复重新排队，避免读者停在被 clamp 的默认位置。
+     */
+    handleUserScrollIntentEnd(): void {
+        if (this.disposed) return;
+        const sessionId = this.activeSessionId;
+        if (!sessionId) return;
+        const state = this.sessions.get(sessionId);
+        if (!state || state.restoreIntentTop == null || state.restoreTarget == null) return;
+        const startTop = state.restoreIntentTop;
+        state.restoreIntentTop = null;
+        const metrics = this.readMetrics();
+        if (!metrics) return;
+        if (Math.abs(metrics.scrollTop - startTop) > 0.5) return;
+        state.restoreBlocked = false;
+        state.restorePhase = 'restoring';
+        this.scheduleRestore(sessionId, state.restoreTarget);
     }
 
     /** 用户明确向上滚动（滚轮上推）时立即暂停，不等 scroll 事件追上。 */
@@ -207,6 +239,8 @@ export class ScrollFollowController {
         state.following = false;
         state.restoreBlocked = true;
         state.restorePhase = 'idle';
+        state.restoreIntentTop = null;
+        this.cancelTimer(this.activeSessionId as string);
     }
 
     /**
@@ -253,6 +287,8 @@ export class ScrollFollowController {
 
         state.following = true;
         state.restorePhase = 'idle';
+        state.restoreTarget = null;
+        state.restoreIntentTop = null;
         this.cancelTimer(this.activeSessionId);
         this.applyScrollTop(this.maxScrollTop());
         this.setUnread(this.activeSessionId, false);
@@ -293,6 +329,8 @@ export class ScrollFollowController {
         const target = mode === 'new' || !hadPosition
             ? 'bottom' as const
             : state.following ? 'bottom' as const : state.scrollTop;
+        state.restoreTarget = target;
+        state.restoreIntentTop = null;
 
         if (mode === 'new') {
             state.following = true;
@@ -352,16 +390,30 @@ export class ScrollFollowController {
         this.onUnreadChange?.(sessionId, unread);
     }
 
-    private scheduleRestore(sessionId: string, target: number | 'bottom'): void {
+    private scheduleRestore(sessionId: string, target: number | 'bottom', attempt = 0): void {
+        this.cancelTimer(sessionId);
         this.timers.set(sessionId, this.schedule(() => {
             this.timers.delete(sessionId);
-            if (this.disposed || this.activeSessionId !== sessionId) return;
             const state = this.sessions.get(sessionId);
-            if (!state) return;
-            // 恢复阶段到此结束：此后到达的 scroll 才是用户/程序化滚动。
-            state.restorePhase = 'idle';
+            // 先结束恢复阶段再判活动/阻断，避免该会话残留 'restoring'。
+            if (state) state.restorePhase = 'idle';
+            if (this.disposed || this.activeSessionId !== sessionId || !state) return;
             if (state.restoreBlocked) return;
             this.applyScrollTop(target === 'bottom' ? this.maxScrollTop() : target);
+            if (target === 'bottom') {
+                state.restoreTarget = null;
+                state.restoreIntentTop = null;
+                return;
+            }
+            const metrics = this.readMetrics();
+            // 目标位置比当前 max 更靠下：内容高度还没长够，落位被 clamp。顺延一拍重试。
+            if (metrics && metrics.scrollTop < target - 2 && attempt < RESTORE_RETRY_LIMIT) {
+                state.restorePhase = 'restoring';
+                this.scheduleRestore(sessionId, target, attempt + 1);
+                return;
+            }
+            state.restoreTarget = null;
+            state.restoreIntentTop = null;
         }, this.restoreDelayMs));
     }
 
