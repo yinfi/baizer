@@ -584,6 +584,9 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Deleted the skill for {plugin}.': '已删除 {plugin} 的技能。',
     'Failed to delete the skill for {plugin}.': '删除 {plugin} 的技能失败。',
 
+    // ── ShellView 聊天滚动 ──
+    'New output · Back to latest': '有新输出 · 回到最新',
+
     // ── ShellView 分支/重试提示(Notice)──
     'Cannot switch branch.': '无法切换分支。',
     'Cannot locate the question to fork.': '无法定位要分叉的问题。',
