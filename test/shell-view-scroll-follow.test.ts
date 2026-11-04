@@ -552,21 +552,24 @@ async function runTests() {
     expect(follow.getLastKnownScrollTop()).toBe(0);
   });
 
-  // ── 验收标准5(静态断言):窄侧栏下入口可见、可点击、无横向溢出 ──
-  await test('affordance styles constrain width and keep the label from causing horizontal overflow', async () => {
+  // ── 验收标准3/5(静态断言):入口必须贴在*可见视口*底部,不能用 absolute 被滚出屏幕 ──
+  await test('affordance stays pinned to the visible viewport (sticky, not absolute) and avoids horizontal overflow', async () => {
     const { readFileSync } = await import('fs');
     const css = readFileSync('styles.css', 'utf8');
-
-    // 定位上下文必须存在,否则绝对定位会跑到别的祖先上去。
-    const outputAreaRule = css.match(/\.shell-output-area \{[\s\S]*?\}/);
-    if (!outputAreaRule) throw new Error('missing .shell-output-area rule');
-    if (!/position:\s*relative/.test(outputAreaRule[0])) {
-      throw new Error('.shell-output-area must be a positioning context for the affordance');
-    }
 
     const affordanceRule = css.match(/\.shell-back-to-latest \{[\s\S]*?\}/);
     if (!affordanceRule) throw new Error('missing .shell-back-to-latest rule');
     const rule = affordanceRule[0];
+    // .shell-output-area 本身就是 overflow-y: auto 的滚动容器:absolute + bottom
+    // 会把按钮定位到*整段可滚动内容*的底部,用户往上翻(正是这个按钮该出现的场景)
+    // 时它会跟着上方内容被滚出屏幕——这是一个已经在真实页面上复现过的具体 bug。
+    // sticky 以同一个滚动容器为参照,始终贴在当前可见区域底部。
+    if (!/position:\s*sticky/.test(rule)) {
+      throw new Error('affordance must use position: sticky (absolute scrolls away with content inside its own overflow:auto ancestor)');
+    }
+    if (/position:\s*absolute/.test(rule)) {
+      throw new Error('affordance must not use position: absolute inside its own scrolling ancestor');
+    }
     if (!/max-width:\s*calc\(100% - /.test(rule)) {
       throw new Error('affordance must cap its width to the container so a 300px sidebar cannot overflow');
     }

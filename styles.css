@@ -288,8 +288,8 @@
 
 /* 2. Output Area */
 .shell-output-area {
-    /* issue #64:承载「回到最新」浮动按钮的定位上下文——按钮绝对定位于本容器
-       底部内侧,容器本身不在输入区内,因此按钮永远不会盖住输入区。 */
+    /* issue #64:本容器本身就是「回到最新」按钮的滚动参照(见下方 .shell-back-to-latest
+       的 position: sticky)。position: relative 不是这件事所必需的,留着无害。 */
     position: relative;
     flex-grow: 1;
     overflow-y: auto;
@@ -313,11 +313,17 @@
 }
 
 /* issue #64:「有新输出 · 回到最新」浮动按钮。
-   绝对定位在 output area 底部内侧居中,随 output area 一起被裁切,
-   因此不会在窄侧栏(验收标准5,300px)下产生横向溢出;
-   output area 的 flex 布局使其自身永远停在输入区上方,按钮也就永远盖不到输入区。 */
+   关键是 position: sticky,不是 absolute——.shell-output-area 自己就是
+   overflow-y: auto 的滚动容器,absolute + bottom 会把它定位到*整个可滚动内容*
+   的底部,而不是*当前可见视口*的底部;用户往上翻、本按钮最该出现的那一刻,
+   它会跟着上方内容一起被滚出屏幕外(经 CDP 实测验证过这个具体失败模式)。
+   sticky 以同一个滚动容器为参照,始终贴在当前可见区域底部,这才是「可见、
+   可点击、不盖输入区」(验收标准3、5)真正需要的效果。
+   随 output area 一起被裁切,因此也不会在窄侧栏(验收标准5,300px)下产生
+   横向溢出;output area 的 flex 布局使其自身永远停在输入区上方,按钮也就
+   永远盖不到输入区。 */
 .shell-back-to-latest {
-    position: absolute;
+    position: sticky;
     left: 50%;
     bottom: var(--size-4-2);
     transform: translateX(-50%);
