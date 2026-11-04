@@ -1,0 +1,138 @@
+{
+  "harness": {
+    "exe": "C:\\obs-1.14.5-installed\\Obsidian.exe",
+    "pluginDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\chat-scroll-follow-f7de61752cb7\\.worktrees\\baseline-cdcccb6\\dist",
+    "vaultDir": "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
+    "vaultKey": "0a1e15b13b143b33",
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.5.0",
+      "minAppVersion": "1.7.2",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    },
+    "copiedPluginFiles": [
+      {
+        "file": "main.js",
+        "bytes": 2756900
+      },
+      {
+        "file": "manifest.json",
+        "bytes": 324
+      },
+      {
+        "file": "styles.css",
+        "bytes": 113082
+      }
+    ],
+    "theme": "dark",
+    "requestedViewport": {
+      "width": 1353,
+      "height": 1053
+    },
+    "sidebarWidthRequested": null,
+    "phase": "before",
+    "revision": "cdcccb6",
+    "explanations": [
+      "the \"back to latest\" affordance could not be located/clicked at the click-affordance step; see harness.affordanceClicked.probe for what the probe saw at that moment"
+    ],
+    "pid": 2960,
+    "browser": "Chrome/150.0.7871.250",
+    "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.14.5 Chrome/150.0.7871.250 Electron/43.8.3 Safari/537.36",
+    "obsidianVersionFromExe": "1.14.5",
+    "obsidianAsarFiles": [
+      {
+        "file": "C:\\Users\\Administrator\\AppData\\Roaming\\obsidian\\obsidian-1.15.0.asar",
+        "bytes": 24553884,
+        "modifiedAt": "2026-11-02T16:28:14.380Z"
+      }
+    ],
+    "pageTargetsSeen": [
+      "FEF1743326C92D5DD1AC6E853F310C22 app://obsidian.md/index.html"
+    ],
+    "locale": {
+      "locale": "zh",
+      "changed": false
+    },
+    "blockingModals": {
+      "trust": {
+        "present": false,
+        "clicked": null
+      },
+      "strayModalsClosed": [],
+      "releaseNotesDetached": 0
+    },
+    "pluginEnableAttempt": {
+      "already": true
+    },
+    "openChatView": {
+      "ok": true
+    },
+    "scenarioStep39_scrollUp": {
+      "ok": true,
+      "before": 1347.3333740234375,
+      "after": 1347.3333740234375,
+      "requestedDelta": 877.5
+    },
+    "affordanceClicked": {
+      "ok": false,
+      "reason": "affordance not found/clickable at click step",
+      "probe": {
+        "found": false,
+        "visible": false,
+        "clickable": false,
+        "box": null,
+        "text": null,
+        "classes": null,
+        "withinOutputArea": false,
+        "overlapsOutputArea": null
+      }
+    },
+    "obsidianVersionFromTitle": "1.15.0"
+  },
+  "captures": [
+    {
+      "outPath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\chat-scroll-follow-f7de61752cb7\\docs\\assets\\chat-scroll-2026-11-04-before-wide-capture-1-scrolled-up-reading-anchor-preserved.png",
+      "layoutPath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\chat-scroll-follow-f7de61752cb7\\docs\\assets\\chat-scroll-2026-11-04-before-wide-capture-1-scrolled-up-reading-anchor-preserved.layout.json",
+      "note": "capture-1 scrolled-up reading anchor preserved",
+      "size": {
+        "width": 1353,
+        "height": 1053
+      },
+      "bytes": 190348
+    },
+    {
+      "outPath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\chat-scroll-follow-f7de61752cb7\\docs\\assets\\chat-scroll-2026-11-04-before-wide-capture-2-paused-with-new-output-arrived.png",
+      "layoutPath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\chat-scroll-follow-f7de61752cb7\\docs\\assets\\chat-scroll-2026-11-04-before-wide-capture-2-paused-with-new-output-arrived.layout.json",
+      "note": "capture-2 paused with new output arrived (back-to-latest entry expected)",
+      "size": {
+        "width": 1353,
+        "height": 1053
+      },
+      "bytes": 193779
+    },
+    {
+      "outPath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\chat-scroll-follow-f7de61752cb7\\docs\\assets\\chat-scroll-2026-11-04-before-wide-capture-3-post-done-still-scrolled-up.png",
+      "layoutPath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\chat-scroll-follow-f7de61752cb7\\docs\\assets\\chat-scroll-2026-11-04-before-wide-capture-3-post-done-still-scrolled-up.layout.json",
+      "note": "capture-3 post-done still-scrolled-up (stream end must not force scroll)",
+      "size": {
+        "width": 1353,
+        "height": 1053
+      },
+      "bytes": 193822
+    },
+    {
+      "outPath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\chat-scroll-follow-f7de61752cb7\\docs\\assets\\chat-scroll-2026-11-04-before-wide-capture-4-post-click-resumed-follow-at-bottom.png",
+      "layoutPath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\chat-scroll-follow-f7de61752cb7\\docs\\assets\\chat-scroll-2026-11-04-before-wide-capture-4-post-click-resumed-follow-at-bottom.layout.json",
+      "note": "capture-4 post-click resumed follow at bottom",
+      "size": {
+        "width": 1353,
+        "height": 1053
+      },
+      "bytes": 193822
+    }
+  ]
+}

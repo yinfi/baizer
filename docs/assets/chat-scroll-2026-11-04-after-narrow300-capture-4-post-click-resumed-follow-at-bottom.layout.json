@@ -1,0 +1,123 @@
+{
+  "schema": "baizer-chat-scroll-layout/1",
+  "label": "capture-4-post-click-resumed-follow-at-bottom",
+  "phase": "after",
+  "revision": "d07c182",
+  "scenarioStep": "capture-4 post-click resumed follow at bottom",
+  "capturedAt": "2026-11-04T10:51:55.863Z",
+  "limitations": [
+    "Colour, contrast, font rendering, animation smoothness and scroll-behavior easing are NOT asserted; this probe only measures geometry, scroll offsets and text reachability.",
+    "The affordance (\"有新输出 · 回到最新\" / \"back to latest\") is located by data-testid/class-name heuristics with a text-content fallback; if the implementation names it something this probe does not anticipate, affordance.found will be false and that is reported as a limitation, not assumed absent in the UI.",
+    "Only the geometry of the FIRST matching affordance element is reported; if more than one element matches the heuristics, affordanceCandidates lists all of them."
+  ],
+  "obsidianVersionInPage": null,
+  "windowTitle": "新标签页 - obsidian - Obsidian 1.15.0",
+  "theme": "dark",
+  "plugin": {
+    "id": "baizer",
+    "loaded": true,
+    "version": "1.5.0"
+  },
+  "viewport": {
+    "innerWidth": 1353,
+    "innerHeight": 1053,
+    "devicePixelRatio": 1.0000000298023224
+  },
+  "leaf": {
+    "found": true,
+    "box": {
+      "x": 1053.33,
+      "y": 70,
+      "w": 300,
+      "h": 983.33,
+      "right": 1353.33,
+      "bottom": 1053.33
+    }
+  },
+  "shellRoot": {
+    "found": true,
+    "box": {
+      "x": 1065.33,
+      "y": 82,
+      "w": 276,
+      "h": 939.33,
+      "right": 1341.33,
+      "bottom": 1021.33
+    }
+  },
+  "scroll": {
+    "found": true,
+    "box": {
+      "x": 1079.33,
+      "y": 182.23,
+      "w": 248,
+      "h": 674.77,
+      "right": 1327.33,
+      "bottom": 857
+    },
+    "scrollTop": 3060,
+    "scrollHeight": 3735,
+    "clientHeight": 675,
+    "distanceFromBottom": 0,
+    "isAtBottom": true,
+    "scrollWidth": 236,
+    "clientWidth": 236,
+    "noHorizontalOverflow": true
+  },
+  "overflow": {
+    "document": {
+      "scrollWidth": 1353,
+      "clientWidth": 1353,
+      "noHorizontalOverflow": true
+    }
+  },
+  "affordance": {
+    "found": true,
+    "visible": false,
+    "clickable": false,
+    "box": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "right": 0,
+      "bottom": 0
+    },
+    "text": "有新输出 · 回到最新",
+    "classes": "shell-back-to-latest-button",
+    "withinOutputArea": true,
+    "overlapsInputArea": false,
+    "inputAreaCandidatesFound": 2
+  },
+  "affordanceCandidates": [
+    {
+      "classes": "shell-back-to-latest-button",
+      "text": "有新输出 · 回到最新",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0,
+        "right": 0,
+        "bottom": 0
+      },
+      "visible": false
+    }
+  ],
+  "content": {
+    "entryCount": 2,
+    "timelineCount": 1,
+    "timelineCollapsedCount": 1
+  },
+  "followHintFromDom": null,
+  "image": {
+    "path": "docs/assets/chat-scroll-2026-11-04-after-narrow300-capture-4-post-click-resumed-follow-at-bottom.png",
+    "bytes": 144745,
+    "width": 1353,
+    "height": 1053,
+    "requestedWidth": 1353,
+    "requestedHeight": 1053,
+    "sizeMatchesRequest": true
+  },
+  "pluginDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\chat-scroll-follow-f7de61752cb7\\dist"
+}

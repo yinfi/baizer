@@ -1,0 +1,123 @@
+{
+  "schema": "baizer-chat-scroll-layout/1",
+  "label": "capture-2-paused-with-new-output-arrived",
+  "phase": "after",
+  "revision": "d07c182",
+  "scenarioStep": "capture-2 paused with new output arrived (back-to-latest entry expected)",
+  "capturedAt": "2026-11-04T10:51:23.047Z",
+  "limitations": [
+    "Colour, contrast, font rendering, animation smoothness and scroll-behavior easing are NOT asserted; this probe only measures geometry, scroll offsets and text reachability.",
+    "The affordance (\"有新输出 · 回到最新\" / \"back to latest\") is located by data-testid/class-name heuristics with a text-content fallback; if the implementation names it something this probe does not anticipate, affordance.found will be false and that is reported as a limitation, not assumed absent in the UI.",
+    "Only the geometry of the FIRST matching affordance element is reported; if more than one element matches the heuristics, affordanceCandidates lists all of them."
+  ],
+  "obsidianVersionInPage": null,
+  "windowTitle": "新标签页 - obsidian - Obsidian 1.15.0",
+  "theme": "dark",
+  "plugin": {
+    "id": "baizer",
+    "loaded": true,
+    "version": "1.5.0"
+  },
+  "viewport": {
+    "innerWidth": 1353,
+    "innerHeight": 1053,
+    "devicePixelRatio": 1.0000000298023224
+  },
+  "leaf": {
+    "found": true,
+    "box": {
+      "x": 868.18,
+      "y": 70,
+      "w": 485.16,
+      "h": 983.33,
+      "right": 1353.33,
+      "bottom": 1053.33
+    }
+  },
+  "shellRoot": {
+    "found": true,
+    "box": {
+      "x": 880.18,
+      "y": 82,
+      "w": 461.16,
+      "h": 939.33,
+      "right": 1341.33,
+      "bottom": 1021.33
+    }
+  },
+  "scroll": {
+    "found": true,
+    "box": {
+      "x": 894.18,
+      "y": 182.23,
+      "w": 433.16,
+      "h": 674.77,
+      "right": 1327.33,
+      "bottom": 857
+    },
+    "scrollTop": 1348.67,
+    "scrollHeight": 2885,
+    "clientHeight": 675,
+    "distanceFromBottom": 861.33,
+    "isAtBottom": false,
+    "scrollWidth": 421,
+    "clientWidth": 421,
+    "noHorizontalOverflow": true
+  },
+  "overflow": {
+    "document": {
+      "scrollWidth": 1353,
+      "clientWidth": 1353,
+      "noHorizontalOverflow": true
+    }
+  },
+  "affordance": {
+    "found": true,
+    "visible": true,
+    "clickable": true,
+    "box": {
+      "x": 1034.67,
+      "y": 817,
+      "w": 140.16,
+      "h": 30,
+      "right": 1174.83,
+      "bottom": 847
+    },
+    "text": "有新输出 · 回到最新",
+    "classes": "shell-back-to-latest-button",
+    "withinOutputArea": true,
+    "overlapsInputArea": false,
+    "inputAreaCandidatesFound": 2
+  },
+  "affordanceCandidates": [
+    {
+      "classes": "shell-back-to-latest-button",
+      "text": "有新输出 · 回到最新",
+      "box": {
+        "x": 1034.67,
+        "y": 817,
+        "w": 140.16,
+        "h": 30,
+        "right": 1174.83,
+        "bottom": 847
+      },
+      "visible": true
+    }
+  ],
+  "content": {
+    "entryCount": 2,
+    "timelineCount": 1,
+    "timelineCollapsedCount": 0
+  },
+  "followHintFromDom": null,
+  "image": {
+    "path": "docs/assets/chat-scroll-2026-11-04-after-wide-capture-2-paused-with-new-output-arrived.png",
+    "bytes": 198326,
+    "width": 1353,
+    "height": 1053,
+    "requestedWidth": 1353,
+    "requestedHeight": 1053,
+    "sizeMatchesRequest": true
+  },
+  "pluginDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\chat-scroll-follow-f7de61752cb7\\dist"
+}

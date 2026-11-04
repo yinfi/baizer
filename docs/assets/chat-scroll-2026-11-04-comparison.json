@@ -1,0 +1,498 @@
+{
+  "schema": "baizer-chat-scroll-comparison/1",
+  "generatedAt": "2026-11-04T10:54:42.037Z",
+  "issue": 64,
+  "scenario": "stream to bottom -> scroll up 1.3 screens -> more output arrives while paused -> stream done -> click back-to-latest",
+  "phases": {
+    "before": {
+      "revision": "cdcccb6"
+    },
+    "after": {
+      "revision": "d07c182"
+    }
+  },
+  "viewports": {
+    "wide": {
+      "parity": {
+        "sameTheme": "dark",
+        "sameRequestedViewport": {
+          "width": 1353,
+          "height": 1053
+        },
+        "sameSidebarWidthRequested": null,
+        "sameObsidianExeVersion": "1.14.5",
+        "sameObsidianTitleVersion": "1.15.0",
+        "beforeRevision": "cdcccb6",
+        "afterRevision": "d07c182",
+        "samePluginVersionField": true
+      },
+      "sidebarResize": {
+        "before": null,
+        "after": null
+      },
+      "captures": {
+        "capture-1-scrolled-up-reading-anchor-preserved": {
+          "before": {
+            "scrollTop": 470,
+            "scrollHeight": 2023,
+            "clientHeight": 675,
+            "distanceFromBottom": 878,
+            "isAtBottom": false,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": false,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": null,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 190348,
+              "path": "docs/assets/chat-scroll-2026-11-04-before-wide-capture-1-scrolled-up-reading-anchor-preserved.png"
+            }
+          },
+          "after": {
+            "scrollTop": 470,
+            "scrollHeight": 2023,
+            "clientHeight": 675,
+            "distanceFromBottom": 878,
+            "isAtBottom": false,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": true,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "right": 0,
+              "bottom": 0
+            },
+            "affordanceOverlapsInputArea": false,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 190332,
+              "path": "docs/assets/chat-scroll-2026-11-04-after-wide-capture-1-scrolled-up-reading-anchor-preserved.png"
+            }
+          }
+        },
+        "capture-2-paused-with-new-output-arrived": {
+          "before": {
+            "scrollTop": 2167.33,
+            "scrollHeight": 2843,
+            "clientHeight": 675,
+            "distanceFromBottom": 0.67,
+            "isAtBottom": true,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": false,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": null,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 193779,
+              "path": "docs/assets/chat-scroll-2026-11-04-before-wide-capture-2-paused-with-new-output-arrived.png"
+            }
+          },
+          "after": {
+            "scrollTop": 1348.67,
+            "scrollHeight": 2885,
+            "clientHeight": 675,
+            "distanceFromBottom": 861.33,
+            "isAtBottom": false,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": true,
+            "affordanceVisible": true,
+            "affordanceClickable": true,
+            "affordanceBox": {
+              "x": 1034.67,
+              "y": 817,
+              "w": 140.16,
+              "h": 30,
+              "right": 1174.83,
+              "bottom": 847
+            },
+            "affordanceOverlapsInputArea": false,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 198326,
+              "path": "docs/assets/chat-scroll-2026-11-04-after-wide-capture-2-paused-with-new-output-arrived.png"
+            }
+          }
+        },
+        "capture-3-post-done-still-scrolled-up": {
+          "before": {
+            "scrollTop": 1539.33,
+            "scrollHeight": 2214,
+            "clientHeight": 675,
+            "distanceFromBottom": -0.33,
+            "isAtBottom": true,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": false,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": null,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 193822,
+              "path": "docs/assets/chat-scroll-2026-11-04-before-wide-capture-3-post-done-still-scrolled-up.png"
+            }
+          },
+          "after": {
+            "scrollTop": 721.33,
+            "scrollHeight": 2256,
+            "clientHeight": 675,
+            "distanceFromBottom": 859.67,
+            "isAtBottom": false,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": true,
+            "affordanceVisible": true,
+            "affordanceClickable": true,
+            "affordanceBox": {
+              "x": 1034.67,
+              "y": 817,
+              "w": 140.16,
+              "h": 30,
+              "right": 1174.83,
+              "bottom": 847
+            },
+            "affordanceOverlapsInputArea": false,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 198338,
+              "path": "docs/assets/chat-scroll-2026-11-04-after-wide-capture-3-post-done-still-scrolled-up.png"
+            }
+          }
+        },
+        "capture-4-post-click-resumed-follow-at-bottom": {
+          "before": {
+            "scrollTop": 1539.33,
+            "scrollHeight": 2214,
+            "clientHeight": 675,
+            "distanceFromBottom": -0.33,
+            "isAtBottom": true,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": false,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": null,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 193822,
+              "path": "docs/assets/chat-scroll-2026-11-04-before-wide-capture-4-post-click-resumed-follow-at-bottom.png"
+            }
+          },
+          "after": {
+            "scrollTop": 1538.67,
+            "scrollHeight": 2214,
+            "clientHeight": 675,
+            "distanceFromBottom": 0.33,
+            "isAtBottom": true,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": true,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "right": 0,
+              "bottom": 0
+            },
+            "affordanceOverlapsInputArea": false,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 193835,
+              "path": "docs/assets/chat-scroll-2026-11-04-after-wide-capture-4-post-click-resumed-follow-at-bottom.png"
+            }
+          }
+        }
+      }
+    },
+    "narrow300": {
+      "parity": {
+        "sameTheme": "dark",
+        "sameRequestedViewport": {
+          "width": 1353,
+          "height": 1053
+        },
+        "sameSidebarWidthRequested": 300,
+        "sameObsidianExeVersion": "1.14.5",
+        "sameObsidianTitleVersion": "1.15.0",
+        "beforeRevision": "cdcccb6",
+        "afterRevision": "d07c182",
+        "samePluginVersionField": true
+      },
+      "sidebarResize": {
+        "before": {
+          "requestedWidthPx": 300,
+          "before": {
+            "found": true,
+            "classes": "workspace-split mod-horizontal mod-sidedock mod-secondary-split mod-right-split",
+            "inlineStyleWidth": "485.167px",
+            "computedWidth": "485.156px",
+            "rectWidth": 485.15625
+          },
+          "setResult": {
+            "ok": true,
+            "rectWidth": 300
+          },
+          "after": {
+            "found": true,
+            "classes": "workspace-split mod-horizontal mod-sidedock mod-secondary-split mod-right-split",
+            "inlineStyleWidth": "300px",
+            "computedWidth": "300px",
+            "rectWidth": 300
+          }
+        },
+        "after": {
+          "requestedWidthPx": 300,
+          "before": {
+            "found": true,
+            "classes": "workspace-split mod-horizontal mod-sidedock mod-secondary-split mod-right-split",
+            "inlineStyleWidth": "485.167px",
+            "computedWidth": "485.156px",
+            "rectWidth": 485.15625
+          },
+          "setResult": {
+            "ok": true,
+            "rectWidth": 300
+          },
+          "after": {
+            "found": true,
+            "classes": "workspace-split mod-horizontal mod-sidedock mod-secondary-split mod-right-split",
+            "inlineStyleWidth": "300px",
+            "computedWidth": "300px",
+            "rectWidth": 300
+          }
+        }
+      },
+      "captures": {
+        "capture-1-scrolled-up-reading-anchor-preserved": {
+          "before": {
+            "scrollTop": 1453.33,
+            "scrollHeight": 3006,
+            "clientHeight": 675,
+            "distanceFromBottom": 877.67,
+            "isAtBottom": false,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": false,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": null,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 147532,
+              "path": "docs/assets/chat-scroll-2026-11-04-before-narrow300-capture-1-scrolled-up-reading-anchor-preserved.png"
+            }
+          },
+          "after": {
+            "scrollTop": 1453.33,
+            "scrollHeight": 3006,
+            "clientHeight": 675,
+            "distanceFromBottom": 877.67,
+            "isAtBottom": false,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": true,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "right": 0,
+              "bottom": 0
+            },
+            "affordanceOverlapsInputArea": false,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 147532,
+              "path": "docs/assets/chat-scroll-2026-11-04-after-narrow300-capture-1-scrolled-up-reading-anchor-preserved.png"
+            }
+          }
+        },
+        "capture-2-paused-with-new-output-arrived": {
+          "before": {
+            "scrollTop": 3731.33,
+            "scrollHeight": 4411,
+            "clientHeight": 675,
+            "distanceFromBottom": 4.67,
+            "isAtBottom": false,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": false,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": null,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 144371,
+              "path": "docs/assets/chat-scroll-2026-11-04-before-narrow300-capture-2-paused-with-new-output-arrived.png"
+            }
+          },
+          "after": {
+            "scrollTop": 2330.67,
+            "scrollHeight": 4453,
+            "clientHeight": 675,
+            "distanceFromBottom": 1447.33,
+            "isAtBottom": false,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": true,
+            "affordanceVisible": true,
+            "affordanceClickable": true,
+            "affordanceBox": {
+              "x": 1104.1,
+              "y": 817,
+              "w": 140.16,
+              "h": 30,
+              "right": 1244.26,
+              "bottom": 847
+            },
+            "affordanceOverlapsInputArea": false,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 146869,
+              "path": "docs/assets/chat-scroll-2026-11-04-after-narrow300-capture-2-paused-with-new-output-arrived.png"
+            }
+          }
+        },
+        "capture-3-post-done-still-scrolled-up": {
+          "before": {
+            "scrollTop": 3060,
+            "scrollHeight": 3735,
+            "clientHeight": 675,
+            "distanceFromBottom": 0,
+            "isAtBottom": true,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": false,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": null,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 144712,
+              "path": "docs/assets/chat-scroll-2026-11-04-before-narrow300-capture-3-post-done-still-scrolled-up.png"
+            }
+          },
+          "after": {
+            "scrollTop": 1655.33,
+            "scrollHeight": 3777,
+            "clientHeight": 675,
+            "distanceFromBottom": 1446.67,
+            "isAtBottom": false,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": true,
+            "affordanceVisible": true,
+            "affordanceClickable": true,
+            "affordanceBox": {
+              "x": 1104.1,
+              "y": 817,
+              "w": 140.16,
+              "h": 30,
+              "right": 1244.26,
+              "bottom": 847
+            },
+            "affordanceOverlapsInputArea": false,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 146839,
+              "path": "docs/assets/chat-scroll-2026-11-04-after-narrow300-capture-3-post-done-still-scrolled-up.png"
+            }
+          }
+        },
+        "capture-4-post-click-resumed-follow-at-bottom": {
+          "before": {
+            "scrollTop": 3060,
+            "scrollHeight": 3735,
+            "clientHeight": 675,
+            "distanceFromBottom": 0,
+            "isAtBottom": true,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": false,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": null,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 144712,
+              "path": "docs/assets/chat-scroll-2026-11-04-before-narrow300-capture-4-post-click-resumed-follow-at-bottom.png"
+            }
+          },
+          "after": {
+            "scrollTop": 3060,
+            "scrollHeight": 3735,
+            "clientHeight": 675,
+            "distanceFromBottom": 0,
+            "isAtBottom": true,
+            "containerNoHorizontalOverflow": true,
+            "documentNoHorizontalOverflow": true,
+            "affordanceFound": true,
+            "affordanceVisible": false,
+            "affordanceClickable": false,
+            "affordanceBox": {
+              "x": 0,
+              "y": 0,
+              "w": 0,
+              "h": 0,
+              "right": 0,
+              "bottom": 0
+            },
+            "affordanceOverlapsInputArea": false,
+            "image": {
+              "width": 1353,
+              "height": 1053,
+              "sizeMatchesRequest": true,
+              "bytes": 144745,
+              "path": "docs/assets/chat-scroll-2026-11-04-after-narrow300-capture-4-post-click-resumed-follow-at-bottom.png"
+            }
+          }
+        }
+      }
+    }
+  }
+}
