@@ -40,6 +40,56 @@ node tools/chat-scroll-shots/capture.mjs `
 Repeat with `--view-width 300` for the narrow sidebar, and with the baseline
 build for `--phase before`.
 
+## Timing regression scenarios (issue #75)
+
+`--scenario` selects what the harness drives. The default, `reading-anchor`, is
+the #64 scenario above. The other three reproduce the timing defects that were
+still present after #70; each writes the same PNG + layout JSON pair and adds a
+`scenarioData` block plus per-scenario booleans under `assertions`.
+
+| `--scenario` | What it drives | What the fix must hold |
+| --- | --- | --- |
+| `tab-switch-clamp` | A tall tab B (following, at the bottom) -> a short tab A that was left paused at `scrollTop=150` with an unread entry. While A's `scrollTop` is clamped from B's bottom to A's new max, a real `scroll` event is dispatched inside the 50 ms restore window. | A returns to 150, stays paused, keeps its unread entry; the clamp scroll is treated as layout noise. |
+| `async-render-identity` | A's Markdown block render is held open (the harness wraps `MessageRenderer.renderAiContent` once), the user switches to B, then A's render resolves. | B's viewport does not move; the stale completion callback is dropped by session/render-generation identity. |
+| `layout-growth-threshold` | A simulated delayed image grows the content 600 px with no user scroll (so `following` stays `true` while the reader is 600 px from the bottom), then a new token arrives. | The viewport stays put, follow pauses and the unread entry appears instead of snapping to the bottom. |
+
+Both extra fixtures are explicit and local to the harness: the "image" is a
+bordered placeholder div appended to the active message container, and the
+render gate wraps only the next `renderAiContent` call so B's normal message
+rendering is unaffected. They stand in for the real async image load and
+Markdown render, which cannot be held open deterministically otherwise.
+
+Determinism note: occluded/headless Chromium may coalesce or drop the
+browser-generated scroll event that follows a `scrollTop` clamp. `tab-switch-clamp`
+therefore moves the viewport to the clamp result (A's max) and dispatches a real
+`DOM scroll` event inside the restore window. The event, container and controller
+are real; only its delivery timing is pinned so the regression is reproducible.
+
+`layout-growth-threshold` cannot be expressed in jsdom: jsdom has no layout, so
+`scrollHeight`/`clientHeight` stay 0 and there is no clamping, scroll anchoring
+or asynchronous scroll delivery to reproduce. That is why these cases live in
+the Obsidian harness rather than `npm test`; the controller-level timing rules
+are additionally covered by `test/scroll-follow.test.ts`, which models clamping
+and async scroll delivery.
+
+Run the three scenarios for both phases:
+
+```powershell
+# changed revision
+node tools/chat-scroll-shots/capture.mjs --plugin-dir dist `
+  --scenario tab-switch-clamp --phase after --revision <fix-sha> `
+  --out docs/assets/chat-scroll-tab-switch-after.png --view-width 520
+# baseline (cc33a19 build), identical scenario
+node tools/chat-scroll-shots/capture.mjs --plugin-dir <baseline-dist> `
+  --scenario tab-switch-clamp --phase before --revision cc33a19 `
+  --out docs/assets/chat-scroll-tab-switch-before.png --view-width 520
+```
+
+Repeat with `async-render-identity` and `layout-growth-threshold`. On the
+baseline the `assertions` block is expected to contain `false` values: that is
+the reproduction. On the fixed revision every boolean must be `true`.
+
+
 ## Isolation
 
 - The vault lives under `%TEMP%\baizer-shots\obsidian` and is recreated per run.

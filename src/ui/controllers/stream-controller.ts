@@ -11,7 +11,6 @@ interface StreamControllerDeps {
   // 而非 UI 逐字累计的 streamAccumulatedText,否则屏幕与保存不一致。
   onDone: (finalText?: string) => void;
   onError: (message: string) => void;
-  onScrollRequest?: () => void;
 }
 
 export class StreamController {
@@ -41,7 +40,5 @@ export class StreamController {
         this.deps.onError(event.message);
         break;
     }
-
-    this.deps.onScrollRequest?.();
   }
 }
