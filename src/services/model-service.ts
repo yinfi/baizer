@@ -73,6 +73,14 @@ export class ModelService {
     private memoryManager: MemoryManager | null = null;
     private readonly modelListCache = new Map<string, { timestamp: number; models: ModelOption[]; listed: boolean; listingUnsupported: boolean; error?: Error }>();
     private readonly modelListCacheTtlMs = 10 * 60 * 1000;
+    /**
+     * 进行中的模型列表请求，键与 modelListCache 相同。
+     *
+     * 设置页每次重渲染都会重新问一遍 /models；移动端慢网络下并发渲染会叠出多条
+     * 重复请求（issue #81）。这里让并发的非 forceRefresh 调用共享同一个 Promise，
+     * 落定后（无论成功还是失败）立刻删除，避免把一次失败永久粘在表里。
+     */
+    private readonly modelListInFlight = new Map<string, Promise<AvailableModelsResult>>();
     private readonly generationStrategyService = new GenerationStrategyService();
     private providerChangedCallbacks: Array<() => void> = [];
     private suppressProviderChangedNotification = false;
@@ -450,8 +458,31 @@ export class ModelService {
                     error: cached.error,
                 };
             }
+
+            // 并发合并:两次重渲染同时进来时只打一次 /models。forceRefresh 是用户显式
+            // 要求重打端点,不并入已有请求,也不登记进表(否则会掩盖「刷新」的动作)。
+            const inFlight = this.modelListInFlight.get(cacheKey);
+            if (inFlight) return inFlight;
+
+            const request = this.loadModelsForProvider(cacheKey, providerId, config, deps, now).finally(() => {
+                // 成功和失败都要删:失败若留在表里,后续调用会永远共享那次失败结果。
+                this.modelListInFlight.delete(cacheKey);
+            });
+            this.modelListInFlight.set(cacheKey, request);
+            return request;
         }
 
+        return this.loadModelsForProvider(cacheKey, providerId, config, deps, now);
+    }
+
+    /** 真正打 /models 的那一段(缓存命中与并发合并都在 fetchModelsForProvider 处理)。 */
+    private async loadModelsForProvider(
+        cacheKey: string,
+        providerId: string,
+        config: ProviderConfig,
+        deps: modelCatalog.ModelCatalogDeps | undefined,
+        now: number,
+    ): Promise<AvailableModelsResult> {
         let models: ModelOption[] = [];
         let listed = false;
         let listingUnsupported = false;

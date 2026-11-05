@@ -30,19 +30,77 @@ It is now split:
 loss and the slider thrash. There are ~33 handlers that were converted from one
 to the other; matching them is the convention.
 
+## Rendering is scheduled, never re-entrant
+
+`renderAccordion()` only *requests* a repaint; the DOM work happens in
+`renderAccordionNow()` / `renderAccordionContents()` via
+`src/utils/render-scheduler.ts`. That scheduler:
+
+- coalesces every request made in the same task into one repaint (microtask);
+- never nests a repaint: a request made while rendering runs once after the
+  current pass finishes;
+- is cancelled by `hide()`, so a closed panel cannot be repainted afterwards.
+
+This exists because several code paths request a repaint from inside a render —
+`renderMemorySection()` triggers the first memory load, and the `<details>`
+`toggle` handler used to rebuild the whole accordion from within the toggle
+event. The old synchronous rebuilds emptied the container that was still being
+built, produced detached nodes, and multiplied the work per interaction. On a
+low-end mobile WebView that turns into multi-second main-thread tasks.
+
+Two consequences worth knowing:
+
+- Expanding a collapsed section no longer rebuilds the accordion. The toggle
+  handler injects that one section's content in place.
+- The first memory load is started before the section renders, so the current
+  paint already shows "Loading memory..." instead of painting empty and then
+  repainting for the loading state.
+
+## Search is debounced and gated
+
+The search box does not repaint per keystroke. Input is debounced by 150 ms, and
+when it fires `applySearchRender()` compares the new match set with the sections
+that are already on screen (`isSameSettingsSectionList()`). Typing more
+characters that match the same sections does not repaint at all.
+
+## Network work is cached, not repeated
+
+- The model field (`renderModelField`) receives the last `AvailableModelsResult`
+  from `SettingTab`'s cache keyed by endpoint identity
+  (`getModelFieldCacheKey()`: provider + protocol + base URL + key prefix).
+  Rerenders reuse it; only the "Refresh list" button forces a request. The
+  underlying `ModelService` also coalesces concurrent in-flight requests, and
+  `/models` calls carry a timeout (see `model-catalog-service.ts`).
+- `KnowledgeStatusService.getGlobalCounts()` is cached with a 30 s TTL, shares
+  one in-flight traversal, and traverses tracked notes in bounded batches. Only
+  explicit knowledge actions (`Discover`, `Mark stale pending`) pass
+  `forceFresh: true`. Counts can therefore be up to 30 s stale after a compile
+  triggered elsewhere.
+- The knowledge status line itself is also memoised for 5 s
+  (`SettingTab.ontologyStatusCache`), so a section re-mount inside that window
+  skips the schema read and readiness scan entirely; the 30 s service-level
+  cache sits underneath it for the count traversal.
+
 ## Persistence has two paths
 
 `saveSettings` distinguishes fields that require rebuilding the provider from
 fields that are purely cosmetic:
 
 - `saveSettings()` — full path. Runs cleanup, re-initializes the provider, and
-  clears the model list cache. Correct for provider, model, key, and context
-  window changes.
+  invalidates the model list cache **only for providers whose base URL or key
+  actually changed**. Correct for provider, model, key, and context window
+  changes.
 - `saveSettingsLight()` — writes to disk only. Correct for appearance settings.
   Paired with `debouncedPersistLight` for sliders.
 
 Getting this wrong is not a visual bug — routing a cosmetic slider through the
 full path re-initializes the model client on every drag increment.
+
+Debounced persistence has one honest boundary: text fields write about 400 ms
+after the last keystroke. `hide()` flushes the pending write, and an open panel
+also flushes on `visibilitychange` when the app goes to the background, so
+normal close / app switch does not lose the edit. A hard process kill inside
+that 400 ms window can still lose the last edit — no callback runs then.
 
 ## Expansion state
 

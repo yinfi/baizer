@@ -23,26 +23,6 @@ const ANTHROPIC_VERSION = '2023-06-01';
 const ANTHROPIC_DEFAULT_BASE_URL = 'https://api.anthropic.com';
 
 /**
- * 列模型请求的应用层超时。
- *
- * 背景（#81）：Obsidian `requestUrl` 没有 `AbortSignal`/超时参数，弱网或 Captive Portal
- * 下请求可以挂起到系统级 TCP 超时（经验上可达数十秒到数分钟）。设置页每次整页/分区重绘都会
- * 无条件重新拉一次模型清单（见 renderModelField 的 `void load(false)`），移动端弱网下
- * 请求挂起期间主线程被反复唤醒、下拉长期停在 Loading，这是 issue 列的嫌疑点之二。
- * 这里不改调用时机（那属于「清空缓存」那一层的职责），只保证单次请求不会无限挂起。
- */
-const MODEL_LISTING_TIMEOUT_MS = 10_000;
-
-/** requestUrl 没有取消能力；超时只能让等待方提前放弃，底层请求可能仍在飞，但不再占用调用方。 */
-function withRequestTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
-}
-
-/**
  * 「这个端点没有列模型能力」——与「这个端点不能推理」是两件事，必须可区分。
  *
  * 理由：Anthropic 兼容网关里只实现 POST /v1/messages 的很多，GET /v1/models 常常没做。
@@ -80,10 +60,94 @@ function isListingUnsupportedStatus(status: number): boolean {
   return status === 404 || status === 405 || status === 501;
 }
 
+/**
+ * /models 请求的默认超时（毫秒）。
+ *
+ * Obsidian 的 requestUrl 没有原生取消能力：移动端网络差或网关挂起时，请求可能
+ * 长时间不返回，设置页的重渲染就会一直等它。这里给一个明确上限，超时即 reject，
+ * 让 UI 能回落到内置兜底列表而不是冻住。
+ *
+ * 取值沿用 #87 合并进 main 的 10s 应用层超时；本 PR 在此基础上补上「可注入
+ * signal / timeoutMs」的取消能力（见 ModelCatalogDeps）。
+ */
+export const DEFAULT_MODELS_REQUEST_TIMEOUT_MS = 10_000;
+
 /** 可注入的 REST 依赖（沿用 request-url-fetch.ts / web-search 的 deps 模式，便于测试）。 */
 export interface ModelCatalogDeps {
   /** 与 Obsidian `requestUrl` 同签名：返回结构化的 HTTP 响应（外部数据仍在调用侧解析）。 */
   requestUrl: (options: RequestUrlParam) => Promise<RequestUrlResponse>;
+  /** 取消信号：设置页关闭/重渲染时可 abort，避免为已不再需要的列表继续等待。 */
+  signal?: AbortSignal;
+  /** 单次 /models 请求的超时（毫秒）；缺省用 DEFAULT_MODELS_REQUEST_TIMEOUT_MS。 */
+  timeoutMs?: number;
+}
+
+/** 构造 AbortError（不用 DOMException：测试与旧运行环境不一定有）。 */
+function createAbortError(): Error {
+  const error = new Error('The model list request was aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
+/**
+ * 给 requestUrl 调用套上「超时 + 取消」语义。
+ *
+ * requestUrl 本身不可中断，故这里只做 Promise.race：超时/abort 后立刻 reject，
+ * 底层请求的晚到结果必须被忽略（settled 守卫生效，且不会产生未处理的 rejection）。
+ * 定时器与 abort 监听都只在 finally 语义的 cleanup 里释放，避免移动端泄漏。
+ */
+function requestModelsWithTimeout(
+  doRequest: (options: RequestUrlParam) => Promise<RequestUrlResponse>,
+  options: RequestUrlParam,
+  url: string,
+  deps?: ModelCatalogDeps,
+): Promise<RequestUrlResponse> {
+  const signal = deps?.signal;
+  // 已经 abort 的 signal 不必发请求：直接按取消处理。
+  if (signal?.aborted) return Promise.reject(createAbortError());
+
+  const timeoutMs = deps?.timeoutMs ?? DEFAULT_MODELS_REQUEST_TIMEOUT_MS;
+
+  return new Promise<RequestUrlResponse>((resolve, reject) => {
+    let settled = false;
+
+    function cleanup(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    }
+
+    function finish(action: () => void): void {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      action();
+    }
+
+    function onAbort(): void {
+      finish(() => reject(createAbortError()));
+    }
+
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error(`Model list request timed out after ${timeoutMs}ms: ${url}`)));
+    }, Math.max(0, timeoutMs));
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    // 请求照常发出；晚到的 resolve/reject 都会被 finish 的 settled 守卫丢弃。
+    // 用 Promise.resolve 包一层：测试里的注入实现可能同步返回响应对象，
+    // 同步抛错也要按普通失败处理，而不是变成未处理异常。
+    let request: Promise<RequestUrlResponse>;
+    try {
+      request = Promise.resolve(doRequest(options));
+    } catch (error) {
+      finish(() => reject(error));
+      return;
+    }
+    request.then(
+      (response) => finish(() => resolve(response)),
+      (error) => finish(() => reject(error)),
+    );
+  });
 }
 
 /** provider 类型 → 静态能力声明。旧 provider 层的 getCapabilities 是硬编码常量，此处按 type 直接返回。 */
@@ -130,7 +194,7 @@ export async function listModels(config: ProviderConfig, deps?: ModelCatalogDeps
     throw new Error(`${config?.label || 'Provider'} API Key not configured`);
   }
   if (config.type === 'anthropic') return listAnthropicModels(config, deps);
-  return listOpenAICompatModels(config);
+  return listOpenAICompatModels(config, deps);
 }
 
 /**
@@ -192,17 +256,14 @@ export async function checkAvailability(config: ProviderConfig, deps?: ModelCata
   return (await checkAvailabilityWithStatus(config, deps)).reachable;
 }
 
-async function listOpenAICompatModels(config: ProviderConfig): Promise<ModelOption[]> {
+async function listOpenAICompatModels(config: ProviderConfig, deps?: ModelCatalogDeps): Promise<ModelOption[]> {
+  const doRequest = deps?.requestUrl ?? requestUrl;
   const url = `${config.baseUrl || 'https://api.openai.com/v1'}/models`;
-  const response = await withRequestTimeout(
-    requestUrl({
-      url,
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${config.apiKey}` },
-    }),
-    MODEL_LISTING_TIMEOUT_MS,
-    'OpenAI models API',
-  );
+  const response = await requestModelsWithTimeout(doRequest, {
+    url,
+    method: 'GET',
+    headers: { 'Authorization': `Bearer ${config.apiKey}` },
+  }, url, deps);
   if (response.status !== 200) {
     throw new Error(`OpenAI models API error: ${response.status}`);
   }
@@ -245,18 +306,14 @@ async function listAnthropicModels(config: ProviderConfig, deps?: ModelCatalogDe
   const baseUrl = (config.baseUrl?.trim() || ANTHROPIC_DEFAULT_BASE_URL).replace(/\/+$/, '');
   const url = `${baseUrl}/v1/models`;
 
-  const response = await withRequestTimeout(
-    doRequest({
-      url,
-      method: 'GET',
-      headers: {
-        'x-api-key': config.apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-      },
-    }),
-    MODEL_LISTING_TIMEOUT_MS,
-    'Anthropic models API',
-  );
+  const response = await requestModelsWithTimeout(doRequest, {
+    url,
+    method: 'GET',
+    headers: {
+      'x-api-key': config.apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+    },
+  }, url, deps);
 
   if (response.status !== 200) {
     // 端点没有列模型能力 → 单独的错误类，让 UI 能区分「列不了模型」与「用不了」。
