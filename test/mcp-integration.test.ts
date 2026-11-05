@@ -49,6 +49,7 @@ async function runTests() {
 
   const mockApp = {
     vault: {
+      configDir: '.obsidian',
       getFiles: () => Array.from(files.values()).map(entry => entry.file),
       getMarkdownFiles: () => Array.from(files.values()).map(entry => ({
         ...entry.file,
@@ -66,8 +67,10 @@ async function runTests() {
         const entry = files.get(file.path);
         if (entry) entry.content = content;
       },
-      trash: async () => { },
       rename: async () => { },
+    },
+    fileManager: {
+      trashFile: async () => { },
     },
     metadataCache: {
       getFirstLinkpathDest: (path: string) => files.get(path)?.file || null,

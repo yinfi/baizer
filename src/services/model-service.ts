@@ -161,6 +161,7 @@ export class ModelService {
         try {
             const vaultAdapter = createVaultFileAdapter(adapter);
             this.sessionManager = new HarnessSessionManager(vaultAdapter, {
+                sessionsRoot: `${this.app.vault.configDir}/baizer-sessions`,
                 loadRef: (conversationId) => this.loadSessionRef(conversationId),
                 saveRef: (conversationId, ref) => this.saveSessionRef(conversationId, ref),
                 contextWindow: () => this.settings.contextWindow ?? 0,
@@ -168,9 +169,12 @@ export class ModelService {
                 // skipGenerationPlan:摘要是纯文本任务,不需要写作策略装饰(同 buildMemoryOptions 的用法)。
                 summarize: (prompt) => this.generate(prompt, undefined, 'shell', undefined, null, { skipGenerationPlan: true }),
             });
-            this.harnessEnv = createHarnessExecutionEnv(vaultAdapter);
+            this.harnessEnv = createHarnessExecutionEnv(vaultAdapter, '/', this.app.vault.configDir);
             // 用户自定义命令服务与 harnessEnv 同源;懒加载模板(首次列命令/执行时读盘)。
-            this.promptTemplateService = new PromptTemplateService(this.harnessEnv);
+            this.promptTemplateService = new PromptTemplateService(
+                this.harnessEnv,
+                `${this.app.vault.configDir}/baizer-commands`,
+            );
         } catch (error) {
             logger.warn('Failed to initialize HarnessSessionManager; falling back to in-memory sessions.', 'ModelService');
             this.sessionManager = null;

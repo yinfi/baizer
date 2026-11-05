@@ -141,6 +141,11 @@ npm run build
 # 运行测试套件
 npm test
 
+# 单独运行某个测试文件（--import 注入 test/setup-env.ts：
+# 生产代码按 Obsidian 平台要求使用 window.* 定时器与 createDiv 等全局 DOM 助手，
+# 裸 Node 需要垫片才能执行）
+npx tsx --tsconfig tsconfig.test.json --import ./test/setup-env.ts test/throttle.test.ts
+
 # 仅类型检查、不产出文件
 npx tsc --noEmit
 

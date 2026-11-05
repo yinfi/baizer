@@ -36,7 +36,7 @@ function createFile(path: string) {
   return file;
 }
 
-function createMockApp() {
+function createMockApp(configDir = '.obsidian') {
   const created: Array<{ path: string; content: string }> = [];
   const modified: Array<{ path: string; content: string }> = [];
   const folders: string[] = [];
@@ -73,10 +73,13 @@ function createMockApp() {
         }
         return contents.get(file.path) || '';
       },
-      trash: async () => { },
+      configDir,
       rename: async () => { },
       getMarkdownFiles: () => [],
       getFiles: () => Array.from(files.values()),
+    },
+    fileManager: {
+      trashFile: async () => { },
     },
     metadataCache: {
       getFirstLinkpathDest: (path: string) => files.get(path) || null,
@@ -268,8 +271,35 @@ async function runTests() {
     });
     expect(hidden).toEqual({
       success: false,
-      error: 'Writing .obsidian files is not allowed',
+      error: 'Writing to the Obsidian configuration folder is not allowed',
     });
+  });
+
+  await test('uses the vault configDir instead of a hardcoded .obsidian path', async () => {
+    const { app } = createMockApp('CustomConfig');
+    const registry = new ToolRegistry(app, {
+      ...DEFAULT_SETTINGS,
+      allowFileCreation: true,
+      allowFileModification: true,
+      confirmExecutions: false,
+    });
+    registerVaultTools(registry);
+
+    const blocked = await registry.execute('create_file', {
+      path: 'CustomConfig/plugins/x/data.json',
+      content: '{}',
+    });
+    expect(blocked).toEqual({
+      success: false,
+      error: 'Writing to the Obsidian configuration folder is not allowed',
+    });
+
+    // 自定义配置目录下，`.obsidian` 只是普通目录，不应再被误判为配置目录。
+    const allowed = await registry.execute('create_file', {
+      path: '.obsidian/note.md',
+      content: 'ok',
+    });
+    expect(allowed.success).toBe(true);
   });
 }
 

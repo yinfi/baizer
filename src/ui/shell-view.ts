@@ -876,7 +876,7 @@ export class ShellView extends ItemView {
         if (this.dehydratedEntries.has(el)) return;
         const height = el.offsetHeight;
         if (height <= 0) return; // 不可见(display:none 的后台 tab 或尚未布局)——不处理
-        const fragment = document.createDocumentFragment();
+        const fragment = createFragment();
         while (el.firstChild) fragment.appendChild(el.firstChild);
         el.setCssStyles({ minHeight: `${height}px` });
         el.classList.add('shell-entry-dehydrated');
@@ -1066,7 +1066,7 @@ export class ShellView extends ItemView {
             this.streamContent.empty();
             this.streamStableEl = this.streamContent.createDiv({ cls: 'shell-stream-stable' });
             this.streamTailEl = this.streamContent.createDiv({ cls: 'shell-stream-plaintext' });
-            this.streamCursorEl = document.createElement('span');
+            this.streamCursorEl = createSpan();
             this.streamCursorEl.className = 'shell-stream-cursor';
             this.streamContent.appendChild(this.streamCursorEl);
             this.streamRenderedLen = 0;
@@ -1432,7 +1432,7 @@ export class ShellView extends ItemView {
 
     private stopHeartbeat() {
         if (this.heartbeatInterval) {
-            clearInterval(this.heartbeatInterval);
+            window.clearInterval(this.heartbeatInterval);
             this.heartbeatInterval = null;
         }
     }
@@ -1508,7 +1508,7 @@ export class ShellView extends ItemView {
                 (this.app as AppWithCommands).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
             },
             onCopyPath: (path) => {
-                void globalThis.navigator?.clipboard?.writeText?.(path);
+                void window.navigator?.clipboard?.writeText?.(path);
                 new Notice('Copied note path.');
             },
             onOpenSettings: () => this.openPluginSettings(),

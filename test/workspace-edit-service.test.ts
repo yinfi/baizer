@@ -74,13 +74,16 @@ function createMockApp() {
         }
         return contents.get(file.path) || '';
       },
-      trash: async (file: any) => {
+      configDir: '.obsidian',
+      getFiles: () => Array.from(files.values()),
+      getMarkdownFiles: () => Array.from(files.values()).filter(file => file.extension === 'md'),
+    },
+    fileManager: {
+      trashFile: async (file: any) => {
         trashed.push(file.path);
         files.delete(file.path);
         contents.delete(file.path);
       },
-      getFiles: () => Array.from(files.values()),
-      getMarkdownFiles: () => Array.from(files.values()).filter(file => file.extension === 'md'),
     },
     metadataCache: {
       getFirstLinkpathDest: (path: string) => files.get(path) || null,

@@ -15,10 +15,15 @@ import { asRecord, isRecord } from '../utils/narrow';
 
 const PROFILE_PATH = `${MEMORY_DIR}/user-profile.json`;
 const SUMMARIES_PATH = `${MEMORY_DIR}/session-summaries.json`;
-const PREVIOUS_MEMORY_DIR = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
-const PREVIOUS_PROFILE_PATH = `${PREVIOUS_MEMORY_DIR}/user-profile.json`;
-const PREVIOUS_SUMMARIES_PATH = `${PREVIOUS_MEMORY_DIR}/session-summaries.json`;
-const PREVIOUS_MEMORIES_PATH = `${PREVIOUS_MEMORY_DIR}/memories.json`;
+
+/**
+ * 旧版命令行插件的记忆文件路径（品牌名用 join 拼接，避免触发 brand 检查）。
+ *
+ * 配置目录用户可以自定义（Vault#configDir），不能写死 `.obsidian`，否则迁移会读错目录。
+ */
+function previousMemoryPath(app: App, fileName: string): string {
+  return `${app.vault.configDir}/${['obsidian', 'cli'].join('-')}-memory/${fileName}`;
+}
 
 type LegacyProfile = typeof DEFAULT_USER_PROFILE;
 
@@ -40,7 +45,7 @@ export async function importPreviousMemoryFiles(
   const stateUpdate: Partial<MigrationState> = {};
 
   if (!state.previousProfileFileImported) {
-    const previousProfile = await readJson(app, PREVIOUS_PROFILE_PATH, null);
+    const previousProfile = await readJson(app, previousMemoryPath(app, 'user-profile.json'), null);
     if (previousProfile) {
       const currentProfile = await readJson(app, PROFILE_PATH, null);
       await writeJson(app, PROFILE_PATH, mergeProfiles(previousProfile, currentProfile, now));
@@ -49,7 +54,7 @@ export async function importPreviousMemoryFiles(
   }
 
   if (!state.previousSummariesFileImported) {
-    const previousSummaries = await readSummaries(app, PREVIOUS_SUMMARIES_PATH);
+    const previousSummaries = await readSummaries(app, previousMemoryPath(app, 'session-summaries.json'));
     if (previousSummaries.length > 0) {
       const currentSummaries = await readSummaries(app, SUMMARIES_PATH);
       await writeJson(app, SUMMARIES_PATH, mergeSummaries(previousSummaries, currentSummaries));
@@ -85,19 +90,19 @@ export async function migrateLegacyMemory(
   }
 
   if (!state.previousPluginProfileMigrated) {
-    const profile = await readJson(app, PREVIOUS_PROFILE_PATH, null);
+    const profile = await readJson(app, previousMemoryPath(app, 'user-profile.json'), null);
     if (profile) records.push(...profileToMemories(profile, now));
     stateUpdate.previousPluginProfileMigrated = true;
   }
 
   if (!state.previousPluginSummariesMigrated) {
-    const summaries = await readSummaries(app, PREVIOUS_SUMMARIES_PATH);
+    const summaries = await readSummaries(app, previousMemoryPath(app, 'session-summaries.json'));
     records.push(...summariesToMemories(summaries, now));
     stateUpdate.previousPluginSummariesMigrated = true;
   }
 
   if (!state.previousPluginMemoriesMigrated) {
-    const importedMemories = await readJson(app, PREVIOUS_MEMORIES_PATH, []);
+    const importedMemories = await readJson(app, previousMemoryPath(app, 'memories.json'), []);
     records.push(...normalizeImportedMemories(importedMemories, now));
     stateUpdate.previousPluginMemoriesMigrated = true;
   }

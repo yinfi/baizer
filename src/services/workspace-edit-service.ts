@@ -138,7 +138,7 @@ export class WorkspaceEditService {
       await this.app.vault.modify(file, record.beforeContent);
       await this.openFile(record.summary.path);
     } else {
-      await this.app.vault.trash(file, true);
+      await this.app.fileManager.trashFile(file);
     }
 
     record.summary = { ...record.summary, status: 'undone' };

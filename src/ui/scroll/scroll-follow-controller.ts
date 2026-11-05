@@ -129,13 +129,10 @@ export class ScrollFollowController {
         this.onUnreadChange = options.onUnreadChange;
         this.getRenderGeneration = options.getRenderGeneration;
         this.schedule = options.schedule
-            ?? ((callback, delayMs) => (typeof window !== 'undefined'
-                ? window.setTimeout(callback, delayMs)
-                : setTimeout(callback, delayMs)));
+            ?? ((callback, delayMs) => window.setTimeout(callback, delayMs));
         this.cancel = options.cancel
             ?? ((handle) => {
-                if (typeof window !== 'undefined') window.clearTimeout(handle as number);
-                else clearTimeout(handle as unknown as NodeJS.Timeout);
+                window.clearTimeout(handle as number);
             });
         this.restoreDelayMs = options.restoreDelayMs ?? RESTORE_POSITION_DELAY_MS;
     }

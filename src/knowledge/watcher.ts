@@ -98,7 +98,7 @@ export class KnowledgeWatcher {
       this._onCompileNeeded?.();
     } finally {
       // 延迟清除，等 vault modify 事件传播完毕
-      setTimeout(() => this.writingPaths.delete(file.path), 500);
+      window.setTimeout(() => this.writingPaths.delete(file.path), 500);
     }
   }
 
@@ -118,7 +118,7 @@ export class KnowledgeWatcher {
           logger.info(`Marked pending (was done): ${file.path}`, 'KnowledgeWatcher');
           this._onCompileNeeded?.();
         } finally {
-          setTimeout(() => this.writingPaths.delete(file.path), 500);
+          window.setTimeout(() => this.writingPaths.delete(file.path), 500);
         }
       }
       this.debouncedHandlers.delete(key);

@@ -81,7 +81,8 @@ interface SettingsSectionMeta {
     keywords: string[];
 }
 
-const SETTINGS_FALLBACK_STYLE_ID = 'baizer-settings-fallback-styles';
+/** 兜底样式表的构造实例（见 ensureSettingsFallbackStyles 的说明）。 */
+let settingsFallbackSheet: CSSStyleSheet | null = null;
 
 export function getSettingsFallbackCss(): string {
     return `
@@ -671,16 +672,30 @@ function ensureSettingsFallbackStyles(): void {
     const doc = typeof document === 'undefined' ? null : document;
     if (!doc) return;
 
-    const existing = doc.getElementById(SETTINGS_FALLBACK_STYLE_ID);
-    if (existing) {
-        existing.textContent = getSettingsFallbackCss();
-        return;
+    // 用可构造样式表注入兜底 CSS：Obsidian 插件审核禁止创建 <style>/<link> 元素，
+    // 而 styles.css 由 Obsidian 负责加载；这里只在样式表缺失时兜底（开发/异常环境）。
+    try {
+        if (!settingsFallbackSheet) {
+            settingsFallbackSheet = new CSSStyleSheet();
+            doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, settingsFallbackSheet];
+        }
+        settingsFallbackSheet.replaceSync(getSettingsFallbackCss());
+    } catch {
+        /* 不支持构造样式表的环境：CSS 由随插件发布的 styles.css 提供 */
     }
+}
 
-    const styleEl = doc.createElement('style');
-    styleEl.id = SETTINGS_FALLBACK_STYLE_ID;
-    styleEl.textContent = getSettingsFallbackCss();
-    doc.head?.appendChild(styleEl);
+/** 插件卸载/重载时移除注入的兜底样式表（构造样式表不随 DOM 节点回收）。 */
+export function disposeSettingsFallbackStyles(): void {
+    if (!settingsFallbackSheet || typeof document === 'undefined') return;
+    try {
+        document.adoptedStyleSheets = document.adoptedStyleSheets.filter(
+            (sheet) => sheet !== settingsFallbackSheet,
+        );
+    } catch {
+        /* 忽略：环境不支持构造样式表 */
+    }
+    settingsFallbackSheet = null;
 }
 
 // 惰性求值：t() 依赖当前 locale，必须在调用时（而非模块加载时）求值，

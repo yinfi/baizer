@@ -30,7 +30,7 @@ export interface PromptTemplateEnv {
   readTextFile(path: string): Promise<{ ok: true; value: string } | { ok: false; error: unknown }>;
 }
 
-const DEFAULT_COMMANDS_DIR = '.obsidian/baizer-commands';
+// 命令目录由调用方按 Vault#configDir 计算（配置目录可自定义，不能写死 `.obsidian`）。
 
 /**
  * 用户自定义 slash 命令服务。
@@ -39,7 +39,7 @@ const DEFAULT_COMMANDS_DIR = '.obsidian/baizer-commands';
  * 不需要 Harness 的 promptFromTemplate(那是给 Harness 自持资源用的);这里把「命令→展开后的 prompt」
  * 做成纯解析,展开结果交给 ModelService 走正常 chat/chatStream,与运行时解耦。
  *
- * 模板放 vault 隐藏目录(.obsidian/baizer-commands/*.md),用户丢文件即可扩展,零代码。
+ * 模板放 vault 隐藏目录(<configDir>/baizer-commands/*.md),用户丢文件即可扩展,零代码。
  * 加载/参数切分/占位符替换三件事原先都借 pi 的导出(`loadPromptTemplates`/
  * `parseCommandArgs`/`substituteArgs`),pi 1.3.0 已整体移除,故改为本地实现
  * (保持原有可观察行为,见各函数注释)。
@@ -51,7 +51,7 @@ export class PromptTemplateService {
 
   constructor(
     private readonly env: PromptTemplateEnv | null | undefined,
-    private readonly commandsDir: string = DEFAULT_COMMANDS_DIR,
+    private readonly commandsDir: string,
   ) {}
 
   /**

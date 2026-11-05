@@ -188,9 +188,9 @@ function currentActiveElement(): Element | null {
 // 回退到微任务而非同步执行:requestSelectionMenuFocusSync 会被 updateListener 调用,
 // 同步 dispatch 会撞上 CM6 的"update 进行中不得再 dispatch"。(回退分支只在 Node 下走到。)
 const scheduleFrame: (run: () => void) => void =
-    typeof requestAnimationFrame === 'function'
-        ? (run) => { requestAnimationFrame(() => run()); }
-        : (run) => { queueMicrotask(run); };
+    typeof window === 'undefined'
+        ? (run) => { queueMicrotask(run); }
+        : (run) => { window.requestAnimationFrame(() => run()); };
 
 const pendingFocusSync = new WeakSet<EditorView>();
 

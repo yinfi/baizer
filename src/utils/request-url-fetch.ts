@@ -47,7 +47,7 @@ let installed = false;
  */
 export function installRequestUrlFetchFallback(deps?: RequestUrlFetchDeps): void {
   if (installed) return;
-  const g = globalThis as unknown as { fetch?: typeof fetch };
+  const g = window as unknown as { fetch?: typeof fetch };
   const nativeFetch = g.fetch;
   if (typeof nativeFetch !== 'function') return;
   installed = true;
@@ -150,8 +150,8 @@ function getNodeTransport(): NodeTransport | null {
   if (cachedNodeTransport !== undefined) return cachedNodeTransport;
   cachedNodeTransport = null;
   try {
-    // 只声明实际用到的成员；globalThis 只出现一次，避免新增 obsidianmd/no-global-this 命中。
-    const g = globalThis as { require?: (id: string) => NodeHttpModule };
+    // 只声明实际用到的成员（桌面端 Electron renderer 的 window.require）。
+    const g = window as unknown as { require?: (id: string) => NodeHttpModule };
     const requireFn: ((id: string) => NodeHttpModule) | null =
       typeof g.require === 'function'
         ? g.require

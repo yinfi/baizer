@@ -61,7 +61,7 @@ function createApp(adapterOverrides: Record<string, any> = {}) {
 
   return {
     app: {
-      vault: { adapter },
+      vault: { adapter, configDir: '.obsidian' },
     } as unknown as App,
     writes,
     files,

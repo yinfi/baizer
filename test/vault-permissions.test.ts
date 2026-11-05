@@ -52,6 +52,7 @@ async function runTests() {
 
   const mockApp = {
     vault: {
+      configDir: '.obsidian',
       getAbstractFileByPath: (path: string) => files.get(path) || null,
       createFolder: async () => { },
       create: async (path: string, _content: string) => {
@@ -64,10 +65,12 @@ async function runTests() {
         modified.push(file.path);
       },
       read: async () => 'current',
-      trash: async () => { },
       rename: async () => { },
       getMarkdownFiles: () => [],
       getFiles: () => [],
+    },
+    fileManager: {
+      trashFile: async () => { },
     },
     metadataCache: {
       getFirstLinkpathDest: (path: string) => files.get(path) || null,

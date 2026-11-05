@@ -123,7 +123,8 @@ const tests = [
 for (const testFile of tests) {
   console.log(`Running ${testFile}...`);
   try {
-    execSync(`npx tsx --tsconfig tsconfig.test.json ${testFile}`, {
+    // setup-env:裸 Node 下补齐 window 定时器与 Obsidian 全局 DOM 助手（见文件头）。
+    execSync(`npx tsx --tsconfig tsconfig.test.json --import ./test/setup-env.ts ${testFile}`, {
       stdio: 'inherit',
       cwd: process.cwd(),
     });

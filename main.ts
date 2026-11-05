@@ -3,7 +3,7 @@ import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
 import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, mergeProviderDefaults, pruneUnsupportedProviders, legacyFlatString } from './src/mcp/types';
 import { setLocale, Locale } from './src/i18n/zh';
-import { SettingTab } from './src/settings';
+import { SettingTab, disposeSettingsFallbackStyles } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
 import { ghostTextExtension, showGhostText, storeGhostText, hideGhostText, showThinkingGhostText, disposeGhostLiveRegion } from './src/ui/ghost-text';
@@ -319,6 +319,8 @@ export default class BaizerPlugin extends Plugin {
         this.clearGuardianEscalationTimer();
         // ghost 的 aria-live 播报区挂在 document.body 上,不随 CM view 回收,必须手动移除。
         disposeGhostLiveRegion();
+        // 设置页兜底样式表挂在 document.adoptedStyleSheets 上，同样需要显式移除。
+        disposeSettingsFallbackStyles();
         if (this.knowledgeRuntime) {
             this.knowledgeRuntime.cleanup();
         }

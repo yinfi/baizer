@@ -68,7 +68,7 @@ class GuardianDotMarker extends GutterMarker {
     }
 
     toDOM() {
-        const dot = document.createElement('div');
+        const dot = createDiv();
         dot.className = `guardian-gutter-marker guardian-${this.state}`;
 
         // Click handler to toggle mode

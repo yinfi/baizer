@@ -25,11 +25,9 @@ let ghostLiveRegion: HTMLElement | null = null;
 function getGhostLiveRegion(): HTMLElement | null {
     if (typeof document === 'undefined') return null;
     if (ghostLiveRegion && document.body.contains(ghostLiveRegion)) return ghostLiveRegion;
-    const region = document.createElement('div');
-    region.className = 'baizer-visually-hidden';
+    const region = document.body.createDiv({ cls: 'baizer-visually-hidden' });
     region.setAttribute('aria-live', 'polite');
     region.setAttribute('role', 'status');
-    document.body.appendChild(region);
     ghostLiveRegion = region;
     return region;
 }
@@ -69,14 +67,14 @@ class GhostTextWidget extends WidgetType {
     }
 
     toDOM() {
-        const span = document.createElement('span');
+        const span = createSpan();
         span.className = this.variant === 'thinking'
             ? 'guardian-ghost-text guardian-ghost-thinking'
             : 'guardian-ghost-text';
         if (this.variant === 'thinking') {
             // 逐字包裹,让每个字符能带相位差地波动(shimmer),而非整体闪烁。
             for (const ch of this.text) {
-                const charSpan = document.createElement('span');
+                const charSpan = createSpan();
                 charSpan.className = 'guardian-ghost-thinking-char';
                 // 空格用 &nbsp 语义:保留宽度但不参与发光。
                 charSpan.textContent = ch;

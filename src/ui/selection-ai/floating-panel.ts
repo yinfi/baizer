@@ -1,4 +1,4 @@
-import { App, MarkdownRenderer, Component, Notice, setIcon } from 'obsidian';
+import { App, MarkdownRenderer, Component, Notice, requireApiVersion, setIcon } from 'obsidian';
 import { StreamController } from '../controllers/stream-controller';
 import { ThinkingRenderer } from '../renderers/thinking-renderer';
 import { StreamEvent } from '../../models/interfaces';
@@ -18,10 +18,13 @@ export function clampRect(rect: PanelRect, viewport: { width: number; height: nu
   return { left, top, width, height };
 }
 
-/** 从 localStorage 读上次矩形;无/损坏返回 null。 */
-export function loadPanelRect(storage: Pick<Storage, 'getItem'> = localStorage): PanelRect | null {
+/** 从 vault 专属 localStorage 读上次矩形(App#loadLocalStorage);无/损坏返回 null。 */
+export function loadPanelRect(app: App): PanelRect | null {
   try {
-    const raw = storage.getItem(STORAGE_KEY);
+    // App#loadLocalStorage 从 Obsidian 1.8.7 起提供；更早版本退回 window.localStorage（旧行为）。
+    const raw = requireApiVersion('1.8.7')
+      ? (app.loadLocalStorage(STORAGE_KEY) as string | null)
+      : window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const p = JSON.parse(raw) as Partial<PanelRect> | null;
     if (typeof p?.left === 'number' && typeof p?.top === 'number' && typeof p?.width === 'number' && typeof p?.height === 'number') return p as PanelRect;
@@ -29,9 +32,13 @@ export function loadPanelRect(storage: Pick<Storage, 'getItem'> = localStorage):
   } catch { return null; }
 }
 
-/** 写入 localStorage(失败静默)。 */
-export function savePanelRect(rect: PanelRect, storage: Pick<Storage, 'setItem'> = localStorage): void {
-  try { storage.setItem(STORAGE_KEY, JSON.stringify(rect)); } catch { /* ignore */ }
+/** 写入 vault 专属 localStorage(App#saveLocalStorage,失败静默)。 */
+export function savePanelRect(app: App, rect: PanelRect): void {
+  try {
+    const serialized = JSON.stringify(rect);
+    if (requireApiVersion('1.8.7')) app.saveLocalStorage(STORAGE_KEY, serialized);
+    else window.localStorage.setItem(STORAGE_KEY, serialized);
+  } catch { /* ignore */ }
 }
 
 export interface FloatingPanelOptions {
@@ -120,7 +127,7 @@ export class FloatingPanel {
 
   private resolveInitialRect(): PanelRect {
     const vw = window.innerWidth, vh = window.innerHeight;
-    const saved = loadPanelRect();
+    const saved = loadPanelRect(this.opts.app);
     if (saved) return clampRect(saved, { width: vw, height: vh });
     const r = { ...DEFAULT_PANEL_RECT, left: this.opts.anchor.x, top: this.opts.anchor.y + 8 };
     return clampRect(r, { width: vw, height: vh });
@@ -161,7 +168,7 @@ export class FloatingPanel {
       );
       this.applyRect(r);
     };
-    this.onDragUp = () => { if (dragging) { dragging = false; savePanelRect(this.currentRect()); } };
+    this.onDragUp = () => { if (dragging) { dragging = false; savePanelRect(this.opts.app, this.currentRect()); } };
     window.addEventListener('mousemove', this.onDragMove);
     window.addEventListener('mouseup', this.onDragUp);
   }
@@ -183,7 +190,7 @@ export class FloatingPanel {
       );
       this.applyRect(r);
     };
-    this.onResizeUp = () => { if (resizing) { resizing = false; savePanelRect(this.currentRect()); } };
+    this.onResizeUp = () => { if (resizing) { resizing = false; savePanelRect(this.opts.app, this.currentRect()); } };
     window.addEventListener('mousemove', this.onResizeMove);
     window.addEventListener('mouseup', this.onResizeUp);
   }

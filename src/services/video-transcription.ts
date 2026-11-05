@@ -88,7 +88,7 @@ interface VideoTranscriptionDeps {
  * 而调用方在解码失败时还要拿原缓冲走整轨回退路径。
  */
 export async function decodeWithWebAudio(bytes: ArrayBuffer): Promise<PcmSource> {
-  const Ctor: unknown = prop(globalThis, 'OfflineAudioContext') || prop(globalThis, 'webkitOfflineAudioContext');
+  const Ctor: unknown = prop(window, 'OfflineAudioContext') || prop(window, 'webkitOfflineAudioContext');
   if (!isOfflineAudioContextCtor(Ctor)) {
     throw new Error('Web Audio (OfflineAudioContext) is unavailable in this environment');
   }
@@ -132,7 +132,9 @@ function isDecodedPcm(value: unknown): value is PcmSource {
 
 const defaultDeps: VideoTranscriptionDeps = {
   requestUrl: (options) => requestUrl(options),
-  fetchImpl: (input, init) => fetch(input, init),
+  // 显式走 window.fetch：插件 onload 装的 installRequestUrlFetchFallback 垫片会替换
+  // window.fetch（原生失败时经 Node 传输 / requestUrl 兜底），模块加载期取到的才是垫片。
+  fetchImpl: (input, init) => window.fetch(input, init),
   decodeAudio: (bytes) => decodeWithWebAudio(bytes),
 };
 

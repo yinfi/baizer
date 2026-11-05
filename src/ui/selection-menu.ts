@@ -83,7 +83,7 @@ export function selectionMenuExtension(
 
 function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
     const context = pluginContextMap.get(view);
-    const dom = document.createElement('div');
+    const dom = createDiv();
     dom.className = `guardian-selection-tooltip is-${state.type}`;
     if (state.type === 'hidden' || !context) return { dom };
 
@@ -130,7 +130,7 @@ function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
 
     // trigger 场景(@ 行内插入):保留旧的迷你对话框。
     if (state.type === 'button') {
-        const btn = document.createElement('button');
+        const btn = createEl('button');
         btn.className = 'guardian-selection-btn';
         btn.type = 'button';
         setIcon(btn, 'sparkles');
@@ -241,7 +241,7 @@ function createChatPanel(
     context: { app: App; modelService: ModelService },
     markdownComponent: Component,
 ) {
-    const container = document.createElement('div');
+    const container = createDiv();
     container.className = `guardian-chat-view is-${state.mode}`;
 
     const header = container.createDiv({ cls: 'guardian-chat-header' });

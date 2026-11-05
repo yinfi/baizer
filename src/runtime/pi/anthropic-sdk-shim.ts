@@ -348,18 +348,16 @@ export default class Anthropic {
   }
 
   /**
-   * 合并调用方 signal 与超时。注意 `globalThis.fetch` 必须**调用时**再取：
+   * 合并调用方 signal 与超时。注意 `window.fetch` 必须**调用时**再取：
    * main.ts 的 installRequestUrlFetchFallback() 在 onload 里替换全局 fetch
    * （绕 CORS + 保留流式），模块加载期取到的会是替换前的原生 fetch。
    */
   private resolveFetch(): typeof fetch {
-    // globalThis.fetch 可能被 main.ts 的 installRequestUrlFetchFallback() 运行期替换;
-    // 这里按声明类型读取(globalThis 本身自带 fetch?: typeof fetch),不绕成 any。
-    const impl: typeof fetch | undefined = this.fetch ?? globalThis.fetch;
+    const impl: typeof fetch | undefined = this.fetch ?? window.fetch;
     if (typeof impl !== 'function') {
       throw new Error('anthropic-sdk-shim: no fetch implementation available in this environment.');
     }
-    return impl.bind(globalThis);
+    return impl.bind(window);
   }
 
   private buildAbortSignal(options?: AnthropicShimRequestOptions): {
@@ -379,12 +377,12 @@ export default class Anthropic {
       if (caller.aborted) controller.abort();
       else caller.addEventListener('abort', abort, { once: true });
     }
-    const timer = setTimeout(abort, timeoutMs);
+    const timer = window.setTimeout(abort, timeoutMs);
 
     return {
       signal: controller.signal,
       cleanup: () => {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         caller?.removeEventListener('abort', abort);
       },
     };

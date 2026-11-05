@@ -141,6 +141,7 @@ async function buildStack(opts: {
   const vaultAdapter = createVaultFileAdapter(vault.adapter as any);
   const savedRefs = new Map<string, any>();
   const sessionManager = new HarnessSessionManager(vaultAdapter, {
+    sessionsRoot: '.obsidian/baizer-sessions',
     loadRef: (cid: string) => savedRefs.get(cid) ?? null,
     saveRef: (cid: string, r: any) => { if (r) savedRefs.set(cid, r); else savedRefs.delete(cid); },
     contextWindow: () => opts.contextWindow ?? 100000,
@@ -149,8 +150,8 @@ async function buildStack(opts: {
     summarize: async () => 'SUMMARY_OF_OLD_MESSAGES',
     ...(opts.compactionSettings ? { compactionSettings: opts.compactionSettings } : {}),
   });
-  const harnessEnv = createHarnessExecutionEnv(vaultAdapter);
-  const promptTemplateService = new PromptTemplateService(harnessEnv);
+  const harnessEnv = createHarnessExecutionEnv(vaultAdapter, '/', '.obsidian');
+  const promptTemplateService = new PromptTemplateService(harnessEnv, '.obsidian/baizer-commands');
   const activeRunController = new ActiveRunController();
 
   const deps: ChatRuntimeDeps = {
