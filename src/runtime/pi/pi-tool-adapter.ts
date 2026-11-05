@@ -5,6 +5,7 @@ import type { ToolRegistry } from '../../skills/tool-registry';
 import type { Tool } from '../../skills/types';
 import { isDirectApplyWorkspaceTool } from '../../services/workspace-edit-service';
 import type { WorkspaceEditService } from '../../services/workspace-edit-service';
+import { asBoolean, prop } from '../../utils/narrow';
 
 export interface PiSkillScope {
   activeSkillName?: string;
@@ -39,7 +40,9 @@ export function adaptToolDefinitionsToPi(input: AdaptToolDefinitionsInput): Agen
       parameters: definition.parameters,
       executionMode: inferToolExecutionMode(definition.name, registeredTool),
       execute: async (_toolCallId: string, params: any, signal?: AbortSignal) => {
-        const response = await executeWithTimeout(
+        // 工具返回值形状由各工具自定(ToolRegistry.execute/executeWorkspaceTool 都声明 Promise<any>),
+        // 当作外部输入,用 unknown + 窄化读取 approval_required,不假设字段一定存在。
+        const response: unknown = await executeWithTimeout(
           // effectiveSignal = 上游中断 ∪ 本地超时,透传进工具,使网络工具能真正取消在途请求。
           (effectiveSignal) => executeBaizerTool(definition.name, params, input, effectiveSignal),
           timeoutMs,
@@ -49,7 +52,7 @@ export function adaptToolDefinitionsToPi(input: AdaptToolDefinitionsInput): Agen
         return {
           content: [{ type: 'text', text: stringifyToolResponse(response) }],
           details: { baizerResponse: response },
-          terminate: response?.approval_required === true,
+          terminate: asBoolean(prop(response, 'approval_required')) === true,
         };
       },
     } as AgentTool<any>;

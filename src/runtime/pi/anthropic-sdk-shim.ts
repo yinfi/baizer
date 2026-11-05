@@ -51,6 +51,8 @@
  *    （esbuild.config.mjs 的 aliasAnthropicSdkToShim 在构建期也做同样的核对。）
  */
 
+import { asString, prop } from '../../utils/narrow';
+
 /** Anthropic 官方端点（与 src/mcp/types.ts 的 DEFAULT_PROVIDERS.anthropic.baseUrl 一致）。 */
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
 
@@ -107,12 +109,12 @@ export interface AnthropicShimClientOptions {
 export class APIError extends Error {
   readonly status: number | undefined;
   readonly headers: Headers | undefined;
-  readonly error: any;
+  readonly error: unknown;
   readonly type: string | null;
 
   constructor(
     status: number | undefined,
-    error: any,
+    error: unknown,
     message: string | undefined,
     headers: Headers | undefined,
     type?: string | null,
@@ -125,12 +127,13 @@ export class APIError extends Error {
     this.type = type ?? null;
   }
 
-  /** 与 SDK 的 APIError.makeMessage 逐字一致。 */
-  static makeMessage(status: number | undefined, error: any, message: string | undefined): string {
-    const msg = error?.message
-      ? typeof error.message === 'string'
-        ? error.message
-        : JSON.stringify(error.message)
+  /** 与 SDK 的 APIError.makeMessage 逐字一致。error 是解析后的响应体,当外部输入处理。 */
+  static makeMessage(status: number | undefined, error: unknown, message: string | undefined): string {
+    const errorMessage = prop(error, 'message');
+    const msg = errorMessage
+      ? typeof errorMessage === 'string'
+        ? errorMessage
+        : JSON.stringify(errorMessage)
       : error
         ? JSON.stringify(error)
         : message;
@@ -144,14 +147,15 @@ export class APIError extends Error {
    * 与 SDK 的 APIError.generate 等价（SDK 会按 status 返回 AuthenticationError /
    * RateLimitError 等子类；pi 只做 `instanceof APIError` 与读 status/type，
    * 故这里统一返回 APIError，避免为一个没人检查的类名多写 8 个空子类）。
+   * errorResponse 是解析后的响应体,当外部输入处理。
    */
   static generate(
     status: number | undefined,
-    errorResponse: any,
+    errorResponse: unknown,
     message: string | undefined,
     headers: Headers | undefined,
   ): APIError {
-    const type = errorResponse?.['error']?.['type'];
+    const type = asString(prop(prop(errorResponse, 'error'), 'type'));
     return new APIError(status, errorResponse, message, headers, type);
   }
 }
@@ -349,7 +353,9 @@ export default class Anthropic {
    * （绕 CORS + 保留流式），模块加载期取到的会是替换前的原生 fetch。
    */
   private resolveFetch(): typeof fetch {
-    const impl = this.fetch ?? (window as any).fetch;
+    // window.fetch 可能被 main.ts 的 installRequestUrlFetchFallback() 运行期替换;
+    // 这里按声明类型读取(window 本身自带 fetch?: typeof fetch),不绕成 any。
+    const impl: typeof fetch | undefined = this.fetch ?? window.fetch;
     if (typeof impl !== 'function') {
       throw new Error('anthropic-sdk-shim: no fetch implementation available in this environment.');
     }
@@ -386,7 +392,10 @@ export default class Anthropic {
 
   /** 非 2xx → APIError，读取 body 的规则照抄 SDK 的 client.js（errText → safeJSON → generate）。 */
   private async toApiError(response: Response): Promise<APIError> {
-    const errText = await response.text().catch((error: any) => String(error?.message ?? error));
+    const errText = await response.text().catch((error: unknown) => {
+      const message = asString(prop(error, 'message'));
+      return message ?? String(error);
+    });
     const errJson = safeJson(errText);
     const errMessage = errJson ? undefined : errText;
     return APIError.generate(response.status, errJson, errMessage, response.headers);

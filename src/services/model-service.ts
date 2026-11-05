@@ -22,6 +22,8 @@ import type { ChatMessage } from '../ui/types';
 import { createVaultFileAdapter } from '../runtime/pi/vault-session-fs';
 import { computeContentHash } from '../knowledge/compiler';
 import { getFileWriteResultPath } from '../utils/file-operation-contract';
+import { isRecord, prop } from '../utils/narrow';
+import { thrownMessage } from '../utils/thrown-message';
 import {
     formatGenerationPlanBlock,
     GenerationSource,
@@ -498,7 +500,7 @@ export class ModelService {
                 // getFallbackModels() 就再也分不出「端点的清单」与「我们的猜测」了。
                 // 空清单（200 {"data":[]}）与解析不出 data 的 body 都留在 false。
                 listed = models.length > 0;
-            } catch (caught: any) {
+            } catch (caught: unknown) {
                 // 「端点不支持列模型」是能力缺口而非故障：它同样回落到内置列表，
                 // 但必须把真实原因透出去，UI 才能提示手输模型名，
                 // 而不是让用户以为 apiKey/网络出了问题。
@@ -508,7 +510,7 @@ export class ModelService {
                     error = caught instanceof Error ? caught : new Error(String(caught));
                 }
                 logger.warn(
-                    `Failed to fetch model list for provider ${providerId}: ${caught?.message || 'Unknown error'}`,
+                    `Failed to fetch model list for provider ${providerId}: ${thrownMessage(caught) || 'Unknown error'}`,
                     'ModelService.getAvailableModels'
                 );
             }
@@ -623,9 +625,10 @@ export class ModelService {
                 // hasPriorContext 不再由此注入:runtime 自己向 sessionManager 查。
             });
             return await runtime.query(preparedTurn);
-        } catch (e: any) {
+        } catch (e: unknown) {
             logger.error('Chat processing failed', e, 'ModelService.chat');
-            return `Error: ${e.message}`;
+            // String(undefined) === 'undefined':与原模板字符串 `${e.message}` 对非 Error 抛出值的输出一致。
+            return `Error: ${String(prop(e, 'message'))}`;
         }
     }
 
@@ -664,12 +667,12 @@ export class ModelService {
             for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
                 yield event;
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             if (this.isAbortError(e)) {
                 throw e;
             }
             logger.error('Stream chat failed', e, 'ModelService.chatStream');
-            yield { type: 'error' as const, message: e.message, outcome: 'failed' as const };
+            yield { type: 'error' as const, message: thrownMessage(e), outcome: 'failed' as const };
         }
     }
 
@@ -722,9 +725,9 @@ export class ModelService {
                 });
             }
             return text;
-        } catch (e: any) {
+        } catch (e: unknown) {
             // 软取消是正常流程，不当错误记录，避免日志噪音。
-            if (e?.name === 'AbortError') throw e;
+            if (this.isAbortError(e)) throw e;
             logger.error('Stateless generation failed', e, 'ModelService.generate');
             throw e;
         }
@@ -1118,13 +1121,13 @@ export class ModelService {
             await this.beginApprovalRequest(requestId, action, target);
         }
 
-        let result: any;
+        let result: unknown;
         try {
             result = await this.toolRegistry.execute(action, {
                 ...args,
                 approved: true,
             });
-        } catch (error: any) {
+        } catch (error: unknown) {
             // 工具抛错时无法判断副作用是否发生：留一条失败尝试记录，返回 unknown 要求先核实。
             await this.recordApprovedActionAudit({
                 id: requestId,
@@ -1136,7 +1139,7 @@ export class ModelService {
                 kind: 'approval-execution',
                 status: 'unknown',
                 target,
-                error: error?.message || String(error),
+                error: thrownMessage(error) || String(error),
                 detail: t('The action was interrupted before its result was recorded. Check the target before retrying.'),
                 completedAt: Date.now(),
                 retryable: false,
@@ -1144,7 +1147,7 @@ export class ModelService {
         }
 
         const resolvedTarget = getFileWriteResultPath(action, result, args) || target;
-        const succeeded = result?.success === true || result?.status === 'success';
+        const succeeded = this.isSuccessfulResult(result);
 
         // 审计写盘失败不能让「已经写成功」的动作看起来失败（#76 P2-A）。
         const auditRecorded = await this.recordApprovedActionAudit({
@@ -1177,7 +1180,7 @@ export class ModelService {
             status: succeeded ? 'succeeded' : 'failed',
             target: resolvedTarget,
             detail: this.buildExecutionDetail(result, succeeded, auditRecorded),
-            error: succeeded ? undefined : (result?.error || result?.message || t('The action failed.')),
+            error: succeeded ? undefined : (this.resultErrorText(result) ?? t('The action failed.')),
             completedAt: Date.now(),
             retryable: !succeeded,
             result: this.summarizeExecutionResult(result),
@@ -1188,18 +1191,30 @@ export class ModelService {
      * 结果摘要。detail 只放「成功/失败」的主文案，具体错误走 error；
      * 审计一旦没写成，主文案后追加可见提示，避免用户以为审计链正常（#76 P2-A）。
      */
-    private buildExecutionDetail(result: any, succeeded: boolean, auditRecorded: boolean): string {
+    private buildExecutionDetail(result: unknown, succeeded: boolean, auditRecorded: boolean): string {
+        const message = prop(result, 'message');
         const base = succeeded
-            ? (typeof result?.message === 'string' ? result.message : t('The action completed successfully.'))
+            ? (typeof message === 'string' ? message : t('The action completed successfully.'))
             : t('The action failed.');
         return auditRecorded ? base : `${base} ${t('The audit log entry was not written.')}`;
+    }
+
+    /** 工具返回值是否表示成功(`success === true` 或 `status === 'success'`)。 */
+    private isSuccessfulResult(result: unknown): boolean {
+        return prop(result, 'success') === true || prop(result, 'status') === 'success';
+    }
+
+    /** 取工具返回里第一个真值的 error / message 并文本化;都为假值时返回 undefined。 */
+    private resultErrorText(result: unknown): string | undefined {
+        const value = prop(result, 'error') || prop(result, 'message');
+        return value ? String(value) : undefined;
     }
 
     /**
      * 只保留宿主打开落盘文件所需的字段，不把整个工具返回留在登记表里（#76 P3）。
      */
-    private summarizeExecutionResult(result: any): unknown {
-        if (!result || typeof result !== 'object') return undefined;
+    private summarizeExecutionResult(result: unknown): unknown {
+        if (!isRecord(result)) return undefined;
         const summary: Record<string, unknown> = {};
         for (const key of ['success', 'status', 'path', 'target'] as const) {
             if (result[key] !== undefined) summary[key] = result[key];
@@ -1263,16 +1278,16 @@ export class ModelService {
     private buildApprovalOutcomeText(
         action: string,
         args: Record<string, any>,
-        result: any,
+        result: unknown,
     ): string {
         const target = getFileWriteResultPath(action, result, args)
             || args?.path || args?.filename || args?.target || '';
         const targetSuffix = target ? ` (${target})` : '';
-        const succeeded = result?.success === true || result?.status === 'success';
+        const succeeded = this.isSuccessfulResult(result);
         if (succeeded) {
             return `[Approved action executed] The user approved "${action}"${targetSuffix} and it completed successfully. You may continue from here.`;
         }
-        const error = result?.error || result?.message || 'unknown error';
+        const error = this.resultErrorText(result) ?? 'unknown error';
         return `[Approved action failed] The user approved "${action}"${targetSuffix} but it failed: ${error}`;
     }
 
@@ -1412,8 +1427,8 @@ export class ModelService {
         return this.activeRunController.isActive();
     }
 
-    private isAbortError(error: any): boolean {
-        return error?.name === 'AbortError';
+    private isAbortError(error: unknown): boolean {
+        return prop(error, 'name') === 'AbortError';
     }
 
     private isAbortSignalValue(value: unknown): value is AbortSignal {

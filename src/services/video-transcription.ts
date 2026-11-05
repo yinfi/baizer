@@ -30,6 +30,7 @@ import {
   ResolvedAsrConfig,
   resolveAsrConfig,
 } from '../mcp/types';
+import { asArray, asString, prop } from '../utils/narrow';
 import { extractJsonAssignment } from '../utils/video_utils';
 import {
   ASR_TARGET_SAMPLE_RATE,
@@ -87,25 +88,46 @@ interface VideoTranscriptionDeps {
  * 而调用方在解码失败时还要拿原缓冲走整轨回退路径。
  */
 export async function decodeWithWebAudio(bytes: ArrayBuffer): Promise<PcmSource> {
-  const globalScope = window as any;
-  const Ctor = globalScope.OfflineAudioContext || globalScope.webkitOfflineAudioContext;
-  if (typeof Ctor !== 'function') {
+  const Ctor: unknown = prop(window, 'OfflineAudioContext') || prop(window, 'webkitOfflineAudioContext');
+  if (!isOfflineAudioContextCtor(Ctor)) {
     throw new Error('Web Audio (OfflineAudioContext) is unavailable in this environment');
   }
 
   const context = new Ctor(1, 1, ASR_TARGET_SAMPLE_RATE);
-  const decoded = await new Promise<any>((resolve, reject) => {
+  const decoded = await new Promise<unknown>((resolve, reject) => {
     const maybePromise = context.decodeAudioData(bytes.slice(0), resolve, reject);
     if (maybePromise && typeof maybePromise.then === 'function') {
       maybePromise.then(resolve, reject);
     }
   });
 
-  if (!decoded || typeof decoded.getChannelData !== 'function' || !(decoded.length > 0)) {
+  if (!isDecodedPcm(decoded)) {
     throw new Error('Decoded audio contains no samples');
   }
 
-  return decoded as PcmSource;
+  return decoded;
+}
+
+/** Web Audio OfflineAudioContext 中本模块用到的最小形状(平台 API 边界)。 */
+interface OfflineAudioContextLike {
+  decodeAudioData(
+    data: ArrayBuffer,
+    onSuccess: (decoded: unknown) => void,
+    onError: (reason: unknown) => void,
+  ): PromiseLike<unknown> | undefined;
+}
+
+type OfflineAudioContextCtor = new (channels: number, length: number, sampleRate: number) => OfflineAudioContextLike;
+
+function isOfflineAudioContextCtor(value: unknown): value is OfflineAudioContextCtor {
+  return typeof value === 'function';
+}
+
+/** 解码结果必须带 getChannelData 且有样本;其余字段(采样率等)由调用方继续校验。 */
+function isDecodedPcm(value: unknown): value is PcmSource {
+  return !!value
+    && typeof prop(value, 'getChannelData') === 'function'
+    && Number(prop(value, 'length')) > 0;
 }
 
 /**
@@ -183,22 +205,28 @@ export function isParameterRejection(error: unknown): boolean {
 function pickBilibiliAudioUrl(html: string): string | null {
   const playInfo = extractJsonAssignment(html, 'window.__playinfo__=')
     || extractJsonAssignment(html, '__playinfo__=');
-  const audioTracks = playInfo?.data?.dash?.audio;
-  if (!Array.isArray(audioTracks) || audioTracks.length === 0) return null;
+  const audioTracks = asArray(prop(prop(prop(playInfo, 'data'), 'dash'), 'audio'));
+  if (!audioTracks || audioTracks.length === 0) return null;
 
-  const selected = audioTracks.find((track: any) => track?.baseUrl || track?.base_url) || audioTracks[0];
-  return selected?.baseUrl || selected?.base_url || selected?.backupUrl?.[0] || selected?.backup_url?.[0] || null;
+  const selected: unknown = audioTracks.find((track) => prop(track, 'baseUrl') || prop(track, 'base_url'))
+    || audioTracks[0];
+  return asString(
+    prop(selected, 'baseUrl')
+    || prop(selected, 'base_url')
+    || asArray(prop(selected, 'backupUrl'))?.[0]
+    || asArray(prop(selected, 'backup_url'))?.[0],
+  ) || null;
 }
 
 function pickYouTubeAudioUrl(html: string): string | null {
   const playerResponse = extractJsonAssignment(html, 'var ytInitialPlayerResponse = ')
     || extractJsonAssignment(html, 'ytInitialPlayerResponse = ')
     || extractJsonAssignment(html, 'ytInitialPlayerResponse=');
-  const formats = playerResponse?.streamingData?.adaptiveFormats;
-  if (!Array.isArray(formats)) return null;
+  const formats = asArray(prop(prop(playerResponse, 'streamingData'), 'adaptiveFormats'));
+  if (!formats) return null;
 
-  const selected = formats.find((format: any) => typeof format?.mimeType === 'string' && format.mimeType.startsWith('audio/'));
-  return selected?.url || null;
+  const selected = formats.find((format) => asString(prop(format, 'mimeType'))?.startsWith('audio/'));
+  return asString(prop(selected, 'url')) || null;
 }
 
 async function resolveAudio(params: {
@@ -251,17 +279,18 @@ async function resolveAudio(params: {
  * 就退化成「一个覆盖整个窗口的段」，而不是丢掉时间轴。
  */
 export function parseTranscriptionPayload(
-  payload: any,
+  payload: unknown,
   window: ChunkWindow,
 ): { text: string; segments: TranscriptSegment[] } {
   const segments: TranscriptSegment[] = [];
 
-  if (Array.isArray(payload?.segments)) {
-    for (const raw of payload.segments) {
-      const text = typeof raw?.text === 'string' ? raw.text.trim() : '';
+  const rawSegments = asArray(prop(payload, 'segments'));
+  if (rawSegments) {
+    for (const raw of rawSegments) {
+      const text = asString(prop(raw, 'text'))?.trim() ?? '';
       if (!text) continue;
-      const start = Number(raw?.start);
-      const end = Number(raw?.end);
+      const start = Number(prop(raw, 'start'));
+      const end = Number(prop(raw, 'end'));
       segments.push({
         start: Number.isFinite(start) ? window.startSec + start : window.startSec,
         end: Number.isFinite(end) ? window.startSec + end : window.endSec,
@@ -270,7 +299,7 @@ export function parseTranscriptionPayload(
     }
   }
 
-  const flat = typeof payload?.text === 'string' ? payload.text.trim() : '';
+  const flat = asString(prop(payload, 'text'))?.trim() ?? '';
   if (segments.length === 0 && flat) {
     segments.push({ start: window.startSec, end: window.endSec, text: flat });
   }
@@ -317,7 +346,7 @@ interface TranscriptionRequestParams {
   deps: VideoTranscriptionDeps;
 }
 
-async function postTranscriptionRequest(params: TranscriptionRequestParams): Promise<any> {
+async function postTranscriptionRequest(params: TranscriptionRequestParams): Promise<unknown> {
   const formData = new FormData();
   const blob = new Blob([params.bytes as unknown as BlobPart], { type: params.mimeType });
   formData.append('file', blob, params.filename);
@@ -337,8 +366,8 @@ async function postTranscriptionRequest(params: TranscriptionRequestParams): Pro
   });
 
   if (!response.ok) {
-    const details = typeof (response as any).text === 'function'
-      ? await (response as any).text()
+    const details = typeof response.text === 'function'
+      ? await response.text()
       : '';
     throw new TranscriptionHttpError(
       response.status,
@@ -346,7 +375,9 @@ async function postTranscriptionRequest(params: TranscriptionRequestParams): Pro
     );
   }
 
-  return typeof (response as any).json === 'function' ? await (response as any).json() : {};
+  if (typeof response.json !== 'function') return {};
+  const body: unknown = await response.json();
+  return body;
 }
 
 /** 本次运行里 response_format 的协商状态。`degraded` 会被写成一条用户可见的 warning。 */
@@ -373,7 +404,7 @@ const RESPONSE_FORMAT_DEGRADED_WARNING =
 async function postWithFormatFallback(
   params: Omit<TranscriptionRequestParams, 'responseFormat'>,
   state: ResponseFormatState,
-): Promise<any> {
+): Promise<unknown> {
   if (!state.verboseJson) {
     return postTranscriptionRequest({ ...params, responseFormat: null });
   }
@@ -447,7 +478,7 @@ export function createVideoTranscriptionService(partialDeps: Partial<VideoTransc
           const window = windows[index];
           const samples = mixToMono(decoded, window.startSec * sampleRate, window.endSec * sampleRate);
           const wav = encodeWav16(samples, sampleRate);
-          let payload: any;
+          let payload: unknown;
           try {
             payload = await postWithFormatFallback({
               endpoint,
@@ -491,7 +522,7 @@ export function createVideoTranscriptionService(partialDeps: Partial<VideoTransc
       }
 
       // 整轨回退：与改动前的请求形状保持一致（原容器、原 MIME）。
-      let payload: any;
+      let payload: unknown;
       try {
         payload = await postWithFormatFallback({
           endpoint,

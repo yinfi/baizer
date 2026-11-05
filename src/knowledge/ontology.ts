@@ -2,6 +2,7 @@
 // Ontology schema 解析、验证、发现 — 纯函数模块
 
 import { OntologySchema, OntologyCategory, OntologyEntityType } from './types';
+import { asRecord, prop, asString, asArray } from '../utils/narrow';
 
 /**
  * 从原始 markdown 内容中提取 frontmatter 对象
@@ -91,13 +92,14 @@ function parseSimpleYaml(yaml: string): Record<string, any> {
  * 从 frontmatter 对象解析 OntologySchema
  * @returns 解析成功返回 schema，失败返回 null
  */
-export function parseOntologySchema(frontmatter: any): OntologySchema | null {
+export function parseOntologySchema(frontmatter: unknown): OntologySchema | null {
   if (!frontmatter) return null;
-  if (frontmatter.knowledge_artifact_type !== 'ontology_schema') return null;
+  const fm = asRecord(frontmatter);
+  if (fm.knowledge_artifact_type !== 'ontology_schema') return null;
 
-  const version = typeof frontmatter.version === 'number' ? frontmatter.version : 1;
-  const categories = parseCategories(frontmatter.categories);
-  const entityTypes = parseEntityTypes(frontmatter.entity_types);
+  const version = typeof fm.version === 'number' ? fm.version : 1;
+  const categories = parseCategories(fm.categories);
+  const entityTypes = parseEntityTypes(fm.entity_types);
 
   // 至少需要 categories 或 entity_types 之一非空
   if (categories.length === 0 && entityTypes.length === 0) return null;
@@ -105,24 +107,40 @@ export function parseOntologySchema(frontmatter: any): OntologySchema | null {
   return { version, categories, entity_types: entityTypes };
 }
 
-function parseCategories(raw: any): OntologyCategory[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((c: any) => typeof c?.name === 'string' && c.name.trim())
-    .map((c: any) => ({
-      name: c.name.trim(),
-      description: typeof c.description === 'string' ? c.description.trim() : '',
-    }));
+function parseCategories(raw: unknown): OntologyCategory[] {
+  const arr = asArray(raw);
+  if (!arr) return [];
+  return arr
+    .filter((c: unknown) => {
+      const name = asString(prop(c, 'name'));
+      return typeof name === 'string' && name.trim();
+    })
+    .map((c: unknown) => {
+      const cRecord = asRecord(c);
+      const description = asString(cRecord.description);
+      return {
+        name: (cRecord.name as string).trim(),
+        description: description ? description.trim() : '',
+      };
+    });
 }
 
-function parseEntityTypes(raw: any): OntologyEntityType[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((e: any) => typeof e?.name === 'string' && e.name.trim())
-    .map((e: any) => ({
-      name: e.name.trim(),
-      description: typeof e.description === 'string' ? e.description.trim() : '',
-    }));
+function parseEntityTypes(raw: unknown): OntologyEntityType[] {
+  const arr = asArray(raw);
+  if (!arr) return [];
+  return arr
+    .filter((e: unknown) => {
+      const name = asString(prop(e, 'name'));
+      return typeof name === 'string' && name.trim();
+    })
+    .map((e: unknown) => {
+      const eRecord = asRecord(e);
+      const description = asString(eRecord.description);
+      return {
+        name: (eRecord.name as string).trim(),
+        description: description ? description.trim() : '',
+      };
+    });
 }
 
 /**
@@ -221,10 +239,11 @@ export function parseDiscoveryResponse(response: string): OntologySchema | null 
   try {
     const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
     const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
-    const parsed = JSON.parse(jsonStr);
+    const parsed: unknown = JSON.parse(jsonStr);
+    const parsedRecord = asRecord(parsed);
 
-    const categories = parseCategories(parsed.categories);
-    const entityTypes = parseEntityTypes(parsed.entity_types);
+    const categories = parseCategories(parsedRecord.categories);
+    const entityTypes = parseEntityTypes(parsedRecord.entity_types);
     if (categories.length === 0 && entityTypes.length === 0) return null;
 
     return { version: 1, categories, entity_types: entityTypes };

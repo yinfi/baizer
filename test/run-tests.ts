@@ -16,6 +16,7 @@ const tests = [
   'test/pi-runtime-factory.test.ts',
   'test/pi-approval-policy.test.ts',
   'test/pi-event-adapter.test.ts',
+  'test/narrow-g5-pi-runtime.test.ts',
   'test/pi-tool-adapter.test.ts',
   'test/pi-native-model.test.ts',
   'test/session-store-types.test.ts',
@@ -61,6 +62,7 @@ const tests = [
   'test/workspace-edit-service.test.ts',
   'test/vault-permissions.test.ts',
   'test/file-tools.test.ts',
+  'test/narrow-g3-builtin-tools.test.ts',
   'test/json-canvas.test.ts',
   'test/obsidian-bases.test.ts',
   'test/plugin-tools.test.ts',
@@ -78,6 +80,7 @@ const tests = [
   'test/anthropic-protocol.test.ts',
   'test/memory-manager.test.ts',
   'test/hindsight-memory.test.ts',
+  'test/narrow-g1-memory.test.ts',
   'test/save-path.test.ts',
   'test/skill-files.test.ts',
   'test/startup-io-budget.test.ts',
@@ -89,6 +92,7 @@ const tests = [
   'test/asr-chunking.test.ts',
   'test/video-transcription.test.ts',
   'test/video-utils.test.ts',
+  'test/narrow-g4-contract.test.ts',
   'test/web-clipper.test.ts',
   'test/web-search.test.ts',
   'test/knowledge/compiler.test.ts',
@@ -113,6 +117,7 @@ const tests = [
   'test/prompt-template-service.test.ts',
   'test/knowledge/compile-concurrency.test.ts',
   'test/cross-phase-smoke.test.ts',
+  'test/narrow-g2-knowledge-services.test.ts',
 ];
 
 for (const testFile of tests) {

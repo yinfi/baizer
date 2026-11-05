@@ -1,6 +1,7 @@
 import { App, TFile } from 'obsidian';
 import { ToolRegistry } from '../skills/tool-registry';
 import { getFileWriteResultPath } from '../utils/file-operation-contract';
+import { asBoolean, asString, prop } from '../utils/narrow';
 
 export type WorkspaceEditKind = 'create' | 'update';
 
@@ -192,16 +193,16 @@ export class WorkspaceEditService {
 
   private resolveResultPath(
     action: string,
-    result: any,
+    result: unknown,
     args: Record<string, any>,
     fallbackPath: string,
   ): string {
     if (action === 'create_note') {
-      return typeof result?.path === 'string'
-        ? result.path
-        : typeof result?.target === 'string'
-          ? result.target
-          : fallbackPath;
+      const resultPath = asString(prop(result, 'path'));
+      if (resultPath !== undefined) return resultPath;
+      const resultTarget = asString(prop(result, 'target'));
+      if (resultTarget !== undefined) return resultTarget;
+      return fallbackPath;
     }
     return getFileWriteResultPath(action, result, args) || fallbackPath;
   }
@@ -228,8 +229,8 @@ export class WorkspaceEditService {
     }
   }
 
-  private isSuccessfulToolResult(result: any): boolean {
-    return result?.success === true || result?.status === 'success';
+  private isSuccessfulToolResult(result: unknown): boolean {
+    return asBoolean(prop(result, 'success')) === true || asString(prop(result, 'status')) === 'success';
   }
 
   private createId(): string {

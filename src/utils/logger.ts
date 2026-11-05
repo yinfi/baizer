@@ -64,7 +64,7 @@ export class Logger {
         }
     }
 
-    private serializeError(error: any): any {
+    private serializeError(error: unknown): any {
         if (error instanceof Error) {
             return {
                 name: error.name,
@@ -74,7 +74,7 @@ export class Logger {
             };
         }
         return {
-            message: error?.toString() || 'Unknown error',
+            message: (error === null || error === undefined ? '' : String(error)) || 'Unknown error',
             data: error
         };
     }

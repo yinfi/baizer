@@ -4,6 +4,7 @@ import {
   isFileWriteToolName,
   isSuccessfulWriteToolResult,
 } from '../../utils/file-operation-contract';
+import { asBoolean, prop } from '../../utils/narrow';
 
 export interface PiFileWriteState {
   required: boolean;
@@ -12,13 +13,13 @@ export interface PiFileWriteState {
   lastError: string;
 }
 
-export function isPiApprovalResponse(result: any): result is {
+export function isPiApprovalResponse(result: unknown): result is {
   approval_required: true;
   action?: string;
   target?: string;
   message?: string;
 } {
-  return !!result && result.approval_required === true;
+  return asBoolean(prop(result, 'approval_required')) === true;
 }
 
 export function formatPiApprovalMessage(result: {

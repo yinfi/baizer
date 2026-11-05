@@ -10,6 +10,8 @@ import {
   KnowledgePendingReason,
 } from './frontmatter';
 import { computeSchemaHash, extractFrontmatter } from './ontology';
+import { asRecord, asString as narrowAsString, asArray } from '../utils/narrow';
+import { thrownMessage } from '../utils/thrown-message';
 
 /**
  * 去除 markdown frontmatter（--- 之间的部分），返回正文
@@ -374,37 +376,66 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
     const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
     const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
 
-    const parsed = JSON.parse(jsonStr);
-    if (typeof parsed.title !== 'string') return null;
+    const parsed: unknown = JSON.parse(jsonStr);
+    const parsedRecord = asRecord(parsed);
+    const titleVal = parsedRecord.title;
+    if (typeof titleVal !== 'string') return null;
 
-    const topics: TopicRef[] = (parsed.topics || []).map((t: any) => ({
-      slug: normalizeTopicSlug(t.slug || t.label || ''),
-      label: t.label || t.slug || ''
-    })).filter((t: TopicRef) => t.slug.length > 0);
+    // 保持原行为:topics 为真值但不是数组、或元素为 null/undefined、或 slug/label 为非字符串真值时,
+    // 原实现会在 .map / 属性访问 / normalizeTopicSlug 处抛错,被外层 catch 吞掉后整体返回 null。
+    const topicsVal = parsedRecord.topics;
+    if (topicsVal && !Array.isArray(topicsVal)) return null;
+    const rawTopics = asArray(topicsVal) || [];
+    const topics: TopicRef[] = rawTopics.map((t: unknown) => {
+      if (t === null || t === undefined) throw new TypeError('topic entry is null');
+      const tRecord = asRecord(t);
+      const slugSource: unknown = tRecord.slug || tRecord.label || '';
+      const labelSource: unknown = tRecord.label || tRecord.slug || '';
+      if (typeof slugSource !== 'string' || typeof labelSource !== 'string') {
+        throw new TypeError('topic slug/label must be a string');
+      }
+      return { slug: normalizeTopicSlug(slugSource), label: labelSource };
+    }).filter((t: TopicRef) => t.slug.length > 0);
 
-    const reviewFlags: string[] = Array.isArray(parsed.review_flags) ? parsed.review_flags : [];
+    const rawReviewFlags = asArray(parsedRecord.review_flags);
+    const reviewFlags: string[] = rawReviewFlags ? rawReviewFlags as string[] : [];
 
     // Ontology 字段解析（fail-visible：解析失败不影响基础字段）
     let categorized_knowledge: CompilerExtraction['categorized_knowledge'];
     let entities: CompilerExtraction['entities'];
 
     try {
-      if (Array.isArray(parsed.categorized_knowledge)) {
-        categorized_knowledge = parsed.categorized_knowledge
-          .filter((ck: any) => typeof ck?.category === 'string' && Array.isArray(ck?.items))
-          .map((ck: any) => ({
-            category: ck.category,
-            items: ck.items.filter((i: any) => typeof i === 'string'),
-          }));
+      const rawCategorizedKnowledge = asArray(parsedRecord.categorized_knowledge);
+      if (rawCategorizedKnowledge) {
+        categorized_knowledge = rawCategorizedKnowledge
+          .filter((ck: unknown) => {
+            const ckRecord = asRecord(ck);
+            return typeof ckRecord.category === 'string' && Array.isArray(ckRecord.items);
+          })
+          .map((ck: unknown) => {
+            const ckRecord = asRecord(ck);
+            const items = asArray(ckRecord.items) || [];
+            return {
+              category: ckRecord.category as string,
+              items: items.filter((i: unknown) => typeof i === 'string') as string[],
+            };
+          });
       }
-      if (Array.isArray(parsed.entities)) {
-        entities = parsed.entities
-          .filter((e: any) => typeof e?.name === 'string' && typeof e?.type === 'string')
-          .map((e: any) => ({
-            name: e.name,
-            type: e.type,
-            description: typeof e.description === 'string' ? e.description : '',
-          }));
+      const rawEntities = asArray(parsedRecord.entities);
+      if (rawEntities) {
+        entities = rawEntities
+          .filter((e: unknown) => {
+            const eRecord = asRecord(e);
+            return typeof eRecord.name === 'string' && typeof eRecord.type === 'string';
+          })
+          .map((e: unknown) => {
+            const eRecord = asRecord(e);
+            return {
+              name: eRecord.name as string,
+              type: eRecord.type as string,
+              description: typeof eRecord.description === 'string' ? eRecord.description : '',
+            };
+          });
       }
     } catch {
       // Ontology 字段解析失败，标记到 review_flags
@@ -412,14 +443,17 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
       console.warn('[parseCompilerResponse] Ontology fields parse failed, base fields preserved');
     }
 
+    const rawConcepts = asArray(parsedRecord.concepts);
+    const rawKeyClaims = asArray(parsedRecord.key_claims);
+
     return {
-      title: parsed.title || '',
-      author: parsed.author || '',
-      source_url: parsed.source_url || '',
-      created_at: parsed.created_at || '',
+      title: titleVal || '',
+      author: narrowAsString(parsedRecord.author) || '',
+      source_url: narrowAsString(parsedRecord.source_url) || '',
+      created_at: narrowAsString(parsedRecord.created_at) || '',
       topics,
-      concepts: Array.isArray(parsed.concepts) ? parsed.concepts : [],
-      key_claims: Array.isArray(parsed.key_claims) ? parsed.key_claims : [],
+      concepts: rawConcepts ? (rawConcepts as string[]) : [],
+      key_claims: rawKeyClaims ? (rawKeyClaims as string[]) : [],
       review_flags: reviewFlags,
       categorized_knowledge,
       entities,
@@ -666,9 +700,9 @@ export class KnowledgeCompiler {
         summary: summaryPath,
       });
       return summaryPath;
-    } catch (e: any) {
+    } catch (e: unknown) {
       try {
-        await setKnowledgeStatus(this.app, file, 'failed', { error: e.message });
+        await setKnowledgeStatus(this.app, file, 'failed', { error: thrownMessage(e) });
       } catch { /* frontmatter 写入也失败了，忽略 */ }
       return null;
     }

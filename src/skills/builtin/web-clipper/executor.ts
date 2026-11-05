@@ -11,6 +11,7 @@ import {
   resolveAsrConfig,
 } from '../../../mcp/types';
 import * as videoUtils from '../../../utils/video_utils';
+import { asString, prop } from '../../../utils/narrow';
 import { resolveSavedNotePath } from '../../../mcp/save-path';
 import type { ModelService } from '../../../services/model-service';
 import {
@@ -254,9 +255,15 @@ async function buildNonTranscriptContent(params: {
   );
 }
 
+/** save_webpage 工具入参窄化后的内部契约。 */
+interface SaveWebpageArgs {
+  url: string;
+  filename?: string;
+}
+
 async function saveVideo(
   url: string,
-  args: any,
+  args: SaveWebpageArgs,
   ctx: ToolContext,
   modelService: SummaryModel,
   deps: WebClipperDeps,
@@ -381,7 +388,7 @@ async function saveVideo(
   return { success: true, path: finalPath, message: `Video Note Saved: ${finalPath}` };
 }
 
-async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebClipperDeps): Promise<any> {
+async function saveWebpage(url: string, args: SaveWebpageArgs, ctx: ToolContext, deps: WebClipperDeps): Promise<any> {
   const response = await deps.requestUrl({
     url,
     headers: {
@@ -512,17 +519,21 @@ export function createSaveWebpageTool(modelService: SummaryModel, deps: WebClipp
       },
       required: ['url'],
     },
-    async execute(args, ctx) {
+    async execute(rawArgs: unknown, ctx: ToolContext) {
       // 入口即检查:已中断(上游超时/用户取消)则不发起任何网络请求或写盘。
       if (ctx.signal?.aborted) {
         return { success: false, error: 'Aborted before saving note', aborted: true };
       }
+      const args: SaveWebpageArgs = {
+        url: asString(prop(rawArgs, 'url')) ?? '',
+        filename: asString(prop(rawArgs, 'filename')),
+      };
       try {
         const videoResult = await saveVideo(args.url, args, ctx, modelService, deps);
         if (videoResult) return videoResult;
         return await saveWebpage(args.url, args, ctx, deps);
-      } catch (e: any) {
-        return { success: false, error: e.message };
+      } catch (e) {
+        return { success: false, error: e instanceof Error ? e.message : String(e) };
       }
     },
   };
@@ -531,7 +542,7 @@ export function createSaveWebpageTool(modelService: SummaryModel, deps: WebClipp
 export function createExecutor(modelService: SummaryModel): BuiltinExecutor {
   const tool = createSaveWebpageTool(modelService);
   return {
-    async execute(args: any, ctx: ToolContext) {
+    async execute(args: unknown, ctx: ToolContext) {
       return tool.execute(args, ctx);
     },
   };

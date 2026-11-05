@@ -2,6 +2,7 @@ import { parse } from 'yaml';
 import { BuiltinExecutor } from '../../skill-registry';
 import { Tool } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
+import { asArray, asRecord, asString, isPlainRecord, prop } from '../../../utils/narrow';
 
 const VIEW_TYPES = new Set(['table', 'cards', 'list', 'map']);
 
@@ -23,8 +24,8 @@ const validateBaseYaml: Tool = {
   },
   executionMode: 'parallel',
   risk: 'read',
-  async execute(args) {
-    return validateBaseYamlContent(args.content);
+  async execute(args: unknown) {
+    return validateBaseYamlContent(prop(args, 'content'));
   },
 };
 
@@ -37,15 +38,15 @@ export function validateBaseYamlContent(content: unknown): { success: boolean; e
     return { success: false, errors: ['content must be a YAML string'] };
   }
 
-  let base: any;
+  let base: unknown;
   try {
     base = parse(content);
-  } catch (error: any) {
-    return { success: false, errors: [`Invalid YAML: ${error.message}`] };
+  } catch (error) {
+    return { success: false, errors: [`Invalid YAML: ${error instanceof Error ? error.message : String(error)}`] };
   }
 
   const errors: string[] = [];
-  if (!base || typeof base !== 'object' || Array.isArray(base)) {
+  if (!isPlainRecord(base)) {
     return { success: false, errors: ['Base root must be a YAML object'] };
   }
 
@@ -53,10 +54,11 @@ export function validateBaseYamlContent(content: unknown): { success: boolean; e
   validateObjectField(base.properties, 'properties', errors);
   validateObjectField(base.summaries, 'summaries', errors);
 
-  if (!Array.isArray(base.views) || base.views.length === 0) {
+  const views = asArray(base.views);
+  if (!views || views.length === 0) {
     errors.push('views must be a non-empty array');
   } else {
-    validateViews(base.views, errors);
+    validateViews(views, errors);
   }
 
   validateFormulaReferences(base, errors);
@@ -69,14 +71,15 @@ function validateObjectField(value: unknown, label: string, errors: string[]): v
   }
 }
 
-function validateViews(views: any[], errors: string[]): void {
+function validateViews(views: unknown[], errors: string[]): void {
   views.forEach((view, index) => {
-    if (!view || typeof view !== 'object' || Array.isArray(view)) {
+    if (!isPlainRecord(view)) {
       errors.push(`views[${index}] must be an object`);
       return;
     }
 
-    if (!VIEW_TYPES.has(view.type)) {
+    const viewType = asString(view.type);
+    if (viewType === undefined || !VIEW_TYPES.has(viewType)) {
       errors.push(`views[${index}].type must be one of table, cards, list, map`);
     }
 
@@ -100,9 +103,10 @@ function isFilterShape(value: unknown): boolean {
   return typeof value === 'string' || (!!value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function validateFormulaReferences(base: any, errors: string[]): void {
-  const formulas = base.formulas && typeof base.formulas === 'object' && !Array.isArray(base.formulas)
-    ? new Set(Object.keys(base.formulas))
+function validateFormulaReferences(base: Record<string, unknown>, errors: string[]): void {
+  const rawFormulas = base.formulas;
+  const formulas = isPlainRecord(rawFormulas)
+    ? new Set(Object.keys(rawFormulas))
     : new Set<string>();
 
   for (const reference of collectFormulaReferences(base)) {
@@ -113,21 +117,22 @@ function validateFormulaReferences(base: any, errors: string[]): void {
   }
 }
 
-function collectFormulaReferences(base: any): string[] {
+function collectFormulaReferences(base: Record<string, unknown>): string[] {
   const references = new Set<string>();
 
-  for (const key of Object.keys(base.properties || {})) {
+  for (const key of Object.keys(asRecord(base.properties))) {
     addFormulaReference(key, references);
   }
 
-  for (const view of Array.isArray(base.views) ? base.views : []) {
-    for (const value of Array.isArray(view?.order) ? view.order : []) {
+  for (const view of asArray(base.views) ?? []) {
+    for (const value of asArray(prop(view, 'order')) ?? []) {
       addFormulaReference(value, references);
     }
-    if (view?.groupBy?.property) {
-      addFormulaReference(view.groupBy.property, references);
+    const groupByProperty = prop(prop(view, 'groupBy'), 'property');
+    if (groupByProperty) {
+      addFormulaReference(groupByProperty, references);
     }
-    for (const key of Object.keys(view?.summaries || {})) {
+    for (const key of Object.keys(asRecord(prop(view, 'summaries')))) {
       addFormulaReference(key, references);
     }
   }
