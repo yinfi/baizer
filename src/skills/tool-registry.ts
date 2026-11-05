@@ -3,7 +3,7 @@
 import { App } from 'obsidian';
 import { PluginSettings } from '../mcp/types';
 import { ToolDefinition } from '../models/interfaces';
-import { Tool, ToolContext } from './types';
+import { Tool, ToolArgs, ToolContext, ToolResult } from './types';
 
 /**
  * 原子工具注册表
@@ -69,7 +69,7 @@ export class ToolRegistry {
    * 执行工具。可选 signal 透传进 ctx,供网络类工具接入 fetch 实现真正的中断/超时取消。
    * 用每次调用的浅拷贝 ctx(而非 mutate 共享 this.ctx),避免并发工具间信号串台。
    */
-  async execute(name: string, args: any, signal?: AbortSignal): Promise<any> {
+  async execute(name: string, args: ToolArgs, signal?: AbortSignal): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
       return { error: `Unknown tool: ${name}` };
@@ -77,9 +77,9 @@ export class ToolRegistry {
     try {
       const ctx = signal ? { ...this.ctx, signal } : this.ctx;
       return await tool.execute(args, ctx);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(`[ToolRegistry] Tool "${name}" execution error:`, e);
-      return { error: e.message };
+      return { error: e instanceof Error ? e.message : String(e) };
     }
   }
 

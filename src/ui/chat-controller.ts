@@ -1322,7 +1322,7 @@ export class ChatController {
         const toolRegistry = (this.app as AppWithPluginHost).plugins?.plugins?.[PLUGIN_ID]?.toolRegistry;
         if (toolRegistry?.execute) {
             try {
-                const result: ToolResultPayload = await toolRegistry.execute('file_back_knowledge', this.buildFileBackArgs(targetMsg));
+                const result = await toolRegistry.execute('file_back_knowledge', this.buildFileBackArgs(targetMsg));
                 if (result?.success) {
                     const suffix = result.path ? `: ${result.path}` : '.';
                     this.addMessage('system', `Archived to the knowledge wiki${suffix}`);
