@@ -276,12 +276,48 @@ export class ModelService {
 
     public async updateSettings(settings: PluginSettings) {
         await this.flushMemorySession();
+        const previousProviders = this.settings.providers;
         this.settings = settings;
         this.cleanup();
         this.initializeProvider();
-        this.modelListCache.clear();
+        // #81：此前无条件 clear() 整个模型清单缓存，哪怕这次改的是记忆/权限等与 provider
+        // 连接完全无关的字段。设置页几乎每个开关都走 updateSettings()，而 renderModelField
+        // 在分区重绘时无条件重新拉一次清单（没有 forceRefresh 概念），于是「改一个不相关字段 →
+        // 缓存被清空 → 下一次重绘立刻真发一次 /models 请求」。缓存 key 本身已经编码了
+        // providerId:baseUrl:apiKey 前缀，这里只按 key 精确失效真正变了连接参数的 provider，
+        // 没碰 baseUrl/apiKey 的 provider 保留其缓存，相当于「改一个字段」不再牵连模型列表请求。
+        this.invalidateChangedProviderCaches(previousProviders, settings.providers);
         if (!this.suppressProviderChangedNotification) {
             this.notifyProviderChanged();
+        }
+    }
+
+    /** 只失效 baseUrl/apiKey 真的变了（或被删除）的 provider 的模型清单缓存。 */
+    private invalidateChangedProviderCaches(
+        previous: Record<string, ProviderConfig> | undefined,
+        next: Record<string, ProviderConfig> | undefined,
+    ): void {
+        const connectionKey = (config?: ProviderConfig): string =>
+            `${config?.baseUrl ?? ''}:${(config?.apiKey || '').slice(0, 8)}`;
+
+        const providerIds = new Set([
+            ...Object.keys(previous || {}),
+            ...Object.keys(next || {}),
+        ]);
+
+        for (const providerId of providerIds) {
+            const before = previous?.[providerId];
+            const after = next?.[providerId];
+            if (before && after && connectionKey(before) === connectionKey(after)) {
+                continue; // 连接参数未变，缓存仍然有效，保留。
+            }
+            // provider 被删除，或 baseUrl/apiKey 变了：旧缓存键不再对应当前配置，清掉。
+            // 缓存键里还带了 apiKey 前缀，直接按 providerId 前缀扫描删除最省事也最不会漏。
+            for (const cacheKey of Array.from(this.modelListCache.keys())) {
+                if (cacheKey.startsWith(`${providerId}:`)) {
+                    this.modelListCache.delete(cacheKey);
+                }
+            }
         }
     }
 

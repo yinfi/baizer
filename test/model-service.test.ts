@@ -209,6 +209,89 @@ async function runTests() {
     ]);
   });
 
+  // ---- #81：updateSettings() 此前无条件 clear() 整个模型清单缓存，哪怕这次改的
+  // 字段与 provider 连接完全无关（记忆/权限等开关）。设置页几乎每个开关都走
+  // updateSettings()，而模型下拉在分区重绘时无条件重新拉一次清单，于是「改一个不
+  // 相关字段 → 缓存被清空 → 下一次重绘立刻真发一次 /models 请求」，弱网下即卡死。 ----
+
+  await test('updateSettings preserves a provider\'s cached model list when its connection fields did not change', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const providers = {
+      openai: {
+        type: 'openai-compatible',
+        label: 'OpenAI',
+        apiKey: 'sk-aaaaaaaa',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4o',
+      },
+    };
+    service.settings = { activeProvider: 'openai', providers, privacyMode: false };
+    service.memoryManager = null;
+    service.cleanup = () => {};
+    service.initializeProvider = () => {};
+    service.providerChangedCallbacks = [];
+
+    const cachedEntry = { timestamp: Date.now(), models: [{ value: 'gpt-4o', label: 'gpt-4o' }], listed: true, listingUnsupported: false };
+    service.modelListCache = new Map([['openai:https://api.openai.com/v1:sk-aaaaa', cachedEntry]]);
+
+    // 只改一个与 provider 连接无关的字段（记忆开关），baseUrl/apiKey 原样未动。
+    const nextSettings = {
+      activeProvider: 'openai',
+      providers: JSON.parse(JSON.stringify(providers)),
+      privacyMode: true,
+    };
+
+    await service.updateSettings(nextSettings);
+
+    // 缓存必须原样保留：下一次挂载模型字段不该真的再发一次网络请求。
+    expect(service.modelListCache.get('openai:https://api.openai.com/v1:sk-aaaaa')).toEqual(cachedEntry);
+  });
+
+  await test('updateSettings invalidates only the providers whose baseUrl/apiKey actually changed', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const providers = {
+      openai: {
+        type: 'openai-compatible',
+        label: 'OpenAI',
+        apiKey: 'sk-aaaaaaaa',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4o',
+      },
+      other: {
+        type: 'openai-compatible',
+        label: 'Other',
+        apiKey: 'sk-bbbbbbbb',
+        baseUrl: 'https://other.example.com/v1',
+        model: 'm',
+      },
+    };
+    service.settings = { activeProvider: 'openai', providers, privacyMode: false };
+    service.memoryManager = null;
+    service.cleanup = () => {};
+    service.initializeProvider = () => {};
+    service.providerChangedCallbacks = [];
+
+    service.modelListCache = new Map([
+      ['openai:https://api.openai.com/v1:sk-aaaaa', { timestamp: Date.now(), models: [], listed: true, listingUnsupported: false }],
+      ['other:https://other.example.com/v1:sk-bbbbb', { timestamp: Date.now(), models: [], listed: true, listingUnsupported: false }],
+    ]);
+
+    // 用户在连接分区改了 openai 的 apiKey；other 原样未动。
+    const nextSettings = {
+      activeProvider: 'openai',
+      providers: {
+        openai: { ...providers.openai, apiKey: 'sk-cccccccc' },
+        other: JSON.parse(JSON.stringify(providers.other)),
+      },
+      privacyMode: false,
+    };
+
+    await service.updateSettings(nextSettings);
+
+    expect(service.modelListCache.has('openai:https://api.openai.com/v1:sk-aaaaa')).toEqual(false);
+    expect(service.modelListCache.has('other:https://other.example.com/v1:sk-bbbbb')).toEqual(true);
+  });
+
   await test('ModelService exposes memory view and memory deletion facade methods', async () => {
     const service: any = Object.create(ModelService.prototype);
     service.memoryManager = {
