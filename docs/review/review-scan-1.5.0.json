@@ -1,0 +1,5912 @@
+{
+  "source": {
+    "url": "https://community.obsidian.md/plugins/baizer",
+    "fetchedAt": "2026-11-05T01:55:28.115Z",
+    "releaseVersion": "1.5.0",
+    "pageUpdated": "Nov 3, 2026",
+    "scanCommit": "65020a8862aeaf88d41a2e164a7f779c3281ddd0",
+    "scanCommitUrl": "https://github.com/yinfi/baizer/tree/65020a8862aeaf88d41a2e164a7f779c3281ddd0",
+    "scannerNote": "Obsidian community plugin review: eslint-plugin-obsidianmd scanner config (TypeScript rules) + stylelint scanner config (CSS rules)."
+  },
+  "review": {
+    "totalIssues": 3002,
+    "summaryText": "3002 issues found by automated scans of the latest release.",
+    "warnings": {
+      "count": 2972,
+      "items": [
+        {
+          "severity": "medium",
+          "index": 0,
+          "type": "details",
+          "title": "Unsafe member access on an error or any typed value",
+          "rawTitle": "Unsafe member access on an `error` or `any` typed value",
+          "count": 1150,
+          "countInferred": false,
+          "rules": [
+            "@typescript-eslint/no-unsafe-member-access"
+          ],
+          "locationCount": 1150,
+          "locationsByFile": [
+            {
+              "file": "src/ui/chat-controller.ts",
+              "count": 126,
+              "lines": [
+                205,
+                320,
+                321,
+                323,
+                325,
+                327,
+                347,
+                358,
+                361,
+                393,
+                397,
+                398,
+                399,
+                414,
+                419,
+                421,
+                422,
+                423,
+                424,
+                425,
+                436,
+                437,
+                450,
+                484,
+                491,
+                503,
+                511,
+                512,
+                513,
+                515,
+                519,
+                534,
+                542,
+                544,
+                545,
+                546,
+                547,
+                552,
+                577,
+                579,
+                619,
+                622,
+                654,
+                656,
+                708,
+                709,
+                797,
+                802,
+                832,
+                833,
+                835,
+                836,
+                837,
+                840,
+                845,
+                949,
+                955,
+                965,
+                969,
+                970,
+                973,
+                974,
+                978,
+                979,
+                980,
+                984,
+                985,
+                989,
+                990,
+                991,
+                1003,
+                1005,
+                1017,
+                1024,
+                1026,
+                1030,
+                1064,
+                1075,
+                1077,
+                1101,
+                1129,
+                1149,
+                1150,
+                1158,
+                1161,
+                1162,
+                1166,
+                1167,
+                1169,
+                1172,
+                1173,
+                1182,
+                1183,
+                1197,
+                1198,
+                1201,
+                1202,
+                1205,
+                1206,
+                1208,
+                1211,
+                1212,
+                1215
+              ]
+            },
+            {
+              "file": "src/settings.ts",
+              "count": 79,
+              "lines": [
+                1959,
+                1960,
+                1973,
+                1974,
+                1986,
+                1987,
+                1999,
+                2000,
+                2031,
+                2041,
+                2047,
+                2055,
+                2057,
+                2058,
+                2059,
+                2060,
+                2062,
+                2063,
+                2151,
+                2152,
+                2157,
+                2163,
+                2170,
+                2172,
+                2204,
+                2209,
+                2210,
+                2215,
+                2220,
+                2221,
+                2295,
+                2472,
+                2496,
+                2665,
+                2669,
+                2697,
+                2715,
+                2880,
+                2881,
+                3086,
+                3087,
+                3089,
+                3096,
+                3098,
+                3099,
+                3101,
+                3104,
+                3105,
+                3462,
+                3463,
+                3467,
+                3471,
+                3472,
+                3476,
+                3481,
+                3482,
+                3486,
+                3487,
+                3488,
+                3491,
+                3492,
+                3496,
+                3574,
+                3575,
+                3581,
+                3582,
+                3583,
+                3585,
+                3586,
+                3592,
+                3594,
+                3595,
+                3597,
+                3600
+              ]
+            },
+            {
+              "file": "src/memory/hindsight-migration.ts",
+              "count": 76,
+              "lines": [
+                135,
+                136,
+                137,
+                139,
+                140,
+                142,
+                143,
+                145,
+                147,
+                148,
+                151,
+                152,
+                153,
+                156,
+                157,
+                158,
+                159,
+                168,
+                169,
+                174,
+                185,
+                187,
+                188,
+                189,
+                191,
+                193,
+                198,
+                199,
+                205,
+                206,
+                208,
+                209,
+                210,
+                211,
+                212,
+                213,
+                214,
+                215,
+                221,
+                222,
+                223,
+                224,
+                225,
+                232,
+                234,
+                237,
+                316,
+                318,
+                319,
+                320,
+                343,
+                344,
+                352,
+                353,
+                355
+              ]
+            },
+            {
+              "file": "src/ui/renderers/message-renderer.ts",
+              "count": 69,
+              "lines": [
+                65,
+                71,
+                72,
+                73,
+                75,
+                76,
+                79,
+                80,
+                81,
+                106,
+                144,
+                145,
+                157,
+                171,
+                181,
+                188,
+                203,
+                225,
+                226,
+                231,
+                232,
+                249,
+                251,
+                255,
+                256,
+                261,
+                270,
+                280,
+                296,
+                299,
+                300,
+                305,
+                306,
+                322,
+                335,
+                337,
+                341,
+                342,
+                347,
+                356,
+                366,
+                382,
+                384,
+                385,
+                389,
+                390,
+                391,
+                399,
+                415,
+                426,
+                427,
+                444,
+                445,
+                467,
+                468,
+                470,
+                473,
+                474,
+                475,
+                486,
+                488,
+                491,
+                492,
+                493,
+                498,
+                505,
+                535,
+                536
+              ]
+            },
+            {
+              "file": "src/skills/builtin/vault-ops.ts",
+              "count": 65,
+              "lines": [
+                44,
+                65,
+                67,
+                84,
+                87,
+                92,
+                100,
+                119,
+                127,
+                129,
+                131,
+                132,
+                133,
+                136,
+                139,
+                145,
+                146,
+                164,
+                172,
+                174,
+                176,
+                177,
+                178,
+                181,
+                184,
+                191,
+                192,
+                209,
+                217,
+                219,
+                220,
+                221,
+                224,
+                232,
+                250,
+                254,
+                262,
+                264,
+                265,
+                266,
+                267,
+                270,
+                277,
+                278,
+                295,
+                296,
+                325,
+                346,
+                349,
+                354,
+                384,
+                417,
+                433,
+                436,
+                441,
+                449,
+                472,
+                490,
+                494,
+                500,
+                507
+              ]
+            },
+            {
+              "file": "main.ts",
+              "count": 60,
+              "lines": [
+                204,
+                328,
+                332,
+                340,
+                341,
+                342,
+                347,
+                348,
+                349,
+                354,
+                355,
+                356,
+                478,
+                479,
+                480,
+                486,
+                542,
+                543,
+                544,
+                551,
+                561,
+                572,
+                583,
+                584,
+                585,
+                593,
+                604,
+                606,
+                607,
+                608,
+                702,
+                733,
+                734,
+                800,
+                815,
+                816,
+                817,
+                818,
+                819,
+                828,
+                830,
+                831,
+                832,
+                839,
+                897,
+                905,
+                1015,
+                1016,
+                1017,
+                1021
+              ]
+            },
+            {
+              "file": "src/memory/memory-manager.ts",
+              "count": 37,
+              "lines": [
+                325,
+                326,
+                328,
+                329,
+                557,
+                558,
+                559,
+                571,
+                593,
+                594,
+                596,
+                602,
+                603,
+                604,
+                645,
+                646,
+                650,
+                652,
+                654,
+                656,
+                658,
+                660,
+                662
+              ]
+            },
+            {
+              "file": "src/knowledge/compiler.ts",
+              "count": 35,
+              "lines": [
+                378,
+                380,
+                381,
+                382,
+                383,
+                385,
+                392,
+                393,
+                394,
+                395,
+                396,
+                397,
+                400,
+                401,
+                402,
+                403,
+                404,
+                405,
+                406,
+                416,
+                417,
+                418,
+                419,
+                421,
+                422,
+                671
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+              "count": 33,
+              "lines": [
+                24,
+                25,
+                27,
+                28,
+                29,
+                49,
+                50,
+                51,
+                52,
+                70,
+                72,
+                75,
+                176,
+                180,
+                182,
+                184,
+                187,
+                189,
+                198,
+                200,
+                201
+              ]
+            },
+            {
+              "file": "src/services/video-transcription.ts",
+              "count": 30,
+              "lines": [
+                91,
+                98,
+                99,
+                100,
+                104,
+                167,
+                170,
+                171,
+                178,
+                181,
+                182,
+                240,
+                241,
+                242,
+                244,
+                245,
+                254,
+                321,
+                322,
+                330
+              ]
+            },
+            {
+              "file": "src/skills/builtin/obsidian-bases/executor.ts",
+              "count": 30,
+              "lines": [
+                27,
+                44,
+                52,
+                53,
+                54,
+                56,
+                59,
+                79,
+                83,
+                87,
+                91,
+                95,
+                104,
+                105,
+                119,
+                123,
+                124,
+                127,
+                128,
+                130
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-event-adapter.ts",
+              "count": 26,
+              "lines": [
+                4,
+                5,
+                7,
+                9,
+                11,
+                47,
+                51,
+                52,
+                53,
+                54,
+                56,
+                57,
+                62,
+                65,
+                66,
+                67,
+                71,
+                74,
+                75,
+                77,
+                78,
+                89,
+                90
+              ]
+            },
+            {
+              "file": "src/services/model-catalog-service.ts",
+              "count": 25,
+              "lines": [
+                51,
+                186,
+                194,
+                195,
+                200,
+                201,
+                232,
+                234,
+                235,
+                237,
+                240,
+                241,
+                244,
+                245,
+                247,
+                248,
+                253,
+                254
+              ]
+            },
+            {
+              "file": "src/skills/builtin/json-canvas/executor.ts",
+              "count": 25,
+              "lines": [
+                28,
+                46,
+                53,
+                54,
+                62,
+                63,
+                64,
+                66,
+                71,
+                76,
+                79,
+                82,
+                87,
+                88,
+                90,
+                92,
+                93,
+                98,
+                104
+              ]
+            },
+            {
+              "file": "src/utils/video_utils.ts",
+              "count": 24,
+              "lines": [
+                143,
+                151,
+                158,
+                165,
+                171,
+                172,
+                173,
+                174,
+                176,
+                177,
+                235,
+                296,
+                300,
+                301,
+                302,
+                303,
+                304,
+                307,
+                308,
+                348
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 23,
+              "lines": [
+                417,
+                418,
+                419,
+                420,
+                421,
+                424,
+                838,
+                839,
+                1070,
+                1076,
+                1077,
+                1225,
+                1308,
+                1309,
+                1312,
+                1345,
+                1347,
+                1489,
+                1547,
+                1549,
+                1649
+              ]
+            },
+            {
+              "file": "src/utils/request-url-fetch.ts",
+              "count": 22,
+              "lines": [
+                116,
+                117,
+                124,
+                203,
+                207,
+                218,
+                219,
+                223,
+                244,
+                252,
+                253,
+                265,
+                266,
+                269,
+                282,
+                316,
+                323,
+                324,
+                325,
+                337,
+                429
+              ]
+            },
+            {
+              "file": "src/ui/approval-card.ts",
+              "count": 21,
+              "lines": [
+                63,
+                64,
+                65,
+                66,
+                67,
+                68,
+                69,
+                73,
+                87,
+                89,
+                97,
+                139,
+                140,
+                143,
+                144,
+                147,
+                158,
+                168,
+                169,
+                170
+              ]
+            },
+            {
+              "file": "src/ui/components/knowledge-status-panel.ts",
+              "count": 21,
+              "lines": [
+                28,
+                36,
+                37,
+                43,
+                56,
+                57,
+                58,
+                69,
+                78,
+                80,
+                82,
+                113,
+                115,
+                117,
+                126,
+                127,
+                130,
+                133,
+                150
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+              "count": 18,
+              "lines": [
+                158,
+                160,
+                161,
+                163,
+                164,
+                165,
+                166,
+                167,
+                168,
+                175,
+                266,
+                280,
+                281,
+                282
+              ]
+            },
+            {
+              "file": "src/ui/renderers/tool-renderer.ts",
+              "count": 18,
+              "lines": [
+                69,
+                73,
+                74,
+                75,
+                76,
+                81,
+                162,
+                172,
+                173,
+                178,
+                179,
+                185,
+                186,
+                193,
+                194,
+                201,
+                202
+              ]
+            },
+            {
+              "file": "src/knowledge/ontology.ts",
+              "count": 17,
+              "lines": [
+                96,
+                98,
+                99,
+                100,
+                111,
+                113,
+                114,
+                121,
+                123,
+                124,
+                226,
+                227
+              ]
+            },
+            {
+              "file": "src/knowledge/metadata-index.ts",
+              "count": 16,
+              "lines": [
+                16,
+                47,
+                49,
+                50,
+                51,
+                52,
+                53,
+                56,
+                63,
+                65,
+                66,
+                67,
+                69
+              ]
+            },
+            {
+              "file": "src/services/operation-audit-log.ts",
+              "count": 16,
+              "lines": [
+                148,
+                149,
+                150,
+                151,
+                152,
+                153,
+                154,
+                155,
+                156,
+                157,
+                158,
+                159
+              ]
+            },
+            {
+              "file": "src/ui/renderers/thinking-renderer.ts",
+              "count": 16,
+              "lines": [
+                149,
+                151,
+                152,
+                153,
+                155,
+                161,
+                234,
+                235,
+                240,
+                241,
+                247,
+                248,
+                255,
+                256,
+                263,
+                264
+              ]
+            },
+            {
+              "file": "src/knowledge/runtime.ts",
+              "count": 14,
+              "lines": [
+                143,
+                266,
+                293,
+                308,
+                323,
+                333,
+                341,
+                350,
+                362,
+                379,
+                388,
+                399,
+                406,
+                601
+              ]
+            },
+            {
+              "file": "src/runtime/pi/harness-chat-runtime.ts",
+              "count": 14,
+              "lines": [
+                158,
+                160,
+                169,
+                221,
+                222,
+                240,
+                341,
+                342,
+                343,
+                345,
+                346,
+                348,
+                349
+              ]
+            },
+            {
+              "file": "src/services/model-service.ts",
+              "count": 14,
+              "lines": [
+                140,
+                141,
+                437,
+                554,
+                598,
+                653,
+                782,
+                784,
+                905,
+                909,
+                1050
+              ]
+            },
+            {
+              "file": "src/services/obsidian-context-service.ts",
+              "count": 14,
+              "lines": [
+                156,
+                157,
+                158,
+                159,
+                163,
+                164,
+                165,
+                166,
+                257,
+                258,
+                259
+              ]
+            },
+            {
+              "file": "src/utils/file-operation-contract.ts",
+              "count": 14,
+              "lines": [
+                114,
+                118,
+                119,
+                120,
+                121,
+                141,
+                142
+              ]
+            },
+            {
+              "file": "src/knowledge/frontmatter.ts",
+              "count": 12,
+              "lines": [
+                128,
+                130,
+                131,
+                132,
+                134,
+                136,
+                141,
+                143,
+                199,
+                206,
+                247
+              ]
+            },
+            {
+              "file": "src/skills/skill-files.ts",
+              "count": 11,
+              "lines": [
+                133,
+                261,
+                264,
+                265,
+                268,
+                270,
+                287
+              ]
+            },
+            {
+              "file": "src/runtime/base-chat-runtime.ts",
+              "count": 10,
+              "lines": [
+                268,
+                269,
+                276,
+                277,
+                278,
+                287,
+                288
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+              "count": 10,
+              "lines": [
+                281,
+                367,
+                437,
+                475,
+                499,
+                501,
+                502,
+                514,
+                742,
+                745
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-clipper/executor.ts",
+              "count": 10,
+              "lines": [
+                154,
+                167,
+                183,
+                196,
+                364,
+                478,
+                479,
+                517,
+                519,
+                521
+              ]
+            },
+            {
+              "file": "src/ui/components/change-preview-card.ts",
+              "count": 10,
+              "lines": [
+                7,
+                8,
+                9,
+                22,
+                23,
+                24,
+                25,
+                30,
+                32,
+                39
+              ]
+            },
+            {
+              "file": "src/ui/history/conversation-store.ts",
+              "count": 10,
+              "lines": [
+                116,
+                117,
+                118,
+                119,
+                120,
+                121,
+                122,
+                123,
+                124,
+                125
+              ]
+            },
+            {
+              "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+              "count": 8,
+              "lines": [
+                130,
+                131,
+                132,
+                133,
+                154,
+                352,
+                356,
+                389
+              ]
+            },
+            {
+              "file": "src/ui/guardian-completion.ts",
+              "count": 8,
+              "lines": [
+                238,
+                239,
+                242,
+                376,
+                377,
+                378,
+                379
+              ]
+            },
+            {
+              "file": "src/ui/renderers/code-block-renderer.ts",
+              "count": 7,
+              "lines": [
+                20,
+                22,
+                24,
+                29,
+                30,
+                38,
+                42
+              ]
+            },
+            {
+              "file": "src/services/workspace-edit-service.ts",
+              "count": 6,
+              "lines": [
+                200,
+                201,
+                202,
+                203,
+                232
+              ]
+            },
+            {
+              "file": "src/skills/pi-skill-source.ts",
+              "count": 6,
+              "lines": [
+                108,
+                109,
+                110
+              ]
+            },
+            {
+              "file": "src/knowledge/indexer.ts",
+              "count": 4,
+              "lines": [
+                76,
+                77,
+                78,
+                139
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-search/executor.ts",
+              "count": 4,
+              "lines": [
+                35,
+                36,
+                73
+              ]
+            },
+            {
+              "file": "src/ui/components/context-chips.ts",
+              "count": 4,
+              "lines": [
+                104,
+                105,
+                112,
+                113
+              ]
+            },
+            {
+              "file": "src/ui/selection-ai/floating-panel.ts",
+              "count": 4,
+              "lines": [
+                27
+              ]
+            },
+            {
+              "file": "src/ui/tabs/tab-bar.ts",
+              "count": 4,
+              "lines": [
+                110,
+                111,
+                118,
+                119
+              ]
+            },
+            {
+              "file": "src/runtime/pi/session-store/compaction.ts",
+              "count": 3,
+              "lines": [
+                68,
+                69
+              ]
+            },
+            {
+              "file": "src/skills/builtin/knowledge/executor.ts",
+              "count": 3,
+              "lines": [
+                63,
+                65
+              ]
+            },
+            {
+              "file": "src/ui/selection-menu.ts",
+              "count": 3,
+              "lines": [
+                225,
+                277,
+                281
+              ]
+            },
+            {
+              "file": "src/knowledge/ontology-service.ts",
+              "count": 2,
+              "lines": [
+                224
+              ]
+            },
+            {
+              "file": "src/skills/builtin/read-skill.ts",
+              "count": 2,
+              "lines": [
+                38
+              ]
+            },
+            {
+              "file": "src/ui/components/command-dropdown.ts",
+              "count": 2,
+              "lines": [
+                164,
+                165
+              ]
+            },
+            {
+              "file": "src/ui/components/input-toolbar.ts",
+              "count": 2,
+              "lines": [
+                187,
+                188
+              ]
+            },
+            {
+              "file": "src/knowledge/file-back.ts",
+              "count": 1,
+              "lines": [
+                113
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-approval-policy.ts",
+              "count": 1,
+              "lines": [
+                21
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-native-model.ts",
+              "count": 1,
+              "lines": [
+                365
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-tool-adapter.ts",
+              "count": 1,
+              "lines": [
+                52
+              ]
+            },
+            {
+              "file": "src/services/clip-protocol.ts",
+              "count": 1,
+              "lines": [
+                77
+              ]
+            },
+            {
+              "file": "src/skills/tool-registry.ts",
+              "count": 1,
+              "lines": [
+                82
+              ]
+            },
+            {
+              "file": "src/utils/logger.ts",
+              "count": 1,
+              "lines": [
+                76
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 1,
+          "type": "details",
+          "title": "Unexpected any. Specify a different type.",
+          "rawTitle": "Unexpected any. Specify a different type.",
+          "count": 553,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 553,
+          "locationsByFile": [
+            {
+              "file": "src/ui/chat-controller.ts",
+              "count": 66,
+              "lines": [
+                62,
+                134,
+                174,
+                285,
+                320,
+                321,
+                323,
+                325,
+                327,
+                329,
+                347,
+                358,
+                361,
+                393,
+                402,
+                412,
+                418,
+                429,
+                450,
+                452,
+                484,
+                502,
+                503,
+                518,
+                525,
+                527,
+                534,
+                551,
+                577,
+                619,
+                628,
+                695,
+                703,
+                707,
+                712,
+                716,
+                724,
+                794,
+                801,
+                805,
+                832,
+                843,
+                853,
+                948,
+                949,
+                964,
+                995,
+                1015,
+                1064,
+                1075,
+                1100,
+                1128,
+                1149,
+                1150,
+                1161,
+                1166,
+                1167,
+                1172,
+                1182,
+                1214
+              ]
+            },
+            {
+              "file": "src/ui/renderers/message-renderer.ts",
+              "count": 66,
+              "lines": [
+                65,
+                71,
+                72,
+                73,
+                75,
+                76,
+                79,
+                106,
+                144,
+                145,
+                157,
+                171,
+                181,
+                188,
+                203,
+                225,
+                226,
+                231,
+                232,
+                249,
+                251,
+                255,
+                256,
+                261,
+                270,
+                280,
+                296,
+                299,
+                300,
+                305,
+                306,
+                322,
+                335,
+                337,
+                341,
+                342,
+                347,
+                356,
+                366,
+                382,
+                384,
+                385,
+                389,
+                390,
+                391,
+                399,
+                415,
+                426,
+                427,
+                444,
+                445,
+                467,
+                468,
+                470,
+                473,
+                474,
+                475,
+                486,
+                488,
+                491,
+                492,
+                493,
+                498,
+                505,
+                535,
+                536
+              ]
+            },
+            {
+              "file": "src/memory/hindsight-migration.ts",
+              "count": 24,
+              "lines": [
+                34,
+                36,
+                43,
+                45,
+                67,
+                73,
+                79,
+                85,
+                91,
+                104,
+                133,
+                148,
+                164,
+                165,
+                177,
+                184,
+                219,
+                230,
+                315,
+                342,
+                351
+              ]
+            },
+            {
+              "file": "main.ts",
+              "count": 20,
+              "lines": [
+                68,
+                203,
+                328,
+                329,
+                495,
+                536,
+                544,
+                700,
+                732,
+                748,
+                794,
+                800,
+                895,
+                916,
+                932,
+                970,
+                1003
+              ]
+            },
+            {
+              "file": "src/services/model-service.ts",
+              "count": 19,
+              "lines": [
+                140,
+                427,
+                520,
+                552,
+                560,
+                593,
+                651,
+                699,
+                782,
+                835,
+                868,
+                870,
+                899,
+                900,
+                913,
+                998,
+                1049
+              ]
+            },
+            {
+              "file": "src/ui/renderers/thinking-renderer.ts",
+              "count": 17,
+              "lines": [
+                34,
+                149,
+                151,
+                152,
+                153,
+                155,
+                161,
+                234,
+                235,
+                240,
+                241,
+                247,
+                248,
+                255,
+                256,
+                263,
+                264
+              ]
+            },
+            {
+              "file": "src/ui/renderers/tool-renderer.ts",
+              "count": 17,
+              "lines": [
+                69,
+                73,
+                74,
+                75,
+                76,
+                81,
+                162,
+                172,
+                173,
+                178,
+                179,
+                185,
+                186,
+                193,
+                194,
+                201,
+                202
+              ]
+            },
+            {
+              "file": "src/ui/components/knowledge-status-panel.ts",
+              "count": 16,
+              "lines": [
+                7,
+                28,
+                56,
+                57,
+                58,
+                67,
+                69,
+                78,
+                80,
+                82,
+                113,
+                126,
+                127,
+                130,
+                133,
+                150
+              ]
+            },
+            {
+              "file": "src/utils/request-url-fetch.ts",
+              "count": 14,
+              "lines": [
+                100,
+                101,
+                114,
+                191,
+                216,
+                244,
+                264,
+                289,
+                307,
+                356,
+                415,
+                429,
+                448,
+                475
+              ]
+            },
+            {
+              "file": "src/services/video-transcription.ts",
+              "count": 13,
+              "lines": [
+                90,
+                97,
+                170,
+                181,
+                235,
+                301,
+                321,
+                322,
+                330,
+                357,
+                431,
+                475
+              ]
+            },
+            {
+              "file": "src/settings.ts",
+              "count": 13,
+              "lines": [
+                1363,
+                1701,
+                2046,
+                2054,
+                2710,
+                2880,
+                2881,
+                3462,
+                3471,
+                3481,
+                3491,
+                3574,
+                3598
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-clipper/executor.ts",
+              "count": 13,
+              "lines": [
+                151,
+                180,
+                221,
+                255,
+                257,
+                259,
+                380,
+                497,
+                520,
+                527,
+                530,
+                536
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 13,
+              "lines": [
+                417,
+                418,
+                419,
+                838,
+                839,
+                1069,
+                1086,
+                1225,
+                1308,
+                1309,
+                1312,
+                1486,
+                1649
+              ]
+            },
+            {
+              "file": "src/knowledge/ontology.ts",
+              "count": 12,
+              "lines": [
+                10,
+                27,
+                28,
+                46,
+                79,
+                94,
+                108,
+                111,
+                112,
+                118,
+                121,
+                122
+              ]
+            },
+            {
+              "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+              "count": 11,
+              "lines": [
+                110,
+                115,
+                129,
+                150,
+                230,
+                275,
+                280,
+                284,
+                288,
+                352,
+                389
+              ]
+            },
+            {
+              "file": "src/utils/logger.ts",
+              "count": 11,
+              "lines": [
+                6,
+                7,
+                27,
+                31,
+                35,
+                39,
+                43,
+                66
+              ]
+            },
+            {
+              "file": "src/memory/memory-manager.ts",
+              "count": 10,
+              "lines": [
+                266,
+                310,
+                329,
+                551,
+                553,
+                592,
+                599,
+                640
+              ]
+            },
+            {
+              "file": "src/knowledge/metadata-index.ts",
+              "count": 9,
+              "lines": [
+                11,
+                14,
+                24,
+                43,
+                47,
+                48,
+                59,
+                63,
+                64
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+              "count": 9,
+              "lines": [
+                24,
+                25,
+                26,
+                49,
+                50,
+                51,
+                70,
+                198,
+                206
+              ]
+            },
+            {
+              "file": "src/utils/throttle.ts",
+              "count": 9,
+              "lines": [
+                26,
+                45,
+                140,
+                163,
+                245
+              ]
+            },
+            {
+              "file": "src/utils/video_utils.ts",
+              "count": 9,
+              "lines": [
+                26,
+                143,
+                173,
+                174,
+                233,
+                300,
+                308,
+                346,
+                372
+              ]
+            },
+            {
+              "file": "src/knowledge/compiler.ts",
+              "count": 8,
+              "lines": [
+                47,
+                380,
+                394,
+                395,
+                397,
+                402,
+                403,
+                669
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+              "count": 8,
+              "lines": [
+                158,
+                163,
+                164,
+                165,
+                166,
+                167,
+                265,
+                348
+              ]
+            },
+            {
+              "file": "src/knowledge/runtime.ts",
+              "count": 7,
+              "lines": [
+                143,
+                265,
+                377,
+                380,
+                389,
+                407,
+                600
+              ]
+            },
+            {
+              "file": "src/runtime/pi/harness-chat-runtime.ts",
+              "count": 7,
+              "lines": [
+                155,
+                169,
+                220,
+                238,
+                336,
+                337,
+                392
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-tool-adapter.ts",
+              "count": 6,
+              "lines": [
+                31,
+                41,
+                55,
+                61,
+                64,
+                82
+              ]
+            },
+            {
+              "file": "src/services/workspace-edit-service.ts",
+              "count": 6,
+              "lines": [
+                64,
+                182,
+                195,
+                196,
+                231
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+              "count": 6,
+              "lines": [
+                280,
+                367,
+                436,
+                475,
+                501,
+                739
+              ]
+            },
+            {
+              "file": "src/skills/types.ts",
+              "count": 6,
+              "lines": [
+                55,
+                90,
+                139
+              ]
+            },
+            {
+              "file": "src/ui/selection-menu.ts",
+              "count": 6,
+              "lines": [
+                57,
+                199,
+                225,
+                277,
+                281
+              ]
+            },
+            {
+              "file": "src/models/interfaces.ts",
+              "count": 5,
+              "lines": [
+                33,
+                39,
+                45,
+                68,
+                69
+              ]
+            },
+            {
+              "file": "src/services/model-catalog-service.ts",
+              "count": 5,
+              "lines": [
+                51,
+                65,
+                194,
+                244
+              ]
+            },
+            {
+              "file": "src/services/obsidian-context-service.ts",
+              "count": 5,
+              "lines": [
+                155,
+                158,
+                162,
+                165,
+                256
+              ]
+            },
+            {
+              "file": "src/skills/builtin/obsidian-bases/executor.ts",
+              "count": 5,
+              "lines": [
+                40,
+                43,
+                72,
+                103,
+                116
+              ]
+            },
+            {
+              "file": "src/ui/approval-card.ts",
+              "count": 5,
+              "lines": [
+                44,
+                57,
+                138,
+                151,
+                167
+              ]
+            },
+            {
+              "file": "src/runtime/base-chat-runtime.ts",
+              "count": 4,
+              "lines": [
+                268,
+                269,
+                276,
+                322
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-event-adapter.ts",
+              "count": 4,
+              "lines": [
+                3,
+                44,
+                88
+              ]
+            },
+            {
+              "file": "src/skills/builtin/json-canvas/executor.ts",
+              "count": 4,
+              "lines": [
+                42,
+                45,
+                62,
+                87
+              ]
+            },
+            {
+              "file": "src/skills/pi-skill-source.ts",
+              "count": 4,
+              "lines": [
+                66,
+                106,
+                108,
+                109
+              ]
+            },
+            {
+              "file": "src/ui/components/context-chips.ts",
+              "count": 4,
+              "lines": [
+                104,
+                105,
+                112,
+                113
+              ]
+            },
+            {
+              "file": "src/ui/tabs/tab-bar.ts",
+              "count": 4,
+              "lines": [
+                110,
+                111,
+                118,
+                119
+              ]
+            },
+            {
+              "file": "src/utils/file-operation-contract.ts",
+              "count": 4,
+              "lines": [
+                113,
+                117,
+                138,
+                139
+              ]
+            },
+            {
+              "file": "src/knowledge/ontology-service.ts",
+              "count": 3,
+              "lines": [
+                218,
+                222,
+                230
+              ]
+            },
+            {
+              "file": "src/mcp/types.ts",
+              "count": 3,
+              "lines": [
+                19,
+                450,
+                459
+              ]
+            },
+            {
+              "file": "src/runtime/pi/session-store/compaction.ts",
+              "count": 3,
+              "lines": [
+                68,
+                69
+              ]
+            },
+            {
+              "file": "src/skills/builtin/vault-ops.ts",
+              "count": 3,
+              "lines": [
+                516,
+                540,
+                559
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-search/executor.ts",
+              "count": 3,
+              "lines": [
+                56,
+                72,
+                82
+              ]
+            },
+            {
+              "file": "src/skills/tool-registry.ts",
+              "count": 3,
+              "lines": [
+                72,
+                80
+              ]
+            },
+            {
+              "file": "src/knowledge/frontmatter.ts",
+              "count": 2,
+              "lines": [
+                127,
+                246
+              ]
+            },
+            {
+              "file": "src/knowledge/indexer.ts",
+              "count": 2,
+              "lines": [
+                76,
+                138
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-approval-policy.ts",
+              "count": 2,
+              "lines": [
+                15,
+                48
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-native-model.ts",
+              "count": 2,
+              "lines": [
+                296,
+                365
+              ]
+            },
+            {
+              "file": "src/services/operation-audit-log.ts",
+              "count": 2,
+              "lines": [
+                146,
+                150
+              ]
+            },
+            {
+              "file": "src/skills/skill-files.ts",
+              "count": 2,
+              "lines": [
+                254,
+                286
+              ]
+            },
+            {
+              "file": "src/skills/skill-registry.ts",
+              "count": 2,
+              "lines": [
+                35
+              ]
+            },
+            {
+              "file": "src/ui/components/change-preview-card.ts",
+              "count": 2,
+              "lines": [
+                4,
+                20
+              ]
+            },
+            {
+              "file": "src/ui/components/command-dropdown.ts",
+              "count": 2,
+              "lines": [
+                164,
+                165
+              ]
+            },
+            {
+              "file": "src/ui/components/input-toolbar.ts",
+              "count": 2,
+              "lines": [
+                187,
+                188
+              ]
+            },
+            {
+              "file": "src/ui/controllers/stream-controller.ts",
+              "count": 2,
+              "lines": [
+                5,
+                6
+              ]
+            },
+            {
+              "file": "src/ui/history/conversation-store.ts",
+              "count": 2,
+              "lines": [
+                114,
+                118
+              ]
+            },
+            {
+              "file": "src/knowledge/file-back.ts",
+              "count": 1,
+              "lines": [
+                112
+              ]
+            },
+            {
+              "file": "src/runtime/runtime-types.ts",
+              "count": 1,
+              "lines": [
+                28
+              ]
+            },
+            {
+              "file": "src/services/clip-protocol.ts",
+              "count": 1,
+              "lines": [
+                77
+              ]
+            },
+            {
+              "file": "src/skills/builtin/knowledge/executor.ts",
+              "count": 1,
+              "lines": [
+                61
+              ]
+            },
+            {
+              "file": "src/ui/guardian-completion.ts",
+              "count": 1,
+              "lines": [
+                789
+              ]
+            },
+            {
+              "file": "src/ui/guardian-gutter.ts",
+              "count": 1,
+              "lines": [
+                163
+              ]
+            },
+            {
+              "file": "src/ui/renderers/code-block-renderer.ts",
+              "count": 1,
+              "lines": [
+                19
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 2,
+          "type": "details",
+          "title": "Unsafe assignment of an error or any typed value",
+          "rawTitle": "Unsafe assignment of an `error` or `any` typed value",
+          "count": 458,
+          "countInferred": false,
+          "rules": [
+            "@typescript-eslint/no-unsafe-assignment"
+          ],
+          "locationCount": 458,
+          "locationsByFile": [
+            {
+              "file": "main.ts",
+              "count": 47,
+              "lines": [
+                324,
+                325,
+                329,
+                332,
+                340,
+                341,
+                342,
+                347,
+                348,
+                349,
+                354,
+                355,
+                356,
+                476,
+                479,
+                506,
+                542,
+                543,
+                550,
+                551,
+                560,
+                561,
+                566,
+                571,
+                572,
+                583,
+                584,
+                585,
+                591,
+                592,
+                593,
+                604,
+                626,
+                714,
+                715,
+                733,
+                804,
+                815,
+                816,
+                817,
+                818,
+                819,
+                828,
+                846,
+                1015,
+                1016,
+                1026
+              ]
+            },
+            {
+              "file": "src/ui/chat-controller.ts",
+              "count": 41,
+              "lines": [
+                189,
+                320,
+                323,
+                327,
+                393,
+                397,
+                421,
+                422,
+                423,
+                424,
+                425,
+                450,
+                484,
+                503,
+                511,
+                519,
+                521,
+                534,
+                542,
+                552,
+                554,
+                577,
+                619,
+                698,
+                797,
+                832,
+                835,
+                949,
+                955,
+                965,
+                1017,
+                1026,
+                1075,
+                1149,
+                1166,
+                1182,
+                1183,
+                1197,
+                1201,
+                1202,
+                1211
+              ]
+            },
+            {
+              "file": "src/memory/hindsight-migration.ts",
+              "count": 26,
+              "lines": [
+                34,
+                36,
+                67,
+                79,
+                135,
+                136,
+                139,
+                142,
+                147,
+                167,
+                187,
+                188,
+                198,
+                200,
+                201,
+                202,
+                212,
+                316,
+                317,
+                318,
+                319,
+                320,
+                342,
+                351
+              ]
+            },
+            {
+              "file": "src/skills/builtin/vault-ops.ts",
+              "count": 23,
+              "lines": [
+                65,
+                86,
+                87,
+                90,
+                92,
+                132,
+                133,
+                136,
+                139,
+                177,
+                178,
+                181,
+                221,
+                224,
+                266,
+                267,
+                270,
+                295,
+                296,
+                436,
+                441,
+                494,
+                500
+              ]
+            },
+            {
+              "file": "src/settings.ts",
+              "count": 22,
+              "lines": [
+                2041,
+                2047,
+                2055,
+                2062,
+                2063,
+                2151,
+                2153,
+                2209,
+                2220,
+                2715,
+                3086,
+                3462,
+                3471,
+                3476,
+                3481,
+                3486,
+                3491,
+                3496,
+                3574,
+                3581,
+                3582,
+                3585
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+              "count": 21,
+              "lines": [
+                24,
+                25,
+                27,
+                28,
+                49,
+                51,
+                52,
+                70,
+                72,
+                75,
+                180,
+                182,
+                187,
+                189,
+                198
+              ]
+            },
+            {
+              "file": "src/services/video-transcription.ts",
+              "count": 19,
+              "lines": [
+                90,
+                91,
+                96,
+                97,
+                98,
+                165,
+                167,
+                170,
+                175,
+                178,
+                181,
+                242,
+                249,
+                254,
+                256,
+                260,
+                321,
+                433,
+                477
+              ]
+            },
+            {
+              "file": "src/utils/request-url-fetch.ts",
+              "count": 19,
+              "lines": [
+                114,
+                115,
+                122,
+                123,
+                127,
+                189,
+                207,
+                218,
+                219,
+                265,
+                266,
+                273,
+                283,
+                344,
+                458,
+                543
+              ]
+            },
+            {
+              "file": "src/knowledge/compiler.ts",
+              "count": 18,
+              "lines": [
+                377,
+                380,
+                382,
+                385,
+                393,
+                396,
+                397,
+                401,
+                404,
+                405,
+                406,
+                416,
+                417,
+                418,
+                419,
+                421,
+                422,
+                671
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+              "count": 18,
+              "lines": [
+                158,
+                160,
+                161,
+                163,
+                165,
+                166,
+                167,
+                168,
+                173,
+                174,
+                175,
+                176,
+                257,
+                278,
+                280,
+                281,
+                282
+              ]
+            },
+            {
+              "file": "src/knowledge/metadata-index.ts",
+              "count": 17,
+              "lines": [
+                12,
+                25,
+                35,
+                44,
+                49,
+                50,
+                60,
+                65,
+                66,
+                67,
+                118,
+                120,
+                121,
+                126,
+                127,
+                128,
+                131
+              ]
+            },
+            {
+              "file": "src/utils/video_utils.ts",
+              "count": 15,
+              "lines": [
+                132,
+                143,
+                145,
+                151,
+                158,
+                170,
+                171,
+                181,
+                295,
+                296,
+                300,
+                302,
+                305,
+                306,
+                308
+              ]
+            },
+            {
+              "file": "src/runtime/pi/harness-chat-runtime.ts",
+              "count": 12,
+              "lines": [
+                60,
+                101,
+                115,
+                160,
+                169,
+                180,
+                222,
+                341,
+                346,
+                349,
+                350,
+                353
+              ]
+            },
+            {
+              "file": "src/services/model-catalog-service.ts",
+              "count": 12,
+              "lines": [
+                185,
+                186,
+                193,
+                223,
+                240,
+                241,
+                243,
+                245,
+                247,
+                250,
+                251
+              ]
+            },
+            {
+              "file": "src/knowledge/frontmatter.ts",
+              "count": 9,
+              "lines": [
+                43,
+                59,
+                199,
+                336,
+                337,
+                338,
+                360,
+                361,
+                362
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-event-adapter.ts",
+              "count": 9,
+              "lines": [
+                11,
+                52,
+                54,
+                57,
+                65,
+                66,
+                67,
+                74,
+                75
+              ]
+            },
+            {
+              "file": "src/knowledge/ontology.ts",
+              "count": 8,
+              "lines": [
+                83,
+                98,
+                105,
+                113,
+                114,
+                123,
+                124,
+                224
+              ]
+            },
+            {
+              "file": "src/memory/memory-manager.ts",
+              "count": 8,
+              "lines": [
+                312,
+                325,
+                328,
+                331,
+                343,
+                594,
+                608,
+                645
+              ]
+            },
+            {
+              "file": "src/services/model-service.ts",
+              "count": 8,
+              "lines": [
+                140,
+                542,
+                582,
+                598,
+                782,
+                871,
+                902,
+                909
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-clipper/executor.ts",
+              "count": 8,
+              "lines": [
+                167,
+                196,
+                224,
+                301,
+                359,
+                478,
+                517,
+                521
+              ]
+            },
+            {
+              "file": "src/knowledge/linter.ts",
+              "count": 7,
+              "lines": [
+                157,
+                175,
+                178,
+                180,
+                182,
+                186,
+                188
+              ]
+            },
+            {
+              "file": "src/skills/skill-files.ts",
+              "count": 7,
+              "lines": [
+                132,
+                256,
+                261,
+                264,
+                265,
+                271
+              ]
+            },
+            {
+              "file": "src/ui/approval-card.ts",
+              "count": 7,
+              "lines": [
+                63,
+                64,
+                66,
+                73,
+                87,
+                97,
+                168
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 7,
+              "lines": [
+                417,
+                420,
+                421,
+                423,
+                1057,
+                1063,
+                1069
+              ]
+            },
+            {
+              "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+              "count": 6,
+              "lines": [
+                124,
+                130,
+                154,
+                290,
+                352,
+                390
+              ]
+            },
+            {
+              "file": "src/skills/pi-skill-source.ts",
+              "count": 6,
+              "lines": [
+                70,
+                98,
+                108,
+                109,
+                111
+              ]
+            },
+            {
+              "file": "src/runtime/base-chat-runtime.ts",
+              "count": 5,
+              "lines": [
+                268,
+                276,
+                277,
+                278,
+                322
+              ]
+            },
+            {
+              "file": "src/utils/logger.ts",
+              "count": 5,
+              "lines": [
+                49,
+                50,
+                72,
+                76,
+                77
+              ]
+            },
+            {
+              "file": "src/ui/components/change-preview-card.ts",
+              "count": 4,
+              "lines": [
+                7,
+                22,
+                23,
+                30
+              ]
+            },
+            {
+              "file": "src/ui/components/knowledge-status-panel.ts",
+              "count": 4,
+              "lines": [
+                36,
+                37,
+                43,
+                115
+              ]
+            },
+            {
+              "file": "src/ui/guardian-completion.ts",
+              "count": 4,
+              "lines": [
+                236,
+                242,
+                361,
+                379
+              ]
+            },
+            {
+              "file": "src/ui/renderers/code-block-renderer.ts",
+              "count": 4,
+              "lines": [
+                19,
+                22,
+                29,
+                30
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-tool-adapter.ts",
+              "count": 3,
+              "lines": [
+                39,
+                42,
+                51
+              ]
+            },
+            {
+              "file": "src/skills/builtin/json-canvas/executor.ts",
+              "count": 3,
+              "lines": [
+                44,
+                53,
+                54
+              ]
+            },
+            {
+              "file": "src/skills/builtin/knowledge/executor.ts",
+              "count": 3,
+              "lines": [
+                63,
+                65
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+              "count": 3,
+              "lines": [
+                498,
+                501,
+                513
+              ]
+            },
+            {
+              "file": "src/skills/builtin/read-skill.ts",
+              "count": 3,
+              "lines": [
+                38,
+                51,
+                57
+              ]
+            },
+            {
+              "file": "src/knowledge/indexer.ts",
+              "count": 2,
+              "lines": [
+                76,
+                77
+              ]
+            },
+            {
+              "file": "src/knowledge/ontology-service.ts",
+              "count": 2,
+              "lines": [
+                219,
+                233
+              ]
+            },
+            {
+              "file": "src/services/workspace-edit-service.ts",
+              "count": 2,
+              "lines": [
+                75,
+                184
+              ]
+            },
+            {
+              "file": "src/knowledge/file-back.ts",
+              "count": 1,
+              "lines": [
+                113
+              ]
+            },
+            {
+              "file": "src/memory/hindsight-store.ts",
+              "count": 1,
+              "lines": [
+                271
+              ]
+            },
+            {
+              "file": "src/services/obsidian-context-service.ts",
+              "count": 1,
+              "lines": [
+                229
+              ]
+            },
+            {
+              "file": "src/services/operation-audit-log.ts",
+              "count": 1,
+              "lines": [
+                104
+              ]
+            },
+            {
+              "file": "src/skills/builtin/obsidian-bases/executor.ts",
+              "count": 1,
+              "lines": [
+                42
+              ]
+            },
+            {
+              "file": "src/skills/tool-registry.ts",
+              "count": 1,
+              "lines": [
+                82
+              ]
+            },
+            {
+              "file": "src/ui/diff-modal.ts",
+              "count": 1,
+              "lines": [
+                155
+              ]
+            },
+            {
+              "file": "src/ui/guardian-gutter.ts",
+              "count": 1,
+              "lines": [
+                116
+              ]
+            },
+            {
+              "file": "src/ui/history/conversation-store.ts",
+              "count": 1,
+              "lines": [
+                72
+              ]
+            },
+            {
+              "file": "src/ui/renderers/message-renderer.ts",
+              "count": 1,
+              "lines": [
+                79
+              ]
+            },
+            {
+              "file": "src/ui/selection-ai/floating-panel.ts",
+              "count": 1,
+              "lines": [
+                26
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 3,
+          "type": "details",
+          "title": "Unsafe call of an error or any typed value",
+          "rawTitle": "Unsafe call of an `error` or `any` typed value",
+          "count": 370,
+          "countInferred": false,
+          "rules": [
+            "@typescript-eslint/no-unsafe-call"
+          ],
+          "locationCount": 370,
+          "locationsByFile": [
+            {
+              "file": "src/ui/renderers/message-renderer.ts",
+              "count": 62,
+              "lines": [
+                65,
+                71,
+                72,
+                73,
+                76,
+                106,
+                144,
+                145,
+                157,
+                171,
+                181,
+                188,
+                203,
+                225,
+                226,
+                231,
+                232,
+                249,
+                251,
+                255,
+                256,
+                261,
+                270,
+                280,
+                296,
+                299,
+                300,
+                305,
+                306,
+                322,
+                335,
+                337,
+                341,
+                342,
+                347,
+                356,
+                366,
+                382,
+                384,
+                385,
+                389,
+                390,
+                391,
+                399,
+                415,
+                426,
+                427,
+                445,
+                467,
+                468,
+                470,
+                473,
+                474,
+                475,
+                486,
+                488,
+                491,
+                492,
+                493,
+                498,
+                505,
+                536
+              ]
+            },
+            {
+              "file": "src/settings.ts",
+              "count": 25,
+              "lines": [
+                1960,
+                1974,
+                1987,
+                2000,
+                2041,
+                2209,
+                2220,
+                2295,
+                2472,
+                2496,
+                2665,
+                2669,
+                2697,
+                2880,
+                2881,
+                3087,
+                3096,
+                3467,
+                3476,
+                3486,
+                3496,
+                3581,
+                3583,
+                3586
+              ]
+            },
+            {
+              "file": "src/ui/chat-controller.ts",
+              "count": 25,
+              "lines": [
+                321,
+                323,
+                327,
+                358,
+                361,
+                397,
+                450,
+                491,
+                511,
+                542,
+                579,
+                622,
+                835,
+                955,
+                1075,
+                1150,
+                1160,
+                1167,
+                1171,
+                1197,
+                1202,
+                1206,
+                1211
+              ]
+            },
+            {
+              "file": "src/memory/memory-manager.ts",
+              "count": 19,
+              "lines": [
+                326,
+                329,
+                594,
+                603,
+                646,
+                650,
+                652,
+                654,
+                656,
+                658,
+                660,
+                662
+              ]
+            },
+            {
+              "file": "src/ui/approval-card.ts",
+              "count": 17,
+              "lines": [
+                63,
+                64,
+                65,
+                66,
+                67,
+                68,
+                69,
+                73,
+                87,
+                89,
+                97,
+                140,
+                144,
+                158,
+                168,
+                169,
+                170
+              ]
+            },
+            {
+              "file": "main.ts",
+              "count": 16,
+              "lines": [
+                480,
+                542,
+                585,
+                604,
+                608,
+                733,
+                734,
+                815,
+                818,
+                828,
+                832,
+                1015,
+                1021
+              ]
+            },
+            {
+              "file": "src/ui/components/knowledge-status-panel.ts",
+              "count": 15,
+              "lines": [
+                28,
+                37,
+                43,
+                56,
+                58,
+                69,
+                78,
+                80,
+                82,
+                113,
+                115,
+                127,
+                130,
+                133,
+                150
+              ]
+            },
+            {
+              "file": "src/memory/hindsight-migration.ts",
+              "count": 14,
+              "lines": [
+                148,
+                168,
+                169,
+                185,
+                188,
+                193,
+                198,
+                232,
+                234,
+                343,
+                344,
+                352,
+                353,
+                355
+              ]
+            },
+            {
+              "file": "src/utils/request-url-fetch.ts",
+              "count": 14,
+              "lines": [
+                122,
+                123,
+                203,
+                207,
+                223,
+                244,
+                252,
+                253,
+                282,
+                316,
+                323,
+                324,
+                325,
+                337
+              ]
+            },
+            {
+              "file": "src/ui/renderers/tool-renderer.ts",
+              "count": 13,
+              "lines": [
+                69,
+                73,
+                74,
+                75,
+                76,
+                81,
+                162,
+                173,
+                179,
+                186,
+                194,
+                202
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 13,
+              "lines": [
+                417,
+                418,
+                838,
+                839,
+                1076,
+                1077,
+                1225,
+                1309,
+                1312,
+                1345,
+                1347,
+                1547,
+                1549
+              ]
+            },
+            {
+              "file": "src/knowledge/runtime.ts",
+              "count": 12,
+              "lines": [
+                266,
+                293,
+                308,
+                323,
+                333,
+                341,
+                350,
+                362,
+                379,
+                388,
+                399,
+                406
+              ]
+            },
+            {
+              "file": "src/services/model-catalog-service.ts",
+              "count": 11,
+              "lines": [
+                193,
+                194,
+                243,
+                245,
+                247,
+                248
+              ]
+            },
+            {
+              "file": "src/ui/renderers/thinking-renderer.ts",
+              "count": 11,
+              "lines": [
+                149,
+                151,
+                152,
+                153,
+                155,
+                161,
+                235,
+                241,
+                248,
+                256,
+                264
+              ]
+            },
+            {
+              "file": "src/ui/components/change-preview-card.ts",
+              "count": 10,
+              "lines": [
+                7,
+                8,
+                9,
+                22,
+                23,
+                24,
+                25,
+                30,
+                32,
+                39
+              ]
+            },
+            {
+              "file": "src/services/video-transcription.ts",
+              "count": 8,
+              "lines": [
+                96,
+                98,
+                100,
+                181,
+                242,
+                254,
+                322,
+                330
+              ]
+            },
+            {
+              "file": "src/utils/video_utils.ts",
+              "count": 8,
+              "lines": [
+                172,
+                174,
+                302,
+                308
+              ]
+            },
+            {
+              "file": "src/knowledge/compiler.ts",
+              "count": 7,
+              "lines": [
+                380,
+                393,
+                397,
+                401
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+              "count": 7,
+              "lines": [
+                28,
+                49,
+                50,
+                70,
+                198
+              ]
+            },
+            {
+              "file": "src/ui/renderers/code-block-renderer.ts",
+              "count": 7,
+              "lines": [
+                20,
+                22,
+                24,
+                29,
+                30,
+                38,
+                42
+              ]
+            },
+            {
+              "file": "src/knowledge/ontology.ts",
+              "count": 6,
+              "lines": [
+                111,
+                113,
+                114,
+                121,
+                123,
+                124
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+              "count": 6,
+              "lines": [
+                163,
+                164,
+                166,
+                167
+              ]
+            },
+            {
+              "file": "src/services/obsidian-context-service.ts",
+              "count": 4,
+              "lines": [
+                157,
+                164
+              ]
+            },
+            {
+              "file": "src/skills/builtin/vault-ops.ts",
+              "count": 4,
+              "lines": [
+                67,
+                325,
+                349,
+                354
+              ]
+            },
+            {
+              "file": "src/utils/file-operation-contract.ts",
+              "count": 4,
+              "lines": [
+                118,
+                119,
+                121
+              ]
+            },
+            {
+              "file": "src/knowledge/frontmatter.ts",
+              "count": 3,
+              "lines": [
+                199,
+                206
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-clipper/executor.ts",
+              "count": 3,
+              "lines": [
+                167,
+                196,
+                479
+              ]
+            },
+            {
+              "file": "src/runtime/base-chat-runtime.ts",
+              "count": 2,
+              "lines": [
+                269,
+                276
+              ]
+            },
+            {
+              "file": "src/runtime/pi/harness-chat-runtime.ts",
+              "count": 2,
+              "lines": [
+                343,
+                346
+              ]
+            },
+            {
+              "file": "src/skills/builtin/json-canvas/executor.ts",
+              "count": 2,
+              "lines": [
+                62,
+                87
+              ]
+            },
+            {
+              "file": "src/skills/pi-skill-source.ts",
+              "count": 2,
+              "lines": [
+                108,
+                109
+              ]
+            },
+            {
+              "file": "src/skills/skill-files.ts",
+              "count": 2,
+              "lines": [
+                264,
+                265
+              ]
+            },
+            {
+              "file": "src/ui/components/context-chips.ts",
+              "count": 2,
+              "lines": [
+                105,
+                113
+              ]
+            },
+            {
+              "file": "src/ui/components/input-toolbar.ts",
+              "count": 2,
+              "lines": [
+                187,
+                188
+              ]
+            },
+            {
+              "file": "src/ui/guardian-completion.ts",
+              "count": 2,
+              "lines": [
+                239,
+                379
+              ]
+            },
+            {
+              "file": "src/ui/tabs/tab-bar.ts",
+              "count": 2,
+              "lines": [
+                111,
+                119
+              ]
+            },
+            {
+              "file": "src/knowledge/metadata-index.ts",
+              "count": 1,
+              "lines": [
+                51
+              ]
+            },
+            {
+              "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+              "count": 1,
+              "lines": [
+                356
+              ]
+            },
+            {
+              "file": "src/services/model-service.ts",
+              "count": 1,
+              "lines": [
+                784
+              ]
+            },
+            {
+              "file": "src/services/operation-audit-log.ts",
+              "count": 1,
+              "lines": [
+                150
+              ]
+            },
+            {
+              "file": "src/skills/builtin/read-skill.ts",
+              "count": 1,
+              "lines": [
+                38
+              ]
+            },
+            {
+              "file": "src/ui/components/command-dropdown.ts",
+              "count": 1,
+              "lines": [
+                165
+              ]
+            },
+            {
+              "file": "src/ui/history/conversation-store.ts",
+              "count": 1,
+              "lines": [
+                118
+              ]
+            },
+            {
+              "file": "src/utils/logger.ts",
+              "count": 1,
+              "lines": [
+                76
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 4,
+          "type": "details",
+          "title": "Passes unsafe values into typed parameters",
+          "rawTitle": "Passes unsafe values into typed parameters",
+          "count": 157,
+          "countInferred": false,
+          "rules": [
+            "@typescript-eslint/no-unsafe-argument"
+          ],
+          "locationCount": 157,
+          "locationsByFile": [
+            {
+              "file": "src/skills/builtin/vault-ops.ts",
+              "count": 28,
+              "lines": [
+                44,
+                69,
+                79,
+                85,
+                99,
+                100,
+                119,
+                127,
+                131,
+                145,
+                164,
+                172,
+                176,
+                209,
+                217,
+                220,
+                250,
+                254,
+                262,
+                265,
+                277,
+                299,
+                301,
+                325,
+                354,
+                449,
+                507
+              ]
+            },
+            {
+              "file": "main.ts",
+              "count": 19,
+              "lines": [
+                601,
+                645,
+                657,
+                669,
+                708,
+                719,
+                839,
+                840,
+                842,
+                871,
+                878,
+                884,
+                899,
+                908,
+                1022,
+                1030,
+                1034,
+                1037
+              ]
+            },
+            {
+              "file": "src/ui/chat-controller.ts",
+              "count": 17,
+              "lines": [
+                206,
+                399,
+                513,
+                515,
+                520,
+                545,
+                547,
+                553,
+                653,
+                709,
+                974,
+                980,
+                985,
+                989,
+                990,
+                991,
+                1003
+              ]
+            },
+            {
+              "file": "src/memory/memory-manager.ts",
+              "count": 12,
+              "lines": [
+                326,
+                558,
+                559,
+                576,
+                597,
+                604,
+                645,
+                646,
+                650,
+                652,
+                662
+              ]
+            },
+            {
+              "file": "src/settings.ts",
+              "count": 11,
+              "lines": [
+                2163,
+                2170,
+                2172,
+                2210,
+                2221,
+                3098,
+                3101,
+                3104,
+                3105,
+                3488,
+                3664
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 6,
+              "lines": [
+                218,
+                427,
+                1065,
+                1076,
+                1077,
+                1086
+              ]
+            },
+            {
+              "file": "src/knowledge/frontmatter.ts",
+              "count": 5,
+              "lines": [
+                45,
+                60,
+                201,
+                205
+              ]
+            },
+            {
+              "file": "src/skills/builtin/obsidian-bases/executor.ts",
+              "count": 5,
+              "lines": [
+                59,
+                79,
+                105,
+                119,
+                130
+              ]
+            },
+            {
+              "file": "src/utils/request-url-fetch.ts",
+              "count": 5,
+              "lines": [
+                220,
+                226,
+                269,
+                293,
+                407
+              ]
+            },
+            {
+              "file": "src/services/model-catalog-service.ts",
+              "count": 4,
+              "lines": [
+                203,
+                234,
+                235,
+                240
+              ]
+            },
+            {
+              "file": "src/skills/builtin/json-canvas/executor.ts",
+              "count": 4,
+              "lines": [
+                64,
+                66,
+                98,
+                104
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-clipper/executor.ts",
+              "count": 4,
+              "lines": [
+                364,
+                481,
+                517,
+                519
+              ]
+            },
+            {
+              "file": "src/memory/hindsight-migration.ts",
+              "count": 3,
+              "lines": [
+                193,
+                237,
+                344
+              ]
+            },
+            {
+              "file": "src/runtime/base-chat-runtime.ts",
+              "count": 3,
+              "lines": [
+                287,
+                288
+              ]
+            },
+            {
+              "file": "src/services/model-service.ts",
+              "count": 3,
+              "lines": [
+                148,
+                699
+              ]
+            },
+            {
+              "file": "src/knowledge/metadata-index.ts",
+              "count": 2,
+              "lines": [
+                53,
+                133
+              ]
+            },
+            {
+              "file": "src/knowledge/ontology.ts",
+              "count": 2,
+              "lines": [
+                82
+              ]
+            },
+            {
+              "file": "src/services/obsidian-context-service.ts",
+              "count": 2,
+              "lines": [
+                225,
+                259
+              ]
+            },
+            {
+              "file": "src/skills/builtin/knowledge/executor.ts",
+              "count": 2,
+              "lines": [
+                31,
+                52
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+              "count": 2,
+              "lines": [
+                26,
+                29
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+              "count": 2,
+              "lines": [
+                166,
+                169
+              ]
+            },
+            {
+              "file": "src/ui/diff-modal.ts",
+              "count": 2,
+              "lines": [
+                157
+              ]
+            },
+            {
+              "file": "src/ui/selection-menu.ts",
+              "count": 2,
+              "lines": [
+                225,
+                231
+              ]
+            },
+            {
+              "file": "src/knowledge/compiler.ts",
+              "count": 1,
+              "lines": [
+                381
+              ]
+            },
+            {
+              "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+              "count": 1,
+              "lines": [
+                155
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-event-adapter.ts",
+              "count": 1,
+              "lines": [
+                9
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-tool-adapter.ts",
+              "count": 1,
+              "lines": [
+                76
+              ]
+            },
+            {
+              "file": "src/services/video-transcription.ts",
+              "count": 1,
+              "lines": [
+                326
+              ]
+            },
+            {
+              "file": "src/skills/builtin/read-skill.ts",
+              "count": 1,
+              "lines": [
+                41
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-search/executor.ts",
+              "count": 1,
+              "lines": [
+                35
+              ]
+            },
+            {
+              "file": "src/ui/components/knowledge-status-panel.ts",
+              "count": 1,
+              "lines": [
+                52
+              ]
+            },
+            {
+              "file": "src/ui/guardian-gutter.ts",
+              "count": 1,
+              "lines": [
+                163
+              ]
+            },
+            {
+              "file": "src/ui/renderers/code-block-renderer.ts",
+              "count": 1,
+              "lines": [
+                37
+              ]
+            },
+            {
+              "file": "src/ui/renderers/message-renderer.ts",
+              "count": 1,
+              "lines": [
+                81
+              ]
+            },
+            {
+              "file": "src/ui/renderers/thinking-renderer.ts",
+              "count": 1,
+              "lines": [
+                34
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 5,
+          "type": "details",
+          "title": "Returns unsafe values from typed code",
+          "rawTitle": "Returns unsafe values from typed code",
+          "count": 71,
+          "countInferred": false,
+          "rules": [
+            "@typescript-eslint/no-unsafe-return"
+          ],
+          "locationCount": 71,
+          "locationsByFile": [
+            {
+              "file": "src/memory/memory-manager.ts",
+              "count": 9,
+              "lines": [
+                571,
+                612,
+                650,
+                652,
+                654,
+                656,
+                658,
+                660,
+                662
+              ]
+            },
+            {
+              "file": "src/services/obsidian-context-service.ts",
+              "count": 5,
+              "lines": [
+                157,
+                158,
+                164,
+                165,
+                257
+              ]
+            },
+            {
+              "file": "src/settings.ts",
+              "count": 5,
+              "lines": [
+                2057,
+                2058,
+                2059,
+                2060,
+                2665
+              ]
+            },
+            {
+              "file": "src/utils/file-operation-contract.ts",
+              "count": 4,
+              "lines": [
+                118,
+                121,
+                141,
+                142
+              ]
+            },
+            {
+              "file": "main.ts",
+              "count": 3,
+              "lines": [
+                88,
+                195,
+                257
+              ]
+            },
+            {
+              "file": "src/knowledge/metadata-index.ts",
+              "count": 3,
+              "lines": [
+                14,
+                16,
+                27
+              ]
+            },
+            {
+              "file": "src/runtime/pi/harness-chat-runtime.ts",
+              "count": 3,
+              "lines": [
+                343,
+                346,
+                350
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+              "count": 3,
+              "lines": [
+                499,
+                502,
+                514
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-clipper/executor.ts",
+              "count": 3,
+              "lines": [
+                518,
+                519,
+                531
+              ]
+            },
+            {
+              "file": "src/utils/video_utils.ts",
+              "count": 3,
+              "lines": [
+                173,
+                174,
+                308
+              ]
+            },
+            {
+              "file": "src/knowledge/ontology-service.ts",
+              "count": 2,
+              "lines": [
+                221,
+                224
+              ]
+            },
+            {
+              "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+              "count": 2,
+              "lines": [
+                139,
+                356
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-event-adapter.ts",
+              "count": 2,
+              "lines": [
+                89,
+                90
+              ]
+            },
+            {
+              "file": "src/services/video-transcription.ts",
+              "count": 2,
+              "lines": [
+                171,
+                182
+              ]
+            },
+            {
+              "file": "src/ui/chat-controller.ts",
+              "count": 2,
+              "lines": [
+                414,
+                550
+              ]
+            },
+            {
+              "file": "src/ui/diff-modal.ts",
+              "count": 2,
+              "lines": [
+                151,
+                161
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 2,
+              "lines": [
+                424,
+                1649
+              ]
+            },
+            {
+              "file": "src/knowledge/frontmatter.ts",
+              "count": 1,
+              "lines": [
+                54
+              ]
+            },
+            {
+              "file": "src/services/model-catalog-service.ts",
+              "count": 1,
+              "lines": [
+                194
+              ]
+            },
+            {
+              "file": "src/services/model-service.ts",
+              "count": 1,
+              "lines": [
+                784
+              ]
+            },
+            {
+              "file": "src/services/operation-audit-log.ts",
+              "count": 1,
+              "lines": [
+                147
+              ]
+            },
+            {
+              "file": "src/services/workspace-edit-service.ts",
+              "count": 1,
+              "lines": [
+                200
+              ]
+            },
+            {
+              "file": "src/skills/builtin/knowledge/executor.ts",
+              "count": 1,
+              "lines": [
+                65
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+              "count": 1,
+              "lines": [
+                50
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+              "count": 1,
+              "lines": [
+                164
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-search/executor.ts",
+              "count": 1,
+              "lines": [
+                83
+              ]
+            },
+            {
+              "file": "src/skills/skill-files.ts",
+              "count": 1,
+              "lines": [
+                133
+              ]
+            },
+            {
+              "file": "src/ui/approval-card.ts",
+              "count": 1,
+              "lines": [
+                135
+              ]
+            },
+            {
+              "file": "src/ui/components/change-preview-card.ts",
+              "count": 1,
+              "lines": [
+                15
+              ]
+            },
+            {
+              "file": "src/ui/history/conversation-store.ts",
+              "count": 1,
+              "lines": [
+                115
+              ]
+            },
+            {
+              "file": "src/ui/renderers/thinking-renderer.ts",
+              "count": 1,
+              "lines": [
+                241
+              ]
+            },
+            {
+              "file": "src/ui/renderers/tool-renderer.ts",
+              "count": 1,
+              "lines": [
+                179
+              ]
+            },
+            {
+              "file": "src/ui/selection-ai/floating-panel.ts",
+              "count": 1,
+              "lines": [
+                27
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 6,
+          "type": "details",
+          "title": "This assertion is unnecessary since it does not change the type of the expression.",
+          "rawTitle": "This assertion is unnecessary since it does not change the type of the expression.",
+          "count": 46,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 46,
+          "locationsByFile": [
+            {
+              "file": "src/settings.ts",
+              "count": 15,
+              "lines": [
+                1268,
+                1282,
+                1286,
+                1789,
+                1840,
+                2069,
+                2269,
+                2304,
+                2418,
+                2453,
+                2484,
+                2513,
+                2553,
+                2612,
+                3739
+              ]
+            },
+            {
+              "file": "src/ui/components/input-toolbar.ts",
+              "count": 8,
+              "lines": [
+                84,
+                88,
+                101,
+                106,
+                131,
+                143,
+                157,
+                162
+              ]
+            },
+            {
+              "file": "main.ts",
+              "count": 7,
+              "lines": [
+                328,
+                329,
+                472,
+                483,
+                544,
+                800
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 5,
+              "lines": [
+                738,
+                745,
+                1332,
+                1563
+              ]
+            },
+            {
+              "file": "src/runtime/pi/session-store/compaction.ts",
+              "count": 3,
+              "lines": [
+                68,
+                69
+              ]
+            },
+            {
+              "file": "src/ui/components/attachment-modal.ts",
+              "count": 2,
+              "lines": [
+                83,
+                117
+              ]
+            },
+            {
+              "file": "src/runtime/pi/harness-chat-runtime.ts",
+              "count": 1,
+              "lines": [
+                169
+              ]
+            },
+            {
+              "file": "src/runtime/pi/session-store/migrate.ts",
+              "count": 1,
+              "lines": [
+                216
+              ]
+            },
+            {
+              "file": "src/runtime/pi/vault-session-fs.ts",
+              "count": 1,
+              "lines": [
+                42
+              ]
+            },
+            {
+              "file": "src/services/obsidian-context-service.ts",
+              "count": 1,
+              "lines": [
+                79
+              ]
+            },
+            {
+              "file": "src/ui/chat-controller.ts",
+              "count": 1,
+              "lines": [
+                936
+              ]
+            },
+            {
+              "file": "src/ui/components/history-menu.ts",
+              "count": 1,
+              "lines": [
+                63
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 7,
+          "type": "details",
+          "title": "Avoid !important — override styles by increasing selector specificity or using CSS variables instead.",
+          "rawTitle": "Avoid !important — override styles by increasing selector specificity or using CSS variables instead.",
+          "count": 24,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 24,
+          "locationsByFile": [
+            {
+              "file": "styles.css",
+              "count": 24,
+              "lines": [
+                6,
+                11,
+                12,
+                16,
+                17,
+                18,
+                22,
+                23,
+                24,
+                496,
+                646,
+                712,
+                713,
+                1061,
+                2737,
+                2738,
+                2802,
+                2803,
+                2864,
+                4221,
+                4222,
+                4223,
+                4224,
+                4229
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 8,
+          "type": "details",
+          "title": "Use 'window.setTimeout()' instead of 'setTimeout()' for popout window compatibility.",
+          "rawTitle": "Use 'window.setTimeout()' instead of 'setTimeout()' for popout window compatibility.",
+          "count": 19,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 19,
+          "locationsByFile": [
+            {
+              "file": "src/ui/guardian-completion.ts",
+              "count": 3,
+              "lines": [
+                256,
+                579,
+                638
+              ]
+            },
+            {
+              "file": "src/ui/renderers/message-renderer.ts",
+              "count": 3,
+              "lines": [
+                283,
+                369,
+                431
+              ]
+            },
+            {
+              "file": "src/utils/throttle.ts",
+              "count": 3,
+              "lines": [
+                63,
+                182,
+                192
+              ]
+            },
+            {
+              "file": "src/knowledge/watcher.ts",
+              "count": 2,
+              "lines": [
+                101,
+                121
+              ]
+            },
+            {
+              "file": "src/knowledge/runtime.ts",
+              "count": 1,
+              "lines": [
+                209
+              ]
+            },
+            {
+              "file": "src/memory/hindsight-types.ts",
+              "count": 1,
+              "lines": [
+                111
+              ]
+            },
+            {
+              "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+              "count": 1,
+              "lines": [
+                376
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-tool-adapter.ts",
+              "count": 1,
+              "lines": [
+                107
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+              "count": 1,
+              "lines": [
+                765
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+              "count": 1,
+              "lines": [
+                317
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-search/executor.ts",
+              "count": 1,
+              "lines": [
+                13
+              ]
+            },
+            {
+              "file": "src/ui/selection-ai/selection-context-builder.ts",
+              "count": 1,
+              "lines": [
+                18
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 9,
+          "type": "details",
+          "title": "Use 'window.clearTimeout()' instead of 'clearTimeout()' for popout window compatibility.",
+          "rawTitle": "Use 'window.clearTimeout()' instead of 'clearTimeout()' for popout window compatibility.",
+          "count": 15,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 15,
+          "locationsByFile": [
+            {
+              "file": "src/utils/throttle.ts",
+              "count": 6,
+              "lines": [
+                82,
+                104,
+                116,
+                191,
+                203,
+                222
+              ]
+            },
+            {
+              "file": "src/ui/guardian-completion.ts",
+              "count": 3,
+              "lines": [
+                269,
+                592,
+                641
+              ]
+            },
+            {
+              "file": "src/memory/hindsight-types.ts",
+              "count": 2,
+              "lines": [
+                112,
+                113
+              ]
+            },
+            {
+              "file": "src/ui/selection-ai/selection-context-builder.ts",
+              "count": 2,
+              "lines": [
+                19,
+                20
+              ]
+            },
+            {
+              "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+              "count": 1,
+              "lines": [
+                381
+              ]
+            },
+            {
+              "file": "src/runtime/pi/pi-tool-adapter.ts",
+              "count": 1,
+              "lines": [
+                123
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 10,
+          "type": "details",
+          "title": "This assertion is unnecessary since the receiver accepts the original type of the expression.",
+          "rawTitle": "This assertion is unnecessary since the receiver accepts the original type of the expression.",
+          "count": 13,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 13,
+          "locationsByFile": [
+            {
+              "file": "src/runtime/pi/session-store/conversation-session.ts",
+              "count": 2,
+              "lines": [
+                191,
+                195
+              ]
+            },
+            {
+              "file": "src/runtime/pi/session-store/migrate.ts",
+              "count": 2,
+              "lines": [
+                218,
+                464
+              ]
+            },
+            {
+              "file": "src/services/model-service.ts",
+              "count": 2,
+              "lines": [
+                699
+              ]
+            },
+            {
+              "file": "src/memory/hindsight-store.ts",
+              "count": 1,
+              "lines": [
+                354
+              ]
+            },
+            {
+              "file": "src/runtime/pi/harness-chat-runtime.ts",
+              "count": 1,
+              "lines": [
+                134
+              ]
+            },
+            {
+              "file": "src/runtime/pi/harness-session-manager.ts",
+              "count": 1,
+              "lines": [
+                439
+              ]
+            },
+            {
+              "file": "src/services/operation-audit-log.ts",
+              "count": 1,
+              "lines": [
+                139
+              ]
+            },
+            {
+              "file": "src/ui/history/conversation-store.ts",
+              "count": 1,
+              "lines": [
+                107
+              ]
+            },
+            {
+              "file": "src/ui/renderers/thinking-renderer.ts",
+              "count": 1,
+              "lines": [
+                34
+              ]
+            },
+            {
+              "file": "src/utils/request-url-fetch.ts",
+              "count": 1,
+              "lines": [
+                407
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 11,
+          "type": "details",
+          "title": "Promise returned in function argument where a void return was expected.",
+          "rawTitle": "Promise returned in function argument where a void return was expected.",
+          "count": 13,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 13,
+          "locationsByFile": [
+            {
+              "file": "src/settings.ts",
+              "count": 7,
+              "lines": [
+                2238,
+                2284,
+                2436,
+                2461,
+                2491,
+                3137,
+                3830
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 5,
+              "lines": [
+                378,
+                384,
+                1030,
+                1120,
+                1121
+              ]
+            },
+            {
+              "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+              "count": 1,
+              "lines": [
+                553
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 12,
+          "type": "details",
+          "title": "Uses document.createElement instead of Obsidian's createEl helpers",
+          "rawTitle": "Uses `document.createElement` instead of Obsidian's `createEl` helpers",
+          "count": 10,
+          "countInferred": false,
+          "rules": [
+            "obsidianmd/prefer-create-el"
+          ],
+          "locationCount": 10,
+          "locationsByFile": [
+            {
+              "file": "src/ui/ghost-text.ts",
+              "count": 3,
+              "lines": [
+                28,
+                72,
+                79
+              ]
+            },
+            {
+              "file": "src/ui/selection-menu.ts",
+              "count": 3,
+              "lines": [
+                84,
+                131,
+                242
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 2,
+              "lines": [
+                676,
+                860
+              ]
+            },
+            {
+              "file": "src/settings.ts",
+              "count": 1,
+              "lines": [
+                676
+              ]
+            },
+            {
+              "file": "src/ui/guardian-gutter.ts",
+              "count": 1,
+              "lines": [
+                71
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 13,
+          "type": "details",
+          "title": "Avoid using 'globalThis'. Use 'window' or 'activeWindow' for popout window compatibility.",
+          "rawTitle": "Avoid using 'globalThis'. Use 'window' or 'activeWindow' for popout window compatibility.",
+          "count": 9,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 9,
+          "locationsByFile": [
+            {
+              "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+              "count": 2,
+              "lines": [
+                352,
+                356
+              ]
+            },
+            {
+              "file": "src/ui/renderers/thinking-renderer.ts",
+              "count": 2,
+              "lines": [
+                32,
+                34
+              ]
+            },
+            {
+              "file": "src/utils/request-url-fetch.ts",
+              "count": 2,
+              "lines": [
+                50,
+                114
+              ]
+            },
+            {
+              "file": "src/services/video-transcription.ts",
+              "count": 1,
+              "lines": [
+                90
+              ]
+            },
+            {
+              "file": "src/ui/components/knowledge-status-panel.ts",
+              "count": 1,
+              "lines": [
+                136
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 1,
+              "lines": [
+                1228
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 14,
+          "type": "details",
+          "title": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the void operator.",
+          "rawTitle": "Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator.",
+          "count": 8,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 8,
+          "locationsByFile": [
+            {
+              "file": "src/settings.ts",
+              "count": 3,
+              "lines": [
+                1753,
+                1754,
+                2746
+              ]
+            },
+            {
+              "file": "main.ts",
+              "count": 2,
+              "lines": [
+                263,
+                319
+              ]
+            },
+            {
+              "file": "src/knowledge/runtime.ts",
+              "count": 1,
+              "lines": [
+                382
+              ]
+            },
+            {
+              "file": "src/ui/chat-controller.ts",
+              "count": 1,
+              "lines": [
+                352
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 1,
+              "lines": [
+                905
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 15,
+          "type": "details",
+          "title": "Obsidian's configuration folder is not necessarily .obsidian, it can be configured by the user. Use Vault#configDir to get the current value",
+          "rawTitle": "Obsidian's configuration folder is not necessarily `.obsidian`, it can be configured by the user. Use `Vault#configDir` to get the current value",
+          "count": 8,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 8,
+          "locationsByFile": [
+            {
+              "file": "src/skills/builtin/vault-ops.ts",
+              "count": 4,
+              "lines": [
+                424,
+                479,
+                537
+              ]
+            },
+            {
+              "file": "src/memory/hindsight-migration.ts",
+              "count": 1,
+              "lines": [
+                17
+              ]
+            },
+            {
+              "file": "src/runtime/pi/harness-env.ts",
+              "count": 1,
+              "lines": [
+                46
+              ]
+            },
+            {
+              "file": "src/runtime/pi/prompt-template-service.ts",
+              "count": 1,
+              "lines": [
+                33
+              ]
+            },
+            {
+              "file": "src/runtime/pi/session-store/conversation-session.ts",
+              "count": 1,
+              "lines": [
+                27
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 16,
+          "type": "details",
+          "title": "'any' overrides all other types in this union type.",
+          "rawTitle": "'any' overrides all other types in this union type.",
+          "count": 8,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 8,
+          "locationsByFile": [
+            {
+              "file": "src/memory/hindsight-migration.ts",
+              "count": 5,
+              "lines": [
+                34,
+                36,
+                67,
+                79,
+                104
+              ]
+            },
+            {
+              "file": "src/utils/video_utils.ts",
+              "count": 2,
+              "lines": [
+                26,
+                372
+              ]
+            },
+            {
+              "file": "src/ui/guardian-completion.ts",
+              "count": 1,
+              "lines": [
+                789
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 17,
+          "type": "details",
+          "title": "Empty block statement.",
+          "rawTitle": "Empty block statement.",
+          "count": 4,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 4,
+          "locationsByFile": [
+            {
+              "file": "src/knowledge/linter.ts",
+              "count": 3,
+              "lines": [
+                180,
+                188,
+                210
+              ]
+            },
+            {
+              "file": "src/knowledge/file-back.ts",
+              "count": 1,
+              "lines": [
+                105
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 18,
+          "type": "details",
+          "title": "Use 'FileManager.trashFile()' instead of 'Vault.trash()' to respect the user's file deletion preference.",
+          "rawTitle": "Use 'FileManager.trashFile()' instead of 'Vault.trash()' to respect the user's file deletion preference.",
+          "count": 4,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 4,
+          "locationsByFile": [
+            {
+              "file": "src/knowledge/indexer.ts",
+              "count": 2,
+              "lines": [
+                94,
+                107
+              ]
+            },
+            {
+              "file": "src/services/workspace-edit-service.ts",
+              "count": 1,
+              "lines": [
+                140
+              ]
+            },
+            {
+              "file": "src/skills/builtin/vault-ops.ts",
+              "count": 1,
+              "lines": [
+                231
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 19,
+          "type": "details",
+          "title": "Avoid :has — it can cause significant performance issues due to broad selector invalidation.",
+          "rawTitle": "Avoid :has — it can cause significant performance issues due to broad selector invalidation.",
+          "count": 4,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 4,
+          "locationsByFile": [
+            {
+              "file": "styles.css",
+              "count": 4,
+              "lines": [
+                10,
+                15,
+                2731,
+                2862
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 20,
+          "type": "details",
+          "title": "Unnecessary escape character: \\).",
+          "rawTitle": "Unnecessary escape character: \\).",
+          "count": 3,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 3,
+          "locationsByFile": [
+            {
+              "file": "main.ts",
+              "count": 1,
+              "lines": [
+                453
+              ]
+            },
+            {
+              "file": "src/services/clip-input.ts",
+              "count": 1,
+              "lines": [
+                13
+              ]
+            },
+            {
+              "file": "src/services/inbox-autosave.ts",
+              "count": 1,
+              "lines": [
+                17
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 21,
+          "type": "details",
+          "title": "Unnecessary escape character: \\[.",
+          "rawTitle": "Unnecessary escape character: \\[.",
+          "count": 3,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 3,
+          "locationsByFile": [
+            {
+              "file": "src/knowledge/runtime.ts",
+              "count": 2,
+              "lines": [
+                418,
+                450
+              ]
+            },
+            {
+              "file": "src/skills/builtin/web-clipper/executor.ts",
+              "count": 1,
+              "lines": [
+                54
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 22,
+          "type": "details",
+          "title": "Avoid unnecessary logging to console",
+          "rawTitle": "Avoid unnecessary logging to console",
+          "count": 2,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 2,
+          "locationsByFile": [
+            {
+              "file": "src/settings.ts",
+              "count": 1,
+              "lines": [
+                3487
+              ]
+            },
+            {
+              "file": "src/utils/logger.ts",
+              "count": 1,
+              "lines": [
+                89
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 23,
+          "type": "details",
+          "title": "Unexpected lexical declaration in case block.",
+          "rawTitle": "Unexpected lexical declaration in case block.",
+          "count": 2,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 2,
+          "locationsByFile": [
+            {
+              "file": "src/ui/chat-controller.ts",
+              "count": 2,
+              "lines": [
+                346,
+                347
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 24,
+          "type": "details",
+          "title": "A method that is not declared with this: void may cause unintentional scoping of this when separated from its object. Consider using an arrow function or explicitly .bind()ing the method to avoid calling the method with an unintended this value.  If a function does not access this, it can be annotated with this: void.",
+          "rawTitle": "A method that is not declared with `this: void` may cause unintentional scoping of `this` when separated from its object.\nConsider using an arrow function or explicitly `.bind()`ing the method to avoid calling the method with an unintended `this` value. \nIf a function does not access `this`, it can be annotated with `this: void`.",
+          "count": 2,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 2,
+          "locationsByFile": [
+            {
+              "file": "src/ui/guardian-completion.ts",
+              "count": 2,
+              "lines": [
+                555,
+                556
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 25,
+          "type": "details",
+          "title": "Unexpected use of 'localStorage'. Prefer App#saveLocalStorage / App#loadLocalStorage functions to write / read localStorage data that's unique to a vault.",
+          "rawTitle": "Unexpected use of 'localStorage'. Prefer `App#saveLocalStorage` / `App#loadLocalStorage` functions to write / read localStorage data that's unique to a vault.",
+          "count": 2,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 2,
+          "locationsByFile": [
+            {
+              "file": "src/ui/selection-ai/floating-panel.ts",
+              "count": 2,
+              "lines": [
+                22,
+                33
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 26,
+          "type": "details",
+          "title": "Unexpected browser feature \"css-display-contents\" is only partially supported by Obsidian 1.6.5",
+          "rawTitle": "Unexpected browser feature \"css-display-contents\" is only partially supported by Obsidian 1.6.5",
+          "count": 2,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 2,
+          "locationsByFile": [
+            {
+              "file": "styles.css",
+              "count": 2,
+              "lines": [
+                972,
+                3401
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 27,
+          "type": "details",
+          "title": "Unexpected browser feature \"multicolumn\" is only partially supported by Obsidian 1.6.5",
+          "rawTitle": "Unexpected browser feature \"multicolumn\" is only partially supported by Obsidian 1.6.5",
+          "count": 2,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 2,
+          "locationsByFile": [
+            {
+              "file": "styles.css",
+              "count": 2,
+              "lines": [
+                2893,
+                3393
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 28,
+          "type": "div",
+          "title": "Direct Filesystem Access: Uses the Node.js fs module to access the filesystem outside of the Obsidian vault API. Can read and write any file on the system.",
+          "rawTitle": "**Direct Filesystem Access**: Uses the Node.js `fs` module to access the filesystem outside of the Obsidian vault API. Can read and write any file on the system.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 0,
+          "locationsByFile": []
+        },
+        {
+          "severity": "medium",
+          "index": 29,
+          "type": "details",
+          "title": "Irregular whitespace not allowed.",
+          "rawTitle": "Irregular whitespace not allowed.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/knowledge/runtime.ts",
+              "count": 1,
+              "lines": [
+                482
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 30,
+          "type": "details",
+          "title": "Unnecessary escape character: \\..",
+          "rawTitle": "Unnecessary escape character: \\..",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/services/clip-input.ts",
+              "count": 1,
+              "lines": [
+                13
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 31,
+          "type": "details",
+          "title": "Unnecessary escape character: \\?.",
+          "rawTitle": "Unnecessary escape character: \\?.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/services/clip-input.ts",
+              "count": 1,
+              "lines": [
+                13
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 32,
+          "type": "details",
+          "title": "Unexpected use of 'fetch'. Use the built-in requestUrl function instead of fetch for network requests in Obsidian.",
+          "rawTitle": "Unexpected use of 'fetch'. Use the built-in `requestUrl` function instead of `fetch` for network requests in Obsidian.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/services/video-transcription.ts",
+              "count": 1,
+              "lines": [
+                113
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 33,
+          "type": "details",
+          "title": "This PluginSettingTab does not implement getSettingDefinitions(); its settings will not appear in Obsidian's settings search for users on 1.13.0 or later. Consider adopting the declarative settings API.",
+          "rawTitle": "This PluginSettingTab does not implement getSettingDefinitions(); its settings will not appear in Obsidian's settings search for users on 1.13.0 or later. Consider adopting the declarative settings API.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/settings.ts",
+              "count": 1,
+              "lines": [
+                1685
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 34,
+          "type": "details",
+          "title": "Promise-returning function provided to property where a void return was expected.",
+          "rawTitle": "Promise-returning function provided to property where a void return was expected.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/ui/controllers/context-controller.ts",
+              "count": 1,
+              "lines": [
+                48
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 35,
+          "type": "details",
+          "title": "Use 'window.requestAnimationFrame()' instead of 'requestAnimationFrame()' for popout window compatibility.",
+          "rawTitle": "Use 'window.requestAnimationFrame()' instead of 'requestAnimationFrame()' for popout window compatibility.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/ui/selection-ai/selection-menu-state.ts",
+              "count": 1,
+              "lines": [
+                192
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 36,
+          "type": "details",
+          "title": "Use 'window.clearInterval()' instead of 'clearInterval()' for popout window compatibility.",
+          "rawTitle": "Use 'window.clearInterval()' instead of 'clearInterval()' for popout window compatibility.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 1,
+              "lines": [
+                1152
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "medium",
+          "index": 37,
+          "type": "details",
+          "title": "Unexpected duplicate \"background\"",
+          "rawTitle": "Unexpected duplicate \"background\"",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "styles.css",
+              "count": 1,
+              "lines": [
+                2362
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "other": {
+      "count": 30,
+      "items": [
+        {
+          "severity": "info",
+          "index": 0,
+          "type": "details",
+          "title": "'_' is defined but never used.",
+          "rawTitle": "'_' is defined but never used.",
+          "count": 8,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 8,
+          "locationsByFile": [
+            {
+              "file": "src/skills/builtin/web-clipper/executor.ts",
+              "count": 7,
+              "lines": [
+                84,
+                174,
+                203,
+                441,
+                452,
+                462,
+                468
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 1,
+              "lines": [
+                1456
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "info",
+          "index": 1,
+          "type": "details",
+          "title": "'e' is defined but never used.",
+          "rawTitle": "'e' is defined but never used.",
+          "count": 7,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 7,
+          "locationsByFile": [
+            {
+              "file": "src/services/model-service.ts",
+              "count": 3,
+              "lines": [
+                700,
+                716,
+                741
+              ]
+            },
+            {
+              "file": "src/skills/skill-registry.ts",
+              "count": 2,
+              "lines": [
+                121,
+                192
+              ]
+            },
+            {
+              "file": "main.ts",
+              "count": 1,
+              "lines": [
+                169
+              ]
+            },
+            {
+              "file": "src/skills/builtin/vault-ops.ts",
+              "count": 1,
+              "lines": [
+                551
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "info",
+          "index": 2,
+          "type": "details",
+          "title": "sessionRef is deprecated. 阶段A 起改用 sessionRefs(per-conversation)。保留字段仅供旧数据迁移。 旧版全局单会话的引用。loadSettings 会把它迁移到 sessionRefs 的一个兜底键后不再写入。",
+          "rawTitle": "`sessionRef` is deprecated. 阶段A 起改用 sessionRefs(per-conversation)。保留字段仅供旧数据迁移。\n旧版全局单会话的引用。loadSettings 会把它迁移到 sessionRefs 的一个兜底键后不再写入。",
+          "count": 3,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 3,
+          "locationsByFile": [
+            {
+              "file": "src/services/model-service.ts",
+              "count": 3,
+              "lines": [
+                172,
+                173,
+                174
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "info",
+          "index": 3,
+          "type": "details",
+          "title": "Missing GitHub artifact attestations for release assets",
+          "rawTitle": "Missing GitHub artifact attestations for release assets",
+          "count": 2,
+          "countInferred": false,
+          "rules": [
+            "main.js",
+            "styles.css"
+          ],
+          "locationCount": 0,
+          "locationsByFile": []
+        },
+        {
+          "severity": "info",
+          "index": 4,
+          "type": "details",
+          "title": "'error' is defined but never used.",
+          "rawTitle": "'error' is defined but never used.",
+          "count": 2,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 2,
+          "locationsByFile": [
+            {
+              "file": "src/services/model-service.ts",
+              "count": 2,
+              "lines": [
+                160,
+                668
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "info",
+          "index": 5,
+          "type": "details",
+          "title": "substr is deprecated. A legacy feature for browser compatibility",
+          "rawTitle": "`substr` is deprecated. A legacy feature for browser compatibility",
+          "count": 2,
+          "countInferred": false,
+          "rules": [],
+          "locationCount": 2,
+          "locationsByFile": [
+            {
+              "file": "src/ui/chat-controller.ts",
+              "count": 1,
+              "lines": [
+                754
+              ]
+            },
+            {
+              "file": "src/ui/shell-view.ts",
+              "count": 1,
+              "lines": [
+                942
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "info",
+          "index": 6,
+          "type": "div",
+          "title": "Vault Enumeration: Enumerates all files in the vault (vault.getFiles, getMarkdownFiles, etc.). Gives the plugin access to every file path in the vault.",
+          "rawTitle": "**Vault Enumeration**: Enumerates all files in the vault (`vault.getFiles`, `getMarkdownFiles`, etc.). Gives the plugin access to every file path in the vault.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 0,
+          "locationsByFile": []
+        },
+        {
+          "severity": "info",
+          "index": 7,
+          "type": "div",
+          "title": "Clipboard Access: Reads or writes the system clipboard. May expose content copied from outside Obsidian.",
+          "rawTitle": "**Clipboard Access**: Reads or writes the system clipboard. May expose content copied from outside Obsidian.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 0,
+          "locationsByFile": []
+        },
+        {
+          "severity": "info",
+          "index": 8,
+          "type": "details",
+          "title": "timeoutMs is deprecated. 保留字段以兼容调用方旧签名，但已不再消费。 无状态生成迁移到 pi completeSimple 后走原生 signal 硬中断； 超时应由调用方用 AbortSignal 表达，而非此毫秒数。",
+          "rawTitle": "`timeoutMs` is deprecated. 保留字段以兼容调用方旧签名，但已不再消费。\n无状态生成迁移到 pi completeSimple 后走原生 signal 硬中断；\n超时应由调用方用 AbortSignal 表达，而非此毫秒数。",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/services/model-service.ts",
+              "count": 1,
+              "lines": [
+                617
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "info",
+          "index": 9,
+          "type": "details",
+          "title": "'_providerId' is assigned a value but never used.",
+          "rawTitle": "'_providerId' is assigned a value but never used.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/settings.ts",
+              "count": 1,
+              "lines": [
+                1470
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "info",
+          "index": 10,
+          "type": "details",
+          "title": "'err' is defined but never used.",
+          "rawTitle": "'err' is defined but never used.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/ui/components/attachment-modal.ts",
+              "count": 1,
+              "lines": [
+                143
+              ]
+            }
+          ]
+        },
+        {
+          "severity": "info",
+          "index": 11,
+          "type": "details",
+          "title": "'_error' is defined but never used.",
+          "rawTitle": "'_error' is defined but never used.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 1,
+          "locationsByFile": [
+            {
+              "file": "src/ui/renderers/tool-renderer.ts",
+              "count": 1,
+              "lines": [
+                234
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "passed": {
+      "count": 5,
+      "items": [
+        {
+          "severity": "pass",
+          "index": 0,
+          "type": "div",
+          "title": "Vault Read: Reads individual vault files via the Obsidian API (vault.read, vault.cachedRead)",
+          "rawTitle": "**Vault Read**: Reads individual vault files via the Obsidian API (`vault.read`, `vault.cachedRead`)",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 0,
+          "locationsByFile": []
+        },
+        {
+          "severity": "pass",
+          "index": 1,
+          "type": "div",
+          "title": "Vault Write: Creates or modifies vault files via the Obsidian API (vault.modify, vault.create, etc.)",
+          "rawTitle": "**Vault Write**: Creates or modifies vault files via the Obsidian API (`vault.modify`, `vault.create`, etc.)",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 0,
+          "locationsByFile": []
+        },
+        {
+          "severity": "pass",
+          "index": 2,
+          "type": "div",
+          "title": "No vulnerable dependencies found.",
+          "rawTitle": "No vulnerable dependencies found.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 0,
+          "locationsByFile": []
+        },
+        {
+          "severity": "pass",
+          "index": 3,
+          "type": "div",
+          "title": "No obfuscation detected.",
+          "rawTitle": "No obfuscation detected.",
+          "count": 1,
+          "countInferred": true,
+          "rules": [],
+          "locationCount": 0,
+          "locationsByFile": []
+        },
+        {
+          "severity": "pass",
+          "index": 4,
+          "type": "details",
+          "title": "Build reproduced the release main.js byte-for-byte",
+          "rawTitle": "Build reproduced the release main.js byte-for-byte",
+          "count": 1,
+          "countInferred": true,
+          "rules": [
+            "main.js"
+          ],
+          "locationCount": 0,
+          "locationsByFile": []
+        }
+      ]
+    }
+  },
+  "disclosures": {
+    "count": 4,
+    "items": [
+      {
+        "severity": "info",
+        "index": 0,
+        "type": "details",
+        "title": "Plugin might make requests to external domains",
+        "rawTitle": "Plugin might make requests to external domains",
+        "count": 1,
+        "countInferred": true,
+        "rules": [
+          "api.bilibili.com"
+        ],
+        "locationCount": 0,
+        "locationsByFile": []
+      },
+      {
+        "severity": "info",
+        "index": 1,
+        "type": "details",
+        "title": "Number of network request calls",
+        "rawTitle": "Number of network request calls",
+        "count": 1,
+        "countInferred": true,
+        "rules": [
+          "21 network calls"
+        ],
+        "locationCount": 0,
+        "locationsByFile": []
+      },
+      {
+        "severity": "info",
+        "index": 2,
+        "type": "div",
+        "title": "Malware scan not available.",
+        "rawTitle": "Malware scan not available.",
+        "count": 1,
+        "countInferred": true,
+        "rules": [],
+        "locationCount": 0,
+        "locationsByFile": []
+      },
+      {
+        "severity": "info",
+        "index": 3,
+        "type": "div",
+        "title": "Network requests scan not available.",
+        "rawTitle": "Network requests scan not available.",
+        "count": 1,
+        "countInferred": true,
+        "rules": [],
+        "locationCount": 0,
+        "locationsByFile": []
+      }
+    ]
+  }
+}

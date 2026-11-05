@@ -7,7 +7,9 @@
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "test": "tsx --tsconfig tsconfig.test.json test/run-tests.ts",
-    "licenses": "node scripts/gen-third-party-licenses.mjs"
+    "licenses": "node scripts/gen-third-party-licenses.mjs",
+    "review:inventory": "node scripts/review-scan/scorecard-inventory.mjs",
+    "review:lint": "node scripts/review-scan/reproduce-eslint.mjs"
   },
   "keywords": [],
   "author": "yinfie",
