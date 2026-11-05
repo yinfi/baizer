@@ -417,7 +417,7 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
             const items = asArray(ckRecord.items) || [];
             return {
               category: ckRecord.category as string,
-              items: items.filter((i: unknown) => typeof i === 'string') as string[],
+              items: items.filter((i: unknown) => typeof i === 'string'),
             };
           });
       }
