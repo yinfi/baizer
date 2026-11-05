@@ -11,6 +11,7 @@ import type {
     DerivedSkillStatus,
 } from './skills/builtin/plugin-ctrl/plugin-watcher';
 import { t, getLocale, Locale } from './i18n/zh';
+import { createRenderScheduler, type RenderScheduler } from './utils/render-scheduler';
 
 export type SettingsSectionId =
     | 'overview'
@@ -1243,7 +1244,9 @@ export function resolveBaseUrlOnProtocolChange(nextType: ProviderType, previousB
     return trimmed;
 }
 
-/** 模型字段的渲染依赖。以参数传入而非闭包 this，这样它能脱离 SettingTab 单测。 */
+/**
+ * 模型字段的渲染依赖。以参数传入而非闭包 this，这样它能脱离 SettingTab 单测。
+ */
 export interface ModelFieldDeps {
     currentModel: string;
     hasApiKey: boolean;
@@ -1257,6 +1260,14 @@ export interface ModelFieldDeps {
     onModelChange: (modelId: string) => Promise<void> | void;
     /** 局部重绘后旧 DOM 已作废，异步回调据此放弃写入 */
     isStale: () => boolean;
+    /**
+     * 上一次已加载的结果。命中时直接渲染，不再重发 /models 请求 —— 设置页每次
+     * 局部重绘都会重建模型字段，若每次都重新拉列表，移动端弱网下会堆起一串挂起请求
+     * （issue #81）。只有用户点「Refresh list」才强制重取。
+     */
+    loadedResult?: AvailableModelsResult;
+    /** 加载完成后把结果交给上层缓存（失败兜底结果也缓存，避免重绘后重复请求）。 */
+    onLoaded?: (result: AvailableModelsResult) => void;
 }
 
 /**
@@ -1360,6 +1371,8 @@ export function renderModelField(container: HTMLElement, deps: ModelFieldDeps): 
         select.value = '__loading__';
         try {
             const result = await deps.loadModels(forceRefresh);
+            // 即使旧 DOM 已作废也把结果交给上层缓存：下一次重绘不必再打一次 /models。
+            deps.onLoaded?.(result);
             if (deps.isStale()) return;
             applyState(result);
         } catch (caught: any) {
@@ -1384,7 +1397,12 @@ export function renderModelField(container: HTMLElement, deps: ModelFieldDeps): 
         void commitModel();
     });
 
-    void load(false);
+    if (deps.loadedResult) {
+        // 命中缓存：直接渲染上次结果。重绘、搜索、展开分区都不再触发新的 /models 请求。
+        applyState(deps.loadedResult);
+    } else {
+        void load(false);
+    }
 }
 
 /** 就地校验反馈节点：只改文案与色调，不重建 DOM —— 重建会打断正在输入的焦点。 */
@@ -1418,6 +1436,34 @@ export function getRenderableSettingsSections(
 ): SettingsSectionId[] {
     return visibleSections.filter(sectionId => openSectionIds.has(sectionId));
 }
+
+/** 两次渲染的分区列表是否一致：一致就不必重绘（搜索框逐键重绘的止损点）。 */
+export function isSameSettingsSectionList(
+    a: readonly SettingsSectionId[],
+    b: readonly SettingsSectionId[],
+): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+}
+
+/**
+ * 模型字段结果缓存键：端点的身份（provider / 协议 / 地址 / key 前缀）。
+ * 只改模型名或其它无关设置时键不变，重绘可以复用上次列表；
+ * 地址、协议或 key 变了才需要重新列模型。
+ */
+export function getModelFieldCacheKey(
+    providerId: string,
+    config: ProviderConfig | undefined,
+): string {
+    if (!config) return providerId;
+    return `${providerId}:${config.type}:${(config.baseUrl || '').trim()}:${(config.apiKey || '').slice(0, 8)}`;
+}
+
+/** 模型字段结果缓存有效期：与 ModelService 的 modelListCache TTL 保持一致。 */
+export const MODEL_FIELD_CACHE_TTL_MS = 10 * 60 * 1000;
 
 export function getSettingsSectionStatuses(
     settings: PluginSettings
@@ -1694,13 +1740,6 @@ export class SettingTab extends PluginSettingTab {
     private didInitExpand = false;
     // P0-1 局部刷新：display() 只建一次骨架（hero+搜索），accordionHost 内容由 renderAccordion() 单独重绘。
     private accordionHost: HTMLElement | null = null;
-    // #81：renderAccordion() 在自身同步构建循环中会调用 renderSectionContent()，
-    // 某些分区（如 memory）在挂载时会同步（await 之前）触发回来再调一次 renderAccordion()
-    // （见 refreshMemoryView），导致外层循环还在往已被 host.empty() 换掉的旧容器里 append，
-    // 产生重复构建与游离 DOM。这里把「正在渲染中」的重入请求收集起来，等当前这趟构建完整
-    // 跑完后统一补一次，而不是立刻在循环中间重新开始。
-    private isRenderingAccordion = false;
-    private pendingAccordionRerender = false;
     private searchQuery = '';
     private revealApiKey = false;
     // 激活 provider 卡片的详情是否折叠。默认展开(false)；再次点击当前激活卡即切换折叠态，
@@ -1712,12 +1751,9 @@ export class SettingTab extends PluginSettingTab {
     private memoryActiveTab: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = 'overview';
     private memoryLoading = false;
     private memoryError = '';
-    // #81：知识库分区每次整页/局部重绘都无条件触发 refreshOntologyStatus()，
-    // 其内部 getGlobalCounts() 对所有被跟踪笔记串行 await 读盘，是 O(笔记数) 的开销。
-    // 展开态下任何一次 renderAccordion()（哪怕由完全不相关的分区触发）都会重跑一次。
-    // 用一个短 TTL 的「上次结果」缓存承接分区重挂载场景：挂载时若缓存未过期，直接复用
-    // 渲染好的文案，不重新发起遍历；显式操作（Open ontology / Discover / Recompile 等）
-    // 仍然各自直接调用 refreshOntologyStatus() 走真实刷新，不受这个 TTL 影响。
+    // #81：知识库分区每次整页/局部重绘都会重新挂载状态行；5s 内直接复用上次渲染好的文案，
+    // 连 getOntologyStatus / 文章 frontmatter 遍历都省掉。计数本身在
+    // KnowledgeStatusService.getGlobalCounts() 还有一层 30s 缓存（含分批与并发合并）。
     private ontologyStatusCache: { text: string; title: string; timestamp: number } | null = null;
     private static readonly ONTOLOGY_STATUS_CACHE_TTL_MS = 5000;
     // textarea 逐击键写盘代价高：包一层 400ms debounce，末尾触发一次落盘。
@@ -1733,6 +1769,20 @@ export class SettingTab extends PluginSettingTab {
         400,
         false,
     );
+    // 局部重绘调度：合并同一轮里的多次请求、禁止渲染中嵌套渲染（issue #81 卡死根因之一）。
+    private renderScheduler: RenderScheduler = createRenderScheduler(() => this.renderAccordionNow());
+    // 搜索逐键整页重建是移动端长任务的放大器：150ms 防抖 + 命中集合没变就不重绘。
+    private debouncedSearchRender: Debouncer<[], void> = debounce(
+        () => this.applySearchRender(),
+        150,
+        false,
+    );
+    private lastSearchRenderQuery = '';
+    private lastSearchRenderVisible: SettingsSectionId[] = [];
+    // 模型字段结果缓存：重绘/搜索/展开分区都复用上次列表，只有用户点「Refresh list」才强制重取。
+    private modelFieldCache = new Map<string, { result: AvailableModelsResult; timestamp: number }>();
+    // 面板打开期间监听隐藏事件，尽量把 debounce 里未落盘的最后一次编辑刷出去（移动端进程可能被回收）。
+    private visibilityFlushInstalled = false;
 
     constructor(app: App, plugin: IPlugin) {
         super(app, plugin);
@@ -1766,6 +1816,10 @@ export class SettingTab extends PluginSettingTab {
     }
 
     hide(): void {
+        // 先丢弃还没执行的排队重绘，避免面板关闭后又往已卸载的 DOM 里构建。
+        this.renderScheduler.cancel();
+        this.debouncedSearchRender.cancel();
+        this.removeVisibilityFlush();
         // 面板关闭时立即落盘 debounce 里未触发的最后一次编辑，避免丢改。
         this.debouncedPersist.run();
         this.debouncedPersistLight.run();
@@ -1791,7 +1845,32 @@ export class SettingTab extends PluginSettingTab {
         const root = containerEl.createDiv({ cls: 'baizer-settings-page' });
         this.renderHeader(root);
         this.accordionHost = root.createDiv({ cls: 'baizer-settings-accordion-host' });
+        this.installVisibilityFlush();
         this.renderAccordion();
+    }
+
+    // 面板打开期间监听「页面被隐藏」：移动端切后台/被回收前尽量把 debounce 里的最后编辑落盘。
+    // 诚实边界：进程被强杀时任何回调都不保证执行 —— 这里只能缩小丢改窗口，不能消除。
+    private readonly handleVisibilityChange = (): void => {
+        if (typeof document === 'undefined') return;
+        if (document.visibilityState === 'visible') return;
+        this.debouncedPersist.run();
+        this.debouncedPersistLight.run();
+    };
+
+    private installVisibilityFlush(): void {
+        if (this.visibilityFlushInstalled || typeof document === 'undefined') return;
+        if (typeof document.addEventListener !== 'function') return;
+        document.addEventListener('visibilitychange', this.handleVisibilityChange);
+        this.visibilityFlushInstalled = true;
+    }
+
+    private removeVisibilityFlush(): void {
+        if (!this.visibilityFlushInstalled || typeof document === 'undefined') return;
+        if (typeof document.removeEventListener === 'function') {
+            document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+        }
+        this.visibilityFlushInstalled = false;
     }
 
     private renderHeader(containerEl: HTMLElement): void {
@@ -1812,47 +1891,51 @@ export class SettingTab extends PluginSettingTab {
             },
         }) as HTMLInputElement;
         searchInput.value = this.searchQuery;
-        // 只更新查询并局部重绘手风琴；搜索框本身不重建，焦点不丢。
+        // 只更新查询；逐键整页重建是移动端长任务的放大器，改为 150ms 防抖后
+        // 再由 applySearchRender() 判断「命中分区是否真的变了」才重绘。
+        // 搜索框本身不重建，焦点与光标不丢。
         searchInput.addEventListener('input', () => {
             this.searchQuery = searchInput.value;
-            this.renderAccordion();
+            this.debouncedSearchRender();
         });
     }
 
     // 局部刷新入口：只重绘 accordion 宿主内的内容，不触碰 hero/搜索框。
     // 所有 section 内的 onChange/click 现在都调用它（而非整页 display()），从而保留焦点与其它分区的展开态。
+    // 真正的 DOM 构建在 renderAccordionNow()；这里只排队：同一轮内合并，渲染中不嵌套（issue #81）。
     private renderAccordion(): void {
-        // #81：部分分区（memory）在同步挂载过程中会回调回来再触发一次 renderAccordion()
-        // （refreshMemoryView 在它的首个 await 之前就调用）。真的重入会让外层循环继续往
-        // 已经被内层 host.empty() 扔掉的旧节点里 append，产生游离 DOM 和双倍渲染。
-        // 这里把重入请求压成「跑完当前这趟后再补一次」，不在栈中间重新开始构建。
-        if (this.isRenderingAccordion) {
-            this.pendingAccordionRerender = true;
-            return;
-        }
-        this.isRenderingAccordion = true;
-        try {
-            this.renderAccordionOnce();
-        } finally {
-            this.isRenderingAccordion = false;
-            if (this.pendingAccordionRerender) {
-                this.pendingAccordionRerender = false;
-                this.renderAccordion();
-            }
-        }
+        this.renderScheduler.request();
     }
 
-    private renderAccordionOnce(): void {
-        const host = this.accordionHost;
-        if (!host) {
-            // 骨架尚未建立（理论上不会发生），退回整页构建。
-            this.display();
+    /**
+     * 搜索输入的重绘闸门：只有「查询空/非空状态」或「可见分区集合」真的变了才重绘。
+     * 连续输入 20 个字符时，只要命中分区没变，一次整页重建都不会发生。
+     */
+    private applySearchRender(): void {
+        const normalized = normalizeSearchQuery(this.searchQuery);
+        const nextVisible = getMatchingSettingsSections(this.searchQuery);
+        const queryModeChanged = (normalized === '') !== (this.lastSearchRenderQuery === '');
+        if (!queryModeChanged && isSameSettingsSectionList(nextVisible, this.lastSearchRenderVisible)) {
             return;
         }
+        this.renderAccordion();
+    }
+
+    private renderAccordionNow(): void {
+        const host = this.accordionHost;
+        // 面板已关闭（hide 会 cancel 排队请求）或骨架未建立：不再构建。
+        if (!host) return;
+        this.renderAccordionContents(host);
+    }
+
+    private renderAccordionContents(host: HTMLElement): void {
         const token = ++this.renderToken;
         host.empty();
 
         const visibleSections = this.getVisibleSections();
+        // 记录本次渲染对应的搜索状态，供 applySearchRender() 判断下次是否真的需要重绘。
+        this.lastSearchRenderQuery = normalizeSearchQuery(this.searchQuery);
+        this.lastSearchRenderVisible = visibleSections;
         if (!visibleSections.length) {
             const empty = host.createDiv({ cls: 'baizer-settings-empty-state' });
             renderSettingHeading(empty, t('No matching settings'));
@@ -1883,8 +1966,12 @@ export class SettingTab extends PluginSettingTab {
             card.addEventListener('toggle', () => {
                 if (card.open) {
                     this.openSectionIds.add(sectionId);
-                    // 首次展开某未渲染分区时，局部重绘即可注入其内容（不再整页重建）。
-                    if (!renderableSections.has(sectionId)) this.renderAccordion();
+                    // 展开一个尚未渲染的分区：只就地注入这一块内容，不再整页重建。
+                    // （此前在 toggle 派发过程中 empty() 掉派发元素自身，属于渲染可重入。）
+                    if (renderableSections.has(sectionId)) return;
+                    renderableSections.add(sectionId);
+                    const content = card.createDiv({ cls: 'baizer-settings-section-content' });
+                    this.renderSectionContent(sectionId, content, this.renderToken);
                     return;
                 }
                 this.openSectionIds.delete(sectionId);
@@ -1985,6 +2072,12 @@ export class SettingTab extends PluginSettingTab {
     }
 
     private renderMemorySection(containerEl: HTMLElement): void {
+        // 首次展开记忆分区时自动加载。放在最前面：本次渲染就能直接画出 Loading 态，
+        // 不必「先渲染空列表、再因 loading 置位整页重绘一次」（issue #81 的渲染可重入）。
+        if (!this.memoryView && !this.memoryLoading) {
+            void this.refreshMemoryView(this.memoryActiveTab, { repaintOnStart: false });
+        }
+
         const toolbar = containerEl.createDiv({ cls: 'baizer-memory-toolbar' });
         new Setting(toolbar)
             .setName(t('Privacy Mode'))
@@ -2057,14 +2150,11 @@ export class SettingTab extends PluginSettingTab {
         this.renderMemorySearch(containerEl);
         this.renderMemoryTabs(containerEl);
         this.renderMemoryList(containerEl);
-
-        if (!this.memoryView && !this.memoryLoading) {
-            void this.refreshMemoryView();
-        }
     }
 
     private async refreshMemoryView(
-        mode: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = this.memoryActiveTab
+        mode: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = this.memoryActiveTab,
+        options: { repaintOnStart?: boolean } = {},
     ): Promise<void> {
         if (typeof this.plugin.modelService?.getMemoryView !== 'function') {
             this.memoryError = t('Memory service is not available.');
@@ -2074,7 +2164,9 @@ export class SettingTab extends PluginSettingTab {
 
         this.memoryLoading = true;
         this.memoryError = '';
-        this.renderAccordion();
+        // 由 renderMemorySection 首次自动加载时，当前这次渲染已经会画出 Loading，
+        // 不再排队一次多余的整页重绘（repaintOnStart: false）。
+        if (options.repaintOnStart !== false) this.renderAccordion();
         try {
             this.memoryView = await this.plugin.modelService.getMemoryView({
                 mode,
@@ -2694,6 +2786,13 @@ export class SettingTab extends PluginSettingTab {
 
     /** 第 3 组：模型。 */
     private renderModelGroup(group: HTMLElement, activeConfig: ProviderConfig, token: number): void {
+        const providerId = this.plugin.settings.activeProvider;
+        const cacheKey = getModelFieldCacheKey(providerId, activeConfig);
+        const cached = this.modelFieldCache.get(cacheKey);
+        const loadedResult = cached && Date.now() - cached.timestamp < MODEL_FIELD_CACHE_TTL_MS
+            ? cached.result
+            : undefined;
+
         this.renderConnectionField(group, t('Model'), (valueEl) => {
             renderModelField(valueEl, {
                 currentModel: activeConfig.model || '',
@@ -2707,6 +2806,16 @@ export class SettingTab extends PluginSettingTab {
                     await this.plugin.modelService.switchModel(modelId, () => this.persistSettings());
                 },
                 isStale: () => token !== this.renderToken,
+                // 复用上次加载结果：重绘/搜索/展开分区不再重发 /models（issue #81）。
+                loadedResult,
+                onLoaded: (result) => {
+                    // 只保留最近若干个端点身份的结果，切换 provider 后缓存不会无限增长。
+                    if (this.modelFieldCache.size >= 8 && !this.modelFieldCache.has(cacheKey)) {
+                        const oldestKey = this.modelFieldCache.keys().next().value;
+                        if (oldestKey !== undefined) this.modelFieldCache.delete(oldestKey);
+                    }
+                    this.modelFieldCache.set(cacheKey, { result, timestamp: Date.now() });
+                },
             });
         }, {
             hint: t('Type the model ID directly, or pick one from the list once the endpoint returns it.'),
@@ -3493,9 +3602,9 @@ export class SettingTab extends PluginSettingTab {
             cls: 'baizer-settings-inline-note',
             text: t('Ontology status: loading...'),
         });
-        // #81：知识库分区随便哪次 renderAccordion() 都会重挂载到这里（哪怕触发源是
-        // 别的分区），挂载即无条件重新遍历全库笔记代价太高。缓存未过期时直接复用上次
-        // 结果渲染，不再重新发起遍历；过期或首次打开仍然老路径刷新。
+        // 默认走缓存：知识库分区每次渲染都重算全库状态正是 issue #81 的第 3 条。
+        // 优先复用 5s 内已渲染的文案（连状态文件读取都省掉）；过期后走
+        // refreshOntologyStatus，其中 getGlobalCounts() 另有服务层 30s 计数缓存。
         const cached = this.ontologyStatusCache;
         if (cached && Date.now() - cached.timestamp < SettingTab.ONTOLOGY_STATUS_CACHE_TTL_MS) {
             ontologyStatusEl.textContent = cached.text;
@@ -3522,7 +3631,8 @@ export class SettingTab extends PluginSettingTab {
             }
             const path = await runtime.discoverOntology();
             new Notice(path ? t('Ontology schema created') + ': ' + path : t('Ontology schema was not created.'));
-            await this.refreshOntologyStatus(ontologyStatusEl);
+            // 显式操作后强制刷新，不必等缓存 TTL。
+            await this.refreshOntologyStatus(ontologyStatusEl, { forceFresh: true });
         }, 'accent');
         this.createActionButton(actions, t('Preview'), async () => {
             const runtime = this.plugin.knowledgeRuntime;
@@ -3542,7 +3652,8 @@ export class SettingTab extends PluginSettingTab {
             }
             const count = await runtime.markOntologyStaleFilesPending();
             new Notice(`${t('Marked stale notes pending')}: ${count}`);
-            await this.refreshOntologyStatus(ontologyStatusEl);
+            // 刚把 stale 标成 pending，计数变了，必须绕过缓存。
+            await this.refreshOntologyStatus(ontologyStatusEl, { forceFresh: true });
         });
 
         const advanced = containerEl.createEl('details', { cls: 'baizer-settings-advanced' });
@@ -3617,7 +3728,15 @@ export class SettingTab extends PluginSettingTab {
                 }));
     }
 
-    private async refreshOntologyStatus(statusEl: HTMLElement): Promise<void> {
+    /**
+     * 刷新知识库状态行。
+     * 计数默认走 KnowledgeStatusService 的缓存（30s TTL），避免每次整页重建都串行遍历全库；
+     * 只有本页的显式操作（Discover / Mark stale pending）才传 forceFresh 绕过缓存。
+     */
+    private async refreshOntologyStatus(
+        statusEl: HTMLElement,
+        options: { forceFresh?: boolean } = {},
+    ): Promise<void> {
         const runtime = this.plugin.knowledgeRuntime;
         if (!runtime?.getOntologyStatus) {
             statusEl.textContent = t('Ontology status: Knowledge runtime is not available.');
@@ -3630,7 +3749,7 @@ export class SettingTab extends PluginSettingTab {
                 ? await runtime.getOntologyDiscoveryReadiness()
                 : null;
             const counts = runtime.getStatusService
-                ? await runtime.getStatusService().getGlobalCounts()
+                ? await runtime.getStatusService().getGlobalCounts({ forceFresh: options.forceFresh })
                 : null;
             // P1-4: 状态串走 i18n,枚举值仍保留原值(供进阶用户识别),但前缀/字段名中文化。
             const parts = [

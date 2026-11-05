@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "issue #81（移动端设置页卡死）的 before/after 截图夹具。",
+    "与 cch-opencode.json 同场景，但把 baseUrl 指向本机未监听的端口：",
+    "这样两个阶段都在同一时刻拿到同样的连接失败结果，/models 请求不会因外网",
+    "可达性差异让 before/after 的模型字段停在不同的中间态。"
+  ],
+  "language": "zh",
+  "activeProvider": "opencode",
+  "deletedProviderIds": ["gemini", "openai", "deepseek", "qwen"],
+  "providers": {
+    "cch": {
+      "type": "openai-compatible",
+      "label": "cch",
+      "apiKey": "sk-cch-fixture-not-a-real-key",
+      "baseUrl": "http://127.0.0.1:9/v1",
+      "model": "gpt-5.6-sol"
+    },
+    "opencode": {
+      "type": "openai-compatible",
+      "label": "opencode",
+      "apiKey": "sk-opencode-fixture-not-a-real-key",
+      "baseUrl": "http://127.0.0.1:9/v1",
+      "model": "deepseek-v4.1-flash",
+      "customHeaders": {
+        "x-opencode-session": "{{conversationId}}"
+      }
+    }
+  }
+}
