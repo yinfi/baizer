@@ -239,6 +239,50 @@ async function runTests() {
     expect(await log.getPrunedRequestBefore()).toBe(0);
   });
 
+  await test('drops malformed rows instead of discarding the whole audit history', async () => {
+    const adapter = new FakeAdapter();
+    adapter.files.set(OPERATION_AUDIT_LOG_PATH, JSON.stringify({
+      version: 1,
+      operations: [
+        { id: 'ok', action: 'create_note', target: 'Good.md', timestamp: 2, approvalSource: 'direct-write', undoable: true, outcome: 'attempt-failed' },
+        // 缺 target / outcome 非法 / 非对象数组元素：逐条丢弃，不能整份丢弃。
+        { id: 'no-target', action: 'create_note', timestamp: 3, approvalSource: 'direct-write', undoable: true },
+        { id: 'bad-outcome', action: 'update_note', target: 'Bad.md', timestamp: 4, approvalSource: 'user-click', undoable: true, outcome: 'maybe' },
+        null,
+        'garbage',
+      ],
+      requests: [
+        { id: 'req-ok', action: 'update_note', target: 'A.md', state: 'attempting', timestamp: 1, updatedAt: 2 },
+        { id: 'req-bad', action: 'update_note', target: 'A.md', state: 'done', timestamp: 1, updatedAt: 2 },
+        42,
+      ],
+      requestsPrunedBefore: 'not-a-number',
+    }));
+
+    const { log } = createLog(OperationAuditLog, adapter);
+    const records = await log.list();
+    expect(records.map((record: any) => record.id)).toEqual(['ok']);
+    expect(records[0].outcome).toBe('attempt-failed');
+    expect((await log.getRequestState('req-ok'))?.state).toBe('attempting');
+    expect(await log.getRequestState('req-bad')).toBe(undefined);
+    // 非数字水位按 0 处理（旧实现同款 typeof 兜底）。
+    expect(await log.getPrunedRequestBefore()).toBe(0);
+  });
+
+  await test('returns an empty log for an unknown version or unparseable content', async () => {
+    const adapter = new FakeAdapter();
+    adapter.files.set(OPERATION_AUDIT_LOG_PATH, JSON.stringify({
+      version: 2,
+      operations: [{ id: 'x', action: 'a', target: 't', timestamp: 1, approvalSource: 'direct-write', undoable: true }],
+    }));
+    const versioned = createLog(OperationAuditLog, adapter);
+    expect(await versioned.log.list()).toEqual([]);
+
+    adapter.files.set(OPERATION_AUDIT_LOG_PATH, '{not json');
+    const broken = createLog(OperationAuditLog, adapter);
+    expect(await broken.log.list()).toEqual([]);
+  });
+
   await test('ignores non-object or wrong-shaped audit files and drops malformed entries individually', async () => {
     const goodOp = { id: 'op-1', action: 'create_note', target: 'A.md', timestamp: 5, approvalSource: 'direct-write', undoable: true };
     const goodReq = { id: 'req-1', action: 'create_note', target: 'A.md', state: 'succeeded', timestamp: 5, updatedAt: 6 };

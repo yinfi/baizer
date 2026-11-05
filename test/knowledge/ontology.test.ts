@@ -102,6 +102,39 @@ test('parseOntologySchema filters invalid category entries', () => {
   expect(schema!.categories[0].name).toBe('有效');
 });
 
+test('parseOntologySchema rejects non-object frontmatter', () => {
+  expect(parseOntologySchema(undefined)).toBeNull();
+  expect(parseOntologySchema('ontology_schema')).toBeNull();
+  expect(parseOntologySchema([{ knowledge_artifact_type: 'ontology_schema' }])).toBeNull();
+});
+
+test('parseOntologySchema narrows malformed category/entity_type entries', () => {
+  const fm = {
+    knowledge_artifact_type: 'ontology_schema',
+    version: '2', // 非数字 → 回退 1
+    categories: [
+      { name: '有效', description: 42 },
+      null,
+      42,
+      { name: 7, description: '数值名' },
+      { name: '  ', description: '空白名' },
+    ],
+    entity_types: [
+      { name: '人物', description: '  ' },
+      { name: '人物2' },
+      'plain',
+    ],
+  };
+  const schema = parseOntologySchema(fm);
+  expect(schema).toBeDefined();
+  expect(schema!.version).toBe(1);
+  expect(schema!.categories).toHaveLength(1);
+  expect(schema!.categories[0].description).toBe('');
+  expect(schema!.entity_types).toHaveLength(2);
+  expect(schema!.entity_types[0].description).toBe('');
+  expect(schema!.entity_types[1].description).toBe('');
+});
+
 // --- validateOntologySchema ---
 
 test('validateOntologySchema passes for valid schema', () => {
@@ -177,6 +210,21 @@ test('parseDiscoveryResponse parses valid JSON response', () => {
 
 test('parseDiscoveryResponse returns null for invalid JSON', () => {
   expect(parseDiscoveryResponse('not json')).toBeNull();
+});
+
+test('parseDiscoveryResponse rejects non-object payloads and drops malformed entries', () => {
+  expect(parseDiscoveryResponse('null')).toBeNull();
+  expect(parseDiscoveryResponse('[{"name":"x"}]')).toBeNull();
+  expect(parseDiscoveryResponse('"categories"')).toBeNull();
+
+  const schema = parseDiscoveryResponse(JSON.stringify({
+    categories: [{ name: '技术', description: '技术类' }, null, { name: 3 }, 'plain'],
+    entity_types: [{ name: '人物', description: 9 }, { name: '  ' }],
+  }));
+  expect(schema).toBeDefined();
+  expect(schema!.categories).toHaveLength(1);
+  expect(schema!.entity_types).toHaveLength(1);
+  expect(schema!.entity_types[0].description).toBe('');
 });
 
 // --- buildOntologyFile ---

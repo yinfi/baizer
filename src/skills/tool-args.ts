@@ -16,11 +16,10 @@ export function strArg(args: ToolArgs | null | undefined, key: string): string |
   return typeof value === 'string' ? value : undefined;
 }
 
-/** 取有限数字参数;接受数字或数字字符串,其余返回 undefined。 */
+/** 取有限数字参数;仅接受 number 类型(数字字符串视为类型不符),其余返回 undefined。 */
 export function numArg(args: ToolArgs | null | undefined, key: string): number | undefined {
   const value = field(args, key);
-  const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
-  return Number.isFinite(n) ? n : undefined;
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 /** 取字符串数组参数;非数组返回 undefined,数组中的非字符串元素被丢弃。 */

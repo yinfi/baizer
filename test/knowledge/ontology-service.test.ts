@@ -278,6 +278,63 @@ categories:
     expect(status.kind).toBe('valid');
     expect(status.schema?.categories[0].name).toBe('Methods');
   });
+
+  await test('discovery readiness narrows malformed frontmatter topics/concepts/claims', async () => {
+    // 外部数据（旧文章 frontmatter）形状不可信：
+    // - topics 里混入 null / 数字 / 只有字符串 label 的对象 / label 非字符串的对象
+    // - concepts 存成 JSON 字符串（旧格式）
+    // - key_claims 是解析不了的字符串（回退成单条原文）
+    const malformedFrontmatter = {
+      topics: ['AI', null, 42, { label: 'AI2' }, { label: 7 }, { slug: 'no-label' }],
+      concepts: '["Agent"]',
+      key_claims: 'not-json-claim',
+    };
+    const service = new OntologyService(createApp({
+      'Knowledge Wiki/Articles/a.md': { content: '# A', frontmatter: malformedFrontmatter },
+      'Knowledge Wiki/Articles/b.md': { content: '# B', frontmatter: malformedFrontmatter },
+    }), createSettings({
+      knowledgeOntologyMinArticles: 2,
+      knowledgeOntologyMinTopicFrequency: 2,
+      knowledgeOntologyMinConceptFrequency: 2,
+    }));
+
+    const readiness = await service.getDiscoveryReadiness();
+
+    expect(readiness.kind).toBe('ready');
+    expect(readiness.totalCount).toBe(2);
+    const ai = readiness.topTopics.find((entry) => entry.topic === 'AI');
+    expect(ai?.count).toBe(2);
+    const ai2 = readiness.topTopics.find((entry) => entry.topic === 'AI2');
+    expect(ai2?.count).toBe(2);
+    // 数字 label / 无 label 的对象不产生 topic 计数。
+    expect(readiness.topTopics.length).toBe(2);
+    expect(readiness.topConcepts[0].concept).toBe('Agent');
+    expect(readiness.topConcepts[0].count).toBe(2);
+    expect(readiness.recentClaims.includes('not-json-claim')).toBe(true);
+  });
+
+  await test('discovery readiness treats non-array topics/concepts as empty', async () => {
+    const scalarFrontmatter = {
+      topics: 'AI',
+      concepts: 42,
+      key_claims: null,
+    };
+    const service = new OntologyService(createApp({
+      'Knowledge Wiki/Articles/a.md': { content: '# A', frontmatter: scalarFrontmatter },
+      'Knowledge Wiki/Articles/b.md': { content: '# B', frontmatter: scalarFrontmatter },
+    }), createSettings({
+      knowledgeOntologyMinArticles: 2,
+      knowledgeOntologyMinTopicFrequency: 2,
+      knowledgeOntologyMinConceptFrequency: 2,
+    }));
+
+    const readiness = await service.getDiscoveryReadiness();
+
+    expect(readiness.kind).toBe('insufficient_signal');
+    expect(readiness.topTopics.length).toBe(0);
+    expect(readiness.topConcepts.length).toBe(0);
+    expect(readiness.recentClaims.length).toBe(0);
+  });
 }
 
 void runTests();
