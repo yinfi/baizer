@@ -104,6 +104,10 @@ interface VaultAdapter {
   mkdir(path: string): Promise<void>;
 }
 
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_MAX_REQUESTS = 500;
 
@@ -272,21 +276,23 @@ export class OperationAuditLog {
       }
 
       const raw = await adapter.read(this.path);
-      const parsed = JSON.parse(raw);
-      if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.operations)) {
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecordObject(parsed) || parsed.version !== 1 || !Array.isArray(parsed.operations)) {
         return this.emptyFile();
       }
 
       // 逐条过滤而非「一条坏就整份丢弃」：旧数据/手改残留不应抹掉整段审计历史。
+      const operations: unknown[] = parsed.operations;
+      const requests: unknown[] | undefined = Array.isArray(parsed.requests) ? parsed.requests : undefined;
       return {
         version: 1,
-        operations: parsed.operations
-          .filter((record: any) => this.isOperationRecord(record))
-          .map((record: OperationRecord) => this.cloneRecord(record)),
-        requests: Array.isArray(parsed.requests)
-          ? parsed.requests
-            .filter((record: any) => this.isRequestRecord(record))
-            .map((record: ApprovalRequestRecord) => ({ ...record }))
+        operations: operations
+          .filter((record): record is OperationRecord => this.isOperationRecord(record))
+          .map((record) => this.cloneRecord(record)),
+        requests: requests
+          ? requests
+            .filter((record): record is ApprovalRequestRecord => this.isRequestRecord(record))
+            .map((record) => ({ ...record }))
           : [],
         requestsPrunedBefore: typeof parsed.requestsPrunedBefore === 'number'
           ? parsed.requestsPrunedBefore
@@ -325,8 +331,8 @@ export class OperationAuditLog {
     return { version: 1, operations: [], requests: [], requestsPrunedBefore: 0 };
   }
 
-  private isOperationRecord(record: any): boolean {
-    return record
+  private isOperationRecord(record: unknown): record is OperationRecord {
+    return isRecordObject(record)
       && typeof record.id === 'string'
       && typeof record.action === 'string'
       && typeof record.target === 'string'
@@ -339,8 +345,8 @@ export class OperationAuditLog {
       && (record.outcome === undefined || record.outcome === 'succeeded' || record.outcome === 'attempt-failed');
   }
 
-  private isRequestRecord(record: any): boolean {
-    return record
+  private isRequestRecord(record: unknown): record is ApprovalRequestRecord {
+    return isRecordObject(record)
       && typeof record.id === 'string'
       && typeof record.action === 'string'
       && typeof record.target === 'string'

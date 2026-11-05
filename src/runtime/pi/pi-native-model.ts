@@ -10,7 +10,7 @@
  *   // 然后把 model 和 streamFn 传给 pi agentLoop。
  */
 
-import type { AssistantMessage, Model } from '@earendil-works/pi-ai';
+import type { Api, AssistantMessage, Model } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 // streamSimple 只在运行期动态 import（与 harness-chat-runtime.ts 的 AgentHarness 同模式），
 // 避免 ESM-only pi-ai 在 CJS 测试环境（tsconfig.test.json module=commonjs）下
@@ -293,7 +293,7 @@ export type NativeCompleteFn = (
  * @param model  - 由 buildOpenAICompatModel / buildAnthropicModel 构造的 pi-ai Model
  * @param apiKey - 用户配置的 API 密钥（不存入 Model，每次调用经 options 透传）
  */
-export function createNativeCompleteFn(model: Model<any>, apiKey: string): NativeCompleteFn {
+export function createNativeCompleteFn(model: Model<Api>, apiKey: string): NativeCompleteFn {
   return async (prompt, systemPrompt, options) => {
     // pi-ai 1.3.0 的主入口不再导出 completeSimple/streamSimple（改为 createModels() 返回的实例方法）；
     // `/compat` 子路径保留旧全局 API（含 api-registry），故无状态路径经它继续可用。
@@ -362,7 +362,7 @@ export function createNativeStreamFn(deps: NativeStreamDeps): StreamFn {
 function extractAssistantText(message: AssistantMessage): string {
   if (!message?.content?.length) return '';
   return message.content
-    .filter((block): block is { type: 'text'; text: string } => (block as any)?.type === 'text')
+    .filter((block): block is Extract<typeof block, { type: 'text' }> => block?.type === 'text')
     .map(block => block.text)
     .join('');
 }

@@ -30,7 +30,7 @@ import {
   ResolvedAsrConfig,
   resolveAsrConfig,
 } from '../mcp/types';
-import { extractJsonAssignment } from '../utils/video_utils';
+import { extractJsonAssignment, isRecord, readPath } from '../utils/video_utils';
 import {
   ASR_TARGET_SAMPLE_RATE,
   ChunkWindow,
@@ -87,25 +87,47 @@ interface VideoTranscriptionDeps {
  * 而调用方在解码失败时还要拿原缓冲走整轨回退路径。
  */
 export async function decodeWithWebAudio(bytes: ArrayBuffer): Promise<PcmSource> {
-  const globalScope = globalThis as any;
+  const globalScope = globalThis as unknown as {
+    OfflineAudioContext?: OfflineAudioContextConstructor;
+    webkitOfflineAudioContext?: OfflineAudioContextConstructor;
+  };
   const Ctor = globalScope.OfflineAudioContext || globalScope.webkitOfflineAudioContext;
   if (typeof Ctor !== 'function') {
     throw new Error('Web Audio (OfflineAudioContext) is unavailable in this environment');
   }
 
   const context = new Ctor(1, 1, ASR_TARGET_SAMPLE_RATE);
-  const decoded = await new Promise<any>((resolve, reject) => {
+  const decoded = await new Promise<unknown>((resolve, reject) => {
     const maybePromise = context.decodeAudioData(bytes.slice(0), resolve, reject);
     if (maybePromise && typeof maybePromise.then === 'function') {
       maybePromise.then(resolve, reject);
     }
   });
 
-  if (!decoded || typeof decoded.getChannelData !== 'function' || !(decoded.length > 0)) {
+  if (!isPcmSource(decoded) || !(decoded.length > 0)) {
     throw new Error('Decoded audio contains no samples');
   }
 
-  return decoded as PcmSource;
+  return decoded;
+}
+
+/** decodeAudioData 的最小形状：同时兼容回调式（旧 Safari）与 Promise 式。 */
+interface OfflineAudioContextLike {
+  decodeAudioData(
+    data: ArrayBuffer,
+    onSuccess: (decoded: unknown) => void,
+    onError: (error: unknown) => void,
+  ): PromiseLike<unknown> | undefined;
+}
+
+type OfflineAudioContextConstructor = new (
+  channels: number,
+  length: number,
+  sampleRate: number,
+) => OfflineAudioContextLike;
+
+function isPcmSource(value: unknown): value is PcmSource {
+  return isRecord(value) && typeof value.getChannelData === 'function';
 }
 
 const defaultDeps: VideoTranscriptionDeps = {
@@ -164,22 +186,37 @@ export function isParameterRejection(error: unknown): boolean {
 function pickBilibiliAudioUrl(html: string): string | null {
   const playInfo = extractJsonAssignment(html, 'window.__playinfo__=')
     || extractJsonAssignment(html, '__playinfo__=');
-  const audioTracks = playInfo?.data?.dash?.audio;
+  const audioTracks = readPath(playInfo, ['data', 'dash', 'audio']);
   if (!Array.isArray(audioTracks) || audioTracks.length === 0) return null;
 
-  const selected = audioTracks.find((track: any) => track?.baseUrl || track?.base_url) || audioTracks[0];
-  return selected?.baseUrl || selected?.base_url || selected?.backupUrl?.[0] || selected?.backup_url?.[0] || null;
+  const tracks: unknown[] = audioTracks;
+  const selected = tracks.find((track) => readPath(track, ['baseUrl']) || readPath(track, ['base_url'])) || tracks[0];
+  const picked = readPath(selected, ['baseUrl'])
+    || readPath(selected, ['base_url'])
+    || firstElement(readPath(selected, ['backupUrl']))
+    || firstElement(readPath(selected, ['backup_url']));
+  return typeof picked === 'string' && picked ? picked : null;
+}
+
+/** 取未知值的首个元素；不是数组（或为空）时返回 undefined。 */
+function firstElement(value: unknown): unknown {
+  return Array.isArray(value) ? (value as unknown[])[0] : undefined;
 }
 
 function pickYouTubeAudioUrl(html: string): string | null {
   const playerResponse = extractJsonAssignment(html, 'var ytInitialPlayerResponse = ')
     || extractJsonAssignment(html, 'ytInitialPlayerResponse = ')
     || extractJsonAssignment(html, 'ytInitialPlayerResponse=');
-  const formats = playerResponse?.streamingData?.adaptiveFormats;
+  const formats = readPath(playerResponse, ['streamingData', 'adaptiveFormats']);
   if (!Array.isArray(formats)) return null;
 
-  const selected = formats.find((format: any) => typeof format?.mimeType === 'string' && format.mimeType.startsWith('audio/'));
-  return selected?.url || null;
+  const candidates: unknown[] = formats;
+  const selected = candidates.find((format) => {
+    const mimeType = readPath(format, ['mimeType']);
+    return typeof mimeType === 'string' && mimeType.startsWith('audio/');
+  });
+  const url = readPath(selected, ['url']);
+  return typeof url === 'string' && url ? url : null;
 }
 
 async function resolveAudio(params: {
@@ -232,17 +269,19 @@ async function resolveAudio(params: {
  * 就退化成「一个覆盖整个窗口的段」，而不是丢掉时间轴。
  */
 export function parseTranscriptionPayload(
-  payload: any,
+  payload: unknown,
   window: ChunkWindow,
 ): { text: string; segments: TranscriptSegment[] } {
   const segments: TranscriptSegment[] = [];
 
-  if (Array.isArray(payload?.segments)) {
-    for (const raw of payload.segments) {
-      const text = typeof raw?.text === 'string' ? raw.text.trim() : '';
+  const rawSegments = readPath(payload, ['segments']);
+  if (Array.isArray(rawSegments)) {
+    for (const raw of rawSegments as unknown[]) {
+      const rawText = readPath(raw, ['text']);
+      const text = typeof rawText === 'string' ? rawText.trim() : '';
       if (!text) continue;
-      const start = Number(raw?.start);
-      const end = Number(raw?.end);
+      const start = Number(readPath(raw, ['start']));
+      const end = Number(readPath(raw, ['end']));
       segments.push({
         start: Number.isFinite(start) ? window.startSec + start : window.startSec,
         end: Number.isFinite(end) ? window.startSec + end : window.endSec,
@@ -251,7 +290,8 @@ export function parseTranscriptionPayload(
     }
   }
 
-  const flat = typeof payload?.text === 'string' ? payload.text.trim() : '';
+  const rawFlat = readPath(payload, ['text']);
+  const flat = typeof rawFlat === 'string' ? rawFlat.trim() : '';
   if (segments.length === 0 && flat) {
     segments.push({ start: window.startSec, end: window.endSec, text: flat });
   }
@@ -298,7 +338,7 @@ interface TranscriptionRequestParams {
   deps: VideoTranscriptionDeps;
 }
 
-async function postTranscriptionRequest(params: TranscriptionRequestParams): Promise<any> {
+async function postTranscriptionRequest(params: TranscriptionRequestParams): Promise<unknown> {
   const formData = new FormData();
   const blob = new Blob([params.bytes as unknown as BlobPart], { type: params.mimeType });
   formData.append('file', blob, params.filename);
@@ -318,8 +358,8 @@ async function postTranscriptionRequest(params: TranscriptionRequestParams): Pro
   });
 
   if (!response.ok) {
-    const details = typeof (response as any).text === 'function'
-      ? await (response as any).text()
+    const details = typeof response.text === 'function'
+      ? await response.text()
       : '';
     throw new TranscriptionHttpError(
       response.status,
@@ -327,7 +367,7 @@ async function postTranscriptionRequest(params: TranscriptionRequestParams): Pro
     );
   }
 
-  return typeof (response as any).json === 'function' ? await (response as any).json() : {};
+  return typeof response.json === 'function' ? await response.json() as unknown : {};
 }
 
 /** 本次运行里 response_format 的协商状态。`degraded` 会被写成一条用户可见的 warning。 */
@@ -354,7 +394,7 @@ const RESPONSE_FORMAT_DEGRADED_WARNING =
 async function postWithFormatFallback(
   params: Omit<TranscriptionRequestParams, 'responseFormat'>,
   state: ResponseFormatState,
-): Promise<any> {
+): Promise<unknown> {
   if (!state.verboseJson) {
     return postTranscriptionRequest({ ...params, responseFormat: null });
   }
@@ -428,7 +468,7 @@ export function createVideoTranscriptionService(partialDeps: Partial<VideoTransc
           const window = windows[index];
           const samples = mixToMono(decoded, window.startSec * sampleRate, window.endSec * sampleRate);
           const wav = encodeWav16(samples, sampleRate);
-          let payload: any;
+          let payload: unknown;
           try {
             payload = await postWithFormatFallback({
               endpoint,
@@ -472,7 +512,7 @@ export function createVideoTranscriptionService(partialDeps: Partial<VideoTransc
       }
 
       // 整轨回退：与改动前的请求形状保持一致（原容器、原 MIME）。
-      let payload: any;
+      let payload: unknown;
       try {
         payload = await postWithFormatFallback({
           endpoint,

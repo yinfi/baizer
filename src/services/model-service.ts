@@ -6,11 +6,11 @@ import { logger } from '../utils/logger';
 import { ChatContextItem, GenerationOptions, ModelOption, StreamEvent } from '../models/interfaces';
 import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
-import { SkillCommandEntry, SkillSummary } from '../skills/types';
+import { SkillCommandEntry, SkillSummary, ToolArgs, ToolResult } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
 import { buildAnthropicModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn, resolveCustomHeaders } from '../runtime/pi/pi-native-model';
 // 仅类型导入（编译期擦除），不把 ESM-only 的 pi-ai 主入口拉进 CJS 测试环境。
-import type { Model } from '@earendil-works/pi-ai';
+import type { Api, Model } from '@earendil-works/pi-ai';
 import { createHarnessExecutionEnv } from '../runtime/pi/harness-env';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import * as modelCatalog from './model-catalog-service';
@@ -67,6 +67,21 @@ export interface AvailableModelsResult {
     listed: boolean;
     listingUnsupported: boolean;
     error?: Error;
+}
+
+/** 取 unknown 异常的 message 字符串；不是带字符串 message 的对象时返回 undefined。 */
+function thrownMessage(error: unknown): string | undefined {
+    if (typeof error !== 'object' || error === null) return undefined;
+    const message = (error as { message?: unknown }).message;
+    return typeof message === 'string' ? message : undefined;
+}
+
+/** 依次返回第一个非空字符串；都不是时返回空串。用于从未知工具参数/结果里取路径与文案。 */
+function firstString(...candidates: unknown[]): string {
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate) return candidate;
+    }
+    return '';
 }
 
 export class ModelService {
@@ -495,7 +510,7 @@ export class ModelService {
                 // getFallbackModels() 就再也分不出「端点的清单」与「我们的猜测」了。
                 // 空清单（200 {"data":[]}）与解析不出 data 的 body 都留在 false。
                 listed = models.length > 0;
-            } catch (caught: any) {
+            } catch (caught) {
                 // 「端点不支持列模型」是能力缺口而非故障：它同样回落到内置列表，
                 // 但必须把真实原因透出去，UI 才能提示手输模型名，
                 // 而不是让用户以为 apiKey/网络出了问题。
@@ -505,7 +520,7 @@ export class ModelService {
                     error = caught instanceof Error ? caught : new Error(String(caught));
                 }
                 logger.warn(
-                    `Failed to fetch model list for provider ${providerId}: ${caught?.message || 'Unknown error'}`,
+                    `Failed to fetch model list for provider ${providerId}: ${thrownMessage(caught) || 'Unknown error'}`,
                     'ModelService.getAvailableModels'
                 );
             }
@@ -620,9 +635,9 @@ export class ModelService {
                 // hasPriorContext 不再由此注入:runtime 自己向 sessionManager 查。
             });
             return await runtime.query(preparedTurn);
-        } catch (e: any) {
+        } catch (e) {
             logger.error('Chat processing failed', e, 'ModelService.chat');
-            return `Error: ${e.message}`;
+            return `Error: ${thrownMessage(e)}`;
         }
     }
 
@@ -661,12 +676,12 @@ export class ModelService {
             for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
                 yield event;
             }
-        } catch (e: any) {
+        } catch (e) {
             if (this.isAbortError(e)) {
                 throw e;
             }
             logger.error('Stream chat failed', e, 'ModelService.chatStream');
-            yield { type: 'error' as const, message: e.message, outcome: 'failed' as const };
+            yield { type: 'error' as const, message: thrownMessage(e) ?? String(e), outcome: 'failed' as const };
         }
     }
 
@@ -719,9 +734,9 @@ export class ModelService {
                 });
             }
             return text;
-        } catch (e: any) {
+        } catch (e) {
             // 软取消是正常流程，不当错误记录，避免日志噪音。
-            if (e?.name === 'AbortError') throw e;
+            if (this.isAbortError(e)) throw e;
             logger.error('Stateless generation failed', e, 'ModelService.generate');
             throw e;
         }
@@ -902,7 +917,7 @@ export class ModelService {
         return modelCatalog.getProviderCapabilities(this.getActiveProviderConfig());
     }
 
-    async executeSlashSkillCommand(command: string, input: string, conversationId?: string): Promise<any> {
+    async executeSlashSkillCommand(command: string, input: string, conversationId?: string): Promise<ToolResult> {
         const skill = this.skillRegistry.resolveByCommand(command);
         if (!skill) {
             return { success: false, error: `Unknown command: ${command}` };
@@ -941,7 +956,7 @@ export class ModelService {
      */
     async executeApprovedAction(
         action: string,
-        args: Record<string, any>,
+        args: ToolArgs,
         conversationId?: string,
         options: { requestId?: string; retry?: boolean } = {},
     ): Promise<ApprovalExecutionOutcome> {
@@ -961,7 +976,7 @@ export class ModelService {
     async reconcileApprovedAction(
         requestId: string,
         action: string,
-        args: Record<string, any>,
+        args: ToolArgs,
         conversationId?: string,
         options: { requestedAt?: number } = {},
     ): Promise<ApprovalExecutionOutcome> {
@@ -1091,12 +1106,12 @@ export class ModelService {
 
     private async performApprovedAction(
         action: string,
-        args: Record<string, any>,
+        args: ToolArgs,
         conversationId: string | undefined,
         requestId: string | undefined,
     ): Promise<ApprovalExecutionOutcome> {
         const target = getFileWriteResultPath(action, {}, args)
-            || args?.path || args?.filename || args?.oldPath || action;
+            || firstString(args?.path, args?.filename, args?.oldPath) || action;
 
         if (requestId) {
             // 登记表按上限淘汰后，同一请求可能再进来一次：持久化状态里的「已成功」是最后一道闸。
@@ -1115,13 +1130,13 @@ export class ModelService {
             await this.beginApprovalRequest(requestId, action, target);
         }
 
-        let result: any;
+        let result: ToolResult;
         try {
             result = await this.toolRegistry.execute(action, {
                 ...args,
                 approved: true,
             });
-        } catch (error: any) {
+        } catch (error) {
             // 工具抛错时无法判断副作用是否发生：留一条失败尝试记录，返回 unknown 要求先核实。
             await this.recordApprovedActionAudit({
                 id: requestId,
@@ -1133,7 +1148,7 @@ export class ModelService {
                 kind: 'approval-execution',
                 status: 'unknown',
                 target,
-                error: error?.message || String(error),
+                error: thrownMessage(error) || String(error),
                 detail: t('The action was interrupted before its result was recorded. Check the target before retrying.'),
                 completedAt: Date.now(),
                 retryable: false,
@@ -1174,7 +1189,7 @@ export class ModelService {
             status: succeeded ? 'succeeded' : 'failed',
             target: resolvedTarget,
             detail: this.buildExecutionDetail(result, succeeded, auditRecorded),
-            error: succeeded ? undefined : (result?.error || result?.message || t('The action failed.')),
+            error: succeeded ? undefined : (firstString(result?.error, result?.message) || t('The action failed.')),
             completedAt: Date.now(),
             retryable: !succeeded,
             result: this.summarizeExecutionResult(result),
@@ -1185,7 +1200,7 @@ export class ModelService {
      * 结果摘要。detail 只放「成功/失败」的主文案，具体错误走 error；
      * 审计一旦没写成，主文案后追加可见提示，避免用户以为审计链正常（#76 P2-A）。
      */
-    private buildExecutionDetail(result: any, succeeded: boolean, auditRecorded: boolean): string {
+    private buildExecutionDetail(result: ToolResult, succeeded: boolean, auditRecorded: boolean): string {
         const base = succeeded
             ? (typeof result?.message === 'string' ? result.message : t('The action completed successfully.'))
             : t('The action failed.');
@@ -1195,7 +1210,7 @@ export class ModelService {
     /**
      * 只保留宿主打开落盘文件所需的字段，不把整个工具返回留在登记表里（#76 P3）。
      */
-    private summarizeExecutionResult(result: any): unknown {
+    private summarizeExecutionResult(result: ToolResult): unknown {
         if (!result || typeof result !== 'object') return undefined;
         const summary: Record<string, unknown> = {};
         for (const key of ['success', 'status', 'path', 'target'] as const) {
@@ -1259,21 +1274,21 @@ export class ModelService {
      */
     private buildApprovalOutcomeText(
         action: string,
-        args: Record<string, any>,
-        result: any,
+        args: ToolArgs,
+        result: ToolResult,
     ): string {
         const target = getFileWriteResultPath(action, result, args)
-            || args?.path || args?.filename || args?.target || '';
+            || firstString(args?.path, args?.filename, args?.target);
         const targetSuffix = target ? ` (${target})` : '';
         const succeeded = result?.success === true || result?.status === 'success';
         if (succeeded) {
             return `[Approved action executed] The user approved "${action}"${targetSuffix} and it completed successfully. You may continue from here.`;
         }
-        const error = result?.error || result?.message || 'unknown error';
+        const error = firstString(result?.error, result?.message) || 'unknown error';
         return `[Approved action failed] The user approved "${action}"${targetSuffix} but it failed: ${error}`;
     }
 
-    async executeWorkspaceTool(action: string, args: Record<string, any>): Promise<any> {
+    async executeWorkspaceTool(action: string, args: ToolArgs): Promise<ToolResult> {
         return this.workspaceEditService.executeWorkspaceTool(action, args);
     }
 
@@ -1358,7 +1373,7 @@ export class ModelService {
      * 注意 loadSettings 已经用 pruneUnsupportedProviders 丢掉不受支持的 type，
      * 所以正常路径走不到这里。
      */
-    private buildModelForConfig(config: ProviderConfig): Model<any> {
+    private buildModelForConfig(config: ProviderConfig): Model<Api> {
         switch (config.type) {
             case 'anthropic':
                 return buildAnthropicModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
@@ -1409,8 +1424,8 @@ export class ModelService {
         return this.activeRunController.isActive();
     }
 
-    private isAbortError(error: any): boolean {
-        return error?.name === 'AbortError';
+    private isAbortError(error: unknown): boolean {
+        return typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'AbortError';
     }
 
     private isAbortSignalValue(value: unknown): value is AbortSignal {

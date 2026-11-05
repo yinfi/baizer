@@ -261,7 +261,7 @@ async function saveVideo(
   ctx: ToolContext,
   modelService: SummaryModel,
   deps: WebClipperDeps,
-): Promise<any> {
+): Promise<ToolResult | null> {
   const transcript = await deps.getVideoTranscript(url);
   if (!transcript) return null;
 

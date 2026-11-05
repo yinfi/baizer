@@ -39,16 +39,17 @@ export function validateCanvasContent(content: unknown): { success: boolean; err
     return { success: false, errors: ['content must be a JSON string'] };
   }
 
-  let canvas: any;
+  let parsed: unknown;
   try {
-    canvas = JSON.parse(content);
-  } catch (error: any) {
-    return { success: false, errors: [`Invalid JSON: ${error.message}`] };
+    parsed = JSON.parse(content);
+  } catch (error: unknown) {
+    return { success: false, errors: [`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`] };
   }
 
-  if (!canvas || typeof canvas !== 'object' || Array.isArray(canvas)) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return { success: false, errors: ['Canvas root must be an object'] };
   }
+  const canvas = parsed as Record<string, unknown>;
 
   const nodes = canvas.nodes ?? [];
   const edges = canvas.edges ?? [];
@@ -56,58 +57,74 @@ export function validateCanvasContent(content: unknown): { success: boolean; err
   if (!Array.isArray(edges)) errors.push('edges must be an array when present');
   if (errors.length > 0) return { success: false, errors };
 
+  const nodeList: unknown[] = Array.isArray(nodes) ? nodes : [];
+  const edgeList: unknown[] = Array.isArray(edges) ? edges : [];
+
   const nodeIds = new Set<string>();
   const allIds = new Set<string>();
 
-  nodes.forEach((node: any, index: number) => {
-    validateId(node?.id, `nodes[${index}].id`, allIds, errors);
-    if (typeof node?.id === 'string') nodeIds.add(node.id);
+  nodeList.forEach((rawNode, index) => {
+    const node = asFields(rawNode);
+    validateId(node.id, `nodes[${index}].id`, allIds, errors);
+    if (typeof node.id === 'string') nodeIds.add(node.id);
 
-    if (!NODE_TYPES.has(node?.type)) {
+    if (!inSet(NODE_TYPES, node.type)) {
       errors.push(`nodes[${index}].type must be one of text, file, link, group`);
     }
 
     for (const field of ['x', 'y', 'width', 'height']) {
-      if (!Number.isInteger(node?.[field])) {
+      if (!Number.isInteger(node[field])) {
         errors.push(`nodes[${index}].${field} must be an integer`);
       }
     }
 
-    if (node?.type === 'text' && typeof node.text !== 'string') {
+    if (node.type === 'text' && typeof node.text !== 'string') {
       errors.push(`nodes[${index}] text nodes require a text field`);
     }
-    if (node?.type === 'file' && typeof node.file !== 'string') {
+    if (node.type === 'file' && typeof node.file !== 'string') {
       errors.push(`nodes[${index}] file nodes require a file field`);
     }
-    if (node?.type === 'link' && typeof node.url !== 'string') {
+    if (node.type === 'link' && typeof node.url !== 'string') {
       errors.push(`nodes[${index}] link nodes require a url field`);
     }
   });
 
-  edges.forEach((edge: any, index: number) => {
-    validateId(edge?.id, `edges[${index}].id`, allIds, errors);
+  edgeList.forEach((rawEdge, index) => {
+    const edge = asFields(rawEdge);
+    validateId(edge.id, `edges[${index}].id`, allIds, errors);
     for (const field of ['fromNode', 'toNode']) {
-      if (typeof edge?.[field] !== 'string') {
+      const target = edge[field];
+      if (typeof target !== 'string') {
         errors.push(`edges[${index}].${field} must be a node id`);
-      } else if (!nodeIds.has(edge[field])) {
-        errors.push(`edges[${index}].${field} references missing node "${edge[field]}"`);
+      } else if (!nodeIds.has(target)) {
+        errors.push(`edges[${index}].${field} references missing node "${target}"`);
       }
     }
 
     for (const field of ['fromSide', 'toSide']) {
-      if (edge?.[field] !== undefined && !SIDES.has(edge[field])) {
+      if (edge[field] !== undefined && !inSet(SIDES, edge[field])) {
         errors.push(`edges[${index}].${field} must be one of top, right, bottom, left`);
       }
     }
 
     for (const field of ['fromEnd', 'toEnd']) {
-      if (edge?.[field] !== undefined && !ENDS.has(edge[field])) {
+      if (edge[field] !== undefined && !inSet(ENDS, edge[field])) {
         errors.push(`edges[${index}].${field} must be none or arrow`);
       }
     }
   });
 
   return { success: errors.length === 0, errors };
+}
+
+/** 数组元素可能是任意 JSON 值;非对象(null/原始值)按「没有任何字段」读取。 */
+function asFields(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+/** 集合成员判断:非字符串必然不在(集合里只有字符串)。 */
+function inSet(set: Set<string>, value: unknown): boolean {
+  return typeof value === 'string' && set.has(value);
 }
 
 function validateId(

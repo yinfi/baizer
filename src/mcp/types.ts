@@ -4,6 +4,7 @@ import { Locale } from "../i18n/zh";
 import type { KnowledgeRuntime } from "../knowledge/runtime";
 import type { ToolRegistry } from "../skills/tool-registry";
 import type { ModelService } from "../services/model-service";
+import type { DerivedSkillStatus } from "../skills/builtin/plugin-ctrl/plugin-watcher";
 
 // ===== 品牌配置 — 改名只需改这里 =====
 export const PLUGIN_ID = 'baizer';
@@ -18,7 +19,7 @@ declare module "obsidian" {
         plugins: {
             manifests: Record<string, PluginManifest>;
             enabledPlugins: Set<string>;
-            getPlugin(id: string): any;
+            getPlugin(id: string): Record<string, unknown> | null | undefined;
         };
         commands: {
             listCommands(): Command[];
@@ -491,8 +492,9 @@ export interface IPlugin extends Plugin {
     applyLanguageChange?(locale: Locale): Promise<void>;
     // 派生技能的管理入口（设置页读对账状态、重新生成、删除）。
     // 用最小结构类型而非 import PluginWatcher：types.ts 是底层模块，不该反向依赖 skills 层。
+    // 状态记录只做 import type（编译期擦除，无运行时依赖）。
     pluginWatcher?: {
-        getDerivedSkillStatuses(): any[];
+        getDerivedSkillStatuses(): DerivedSkillStatus[];
         getGenerationFailures(): ReadonlyMap<string, string>;
         // 返回值不写 any：设置页据 regenerated / blocker 决定提示哪一种结局，
         // any 会让日后改字段名时静默退化成「每次成功都报失败」。

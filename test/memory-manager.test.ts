@@ -501,6 +501,51 @@ async function runTests() {
     expect(rec.entities.includes('TypeScript')).toBe(true);
   });
 
+  await test('distill tolerates malformed LLM elements (null, numbers, wrong-typed text/entities)', async () => {
+    const { app } = createApp();
+    // 混入 null / 数字 / text 非字符串 / entities 非数组 / entities 含非字符串:只有合法项入库。
+    const generate = async () => JSON.stringify([
+      null,
+      42,
+      { text: 7, entities: ['ignored'] },
+      { text: '用户偏好简洁回答', entities: 'not-an-array' },
+      { text: '用户在做知了项目', entities: ['知了', 5, null] },
+    ]);
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: '我偏好简洁回答,也在做知了项目', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    const raw = view.sections.raw as Array<{ text: string; entities: string[] }>;
+    const texts = raw.map((r) => r.text);
+    expect(texts.includes('用户偏好简洁回答')).toBe(true);
+    expect(texts.includes('用户在做知了项目')).toBe(true);
+    expect(raw.length).toBe(2);
+    // entities 非数组 → 回退正则抽取(不抛错);数组中的非字符串元素被 String() 转换后按长度清洗。
+    const project = raw.find((r) => r.text === '用户在做知了项目')!;
+    expect(project.entities.includes('知了')).toBe(true);
+    expect(project.entities.includes('null')).toBe(true);
+  });
+
+  await test('distill falls back to the rule path when LLM returns a non-array JSON value', async () => {
+    const { app } = createApp();
+    const generate = async () => JSON.stringify({ text: '用户偏好简洁回答' });
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: '我偏好简洁回答', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    // 非数组 JSON → 无可提炼项 → 回退纯规则路径,仍沉淀用户原话。
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    const texts = (view.sections.raw as Array<{ text: string }>).map((r) => r.text);
+    expect(texts.some((t) => t.includes('我偏好简洁回答'))).toBe(true);
+  });
+
   // ---- #4 矛盾更新:同主题替换 ----
 
   await test('conflict update retires an outdated same-topic preference from recall', async () => {

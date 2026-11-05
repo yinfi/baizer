@@ -374,7 +374,10 @@ export default class BaizerPlugin extends Plugin {
         // 持久化数据是不可信输入：按 Record<string, unknown> 收口，不断言成 PluginSettings。
         // `|| {}` 保留原语义（loadData 返回假值时兜底成空对象）；变量名沿用 raw——
         // test/settings-provider-migration.test.ts 用它作为定位迁移分支的源码锚点。
-        const raw: Record<string, unknown> = (await this.loadData()) || {};
+        const loaded: unknown = await this.loadData();
+        const raw: Record<string, unknown> = typeof loaded === 'object' && loaded !== null
+            ? (loaded as Record<string, unknown>)
+            : {};
         this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
 
         // 数据迁移：旧扁平格式 → 新 providers map

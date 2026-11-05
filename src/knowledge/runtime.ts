@@ -28,6 +28,7 @@ import {
   KnowledgePendingReason,
 } from './frontmatter';
 import { OntologyService } from './ontology-service';
+import { errorMessage } from './ontology';
 
 const AUTO_COMPILE_PENDING_REASONS: KnowledgePendingReason[] = ['new', 'content_changed'];
 
@@ -597,8 +598,8 @@ export class KnowledgeRuntime {
       const path = await this.ontologyService.createSchemaFile(candidate.content);
       logger.info(`Ontology schema created at ${path}`, 'KnowledgeRuntime');
       return path;
-    } catch (e: any) {
-      console.error('[KnowledgeRuntime] Ontology discovery failed:', e.message);
+    } catch (e) {
+      console.error('[KnowledgeRuntime] Ontology discovery failed:', errorMessage(e));
       return null;
     }
   }

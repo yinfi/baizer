@@ -37,17 +37,18 @@ export function validateBaseYamlContent(content: unknown): { success: boolean; e
     return { success: false, errors: ['content must be a YAML string'] };
   }
 
-  let base: any;
+  let parsed: unknown;
   try {
-    base = parse(content);
-  } catch (error: any) {
-    return { success: false, errors: [`Invalid YAML: ${error.message}`] };
+    parsed = parse(content);
+  } catch (error: unknown) {
+    return { success: false, errors: [`Invalid YAML: ${error instanceof Error ? error.message : String(error)}`] };
   }
 
   const errors: string[] = [];
-  if (!base || typeof base !== 'object' || Array.isArray(base)) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return { success: false, errors: ['Base root must be a YAML object'] };
   }
+  const base = parsed as Record<string, unknown>;
 
   validateObjectField(base.formulas, 'formulas', errors);
   validateObjectField(base.properties, 'properties', errors);
@@ -69,14 +70,15 @@ function validateObjectField(value: unknown, label: string, errors: string[]): v
   }
 }
 
-function validateViews(views: any[], errors: string[]): void {
-  views.forEach((view, index) => {
-    if (!view || typeof view !== 'object' || Array.isArray(view)) {
+function validateViews(views: unknown[], errors: string[]): void {
+  views.forEach((rawView, index) => {
+    if (!rawView || typeof rawView !== 'object' || Array.isArray(rawView)) {
       errors.push(`views[${index}] must be an object`);
       return;
     }
+    const view = rawView as Record<string, unknown>;
 
-    if (!VIEW_TYPES.has(view.type)) {
+    if (typeof view.type !== 'string' || !VIEW_TYPES.has(view.type)) {
       errors.push(`views[${index}].type must be one of table, cards, list, map`);
     }
 
@@ -100,7 +102,7 @@ function isFilterShape(value: unknown): boolean {
   return typeof value === 'string' || (!!value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function validateFormulaReferences(base: any, errors: string[]): void {
+function validateFormulaReferences(base: Record<string, unknown>, errors: string[]): void {
   const formulas = base.formulas && typeof base.formulas === 'object' && !Array.isArray(base.formulas)
     ? new Set(Object.keys(base.formulas))
     : new Set<string>();
@@ -113,26 +115,35 @@ function validateFormulaReferences(base: any, errors: string[]): void {
   }
 }
 
-function collectFormulaReferences(base: any): string[] {
+function collectFormulaReferences(base: Record<string, unknown>): string[] {
   const references = new Set<string>();
 
-  for (const key of Object.keys(base.properties || {})) {
+  for (const key of Object.keys(truthyObject(base.properties))) {
     addFormulaReference(key, references);
   }
 
-  for (const view of Array.isArray(base.views) ? base.views : []) {
-    for (const value of Array.isArray(view?.order) ? view.order : []) {
+  const views: unknown[] = Array.isArray(base.views) ? base.views : [];
+  for (const rawView of views) {
+    const view = truthyObject(rawView);
+    const order: unknown[] = Array.isArray(view.order) ? view.order : [];
+    for (const value of order) {
       addFormulaReference(value, references);
     }
-    if (view?.groupBy?.property) {
-      addFormulaReference(view.groupBy.property, references);
+    const groupBy = truthyObject(view.groupBy);
+    if (groupBy.property) {
+      addFormulaReference(groupBy.property, references);
     }
-    for (const key of Object.keys(view?.summaries || {})) {
+    for (const key of Object.keys(truthyObject(view.summaries))) {
       addFormulaReference(key, references);
     }
   }
 
   return [...references];
+}
+
+/** 对象则原样返回,其余(含 null/原始值)视为空对象;对应旧代码的 `x?.y || {}` 读取。 */
+function truthyObject(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 }
 
 function addFormulaReference(value: unknown, references: Set<string>): void {

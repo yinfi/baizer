@@ -110,15 +110,22 @@ export function isFileWriteToolName(name: string): boolean {
   return (FILE_WRITE_TOOL_NAMES as readonly string[]).includes(name);
 }
 
-export function isSuccessfulWriteToolResult(result: any): boolean {
-  return result?.success === true || result?.status === 'success';
+/** 工具结果的宽松形状：任何 object 都按字符串键读取，非 object（含 null）视为空。 */
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 }
 
-export function getFileWriteError(result: any): string {
-  if (typeof result?.error === 'string' && result.error.trim()) return result.error.trim();
-  if (typeof result?.message === 'string' && result.message.trim()) {
-    if (result?.success === false || result?.status === 'error') {
-      return result.message.trim();
+export function isSuccessfulWriteToolResult(result: unknown): boolean {
+  const r = asRecord(result);
+  return r.success === true || r.status === 'success';
+}
+
+export function getFileWriteError(result: unknown): string {
+  const r = asRecord(result);
+  if (typeof r.error === 'string' && r.error.trim()) return r.error.trim();
+  if (typeof r.message === 'string' && r.message.trim()) {
+    if (r.success === false || r.status === 'error') {
+      return r.message.trim();
     }
   }
   return '';
@@ -135,11 +142,12 @@ export function buildFileWriteFailureMessage(attemptedWrite: boolean, lastError?
 
 export function getFileWriteResultPath(
   action: string,
-  result: any,
-  args: Record<string, any>,
+  result: unknown,
+  args: Record<string, unknown>,
 ): string {
-  if (typeof result?.path === 'string') return result.path;
-  if (typeof result?.target === 'string') return result.target;
+  const r = asRecord(result);
+  if (typeof r.path === 'string') return r.path;
+  if (typeof r.target === 'string') return r.target;
   if (action === 'create_note' && typeof args.filename === 'string') return args.filename;
   if (action === 'rename_note' && typeof args.newPath === 'string') return args.newPath;
   if (typeof args.path === 'string') return args.path;

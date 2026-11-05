@@ -50,6 +50,14 @@ interface ToolResultPayload {
     workspaceEdit?: WorkspaceEditSummary;
 }
 
+/**
+ * 流事件里的 tool_result.result 类型为 unknown(可能是 null/字符串/对象)。
+ * 非对象一律视为空对象:所有消费点都只读可选字段,与此前对 null/原始值的 `?.` 读取等价。
+ */
+function asToolResultPayload(value: unknown): ToolResultPayload {
+    return (typeof value === 'object' && value !== null ? value : {}) as ToolResultPayload;
+}
+
 /** Obsidian App 上未在公开 d.ts 暴露的内部命令 API。 */
 type AppWithCommands = App & {
     commands: { executeCommandById(commandId: string): boolean };
@@ -373,23 +381,23 @@ export class ChatController {
 
                     if (event.type === 'tool_result') {
                         const args = this.shiftToolArgs(writeToolArgs, event.name);
-                        this.handleWorkspaceEditResult(event.result);
+                        const toolResult = asToolResultPayload(event.result);
+                        this.handleWorkspaceEditResult(toolResult);
                         if (this.isFileWriteTool(event.name)) {
                             attemptedFileWrite = true;
-                            if (this.isSuccessfulToolResult(event.result)) {
+                            if (this.isSuccessfulToolResult(toolResult)) {
                                 successfulFileWrite = true;
                             } else {
-                                const error = this.getWriteToolError(event.result);
+                                const error = this.getWriteToolError(toolResult);
                                 if (error) lastWriteError = error;
                             }
                         }
-                        const nextApproval = this.toApprovalRequest(event.result);
+                        const nextApproval = this.toApprovalRequest(toolResult);
                         if (nextApproval) {
                             approvalRequest = nextApproval;
                             this.addApprovalMessage(nextApproval);
                         } else if (this.isFileWriteTool(event.name)) {
-                            const toolResult: ToolResultPayload = event.result;
-                            if (!toolResult?.workspaceEdit) {
+                            if (!toolResult.workspaceEdit) {
                                 await this.openFileFromToolResult(event.name, toolResult, args);
                             }
                             if (successfulFileWrite && bufferedTextEvents.length > 0) {
@@ -560,8 +568,12 @@ export class ChatController {
 
         if (matchedSkillCommand && typeof this.api.executeSlashSkillCommand === 'function') {
             try {
-                const result = await this.api.executeSlashSkillCommand(cmd, argStr.trim(), this.conversationId);
-                this.handleStructuredResult(result);
+                const result: unknown = await this.api.executeSlashSkillCommand(cmd, argStr.trim(), this.conversationId);
+                if (typeof result === 'string') {
+                    this.addMessage('system', result);
+                } else {
+                    this.handleStructuredResult(asToolResultPayload(result));
+                }
             } catch (error: unknown) {
                 this.handleError(error);
             }

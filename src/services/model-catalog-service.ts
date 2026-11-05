@@ -48,7 +48,7 @@ export class ModelListingUnsupportedError extends Error {
 /** 判断错误是否为「端点不支持列模型」（而非 key / 网络 / 限流问题）。 */
 export function isModelListingUnsupported(error: unknown): error is ModelListingUnsupportedError {
   return error instanceof ModelListingUnsupportedError
-    || (typeof error === 'object' && error !== null && (error as any).code === 'model-listing-unsupported');
+    || (typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'model-listing-unsupported');
 }
 
 /**
@@ -268,23 +268,22 @@ async function listOpenAICompatModels(config: ProviderConfig, deps?: ModelCatalo
     throw new Error(`OpenAI models API error: ${response.status}`);
   }
 
-  const data = JSON.parse(response.text || '{}');
-  const rows = Array.isArray(data?.data) ? data.data : [];
+  const rows = parseModelRows(response.text);
 
   const excludedKeywords = [
     'embedding', 'whisper', 'tts', 'transcribe', 'moderation',
     'dall-e', 'image', 'audio-preview', 'omni-moderation',
   ];
 
-  const options = rows
-    .map((row: any) => (typeof row?.id === 'string' ? row.id.trim() : ''))
-    .filter((id: string) => {
+  const options: ModelOption[] = rows
+    .map((row) => readTrimmedString(row, 'id'))
+    .filter((id) => {
       if (!id) return false;
       const lower = id.toLowerCase();
       return !excludedKeywords.some(keyword => lower.includes(keyword));
     })
-    .map((id: string) => ({ value: id, label: id }))
-    .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
+    .map((id): ModelOption => ({ value: id, label: id }))
+    .sort((a, b) => a.value.localeCompare(b.value));
 
   return dedupeByValue(options);
 }
@@ -323,23 +322,34 @@ async function listAnthropicModels(config: ProviderConfig, deps?: ModelCatalogDe
     throw new Error(`Anthropic models API error: ${response.status}`);
   }
 
-  const data = JSON.parse(response.text || '{}');
-  const rows = Array.isArray(data?.data) ? data.data : [];
+  const rows = parseModelRows(response.text);
 
   const options: ModelOption[] = rows
-    .map((row: any): ModelOption | null => {
-      const value = typeof row?.id === 'string' ? row.id.trim() : '';
+    .map((row): ModelOption | null => {
+      const value = readTrimmedString(row, 'id');
       if (!value) return null;
-      const displayName = typeof row?.display_name === 'string' && row.display_name.trim().length > 0
-        ? row.display_name.trim()
-        : value;
+      const displayName = readTrimmedString(row, 'display_name') || value;
       const label = displayName === value ? value : `${displayName} (${value})`;
       return { value, label };
     })
-    .filter((option: ModelOption | null): option is ModelOption => option !== null)
-    .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
+    .filter((option): option is ModelOption => option !== null)
+    .sort((a, b) => a.value.localeCompare(b.value));
 
   return dedupeByValue(options);
+}
+
+/** 解析 /models 响应体，取出 `data` 数组；形状不符时返回空数组。 */
+function parseModelRows(text: string | undefined): unknown[] {
+  const data: unknown = JSON.parse(text || '{}');
+  const rows = typeof data === 'object' && data !== null ? (data as { data?: unknown }).data : undefined;
+  return Array.isArray(rows) ? rows : [];
+}
+
+/** 读取对象上的字符串字段并 trim；非字符串或字段缺失时返回空串。 */
+function readTrimmedString(row: unknown, key: string): string {
+  if (typeof row !== 'object' || row === null) return '';
+  const value = (row as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function dedupeByValue(options: ModelOption[]): ModelOption[] {

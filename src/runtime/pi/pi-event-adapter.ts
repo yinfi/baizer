@@ -1,15 +1,38 @@
 import type { StreamEvent } from '../../models/interfaces';
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
 
-export function unwrapPiToolResult(result: any): any {
-  if (result?.details && Object.prototype.hasOwnProperty.call(result.details, 'baizerResponse')) {
-    return result.details.baizerResponse;
+/** pi 工具结果的宽松读取形状:details / content[0].text 都可能缺失。 */
+interface LoosePiToolResult {
+  details?: unknown;
+  content?: unknown;
+}
+
+function asLooseResult(result: unknown): LoosePiToolResult | undefined {
+  return typeof result === 'object' && result !== null ? (result as LoosePiToolResult) : undefined;
+}
+
+/** 取 content[0].text;不是字符串则返回 undefined。 */
+function firstContentText(result: LoosePiToolResult | undefined): string | undefined {
+  const content = result?.content;
+  if (!Array.isArray(content)) return undefined;
+  const first: unknown = content[0];
+  if (typeof first !== 'object' || first === null) return undefined;
+  const text = (first as { text?: unknown }).text;
+  return typeof text === 'string' ? text : undefined;
+}
+
+export function unwrapPiToolResult(result: unknown): unknown {
+  const loose = asLooseResult(result);
+  const details = loose?.details;
+  if (details && Object.prototype.hasOwnProperty.call(details, 'baizerResponse')) {
+    return (details as { baizerResponse: unknown }).baizerResponse;
   }
-  if (typeof result?.content?.[0]?.text === 'string') {
+  const text = firstContentText(loose);
+  if (text !== undefined) {
     try {
-      return JSON.parse(result.content[0].text);
+      return JSON.parse(text) as unknown;
     } catch {
-      return { message: result.content[0].text };
+      return { message: text };
     }
   }
   return result;
@@ -61,22 +84,24 @@ export function mapPiEventToStreamEvent(event: AgentEvent): StreamEvent | undefi
   }
 
   if (event.type === 'tool_execution_start') {
+    const args: unknown = event.args;
     return {
       type: 'tool_call',
       id: event.toolCallId,
       name: event.toolName,
-      args: event.args || {},
+      args: typeof args === 'object' && args !== null ? (args as Record<string, unknown>) : {},
     };
   }
 
   if (event.type === 'tool_execution_end') {
+    const rawResult: unknown = event.result;
     const streamEvent: StreamEvent = {
       type: 'tool_result',
       name: event.toolName,
-      result: unwrapPiToolResult(event.result),
+      result: unwrapPiToolResult(rawResult),
     };
     if (event.isError) {
-      streamEvent.error = getToolErrorMessage(event.result);
+      streamEvent.error = getToolErrorMessage(rawResult);
     }
     return streamEvent;
   }
@@ -86,8 +111,12 @@ export function mapPiEventToStreamEvent(event: AgentEvent): StreamEvent | undefi
   return undefined;
 }
 
-function getToolErrorMessage(result: any): string | undefined {
-  if (typeof result?.details?.error === 'string') return result.details.error;
-  if (typeof result?.content?.[0]?.text === 'string') return result.content[0].text;
-  return undefined;
+function getToolErrorMessage(result: unknown): string | undefined {
+  const loose = asLooseResult(result);
+  const details = loose?.details;
+  if (typeof details === 'object' && details !== null) {
+    const error = (details as { error?: unknown }).error;
+    if (typeof error === 'string') return error;
+  }
+  return firstContentText(loose);
 }

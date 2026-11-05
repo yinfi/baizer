@@ -65,8 +65,9 @@ export function estimateTokens(message: EstimableMessage): number {
     chars = content.length;
   } else if (Array.isArray(content)) {
     for (const block of content) {
-      if (block && typeof block === 'object' && (block as any).type === 'text' && typeof (block as any).text === 'string') {
-        chars += (block as any).text.length;
+      if (block && typeof block === 'object') {
+        const { type, text } = block as { type?: unknown; text?: unknown };
+        if (type === 'text' && typeof text === 'string') chars += text.length;
       }
     }
   }

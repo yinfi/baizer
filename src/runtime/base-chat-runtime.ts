@@ -11,6 +11,18 @@ import { evaluateGenerationQuality } from '../services/generation-quality';
 import { formatGenerationPlanBlock, GenerationStrategyService } from '../services/generation-strategy-service';
 import { PreparedChatTurn, ChatRuntime, ChatRuntimeDeps, ChatTurnRequest } from './runtime-types';
 import { logger } from '../utils/logger';
+import type { ContextItem as SnapshotContextItem } from '../services/context-manager';
+
+const SNAPSHOT_CONTEXT_TYPES: readonly SnapshotContextItem['type'][] = ['file', 'image', 'url', 'youtube', 'text', 'scope'];
+
+/**
+ * ChatContextItem(id 可选、type 为任意字符串)→ 快照里的窄契约 ContextItem。
+ * 兜底快照的下游(写作画像)只读 content,其余字段仅为满足类型而规整。
+ */
+function toSnapshotContextItem(item: ChatContextItem): SnapshotContextItem {
+  const type = SNAPSHOT_CONTEXT_TYPES.find(known => known === item.type) ?? 'text';
+  return { ...item, id: item.id ?? '', type };
+}
 
 interface ActiveSkillScope {
   activeSkillName?: string;
@@ -319,7 +331,7 @@ If no listed command fits, suggest a plain-language request instead.
       backlinks: [],
       recentNotes: [],
       explicitScopes: [],
-      contextItems: request.contextItems as any,
+      contextItems: request.contextItems.map(toSnapshotContextItem),
     };
   }
 

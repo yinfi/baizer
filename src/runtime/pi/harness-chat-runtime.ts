@@ -17,6 +17,7 @@ import {
   type ConversationSession,
 } from './session-store/conversation-session';
 import type { EntryKind } from './session-store/types';
+import { thrownMessage } from '../../utils/thrown-message';
 
 /**
  * 基于 pi `Agent` 的聊天运行时。
@@ -153,19 +154,21 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     // 提炼只用 user+assistant 文本(assistant 文本已是动作的自然摘要)。
     const turnToolResults: Array<{ name: string; result: unknown }> = [];
 
-    const unsubscribe = agent.subscribe((event: any) => {
+    const unsubscribe = agent.subscribe((event: AgentEvent) => {
       // Provider 错误不会让 prompt() reject,而是以 message_end(stopReason:'error') 出现。
       // 用户中断同样以 message_end(stopReason:'aborted') 出现:pi 会把这次 run 正常收尾
       // (prompt 不 reject),若只看 signal.aborted 或 catch,取消会被当成正常完成——
       // 这正是「手动停止后仍显示成功」的根因。故这里显式转成 aborted runError。
-      if (event?.type === 'message_end') {
-        if (event.message?.stopReason === 'aborted') {
+      if (event.type === 'message_end') {
+        const endMessage = event.message as { stopReason?: unknown; errorMessage?: unknown } | null | undefined;
+        if (endMessage?.stopReason === 'aborted') {
           if (!runErrorBox.value) runErrorBox.value = { message: 'Request aborted', aborted: true };
           return;
         }
-        if (event.message?.stopReason === 'error') {
+        if (endMessage?.stopReason === 'error') {
           if (!approvalMessage) {
-            if (!runErrorBox.value) runErrorBox.value = { message: event.message?.errorMessage || 'Provider error', aborted: false };
+            const providerMessage = typeof endMessage.errorMessage === 'string' ? endMessage.errorMessage : '';
+            if (!runErrorBox.value) runErrorBox.value = { message: providerMessage || 'Provider error', aborted: false };
           }
           return;
         }
@@ -175,7 +178,9 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       if (!mapped) return;
 
       if (mapped.type === 'tool_result') {
-        const raw = unwrapPiToolResult(event.result);
+        // mapped 为 tool_result 时 event 必为 tool_execution_end
+        const rawEventResult: unknown = event.type === 'tool_execution_end' ? event.result : undefined;
+        const raw = unwrapPiToolResult(rawEventResult);
         recordPiFileWriteResult(fileWriteState, mapped.name, raw);
         if (isPiApprovalResponse(raw)) {
           approvalMessage = formatPiApprovalMessage(raw);
@@ -226,9 +231,10 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     const runPromise = (async () => {
       try {
         await agent.prompt(turn.prompt);
-      } catch (error: any) {
-        const aborted = error?.name === 'AbortError' || signal?.aborted === true;
-        if (!runErrorBox.value) runErrorBox.value = { message: error?.message || 'Agent run failed', aborted };
+      } catch (error: unknown) {
+        const errorName = typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
+        const aborted = errorName === 'AbortError' || signal?.aborted === true;
+        if (!runErrorBox.value) runErrorBox.value = { message: thrownMessage(error) || 'Agent run failed', aborted };
       } finally {
         queue.close();
       }
@@ -267,8 +273,8 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     let persistFailure = '';
     try {
       await persistTurnMessages(session, agent.state.messages.slice(transcriptBaseline));
-    } catch (error: any) {
-      persistFailure = `Failed to persist turn: ${error?.message || 'unknown error'}`;
+    } catch (error: unknown) {
+      persistFailure = `Failed to persist turn: ${thrownMessage(error) || 'unknown error'}`;
     }
     if (persistFailure && !approvalMessage) {
       yield { type: 'error', message: persistFailure, outcome: 'failed' };

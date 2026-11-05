@@ -297,6 +297,29 @@ async function runTests() {
     expect(retried.error instanceof Error).toBe(true);
     expect(service.modelListInFlight.size).toBe(0);
   });
+
+  await test('(z) model list parsing ignores malformed rows and bodies', async () => {
+    const ok = (text: string) => async () => ({ status: 200, text }) as any;
+
+    const openai = await catalog.listModels(openaiConfig(), {
+      requestUrl: ok(JSON.stringify({ data: [null, 'x', 5, {}, { id: 7 }, { id: '  ' }, { id: 'gpt-4o ' }, { id: 'text-embedding-3' }, { id: 'b-model' }, { id: 'gpt-4o' }] })),
+    });
+    expect(openai.map((m: any) => m.value)).toEqual(['b-model', 'gpt-4o']);
+
+    for (const body of ['{}', 'null', '[]', '{"data":"x"}', '{"data":{}}']) {
+      expect(await catalog.listModels(openaiConfig(), { requestUrl: ok(body) })).toEqual([]);
+      expect(await catalog.listModels(anthropicConfig(), { requestUrl: ok(body) })).toEqual([]);
+    }
+
+    const anthropic = await catalog.listModels(anthropicConfig(), {
+      requestUrl: ok(JSON.stringify({ data: [null, { id: 3 }, { id: 'claude-a', display_name: 7 }, { id: 'claude-b', display_name: ' Claude B ' }, { id: 'claude-c', display_name: '   ' }] })),
+    });
+    expect(anthropic).toEqual([
+      { value: 'claude-a', label: 'claude-a' },
+      { value: 'claude-b', label: 'Claude B (claude-b)' },
+      { value: 'claude-c', label: 'claude-c' },
+    ]);
+  });
 }
 
 runTests().catch((e) => {
