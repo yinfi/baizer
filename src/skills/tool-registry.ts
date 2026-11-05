@@ -4,6 +4,7 @@ import { App } from 'obsidian';
 import { PluginSettings } from '../mcp/types';
 import { ToolDefinition } from '../models/interfaces';
 import { Tool, ToolContext } from './types';
+import { prop } from '../utils/narrow';
 
 /**
  * 原子工具注册表
@@ -77,9 +78,9 @@ export class ToolRegistry {
     try {
       const ctx = signal ? { ...this.ctx, signal } : this.ctx;
       return await tool.execute(args, ctx);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(`[ToolRegistry] Tool "${name}" execution error:`, e);
-      return { error: e.message };
+      return { error: prop(e, 'message') };
     }
   }
 

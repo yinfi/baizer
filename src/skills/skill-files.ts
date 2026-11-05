@@ -1,6 +1,7 @@
 import { parse } from 'yaml';
 import { PLUGIN_DATA_DIR } from '../mcp/types';
 import { computeSchemaHash } from '../knowledge/ontology';
+import { asString, prop } from '../utils/narrow';
 
 export interface ListedFilesLike {
   files: string[];
@@ -129,8 +130,8 @@ async function readBuiltinSourceHash(
 ): Promise<string | null> {
   if (!await adapter.exists(sourcePath)) return null;
   try {
-    const parsed = JSON.parse(await adapter.read(sourcePath));
-    return typeof parsed.bundleHash === 'string' ? parsed.bundleHash : null;
+    const parsed = JSON.parse(await adapter.read(sourcePath)) as unknown;
+    return asString(prop(parsed, 'bundleHash')) ?? null;
   } catch {
     return null;
   }
@@ -251,23 +252,24 @@ export function readSkillProvenanceFromText(raw: string): SkillProvenanceReport 
 
 /** frontmatter YAML 里的 source 嵌套映射；缺 plugin 或 body_hash 视为无溯源。 */
 function parseProvenance(frontmatter: string): SkillProvenance | null {
-  let fm: any;
+  let fm: unknown;
   try {
     fm = parse(frontmatter);
   } catch {
     return null;
   }
 
-  const source = fm?.source;
+  const source = prop(fm, 'source');
   if (!source || typeof source !== 'object') return null;
 
-  const plugin = typeof source.plugin === 'string' ? source.plugin.trim() : '';
-  const bodyHash = typeof source.body_hash === 'string' ? source.body_hash.trim() : '';
+  const plugin = asString(prop(source, 'plugin'))?.trim() ?? '';
+  const bodyHash = asString(prop(source, 'body_hash'))?.trim() ?? '';
   if (!plugin || !bodyHash) return null;
 
-  const version = source.version === undefined || source.version === null
+  const rawVersion = prop(source, 'version');
+  const version = rawVersion === undefined || rawVersion === null
     ? ''
-    : String(source.version).trim();
+    : String(rawVersion).trim();
   return { plugin, version, bodyHash };
 }
 
@@ -283,8 +285,8 @@ export async function readSkillProvenanceFromFile(
   let raw: string | null;
   try {
     raw = await readTextIfExists(adapter, filePath);
-  } catch (e: any) {
-    console.warn(`[skill-files] Failed to read provenance from ${filePath}:`, e?.message ?? e);
+  } catch (e: unknown) {
+    console.warn(`[skill-files] Failed to read provenance from ${filePath}:`, prop(e, 'message') ?? e);
     return absentProvenance();
   }
   if (raw === null) return absentProvenance();

@@ -4,6 +4,7 @@
 import { App, TFile, Notice } from 'obsidian';
 import { MetadataIndex } from './metadata-index';
 import { logger } from '../utils/logger';
+import { prop } from '../utils/narrow';
 import {
   DEFAULT_WIKI_FOLDER,
   WIKI_INDEX_BASE_FILENAME,
@@ -135,8 +136,8 @@ export class WikiIndexer {
 
     try {
       await this.app.vault.create(basePath, content);
-    } catch (e: any) {
-      if (String(e?.message ?? e).includes('File already exists')) {
+    } catch (e: unknown) {
+      if (String(prop(e, 'message') ?? e).includes('File already exists')) {
         await adapter.write(basePath, content);
         return;
       }

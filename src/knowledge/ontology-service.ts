@@ -15,6 +15,7 @@ import {
   parseOntologySchema,
 } from './ontology';
 import { normalizeTopicSlug } from './types';
+import { prop } from '../utils/narrow';
 
 export class OntologyService {
   constructor(
@@ -215,23 +216,24 @@ export class OntologyService {
   }
 }
 
-function readTopics(fm: Record<string, any>): string[] {
+function readTopics(fm: Record<string, unknown>): string[] {
   const raw = fm.topics;
   if (!Array.isArray(raw)) return [];
-  return raw
-    .map((topic: any) => {
+  return (raw as unknown[])
+    .map((topic): string => {
       if (typeof topic === 'string') return topic;
-      if (topic && typeof topic.label === 'string') return topic.label;
+      const label = prop(topic, 'label');
+      if (typeof label === 'string') return label;
       return '';
     })
-    .filter((topic: string) => topic.length > 0);
+    .filter((topic) => topic.length > 0);
 }
 
-function readStringArray(raw: any): string[] {
+function readStringArray(raw: unknown): string[] {
   if (typeof raw === 'string') {
     try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.map(String) : [raw];
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as unknown[]).map(String) : [raw];
     } catch {
       return [raw];
     }

@@ -5,6 +5,18 @@ import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import { pluginSkillFilePath } from '../../skill-files';
 import { checkPluginControl, needsApproval } from '../../../permissions/permission-service';
+import { prop } from '../../../utils/narrow';
+
+/** get_plugin_commands / get_plugin_settings 的入参(由 parameters schema 约束)。 */
+interface PluginIdArgs {
+  pluginId: string;
+}
+
+/** execute_plugin_command 的入参;approved 由审批流程回填。 */
+interface ExecutePluginCommandArgs {
+  commandId: string;
+  approved?: boolean;
+}
 
 export function getPluginCommandPreconditions(): string[] {
   return [
@@ -44,7 +56,7 @@ const getPluginCommands: Tool = {
     },
     required: ['pluginId'],
   },
-  async execute(args, ctx) {
+  async execute(args: PluginIdArgs, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
     const cmds = ctx.app.commands.listCommands()
       .filter((c) => c.id.startsWith(args.pluginId + ':'))
@@ -65,11 +77,12 @@ const getPluginSettings: Tool = {
     },
     required: ['pluginId'],
   },
-  async execute(args, ctx) {
+  async execute(args: PluginIdArgs, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const plugin = ctx.app.plugins.getPlugin(args.pluginId);
+    // getPlugin 返回第三方插件实例(外部数据),以 unknown 接收后显式窄化。
+    const plugin: unknown = ctx.app.plugins.getPlugin(args.pluginId);
     if (!plugin) return { error: 'Plugin not found or not enabled' };
-    const raw = plugin.settings || plugin.data || {};
+    const raw = prop(plugin, 'settings') || prop(plugin, 'data') || {};
     const allowValues = ctx.settings.allowPluginConfigValues === true;
     return {
       pluginId: args.pluginId,
@@ -171,7 +184,7 @@ const executePluginCommand: Tool = {
     },
     required: ['commandId'],
   },
-  async execute(args, ctx) {
+  async execute(args: ExecutePluginCommandArgs, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
     if (needsApproval('plugin-control', ctx.settings) && !args.approved) {
       return {
