@@ -11,6 +11,7 @@ import {
   resolveAsrConfig,
 } from '../../../mcp/types';
 import * as videoUtils from '../../../utils/video_utils';
+import { thrownMessage } from '../../../utils/thrown-message';
 import { resolveSavedNotePath } from '../../../mcp/save-path';
 import type { ModelService } from '../../../services/model-service';
 import {
@@ -45,6 +46,17 @@ const defaultDeps: WebClipperDeps = {
   },
   transcribeVideoAudio: (params) => transcriptionService.transcribeFromVideoUrl(params),
 };
+
+/** 工具 args 是模型生成的 JSON（外部输入）：非字符串字段一律视为缺省。 */
+function readStringArg(args: unknown, key: string): string {
+  if (!isRecord(args)) return '';
+  const value = args[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
 
 function extractTags(text: string): string[] {
   const tags: string[] = [];
@@ -256,7 +268,7 @@ async function buildNonTranscriptContent(params: {
 
 async function saveVideo(
   url: string,
-  args: any,
+  args: unknown,
   ctx: ToolContext,
   modelService: SummaryModel,
   deps: WebClipperDeps,
@@ -365,7 +377,7 @@ async function saveVideo(
     });
   }
 
-  let filename = sanitizeTitle(args.filename || transcript.title);
+  let filename = sanitizeTitle(readStringArg(args, 'filename') || transcript.title);
   if (!filename.endsWith('.md')) filename += '.md';
   const finalPath = resolveSavedNotePath(
     filename,
@@ -381,7 +393,7 @@ async function saveVideo(
   return { success: true, path: finalPath, message: `Video Note Saved: ${finalPath}` };
 }
 
-async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebClipperDeps): Promise<any> {
+async function saveWebpage(url: string, args: unknown, ctx: ToolContext, deps: WebClipperDeps): Promise<any> {
   const response = await deps.requestUrl({
     url,
     headers: {
@@ -479,7 +491,7 @@ async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebCl
     throw new Error('Failed to convert webpage content to Markdown');
   }
 
-  let filename = args.filename || title;
+  let filename = readStringArg(args, 'filename') || title;
   if (!filename.endsWith('.md')) filename += '.md';
   const finalPath = resolveSavedNotePath(
     filename,
@@ -517,12 +529,13 @@ export function createSaveWebpageTool(modelService: SummaryModel, deps: WebClipp
       if (ctx.signal?.aborted) {
         return { success: false, error: 'Aborted before saving note', aborted: true };
       }
+      const url = readStringArg(args, 'url');
       try {
-        const videoResult = await saveVideo(args.url, args, ctx, modelService, deps);
+        const videoResult = await saveVideo(url, args, ctx, modelService, deps);
         if (videoResult) return videoResult;
-        return await saveWebpage(args.url, args, ctx, deps);
-      } catch (e: any) {
-        return { success: false, error: e.message };
+        return await saveWebpage(url, args, ctx, deps);
+      } catch (e: unknown) {
+        return { success: false, error: thrownMessage(e) || String(e) };
       }
     },
   };

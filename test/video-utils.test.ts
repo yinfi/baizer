@@ -121,6 +121,88 @@ async function runTests() {
     expect(result?.needsTranscription).toBe(true);
     expect(result?.transcriptSource).toBe('metadata');
   });
+
+  await test('skips malformed Bilibili subtitle entries instead of failing the whole clip', async () => {
+    const fetcher = createVideoTranscriptFetcher({
+      userAgent: 'TestAgent',
+      requestUrl: async (options: any) => {
+        if (options.url === 'https://www.bilibili.com/video/BVmalformed') {
+          return {
+            status: 200,
+            text: '<title>Malformed Bilibili Video_哔哩哔哩_bilibili</title><script>window.__INITIAL_STATE__={"bvid":"BVmalformed","cid":789}</script>',
+            headers: {},
+            arrayBuffer: new ArrayBuffer(0),
+            json: {},
+          };
+        }
+        if (options.url === 'https://api.bilibili.com/x/player/v2?cid=789&bvid=BVmalformed') {
+          return {
+            status: 200,
+            text: JSON.stringify({
+              code: 0,
+              data: {
+                subtitle: {
+                  subtitles: [
+                    null,
+                    'not-an-object',
+                    { url: 42 },
+                    { url: '' },
+                    { url: '//example.com/malformed-subtitle.json' },
+                  ],
+                },
+              },
+            }),
+            headers: {},
+            arrayBuffer: new ArrayBuffer(0),
+            json: {},
+          };
+        }
+        if (options.url === 'https://example.com/malformed-subtitle.json') {
+          return {
+            status: 200,
+            text: JSON.stringify({
+              body: [{ content: 'first sentence' }, null, { content: 42 }, { content: 'second sentence' }],
+            }),
+            headers: {},
+            arrayBuffer: new ArrayBuffer(0),
+            json: {},
+          };
+        }
+        throw new Error(`Unexpected URL ${options.url}`);
+      },
+    });
+
+    const result = await fetcher('https://www.bilibili.com/video/BVmalformed');
+    // 坏条目（null / 非对象 / 非字符串 url / 非字符串 content）被跳过，好条目照常拼出文本。
+    expect(result?.text).toContain('first sentence');
+    expect(result?.text).toContain('second sentence');
+    expect(result?.transcriptSource).toBe('platform-subtitle');
+  });
+
+  await test('falls back to metadata when YouTube caption tracks are malformed', async () => {
+    const fetcher = createVideoTranscriptFetcher({
+      userAgent: 'TestAgent',
+      requestUrl: async (options: any) => {
+        if (options.url === 'https://www.youtube.com/watch?v=malformed') {
+          return {
+            status: 200,
+            text: '<title>Demo - YouTube</title><script>"captionTracks":[null,{"languageCode":"en"}]</script>',
+            headers: {},
+            arrayBuffer: new ArrayBuffer(0),
+            json: {},
+          };
+        }
+        throw new Error(`Unexpected URL ${options.url}`);
+      },
+    });
+
+    const result = await fetcher('https://www.youtube.com/watch?v=malformed');
+    // 唯一字幕轨没有 baseUrl：不能拿着坏 URL 发请求，退回 metadata（由上层触发音频转写）。
+    expect(result?.title).toBe('Demo');
+    expect(result?.text).toBe('');
+    expect(result?.transcriptSource).toBe('metadata');
+    expect(result?.needsTranscription).toBe(true);
+  });
 }
 
 runTests().catch((e) => {

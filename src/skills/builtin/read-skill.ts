@@ -35,7 +35,7 @@ export function registerSkillReadTool(
       required: ['name'],
     },
     async execute(args, ctx) {
-      const name = typeof args?.name === 'string' ? args.name.trim() : '';
+      const name = readSkillNameArg(args);
       if (!name) return { error: 'Missing skill name' };
 
       const resolved = skillRegistry.resolveForRead(name);
@@ -59,4 +59,18 @@ export function registerSkillReadTool(
   };
 
   toolRegistry.register(readSkill);
+}
+
+/**
+ * 工具 args 是模型生成的 JSON（外部输入）：先窄化再取 name。
+ * 非字符串（含缺失）一律视为未提供，与原来 `typeof args?.name === 'string'` 一致。
+ */
+function readSkillNameArg(args: unknown): string {
+  if (!isRecord(args)) return '';
+  const name = args.name;
+  return typeof name === 'string' ? name.trim() : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

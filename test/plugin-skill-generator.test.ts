@@ -411,6 +411,88 @@ async function runTests() {
 
     expect(error).toContain('get_plugin_settings');
   });
+
+  // ---------- 外部输入窄化 ----------
+
+  await test('collectBasicPluginInfo ignores non-string manifest fields and keeps installed-manifest fallbacks', async () => {
+    const files = new Map<string, string>([
+      [
+        '.obsidian/plugins/obsidian-tasks-plugin/manifest.json',
+        JSON.stringify({ name: 5, description: {}, version: 7 }),
+      ],
+    ]);
+    const app = {
+      ...mockApp,
+      plugins: {
+        ...(mockApp as any).plugins,
+        getPlugin: () => null,
+      },
+      vault: {
+        adapter: {
+          read: async (path: string) => {
+            const content = files.get(path);
+            if (content === undefined) throw new Error(`File not found: ${path}`);
+            return content;
+          },
+        },
+      },
+    } as unknown as App;
+    const localGenerator = new PluginSkillGenerator(app, mockModelService as any);
+
+    const info = await localGenerator.collectBasicPluginInfo('obsidian-tasks-plugin');
+
+    // manifest.json 里的数字/对象字段不是字符串：回退到已加载的 manifests，而不是原样透出。
+    expect(info.name).toBe('Tasks');
+    expect(info.description).toBe('Task management for Obsidian');
+    expect(info.version).toBe('7.14.0');
+  });
+
+  await test('collectBasicPluginInfo reads settings keys from plugin.data when settings is absent', async () => {
+    const app = {
+      ...mockApp,
+      plugins: {
+        ...(mockApp as any).plugins,
+        getPlugin: () => ({ data: { theme: 'dark', folder: 'x' } }),
+      },
+    } as unknown as App;
+    const localGenerator = new PluginSkillGenerator(app, mockModelService as any);
+
+    const info = await localGenerator.collectBasicPluginInfo('obsidian-minimal-settings');
+    expect(info.settingsKeys).toEqual(['theme', 'folder']);
+  });
+
+  await test('parseBuiltinSkill drops malformed sidecar fields instead of trusting them', async () => {
+    const md = [
+      '---',
+      'name: weird-skill',
+      'description: 非法 sidecar 字段',
+      'tools: not-an-array',
+      'triggers:',
+      '  commands: [1, "/go", null]',
+      '  keywords: not-an-array',
+      'mode: simple',
+      '---',
+      'body',
+    ].join('\n');
+
+    const loaded = parseBuiltinSkill(md, 'weird/SKILL.md');
+    expect(loaded !== null).toBe(true);
+    expect(loaded!.sidecar.tools).toEqual([]);
+    expect(loaded!.sidecar.triggers!.commands).toEqual(['/go']);
+    expect(loaded!.sidecar.triggers!.keywords).toBe(undefined);
+    expect(loaded!.sidecar.executionMode).toBe('direct');
+
+    // triggers 是标量时不产生任何触发配置（与原实现一致）。
+    const scalarTriggers = parseBuiltinSkill([
+      '---',
+      'name: scalar-triggers',
+      'description: x',
+      'triggers: oops',
+      '---',
+      'body',
+    ].join('\n'), 'scalar/SKILL.md');
+    expect(scalarTriggers!.sidecar.triggers).toBe(undefined);
+  });
 }
 
 runTests().catch(console.error);

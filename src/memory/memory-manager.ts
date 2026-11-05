@@ -8,6 +8,7 @@ import {
     collectSupersededIds,
     createMemoryId,
     DEFAULT_MEMORY_BANK_ID,
+    MemoryRecord,
     normalizeMemoryText,
     sanitizeMemoryText,
     tokenizeForRetrieval,
@@ -20,6 +21,17 @@ import { importPreviousMemoryFiles, migrateLegacyMemory } from './hindsight-migr
 import { HindsightRetriever } from './hindsight-retriever';
 import { HindsightStore } from './hindsight-store';
 import { logger } from '../utils/logger';
+
+/** LLM distill 输出里的一条：{text, entities} 或纯字符串（旧格式/降级）。 */
+interface DistilledItem {
+    text: string;
+    entities?: string[];
+}
+
+/** LLM 输出（JSON.parse）的窄化入口：只接受非 null、非数组的对象。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 interface MemoryManagerOptions {
     privacyMode?: boolean;
@@ -263,7 +275,7 @@ export class MemoryManager {
      * 返回 null = 交给上层规则回退(未注入 generate / LLM 失败 / LLM 超时 / LLM 判定无可记);
      * 返回 [] = 输入真空(user、assistant 都空),规则回退也产不出记录,无需回退。
      */
-    private async distillTurnMemories(input: RetainTurnInput, now: number): Promise<any[] | null> {
+    private async distillTurnMemories(input: RetainTurnInput, now: number): Promise<MemoryRecord[] | null> {
         const generate = this.options.generate;
         if (typeof generate !== 'function') return null;
 
@@ -304,10 +316,10 @@ export class MemoryManager {
      * 解析 distill 的结构化返回:元素为 {text, entities}(新格式)或纯字符串(旧格式/降级)。
      * text 走脱敏+去前缀符号,entities 原样(交给 createMemoryRecord 的 normalizeEntities 清洗)。
      */
-    private parseDistilledItems(raw: string): Array<{ text: string; entities?: string[] }> {
+    private parseDistilledItems(raw: string): DistilledItem[] {
         const text = (raw || '').trim();
         if (!text) return [];
-        let parsed: any;
+        let parsed: unknown;
         try {
             parsed = JSON.parse(text);
         } catch {
@@ -319,14 +331,15 @@ export class MemoryManager {
                 .map((line) => ({ text: line }));
         }
         if (!Array.isArray(parsed)) return [];
-        const result: Array<{ text: string; entities?: string[] }> = [];
+        const result: DistilledItem[] = [];
         for (const el of parsed) {
             // 兼容:元素可能是对象 {text,entities} 或纯字符串。
-            const rawText = typeof el === 'string' ? el : (el && typeof el.text === 'string' ? el.text : '');
+            const entry = isRecord(el) ? el : null;
+            const rawText = typeof el === 'string' ? el : (entry && typeof entry.text === 'string' ? entry.text : '');
             const clean = sanitizeMemoryText(rawText.replace(/^[-*\d.\s]+/, '').trim());
             if (clean.length < 2) continue;
-            const entities = (el && Array.isArray(el.entities))
-                ? el.entities.map((x: any) => String(x))
+            const entities = entry && Array.isArray(entry.entities)
+                ? entry.entities.map((x) => String(x))
                 : undefined;
             result.push({ text: clean, entities });
             if (result.length >= 5) break;
@@ -340,7 +353,7 @@ export class MemoryManager {
         if (!text) return [];
         let items: string[] = [];
         try {
-            const parsed = JSON.parse(text);
+            const parsed: unknown = JSON.parse(text);
             if (Array.isArray(parsed)) items = parsed.map((x) => String(x));
         } catch {
             items = text.split('\n');
@@ -513,8 +526,8 @@ export class MemoryManager {
      * - 用户消息:仅当 looksDurable(含偏好/项目/目标/自我陈述等信号)才存,存为 world;普通问答流水账不入库。
      * - 助手输出:仅当本轮有工具操作(toolResults,有实际动作发生)或用户消息 durable 时才存;否则丢弃闲聊回答。
      */
-    private buildTurnMemories(input: RetainTurnInput, now: number) {
-        const records = [];
+    private buildTurnMemories(input: RetainTurnInput, now: number): MemoryRecord[] {
+        const records: MemoryRecord[] = [];
         const userText = sanitizeMemoryText(input.userMessage.trim());
         const userDurable = !!userText && this.looksDurable(userText);
 
@@ -548,9 +561,9 @@ export class MemoryManager {
      * 去重写入:与库内"同 tag 集且文本高相似(token Jaccard ≥ 0.8)"的记录视为同一条,
      * 只更新其 mentionedAt(+可选 accessCount),不新增;否则正常 upsert。避免近义改写句无限堆叠。
      */
-    private async upsertDeduped(records: any[], now: number): Promise<void> {
+    private async upsertDeduped(records: MemoryRecord[], now: number): Promise<void> {
         const existing = await this.hindsightStore.listMemoriesRaw(DEFAULT_MEMORY_BANK_ID);
-        const toWrite: any[] = [];
+        const toWrite: MemoryRecord[] = [];
 
         for (const record of records) {
             const dup = existing.find((e) =>
@@ -589,14 +602,14 @@ export class MemoryManager {
      * 精度取舍:只退役窗口内"最相似"的一条(同维度改值),不误伤同 tag 但不同槽位的并存偏好;
      * 相似度过低(<MIN)说明是不同槽位,一律不退役。多值主题/experience 一律不触发。
      */
-    private findStaleSameTopic(record: any, existing: any[]): any[] {
+    private findStaleSameTopic(record: MemoryRecord, existing: MemoryRecord[]): MemoryRecord[] {
         if (record.type !== 'world') return [];
         const recordTopics = record.tags.filter((t: string) =>
             MemoryManager.SINGLE_VALUE_TOPICS.includes(t));
         if (recordTopics.length === 0) return [];
         const topicSet = new Set(recordTopics);
 
-        let best: any = null;
+        let best: MemoryRecord | null = null;
         let bestSim = 0;
         for (const e of existing) {
             if (e.type !== 'world' || e.id === record.id) continue;
@@ -637,7 +650,7 @@ export class MemoryManager {
         return this.hindsightStore.bumpConsolidateCounter();
     }
 
-    private shouldForgetHindsightMemory(memory: any, field: ForgetMemoryField): boolean {
+    private shouldForgetHindsightMemory(memory: MemoryRecord, field: ForgetMemoryField): boolean {
         if (!['name', 'profession', 'expertise', 'preferences', 'workflows', 'projects', 'goals'].includes(field)) {
             return false;
         }
@@ -690,7 +703,7 @@ export class MemoryManager {
         polarity?: 'positive' | 'negative';
         // LLM 结构化抽取的实体(优先);缺省时回退正则版 extractEntities。
         entities?: string[];
-    }) {
+    }): MemoryRecord {
         const entities = (input.entities && input.entities.length > 0)
             ? this.normalizeEntities(input.entities)
             : this.extractEntities(input.text);

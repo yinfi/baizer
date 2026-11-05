@@ -4,6 +4,11 @@
 import { App, TFile } from 'obsidian';
 import { extractFrontmatter } from './ontology';
 
+/** 自研 YAML 解析结果（外部输入）里的标量字段：非字符串一律视为缺失。 */
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 export type KnowledgeStatus = 'pending' | 'processing' | 'done' | 'failed';
 export type KnowledgePendingReason = 'new' | 'content_changed' | 'manual' | 'legacy' | 'interrupted';
 
@@ -124,7 +129,7 @@ export async function setKnowledgeStatus(
   if (isKnowledgeStatusNoop(app, file, status, extra)) return;
 
   try {
-    await app.fileManager.processFrontMatter(file, (fm: any) => {
+    await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
       fm.knowledge_status = status;
 
       if (extra?.source_id) fm.knowledge_source_id = extra.source_id;
@@ -195,7 +200,7 @@ async function fixAndSetFrontmatter(
     //    重复转义（旧实现每轮翻倍转义，把 frontmatter 撑成乱码的元凶）。
     const fixedFm = fmBody.replace(
       /^(\s*[\w-]+):[ \t]+(\S.*)$/gm,
-      (line, key, val) => {
+      (line: string, key: string, val: string) => {
         const trimmed = val.trim();
         // 已被双引号或单引号完整包裹：合法，保持原样（幂等）
         if (/^"(?:[^"\\]|\\.)*"$/.test(trimmed) || /^'(?:[^']|'')*'$/.test(trimmed)) {
@@ -243,7 +248,7 @@ export async function ensureSourceId(app: App, file: TFile): Promise<string> {
 
   const newId = generateSourceId();
   try {
-    await app.fileManager.processFrontMatter(file, (fm: any) => {
+    await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
       fm.knowledge_source_id = newId;
     });
   } catch {
@@ -357,9 +362,9 @@ export async function readSummaryFrontmatter(
     if (!frontmatter) return cached;
 
     return {
-      schema_hash: cached?.schema_hash || frontmatter.schema_hash || undefined,
-      content_hash: cached?.content_hash || frontmatter.content_hash || undefined,
-      compiled_at: cached?.compiled_at || frontmatter.compiled_at || undefined,
+      schema_hash: cached?.schema_hash || asString(frontmatter.schema_hash) || undefined,
+      content_hash: cached?.content_hash || asString(frontmatter.content_hash) || undefined,
+      compiled_at: cached?.compiled_at || asString(frontmatter.compiled_at) || undefined,
     };
   } catch {
     return cached;

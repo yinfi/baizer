@@ -17,6 +17,36 @@ import {
 
 const MAX_FILE_READ_CHARS = 20000;
 
+// ==================== 参数窄化 ====================
+// 工具 args 是模型生成的 JSON（外部输入）：统一按 unknown 处理，再按字段类型取值。
+// 这样既不再依赖 any，也保留了原来 `args.x || 默认值` 的容错语义。
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readString(args: unknown, key: string): string {
+  if (!isRecord(args)) return '';
+  const value = args[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function readField(args: unknown, key: string): unknown {
+  return isRecord(args) ? args[key] : undefined;
+}
+
+/** 与原 `args.limit || 20` 对齐：只有数字真值才采用（0 / NaN / 非数字走默认值）。 */
+function readNumber(args: unknown, key: string): number | undefined {
+  if (!isRecord(args)) return undefined;
+  const value = args[key];
+  return typeof value === 'number' && value ? value : undefined;
+}
+
+/** 与原 `!args.approved` 对齐：任何真值都算已批准。 */
+function hasFlag(args: unknown, key: string): boolean {
+  return isRecord(args) && Boolean(args[key]);
+}
+
 // 权限决策已迁入 PermissionService（Stage 2）。这里再导出 canWriteToVaultTarget
 // 与其类型，保持既有调用方（test/vault-permissions.test.ts 等）import 路径不变。
 export { canWriteToVaultTargetImpl as canWriteToVaultTarget };
@@ -41,7 +71,8 @@ const readNote: Tool = {
     required: ['path'],
   },
   async execute(args, ctx) {
-    const file = ctx.app.metadataCache.getFirstLinkpathDest(args.path, '');
+    const path = readString(args, 'path');
+    const file = ctx.app.metadataCache.getFirstLinkpathDest(path, '');
     if (!file) return { success: false, error: 'File not found' };
     const content = await ctx.app.vault.read(file);
     return { path: file.path, content: content.substring(0, 5000) };
@@ -62,7 +93,8 @@ const createNote: Tool = {
     required: ['filename', 'content'],
   },
   async execute(args, ctx) {
-    let path = args.filename || args.path || args.name;
+    let path = readString(args, 'filename') || readString(args, 'path') || readString(args, 'name');
+    const content = readString(args, 'content');
     if (!path) return { success: false, error: 'Missing filename parameter' };
     if (!path.endsWith('.md')) path += '.md';
 
@@ -81,15 +113,15 @@ const createNote: Tool = {
       return { success: false, error: `File already exists: ${path}. Use update_note to modify existing files.` };
     }
 
-    if (needsApproval('write', ctx.settings) && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !hasFlag(args, 'approved')) {
       return buildApprovalResponse('create_note', path, {
         filename: path,
-        content: args.content || '',
+        content: content || '',
       }, 'create note', {
         kind: 'note-create',
         target: path,
         summary: 'Create note',
-        newContent: args.content || '',
+        newContent: content || '',
         risk: 'medium',
         supportsPartialApply: false,
         undoable: true,
@@ -97,7 +129,7 @@ const createNote: Tool = {
     }
 
     await ensureParentFolder(ctx.app, path);
-    await ctx.app.vault.create(path, args.content || '');
+    await ctx.app.vault.create(path, content || '');
     return { status: 'success', message: `✅ Note created: ${path}` };
   },
 };
@@ -116,7 +148,9 @@ const updateNote: Tool = {
     required: ['path', 'content'],
   },
   async execute(args, ctx) {
-    const scopeError = getWriteScopeError(ctx, args.path);
+    const path = readString(args, 'path');
+    const content = readString(args, 'content');
+    const scopeError = getWriteScopeError(ctx, path);
     if (scopeError) {
       return { success: false, error: scopeError };
     }
@@ -124,26 +158,26 @@ const updateNote: Tool = {
     if (capabilityError) {
       return { success: false, error: capabilityError };
     }
-    const file = ctx.app.vault.getAbstractFileByPath(args.path);
+    const file = ctx.app.vault.getAbstractFileByPath(path);
     if (!file || !(file instanceof TFile)) return { success: false, error: 'File not found' };
-    if (needsApproval('write', ctx.settings) && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !hasFlag(args, 'approved')) {
       const oldContent = await ctx.app.vault.read(file);
-      return buildApprovalResponse('update_note', args.path, {
-        path: args.path,
-        content: args.content,
+      return buildApprovalResponse('update_note', path, {
+        path,
+        content,
       }, 'update note', {
         kind: 'note-replace',
-        target: args.path,
+        target: path,
         summary: 'Replace note content',
         oldContent,
-        newContent: args.content,
+        newContent: content,
         risk: 'medium',
         supportsPartialApply: false,
         undoable: true,
       });
     }
-    await ctx.app.vault.modify(file, args.content);
-    return { success: true, message: `✅ Updated: ${args.path}` };
+    await ctx.app.vault.modify(file, content);
+    return { success: true, message: `✅ Updated: ${path}` };
   },
 };
 
@@ -161,7 +195,9 @@ const appendToNote: Tool = {
     required: ['path', 'content'],
   },
   async execute(args, ctx) {
-    const scopeError = getWriteScopeError(ctx, args.path);
+    const path = readString(args, 'path');
+    const content = readString(args, 'content');
+    const scopeError = getWriteScopeError(ctx, path);
     if (scopeError) {
       return { success: false, error: scopeError };
     }
@@ -169,27 +205,27 @@ const appendToNote: Tool = {
     if (capabilityError) {
       return { success: false, error: capabilityError };
     }
-    const file = ctx.app.vault.getAbstractFileByPath(args.path);
+    const file = ctx.app.vault.getAbstractFileByPath(path);
     if (!file || !(file instanceof TFile)) return { success: false, error: 'File not found' };
-    if (needsApproval('write', ctx.settings) && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !hasFlag(args, 'approved')) {
       const existing = await ctx.app.vault.read(file);
-      return buildApprovalResponse('append_to_note', args.path, {
-        path: args.path,
-        content: args.content,
+      return buildApprovalResponse('append_to_note', path, {
+        path,
+        content,
       }, 'append to note', {
         kind: 'note-append',
-        target: args.path,
+        target: path,
         summary: 'Append to note',
         oldContent: existing,
-        newContent: `${existing}\n${args.content}`,
+        newContent: `${existing}\n${content}`,
         risk: 'medium',
         supportsPartialApply: false,
         undoable: true,
       });
     }
     const existing = await ctx.app.vault.read(file);
-    await ctx.app.vault.modify(file, existing + '\n' + args.content);
-    return { success: true, message: `✅ Appended to: ${args.path}` };
+    await ctx.app.vault.modify(file, existing + '\n' + content);
+    return { success: true, message: `✅ Appended to: ${path}` };
   },
 };
 
@@ -206,7 +242,8 @@ const deleteNote: Tool = {
     required: ['path'],
   },
   async execute(args, ctx) {
-    const scopeError = getWriteScopeError(ctx, args.path);
+    const path = readString(args, 'path');
+    const scopeError = getWriteScopeError(ctx, path);
     if (scopeError) {
       return { success: false, error: scopeError };
     }
@@ -214,14 +251,14 @@ const deleteNote: Tool = {
     if (capabilityError) {
       return { success: false, error: capabilityError };
     }
-    const file = ctx.app.vault.getAbstractFileByPath(args.path);
+    const file = ctx.app.vault.getAbstractFileByPath(path);
     if (!file) return { success: false, error: 'File not found' };
-    if (needsApproval('write', ctx.settings) && !args.approved) {
-      return buildApprovalResponse('delete_note', args.path, {
-        path: args.path,
+    if (needsApproval('write', ctx.settings) && !hasFlag(args, 'approved')) {
+      return buildApprovalResponse('delete_note', path, {
+        path,
       }, 'delete note', {
         kind: 'note-delete',
-        target: args.path,
+        target: path,
         summary: 'Delete note',
         risk: 'high',
         supportsPartialApply: false,
@@ -229,7 +266,7 @@ const deleteNote: Tool = {
       });
     }
     await ctx.app.vault.trash(file, true);
-    return { success: true, message: `✅ Deleted: ${args.path}` };
+    return { success: true, message: `✅ Deleted: ${path}` };
   },
 };
 
@@ -247,11 +284,13 @@ const renameNote: Tool = {
     required: ['oldPath', 'newPath'],
   },
   async execute(args, ctx) {
-    const scopeError = getWriteScopeError(ctx, args.oldPath);
+    const oldPath = readString(args, 'oldPath');
+    const newPath = readString(args, 'newPath');
+    const scopeError = getWriteScopeError(ctx, oldPath);
     if (scopeError) {
       return { success: false, error: scopeError };
     }
-    const newPathScopeError = getWriteScopeError(ctx, args.newPath);
+    const newPathScopeError = getWriteScopeError(ctx, newPath);
     if (newPathScopeError) {
       return { success: false, error: newPathScopeError };
     }
@@ -259,23 +298,23 @@ const renameNote: Tool = {
     if (capabilityError) {
       return { success: false, error: capabilityError };
     }
-    const file = ctx.app.vault.getAbstractFileByPath(args.oldPath);
+    const file = ctx.app.vault.getAbstractFileByPath(oldPath);
     if (!file) return { success: false, error: 'File not found' };
-    if (needsApproval('write', ctx.settings) && !args.approved) {
-      return buildApprovalResponse('rename_note', args.oldPath, {
-        oldPath: args.oldPath,
-        newPath: args.newPath,
+    if (needsApproval('write', ctx.settings) && !hasFlag(args, 'approved')) {
+      return buildApprovalResponse('rename_note', oldPath, {
+        oldPath,
+        newPath,
       }, 'rename note', {
         kind: 'note-rename',
-        target: args.oldPath,
+        target: oldPath,
         summary: 'Rename note',
         risk: 'medium',
         supportsPartialApply: false,
         undoable: true,
       });
     }
-    await ctx.app.vault.rename(file, args.newPath);
-    return { success: true, message: `✅ Renamed: ${args.oldPath} -> ${args.newPath}` };
+    await ctx.app.vault.rename(file, newPath);
+    return { success: true, message: `✅ Renamed: ${oldPath} -> ${newPath}` };
   },
 };
 
@@ -292,8 +331,8 @@ const listNotes: Tool = {
     },
   },
   async execute(args, ctx) {
-    const folderPath = args.folder || '/';
-    const limit = args.limit || 20;
+    const folderPath = readString(args, 'folder') || '/';
+    const limit = readNumber(args, 'limit') ?? 20;
     let files = ctx.app.vault.getMarkdownFiles();
     if (folderPath !== '/') {
       files = files.filter(f => f.path.startsWith(folderPath));
@@ -321,8 +360,10 @@ const searchVault: Tool = {
     required: ['query'],
   },
   async execute(args, ctx) {
+    const query = readString(args, 'query');
+    if (!query) return { matches: [] };
     const matches = ctx.app.vault.getFiles()
-      .filter(f => f.basename.toLowerCase().includes(args.query.toLowerCase()))
+      .filter(f => f.basename.toLowerCase().includes(query.toLowerCase()))
       .map(f => f.path)
       .slice(0, 5);
     return { matches };
@@ -342,16 +383,18 @@ const openFile: Tool = {
     required: ['path'],
   },
   async execute(args, ctx) {
+    const path = readString(args, 'path');
+    if (!path) return { success: false, error: 'Missing path parameter' };
     const allFiles = ctx.app.vault.getFiles();
-    let target = allFiles.find(f => f.path === args.path);
+    let target = allFiles.find(f => f.path === path);
     if (!target) {
       target = allFiles.find(f =>
-        f.basename === args.path || f.basename === args.path.replace('.md', '')
+        f.basename === path || f.basename === path.replace('.md', '')
       );
     }
     if (!target) {
       const fuzzy = allFiles.filter(f =>
-        f.path.toLowerCase().includes(args.path.toLowerCase())
+        f.path.toLowerCase().includes(path.toLowerCase())
       );
       if (fuzzy.length === 1) {
         target = fuzzy[0];
@@ -381,7 +424,7 @@ const readFile: Tool = {
     required: ['path'],
   },
   async execute(args, ctx) {
-    const pathResult = normalizeVaultPath(args.path);
+    const pathResult = normalizeVaultPath(readField(args, 'path'));
     if (pathResult.error) return { success: false, error: pathResult.error };
 
     const file = ctx.app.vault.getAbstractFileByPath(pathResult.path);
@@ -414,7 +457,8 @@ const createFile: Tool = {
     required: ['path', 'content'],
   },
   async execute(args, ctx) {
-    const pathResult = normalizeVaultPath(args.path);
+    const pathResult = normalizeVaultPath(readField(args, 'path'));
+    const content = readString(args, 'content');
     if (pathResult.error) return { success: false, error: pathResult.error };
     const scopeError = getWriteScopeError(ctx, pathResult.path);
     if (scopeError) {
@@ -430,15 +474,15 @@ const createFile: Tool = {
     if (ctx.app.vault.getAbstractFileByPath(pathResult.path)) {
       return { success: false, error: `File already exists: ${pathResult.path}` };
     }
-    if (needsApproval('write', ctx.settings) && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !hasFlag(args, 'approved')) {
       return buildApprovalResponse('create_file', pathResult.path, {
         path: pathResult.path,
-        content: args.content || '',
+        content: content || '',
       }, 'create file', {
         kind: 'note-create',
         target: pathResult.path,
         summary: 'Create file',
-        newContent: args.content || '',
+        newContent: content || '',
         risk: 'medium',
         supportsPartialApply: false,
         undoable: true,
@@ -446,7 +490,7 @@ const createFile: Tool = {
     }
 
     await ensureParentFolder(ctx.app, pathResult.path);
-    await ctx.app.vault.create(pathResult.path, args.content || '');
+    await ctx.app.vault.create(pathResult.path, content || '');
     return {
       success: true,
       path: pathResult.path,
@@ -469,7 +513,8 @@ const updateFile: Tool = {
     required: ['path', 'content'],
   },
   async execute(args, ctx) {
-    const pathResult = normalizeVaultPath(args.path);
+    const pathResult = normalizeVaultPath(readField(args, 'path'));
+    const content = readString(args, 'content');
     if (pathResult.error) return { success: false, error: pathResult.error };
     const scopeError = getWriteScopeError(ctx, pathResult.path);
     if (scopeError) {
@@ -487,24 +532,24 @@ const updateFile: Tool = {
     if (!isReadableVaultFile(file)) {
       return { success: false, error: 'File not found' };
     }
-    if (needsApproval('write', ctx.settings) && !args.approved) {
+    if (needsApproval('write', ctx.settings) && !hasFlag(args, 'approved')) {
       const oldContent = await ctx.app.vault.read(file);
       return buildApprovalResponse('update_file', pathResult.path, {
         path: pathResult.path,
-        content: args.content,
+        content,
       }, 'update file', {
         kind: 'note-replace',
         target: pathResult.path,
         summary: 'Replace file content',
         oldContent,
-        newContent: args.content,
+        newContent: content,
         risk: 'medium',
         supportsPartialApply: false,
         undoable: true,
       });
     }
 
-    await ctx.app.vault.modify(file, args.content);
+    await ctx.app.vault.modify(file, content);
     return {
       success: true,
       path: pathResult.path,
@@ -513,7 +558,7 @@ const updateFile: Tool = {
   },
 };
 
-function normalizeVaultPath(rawPath: any): { path: string; error?: string } {
+function normalizeVaultPath(rawPath: unknown): { path: string; error?: string } {
   if (typeof rawPath !== 'string' || !rawPath.trim()) {
     return { path: '', error: 'Missing path parameter' };
   }

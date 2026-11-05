@@ -12,6 +12,7 @@ import type {
 } from './skills/builtin/plugin-ctrl/plugin-watcher';
 import { t, getLocale, Locale } from './i18n/zh';
 import { createRenderScheduler, type RenderScheduler } from './utils/render-scheduler';
+import { thrownMessage } from './utils/thrown-message';
 
 export type SettingsSectionId =
     | 'overview'
@@ -2173,8 +2174,8 @@ export class SettingTab extends PluginSettingTab {
                 query: mode === 'search' ? this.memorySearchQuery : undefined,
                 limit: 25,
             });
-        } catch (error: any) {
-            this.memoryError = error?.message || t('Failed to load memory.');
+        } catch (error: unknown) {
+            this.memoryError = thrownMessage(error) || t('Failed to load memory.');
         } finally {
             this.memoryLoading = false;
             this.renderAccordion();
@@ -2854,12 +2855,12 @@ export class SettingTab extends PluginSettingTab {
                         endpoint,
                         reason: availability.error?.message,
                     });
-                } catch (error: any) {
+                } catch (error: unknown) {
                     this.connectionTestStatus = getConnectionTestReport({
                         label,
                         stage: 'unreachable',
                         endpoint,
-                        reason: error?.message || t('unknown reason'),
+                        reason: thrownMessage(error) || t('unknown reason'),
                     });
                 }
 
@@ -3765,9 +3766,9 @@ export class SettingTab extends PluginSettingTab {
             if (!statusEl.isConnected) return;
             statusEl.textContent = text;
             statusEl.title = title;
-        } catch (e: any) {
+        } catch (error: unknown) {
             if (!statusEl.isConnected) return;
-            statusEl.textContent = `${t('Ontology status unavailable')}: ${e.message}`;
+            statusEl.textContent = `${t('Ontology status unavailable')}: ${thrownMessage(error)}`;
         }
     }
 

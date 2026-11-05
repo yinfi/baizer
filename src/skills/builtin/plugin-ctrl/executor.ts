@@ -6,6 +6,27 @@ import { BuiltinExecutor } from '../../skill-registry';
 import { pluginSkillFilePath } from '../../skill-files';
 import { checkPluginControl, needsApproval } from '../../../permissions/permission-service';
 
+/** 工具 args / 插件实例都来自外部（模型 JSON、第三方插件）：先窄化再取值。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readStringArg(args: unknown, key: string): string {
+  if (!isRecord(args)) return '';
+  const value = args[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function isTruthyFlag(args: unknown, key: string): boolean {
+  return isRecord(args) && Boolean(args[key]);
+}
+
+/** 插件实例形状由各插件自定义：settings 与 data 都是未公开字段。 */
+function readPluginConfig(plugin: unknown): unknown {
+  if (!isRecord(plugin)) return {};
+  return plugin.settings || plugin.data || {};
+}
+
 export function getPluginCommandPreconditions(): string[] {
   return [
     'Open the target note before execution.',
@@ -46,10 +67,11 @@ const getPluginCommands: Tool = {
   },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
+    const pluginId = readStringArg(args, 'pluginId');
     const cmds = ctx.app.commands.listCommands()
-      .filter((c) => c.id.startsWith(args.pluginId + ':'))
+      .filter((c) => c.id.startsWith(pluginId + ':'))
       .map((c) => ({ id: c.id, name: c.name }));
-    return { pluginId: args.pluginId, commands: cmds, count: cmds.length };
+    return { pluginId, commands: cmds, count: cmds.length };
   },
 };
 
@@ -67,12 +89,13 @@ const getPluginSettings: Tool = {
   },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const plugin = ctx.app.plugins.getPlugin(args.pluginId);
+    const pluginId = readStringArg(args, 'pluginId');
+    const plugin: unknown = ctx.app.plugins.getPlugin(pluginId);
     if (!plugin) return { error: 'Plugin not found or not enabled' };
-    const raw = plugin.settings || plugin.data || {};
+    const raw = readPluginConfig(plugin);
     const allowValues = ctx.settings.allowPluginConfigValues === true;
     return {
-      pluginId: args.pluginId,
+      pluginId,
       settings: redactPluginSettings(raw, { allowValues, depth: 0 }),
       redactionNote: allowValues
         ? 'Values returned per user setting; sensitive keys still redacted.'
@@ -173,20 +196,21 @@ const executePluginCommand: Tool = {
   },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    if (needsApproval('plugin-control', ctx.settings) && !args.approved) {
+    const commandId = readStringArg(args, 'commandId');
+    if (needsApproval('plugin-control', ctx.settings) && !isTruthyFlag(args, 'approved')) {
       return {
         approval_required: true,
         action: 'execute_plugin_command',
-        target: args.commandId,
+        target: commandId,
         args: {
-          commandId: args.commandId,
+          commandId,
         },
-        message: `Approval required to execute plugin command: ${args.commandId}`,
+        message: `Approval required to execute plugin command: ${commandId}`,
         preview: {
           kind: 'plugin-command',
-          target: args.commandId,
+          target: commandId,
           summary: 'Execute plugin command',
-          commandId: args.commandId,
+          commandId,
           preconditions: getPluginCommandPreconditions(),
           risk: 'medium',
           supportsPartialApply: false,
@@ -195,10 +219,10 @@ const executePluginCommand: Tool = {
       };
     }
 
-    const success = ctx.app.commands.executeCommandById(args.commandId);
+    const success = ctx.app.commands.executeCommandById(commandId);
     return success
-      ? { success: true, message: `✅ Executed: ${args.commandId}` }
-      : { success: false, error: `Command not found: ${args.commandId}` };
+      ? { success: true, message: `✅ Executed: ${commandId}` }
+      : { success: false, error: `Command not found: ${commandId}` };
   },
 };
 

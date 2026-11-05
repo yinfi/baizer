@@ -103,12 +103,21 @@ export function parseBuiltinSkill(md: string, filePath: string): LoadedSkill | n
 }
 
 /** 归一化 triggers：只保留 commands / keywords 的字符串数组，其余丢弃。 */
-function normalizeTriggers(raw: any): SkillSidecar['triggers'] {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const commands = Array.isArray(raw.commands) ? raw.commands.filter((c: any) => typeof c === 'string') : undefined;
-  const keywords = Array.isArray(raw.keywords) ? raw.keywords.filter((k: any) => typeof k === 'string') : undefined;
+function normalizeTriggers(raw: unknown): SkillSidecar['triggers'] {
+  if (!isRecord(raw)) return undefined;
+  const commands = readStringArray(raw.commands);
+  const keywords = readStringArray(raw.keywords);
   if (!commands?.length && !keywords?.length) return undefined;
   return { commands, keywords };
+}
+
+/** frontmatter 是外部 YAML：数组里只保留字符串项，非数组视为未声明。 */
+function readStringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 /**

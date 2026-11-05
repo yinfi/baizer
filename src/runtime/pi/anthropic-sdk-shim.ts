@@ -100,6 +100,11 @@ export interface AnthropicShimClientOptions {
   config?: unknown;
 }
 
+/** 外部输入（错误响应体）先收成 unknown，再逐字段窄化。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 /**
  * 非 2xx 响应错误。字段与 message 生成规则照抄 SDK 的 `core/error.js`，
  * 这样用户看到的报错文本与用官方 SDK 时一致（例如 "401 invalid x-api-key"）。
@@ -107,12 +112,12 @@ export interface AnthropicShimClientOptions {
 export class APIError extends Error {
   readonly status: number | undefined;
   readonly headers: Headers | undefined;
-  readonly error: any;
+  readonly error: unknown;
   readonly type: string | null;
 
   constructor(
     status: number | undefined,
-    error: any,
+    error: unknown,
     message: string | undefined,
     headers: Headers | undefined,
     type?: string | null,
@@ -126,11 +131,12 @@ export class APIError extends Error {
   }
 
   /** 与 SDK 的 APIError.makeMessage 逐字一致。 */
-  static makeMessage(status: number | undefined, error: any, message: string | undefined): string {
-    const msg = error?.message
-      ? typeof error.message === 'string'
-        ? error.message
-        : JSON.stringify(error.message)
+  static makeMessage(status: number | undefined, error: unknown, message: string | undefined): string {
+    const errorMessage = isRecord(error) ? error.message : undefined;
+    const msg = errorMessage
+      ? typeof errorMessage === 'string'
+        ? errorMessage
+        : JSON.stringify(errorMessage)
       : error
         ? JSON.stringify(error)
         : message;
@@ -147,12 +153,13 @@ export class APIError extends Error {
    */
   static generate(
     status: number | undefined,
-    errorResponse: any,
+    errorResponse: unknown,
     message: string | undefined,
     headers: Headers | undefined,
   ): APIError {
-    const type = errorResponse?.['error']?.['type'];
-    return new APIError(status, errorResponse, message, headers, type);
+    const errorBody = isRecord(errorResponse) ? errorResponse['error'] : undefined;
+    const type = isRecord(errorBody) ? errorBody['type'] : undefined;
+    return new APIError(status, errorResponse, message, headers, typeof type === 'string' ? type : null);
   }
 }
 
@@ -227,9 +234,10 @@ function joinUrl(baseURL: string | undefined, path: string): string {
 }
 
 /** JSON.parse，失败返回 undefined（对齐 SDK 的 safeJSON）。 */
-function safeJson(text: string): any {
+function safeJson(text: string): unknown {
   try {
-    return JSON.parse(text);
+    const parsed: unknown = JSON.parse(text);
+    return parsed;
   } catch {
     return undefined;
   }
@@ -349,7 +357,8 @@ export default class Anthropic {
    * （绕 CORS + 保留流式），模块加载期取到的会是替换前的原生 fetch。
    */
   private resolveFetch(): typeof fetch {
-    const impl = this.fetch ?? (globalThis as any).fetch;
+    const globalScope: { fetch?: typeof fetch } = globalThis;
+    const impl = this.fetch ?? globalScope.fetch;
     if (typeof impl !== 'function') {
       throw new Error('anthropic-sdk-shim: no fetch implementation available in this environment.');
     }
@@ -386,7 +395,10 @@ export default class Anthropic {
 
   /** 非 2xx → APIError，读取 body 的规则照抄 SDK 的 client.js（errText → safeJSON → generate）。 */
   private async toApiError(response: Response): Promise<APIError> {
-    const errText = await response.text().catch((error: any) => String(error?.message ?? error));
+    const errText = await response.text().catch((error: unknown) => {
+      const detail = isRecord(error) && typeof error.message === 'string' ? error.message : error;
+      return String(detail);
+    });
     const errJson = safeJson(errText);
     const errMessage = errJson ? undefined : errText;
     return APIError.generate(response.status, errJson, errMessage, response.headers);

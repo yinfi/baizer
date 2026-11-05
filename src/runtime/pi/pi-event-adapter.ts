@@ -1,15 +1,29 @@
 import type { StreamEvent } from '../../models/interfaces';
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
 
-export function unwrapPiToolResult(result: any): any {
-  if (result?.details && Object.prototype.hasOwnProperty.call(result.details, 'baizerResponse')) {
+/** 工具结果是 pi 透传的运行时数据，先收成 unknown 再逐字段窄化。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function getContentText(result: unknown): string | undefined {
+  if (!isRecord(result) || !Array.isArray(result.content)) return undefined;
+  const first = result.content[0];
+  return isRecord(first) && typeof first.text === 'string' ? first.text : undefined;
+}
+
+export function unwrapPiToolResult(result: unknown): unknown {
+  if (isRecord(result) && isRecord(result.details)
+    && Object.prototype.hasOwnProperty.call(result.details, 'baizerResponse')) {
     return result.details.baizerResponse;
   }
-  if (typeof result?.content?.[0]?.text === 'string') {
+  const contentText = getContentText(result);
+  if (contentText !== undefined) {
     try {
-      return JSON.parse(result.content[0].text);
+      const parsed: unknown = JSON.parse(contentText);
+      return parsed;
     } catch {
-      return { message: result.content[0].text };
+      return { message: contentText };
     }
   }
   return result;
@@ -86,8 +100,10 @@ export function mapPiEventToStreamEvent(event: AgentEvent): StreamEvent | undefi
   return undefined;
 }
 
-function getToolErrorMessage(result: any): string | undefined {
-  if (typeof result?.details?.error === 'string') return result.details.error;
-  if (typeof result?.content?.[0]?.text === 'string') return result.content[0].text;
-  return undefined;
+function getToolErrorMessage(result: unknown): string | undefined {
+  if (isRecord(result)) {
+    const details = result.details;
+    if (isRecord(details) && typeof details.error === 'string') return details.error;
+  }
+  return getContentText(result);
 }

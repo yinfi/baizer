@@ -19,7 +19,51 @@ const PREVIOUS_PROFILE_PATH = `${PREVIOUS_MEMORY_DIR}/user-profile.json`;
 const PREVIOUS_SUMMARIES_PATH = `${PREVIOUS_MEMORY_DIR}/session-summaries.json`;
 const PREVIOUS_MEMORIES_PATH = `${PREVIOUS_MEMORY_DIR}/memories.json`;
 
-type LegacyProfile = typeof DEFAULT_USER_PROFILE;
+/** 旧 user-profile.json 的落盘形状：workflows 项可能带额外字段、也可能缺 frequency。 */
+interface LegacyProfileWorkflow {
+  name: string;
+  description: string;
+  frequency?: number;
+  [key: string]: unknown;
+}
+
+interface LegacyProfile {
+  name?: string;
+  profession?: string;
+  expertise: string[];
+  preferences: {
+    language: string;
+    responseStyle: string;
+    topics: string[];
+  };
+  workflows: LegacyProfileWorkflow[];
+  context: {
+    currentProjects: string[];
+    goals: string[];
+    challenges: string[];
+  };
+  metadata: {
+    createdAt: number;
+    updatedAt: number;
+    totalInteractions: number;
+    lastProfileUpdate: number;
+  };
+}
+
+/** 旧 session-summaries.json 的单项形状。 */
+interface LegacySummaryEntry {
+  summary: string;
+  timestamp?: number;
+}
+
+/** 外部输入（磁盘 JSON）的窄化入口：只接受非 null、非数组的对象。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isLegacySummaryEntry(value: unknown): value is LegacySummaryEntry {
+  return isRecord(value) && typeof value.summary === 'string' && value.summary.trim().length > 0;
+}
 
 export async function importPreviousMemoryFiles(
   app: App,
@@ -31,19 +75,22 @@ export async function importPreviousMemoryFiles(
   const stateUpdate: Partial<MigrationState> = {};
 
   if (!state.previousProfileFileImported) {
-    const previousProfile = await readJson<any | null>(app, PREVIOUS_PROFILE_PATH, null);
+    const previousProfile = await readJson(app, PREVIOUS_PROFILE_PATH);
     if (previousProfile) {
-      const currentProfile = await readJson<any | null>(app, PROFILE_PATH, null);
+      const currentProfile = await readJson(app, PROFILE_PATH);
       await writeJson(app, PROFILE_PATH, mergeProfiles(previousProfile, currentProfile, now));
     }
     stateUpdate.previousProfileFileImported = true;
   }
 
   if (!state.previousSummariesFileImported) {
-    const previousSummaries = await readJson<any[]>(app, PREVIOUS_SUMMARIES_PATH, []);
-    if (previousSummaries.length > 0) {
-      const currentSummaries = await readJson<any[]>(app, SUMMARIES_PATH, []);
-      await writeJson(app, SUMMARIES_PATH, mergeSummaries(previousSummaries, currentSummaries));
+    const previousSummaries = await readJson(app, PREVIOUS_SUMMARIES_PATH);
+    if (Array.isArray(previousSummaries) && previousSummaries.length > 0) {
+      const currentSummaries = await readJson(app, SUMMARIES_PATH);
+      await writeJson(app, SUMMARIES_PATH, mergeSummaries(
+        previousSummaries,
+        Array.isArray(currentSummaries) ? currentSummaries : [],
+      ));
     }
     stateUpdate.previousSummariesFileImported = true;
   }
@@ -64,31 +111,31 @@ export async function migrateLegacyMemory(
   const stateUpdate: Partial<MigrationState> = {};
 
   if (!state.legacyProfileMigrated) {
-    const profile = await readJson<any | null>(app, PROFILE_PATH, null);
+    const profile = await readJson(app, PROFILE_PATH);
     if (profile) records.push(...profileToMemories(profile, now));
     stateUpdate.legacyProfileMigrated = true;
   }
 
   if (!state.legacySummariesMigrated) {
-    const summaries = await readJson<any[]>(app, SUMMARIES_PATH, []);
+    const summaries = await readJson(app, SUMMARIES_PATH);
     records.push(...summariesToMemories(summaries, now));
     stateUpdate.legacySummariesMigrated = true;
   }
 
   if (!state.previousPluginProfileMigrated) {
-    const profile = await readJson<any | null>(app, PREVIOUS_PROFILE_PATH, null);
+    const profile = await readJson(app, PREVIOUS_PROFILE_PATH);
     if (profile) records.push(...profileToMemories(profile, now));
     stateUpdate.previousPluginProfileMigrated = true;
   }
 
   if (!state.previousPluginSummariesMigrated) {
-    const summaries = await readJson<any[]>(app, PREVIOUS_SUMMARIES_PATH, []);
+    const summaries = await readJson(app, PREVIOUS_SUMMARIES_PATH);
     records.push(...summariesToMemories(summaries, now));
     stateUpdate.previousPluginSummariesMigrated = true;
   }
 
   if (!state.previousPluginMemoriesMigrated) {
-    const importedMemories = await readJson<any[]>(app, PREVIOUS_MEMORIES_PATH, []);
+    const importedMemories = await readJson(app, PREVIOUS_MEMORIES_PATH);
     records.push(...normalizeImportedMemories(importedMemories, now));
     stateUpdate.previousPluginMemoriesMigrated = true;
   }
@@ -101,7 +148,7 @@ export async function migrateLegacyMemory(
   }
 }
 
-function mergeProfiles(previous: any, current: any | null, now: number): LegacyProfile {
+function mergeProfiles(previous: unknown, current: unknown, now: number): LegacyProfile {
   const previousProfile = normalizeProfile(previous, now);
   const currentProfile = current ? normalizeProfile(current, now) : null;
   if (!currentProfile) return previousProfile;
@@ -130,59 +177,70 @@ function mergeProfiles(previous: any, current: any | null, now: number): LegacyP
   };
 }
 
-function normalizeProfile(value: any, now: number): LegacyProfile {
+function normalizeProfile(value: unknown, now: number): LegacyProfile {
+  const profile = isRecord(value) ? value : {};
+  const preferences = isRecord(profile.preferences) ? profile.preferences : {};
+  const context = isRecord(profile.context) ? profile.context : {};
+  const metadata = isRecord(profile.metadata) ? profile.metadata : {};
+
   return {
-    name: typeof value?.name === 'string' ? value.name : DEFAULT_USER_PROFILE.name,
-    profession: typeof value?.profession === 'string' ? value.profession : DEFAULT_USER_PROFILE.profession,
-    expertise: arrayOf(value?.expertise),
+    name: typeof profile.name === 'string' ? profile.name : DEFAULT_USER_PROFILE.name,
+    profession: typeof profile.profession === 'string' ? profile.profession : DEFAULT_USER_PROFILE.profession,
+    expertise: arrayOf(profile.expertise),
     preferences: {
-      language: typeof value?.preferences?.language === 'string'
-        ? value.preferences.language
+      language: typeof preferences.language === 'string'
+        ? preferences.language
         : DEFAULT_USER_PROFILE.preferences.language,
-      responseStyle: typeof value?.preferences?.responseStyle === 'string'
-        ? value.preferences.responseStyle
+      responseStyle: typeof preferences.responseStyle === 'string'
+        ? preferences.responseStyle
         : DEFAULT_USER_PROFILE.preferences.responseStyle,
-      topics: arrayOf(value?.preferences?.topics),
+      topics: arrayOf(preferences.topics),
     },
-    workflows: Array.isArray(value?.workflows)
-      ? value.workflows.filter((item: any) => typeof item?.name === 'string' && typeof item?.description === 'string')
+    workflows: Array.isArray(profile.workflows)
+      ? profile.workflows.filter((item): item is LegacyProfileWorkflow =>
+        isRecord(item) && typeof item.name === 'string' && typeof item.description === 'string')
       : [],
     context: {
-      currentProjects: arrayOf(value?.context?.currentProjects),
-      goals: arrayOf(value?.context?.goals),
-      challenges: arrayOf(value?.context?.challenges),
+      currentProjects: arrayOf(context.currentProjects),
+      goals: arrayOf(context.goals),
+      challenges: arrayOf(context.challenges),
     },
     metadata: {
-      createdAt: numberOr(value?.metadata?.createdAt, now),
-      updatedAt: numberOr(value?.metadata?.updatedAt, now),
-      totalInteractions: numberOr(value?.metadata?.totalInteractions, 0),
-      lastProfileUpdate: numberOr(value?.metadata?.lastProfileUpdate, now),
+      createdAt: numberOr(metadata.createdAt, now),
+      updatedAt: numberOr(metadata.updatedAt, now),
+      totalInteractions: numberOr(metadata.totalInteractions, 0),
+      lastProfileUpdate: numberOr(metadata.lastProfileUpdate, now),
     },
   };
 }
 
-function mergeSummaries(previous: any[], current: any[]): any[] {
-  const merged: any[] = [];
+function mergeSummaries(previous: unknown[], current: unknown[]): unknown[] {
+  const merged: unknown[] = [];
   const seen = new Set<string>();
   for (const summary of [...current, ...previous]) {
-    if (typeof summary?.summary !== 'string' || !summary.summary.trim()) continue;
+    if (!isLegacySummaryEntry(summary)) continue;
     const key = `${typeof summary.timestamp === 'number' ? summary.timestamp : ''}:${summary.summary.trim()}`;
     if (seen.has(key)) continue;
     seen.add(key);
     merged.push(summary);
   }
-  return merged.sort((a, b) => numberOr(b?.timestamp, 0) - numberOr(a?.timestamp, 0));
+  return merged.sort((a, b) => summaryTimestamp(b) - summaryTimestamp(a));
 }
 
-function normalizeImportedMemories(values: any[], now: number): MemoryRecord[] {
+function summaryTimestamp(value: unknown): number {
+  return isRecord(value) ? numberOr(value.timestamp, 0) : 0;
+}
+
+function normalizeImportedMemories(values: unknown, now: number): MemoryRecord[] {
   if (!Array.isArray(values)) return [];
   return values
     .map((value) => normalizeImportedMemory(value, now))
     .filter((memory): memory is MemoryRecord => memory !== null);
 }
 
-function normalizeImportedMemory(value: any, now: number): MemoryRecord | null {
-  if (typeof value?.text !== 'string' || !value.text.trim()) return null;
+function normalizeImportedMemory(value: unknown, now: number): MemoryRecord | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.text !== 'string' || !value.text.trim()) return null;
 
   const type = isMemoryType(value.type) ? value.type : 'world';
   const bankId = typeof value.bankId === 'string' && value.bankId.trim()
@@ -216,20 +274,24 @@ function normalizeImportedMemory(value: any, now: number): MemoryRecord | null {
   };
 }
 
-function profileToMemories(profile: any, now: number): MemoryRecord[] {
+function profileToMemories(profile: unknown, now: number): MemoryRecord[] {
+  const record = isRecord(profile) ? profile : {};
+  const preferences = isRecord(record.preferences) ? record.preferences : {};
+  const context = isRecord(record.context) ? record.context : {};
   const texts: string[] = [];
-  if (profile.profession) texts.push(`User profession: ${profile.profession}`);
-  for (const expertise of arrayOf(profile.expertise)) texts.push(`User expertise: ${expertise}`);
-  if (profile.preferences?.responseStyle) texts.push(`User response style preference: ${profile.preferences.responseStyle}`);
-  for (const project of arrayOf(profile.context?.currentProjects)) texts.push(`Current project: ${project}`);
-  for (const goal of arrayOf(profile.context?.goals)) texts.push(`User goal: ${goal}`);
+  if (record.profession) texts.push(`User profession: ${String(record.profession)}`);
+  for (const expertise of arrayOf(record.expertise)) texts.push(`User expertise: ${expertise}`);
+  if (preferences.responseStyle) texts.push(`User response style preference: ${String(preferences.responseStyle)}`);
+  for (const project of arrayOf(context.currentProjects)) texts.push(`Current project: ${project}`);
+  for (const goal of arrayOf(context.goals)) texts.push(`User goal: ${goal}`);
 
   return texts.map((text) => makeMemory(text, 'world', 'profile-migration', now, 0.8));
 }
 
-function summariesToMemories(summaries: any[], now: number): MemoryRecord[] {
+function summariesToMemories(summaries: unknown, now: number): MemoryRecord[] {
+  if (!Array.isArray(summaries)) return [];
   return summaries
-    .filter((summary) => typeof summary?.summary === 'string' && summary.summary.trim())
+    .filter(isLegacySummaryEntry)
     .map((summary) => makeMemory(
       `Previous session: ${summary.summary.trim()}`,
       'experience',
@@ -312,12 +374,13 @@ function isMemoryType(value: unknown): value is MemoryType {
   return value === 'world' || value === 'experience' || value === 'observation';
 }
 
-function normalizeSource(value: any): MemorySource {
-  const kind = isSourceKind(value?.kind) ? value.kind : 'manual';
+function normalizeSource(value: unknown): MemorySource {
+  const raw = isRecord(value) ? value : {};
+  const kind = isSourceKind(raw.kind) ? raw.kind : 'manual';
   const source: MemorySource = { kind };
-  if (typeof value?.messageId === 'string') source.messageId = value.messageId;
-  if (typeof value?.action === 'string') source.action = value.action;
-  if (typeof value?.target === 'string') source.target = value.target;
+  if (typeof raw.messageId === 'string') source.messageId = raw.messageId;
+  if (typeof raw.action === 'string') source.action = raw.action;
+  if (typeof raw.target === 'string') source.target = raw.target;
   return source;
 }
 
@@ -337,18 +400,19 @@ function extractSimpleEntities(text: string): string[] {
     .slice(0, 5);
 }
 
-async function readJson<T>(app: App, path: string, fallback: T): Promise<T> {
+async function readJson(app: App, path: string): Promise<unknown> {
   try {
-    const adapter = app.vault.adapter as any;
-    if (!await adapter.exists(path)) return fallback;
-    return JSON.parse(await adapter.read(path)) as T;
+    const adapter = app.vault.adapter;
+    if (!await adapter.exists(path)) return null;
+    const parsed: unknown = JSON.parse(await adapter.read(path));
+    return parsed;
   } catch {
-    return fallback;
+    return null;
   }
 }
 
 async function writeJson(app: App, path: string, value: unknown): Promise<void> {
-  const adapter = app.vault.adapter as any;
+  const adapter = app.vault.adapter;
   if (!await adapter.exists(MEMORY_DIR)) {
     await adapter.mkdir(MEMORY_DIR);
   }

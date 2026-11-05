@@ -262,6 +262,35 @@ async function runTests() {
     expect(result.success).toBe(false);
     expect(result.error).toContain('File already exists');
   });
+
+  await test('narrows malformed tool results instead of inventing a workspace edit', async () => {
+    const { app } = createMockApp();
+    const registry = new ToolRegistry(app, {
+      ...DEFAULT_SETTINGS,
+      allowFileCreation: true,
+      allowFileModification: true,
+      confirmExecutions: true,
+    });
+    registerVaultTools(registry);
+    const service = new WorkspaceEditService(app, registry);
+
+    // 非对象结果：既不能算成功（原值透传、不登记编辑），也不会被当成 {path}/{target} 读取。
+    (registry as any).execute = async () => 'not-an-object';
+    const malformed = await service.executeWorkspaceTool('update_file', {
+      path: 'Notes/source.md',
+      content: 'x',
+    });
+    expect(malformed).toBe('not-an-object');
+    expect(service.listWorkspaceEdits().length).toBe(0);
+
+    // 成功但没有 path/target：回退到按 args 推出的预期路径（旧代码的 fallbackPath 分支）。
+    (registry as any).execute = async () => ({ success: true });
+    const fallback = await service.executeWorkspaceTool('create_note', {
+      filename: 'Notes/fallback.md',
+      content: 'x',
+    });
+    expect(fallback.workspaceEdit.path).toBe('Notes/fallback.md');
+  });
 }
 
 runTests().catch((e) => {

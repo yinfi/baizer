@@ -92,6 +92,8 @@ const tests = [
   'test/web-clipper.test.ts',
   'test/web-search.test.ts',
   'test/knowledge/compiler.test.ts',
+  'test/knowledge/executor.test.ts',
+  'test/knowledge/metadata-index.test.ts',
   'test/knowledge-status-service.test.ts',
   'test/knowledge/file-back.test.ts',
   'test/knowledge/indexer.test.ts',

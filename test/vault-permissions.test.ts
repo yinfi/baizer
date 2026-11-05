@@ -283,6 +283,95 @@ async function runTests() {
       error: 'Write not allowed for path: Blocked/new.canvas',
     });
   });
+
+  // 工具 args 是模型给的 JSON（外部输入）：缺参 / 错类型走既有错误文案，不能把工具体打崩。
+  await test('create_note treats null args and non-string filenames as a missing filename', async () => {
+    const registry = new ToolRegistry(mockApp, {
+      ...DEFAULT_SETTINGS,
+      allowFileCreation: true,
+      confirmExecutions: false,
+    });
+    registerVaultTools(registry);
+
+    expect(await registry.execute('create_note', null)).toEqual({
+      success: false,
+      error: 'Missing filename parameter',
+    });
+    expect(await registry.execute('create_note', { filename: 42, content: '# New' })).toEqual({
+      success: false,
+      error: 'Missing filename parameter',
+    });
+  });
+
+  // 兼容旧参数名：filename || path || name。
+  await test('create_note keeps the legacy filename/path/name aliases', async () => {
+    created.length = 0;
+    const registry = new ToolRegistry(mockApp, {
+      ...DEFAULT_SETTINGS,
+      allowFileCreation: true,
+      confirmExecutions: false,
+    });
+    registerVaultTools(registry);
+
+    const byPath = await registry.execute('create_note', { path: 'alias-path', content: '# A' });
+    const byName = await registry.execute('create_note', { name: 'alias-name', content: '# B' });
+
+    expect(byPath).toEqual({ status: 'success', message: '✅ Note created: alias-path.md' });
+    expect(byName).toEqual({ status: 'success', message: '✅ Note created: alias-name.md' });
+    expect(created).toEqual(['alias-path.md', 'alias-name.md']);
+  });
+
+  // 原实现是 `!args.approved`：任何真值都算已批准，不能收窄成只认布尔 true。
+  await test('approved flag keeps truthiness semantics', async () => {
+    created.length = 0;
+    const registry = new ToolRegistry(mockApp, {
+      ...DEFAULT_SETTINGS,
+      allowFileCreation: true,
+      confirmExecutions: true,
+    });
+    registerVaultTools(registry);
+
+    const result = await registry.execute('create_note', {
+      filename: 'truthy-approval',
+      content: '# ok',
+      approved: 'yes',
+    });
+
+    expect(result).toEqual({ status: 'success', message: '✅ Note created: truthy-approval.md' });
+    expect(created).toEqual(['truthy-approval.md']);
+  });
+
+  await test('read_file rejects missing or non-string paths before touching the vault', async () => {
+    const registry = new ToolRegistry(mockApp, DEFAULT_SETTINGS);
+    registerVaultTools(registry);
+
+    expect(await registry.execute('read_file', null)).toEqual({
+      success: false,
+      error: 'Missing path parameter',
+    });
+    expect(await registry.execute('read_file', { path: 42 })).toEqual({
+      success: false,
+      error: 'Missing path parameter',
+    });
+  });
+
+  await test('search_vault returns no matches for a missing query instead of crashing', async () => {
+    const registry = new ToolRegistry(mockApp, DEFAULT_SETTINGS);
+    registerVaultTools(registry);
+
+    expect(await registry.execute('search_vault', null)).toEqual({ matches: [] });
+    expect(await registry.execute('search_vault', { query: 42 })).toEqual({ matches: [] });
+  });
+
+  await test('open_file rejects a missing path', async () => {
+    const registry = new ToolRegistry(mockApp, DEFAULT_SETTINGS);
+    registerVaultTools(registry);
+
+    expect(await registry.execute('open_file', null)).toEqual({
+      success: false,
+      error: 'Missing path parameter',
+    });
+  });
 }
 
 runTests().catch(console.error);

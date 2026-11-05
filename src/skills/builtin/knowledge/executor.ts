@@ -56,13 +56,22 @@ export function createKnowledgeTools(
   return [queryKnowledge, fileBackKnowledge];
 }
 
+/** 外部工具入参（模型生成）的窄化：只认对象，字段按类型校验。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function createExecutor(registry: ToolRegistry): BuiltinExecutor {
   return {
-    async execute(args: any, ctx: ToolContext) {
+    async execute(args: unknown, ctx: ToolContext) {
       // simple mode: 直接执行 query_knowledge
-      const query = args?.query || args?.name || '';
+      const rawQuery = isRecord(args) ? args.query ?? args.name : undefined;
+      const query = typeof rawQuery === 'string' ? rawQuery : '';
       if (!query) return { error: 'Missing query parameter' };
-      return registry.execute('query_knowledge', { query, max_results: args?.max_results || 3 });
+      const rawMaxResults = isRecord(args) ? args.max_results : undefined;
+      // 与旧实现 `args?.max_results || 3` 对齐：0/NaN/非数字一律回退 3。
+      const maxResults = typeof rawMaxResults === 'number' && rawMaxResults ? rawMaxResults : 3;
+      return registry.execute('query_knowledge', { query, max_results: maxResults });
     },
   };
 }

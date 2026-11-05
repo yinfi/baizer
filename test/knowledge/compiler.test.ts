@@ -74,6 +74,66 @@ test('parseCompilerResponse returns null for invalid response', () => {
   expect(result === null).toBeTruthy();
 });
 
+// --- 外部模型输出的窄化（坏字段丢弃，不污染基础字段） ---
+
+test('parseCompilerResponse returns null for non-object JSON payloads', () => {
+  expect(parseCompilerResponse('null')).toBe(null);
+  expect(parseCompilerResponse('[]')).toBe(null);
+  expect(parseCompilerResponse('[1,2]')).toBe(null);
+  expect(parseCompilerResponse('"just a string"')).toBe(null);
+  expect(parseCompilerResponse('{"title":42}')).toBe(null);
+});
+
+test('parseCompilerResponse drops malformed topics/entities but preserves valid base fields', () => {
+  const response = JSON.stringify({
+    title: 'Valid Title',
+    author: 42,
+    source_url: null,
+    created_at: ['not', 'string'],
+    topics: [
+      { slug: 'valid-slug', label: 'Valid Label' },
+      { label: 'Label Only' },
+      null,
+      'plain-string',
+      { slug: 42, label: 7 },
+      { slug: '', label: '' },
+    ],
+    concepts: ['concept-a', 3, null],
+    key_claims: 'not-an-array',
+    review_flags: ['flag-a', 2, null],
+    categorized_knowledge: [
+      { category: 'cat-a', items: ['item-a', 9] },
+      { category: 'cat-b', items: 'not-array' },
+      null,
+      { items: ['orphan'] },
+    ],
+    entities: [
+      { name: 'EntityA', type: 'person', description: 12 },
+      { name: 'EntityB', type: 5 },
+      null,
+      'plain',
+    ],
+  });
+
+  const result = parseCompilerResponse(response);
+  expect(result).toBeDefined();
+  expect(result!.title).toBe('Valid Title');
+  expect(result!.author).toBe('');
+  expect(result!.source_url).toBe('');
+  expect(result!.created_at).toBe('');
+  expect(result!.topics.length).toBe(2);
+  expect(result!.topics[0].slug).toBe('valid-slug');
+  expect(result!.topics[1].slug).toBe('label-only');
+  expect(result!.topics[1].label).toBe('Label Only');
+  expect(result!.concepts.length).toBe(1);
+  expect(result!.key_claims.length).toBe(0);
+  expect(result!.review_flags.length).toBe(1);
+  expect(result!.categorized_knowledge!.length).toBe(1);
+  expect(result!.categorized_knowledge![0].items.length).toBe(1);
+  expect(result!.entities!.length).toBe(1);
+  expect(result!.entities![0].description).toBe('');
+});
+
 test('buildSummaryMarkdown generates correct frontmatter and body', () => {
   const extraction: CompilerExtraction = {
     title: 'Karpathy 的第二大脑',

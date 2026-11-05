@@ -9,7 +9,8 @@ import {
   getPendingReason,
   KnowledgePendingReason,
 } from './frontmatter';
-import { computeSchemaHash, extractFrontmatter } from './ontology';
+import { computeSchemaHash, extractFrontmatter, isRecord } from './ontology';
+import { thrownMessage } from '../utils/thrown-message';
 
 /**
  * 去除 markdown frontmatter（--- 之间的部分），返回正文
@@ -44,8 +45,21 @@ export interface CompileAllPendingOptions {
   fileConcurrency?: number;
 }
 
-function asString(value: any): string | undefined {
+function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** 外部模型输出里的 topics 元素：仅接受对象形状，其余按坏条目丢弃。 */
+function readTopicRef(value: unknown): TopicRef | null {
+  if (!isRecord(value)) return null;
+  const slug = typeof value.slug === 'string' ? value.slug : '';
+  const label = typeof value.label === 'string' ? value.label : '';
+  const normalized = normalizeTopicSlug(slug || label);
+  return normalized.length > 0 ? { slug: normalized, label: label || slug } : null;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
 function summarySourceIdFromPath(summaryPath: string): string {
@@ -374,15 +388,14 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
     const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
     const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
 
-    const parsed = JSON.parse(jsonStr);
-    if (typeof parsed.title !== 'string') return null;
+    const parsed: unknown = JSON.parse(jsonStr);
+    if (!isRecord(parsed) || typeof parsed.title !== 'string') return null;
 
-    const topics: TopicRef[] = (parsed.topics || []).map((t: any) => ({
-      slug: normalizeTopicSlug(t.slug || t.label || ''),
-      label: t.label || t.slug || ''
-    })).filter((t: TopicRef) => t.slug.length > 0);
+    const topics: TopicRef[] = (Array.isArray(parsed.topics) ? parsed.topics : [])
+      .map(readTopicRef)
+      .filter((t): t is TopicRef => t !== null);
 
-    const reviewFlags: string[] = Array.isArray(parsed.review_flags) ? parsed.review_flags : [];
+    const reviewFlags: string[] = asStringArray(parsed.review_flags);
 
     // Ontology 字段解析（fail-visible：解析失败不影响基础字段）
     let categorized_knowledge: CompilerExtraction['categorized_knowledge'];
@@ -391,16 +404,18 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
     try {
       if (Array.isArray(parsed.categorized_knowledge)) {
         categorized_knowledge = parsed.categorized_knowledge
-          .filter((ck: any) => typeof ck?.category === 'string' && Array.isArray(ck?.items))
-          .map((ck: any) => ({
+          .filter((ck): ck is { category: string; items: unknown[] } =>
+            isRecord(ck) && typeof ck.category === 'string' && Array.isArray(ck.items))
+          .map((ck) => ({
             category: ck.category,
-            items: ck.items.filter((i: any) => typeof i === 'string'),
+            items: asStringArray(ck.items),
           }));
       }
       if (Array.isArray(parsed.entities)) {
         entities = parsed.entities
-          .filter((e: any) => typeof e?.name === 'string' && typeof e?.type === 'string')
-          .map((e: any) => ({
+          .filter((e): e is { name: string; type: string; description?: unknown } =>
+            isRecord(e) && typeof e.name === 'string' && typeof e.type === 'string')
+          .map((e) => ({
             name: e.name,
             type: e.type,
             description: typeof e.description === 'string' ? e.description : '',
@@ -414,12 +429,12 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
 
     return {
       title: parsed.title || '',
-      author: parsed.author || '',
-      source_url: parsed.source_url || '',
-      created_at: parsed.created_at || '',
+      author: typeof parsed.author === 'string' ? parsed.author : '',
+      source_url: typeof parsed.source_url === 'string' ? parsed.source_url : '',
+      created_at: typeof parsed.created_at === 'string' ? parsed.created_at : '',
       topics,
-      concepts: Array.isArray(parsed.concepts) ? parsed.concepts : [],
-      key_claims: Array.isArray(parsed.key_claims) ? parsed.key_claims : [],
+      concepts: asStringArray(parsed.concepts),
+      key_claims: asStringArray(parsed.key_claims),
       review_flags: reviewFlags,
       categorized_knowledge,
       entities,
@@ -666,9 +681,9 @@ export class KnowledgeCompiler {
         summary: summaryPath,
       });
       return summaryPath;
-    } catch (e: any) {
+    } catch (e) {
       try {
-        await setKnowledgeStatus(this.app, file, 'failed', { error: e.message });
+        await setKnowledgeStatus(this.app, file, 'failed', { error: thrownMessage(e) });
       } catch { /* frontmatter 写入也失败了，忽略 */ }
       return null;
     }

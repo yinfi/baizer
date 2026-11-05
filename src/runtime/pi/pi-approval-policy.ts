@@ -12,13 +12,14 @@ export interface PiFileWriteState {
   lastError: string;
 }
 
-export function isPiApprovalResponse(result: any): result is {
+export function isPiApprovalResponse(result: unknown): result is {
   approval_required: true;
   action?: string;
   target?: string;
   message?: string;
 } {
-  return !!result && result.approval_required === true;
+  if (typeof result !== 'object' || result === null) return false;
+  return 'approval_required' in result && result.approval_required === true;
 }
 
 export function formatPiApprovalMessage(result: {
@@ -45,7 +46,7 @@ export function createPiFileWriteState(required: boolean): PiFileWriteState {
 export function recordPiFileWriteResult(
   state: PiFileWriteState,
   toolName: string,
-  result: any,
+  result: unknown,
 ): void {
   if (!state.required || !isFileWriteToolName(toolName)) return;
   state.attempted = true;

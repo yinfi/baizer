@@ -591,6 +591,21 @@ async function runTests() {
     expect(doneEvent.outcome).toBe('completed');
     expect(doneEvent.text).toBe('ok');
   });
+
+  await test('a rejected prompt with a non-Error value reports a readable failure message', async () => {
+    const deps = createDeps({
+      // streamFactory 是 provider 的唯一注入点；抛错会被 agent.prompt 拒绝，走 catch 分支。
+      streamFactory: () => {
+        throw new Error('provider exploded');
+      },
+    });
+    const runtime = await makeRuntime(deps);
+    const events = await collect(runtime.queryStream(createTurn()));
+    const errorEvent = events.find(event => event.type === 'error') as any;
+
+    expect(errorEvent.outcome).toBe('failed');
+    expect(String(errorEvent.message)).toContain('provider exploded');
+  });
 }
 
 runTests().catch((e) => {

@@ -74,7 +74,10 @@ export class BaizerClipProtocolHandler {
 }
 
 function isDuplicateProtocolHandlerError(error: unknown): boolean {
-  const message = String((error as any)?.message || error || '');
+  const rawMessage = typeof error === 'object' && error !== null && 'message' in error
+    ? error.message
+    : undefined;
+  const message = String(rawMessage || error || '');
   return message.includes('baizer-clip') && message.includes('already registered');
 }
 

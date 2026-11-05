@@ -3,11 +3,16 @@
 
 import { OntologySchema, OntologyCategory, OntologyEntityType } from './types';
 
+/** 外部输入（磁盘 YAML / JSON.parse）的窄化入口：只接受非 null、非数组的对象。 */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * 从原始 markdown 内容中提取 frontmatter 对象
  * 不依赖 Obsidian metadataCache，自行解析 YAML
  */
-export function extractFrontmatter(rawContent: string): Record<string, any> | null {
+export function extractFrontmatter(rawContent: string): Record<string, unknown> | null {
   if (!rawContent.startsWith('---')) return null;
   const endIdx = rawContent.indexOf('\n---', 3);
   if (endIdx === -1) return null;
@@ -24,8 +29,8 @@ export function extractFrontmatter(rawContent: string): Record<string, any> | nu
  * 简易 YAML 解析器 — 只处理 ontology schema 用到的结构：
  * 标量值、对象数组（- name: / description:）
  */
-function parseSimpleYaml(yaml: string): Record<string, any> {
-  const result: Record<string, any> = {};
+function parseSimpleYaml(yaml: string): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
   const lines = yaml.split('\n');
   let i = 0;
 
@@ -43,7 +48,7 @@ function parseSimpleYaml(yaml: string): Record<string, any> {
 
     // 值是数组（下一行以 - 开头）
     if (!inlineVal && i + 1 < lines.length && lines[i + 1].match(/^\s+-/)) {
-      const arr: any[] = [];
+      const arr: unknown[] = [];
       i++;
       while (i < lines.length) {
         const arrLine = lines[i];
@@ -76,11 +81,11 @@ function parseSimpleYaml(yaml: string): Record<string, any> {
       result[key] = arr;
     } else {
       // 标量值
-      let val: any = inlineVal.replace(/^"(.*)"$/, '$1');
-      if (val === 'true') val = true;
-      else if (val === 'false') val = false;
-      else if (/^\d+$/.test(val)) val = parseInt(val, 10);
-      result[key] = val;
+      const raw = inlineVal.replace(/^"(.*)"$/, '$1');
+      if (raw === 'true') result[key] = true;
+      else if (raw === 'false') result[key] = false;
+      else if (/^\d+$/.test(raw)) result[key] = parseInt(raw, 10);
+      else result[key] = raw;
       i++;
     }
   }
@@ -91,8 +96,8 @@ function parseSimpleYaml(yaml: string): Record<string, any> {
  * 从 frontmatter 对象解析 OntologySchema
  * @returns 解析成功返回 schema，失败返回 null
  */
-export function parseOntologySchema(frontmatter: any): OntologySchema | null {
-  if (!frontmatter) return null;
+export function parseOntologySchema(frontmatter: unknown): OntologySchema | null {
+  if (!isRecord(frontmatter)) return null;
   if (frontmatter.knowledge_artifact_type !== 'ontology_schema') return null;
 
   const version = typeof frontmatter.version === 'number' ? frontmatter.version : 1;
@@ -105,21 +110,23 @@ export function parseOntologySchema(frontmatter: any): OntologySchema | null {
   return { version, categories, entity_types: entityTypes };
 }
 
-function parseCategories(raw: any): OntologyCategory[] {
+function parseCategories(raw: unknown): OntologyCategory[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((c: any) => typeof c?.name === 'string' && c.name.trim())
-    .map((c: any) => ({
+    .filter((c): c is { name: string; description?: unknown } =>
+      isRecord(c) && typeof c.name === 'string' && c.name.trim().length > 0)
+    .map((c) => ({
       name: c.name.trim(),
       description: typeof c.description === 'string' ? c.description.trim() : '',
     }));
 }
 
-function parseEntityTypes(raw: any): OntologyEntityType[] {
+function parseEntityTypes(raw: unknown): OntologyEntityType[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((e: any) => typeof e?.name === 'string' && e.name.trim())
-    .map((e: any) => ({
+    .filter((e): e is { name: string; description?: unknown } =>
+      isRecord(e) && typeof e.name === 'string' && e.name.trim().length > 0)
+    .map((e) => ({
       name: e.name.trim(),
       description: typeof e.description === 'string' ? e.description.trim() : '',
     }));
@@ -221,7 +228,8 @@ export function parseDiscoveryResponse(response: string): OntologySchema | null 
   try {
     const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
     const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
-    const parsed = JSON.parse(jsonStr);
+    const parsed: unknown = JSON.parse(jsonStr);
+    if (!isRecord(parsed)) return null;
 
     const categories = parseCategories(parsed.categories);
     const entityTypes = parseEntityTypes(parsed.entity_types);

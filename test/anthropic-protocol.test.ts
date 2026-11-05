@@ -994,7 +994,42 @@ async function runTests() {
   });
 
   /* ------------------------------------------------------------------ */
-  /* (h) 打包策略自证：SDK 没进 bundle、shim 进了                          */
+  /* (h) 错误体窄化：非对象 / 缺字段的响应体不能臆造 type                    */
+  /* ------------------------------------------------------------------ */
+
+  await test('shim APIError narrows malformed error bodies', async () => {
+    const Anthropic = (await import('../src/runtime/pi/anthropic-sdk-shim')).default;
+
+    // message 生成规则照抄 SDK：有 body.message 用 message，否则整体 JSON，否则状态码文案。
+    expect(Anthropic.APIError.makeMessage(401, 'bad key', undefined)).toBe('401 "bad key"');
+    expect(Anthropic.APIError.makeMessage(500, null, undefined)).toBe('500 status code (no body)');
+    expect(Anthropic.APIError.makeMessage(undefined, null, undefined)).toBe('(no status code or body)');
+    expect(Anthropic.APIError.makeMessage(undefined, null, 'still broken')).toBe('still broken');
+
+    // 非对象 / 非字符串 type：type 退回 null，而不是把一个值塞进 string 字段。
+    const malformed = Anthropic.APIError.generate(400, { error: 'oops' }, undefined, undefined);
+    expect(malformed.status).toBe(400);
+    expect(malformed.type).toBe(null);
+    expect(malformed.error).toEqual({ error: 'oops' });
+
+    const typed = Anthropic.APIError.generate(
+      400,
+      { error: { type: 'invalid_request_error', message: 'bad request' } },
+      undefined,
+      undefined,
+    );
+    expect(typed.type).toBe('invalid_request_error');
+    expect(typed.message).toContain('400');
+    expect(typed.message).toContain('bad request');
+
+    // 完全没有 error 字段的 body 也不能崩。
+    const empty = Anthropic.APIError.generate(429, null, 'rate limited', undefined);
+    expect(empty.type).toBe(null);
+    expect(empty.message).toBe('429 rate limited');
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* (i) 打包策略自证：SDK 没进 bundle、shim 进了                          */
   /* ------------------------------------------------------------------ */
 
   const { existsSync, readFileSync, statSync } = await import('fs');

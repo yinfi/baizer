@@ -2,6 +2,7 @@ import { requestUrl } from 'obsidian';
 import { Tool, ToolContext } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
+import { thrownMessage } from '../../../utils/thrown-message';
 
 interface WebSearchDeps {
   requestUrl: typeof requestUrl;
@@ -32,8 +33,10 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
       required: ['query'],
     },
     async execute(args, _ctx) {
-      let searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;
-      if (args.time_range) searchUrl += `&df=${args.time_range}`;
+      const query = readStringArg(args, 'query');
+      const timeRange = readStringArg(args, 'time_range');
+      let searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      if (timeRange) searchUrl += `&df=${timeRange}`;
 
       try {
         let html = '';
@@ -69,11 +72,22 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
         return results.length === 0
           ? { results: [], message: 'No results found or parsing failed.' }
           : { results };
-      } catch (error: any) {
-        return { error: `Search failed: ${error.message}` };
+      } catch (error: unknown) {
+        return { error: `Search failed: ${thrownMessage(error) || String(error)}` };
       }
     },
   };
+}
+
+/** 工具 args 是模型生成的 JSON（外部输入）：非字符串字段一律视为缺省。 */
+function readStringArg(args: unknown, key: string): string {
+  if (!isRecord(args)) return '';
+  const value = args[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 const webSearchTool = createWebSearchTool();

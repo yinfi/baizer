@@ -11,6 +11,7 @@ import {
   extractFrontmatter,
   buildDiscoveryPrompt,
   buildOntologyFile,
+  isRecord,
   parseDiscoveryResponse,
   parseOntologySchema,
 } from './ontology';
@@ -215,22 +216,22 @@ export class OntologyService {
   }
 }
 
-function readTopics(fm: Record<string, any>): string[] {
+function readTopics(fm: Record<string, unknown>): string[] {
   const raw = fm.topics;
   if (!Array.isArray(raw)) return [];
   return raw
-    .map((topic: any) => {
+    .map((topic) => {
       if (typeof topic === 'string') return topic;
-      if (topic && typeof topic.label === 'string') return topic.label;
+      if (isRecord(topic) && typeof topic.label === 'string') return topic.label;
       return '';
     })
-    .filter((topic: string) => topic.length > 0);
+    .filter((topic) => topic.length > 0);
 }
 
-function readStringArray(raw: any): string[] {
+function readStringArray(raw: unknown): string[] {
   if (typeof raw === 'string') {
     try {
-      const parsed = JSON.parse(raw);
+      const parsed: unknown = JSON.parse(raw);
       return Array.isArray(parsed) ? parsed.map(String) : [raw];
     } catch {
       return [raw];

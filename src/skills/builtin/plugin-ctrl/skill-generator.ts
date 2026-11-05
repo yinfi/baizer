@@ -10,8 +10,29 @@ import {
 } from '../../skill-files';
 import { getPluginCommandPreconditions } from './executor';
 import { logger } from '../../../utils/logger';
+import { thrownMessage } from '../../../utils/thrown-message';
 
 // ==================== 类型 ====================
+
+/** 插件实例 / manifest JSON / 插件配置都来自外部：先窄化再读字段。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isObjectValue(value: unknown): value is object {
+  return typeof value === 'object' && value !== null;
+}
+
+/** 插件实例形状由各插件自定义：settings 与 data 都是未公开字段。 */
+function readPluginConfig(plugin: unknown): unknown {
+  if (!isRecord(plugin)) return {};
+  return plugin.settings || plugin.data || {};
+}
+
+/** 只在类型正确时取字符串，避免把数字等外部值当版本/名称使用。 */
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
 
 export interface PluginInfo {
   id: string;
@@ -164,8 +185,8 @@ export class PluginSkillGenerator {
       .filter((c) => c.id.startsWith(pluginId + ':'))
       .map((c) => ({ id: c.id, name: c.name }));
     const commands = rawCommands.map((c) => this.classifyCommand(c));
-    const plugin = this.app.plugins.getPlugin(pluginId);
-    const rawSettings = plugin?.settings || plugin?.data || {};
+    const plugin: unknown = this.app.plugins.getPlugin(pluginId);
+    const rawSettings = readPluginConfig(plugin);
     const settingsKeys = this.extractSettingsKeys(rawSettings);
 
     return {
@@ -262,8 +283,8 @@ export class PluginSkillGenerator {
       }
       logger.debug(`Loaded community-plugins.json: ${plugins.length} plugins`, 'SkillGenerator');
       return this.communityPluginsCache[pluginId] || '';
-    } catch (e: any) {
-      console.warn(`[SkillGenerator] Failed to load community-plugins.json:`, e.message);
+    } catch (e: unknown) {
+      console.warn(`[SkillGenerator] Failed to load community-plugins.json:`, thrownMessage(e) || String(e));
       return '';
     }
   }
@@ -275,11 +296,11 @@ export class PluginSkillGenerator {
     try {
       const path = `.obsidian/plugins/${pluginId}/manifest.json`;
       const raw = await this.app.vault.adapter.read(path);
-      const json = JSON.parse(raw);
+      const json: unknown = JSON.parse(raw);
       return {
-        name: json.name || '',
-        description: json.description || '',
-        version: json.version || '',
+        name: isRecord(json) ? readString(json.name) : '',
+        description: isRecord(json) ? readString(json.description) : '',
+        version: isRecord(json) ? readString(json.version) : '',
       };
     } catch {
       return { name: '', description: '', version: '' };
@@ -345,8 +366,9 @@ export class PluginSkillGenerator {
   }
 
   /** 只提取 settings 顶层 key 名，不 dump 值 */
-  private extractSettingsKeys(settings: Record<string, any>): string[] {
+  private extractSettingsKeys(settings: unknown): string[] {
     try {
+      if (!isObjectValue(settings)) return [];
       return Object.keys(settings).slice(0, 15);
     } catch {
       return [];

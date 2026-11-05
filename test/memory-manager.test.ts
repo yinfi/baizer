@@ -689,6 +689,68 @@ async function runTests() {
     const view = await (memory as any).getMemoryView({ mode: 'raw' });
     expect(view.sections.raw.filter((r: any) => r.type === 'world').length).toBe(1);
   });
+
+  // ---- LLM 输出窄化:坏条目丢弃、非数组回退 ----
+
+  await test('distill narrows malformed LLM JSON entries and keeps valid ones', async () => {
+    const { app } = createApp();
+    // LLM 输出形状不可信:null/数字/无 text 的对象应被丢弃,合法条目保留。
+    const generate = async () => JSON.stringify([
+      null,
+      42,
+      { text: 123 },
+      { text: 'Valid fact about Baizer', entities: ['Baizer', 7, null] },
+      'Plain line fact',
+    ]);
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer local-first memory',
+      assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    const all = await (memory as any).hindsightStore.listMemoriesRaw('default');
+    const texts = all.map((m: any) => m.text);
+    expect(texts.some((t: string) => t.includes('Valid fact about Baizer'))).toBe(true);
+    expect(texts.some((t: string) => t.includes('Plain line fact'))).toBe(true);
+    expect(texts.some((t: string) => t.includes('123'))).toBe(false);
+
+    const valid = all.find((m: any) => m.text.includes('Valid fact about Baizer'));
+    // 实体数组里的数字被 String 化后长度不足 2 → 丢弃;字符串实体保留。
+    expect(valid.entities.includes('Baizer')).toBe(true);
+    expect(valid.entities.includes('7')).toBe(false);
+  });
+
+  await test('distill falls back to rule path when LLM returns non-array JSON', async () => {
+    const { app } = createApp();
+    const generate = async () => '{"text":"not-an-array"}';
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer local-first memory', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    // 非数组 JSON 解析不出任何条目 → 回退规则路径,durable 用户事实仍入库。
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    const world = view.sections.raw.filter((r: any) => r.type === 'world');
+    expect(world.length).toBe(1);
+    expect(world[0].text).toContain('local-first memory');
+  });
+
+  await test('query expansion tolerates non-array LLM output', async () => {
+    const { app } = createApp();
+    let calls = 0;
+    const generate = async () => { calls += 1; return '{"terms":["deploy"]}'; };
+    const memory = new MemoryManager(app, { generate, queryExpansion: true } as any);
+    await memory.ready();
+
+    const block = await (memory as any).recallForPrompt({ query: '部署', source: 'shell', now: 2000 });
+
+    expect(block).toBe('');
+    expect(calls).toBe(1);
+  });
 }
 
 runTests().catch((e) => {

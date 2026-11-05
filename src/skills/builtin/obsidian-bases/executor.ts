@@ -2,8 +2,22 @@ import { parse } from 'yaml';
 import { BuiltinExecutor } from '../../skill-registry';
 import { Tool } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
+import { thrownMessage } from '../../../utils/thrown-message';
 
 const VIEW_TYPES = new Set(['table', 'cards', 'list', 'map']);
+
+/** 工具 args 是模型生成的 JSON，.base 内容也是外部输入：先窄化再读字段。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isObjectValue(value: unknown): value is object {
+  return typeof value === 'object' && value !== null;
+}
+
+function readField(value: unknown, key: string): unknown {
+  return isRecord(value) ? value[key] : undefined;
+}
 
 export const executor: BuiltinExecutor = {
   async execute() {
@@ -24,7 +38,7 @@ const validateBaseYaml: Tool = {
   executionMode: 'parallel',
   risk: 'read',
   async execute(args) {
-    return validateBaseYamlContent(args.content);
+    return validateBaseYamlContent(readField(args, 'content'));
   },
 };
 
@@ -37,15 +51,15 @@ export function validateBaseYamlContent(content: unknown): { success: boolean; e
     return { success: false, errors: ['content must be a YAML string'] };
   }
 
-  let base: any;
+  let base: unknown;
   try {
     base = parse(content);
-  } catch (error: any) {
-    return { success: false, errors: [`Invalid YAML: ${error.message}`] };
+  } catch (error: unknown) {
+    return { success: false, errors: [`Invalid YAML: ${thrownMessage(error)}`] };
   }
 
   const errors: string[] = [];
-  if (!base || typeof base !== 'object' || Array.isArray(base)) {
+  if (!isRecord(base)) {
     return { success: false, errors: ['Base root must be a YAML object'] };
   }
 
@@ -53,10 +67,11 @@ export function validateBaseYamlContent(content: unknown): { success: boolean; e
   validateObjectField(base.properties, 'properties', errors);
   validateObjectField(base.summaries, 'summaries', errors);
 
-  if (!Array.isArray(base.views) || base.views.length === 0) {
+  const views = base.views;
+  if (!Array.isArray(views) || views.length === 0) {
     errors.push('views must be a non-empty array');
   } else {
-    validateViews(base.views, errors);
+    validateViews(views, errors);
   }
 
   validateFormulaReferences(base, errors);
@@ -69,14 +84,15 @@ function validateObjectField(value: unknown, label: string, errors: string[]): v
   }
 }
 
-function validateViews(views: any[], errors: string[]): void {
+function validateViews(views: unknown[], errors: string[]): void {
   views.forEach((view, index) => {
-    if (!view || typeof view !== 'object' || Array.isArray(view)) {
+    if (!isRecord(view)) {
       errors.push(`views[${index}] must be an object`);
       return;
     }
 
-    if (!VIEW_TYPES.has(view.type)) {
+    const viewType = view.type;
+    if (typeof viewType !== 'string' || !VIEW_TYPES.has(viewType)) {
       errors.push(`views[${index}].type must be one of table, cards, list, map`);
     }
 
@@ -88,7 +104,7 @@ function validateViews(views: any[], errors: string[]): void {
       errors.push(`views[${index}].filters must be a filter string or filter object`);
     }
 
-    if (view.groupBy !== undefined && (!view.groupBy || typeof view.groupBy !== 'object' || Array.isArray(view.groupBy))) {
+    if (view.groupBy !== undefined && !isRecord(view.groupBy)) {
       errors.push(`views[${index}].groupBy must be an object when present`);
     }
 
@@ -100,8 +116,8 @@ function isFilterShape(value: unknown): boolean {
   return typeof value === 'string' || (!!value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function validateFormulaReferences(base: any, errors: string[]): void {
-  const formulas = base.formulas && typeof base.formulas === 'object' && !Array.isArray(base.formulas)
+function validateFormulaReferences(base: Record<string, unknown>, errors: string[]): void {
+  const formulas = isRecord(base.formulas)
     ? new Set(Object.keys(base.formulas))
     : new Set<string>();
 
@@ -113,22 +129,31 @@ function validateFormulaReferences(base: any, errors: string[]): void {
   }
 }
 
-function collectFormulaReferences(base: any): string[] {
+function collectFormulaReferences(base: Record<string, unknown>): string[] {
   const references = new Set<string>();
 
-  for (const key of Object.keys(base.properties || {})) {
-    addFormulaReference(key, references);
+  const properties = base.properties;
+  if (isObjectValue(properties)) {
+    for (const key of Object.keys(properties)) {
+      addFormulaReference(key, references);
+    }
   }
 
-  for (const view of Array.isArray(base.views) ? base.views : []) {
-    for (const value of Array.isArray(view?.order) ? view.order : []) {
+  const views = base.views;
+  for (const view of Array.isArray(views) ? views : []) {
+    const order = readField(view, 'order');
+    for (const value of Array.isArray(order) ? order : []) {
       addFormulaReference(value, references);
     }
-    if (view?.groupBy?.property) {
-      addFormulaReference(view.groupBy.property, references);
+    const groupByProperty = readField(readField(view, 'groupBy'), 'property');
+    if (groupByProperty) {
+      addFormulaReference(groupByProperty, references);
     }
-    for (const key of Object.keys(view?.summaries || {})) {
-      addFormulaReference(key, references);
+    const summaries = readField(view, 'summaries');
+    if (isObjectValue(summaries)) {
+      for (const key of Object.keys(summaries)) {
+        addFormulaReference(key, references);
+      }
     }
   }
 

@@ -107,6 +107,10 @@ interface VaultAdapter {
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_MAX_REQUESTS = 500;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 export class OperationAuditLog {
   private readonly maxRecords: number;
   private readonly maxRequests: number;
@@ -272,22 +276,24 @@ export class OperationAuditLog {
       }
 
       const raw = await adapter.read(this.path);
-      const parsed = JSON.parse(raw);
-      if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.operations)) {
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.operations)) {
         return this.emptyFile();
       }
+
+      const operations: unknown[] = parsed.operations;
+      const requestsValue: unknown = parsed.requests;
+      const requests: unknown[] = Array.isArray(requestsValue) ? requestsValue : [];
 
       // 逐条过滤而非「一条坏就整份丢弃」：旧数据/手改残留不应抹掉整段审计历史。
       return {
         version: 1,
-        operations: parsed.operations
-          .filter((record: any) => this.isOperationRecord(record))
-          .map((record: OperationRecord) => this.cloneRecord(record)),
-        requests: Array.isArray(parsed.requests)
-          ? parsed.requests
-            .filter((record: any) => this.isRequestRecord(record))
-            .map((record: ApprovalRequestRecord) => ({ ...record }))
-          : [],
+        operations: operations
+          .filter((record): record is OperationRecord => this.isOperationRecord(record))
+          .map((record) => this.cloneRecord(record)),
+        requests: requests
+          .filter((record): record is ApprovalRequestRecord => this.isRequestRecord(record))
+          .map((record) => ({ ...record })),
         requestsPrunedBefore: typeof parsed.requestsPrunedBefore === 'number'
           ? parsed.requestsPrunedBefore
           : 0,
@@ -325,9 +331,9 @@ export class OperationAuditLog {
     return { version: 1, operations: [], requests: [], requestsPrunedBefore: 0 };
   }
 
-  private isOperationRecord(record: any): boolean {
-    return record
-      && typeof record.id === 'string'
+  private isOperationRecord(record: unknown): record is OperationRecord {
+    if (!isRecord(record)) return false;
+    return typeof record.id === 'string'
       && typeof record.action === 'string'
       && typeof record.target === 'string'
       && typeof record.timestamp === 'number'
@@ -339,9 +345,9 @@ export class OperationAuditLog {
       && (record.outcome === undefined || record.outcome === 'succeeded' || record.outcome === 'attempt-failed');
   }
 
-  private isRequestRecord(record: any): boolean {
-    return record
-      && typeof record.id === 'string'
+  private isRequestRecord(record: unknown): record is ApprovalRequestRecord {
+    if (!isRecord(record)) return false;
+    return typeof record.id === 'string'
       && typeof record.action === 'string'
       && typeof record.target === 'string'
       && (record.state === 'attempting' || record.state === 'succeeded' || record.state === 'attempt-failed')

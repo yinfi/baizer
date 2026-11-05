@@ -5,6 +5,7 @@ import type { ToolRegistry } from '../../skills/tool-registry';
 import type { Tool } from '../../skills/types';
 import { isDirectApplyWorkspaceTool } from '../../services/workspace-edit-service';
 import type { WorkspaceEditService } from '../../services/workspace-edit-service';
+import { isPiApprovalResponse } from './pi-approval-policy';
 
 export interface PiSkillScope {
   activeSkillName?: string;
@@ -49,7 +50,7 @@ export function adaptToolDefinitionsToPi(input: AdaptToolDefinitionsInput): Agen
         return {
           content: [{ type: 'text', text: stringifyToolResponse(response) }],
           details: { baizerResponse: response },
-          terminate: response?.approval_required === true,
+          terminate: isPiApprovalResponse(response),
         };
       },
     } as AgentTool<any>;
@@ -61,7 +62,7 @@ async function executeBaizerTool(
   args: any,
   input: AdaptToolDefinitionsInput,
   signal?: AbortSignal,
-): Promise<any> {
+): Promise<unknown> {
   // B 方案：use_skill 元工具已移除，skill 激活改由 read_skill（普通工具）+ system prompt
   // 的 <available_skills> 清单完成。此处不再有 use_skill 分支。
   // 强制激活时的工具收窄（allowedToolNames）暂留，Stage 2 迁入 PermissionService。

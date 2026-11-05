@@ -51,6 +51,11 @@ export function isDirectApplyWorkspaceTool(name: string): boolean {
   return DIRECT_APPLY_WRITE_TOOLS.has(name);
 }
 
+/** 工具结果是运行时透传数据，先收成 unknown 再逐字段窄化。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 export class WorkspaceEditService {
   private readonly records = new Map<string, WorkspaceEditRecord>();
   private nextEditOrder = 0;
@@ -192,16 +197,16 @@ export class WorkspaceEditService {
 
   private resolveResultPath(
     action: string,
-    result: any,
+    result: unknown,
     args: Record<string, any>,
     fallbackPath: string,
   ): string {
     if (action === 'create_note') {
-      return typeof result?.path === 'string'
-        ? result.path
-        : typeof result?.target === 'string'
-          ? result.target
-          : fallbackPath;
+      if (isRecord(result)) {
+        if (typeof result.path === 'string') return result.path;
+        if (typeof result.target === 'string') return result.target;
+      }
+      return fallbackPath;
     }
     return getFileWriteResultPath(action, result, args) || fallbackPath;
   }
@@ -228,8 +233,9 @@ export class WorkspaceEditService {
     }
   }
 
-  private isSuccessfulToolResult(result: any): boolean {
-    return result?.success === true || result?.status === 'success';
+  private isSuccessfulToolResult(result: unknown): boolean {
+    if (!isRecord(result)) return false;
+    return result.success === true || result.status === 'success';
   }
 
   private createId(): string {

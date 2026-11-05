@@ -110,14 +110,21 @@ export function isFileWriteToolName(name: string): boolean {
   return (FILE_WRITE_TOOL_NAMES as readonly string[]).includes(name);
 }
 
-export function isSuccessfulWriteToolResult(result: any): boolean {
-  return result?.success === true || result?.status === 'success';
+/** 工具结果/参数来自模型输出，先收成 unknown 再逐字段窄化。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
-export function getFileWriteError(result: any): string {
-  if (typeof result?.error === 'string' && result.error.trim()) return result.error.trim();
-  if (typeof result?.message === 'string' && result.message.trim()) {
-    if (result?.success === false || result?.status === 'error') {
+export function isSuccessfulWriteToolResult(result: unknown): boolean {
+  if (!isRecord(result)) return false;
+  return result.success === true || result.status === 'success';
+}
+
+export function getFileWriteError(result: unknown): string {
+  if (!isRecord(result)) return '';
+  if (typeof result.error === 'string' && result.error.trim()) return result.error.trim();
+  if (typeof result.message === 'string' && result.message.trim()) {
+    if (result.success === false || result.status === 'error') {
       return result.message.trim();
     }
   }
@@ -135,11 +142,13 @@ export function buildFileWriteFailureMessage(attemptedWrite: boolean, lastError?
 
 export function getFileWriteResultPath(
   action: string,
-  result: any,
-  args: Record<string, any>,
+  result: unknown,
+  args: Record<string, unknown>,
 ): string {
-  if (typeof result?.path === 'string') return result.path;
-  if (typeof result?.target === 'string') return result.target;
+  if (isRecord(result)) {
+    if (typeof result.path === 'string') return result.path;
+    if (typeof result.target === 'string') return result.target;
+  }
   if (action === 'create_note' && typeof args.filename === 'string') return args.filename;
   if (action === 'rename_note' && typeof args.newPath === 'string') return args.newPath;
   if (typeof args.path === 'string') return args.path;
