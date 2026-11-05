@@ -223,8 +223,12 @@ B2 的判定标准：新增 `unknown` 窄化时，对旧数据的行为（保留
    行为等价，未新增其他 API。
 3. **`harness-chat-runtime.resolveModelHandle`**：把方法取出后调用改为 `getter.call(handle)`，
    `this` 绑定与调用结果不变（此前用 `as any` 屏蔽了 unbound-method）。
+4. **异常值窄化**：`catch (e: any)` 改为 `unknown` 后，异常文案沿用 HEAD 已有的 `thrownMessage()`。
+   对 `Error` 与「带 message 的对象」与原来完全一致；对**非对象抛出值**（如直接 `throw 'x'`），
+   原来 `${e.message}` 会显示 `undefined`，现在显示空文本 —— 即 issue #69 要求的异常值窄化，
+   属于有意的小变化（`thrownMessage(e) || String(e)` 之类仍保留原有 `String(e)` 回退）。
 
-其余如 `thrownMessage()`（HEAD 已有）、异常分支、`?.` 兜底、设置迁移时机、日志文案均未改。
+其余如异常分支、`?.` 兜底、设置迁移时机、日志文案均未改。
 本 PR 没有用户可见的 UI/视觉变化，因此不附 Before/After 截图；UI 相关改动只有上述类型收口。
 
 ### 6.4 复跑方式
