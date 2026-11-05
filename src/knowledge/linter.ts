@@ -220,7 +220,7 @@ export class KnowledgeLinter {
     const reportPath = `${reportDir}/report.md`;
 
     if (!this.app.vault.getAbstractFileByPath(reportDir)) {
-      try { await this.app.vault.createFolder(reportDir); } catch {}
+      try { await this.app.vault.createFolder(reportDir); } catch { /* folder may already exist (concurrent create) */ }
     }
 
     const existing = this.app.vault.getAbstractFileByPath(reportPath);

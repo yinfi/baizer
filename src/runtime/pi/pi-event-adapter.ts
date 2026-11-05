@@ -8,7 +8,7 @@ interface LoosePiToolResult {
 }
 
 function asLooseResult(result: unknown): LoosePiToolResult | undefined {
-  return typeof result === 'object' && result !== null ? (result as LoosePiToolResult) : undefined;
+  return typeof result === 'object' && result !== null ? result : undefined;
 }
 
 /** 取 content[0].text;不是字符串则返回 undefined。 */
