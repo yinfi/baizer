@@ -375,16 +375,18 @@ test('chunkDocument terminates when only heading is within overlap distance (no 
 // 被外层 catch 吞掉 → 整份提取返回 null（编译被判失败）。
 // 现在按字段逐个窄化：坏字段被丢弃/归一化，基础字段仍然保留。
 
-test('parseCompilerResponse tolerates non-array topics (regression)', () => {
+test('parseCompilerResponse keeps returning null for a truthy non-array topics value (regression)', () => {
   const response = '{"title":"T","topics":5,"concepts":[],"key_claims":[],"review_flags":[]}';
-  const result = parseCompilerResponse(response);
-  expect(result).toBeDefined();
-  expect(result!.topics.length).toBe(0);
+  expect(parseCompilerResponse(response) === null).toBeTruthy();
+  // 假值 topics 仍视为「没有主题」。
+  expect(parseCompilerResponse('{"title":"T","topics":0}')!.topics.length).toBe(0);
 });
 
-test('parseCompilerResponse drops topic entries with non-string slug/label (regression)', () => {
-  const response = '{"title":"T","topics":[{"slug":5},{"slug":"ok","label":"OK"},"raw"],"concepts":[],"key_claims":[],"review_flags":[]}';
-  const result = parseCompilerResponse(response);
+test('parseCompilerResponse: a topic with a truthy non-string slug still yields null; strings and empty entries are tolerated (regression)', () => {
+  const bad = '{"title":"T","topics":[{"slug":5},{"slug":"ok","label":"OK"}]}';
+  expect(parseCompilerResponse(bad) === null).toBeTruthy();
+  const ok = '{"title":"T","topics":[{"slug":"ok","label":"OK"},"raw",{}]}';
+  const result = parseCompilerResponse(ok);
   expect(result).toBeDefined();
   expect(result!.topics.length).toBe(1);
   expect(result!.topics[0].slug).toBe('ok');
@@ -408,11 +410,11 @@ test('parseCompilerResponse returns null when JSON is not an object (regression)
   expect(parseCompilerResponse('"just a string"') === null).toBeTruthy();
 });
 
-test('parseCompilerResponse normalizes non-string author/source_url/created_at (regression)', () => {
+test('parseCompilerResponse defaults non-string author/source_url/created_at to empty string (regression)', () => {
   const response = '{"title":"T","author":5,"source_url":0,"created_at":null,"topics":[],"concepts":[],"key_claims":[],"review_flags":[]}';
   const result = parseCompilerResponse(response);
   expect(result).toBeDefined();
-  expect(result!.author).toBe('5');
+  expect(result!.author).toBe('');
   expect(result!.source_url).toBe('');
   expect(result!.created_at).toBe('');
 });

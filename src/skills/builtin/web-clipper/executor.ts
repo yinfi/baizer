@@ -2,7 +2,7 @@ import type { App } from 'obsidian';
 import * as obsidian from 'obsidian';
 import { Readability } from '@mozilla/readability';
 import { Tool, ToolArgs, ToolContext, ToolResult } from '../../types';
-import { missingParam, strArg } from '../../tool-args';
+import { strArg } from '../../tool-args';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import {
@@ -518,8 +518,7 @@ export function createSaveWebpageTool(modelService: SummaryModel, deps: WebClipp
       if (ctx.signal?.aborted) {
         return { success: false, error: 'Aborted before saving note', aborted: true };
       }
-      const url = strArg(args, 'url');
-      if (url === undefined) return missingParam('url');
+      const url = strArg(args, 'url') ?? '';
       const filename = strArg(args, 'filename');
       try {
         const videoResult = await saveVideo(url, filename, ctx, modelService, deps);

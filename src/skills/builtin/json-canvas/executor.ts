@@ -25,7 +25,7 @@ const validateJsonCanvas: Tool = {
   executionMode: 'parallel',
   risk: 'read',
   async execute(args) {
-    return validateCanvasContent(args.content);
+    return validateCanvasContent(args?.content);
   },
 };
 

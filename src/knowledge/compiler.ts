@@ -48,19 +48,6 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-/**
- * 把 AI 返回的未知标量渲染成字符串字段。
- * 对齐旧实现 `value || ''` 的语义：falsy 值（含 0/false/空串/null）归一化为空串，
- * 其余标量按 String() 渲染；对象/数组等复合值归一化为空串。
- */
-function asFieldText(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-    return value ? String(value) : '';
-  }
-  return '';
-}
-
 /** categorized_knowledge 条目：category 为字符串且 items 为数组 */
 function isCategorizedEntry(value: unknown): value is { category: string; items: unknown[] } {
   return isRecord(value) && typeof value.category === 'string' && Array.isArray(value.items);
@@ -403,14 +390,19 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
     const rawTitle = parsed.title;
     if (typeof rawTitle !== 'string') return null;
 
+    // 保持原行为:topics 为真值但不是数组、元素为 null/undefined、或 slug/label 为非字符串真值时,
+    // 整体返回 null(原实现在 .map / 属性访问处抛错,被外层 catch 吞掉)。
     const rawTopics = parsed.topics;
-    const topics: TopicRef[] = (Array.isArray(rawTopics) ? rawTopics : []).map((t: unknown) => {
-      const slug = isRecord(t) ? t.slug : undefined;
-      const label = isRecord(t) ? t.label : undefined;
-      return {
-        slug: normalizeTopicSlug(typeof slug === 'string' ? slug : typeof label === 'string' ? label : ''),
-        label: typeof label === 'string' ? label : typeof slug === 'string' ? slug : '',
-      };
+    if (rawTopics && !Array.isArray(rawTopics)) return null;
+    const topics: TopicRef[] = (Array.isArray(rawTopics) ? (rawTopics as unknown[]) : []).map((t: unknown) => {
+      if (t === null || t === undefined) throw new TypeError('topic entry is null');
+      const entry = isRecord(t) ? t : {};
+      const slugSource: unknown = entry.slug || entry.label || '';
+      const labelSource: unknown = entry.label || entry.slug || '';
+      if (typeof slugSource !== 'string' || typeof labelSource !== 'string') {
+        throw new TypeError('topic slug/label must be a string');
+      }
+      return { slug: normalizeTopicSlug(slugSource), label: labelSource };
     }).filter((t: TopicRef) => t.slug.length > 0);
 
     const reviewFlags: string[] = readStringList(parsed.review_flags);
@@ -447,9 +439,9 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
 
     return {
       title: rawTitle,
-      author: asFieldText(parsed.author),
-      source_url: asFieldText(parsed.source_url),
-      created_at: asFieldText(parsed.created_at),
+      author: typeof parsed.author === 'string' ? parsed.author : '',
+      source_url: typeof parsed.source_url === 'string' ? parsed.source_url : '',
+      created_at: typeof parsed.created_at === 'string' ? parsed.created_at : '',
       topics,
       concepts: readStringList(parsed.concepts),
       key_claims: readStringList(parsed.key_claims),

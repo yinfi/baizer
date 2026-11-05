@@ -24,7 +24,7 @@ const validateBaseYaml: Tool = {
   executionMode: 'parallel',
   risk: 'read',
   async execute(args) {
-    return validateBaseYamlContent(args.content);
+    return validateBaseYamlContent(args?.content);
   },
 };
 

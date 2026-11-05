@@ -76,7 +76,9 @@ export class ToolRegistry {
     }
     try {
       const ctx = signal ? { ...this.ctx, signal } : this.ctx;
-      return await tool.execute(args, ctx);
+      // 模型/调用方可能给出 null 或原始值:统一按空对象处理,工具内部不必各自防御。
+      const safeArgs: ToolArgs = typeof args === 'object' && args !== null ? args : {};
+      return await tool.execute(safeArgs, ctx);
     } catch (e: unknown) {
       console.error(`[ToolRegistry] Tool "${name}" execution error:`, e);
       return { error: e instanceof Error ? e.message : String(e) };

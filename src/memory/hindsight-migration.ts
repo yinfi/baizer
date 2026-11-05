@@ -233,12 +233,10 @@ function profileToMemories(profile: JsonObject, now: number): MemoryRecord[] {
   const texts: string[] = [];
   const preferences = asObject(profile.preferences);
   const context = asObject(profile.context);
-  if (typeof profile.profession === 'string' && profile.profession) {
-    texts.push(`User profession: ${profile.profession}`);
-  }
+  if (profile.profession) texts.push(`User profession: ${String(profile.profession)}`);
   for (const expertise of arrayOf(profile.expertise)) texts.push(`User expertise: ${expertise}`);
-  if (typeof preferences.responseStyle === 'string' && preferences.responseStyle) {
-    texts.push(`User response style preference: ${preferences.responseStyle}`);
+  if (preferences.responseStyle) {
+    texts.push(`User response style preference: ${String(preferences.responseStyle)}`);
   }
   for (const project of arrayOf(context.currentProjects)) texts.push(`Current project: ${project}`);
   for (const goal of arrayOf(context.goals)) texts.push(`User goal: ${goal}`);

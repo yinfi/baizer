@@ -43,7 +43,7 @@ const readNote: Tool = {
   },
   async execute(args, ctx) {
     const notePath = strArg(args, 'path');
-    if (notePath === undefined) return missingParam('path');
+    if (notePath === undefined) return { success: false, error: 'File not found' };
     const file = ctx.app.metadataCache.getFirstLinkpathDest(notePath, '');
     if (!file) return { success: false, error: 'File not found' };
     const content = await ctx.app.vault.read(file);
@@ -340,7 +340,7 @@ const searchVault: Tool = {
   },
   async execute(args, ctx) {
     const query = strArg(args, 'query');
-    if (query === undefined) return missingParam('query');
+    if (query === undefined) return { matches: [] };
     const matches = ctx.app.vault.getFiles()
       .filter(f => f.basename.toLowerCase().includes(query.toLowerCase()))
       .map(f => f.path)
@@ -363,7 +363,7 @@ const openFile: Tool = {
   },
   async execute(args, ctx) {
     const wanted = strArg(args, 'path');
-    if (wanted === undefined) return missingParam('path');
+    if (wanted === undefined) return { success: false, error: 'File not found' };
     const allFiles = ctx.app.vault.getFiles();
     let target = allFiles.find(f => f.path === wanted);
     if (!target) {

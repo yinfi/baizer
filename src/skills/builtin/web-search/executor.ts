@@ -33,8 +33,7 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
       required: ['query'],
     },
     async execute(args, _ctx) {
-      const query = strArg(args, 'query');
-      if (query === undefined) return { error: 'Missing query parameter' };
+      const query = strArg(args, 'query') ?? '';
       const timeRange = strArg(args, 'time_range');
       let searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
       if (timeRange) searchUrl += `&df=${encodeURIComponent(timeRange)}`;

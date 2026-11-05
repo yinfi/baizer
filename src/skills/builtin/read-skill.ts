@@ -8,7 +8,8 @@
 // 看不到点目录，那两个工具读不到。read_skill 走 vault.adapter.read（能读点目录），
 // 并对内置 / 用户 / 未来任何 skill 统一生效——正是“通用激活”的读取端。
 
-import type { Tool } from '../types';
+import type { Tool, ToolContext } from '../types';
+import { asString, prop } from '../../utils/narrow';
 import type { ToolRegistry } from '../tool-registry';
 import type { SkillRegistry } from '../skill-registry';
 
@@ -34,8 +35,8 @@ export function registerSkillReadTool(
       },
       required: ['name'],
     },
-    async execute(args, ctx) {
-      const name = typeof args?.name === 'string' ? args.name.trim() : '';
+    async execute(args: unknown, ctx: ToolContext) {
+      const name = (asString(prop(args, 'name')) ?? '').trim();
       if (!name) return { error: 'Missing skill name' };
 
       const resolved = skillRegistry.resolveForRead(name);

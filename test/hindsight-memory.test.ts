@@ -245,7 +245,7 @@ async function runTests() {
     expect(memories.some((memory) => memory.id === 'mem_previous_plugin')).toBe(true);
   });
 
-  await test('migration ignores wrong-typed profile fields instead of stringifying them', async () => {
+  await test('migration skips wrong-typed list fields and non-object sections, keeps truthy scalars as text', async () => {
     const profilePath = '.obsidian/baizer-memory/user-profile.json';
     const { app } = createApp({
       [profilePath]: JSON.stringify({
@@ -262,7 +262,7 @@ async function runTests() {
     await migrateLegacyMemory(app, store, 5000);
 
     const texts = (await store.listMemories()).map((memory) => memory.text).sort();
-    expect(texts).toEqual(['User expertise: valid', 'User goal: ship it']);
+    expect(texts).toEqual(['User expertise: valid', 'User goal: ship it', 'User profession: 42']);
   });
 
   await test('migration tolerates summaries with missing or wrong-typed fields and non-array files', async () => {
