@@ -80,8 +80,6 @@ interface SettingsSectionMeta {
     keywords: string[];
 }
 
-const SETTINGS_FALLBACK_STYLE_ID = 'baizer-settings-fallback-styles';
-
 export function getSettingsFallbackCss(): string {
     return `
 .baizer-settings-page {
@@ -666,20 +664,21 @@ export function getSettingsFallbackCss(): string {
 }
 `;
 }
+let settingsFallbackSheet: CSSStyleSheet | null = null;
+
+/**
+ * 兜底样式以 constructable stylesheet 挂到 document.adoptedStyleSheets(排在 styles.css 之后,
+ * 优先级与原先末尾注入的 <style> 相同),不再创建 <style> 元素。重复调用只刷新内容(t() 随 locale 变化)。
+ */
 function ensureSettingsFallbackStyles(): void {
     const doc = typeof document === 'undefined' ? null : document;
-    if (!doc) return;
+    if (!doc || typeof CSSStyleSheet === 'undefined' || !('adoptedStyleSheets' in doc)) return;
 
-    const existing = doc.getElementById(SETTINGS_FALLBACK_STYLE_ID);
-    if (existing) {
-        existing.textContent = getSettingsFallbackCss();
-        return;
+    if (!settingsFallbackSheet) settingsFallbackSheet = new CSSStyleSheet();
+    settingsFallbackSheet.replaceSync(getSettingsFallbackCss());
+    if (!doc.adoptedStyleSheets.includes(settingsFallbackSheet)) {
+        doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, settingsFallbackSheet];
     }
-
-    const styleEl = doc.createElement('style');
-    styleEl.id = SETTINGS_FALLBACK_STYLE_ID;
-    styleEl.textContent = getSettingsFallbackCss();
-    doc.head?.appendChild(styleEl);
 }
 
 // 惰性求值：t() 依赖当前 locale，必须在调用时（而非模块加载时）求值，

@@ -83,8 +83,7 @@ export function selectionMenuExtension(
 
 function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
     const context = pluginContextMap.get(view);
-    const dom = document.createElement('div');
-    dom.className = `guardian-selection-tooltip is-${state.type}`;
+    const dom = createDiv({ cls: `guardian-selection-tooltip is-${state.type}` });
     if (state.type === 'hidden' || !context) return { dom };
 
     // 防重("同一文档多个 CM 实例各弹一条")的判定已上移到状态层:
@@ -130,9 +129,7 @@ function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
 
     // trigger 场景(@ 行内插入):保留旧的迷你对话框。
     if (state.type === 'button') {
-        const btn = document.createElement('button');
-        btn.className = 'guardian-selection-btn';
-        btn.type = 'button';
+        const btn = createEl('button', { cls: 'guardian-selection-btn', type: 'button' });
         setIcon(btn, 'sparkles');
         btn.createSpan({ cls: 'guardian-selection-btn-label', text: 'AI' });
         btn.setAttribute('aria-label', 'Ask AI to insert here');
@@ -241,8 +238,7 @@ function createChatPanel(
     context: { app: App; modelService: ModelService },
     markdownComponent: Component,
 ) {
-    const container = document.createElement('div');
-    container.className = `guardian-chat-view is-${state.mode}`;
+    const container = createDiv({ cls: `guardian-chat-view is-${state.mode}` });
 
     const header = container.createDiv({ cls: 'guardian-chat-header' });
     header.createSpan({ text: t('Inline AI') });

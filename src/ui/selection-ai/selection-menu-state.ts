@@ -189,7 +189,7 @@ function currentActiveElement(): Element | null {
 // 同步 dispatch 会撞上 CM6 的"update 进行中不得再 dispatch"。(回退分支只在 Node 下走到。)
 const scheduleFrame: (run: () => void) => void =
     typeof requestAnimationFrame === 'function'
-        ? (run) => { requestAnimationFrame(() => run()); }
+        ? (run) => { window.requestAnimationFrame(() => run()); }
         : (run) => { queueMicrotask(run); };
 
 const pendingFocusSync = new WeakSet<EditorView>();

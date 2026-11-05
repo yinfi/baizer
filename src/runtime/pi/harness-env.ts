@@ -43,8 +43,6 @@ function shellUnavailable(): { ok: false; error: { code: string; message: string
   };
 }
 
-const TEMP_ROOT = '.obsidian/baizer-tmp';
-
 /**
  * 完整的 pi ExecutionEnv:委托 VaultSessionFileSystem 处理会话文件读写,
  * 补齐 Harness 需要但会话持久化用不到的方法,并附一个 NoopShell。
@@ -54,6 +52,8 @@ export class HarnessExecutionEnv {
 
   constructor(
     private readonly fs: VaultSessionFileSystem,
+    /** 临时文件根目录(vault 相对,位于 Vault#configDir 下)。 */
+    private readonly tempRoot: string,
   ) {
     this.cwd = fs.cwd;
   }
@@ -111,7 +111,7 @@ export class HarnessExecutionEnv {
   }
 
   async createTempDir(prefix = 'tmp-'): Promise<Result<string, FileError>> {
-    const dir = `${TEMP_ROOT}/${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const dir = `${this.tempRoot}/${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const created = await this.fs.createDir(dir, { recursive: true });
     if (!created.ok) return created;
     return ok(dir);
@@ -120,7 +120,7 @@ export class HarnessExecutionEnv {
   async createTempFile(options?: { prefix?: string; suffix?: string }): Promise<Result<string, FileError>> {
     const prefix = options?.prefix ?? '';
     const suffix = options?.suffix ?? '';
-    const file = `${TEMP_ROOT}/${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}${suffix}`;
+    const file = `${this.tempRoot}/${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}${suffix}`;
     const written = await this.fs.writeFile(file, '');
     if (!written.ok) return written;
     return ok(file);
@@ -138,7 +138,7 @@ export class HarnessExecutionEnv {
 }
 
 /** 从 VaultFileAdapter 构造完整的 Harness ExecutionEnv。 */
-export function createHarnessExecutionEnv(adapter: VaultFileAdapter, cwd = '/'): HarnessExecutionEnv {
+export function createHarnessExecutionEnv(adapter: VaultFileAdapter, tempRoot: string, cwd = '/'): HarnessExecutionEnv {
   const fs = new VaultSessionFileSystem(adapter, cwd);
-  return new HarnessExecutionEnv(fs);
+  return new HarnessExecutionEnv(fs, tempRoot);
 }

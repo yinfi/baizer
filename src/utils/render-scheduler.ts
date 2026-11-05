@@ -35,7 +35,7 @@ const defaultSchedule: ScheduleCallback = callback => {
     return;
   }
   // 极老的 WebView 兜底：微任务不可用时退回宏任务，语义仍是「下一轮再画」。
-  setTimeout(callback, 0);
+  window.setTimeout(callback, 0);
 };
 
 /**

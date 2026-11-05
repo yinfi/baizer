@@ -101,10 +101,10 @@ async function executeWithTimeout<T>(
   // 组合信号:超时 ∪ 上游中断。任一触发即 abort,透传给工具让它取消在途副作用
   // (如 save_webpage 的 fetch),而非仅让 race 返回错误、请求却在后台跑完。
   const controller = new AbortController();
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let timeoutId: number | undefined;
   let upstreamHandler: (() => void) | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
+    timeoutId = window.setTimeout(() => {
       controller.abort();
       reject(new Error(errorMessage));
     }, timeoutMs);
@@ -120,7 +120,7 @@ async function executeWithTimeout<T>(
   try {
     return await Promise.race([operation(controller.signal), timeoutPromise]);
   } finally {
-    if (timeoutId) clearTimeout(timeoutId);
+    if (timeoutId) window.clearTimeout(timeoutId);
     if (signal && upstreamHandler) signal.removeEventListener('abort', upstreamHandler);
   }
 }

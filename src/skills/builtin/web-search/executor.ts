@@ -10,7 +10,7 @@ interface WebSearchDeps {
 
 const defaultDeps: WebSearchDeps = {
   requestUrl: (options) => requestUrl(options),
-  wait: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+  wait: (ms) => new Promise(resolve => window.setTimeout(resolve, ms)),
 };
 
 export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {

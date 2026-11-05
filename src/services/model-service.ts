@@ -1,5 +1,5 @@
 import { App, Notice } from 'obsidian';
-import { PluginSettings, ProviderConfig } from '../mcp/types';
+import { PLUGIN_ID, PluginSettings, ProviderConfig } from '../mcp/types';
 import { MemoryManager } from '../memory/memory-manager';
 import { MemoryMutationResult, MemoryView, MemoryViewRequest, UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
@@ -158,7 +158,10 @@ export class ModelService {
         }
         try {
             const vaultAdapter = createVaultFileAdapter(adapter);
+            // 插件私有目录一律挂在用户实际的配置目录下(Vault#configDir 可被用户改名)。
+            const configDir = this.app.vault.configDir;
             this.sessionManager = new HarnessSessionManager(vaultAdapter, {
+                sessionsRoot: `${configDir}/${PLUGIN_ID}-sessions`,
                 loadRef: (conversationId) => this.loadSessionRef(conversationId),
                 saveRef: (conversationId, ref) => this.saveSessionRef(conversationId, ref),
                 contextWindow: () => this.settings.contextWindow ?? 0,
@@ -166,9 +169,9 @@ export class ModelService {
                 // skipGenerationPlan:摘要是纯文本任务,不需要写作策略装饰(同 buildMemoryOptions 的用法)。
                 summarize: (prompt) => this.generate(prompt, undefined, 'shell', undefined, null, { skipGenerationPlan: true }),
             });
-            this.harnessEnv = createHarnessExecutionEnv(vaultAdapter);
+            this.harnessEnv = createHarnessExecutionEnv(vaultAdapter, `${configDir}/${PLUGIN_ID}-tmp`);
             // 用户自定义命令服务与 harnessEnv 同源;懒加载模板(首次列命令/执行时读盘)。
-            this.promptTemplateService = new PromptTemplateService(this.harnessEnv);
+            this.promptTemplateService = new PromptTemplateService(this.harnessEnv, `${configDir}/${PLUGIN_ID}-commands`);
         } catch (error) {
             logger.warn('Failed to initialize HarnessSessionManager; falling back to in-memory sessions.', 'ModelService');
             this.sessionManager = null;

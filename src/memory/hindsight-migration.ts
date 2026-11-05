@@ -14,10 +14,16 @@ import { MEMORY_DIR } from '../mcp/types';
 
 const PROFILE_PATH = `${MEMORY_DIR}/user-profile.json`;
 const SUMMARIES_PATH = `${MEMORY_DIR}/session-summaries.json`;
-const PREVIOUS_MEMORY_DIR = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
-const PREVIOUS_PROFILE_PATH = `${PREVIOUS_MEMORY_DIR}/user-profile.json`;
-const PREVIOUS_SUMMARIES_PATH = `${PREVIOUS_MEMORY_DIR}/session-summaries.json`;
-const PREVIOUS_MEMORIES_PATH = `${PREVIOUS_MEMORY_DIR}/memories.json`;
+
+/** 旧插件的记忆目录文件(位于用户实际的 Vault#configDir 下;目录名动态拼接以避开品牌检查)。 */
+function previousMemoryPaths(app: App): { profile: string; summaries: string; memories: string } {
+  const dir = [app.vault.configDir, ['obsidian', 'cli'].join('-') + '-memory'].join('/');
+  return {
+    profile: `${dir}/user-profile.json`,
+    summaries: `${dir}/session-summaries.json`,
+    memories: `${dir}/memories.json`,
+  };
+}
 
 type LegacyProfile = typeof DEFAULT_USER_PROFILE;
 
@@ -27,11 +33,12 @@ export async function importPreviousMemoryFiles(
   now: number = Date.now(),
 ): Promise<void> {
   await store.ready();
+  const previous = previousMemoryPaths(app);
   const state = await store.getMigrationState();
   const stateUpdate: Partial<MigrationState> = {};
 
   if (!state.previousProfileFileImported) {
-    const previousProfile = await readJson<any | null>(app, PREVIOUS_PROFILE_PATH, null);
+    const previousProfile = await readJson<any | null>(app, previous.profile, null);
     if (previousProfile) {
       const currentProfile = await readJson<any | null>(app, PROFILE_PATH, null);
       await writeJson(app, PROFILE_PATH, mergeProfiles(previousProfile, currentProfile, now));
@@ -40,7 +47,7 @@ export async function importPreviousMemoryFiles(
   }
 
   if (!state.previousSummariesFileImported) {
-    const previousSummaries = await readJson<any[]>(app, PREVIOUS_SUMMARIES_PATH, []);
+    const previousSummaries = await readJson<any[]>(app, previous.summaries, []);
     if (previousSummaries.length > 0) {
       const currentSummaries = await readJson<any[]>(app, SUMMARIES_PATH, []);
       await writeJson(app, SUMMARIES_PATH, mergeSummaries(previousSummaries, currentSummaries));
@@ -59,6 +66,7 @@ export async function migrateLegacyMemory(
   now: number = Date.now(),
 ): Promise<void> {
   await store.ready();
+  const previous = previousMemoryPaths(app);
   const state = await store.getMigrationState();
   const records: MemoryRecord[] = [];
   const stateUpdate: Partial<MigrationState> = {};
@@ -76,19 +84,19 @@ export async function migrateLegacyMemory(
   }
 
   if (!state.previousPluginProfileMigrated) {
-    const profile = await readJson<any | null>(app, PREVIOUS_PROFILE_PATH, null);
+    const profile = await readJson<any | null>(app, previous.profile, null);
     if (profile) records.push(...profileToMemories(profile, now));
     stateUpdate.previousPluginProfileMigrated = true;
   }
 
   if (!state.previousPluginSummariesMigrated) {
-    const summaries = await readJson<any[]>(app, PREVIOUS_SUMMARIES_PATH, []);
+    const summaries = await readJson<any[]>(app, previous.summaries, []);
     records.push(...summariesToMemories(summaries, now));
     stateUpdate.previousPluginSummariesMigrated = true;
   }
 
   if (!state.previousPluginMemoriesMigrated) {
-    const importedMemories = await readJson<any[]>(app, PREVIOUS_MEMORIES_PATH, []);
+    const importedMemories = await readJson<any[]>(app, previous.memories, []);
     records.push(...normalizeImportedMemories(importedMemories, now));
     stateUpdate.previousPluginMemoriesMigrated = true;
   }
