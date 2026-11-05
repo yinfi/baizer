@@ -2,7 +2,43 @@
 // Ontology schema 解析、验证、发现 — 纯函数模块
 
 import { OntologySchema, OntologyCategory, OntologyEntityType } from './types';
-import { asRecord, prop, asString, asArray } from '../utils/narrow';
+
+// ===== 窄化工具 =====
+// frontmatter / AI 返回值都是不可信输入。这里集中提供 unknown 安全读取原语，
+// 避免在调用点使用 any 或 `as` 断言。
+
+/** 判断未知值是否为普通对象（排除 null 与数组） */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 读取字符串字段；非字符串返回 undefined */
+export function readString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+/** 读取非空字符串字段；空串与非字符串返回 undefined（对齐旧 `value || undefined` 语义） */
+export function readNonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** 读取字符串数组字段；非数组返回 []，元素按 String() 归一化 */
+export function readStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  for (const item of value) result.push(String(item));
+  return result;
+}
+
+/** 提取异常消息：Error 取 message，类 Error 对象取字符串 message，其余 undefined */
+export function errorMessage(error: unknown): string | undefined {
+  if (error instanceof Error) return error.message;
+  if (isRecord(error)) {
+    const message = error.message;
+    if (typeof message === 'string') return message;
+  }
+  return undefined;
+}
 
 /**
  * 从原始 markdown 内容中提取 frontmatter 对象
@@ -77,11 +113,11 @@ function parseSimpleYaml(yaml: string): Record<string, unknown> {
       result[key] = arr;
     } else {
       // 标量值
-      const rawVal = inlineVal.replace(/^"(.*)"$/, '$1');
-      let val: string | boolean | number = rawVal;
-      if (rawVal === 'true') val = true;
-      else if (rawVal === 'false') val = false;
-      else if (/^\d+$/.test(rawVal)) val = parseInt(rawVal, 10);
+      const scalar = inlineVal.replace(/^"(.*)"$/, '$1');
+      let val: string | boolean | number = scalar;
+      if (scalar === 'true') val = true;
+      else if (scalar === 'false') val = false;
+      else if (/^\d+$/.test(scalar)) val = parseInt(scalar, 10);
       result[key] = val;
       i++;
     }
@@ -94,13 +130,12 @@ function parseSimpleYaml(yaml: string): Record<string, unknown> {
  * @returns 解析成功返回 schema，失败返回 null
  */
 export function parseOntologySchema(frontmatter: unknown): OntologySchema | null {
-  if (!frontmatter) return null;
-  const fm = asRecord(frontmatter);
-  if (fm.knowledge_artifact_type !== 'ontology_schema') return null;
+  if (!isRecord(frontmatter)) return null;
+  if (frontmatter.knowledge_artifact_type !== 'ontology_schema') return null;
 
-  const version = typeof fm.version === 'number' ? fm.version : 1;
-  const categories = parseCategories(fm.categories);
-  const entityTypes = parseEntityTypes(fm.entity_types);
+  const version = typeof frontmatter.version === 'number' ? frontmatter.version : 1;
+  const categories = parseCategories(frontmatter.categories);
+  const entityTypes = parseEntityTypes(frontmatter.entity_types);
 
   // 至少需要 categories 或 entity_types 之一非空
   if (categories.length === 0 && entityTypes.length === 0) return null;
@@ -109,39 +144,35 @@ export function parseOntologySchema(frontmatter: unknown): OntologySchema | null
 }
 
 function parseCategories(raw: unknown): OntologyCategory[] {
-  const arr = asArray(raw);
-  if (!arr) return [];
-  return arr
-    .filter((c: unknown) => {
-      const name = asString(prop(c, 'name'));
-      return typeof name === 'string' && name.trim();
-    })
-    .map((c: unknown) => {
-      const cRecord = asRecord(c);
-      const description = asString(cRecord.description);
-      return {
-        name: (cRecord.name as string).trim(),
-        description: description ? description.trim() : '',
-      };
+  if (!Array.isArray(raw)) return [];
+  const result: OntologyCategory[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const name = item.name;
+    if (typeof name !== 'string' || name.trim().length === 0) continue;
+    const description = item.description;
+    result.push({
+      name: name.trim(),
+      description: typeof description === 'string' ? description.trim() : '',
     });
+  }
+  return result;
 }
 
 function parseEntityTypes(raw: unknown): OntologyEntityType[] {
-  const arr = asArray(raw);
-  if (!arr) return [];
-  return arr
-    .filter((e: unknown) => {
-      const name = asString(prop(e, 'name'));
-      return typeof name === 'string' && name.trim();
-    })
-    .map((e: unknown) => {
-      const eRecord = asRecord(e);
-      const description = asString(eRecord.description);
-      return {
-        name: (eRecord.name as string).trim(),
-        description: description ? description.trim() : '',
-      };
+  if (!Array.isArray(raw)) return [];
+  const result: OntologyEntityType[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const name = item.name;
+    if (typeof name !== 'string' || name.trim().length === 0) continue;
+    const description = item.description;
+    result.push({
+      name: name.trim(),
+      description: typeof description === 'string' ? description.trim() : '',
     });
+  }
+  return result;
 }
 
 /**
@@ -241,10 +272,10 @@ export function parseDiscoveryResponse(response: string): OntologySchema | null 
     const fenceMatch = response.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
     const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
     const parsed: unknown = JSON.parse(jsonStr);
-    const parsedRecord = asRecord(parsed);
+    if (!isRecord(parsed)) return null;
 
-    const categories = parseCategories(parsedRecord.categories);
-    const entityTypes = parseEntityTypes(parsedRecord.entity_types);
+    const categories = parseCategories(parsed.categories);
+    const entityTypes = parseEntityTypes(parsed.entity_types);
     if (categories.length === 0 && entityTypes.length === 0) return null;
 
     return { version: 1, categories, entity_types: entityTypes };

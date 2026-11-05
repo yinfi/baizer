@@ -372,6 +372,126 @@ async function runTests() {
     expect(mergedSummaries.map((entry: { timestamp: number }) => entry.timestamp)).toEqual([20, 10, 5]);
   });
 
+  await test('migration skips wrong-typed list fields and non-object sections, keeps truthy scalars as text', async () => {
+    const profilePath = '.obsidian/baizer-memory/user-profile.json';
+    const { app } = createApp({
+      [profilePath]: JSON.stringify({
+        profession: 42,
+        expertise: ['valid', 7, null, '  '],
+        preferences: 'not-an-object',
+        context: { currentProjects: 'not-an-array', goals: ['ship it'] },
+      }),
+    });
+    const store = new HindsightStore(app);
+    await store.ready();
+
+    const { migrateLegacyMemory } = await import('../src/memory/hindsight-migration');
+    await migrateLegacyMemory(app, store, 5000);
+
+    const texts = (await store.listMemories()).map((memory) => memory.text).sort();
+    expect(texts).toEqual(['User expertise: valid', 'User goal: ship it', 'User profession: 42']);
+  });
+
+  await test('migration tolerates summaries with missing or wrong-typed fields and non-array files', async () => {
+    const summariesPath = '.obsidian/baizer-memory/session-summaries.json';
+    const previousMemoryDir = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
+    const { app } = createApp({
+      [summariesPath]: JSON.stringify([
+        null,
+        'text',
+        { timestamp: 10 },
+        { summary: 5, timestamp: 11 },
+        { summary: '   ', timestamp: 12 },
+        { summary: 'Kept summary.', timestamp: 'not-a-number' },
+      ]),
+      // 旧文件顶层不是数组:不得抛错,也不应产出记忆。
+      [`${previousMemoryDir}/session-summaries.json`]: JSON.stringify({ summary: 'wrapped' }),
+      [`${previousMemoryDir}/memories.json`]: JSON.stringify({ text: 'wrapped' }),
+    });
+    const store = new HindsightStore(app);
+    await store.ready();
+
+    const { migrateLegacyMemory } = await import('../src/memory/hindsight-migration');
+    await migrateLegacyMemory(app, store, 5000);
+
+    const memories = await store.listMemories();
+    expect(memories.length).toBe(1);
+    expect(memories[0].text).toBe('Previous session: Kept summary.');
+    expect(memories[0].createdAt).toBe(5000);
+  });
+
+  await test('migration normalizes imported memories with invalid type, source, and field types', async () => {
+    const previousMemoryDir = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
+    const { app } = createApp({
+      [`${previousMemoryDir}/memories.json`]: JSON.stringify([
+        null,
+        { text: 12 },
+        { text: '   ' },
+        {
+          id: 'mem_loose',
+          text: ' Loose fact. ',
+          type: 'bogus',
+          bankId: 9,
+          source: { kind: 'nope', messageId: 'm1', action: 3, target: 'note.md' },
+          entities: ['a', 1],
+          confidence: 'high',
+          lastAccessedAt: 'yesterday',
+          accessCount: null,
+        },
+      ]),
+    });
+    const store = new HindsightStore(app);
+    await store.ready();
+
+    const { migrateLegacyMemory } = await import('../src/memory/hindsight-migration');
+    await migrateLegacyMemory(app, store, 5000);
+
+    const memories = await store.listMemories();
+    expect(memories.length).toBe(1);
+    const [memory] = memories;
+    expect(memory.id).toBe('mem_loose');
+    expect(memory.text).toBe('Loose fact.');
+    expect(memory.type).toBe('world');
+    expect(memory.bankId).toBe(DEFAULT_MEMORY_BANK_ID);
+    expect(memory.source).toEqual({ kind: 'manual', messageId: 'm1', target: 'note.md' });
+    expect(memory.entities).toEqual(['a']);
+    expect(memory.confidence).toBe(0.7);
+    expect(memory.lastAccessedAt).toBe(undefined);
+    expect(memory.accessCount).toBe(0);
+  });
+
+  await test('importPreviousMemoryFiles merges profiles and summaries, tolerating malformed current files', async () => {
+    const previousMemoryDir = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
+    const profilePath = '.obsidian/baizer-memory/user-profile.json';
+    const summariesPath = '.obsidian/baizer-memory/session-summaries.json';
+    const { app, files } = createApp({
+      [`${previousMemoryDir}/user-profile.json`]: JSON.stringify({
+        name: 'Old name',
+        expertise: ['old', 5],
+        workflows: [{ name: 'w', description: 'd', frequency: 1 }, { name: 'bad' }, 'junk'],
+      }),
+      [profilePath]: '{ corrupted',
+      [`${previousMemoryDir}/session-summaries.json`]: JSON.stringify([
+        { summary: 'older', timestamp: 1 },
+        { summary: 'newer', timestamp: 2 },
+        { timestamp: 3 },
+      ]),
+      [summariesPath]: JSON.stringify({ not: 'an array' }),
+    });
+    const store = new HindsightStore(app);
+    await store.ready();
+
+    const { importPreviousMemoryFiles } = await import('../src/memory/hindsight-migration');
+    await importPreviousMemoryFiles(app, store, 5000);
+
+    const profile = JSON.parse(files[profilePath]);
+    expect(profile.name).toBe('Old name');
+    expect(profile.expertise).toEqual(['old']);
+    expect(profile.workflows).toEqual([{ name: 'w', description: 'd', frequency: 1 }]);
+    const summaries = JSON.parse(files[summariesPath]);
+    expect(summaries.map((item: { summary: string }) => item.summary)).toEqual(['newer', 'older']);
+  });
+
   // ── tokenizeForRetrieval unit tests ──────────────────────────────────────
 
   await test('tokenizeForRetrieval expands CJK runs into overlapping bigrams', async () => {

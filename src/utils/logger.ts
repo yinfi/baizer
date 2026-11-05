@@ -74,7 +74,7 @@ export class Logger {
             };
         }
         return {
-            message: (error === null || error === undefined ? '' : String(error)) || 'Unknown error',
+            message: (error == null ? '' : String(error)) || 'Unknown error',
             data: error
         };
     }

@@ -3,12 +3,7 @@
 import { App } from 'obsidian';
 import { PluginSettings } from '../mcp/types';
 import { ToolDefinition } from '../models/interfaces';
-import {
-  Tool,
-  ToolArguments,
-  ToolContext,
-  ToolExecutionResult,
-} from './types';
+import { Tool, ToolArgs, ToolContext, ToolResult } from './types';
 
 /**
  * 原子工具注册表
@@ -73,26 +68,20 @@ export class ToolRegistry {
   /**
    * 执行工具。可选 signal 透传进 ctx,供网络类工具接入 fetch 实现真正的中断/超时取消。
    * 用每次调用的浅拷贝 ctx(而非 mutate 共享 this.ctx),避免并发工具间信号串台。
-   *
-   * `TResult` 默认就是工具结果的统一视图（`Record<string, unknown>`）；保留泛型是为了
-   * 既有调用方仍可把结果当作具体 payload 消费（如 UI 的 approval 结果），语义与原先
-   * 返回 `any` 一致——工具结果形状由各工具决定，调用方自行负责窄化。
    */
-  async execute<TResult = ToolExecutionResult>(
-    name: string,
-    args: ToolArguments,
-    signal?: AbortSignal,
-  ): Promise<TResult> {
+  async execute(name: string, args: ToolArgs, signal?: AbortSignal): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
-      return { error: `Unknown tool: ${name}` } as TResult;
+      return { error: `Unknown tool: ${name}` };
     }
     try {
       const ctx = signal ? { ...this.ctx, signal } : this.ctx;
-      return await tool.execute(args, ctx) as TResult;
+      // 模型/调用方可能给出 null 或原始值:统一按空对象处理,工具内部不必各自防御。
+      const safeArgs: ToolArgs = typeof args === 'object' && args !== null ? args : {};
+      return await tool.execute(safeArgs, ctx);
     } catch (e: unknown) {
       console.error(`[ToolRegistry] Tool "${name}" execution error:`, e);
-      return { error: e instanceof Error ? e.message : String(e) } as TResult;
+      return { error: e instanceof Error ? e.message : String(e) };
     }
   }
 

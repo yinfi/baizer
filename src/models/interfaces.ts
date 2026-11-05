@@ -1,3 +1,4 @@
+import type { ToolParameters } from '../skills/types';
 
 export interface ModelOption {
     value: string;
@@ -27,16 +28,10 @@ export interface ChatContextItem {
     content?: string;
 }
 
-/**
- * 工具参数的 JSON Schema。具体形状由各工具声明、供 pi 做参数校验，
- * 故这里只约束「是 JSON 对象」，不重复声明 schema 细节。
- */
-export type ToolParameterSchema = object;
-
 export interface ToolDefinition {
     name: string;
     description: string;
-    parameters: ToolParameterSchema;
+    parameters: ToolParameters;
 }
 
 export interface ToolCall {

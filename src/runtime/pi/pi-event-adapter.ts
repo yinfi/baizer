@@ -1,28 +1,36 @@
 import type { StreamEvent } from '../../models/interfaces';
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
-import { asArray, asRecord, asString, isRecord, prop } from '../../utils/narrow';
 
-/**
- * pi `tool_execution_end` 的 `result` 字段是库里的 `any`(见 `types.d.ts`),
- * 实际形状是 `{ content: [{ type, text }], details: {...} }`
- * (`pi-tool-adapter.ts` 的 `execute` 产出,或库内 `createErrorToolResult` 的兜底)。
- * 当作外部输入用 `unknown` + 窄化读取,不假设字段一定存在。
- */
-function firstContentText(result: unknown): string | undefined {
-  const content = asArray(prop(result, 'content'));
-  const first = content?.[0];
-  return isRecord(first) ? asString(first.text) : undefined;
+/** pi 工具结果的宽松读取形状:details / content[0].text 都可能缺失。 */
+interface LoosePiToolResult {
+  details?: unknown;
+  content?: unknown;
+}
+
+function asLooseResult(result: unknown): LoosePiToolResult | undefined {
+  return typeof result === 'object' && result !== null ? (result as LoosePiToolResult) : undefined;
+}
+
+/** 取 content[0].text;不是字符串则返回 undefined。 */
+function firstContentText(result: LoosePiToolResult | undefined): string | undefined {
+  const content = result?.content;
+  if (!Array.isArray(content)) return undefined;
+  const first: unknown = content[0];
+  if (typeof first !== 'object' || first === null) return undefined;
+  const text = (first as { text?: unknown }).text;
+  return typeof text === 'string' ? text : undefined;
 }
 
 export function unwrapPiToolResult(result: unknown): unknown {
-  const details = prop(result, 'details');
-  if (isRecord(details) && Object.prototype.hasOwnProperty.call(details, 'baizerResponse')) {
-    return details.baizerResponse;
+  const loose = asLooseResult(result);
+  const details = loose?.details;
+  if (details && Object.prototype.hasOwnProperty.call(details, 'baizerResponse')) {
+    return (details as { baizerResponse: unknown }).baizerResponse;
   }
-  const text = firstContentText(result);
-  if (typeof text === 'string') {
+  const text = firstContentText(loose);
+  if (text !== undefined) {
     try {
-      return JSON.parse(text);
+      return JSON.parse(text) as unknown;
     } catch {
       return { message: text };
     }
@@ -76,25 +84,24 @@ export function mapPiEventToStreamEvent(event: AgentEvent): StreamEvent | undefi
   }
 
   if (event.type === 'tool_execution_start') {
+    const args: unknown = event.args;
     return {
       type: 'tool_call',
       id: event.toolCallId,
       name: event.toolName,
-      // pi 侧 args 的静态类型是 any（外部弱类型边界）；StreamEvent.args 是
-      // Record<string, unknown>。保留原 `|| {}` 语义（缺失时给空对象），再显式收窄，
-      // 避免把 any 继续往下游扩散。
-      args: asRecord(event.args),
+      args: typeof args === 'object' && args !== null ? (args as Record<string, unknown>) : {},
     };
   }
 
   if (event.type === 'tool_execution_end') {
+    const rawResult: unknown = event.result;
     const streamEvent: StreamEvent = {
       type: 'tool_result',
       name: event.toolName,
-      result: unwrapPiToolResult(event.result),
+      result: unwrapPiToolResult(rawResult),
     };
     if (event.isError) {
-      streamEvent.error = getToolErrorMessage(event.result);
+      streamEvent.error = getToolErrorMessage(rawResult);
     }
     return streamEvent;
   }
@@ -105,7 +112,11 @@ export function mapPiEventToStreamEvent(event: AgentEvent): StreamEvent | undefi
 }
 
 function getToolErrorMessage(result: unknown): string | undefined {
-  const detailsError = asString(prop(prop(result, 'details'), 'error'));
-  if (detailsError !== undefined) return detailsError;
-  return firstContentText(result);
+  const loose = asLooseResult(result);
+  const details = loose?.details;
+  if (typeof details === 'object' && details !== null) {
+    const error = (details as { error?: unknown }).error;
+    if (typeof error === 'string') return error;
+  }
+  return firstContentText(loose);
 }

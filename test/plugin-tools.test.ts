@@ -228,7 +228,6 @@ async function runTests() {
     }
     for (const args of [null, undefined, {}, { commandId: 5 }, { commandId: null }]) {
       expect(await registry.execute('execute_plugin_command', args)).toEqual({
-        success: false,
         error: 'Missing commandId parameter',
       });
     }

@@ -217,7 +217,7 @@ export class ObsidianContextService {
     if (!backlinkMap) return [];
 
     // Current Obsidian wraps the map in `data`; retain direct-map compatibility.
-    const paths = backlinkMap instanceof Map ? backlinkMap
+    const paths: Map<string, unknown> | Record<string, unknown> = backlinkMap instanceof Map ? backlinkMap
       : backlinkMap.data instanceof Map ? backlinkMap.data : backlinkMap;
     // 反链键由宿主给出：只接受字符串（Map 键 / 对象键），非字符串条目原本也打不开文件。
     const rawEntries: unknown[] = Array.from(paths instanceof Map ? paths.keys() : Object.keys(paths));

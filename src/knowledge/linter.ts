@@ -3,15 +3,17 @@
 import { App, TFile } from 'obsidian';
 import { WIKI_HEALTH_SUBFOLDER } from './types';
 import { getFilesByKnowledgeStatus } from './frontmatter';
-import { asArray, asString, isPlainRecord } from '../utils/narrow';
+import { readNonEmptyString } from './ontology';
 
-/**
- * metadataCache 的 frontmatter 是外部 YAML 数据（索引签名值类型为 any），
- * 统一收窄成 Record<string, unknown> 后再逐字段判断类型。
- */
-function readFrontmatter(app: App, file: TFile): Record<string, unknown> | null {
-  const frontmatter: unknown = app.metadataCache.getFileCache(file)?.frontmatter;
-  return isPlainRecord(frontmatter) ? frontmatter : null;
+/** 解析 frontmatter 中以 JSON 字符串存储的数组字段；结果非数组时返回 [] */
+function parseJsonStringList(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    // 非 JSON 字符串：忽略
+  }
+  return [];
 }
 
 export type LintIssueType =
@@ -161,10 +163,11 @@ export class KnowledgeLinter {
     // 检查 done 状态文件的 summary 是否存在
     const doneFiles = getFilesByKnowledgeStatus(this.app, 'done');
     const doneInfo = doneFiles.map(f => {
-      const fm = readFrontmatter(this.app, f);
+      const cache = this.app.metadataCache.getFileCache(f);
+      const summaryPath: unknown = cache?.frontmatter?.knowledge_summary;
       return {
         path: f.path,
-        summaryPath: asString(fm?.knowledge_summary) ?? null
+        summaryPath: typeof summaryPath === 'string' ? summaryPath : null
       };
     });
     allIssues.push(...checkMissingSummaries(doneInfo, existingFiles));
@@ -178,39 +181,24 @@ export class KnowledgeLinter {
     );
 
     for (const file of wikiFiles) {
-      const fm = readFrontmatter(this.app, file);
+      const cache = this.app.metadataCache.getFileCache(file);
+      const fm = cache?.frontmatter;
       if (!fm || !fm.knowledge_generated) continue;
 
-      const title = asString(fm.title) || file.basename;
+      const title = readNonEmptyString(fm.title) ?? file.basename;
       let reviewFlags: string[] = [];
-      const rawReviewFlags = fm.review_flags;
-      const reviewFlagArray = asArray(rawReviewFlags);
-      if (reviewFlagArray) {
-        reviewFlags = reviewFlagArray.map(String);
-      } else if (typeof rawReviewFlags === 'string') {
-        try {
-          const parsed: unknown = JSON.parse(rawReviewFlags);
-          const parsedArray = asArray(parsed);
-          if (parsedArray) reviewFlags = parsedArray.map(String);
-        } catch {
-          // 非法 JSON：按无 review_flags 处理
-        }
+      if (Array.isArray(fm.review_flags)) {
+        reviewFlags = fm.review_flags.map(String);
+      } else if (typeof fm.review_flags === 'string') {
+        reviewFlags = parseJsonStringList(fm.review_flags);
       }
       summaries.push({ path: file.path, title, reviewFlags });
 
       let concepts: string[] = [];
-      const rawConcepts = fm.concepts;
-      const conceptArray = asArray(rawConcepts);
-      if (conceptArray) {
-        concepts = conceptArray.map(String);
-      } else if (typeof rawConcepts === 'string') {
-        try {
-          const parsed: unknown = JSON.parse(rawConcepts);
-          const parsedArray = asArray(parsed);
-          if (parsedArray) concepts = parsedArray.map(String);
-        } catch {
-          // 非法 JSON：按无 concepts 处理
-        }
+      if (Array.isArray(fm.concepts)) {
+        concepts = fm.concepts.map(String);
+      } else if (typeof fm.concepts === 'string') {
+        concepts = parseJsonStringList(fm.concepts);
       }
       for (const c of concepts) {
         if (!conceptMap[c]) conceptMap[c] = [];

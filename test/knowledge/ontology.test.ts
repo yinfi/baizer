@@ -36,6 +36,17 @@ function test(name: string, fn: () => void) {
   catch (e: any) { console.error(`  ✗ ${name}: ${e.message}`); process.exit(1); }
 }
 
+// extractFrontmatter 返回 Record<string, unknown>，测试里按需窄化读取
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 console.log('=== Ontology Tests ===');
 
 // --- parseOntologySchema ---
@@ -260,10 +271,10 @@ Body`;
   const fm = extractFrontmatter(content);
   expect(fm).toBeDefined();
   expect(Array.isArray(fm!.categories)).toBeTruthy();
-  expect(fm!.categories.length).toBe(2);
-  expect(fm!.categories[0].name).toBe('心智模型');
-  expect(fm!.categories[0].description).toBe('可复用的思维框架');
-  expect(fm!.entity_types.length).toBe(1);
+  expect(asArray(fm!.categories).length).toBe(2);
+  expect(asRecord(asArray(fm!.categories)[0]).name).toBe('心智模型');
+  expect(asRecord(asArray(fm!.categories)[0]).description).toBe('可复用的思维框架');
+  expect(asArray(fm!.entity_types).length).toBe(1);
 });
 
 test('extractFrontmatter returns null for no frontmatter', () => {
@@ -321,6 +332,53 @@ test('roundtrip: buildOntologyFile output can be parsed back to schema', () => {
   expect(parsed!.categories[1].name).toBe('方法论');
   expect(parsed!.entity_types[0].name).toBe('人物');
   expect(parsed!.entity_types[1].name).toBe('工具');
+});
+
+// --- 回归：窄化后对非对象输入的处理 ---
+
+test('parseOntologySchema returns null for non-object frontmatter (regression)', () => {
+  expect(parseOntologySchema('ontology_schema')).toBeNull();
+  expect(parseOntologySchema(42)).toBeNull();
+  expect(parseOntologySchema(['knowledge_artifact_type'])).toBeNull();
+  expect(parseOntologySchema(undefined)).toBeNull();
+});
+
+test('parseOntologySchema keeps working for wrong-typed category entries (regression)', () => {
+  const fm = {
+    knowledge_artifact_type: 'ontology_schema',
+    version: 'not-a-number',
+    categories: [null, 7, { name: 42 }, { name: '有效', description: 5 }],
+    entity_types: [{ name: '人物', description: null }],
+  };
+  const schema = parseOntologySchema(fm);
+  expect(schema).toBeDefined();
+  expect(schema!.version).toBe(1); // 非 number → 回退默认版本
+  expect(schema!.categories).toHaveLength(1);
+  expect(schema!.categories[0].name).toBe('有效');
+  expect(schema!.categories[0].description).toBe('');
+  expect(schema!.entity_types[0].description).toBe('');
+});
+
+test('parseDiscoveryResponse returns null for JSON that is not an object (regression)', () => {
+  expect(parseDiscoveryResponse('[1,2,3]')).toBeNull();
+  expect(parseDiscoveryResponse('null')).toBeNull();
+  expect(parseDiscoveryResponse('"text"')).toBeNull();
+});
+
+test('parseDiscoveryResponse ignores wrong-typed categories/entity_types (regression)', () => {
+  expect(parseDiscoveryResponse('{"categories":5,"entity_types":"x"}')).toBeNull();
+  const schema = parseDiscoveryResponse('{"categories":[{"name":"A","description":9}],"entity_types":[null]}');
+  expect(schema).toBeDefined();
+  expect(schema!.categories).toHaveLength(1);
+  expect(schema!.categories[0].description).toBe('');
+});
+
+test('extractFrontmatter coerces scalar types without leaking objects (regression)', () => {
+  const content = '---\nflag: true\ncount: 42\nname: "quoted"\n---\nBody';
+  const fm = extractFrontmatter(content);
+  expect(fm!.flag).toBe(true);
+  expect(fm!.count).toBe(42);
+  expect(fm!.name).toBe('quoted');
 });
 
 console.log('All ontology tests passed!');

@@ -1,7 +1,7 @@
 import { App, TFile } from 'obsidian';
 import { ToolRegistry } from '../skills/tool-registry';
+import type { ToolArgs, ToolResult } from '../skills/types';
 import { getFileWriteResultPath } from '../utils/file-operation-contract';
-import { asBoolean, asRecord, asString, prop } from '../utils/narrow';
 
 export type WorkspaceEditKind = 'create' | 'update';
 
@@ -62,10 +62,9 @@ export class WorkspaceEditService {
     private readonly options: WorkspaceEditServiceOptions = {},
   ) {}
 
-  async executeWorkspaceTool(action: string, args: Record<string, unknown>): Promise<unknown> {
+  async executeWorkspaceTool(action: string, args: ToolArgs): Promise<ToolResult> {
     if (!isDirectApplyWorkspaceTool(action)) {
-      const delegated: unknown = await this.toolRegistry.execute(action, args);
-      return delegated;
+      return this.toolRegistry.execute(action, args);
     }
 
     const expectedPath = this.resolveExpectedPath(action, args);
@@ -74,7 +73,7 @@ export class WorkspaceEditService {
       : { exists: false, content: '' };
 
     const approvedArgs = { ...args, approved: true };
-    const result: unknown = await this.toolRegistry.execute(action, approvedArgs);
+    const result = await this.toolRegistry.execute(action, approvedArgs);
     if (!this.isSuccessfulToolResult(result)) return result;
 
     const path = this.resolveResultPath(action, result, approvedArgs, expectedPath);
@@ -104,7 +103,7 @@ export class WorkspaceEditService {
 
     await this.notifyEditApplied(summary, beforeSnapshot.exists ? beforeSnapshot.content : undefined);
     await this.openFile(path);
-    return { ...asRecord(result), workspaceEdit: { ...summary } };
+    return { ...result, workspaceEdit: { ...summary } };
   }
 
   async undoWorkspaceEdit(editId: string): Promise<WorkspaceEditResult> {
@@ -181,9 +180,9 @@ export class WorkspaceEditService {
     };
   }
 
-  private resolveExpectedPath(action: string, args: Record<string, unknown>): string {
+  private resolveExpectedPath(action: string, args: ToolArgs): string {
     if (action === 'create_note') {
-      const filename = args.filename || args.path || args.name || '';
+      const filename: unknown = args.filename || args.path || args.name || '';
       if (!filename || typeof filename !== 'string') return '';
       return filename.endsWith('.md') ? filename : `${filename}.md`;
     }
@@ -194,16 +193,16 @@ export class WorkspaceEditService {
 
   private resolveResultPath(
     action: string,
-    result: unknown,
-    args: Record<string, unknown>,
+    result: ToolResult,
+    args: ToolArgs,
     fallbackPath: string,
   ): string {
     if (action === 'create_note') {
-      const resultPath = asString(prop(result, 'path'));
-      if (resultPath !== undefined) return resultPath;
-      const resultTarget = asString(prop(result, 'target'));
-      if (resultTarget !== undefined) return resultTarget;
-      return fallbackPath;
+      return typeof result?.path === 'string'
+        ? result.path
+        : typeof result?.target === 'string'
+          ? result.target
+          : fallbackPath;
     }
     return getFileWriteResultPath(action, result, args) || fallbackPath;
   }
@@ -230,8 +229,8 @@ export class WorkspaceEditService {
     }
   }
 
-  private isSuccessfulToolResult(result: unknown): boolean {
-    return asBoolean(prop(result, 'success')) === true || asString(prop(result, 'status')) === 'success';
+  private isSuccessfulToolResult(result: ToolResult): boolean {
+    return result?.success === true || result?.status === 'success';
   }
 
   private createId(): string {

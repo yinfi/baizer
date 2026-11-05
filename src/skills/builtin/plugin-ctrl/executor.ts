@@ -1,11 +1,11 @@
 // src/skills/builtin/plugin-ctrl/executor.ts
 
-import { Tool, ToolArguments, ToolContext } from '../../types';
+import { Tool, ToolArgs, ToolContext } from '../../types';
+import { strArg } from '../../tool-args';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import { pluginSkillFilePath } from '../../skill-files';
 import { checkPluginControl, needsApproval } from '../../../permissions/permission-service';
-import { asBoolean, asString, prop } from '../../../utils/narrow';
 
 export function getPluginCommandPreconditions(): string[] {
   return [
@@ -47,8 +47,8 @@ const getPluginCommands: Tool = {
   },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const pluginId = asString(prop(args, 'pluginId'));
-    if (!pluginId) return { error: 'Missing pluginId parameter' };
+    const pluginId = strArg(args, 'pluginId');
+    if (pluginId === undefined) return { error: 'Missing pluginId parameter' };
     const cmds = ctx.app.commands.listCommands()
       .filter((c) => c.id.startsWith(pluginId + ':'))
       .map((c) => ({ id: c.id, name: c.name }));
@@ -70,12 +70,11 @@ const getPluginSettings: Tool = {
   },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const pluginId = asString(prop(args, 'pluginId'));
-    if (!pluginId) return { error: 'Missing pluginId parameter' };
-    // getPlugin 返回第三方插件实例(外部数据),以 unknown 接收后显式窄化。
-    const plugin: unknown = ctx.app.plugins.getPlugin(pluginId);
+    const pluginId = strArg(args, 'pluginId');
+    if (pluginId === undefined) return { error: 'Missing pluginId parameter' };
+    const plugin = ctx.app.plugins.getPlugin(pluginId);
     if (!plugin) return { error: 'Plugin not found or not enabled' };
-    const raw = prop(plugin, 'settings') || prop(plugin, 'data') || {};
+    const raw = plugin.settings || plugin.data || {};
     const allowValues = ctx.settings.allowPluginConfigValues === true;
     return {
       pluginId,
@@ -179,10 +178,9 @@ const executePluginCommand: Tool = {
   },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const commandId = asString(prop(args, 'commandId'));
-    if (!commandId) return { success: false, error: 'Missing commandId parameter' };
-    const approved = asBoolean(prop(args, 'approved')) === true;
-    if (needsApproval('plugin-control', ctx.settings) && !approved) {
+    const commandId = strArg(args, 'commandId');
+    if (commandId === undefined) return { error: 'Missing commandId parameter' };
+    if (needsApproval('plugin-control', ctx.settings) && !args.approved) {
       return {
         approval_required: true,
         action: 'execute_plugin_command',
@@ -212,7 +210,7 @@ const executePluginCommand: Tool = {
 };
 
 export const executor: BuiltinExecutor = {
-  async execute(_args: ToolArguments, _ctx: ToolContext) {
+  async execute(_args: ToolArgs, _ctx: ToolContext) {
     return { message: 'Plugin control: use args.action (list/commands/settings/execute) with pluginId.' };
   },
 };

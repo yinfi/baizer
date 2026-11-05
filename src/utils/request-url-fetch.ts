@@ -496,9 +496,13 @@ function buildStreamingResponse(
           bytes = chunk;
         } else if (chunk instanceof ArrayBuffer) {
           bytes = new Uint8Array(chunk);
+        } else if (ArrayBuffer.isView(chunk)) {
+          // Buffer / 其它 TypedArray：按字节视图重新包装，不假定具体子类型
+          bytes = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
         } else {
-          // Buffer / 其它 TypedArray：仍按 Uint8Array 构造语义解释该值（与旧行为一致）。
-          bytes = new Uint8Array(chunk as ArrayBuffer);
+          // 未知分片形状：既非字符串也非二进制视图，判定为协议错误而非静默吞掉
+          onError(new Error(`Unsupported stream chunk type: ${Object.prototype.toString.call(chunk)}`));
+          return;
         }
         try {
           controller.enqueue(bytes);

@@ -11,11 +11,11 @@ import {
   extractFrontmatter,
   buildDiscoveryPrompt,
   buildOntologyFile,
+  isRecord,
   parseDiscoveryResponse,
   parseOntologySchema,
 } from './ontology';
 import { normalizeTopicSlug } from './types';
-import { prop } from '../utils/narrow';
 
 export class OntologyService {
   constructor(
@@ -219,11 +219,10 @@ export class OntologyService {
 function readTopics(fm: Record<string, unknown>): string[] {
   const raw = fm.topics;
   if (!Array.isArray(raw)) return [];
-  return (raw as unknown[])
-    .map((topic): string => {
+  return raw
+    .map((topic: unknown) => {
       if (typeof topic === 'string') return topic;
-      const label = prop(topic, 'label');
-      if (typeof label === 'string') return label;
+      if (isRecord(topic) && typeof topic.label === 'string') return topic.label;
       return '';
     })
     .filter((topic) => topic.length > 0);
@@ -233,7 +232,7 @@ function readStringArray(raw: unknown): string[] {
   if (typeof raw === 'string') {
     try {
       const parsed: unknown = JSON.parse(raw);
-      return Array.isArray(parsed) ? (parsed as unknown[]).map(String) : [raw];
+      return Array.isArray(parsed) ? parsed.map(String) : [raw];
     } catch {
       return [raw];
     }

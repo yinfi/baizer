@@ -1,5 +1,4 @@
 import { requestUrl, Notice } from 'obsidian';
-import { asArray, asString, prop } from './narrow';
 
 export interface VideoTranscript {
     text: string;
@@ -23,6 +22,29 @@ const defaultDeps: VideoTranscriptDeps = {
     requestUrl: (options) => requestUrl(options),
     userAgent: DEFAULT_USER_AGENT,
 };
+
+/** 判断值是否为非 null 对象，用于收窄外部（平台页面/接口）返回的未知 JSON。 */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+/** 沿路径逐层读取未知 JSON 的字段；任一层不是对象时返回 undefined。 */
+export function readPath(value: unknown, path: string[]): unknown {
+    let current: unknown = value;
+    for (const key of path) {
+        if (!isRecord(current)) return undefined;
+        current = current[key];
+    }
+    return current;
+}
+
+function asArray(value: unknown): unknown[] | null {
+    return Array.isArray(value) ? value : null;
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
 
 function extractBalancedJson(source: string, marker: string): unknown {
     const markerIndex = source.indexOf(marker);
@@ -64,11 +86,6 @@ function extractBalancedJson(source: string, marker: string): unknown {
     }
 
     return null;
-}
-
-/** 读取 catch 到的值的 `.message`;保持原 `e.message` 的取值语义(缺失时为 "undefined")。 */
-function errorMessageOf(error: unknown): string {
-    return String(prop(error, 'message'));
 }
 
 async function fetchText(
@@ -135,7 +152,7 @@ async function getYoutubeTranscript(url: string, deps: VideoTranscriptDeps): Pro
             });
         }
 
-        const captionTracks = asArray(JSON.parse(captionsMatch[1]) as unknown);
+        const captionTracks = asArray(JSON.parse(captionsMatch[1]));
         if (!captionTracks || captionTracks.length === 0) {
             return buildMetadataOnlyResult({
                 title,
@@ -146,11 +163,14 @@ async function getYoutubeTranscript(url: string, deps: VideoTranscriptDeps): Pro
             });
         }
 
-        let selectedTrack: unknown = captionTracks.find((track) => prop(track, 'languageCode') === 'en');
+        let selectedTrack: unknown = captionTracks.find((track) => isRecord(track) && track.languageCode === 'en');
         if (!selectedTrack) {
             selectedTrack = captionTracks[0];
         }
-        const trackBaseUrl = asString(prop(selectedTrack, 'baseUrl')) ?? '';
+        const trackBaseUrl = readPath(selectedTrack, ['baseUrl']);
+        if (typeof trackBaseUrl !== 'string') {
+            throw new Error('YouTube caption track has no baseUrl');
+        }
 
         let transcriptText = '';
         try {
@@ -174,15 +194,12 @@ async function getYoutubeTranscript(url: string, deps: VideoTranscriptDeps): Pro
                         'User-Agent': deps.userAgent,
                     },
                 });
-                const jsonData = JSON.parse(jsonResponse.text) as unknown;
-                const events = asArray(prop(jsonData, 'events'));
+                const events = asArray(readPath(JSON.parse(jsonResponse.text), ['events']));
                 const text = events
                     ? events
                         .map((event) => {
-                            const segs = asArray(prop(event, 'segs'));
-                            return segs
-                                ? segs.map((seg) => prop(seg, 'utf8')).join('')
-                                : '';
+                            const segs = asArray(readPath(event, ['segs']));
+                            return segs ? segs.map((seg) => readPath(seg, ['utf8'])).join('') : '';
                         })
                         .filter(Boolean)
                         .join(' ')
@@ -241,9 +258,9 @@ async function getYoutubeTranscript(url: string, deps: VideoTranscriptDeps): Pro
             transcriptSource: 'platform-subtitle',
             needsTranscription: false,
         };
-    } catch (e: unknown) {
+    } catch (e) {
         console.error('Failed to get YouTube transcript', e);
-        new Notice(`YouTube Transcript Error: ${errorMessageOf(e)}`);
+        new Notice(`YouTube Transcript Error: ${errorMessage(e)}`);
         return null;
     }
 }
@@ -303,28 +320,20 @@ async function getBilibiliTranscript(url: string, deps: VideoTranscriptDeps): Pr
                 'User-Agent': deps.userAgent,
             },
         });
-        const subtitleData = JSON.parse(subtitleResponse.text) as unknown;
-        const subtitles = prop(prop(prop(subtitleData, 'data'), 'subtitle'), 'subtitles');
+        const subtitles = asArray(readPath(JSON.parse(subtitleResponse.text), ['data', 'subtitle', 'subtitles']));
 
         let text = '';
-        if (Array.isArray(subtitles) && subtitles.length > 0) {
-            const subtitleList = subtitles as unknown[];
-            const selectedSubtitle: unknown = subtitleList.find((subtitle) => prop(subtitle, 'url')) || subtitleList[0];
-            const selectedUrl = prop(selectedSubtitle, 'url');
-            if (selectedUrl) {
-                const selectedUrlText = asString(selectedUrl);
-                if (selectedUrlText === undefined) {
-                    // 与原行为一致:非字符串 url 在 startsWith 处抛 TypeError,由外层 catch 处理。
-                    throw new TypeError('selectedSubtitle.url.startsWith is not a function');
-                }
-                const subtitleUrl = selectedUrlText.startsWith('http')
-                    ? selectedUrlText
-                    : `https:${selectedUrlText}`;
+        if (subtitles && subtitles.length > 0) {
+            const selectedSubtitle = subtitles.find((subtitle) => readPath(subtitle, ['url'])) || subtitles[0];
+            const rawSubtitleUrl = readPath(selectedSubtitle, ['url']);
+            if (typeof rawSubtitleUrl === 'string' && rawSubtitleUrl) {
+                const subtitleUrl = rawSubtitleUrl.startsWith('http')
+                    ? rawSubtitleUrl
+                    : `https:${rawSubtitleUrl}`;
                 const transcriptResponse = await deps.requestUrl({ url: subtitleUrl });
-                const transcriptJson = JSON.parse(transcriptResponse.text) as unknown;
-                const body = asArray(prop(transcriptJson, 'body'));
+                const body = asArray(readPath(JSON.parse(transcriptResponse.text), ['body']));
                 if (body) {
-                    text = body.map((item) => prop(item, 'content')).join(' ');
+                    text = body.map((item) => readPath(item, ['content'])).join(' ');
                 }
             }
         }
@@ -362,9 +371,9 @@ async function getBilibiliTranscript(url: string, deps: VideoTranscriptDeps): Pr
             transcriptSource: 'platform-subtitle',
             needsTranscription: false,
         };
-    } catch (e: unknown) {
+    } catch (e) {
         console.error('Failed to get Bilibili transcript', e);
-        new Notice(`Bilibili Transcript Error: ${errorMessageOf(e)}`);
+        new Notice(`Bilibili Transcript Error: ${errorMessage(e)}`);
         return null;
     }
 }

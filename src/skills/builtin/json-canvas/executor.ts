@@ -1,7 +1,6 @@
 import { BuiltinExecutor } from '../../skill-registry';
 import { Tool } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
-import { asString, isPlainRecord, prop } from '../../../utils/narrow';
 
 const NODE_TYPES = new Set(['text', 'file', 'link', 'group']);
 const SIDES = new Set(['top', 'right', 'bottom', 'left']);
@@ -25,8 +24,8 @@ const validateJsonCanvas: Tool = {
   },
   executionMode: 'parallel',
   risk: 'read',
-  async execute(args: unknown) {
-    return validateCanvasContent(prop(args, 'content'));
+  async execute(args) {
+    return validateCanvasContent(args?.content);
   },
 };
 
@@ -40,83 +39,92 @@ export function validateCanvasContent(content: unknown): { success: boolean; err
     return { success: false, errors: ['content must be a JSON string'] };
   }
 
-  let canvas: unknown;
+  let parsed: unknown;
   try {
-    canvas = JSON.parse(content);
-  } catch (error) {
+    parsed = JSON.parse(content);
+  } catch (error: unknown) {
     return { success: false, errors: [`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`] };
   }
 
-  if (!isPlainRecord(canvas)) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return { success: false, errors: ['Canvas root must be an object'] };
   }
+  const canvas = parsed as Record<string, unknown>;
 
-  // null/undefined 沿用改动前 `?? []` 的语义（视为未提供 → 空数组）；只有非数组才报错。
   const nodes = canvas.nodes ?? [];
   const edges = canvas.edges ?? [];
-  if (!Array.isArray(nodes) || !Array.isArray(edges)) {
-    if (!Array.isArray(nodes)) errors.push('nodes must be an array when present');
-    if (!Array.isArray(edges)) errors.push('edges must be an array when present');
-    return { success: false, errors };
-  }
+  if (!Array.isArray(nodes)) errors.push('nodes must be an array when present');
+  if (!Array.isArray(edges)) errors.push('edges must be an array when present');
+  if (errors.length > 0) return { success: false, errors };
+
+  const nodeList: unknown[] = Array.isArray(nodes) ? nodes : [];
+  const edgeList: unknown[] = Array.isArray(edges) ? edges : [];
 
   const nodeIds = new Set<string>();
   const allIds = new Set<string>();
 
-  nodes.forEach((node: unknown, index: number) => {
-    validateId(prop(node, 'id'), `nodes[${index}].id`, allIds, errors);
-    const nodeId = asString(prop(node, 'id'));
-    if (nodeId !== undefined) nodeIds.add(nodeId);
+  nodeList.forEach((rawNode, index) => {
+    const node = asFields(rawNode);
+    validateId(node.id, `nodes[${index}].id`, allIds, errors);
+    if (typeof node.id === 'string') nodeIds.add(node.id);
 
-    const nodeType = asString(prop(node, 'type'));
-    if (nodeType === undefined || !NODE_TYPES.has(nodeType)) {
+    if (!inSet(NODE_TYPES, node.type)) {
       errors.push(`nodes[${index}].type must be one of text, file, link, group`);
     }
 
     for (const field of ['x', 'y', 'width', 'height']) {
-      if (!Number.isInteger(prop(node, field))) {
+      if (!Number.isInteger(node[field])) {
         errors.push(`nodes[${index}].${field} must be an integer`);
       }
     }
 
-    if (nodeType === 'text' && typeof prop(node, 'text') !== 'string') {
+    if (node.type === 'text' && typeof node.text !== 'string') {
       errors.push(`nodes[${index}] text nodes require a text field`);
     }
-    if (nodeType === 'file' && typeof prop(node, 'file') !== 'string') {
+    if (node.type === 'file' && typeof node.file !== 'string') {
       errors.push(`nodes[${index}] file nodes require a file field`);
     }
-    if (nodeType === 'link' && typeof prop(node, 'url') !== 'string') {
+    if (node.type === 'link' && typeof node.url !== 'string') {
       errors.push(`nodes[${index}] link nodes require a url field`);
     }
   });
 
-  edges.forEach((edge: unknown, index: number) => {
-    validateId(prop(edge, 'id'), `edges[${index}].id`, allIds, errors);
+  edgeList.forEach((rawEdge, index) => {
+    const edge = asFields(rawEdge);
+    validateId(edge.id, `edges[${index}].id`, allIds, errors);
     for (const field of ['fromNode', 'toNode']) {
-      const nodeRef = asString(prop(edge, field));
-      if (nodeRef === undefined) {
+      const target = edge[field];
+      if (typeof target !== 'string') {
         errors.push(`edges[${index}].${field} must be a node id`);
-      } else if (!nodeIds.has(nodeRef)) {
-        errors.push(`edges[${index}].${field} references missing node "${nodeRef}"`);
+      } else if (!nodeIds.has(target)) {
+        errors.push(`edges[${index}].${field} references missing node "${target}"`);
       }
     }
 
     for (const field of ['fromSide', 'toSide']) {
-      const side = prop(edge, field);
-      if (side !== undefined && !SIDES.has(asString(side) ?? '')) {
+      if (edge[field] !== undefined && !inSet(SIDES, edge[field])) {
         errors.push(`edges[${index}].${field} must be one of top, right, bottom, left`);
       }
     }
 
     for (const field of ['fromEnd', 'toEnd']) {
-      const end = prop(edge, field);
-      if (end !== undefined && !ENDS.has(asString(end) ?? '')) {
+      if (edge[field] !== undefined && !inSet(ENDS, edge[field])) {
         errors.push(`edges[${index}].${field} must be none or arrow`);
       }
     }
   });
 
   return { success: errors.length === 0, errors };
+}
+
+/** 数组元素可能是任意 JSON 值;非对象(null/原始值)按「没有任何字段」读取。 */
+function asFields(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+/** 集合成员判断:非字符串必然不在(集合里只有字符串)。 */
+function inSet(set: Set<string>, value: unknown): boolean {
+  return typeof value === 'string' && set.has(value);
 }
 
 function validateId(

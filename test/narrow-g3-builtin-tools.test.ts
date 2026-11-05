@@ -337,7 +337,7 @@ async function runTests() {
     }, 'narrowed file-back args');
     assertEqual(
       await fileBackTool.execute({ title: 5, content: 'C' }, ctx),
-      { error: 'Missing title or content parameter' },
+      { success: false, error: 'Missing title or content parameter' },
       'missing title',
     );
     assert(fileBackCalls.length === 1, 'invalid file-back args do not reach the executor');

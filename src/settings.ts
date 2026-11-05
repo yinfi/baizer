@@ -12,7 +12,7 @@ import type {
 } from './skills/builtin/plugin-ctrl/plugin-watcher';
 import { t, getLocale, Locale } from './i18n/zh';
 import { createRenderScheduler, type RenderScheduler } from './utils/render-scheduler';
-import { asString, prop } from './utils/narrow';
+import { thrownMessage } from './utils/thrown-message';
 
 export type SettingsSectionId =
     | 'overview'
@@ -2175,7 +2175,7 @@ export class SettingTab extends PluginSettingTab {
                 limit: 25,
             });
         } catch (error: unknown) {
-            this.memoryError = asString(prop(error, 'message')) || t('Failed to load memory.');
+            this.memoryError = thrownMessage(error) || t('Failed to load memory.');
         } finally {
             this.memoryLoading = false;
             this.renderAccordion();
@@ -2860,7 +2860,7 @@ export class SettingTab extends PluginSettingTab {
                         label,
                         stage: 'unreachable',
                         endpoint,
-                        reason: asString(prop(error, 'message')) || t('unknown reason'),
+                        reason: thrownMessage(error) || t('unknown reason'),
                     });
                 }
 
@@ -3768,7 +3768,7 @@ export class SettingTab extends PluginSettingTab {
             statusEl.title = title;
         } catch (e: unknown) {
             if (!statusEl.isConnected) return;
-            statusEl.textContent = `${t('Ontology status unavailable')}: ${String(prop(e, 'message'))}`;
+            statusEl.textContent = `${t('Ontology status unavailable')}: ${thrownMessage(e)}`;
         }
     }
 

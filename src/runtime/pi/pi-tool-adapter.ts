@@ -1,11 +1,10 @@
-import type { AgentTool, AgentToolResult, ToolExecutionMode as PiToolExecutionMode } from '@earendil-works/pi-agent-core';
+import type { AgentTool, ToolExecutionMode as PiToolExecutionMode } from '@earendil-works/pi-agent-core';
 import type { ToolDefinition } from '../../models/interfaces';
 import type { SkillRegistry } from '../../skills/skill-registry';
 import type { ToolRegistry } from '../../skills/tool-registry';
-import type { Tool } from '../../skills/types';
+import type { Tool, ToolArgs, ToolParameters, ToolResult } from '../../skills/types';
 import { isDirectApplyWorkspaceTool } from '../../services/workspace-edit-service';
 import type { WorkspaceEditService } from '../../services/workspace-edit-service';
-import { asBoolean, prop } from '../../utils/narrow';
 
 export interface PiSkillScope {
   activeSkillName?: string;
@@ -20,13 +19,6 @@ export interface AdaptToolDefinitionsInput {
   skillScope: PiSkillScope;
 }
 
-/**
- * 适配后的 pi 工具。参数与 details 都用 `unknown`/`object` 显式标注：
- * pi 的 `AgentTool<any>` 会把 any 带进参数与返回值，这里在边界处收口，
- * 具体形状由各工具的 schema 与执行结果自行保证。
- */
-export type AdaptedPiTool = AgentTool<object, unknown>;
-
 export function inferToolExecutionMode(name: string, tool?: Partial<Tool>): PiToolExecutionMode {
   if (tool?.executionMode) return tool.executionMode;
   if (tool?.risk === 'write' || tool?.risk === 'plugin-control') return 'sequential';
@@ -36,15 +28,13 @@ export function inferToolExecutionMode(name: string, tool?: Partial<Tool>): PiTo
   return 'sequential';
 }
 
-/** 工具参数是外部（模型 + pi schema 校验）给的，按字典收下，非对象退化为空参数。 */
-function asToolArgs(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+/** pi 传入的 params 类型上是 unknown;非对象(null/undefined/原始值)按「无参数」处理。 */
+function toToolArgs(params: unknown): ToolArgs {
+  return typeof params === 'object' && params !== null && !Array.isArray(params) ? (params as ToolArgs) : {};
 }
 
-export function adaptToolDefinitionsToPi(input: AdaptToolDefinitionsInput): AdaptedPiTool[] {
-  return input.definitions.map((definition) => {
+export function adaptToolDefinitionsToPi(input: AdaptToolDefinitionsInput): AgentTool<ToolParameters>[] {
+  return input.definitions.map((definition): AgentTool<ToolParameters> => {
     const registeredTool = input.toolRegistry.get(definition.name);
     const timeoutMs = registeredTool?.timeoutMs ?? 30000;
     return {
@@ -53,25 +43,19 @@ export function adaptToolDefinitionsToPi(input: AdaptToolDefinitionsInput): Adap
       description: definition.description,
       parameters: definition.parameters,
       executionMode: inferToolExecutionMode(definition.name, registeredTool),
-      execute: async (
-        _toolCallId: string,
-        params: unknown,
-        signal?: AbortSignal,
-      ): Promise<AgentToolResult<unknown>> => {
-        // 工具返回值形状由各工具自定(ToolRegistry.execute 给出统一的 Record 视图,
-        // executeWorkspaceTool 仍是 Promise<any>),当作外部输入,用 unknown + 窄化读取
-        // approval_required,不假设字段一定存在。
-        const response: unknown = await executeWithTimeout(
+      execute: async (_toolCallId: string, params: unknown, signal?: AbortSignal) => {
+        const args = toToolArgs(params);
+        const response = await executeWithTimeout(
           // effectiveSignal = 上游中断 ∪ 本地超时,透传进工具,使网络工具能真正取消在途请求。
-          (effectiveSignal) => executeBaizerTool(definition.name, params, input, effectiveSignal),
+          (effectiveSignal) => executeBaizerTool(definition.name, args, input, effectiveSignal),
           timeoutMs,
           `Tool ${definition.name} execution timed out`,
           signal,
         );
         return {
-          content: [{ type: 'text', text: stringifyToolResponse(response) }],
+          content: [{ type: 'text' as const, text: stringifyToolResponse(response) }],
           details: { baizerResponse: response },
-          terminate: asBoolean(prop(response, 'approval_required')) === true,
+          terminate: response?.approval_required === true,
         };
       },
     };
@@ -80,11 +64,10 @@ export function adaptToolDefinitionsToPi(input: AdaptToolDefinitionsInput): Adap
 
 async function executeBaizerTool(
   name: string,
-  params: unknown,
+  args: ToolArgs,
   input: AdaptToolDefinitionsInput,
   signal?: AbortSignal,
-): Promise<unknown> {
-  const args = asToolArgs(params);
+): Promise<ToolResult> {
   // B 方案：use_skill 元工具已移除，skill 激活改由 read_skill（普通工具）+ system prompt
   // 的 <available_skills> 清单完成。此处不再有 use_skill 分支。
   // 强制激活时的工具收窄（allowedToolNames）暂留，Stage 2 迁入 PermissionService。

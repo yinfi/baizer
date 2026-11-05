@@ -1,7 +1,6 @@
 import { App } from 'obsidian';
 
 import { PLUGIN_DATA_DIR } from '../mcp/types';
-import { asRecord, isRecord } from '../utils/narrow';
 
 export const OPERATION_AUDIT_LOG_DIR = PLUGIN_DATA_DIR;
 export const OPERATION_AUDIT_LOG_PATH = `${OPERATION_AUDIT_LOG_DIR}/operations.json`;
@@ -103,6 +102,10 @@ interface VaultAdapter {
   read(path: string): Promise<string>;
   write(path: string, content: string): Promise<void>;
   mkdir(path: string): Promise<void>;
+}
+
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 const DEFAULT_MAX_RECORDS = 200;
@@ -274,27 +277,25 @@ export class OperationAuditLog {
 
       const raw = await adapter.read(this.path);
       const parsed: unknown = JSON.parse(raw);
-      const parsedRecord = asRecord(parsed);
-      const operationsRaw = parsedRecord.operations;
-      if (!isRecord(parsed) || parsedRecord.version !== 1 || !Array.isArray(operationsRaw)) {
+      if (!isRecordObject(parsed) || parsed.version !== 1 || !Array.isArray(parsed.operations)) {
         return this.emptyFile();
       }
 
-      const requestsRaw = parsedRecord.requests;
-
       // 逐条过滤而非「一条坏就整份丢弃」：旧数据/手改残留不应抹掉整段审计历史。
+      const operations: unknown[] = parsed.operations;
+      const requests: unknown[] | undefined = Array.isArray(parsed.requests) ? parsed.requests : undefined;
       return {
         version: 1,
-        operations: (operationsRaw as unknown[])
-          .filter((record: unknown): record is OperationRecord => this.isOperationRecord(record))
+        operations: operations
+          .filter((record): record is OperationRecord => this.isOperationRecord(record))
           .map((record) => this.cloneRecord(record)),
-        requests: Array.isArray(requestsRaw)
-          ? (requestsRaw as unknown[])
-            .filter((record: unknown): record is ApprovalRequestRecord => this.isRequestRecord(record))
+        requests: requests
+          ? requests
+            .filter((record): record is ApprovalRequestRecord => this.isRequestRecord(record))
             .map((record) => ({ ...record }))
           : [],
-        requestsPrunedBefore: typeof parsedRecord.requestsPrunedBefore === 'number'
-          ? parsedRecord.requestsPrunedBefore
+        requestsPrunedBefore: typeof parsed.requestsPrunedBefore === 'number'
+          ? parsed.requestsPrunedBefore
           : 0,
       };
     } catch {
@@ -331,8 +332,8 @@ export class OperationAuditLog {
   }
 
   private isOperationRecord(record: unknown): record is OperationRecord {
-    if (!isRecord(record)) return false;
-    return typeof record.id === 'string'
+    return isRecordObject(record)
+      && typeof record.id === 'string'
       && typeof record.action === 'string'
       && typeof record.target === 'string'
       && typeof record.timestamp === 'number'
@@ -345,8 +346,8 @@ export class OperationAuditLog {
   }
 
   private isRequestRecord(record: unknown): record is ApprovalRequestRecord {
-    if (!isRecord(record)) return false;
-    return typeof record.id === 'string'
+    return isRecordObject(record)
+      && typeof record.id === 'string'
       && typeof record.action === 'string'
       && typeof record.target === 'string'
       && (record.state === 'attempting' || record.state === 'succeeded' || record.state === 'attempt-failed')

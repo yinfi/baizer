@@ -41,16 +41,15 @@ export interface ParameterDef {
 export type ToolExecutionMode = 'parallel' | 'sequential';
 export type ToolRisk = 'read' | 'write' | 'plugin-control' | 'network' | 'unknown';
 
-/**
- * 工具参数：来自模型(或审批回放)的 function-calling 输入，形状不可信。
- * 工具内部必须先做运行时窄化(类型谓词)，不能假定字段存在或类型正确。
- */
-export type ToolArguments = Record<string, unknown>;
-
-/**
- * 工具执行结果：每个工具自定形状，消费方按需窄化后再读字段。
- */
-export type ToolExecutionResult = Record<string, unknown>;
+/** 模型给出的工具参数:来自外部,字段类型未知,工具内部必须逐项窄化。 */
+export type ToolArgs = Record<string, unknown>;
+/** 工具返回的结构化结果。success/path/error 是各工具共有的约定字段,其余字段因工具而异。 */
+export interface ToolResult {
+  success?: boolean;
+  path?: string;
+  error?: string;
+  [key: string]: unknown;
+}
 
 /**
  * 原子工具：无状态、可组合的最小操作单元
@@ -63,7 +62,7 @@ export interface Tool {
   executionMode?: ToolExecutionMode;
   timeoutMs?: number;
   risk?: ToolRisk;
-  execute(args: ToolArguments, ctx: ToolContext): Promise<ToolExecutionResult>;
+  execute(args: ToolArgs, ctx: ToolContext): Promise<ToolResult>;
 }
 
 // ==================== Skill 层 ====================
@@ -98,7 +97,7 @@ export interface Skill {
 
   // === Level 3: Execution（按需执行） ===
   /** simple mode: 直接执行并返回结果 */
-  execute(args: ToolArguments, ctx: ToolContext): Promise<ToolExecutionResult>;
+  execute(args: ToolArgs, ctx: ToolContext): Promise<ToolResult>;
 
   // === 触发条件 ===
   triggers?: SkillTriggers;
@@ -147,5 +146,5 @@ export interface ActivatedSkill {
 export interface ResolvedSkill {
   name: string;
   executionMode: 'direct' | 'instructions';
-  execute(args: ToolArguments, ctx: ToolContext): Promise<ToolExecutionResult>;
+  execute(args: ToolArgs, ctx: ToolContext): Promise<ToolResult>;
 }

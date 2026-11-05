@@ -50,9 +50,12 @@ interface ToolResultPayload {
     workspaceEdit?: WorkspaceEditSummary;
 }
 
-/** 工具/命令结果由运行时产出，形状不可信；UI 只按可选字段消费，故在边界做静态收口。 */
+/**
+ * 流事件里的 tool_result.result 类型为 unknown(可能是 null/字符串/对象)。
+ * 非对象一律视为空对象:所有消费点都只读可选字段,与此前对 null/原始值的 `?.` 读取等价。
+ */
 function asToolResultPayload(value: unknown): ToolResultPayload {
-    return value as ToolResultPayload;
+    return (typeof value === 'object' && value !== null ? value : {}) as ToolResultPayload;
 }
 
 /** Obsidian App 上未在公开 d.ts 暴露的内部命令 API。 */
@@ -377,8 +380,8 @@ export class ChatController {
                     }
 
                     if (event.type === 'tool_result') {
-                        const toolResult = asToolResultPayload(event.result);
                         const args = this.shiftToolArgs(writeToolArgs, event.name);
+                        const toolResult = asToolResultPayload(event.result);
                         this.handleWorkspaceEditResult(toolResult);
                         if (this.isFileWriteTool(event.name)) {
                             attemptedFileWrite = true;
@@ -394,7 +397,7 @@ export class ChatController {
                             approvalRequest = nextApproval;
                             this.addApprovalMessage(nextApproval);
                         } else if (this.isFileWriteTool(event.name)) {
-                            if (!toolResult?.workspaceEdit) {
+                            if (!toolResult.workspaceEdit) {
                                 await this.openFileFromToolResult(event.name, toolResult, args);
                             }
                             if (successfulFileWrite && bufferedTextEvents.length > 0) {
@@ -565,8 +568,12 @@ export class ChatController {
 
         if (matchedSkillCommand && typeof this.api.executeSlashSkillCommand === 'function') {
             try {
-                const result = await this.api.executeSlashSkillCommand(cmd, argStr.trim(), this.conversationId);
-                this.handleStructuredResult(asToolResultPayload(result));
+                const result: unknown = await this.api.executeSlashSkillCommand(cmd, argStr.trim(), this.conversationId);
+                if (typeof result === 'string') {
+                    this.addMessage('system', result);
+                } else {
+                    this.handleStructuredResult(asToolResultPayload(result));
+                }
             } catch (error: unknown) {
                 this.handleError(error);
             }
@@ -1327,7 +1334,7 @@ export class ChatController {
         const toolRegistry = (this.app as AppWithPluginHost).plugins?.plugins?.[PLUGIN_ID]?.toolRegistry;
         if (toolRegistry?.execute) {
             try {
-                const result = asToolResultPayload(await toolRegistry.execute('file_back_knowledge', this.buildFileBackArgs(targetMsg)));
+                const result = await toolRegistry.execute('file_back_knowledge', this.buildFileBackArgs(targetMsg));
                 if (result?.success) {
                     const suffix = result.path ? `: ${result.path}` : '.';
                     this.addMessage('system', `Archived to the knowledge wiki${suffix}`);

@@ -1322,15 +1322,17 @@ export class ShellView extends ItemView {
     }
 
     private async showApprovalPreviewInEditor(approval: import('./approval-card').ApprovalRequest) {
-        const previewText = approval.preview?.newContent ?? approval.args.content;
+        const previewText = approval.preview?.newContent ?? approval.args?.content;
         if (!previewText || typeof previewText !== 'string') {
             new Notice('No editor preview is available for this approval.');
             return;
         }
 
-        // 审批参数来自工具调用（外部输入）：只接受字符串目标，非字符串按「没有目标」处理。
-        const rawTarget = approval.target || approval.args.path || approval.args.filename;
-        const target = typeof rawTarget === 'string' ? rawTarget : '';
+        const argPath = approval.args?.path;
+        const argFilename = approval.args?.filename;
+        const target = approval.target
+            || (typeof argPath === 'string' ? argPath : '')
+            || (typeof argFilename === 'string' ? argFilename : '');
         if (target) {
             await this.openApprovalTarget(target);
         }
