@@ -132,7 +132,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     const activeRunController = this.deps.activeRunController ?? null;
     const steerable = {
       steer: async (text: string) => {
-        agent.steer({ role: 'user', content: text, timestamp: Date.now() } as AgentMessage);
+        agent.steer({ role: 'user', content: text, timestamp: Date.now() });
       },
       setActiveTools: async (toolNames: string[]) => {
         const allowed = new Set(toolNames);

@@ -177,7 +177,7 @@ export class KnowledgeLinter {
       if (Array.isArray(fm.review_flags)) {
         reviewFlags = fm.review_flags;
       } else if (typeof fm.review_flags === 'string') {
-        try { reviewFlags = JSON.parse(fm.review_flags); } catch {}
+        try { reviewFlags = JSON.parse(fm.review_flags); } catch { /* malformed frontmatter: keep the empty default */ }
       }
       summaries.push({ path: file.path, title, reviewFlags });
 
@@ -185,7 +185,7 @@ export class KnowledgeLinter {
       if (Array.isArray(fm.concepts)) {
         concepts = fm.concepts;
       } else if (typeof fm.concepts === 'string') {
-        try { concepts = JSON.parse(fm.concepts); } catch {}
+        try { concepts = JSON.parse(fm.concepts); } catch { /* malformed frontmatter: keep the empty default */ }
       }
       for (const c of concepts) {
         if (!conceptMap[c]) conceptMap[c] = [];
@@ -207,7 +207,7 @@ export class KnowledgeLinter {
     const reportPath = `${reportDir}/report.md`;
 
     if (!this.app.vault.getAbstractFileByPath(reportDir)) {
-      try { await this.app.vault.createFolder(reportDir); } catch {}
+      try { await this.app.vault.createFolder(reportDir); } catch { /* folder may already exist (concurrent create) */ }
     }
 
     const existing = this.app.vault.getAbstractFileByPath(reportPath);

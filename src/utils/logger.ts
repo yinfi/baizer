@@ -87,7 +87,7 @@ export class Logger {
                 console.debug(consoleMessage, entry.metadata || '', entry.error || '');
                 break;
             case 'info':
-                console.info(consoleMessage, entry.metadata || '', entry.error || '');
+                console.debug(consoleMessage, entry.metadata || '', entry.error || '');
                 break;
             case 'warn':
                 console.warn(consoleMessage, entry.metadata || '', entry.error || '');

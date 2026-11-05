@@ -1286,7 +1286,7 @@ export function renderModelField(container: HTMLElement, deps: ModelFieldDeps): 
             autocomplete: 'off',
             'aria-label': t('Model ID'),
         },
-    }) as HTMLInputElement;
+    });
     input.value = deps.currentModel;
     // 长模型名不该只能靠截断看：悬停给完整值，输入框本身可编辑全文。
     input.title = deps.currentModel;
@@ -1295,12 +1295,12 @@ export function renderModelField(container: HTMLElement, deps: ModelFieldDeps): 
     const select = picker.createEl('select', {
         cls: 'baizer-settings-detail-input baizer-settings-model-select',
         attr: { 'aria-label': t('Model list') },
-    }) as HTMLSelectElement;
+    });
     const refresh = picker.createEl('button', {
         cls: 'baizer-settings-action',
         text: t('Refresh list'),
         attr: { type: 'button' },
-    }) as HTMLButtonElement;
+    });
 
     const note = container.createDiv({ cls: 'baizer-settings-field-hint' });
 
@@ -1515,7 +1515,7 @@ export function getSettingsOverviewActions(settings: PluginSettings): SettingsOv
         actions.push({ label: t('Permissions too broad'), sectionId: 'permissions', tone: 'danger' });
     }
 
-    for (const [_providerId, provider] of Object.entries(settings.providers || {})) {
+    for (const provider of Object.values(settings.providers || {})) {
         if (!provider.apiKey?.trim()) {
             actions.push({ label: `${provider.label} ${t('missing API key')}`, sectionId: 'connection', tone: 'warning' });
         }
@@ -1889,7 +1889,7 @@ export class SettingTab extends PluginSettingTab {
                 placeholder: t('Search settings'),
                 'aria-label': t('Search settings'),
             },
-        }) as HTMLInputElement;
+        });
         searchInput.value = this.searchQuery;
         // 只更新查询；逐键整页重建是移动端长任务的放大器，改为 150ms 防抖后
         // 再由 applySearchRender() 判断「命中分区是否真的变了」才重绘。
@@ -1961,7 +1961,7 @@ export class SettingTab extends PluginSettingTab {
             const card = accordion.createEl('details', {
                 cls: 'baizer-settings-section-card',
                 attr: { 'data-section-id': sectionId },
-            }) as HTMLDetailsElement;
+            });
             card.open = this.openSectionIds.has(sectionId);
             card.addEventListener('toggle', () => {
                 if (card.open) {
@@ -2200,7 +2200,7 @@ export class SettingTab extends PluginSettingTab {
             cls: 'baizer-settings-search',
             // P1-6: 补 aria-label(此前只有 placeholder,与顶部主搜索不一致)。
             attr: { type: 'search', placeholder: t('Search memories'), 'aria-label': t('Search memories') },
-        }) as HTMLInputElement;
+        });
         input.value = this.memorySearchQuery;
         const runSearch = () => {
             if (!this.memorySearchQuery.trim()) return;
@@ -2403,7 +2403,7 @@ export class SettingTab extends PluginSettingTab {
                     'aria-pressed': meta.isActive ? 'true' : 'false',
                     'aria-expanded': detailExpanded ? 'true' : 'false',
                 },
-            }) as HTMLButtonElement;
+            });
             // 栅格下沉到内层 div：移动端 WebView 不允许 <button> 当 grid 容器，
             // 直接在 button 上 display:grid 会被忽略、子项重叠。
             const buttonInner = button.createDiv({ cls: 'baizer-settings-provider-card-main-inner' });
@@ -2438,7 +2438,7 @@ export class SettingTab extends PluginSettingTab {
                     title: t('Delete provider'),
                     'aria-label': `${t('Delete provider')} ${meta.label}`,
                 },
-            }) as HTMLButtonElement;
+            });
             setIcon(deleteBtn, 'trash-2');
             deleteBtn.disabled = !canDelete;
             deleteBtn.addEventListener('click', (evt) => {
@@ -2548,7 +2548,7 @@ export class SettingTab extends PluginSettingTab {
             const input = valueEl.createEl('input', {
                 cls: 'baizer-settings-detail-input',
                 attr: { type: 'text', 'aria-label': t('Provider name') },
-            }) as HTMLInputElement;
+            });
             input.value = activeConfig.label;
             input.title = activeConfig.label;
             const feedback = createFieldFeedback(valueEl);
@@ -2583,7 +2583,7 @@ export class SettingTab extends PluginSettingTab {
             const select = valueEl.createEl('select', {
                 cls: 'baizer-settings-detail-input',
                 attr: { 'aria-label': t('Provider protocol') },
-            }) as HTMLSelectElement;
+            });
             getProtocolOptions().forEach(option => {
                 select.createEl('option', { value: option.value, text: option.label });
             });
@@ -2614,7 +2614,7 @@ export class SettingTab extends PluginSettingTab {
                 const select = valueEl.createEl('select', {
                     cls: 'baizer-settings-detail-input',
                     attr: { 'aria-label': t('API type (Chat Completions / Responses)') },
-                }) as HTMLSelectElement;
+                });
                 select.createEl('option', { value: 'completions', text: t('Chat Completions (/chat/completions)') });
                 select.createEl('option', { value: 'responses', text: t('Responses (/responses)') });
                 select.value = activeConfig.apiFlavor ?? 'completions';
@@ -2649,7 +2649,7 @@ export class SettingTab extends PluginSettingTab {
                     spellcheck: 'false',
                     autocomplete: 'off',
                 },
-            }) as HTMLInputElement;
+            });
             input.value = activeConfig.baseUrl;
             // 完整值可悬停查看，输入框本身可编辑全文——不靠截断当唯一手段。
             input.title = activeConfig.baseUrl;
@@ -2689,7 +2689,7 @@ export class SettingTab extends PluginSettingTab {
                     spellcheck: 'false',
                     'aria-label': t('API key'),
                 },
-            }) as HTMLInputElement;
+            });
             input.value = activeConfig.apiKey;
 
             // 操作按钮独占一行：此前按钮和输入框挤在同一窄栏里，Reveal/Clear 被挤成竖向堆叠、
@@ -2746,7 +2746,7 @@ export class SettingTab extends PluginSettingTab {
                 spellcheck: 'false',
                 'aria-label': t('Custom headers'),
             },
-        }) as HTMLTextAreaElement;
+        });
         textarea.value = serializeCustomHeaders(activeConfig.customHeaders);
         const feedback = createFieldFeedback(advancedBody);
 
@@ -3641,7 +3641,7 @@ export class SettingTab extends PluginSettingTab {
                 return;
             }
             const preview = await runtime.discoverOntologyPreview();
-            if (preview.content) console.log('[Baizer] Ontology preview:\n', preview.content);
+            if (preview.content) console.debug('[Baizer] Ontology preview:\n', preview.content);
             new Notice(preview.message);
         });
         this.createActionButton(actions, t('Mark stale pending'), async () => {
@@ -3910,7 +3910,7 @@ export class SettingTab extends PluginSettingTab {
             text: label,
             cls: `baizer-settings-action is-${variant}`,
             attr: { type: 'button' },
-        }) as HTMLButtonElement;
+        });
         button.disabled = disabled;
         button.addEventListener('click', () => {
             if (button.disabled) return;

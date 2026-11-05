@@ -318,7 +318,7 @@ export class OperationAuditLog {
   }
 
   private getAdapter(): VaultAdapter {
-    return this.app.vault.adapter as unknown as VaultAdapter;
+    return this.app.vault.adapter;
   }
 
   private emptyFile(): OperationAuditFile {

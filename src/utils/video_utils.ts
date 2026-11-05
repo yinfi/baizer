@@ -23,7 +23,7 @@ const defaultDeps: VideoTranscriptDeps = {
     userAgent: DEFAULT_USER_AGENT,
 };
 
-function extractBalancedJson(source: string, marker: string): any | null {
+function extractBalancedJson(source: string, marker: string): any {
     const markerIndex = source.indexOf(marker);
     if (markerIndex === -1) return null;
 
@@ -369,6 +369,6 @@ export function createVideoTranscriptFetcher(partialDeps: Partial<VideoTranscrip
 
 export const getVideoTranscript = createVideoTranscriptFetcher();
 
-export function extractJsonAssignment(source: string, marker: string): any | null {
+export function extractJsonAssignment(source: string, marker: string): any {
     return extractBalancedJson(source, marker);
 }

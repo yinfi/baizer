@@ -102,7 +102,7 @@ export class FileBackExecutor {
 
       const articlesDir = `${this.wikiFolder}/${WIKI_ARTICLES_SUBFOLDER}`;
       if (!this.app.vault.getAbstractFileByPath(articlesDir)) {
-        try { await this.app.vault.createFolder(articlesDir); } catch {}
+        try { await this.app.vault.createFolder(articlesDir); } catch { /* folder may already exist (concurrent create) */ }
       }
 
       await this.app.vault.create(filePath, markdown);

@@ -940,14 +940,14 @@ export class ShellView extends ItemView {
         this.outputContainer.addEventListener('click', (event) => {
             const summary = (event.target as HTMLElement | null)?.closest('.shell-think-summary') as HTMLElement | null;
             if (!summary) return;
-            const timeline = summary.closest('.shell-think-timeline') as HTMLElement | null;
+            const timeline = summary.closest<HTMLElement>('.shell-think-timeline');
             if (timeline) this.toggleStreamTimeline(timeline);
         });
         this.outputContainer.addEventListener('keydown', (event: KeyboardEvent) => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             const summary = (event.target as HTMLElement | null)?.closest('.shell-think-summary') as HTMLElement | null;
             if (!summary) return;
-            const timeline = summary.closest('.shell-think-timeline') as HTMLElement | null;
+            const timeline = summary.closest<HTMLElement>('.shell-think-timeline');
             if (!timeline) return;
             event.preventDefault();
             this.toggleStreamTimeline(timeline);
@@ -1203,7 +1203,7 @@ export class ShellView extends ItemView {
                 ? (lastAiMessage
                     ? { ...lastAiMessage, forkSourceText: this.findPrecedingUserMessage(lastAiMessage)?.content }
                     : {
-                        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                        id: Date.now().toString() + Math.random().toString(36).slice(2, 11),
                         role: 'ai',
                         content: resolvedText,
                         timestamp: Date.now(),
@@ -1612,7 +1612,7 @@ export class ShellView extends ItemView {
         const activePath = this.app.workspace?.getActiveFile?.()?.path ?? null;
         const scoped = !!activePath && activePath !== this.excludedCurrentNotePath;
         if (scoped) {
-            const base = activePath!.split('/').pop() ?? activePath!;
+            const base = activePath.split('/').pop() ?? activePath;
             const name = base.replace(/\.md$/i, '');
             this.scopePillNameEl.setText(name);
             this.scopePillEl.setAttribute('title', `当前作用于:${activePath}`);
@@ -1735,7 +1735,7 @@ export class ShellView extends ItemView {
         try {
             new URL(str);
             return true;
-        } catch (_) {
+        } catch {
             return false;
         }
     }
@@ -1841,7 +1841,7 @@ export class ShellView extends ItemView {
     private refreshInputToolbarThinking() {
         const settings = this.getPluginInstance()?.settings;
         if (!settings || !this.inputToolbar) return;
-        this.inputToolbar.updateThinking((settings.thinkingLevel ?? 'medium') as ThinkingLevel);
+        this.inputToolbar.updateThinking(settings.thinkingLevel ?? 'medium');
     }
 
     private updatePlaceholder() {
@@ -2047,7 +2047,7 @@ export class ShellView extends ItemView {
         }
 
         const container = this.getActiveMessageContainer();
-        const entry = container.querySelector(`.shell-entry[data-message-id="${msg.id}"]`) as HTMLElement | null;
+        const entry = container.querySelector<HTMLElement>(`.shell-entry[data-message-id="${msg.id}"]`);
         const body = entry?.querySelector('.shell-approval-message-body') as HTMLElement | null;
         if (!body) return;
 
@@ -2077,7 +2077,7 @@ export class ShellView extends ItemView {
             : status === 'unknown'
                 ? '.shell-approval-recheck'
                 : '.shell-approval-processing, .shell-approval-outcome';
-        const target = entry.querySelector(selector) as HTMLElement | null;
+        const target = entry.querySelector<HTMLElement>(selector);
         target?.focus?.();
     }
 

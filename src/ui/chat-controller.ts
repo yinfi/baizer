@@ -578,11 +578,12 @@ export class ChatController {
             case '/profile':
                 await this.handleMemory(argStr || 'overview', '/profile');
                 break;
-            case '/tools':
+            case '/tools': {
                 const tools = this.api.getAvailableTools();
                 const toolsList = tools.map((t) => `- **${t.name}**: ${t.description}`).join('\n');
                 this.addMessage('system', `## Available Tools\n\n${toolsList}`);
                 break;
+            }
             case '/file-back':
         // 后台执行，不阻塞主流程
                 this.runFileBackInBackground(argStr.trim());
@@ -1220,7 +1221,7 @@ export class ChatController {
         },
     ): ChatMessage {
         const msg: ChatMessage = {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            id: Date.now().toString() + Math.random().toString(36).slice(2, 11),
             role,
             content,
             timestamp: Date.now(),

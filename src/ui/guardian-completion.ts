@@ -552,8 +552,8 @@ export class GuardianCompletionService {
     const runtime = this.deps.knowledgeRuntime;
     const deep = input.mode === 'deep';
     const fetcher = deep
-      ? runtime?.getGuardianDeepKnowledgeContext
-      : runtime?.getGuardianKnowledgeContext;
+      ? runtime?.getGuardianDeepKnowledgeContext?.bind(runtime)
+      : runtime?.getGuardianKnowledgeContext?.bind(runtime);
     if (!fetcher) return '';
 
     const startedAt = Date.now();
@@ -574,7 +574,7 @@ export class GuardianCompletionService {
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     let timedOut = false;
     const raw = await Promise.race([
-      fetcher.call(runtime, query),
+      fetcher(query),
       new Promise<string>((resolve) => {
         timeoutHandle = setTimeout(() => {
           timedOut = true;
