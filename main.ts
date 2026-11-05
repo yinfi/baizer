@@ -1,7 +1,7 @@
-import { Plugin, Notice, MarkdownView, TFile, addIcon } from 'obsidian';
+import { Plugin, Notice, Editor, MarkdownView, MarkdownFileInfo, TFile, addIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
-import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, mergeProviderDefaults, pruneUnsupportedProviders } from './src/mcp/types';
+import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, mergeProviderDefaults, pruneUnsupportedProviders, legacyFlatString } from './src/mcp/types';
 import { setLocale, Locale } from './src/i18n/zh';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
@@ -38,6 +38,28 @@ import { ObsidianContextService } from './src/services/obsidian-context-service'
 import { USER_SKILLS_DIR } from './src/skills/skill-files';
 import { logger } from './src/utils/logger';
 import { installRequestUrlFetchFallback } from './src/utils/request-url-fetch';
+import { thrownMessage } from './src/utils/thrown-message';
+
+/**
+ * 旧版扁平设置：data.json 里没有 providers、只有 provider + 各家 xxxApiKey 的历史格式。
+ *
+ * 只声明 loadSettings 真正读取的字段，且一律按 unknown 收口——持久化数据是不可信输入，
+ * 既不能断言成一份完整的 PluginSettings，也不能假定某个字段真的是字符串。
+ * （旧格式里另有 apiKey / primaryModel 等 Google 凭证字段，随 gemini 协议移除后已不再迁移，
+ * 故这里不声明它们。）
+ */
+type LegacyFlatSettings = {
+    provider?: unknown;
+    openaiApiKey?: unknown;
+    openaiBaseUrl?: unknown;
+    openaiModel?: unknown;
+    deepseekApiKey?: unknown;
+    deepseekBaseUrl?: unknown;
+    deepseekModel?: unknown;
+    qwenApiKey?: unknown;
+    qwenBaseUrl?: unknown;
+    qwenModel?: unknown;
+};
 
 export default class BaizerPlugin extends Plugin {
     settings: PluginSettings;
@@ -65,7 +87,10 @@ export default class BaizerPlugin extends Plugin {
     private guardianEscalationTimer: number | null = null;
     private guardianEscalatedAnchors: Set<string> = new Set();
 
-    private onEditorChange = (editor: any, info: any) => {
+    // 参数类型照抄 obsidian.d.ts 里 workspace.on('editor-change', ...) 的声明：
+    // (editor: Editor, info: MarkdownView | MarkdownFileInfo) => any。
+    // queueGuardianCheck 与下游 runGuardianCheck 沿用同一份契约。
+    private onEditorChange = (editor: Editor, info: MarkdownView | MarkdownFileInfo) => {
         void this.queueGuardianCheck(editor, info);
     };
 
@@ -166,7 +191,7 @@ export default class BaizerPlugin extends Plugin {
                 VIEW_TYPE_SHELL,
                 (leaf) => new ShellView(leaf, this.modelService, this)
             );
-        } catch (e) {
+        } catch {
             // hot reload 时 view type 可能已注册，忽略
             logger.info('View type already registered, skipping.', 'Baizer');
         }
@@ -175,7 +200,7 @@ export default class BaizerPlugin extends Plugin {
         // 用自定义 BZ 字标(描边圆角方 + 填充字),避免复用系统 'terminal'(>_) 与命令面板撞脸;
         // 18px 下双描边字母易糊,故字母用填充、外框用描边,复刻头部品牌块观感。
         addIcon('baizer-bz', `<g fill="none" stroke="currentColor" stroke-width="8" stroke-linejoin="round"><rect x="8" y="8" width="84" height="84" rx="20"/></g><text x="50" y="50" fill="currentColor" font-family="-apple-system,'Segoe UI',sans-serif" font-size="46" font-weight="800" text-anchor="middle" dominant-baseline="central" letter-spacing="-2">BZ</text>`);
-        this.addRibbonIcon('baizer-bz', `Open ${PLUGIN_NAME}`, (evt: MouseEvent) => {
+        this.addRibbonIcon('baizer-bz', `Open ${PLUGIN_NAME}`, (_evt: MouseEvent) => {
             void this.activateView();
         });
 
@@ -200,8 +225,8 @@ export default class BaizerPlugin extends Plugin {
                     } else {
                         new Notice(`Failed to save URL: ${result.error || 'unknown error'}`);
                     }
-                } catch (e: any) {
-                    new Notice(`Failed to read clipboard: ${e?.message || 'unknown error'}`);
+                } catch (error: unknown) {
+                    new Notice(`Failed to read clipboard: ${thrownMessage(error) || 'unknown error'}`);
                 }
             },
         });
@@ -321,15 +346,21 @@ export default class BaizerPlugin extends Plugin {
     }
 
     async loadSettings() {
-        const raw = await this.loadData() || {};
+        // 持久化数据是不可信输入：按 Record<string, unknown> 收口，不断言成 PluginSettings。
+        // `|| {}` 保留原语义（loadData 返回假值时兜底成空对象）；变量名沿用 raw——
+        // test/settings-provider-migration.test.ts 用它作为定位迁移分支的源码锚点。
+        const raw: Record<string, unknown> = (await this.loadData()) || {};
         this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
 
         // 数据迁移：旧扁平格式 → 新 providers map
-        if (!raw.providers && (raw as any).provider) {
-            const old = raw as any;
+        if (!raw.providers && raw.provider) {
+            // 旧格式的字段一律经 legacyFlatString 收口：字符串照旧（含空串，仍走 `|| 默认值`），
+            // 非字符串（手工改坏的 data.json）按「未设置」回落到默认值。这是本次类型清理
+            // 唯一的行为收口，见 issue #67 风险一节与 test/main-ts-lint-cleanup.test.ts。
+            const old: LegacyFlatSettings = raw;
             // 旧格式的 provider 可能是已移除的 'gemini'：原样记下来即可，
             // 下面的 activeProvider 修复步骤会把它挪到仍然存在的 provider 上。
-            this.settings.activeProvider = old.provider || 'openai';
+            this.settings.activeProvider = legacyFlatString(old.provider) || 'openai';
             // 旧格式里的 Google 凭证（old.apiKey / old.primaryModel）不再迁移：
             // 'gemini' 协议已移除，把 Google 的 key 塞进一个 openai-compatible 条目
             // 只会得到一个看着配好了、实际必然失败的 provider。
@@ -337,23 +368,23 @@ export default class BaizerPlugin extends Plugin {
                 'openai': {
                     type: 'openai-compatible' as const,
                     label: 'OpenAI',
-                    apiKey: old.openaiApiKey || '',
-                    baseUrl: old.openaiBaseUrl || 'https://api.openai.com/v1',
-                    model: old.openaiModel || 'gpt-4o'
+                    apiKey: legacyFlatString(old.openaiApiKey) || '',
+                    baseUrl: legacyFlatString(old.openaiBaseUrl) || 'https://api.openai.com/v1',
+                    model: legacyFlatString(old.openaiModel) || 'gpt-4o'
                 },
                 'deepseek': {
                     type: 'openai-compatible' as const,
                     label: 'DeepSeek',
-                    apiKey: old.deepseekApiKey || '',
-                    baseUrl: old.deepseekBaseUrl || 'https://api.deepseek.com',
-                    model: old.deepseekModel || 'deepseek-chat'
+                    apiKey: legacyFlatString(old.deepseekApiKey) || '',
+                    baseUrl: legacyFlatString(old.deepseekBaseUrl) || 'https://api.deepseek.com',
+                    model: legacyFlatString(old.deepseekModel) || 'deepseek-chat'
                 },
                 'qwen': {
                     type: 'openai-compatible' as const,
                     label: 'Qwen',
-                    apiKey: old.qwenApiKey || '',
-                    baseUrl: old.qwenBaseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-                    model: old.qwenModel || 'qwen-turbo'
+                    apiKey: legacyFlatString(old.qwenApiKey) || '',
+                    baseUrl: legacyFlatString(old.qwenBaseUrl) || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                    model: legacyFlatString(old.qwenModel) || 'qwen-turbo'
                 }
             };
             // 持久化迁移结果
@@ -450,7 +481,7 @@ export default class BaizerPlugin extends Plugin {
         // Group 1: Wikilink [[...]]
         // Group 2: Markdown Link [text](url)
         // Group 3: Raw URL http...
-        const regex = /(\[\[.*?\]\])|(\[.*?\]\(.*?\))|(https?:\/\/[^\s\)]+)/g;
+        const regex = /(\[\[.*?\]\])|(\[.*?\]\(.*?\))|(https?:\/\/[^\s)]+)/g;
 
         let newContent = content;
         let modified = false;
@@ -492,7 +523,7 @@ export default class BaizerPlugin extends Plugin {
         }
     }
 
-    private queueGuardianCheck(editor: any, info: any) {
+    private queueGuardianCheck(editor: Editor, info: MarkdownView | MarkdownFileInfo) {
         // 用户打字即取消待确认的升级:停留被打破,说明不再是「卡住」。
         this.clearGuardianEscalationTimer();
         if (this.guardianCheckTimer !== null) {
