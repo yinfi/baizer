@@ -511,6 +511,87 @@ async function runTests() {
       assert(e.message.includes('empty text'), `message: ${e.message}`);
     }
   });
+
+  await test('parseTranscriptionPayload tolerates malformed payloads and segment fields', async () => {
+    const { parseTranscriptionPayload } = await import('../src/services/video-transcription');
+    const window = { startSec: 10, endSec: 20 };
+
+    for (const payload of [null, undefined, 'text', 42, [], {}, { segments: 'nope', text: 5 }]) {
+      const parsed = parseTranscriptionPayload(payload, window);
+      assert(parsed.text === '' && parsed.segments.length === 0, `payload ${JSON.stringify(payload)} -> ${JSON.stringify(parsed)}`);
+    }
+
+    // 脏段被跳过（null / 非字符串 text / 空白 text），好段保留；缺失或非数字时间戳回退到窗口边界。
+    const parsed = parseTranscriptionPayload({
+      segments: [null, 'x', { text: 7 }, { text: '   ' }, { text: ' ok ', start: 'abc' }, { text: 'timed', start: 1, end: 2 }],
+      text: 'flat',
+    }, window);
+    assert(parsed.segments.length === 2, `segments: ${JSON.stringify(parsed.segments)}`);
+    assert(parsed.segments[0].start === 10 && parsed.segments[0].end === 20 && parsed.segments[0].text === 'ok', JSON.stringify(parsed.segments[0]));
+    assert(parsed.segments[1].start === 11 && parsed.segments[1].end === 12, JSON.stringify(parsed.segments[1]));
+    assert(parsed.text === 'flat', `text: ${parsed.text}`);
+
+    // 只有扁平 text：退化成覆盖整个窗口的一段。
+    const flatOnly = parseTranscriptionPayload({ text: ' hello ' }, window);
+    assert(flatOnly.segments.length === 1 && flatOnly.segments[0].text === 'hello', JSON.stringify(flatOnly));
+  });
+
+  await test('rejects malformed bilibili playinfo with a clear error instead of crashing', async () => {
+    const cases = [
+      '<script>window.__playinfo__={"data":{"dash":{"audio":"oops"}}}</script>',
+      '<script>window.__playinfo__={"data":{"dash":{"audio":[]}}}</script>',
+      '<script>window.__playinfo__={"data":{"dash":{"audio":[null,{"baseUrl":123},{"backupUrl":"not-array"}]}}}</script>',
+      '<script>window.__playinfo__={"data":null}</script>',
+    ];
+    for (const html of cases) {
+      const service = createVideoTranscriptionService({
+        requestUrl: async () => ({ status: 200, text: html, headers: {}, arrayBuffer: new ArrayBuffer(0), json: {} }) as any,
+      });
+      try {
+        await service.transcribeFromVideoUrl({
+          url: 'https://www.bilibili.com/video/BVbad',
+          platform: 'bilibili',
+          provider: DEFAULT_PROVIDERS.openai,
+        });
+        throw new Error('Expected failure');
+      } catch (e: any) {
+        assert(e.message.includes('Unable to resolve audio stream URL'), `case ${html}: ${e.message}`);
+      }
+    }
+  });
+
+  await test('falls back to backupUrl and skips non-audio / malformed youtube formats', async () => {
+    const seen: string[] = [];
+    const bilibili = createVideoTranscriptionService({
+      requestUrl: async (options: any) => {
+        seen.push(options.url);
+        if (options.url === 'https://www.bilibili.com/video/BVbackup') {
+          return { status: 200, text: '<script>window.__playinfo__={"data":{"dash":{"audio":[{"backupUrl":["https://media.example/backup.m4s"]}]}}}</script>', headers: {}, arrayBuffer: new ArrayBuffer(0), json: {} } as any;
+        }
+        return { status: 200, text: '', headers: {}, arrayBuffer: new Uint8Array([1]).buffer, json: {} } as any;
+      },
+      decodeAudio: async () => fakeDecoded(10, 100),
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ text: 'x' }) }) as any,
+    });
+    await bilibili.transcribeFromVideoUrl({ url: 'https://www.bilibili.com/video/BVbackup', platform: 'bilibili', provider: DEFAULT_PROVIDERS.openai });
+    assert(seen.includes('https://media.example/backup.m4s'), `requested: ${seen.join(',')}`);
+
+    const html = 'var ytInitialPlayerResponse = {"streamingData":{"adaptiveFormats":[null,{"mimeType":5,"url":"https://bad"},{"mimeType":"video/mp4","url":"https://video"},{"mimeType":"audio/mp4","url":"https://media.example/yt.m4a"}]}};';
+    const youtubeSeen: string[] = [];
+    const youtube = createVideoTranscriptionService({
+      requestUrl: async (options: any) => {
+        youtubeSeen.push(options.url);
+        if (options.url === 'https://www.youtube.com/watch?v=abc') {
+          return { status: 200, text: html, headers: {}, arrayBuffer: new ArrayBuffer(0), json: {} } as any;
+        }
+        return { status: 200, text: '', headers: {}, arrayBuffer: new Uint8Array([1]).buffer, json: {} } as any;
+      },
+      decodeAudio: async () => fakeDecoded(10, 100),
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ text: 'x' }) }) as any,
+    });
+    await youtube.transcribeFromVideoUrl({ url: 'https://www.youtube.com/watch?v=abc', platform: 'youtube', provider: DEFAULT_PROVIDERS.openai });
+    assert(youtubeSeen.includes('https://media.example/yt.m4a'), `requested: ${youtubeSeen.join(',')}`);
+  });
 }
 
 runTests().catch((e) => {

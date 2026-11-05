@@ -3,7 +3,6 @@
 import { App, Plugin, TFile, Notice } from 'obsidian';
 import { debounce } from '../utils/throttle';
 import { logger } from '../utils/logger';
-import { prop } from '../utils/narrow';
 import { PluginSettings } from '../mcp/types';
 import { ModelService } from '../services/model-service';
 import { KnowledgeCompiler, findCurrentCompiledSummary } from './compiler';
@@ -29,6 +28,7 @@ import {
   KnowledgePendingReason,
 } from './frontmatter';
 import { OntologyService } from './ontology-service';
+import { errorMessage } from './ontology';
 
 const AUTO_COMPILE_PENDING_REASONS: KnowledgePendingReason[] = ['new', 'content_changed'];
 
@@ -598,8 +598,8 @@ export class KnowledgeRuntime {
       const path = await this.ontologyService.createSchemaFile(candidate.content);
       logger.info(`Ontology schema created at ${path}`, 'KnowledgeRuntime');
       return path;
-    } catch (e: unknown) {
-      console.error('[KnowledgeRuntime] Ontology discovery failed:', prop(e, 'message'));
+    } catch (e) {
+      console.error('[KnowledgeRuntime] Ontology discovery failed:', errorMessage(e));
       return null;
     }
   }

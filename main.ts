@@ -44,10 +44,17 @@ import { thrownMessage } from './src/utils/thrown-message';
 type EditorWithCm = Editor & { cm?: EditorView };
 
 /** save_webpage 等 vault 写工具的返回形态(工具契约未导出统一类型)。 */
-interface ToolExecutionResult {
-    success: boolean;
-    path: string;
-    error?: string;
+/** 调用 save_webpage 工具,并把松散的工具结果窄化为 { success, path?, error? }。 */
+async function saveWebpage(
+    registry: ToolRegistry,
+    url: string,
+): Promise<{ success: boolean; path?: string; error?: string }> {
+    const result = await registry.execute('save_webpage', { url });
+    return {
+        success: Boolean(result.success),
+        path: typeof result.path === 'string' ? result.path : undefined,
+        error: typeof result.error === 'string' ? result.error : undefined,
+    };
 }
 
 /**
@@ -128,7 +135,7 @@ export default class BaizerPlugin extends Plugin {
         this.inboxAutosave = new InboxAutosaveCoordinator({
             app: this.app,
             getInboxPath: () => this.settings.wechatInboxPath,
-            saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+            saveUrl: (url: string) => saveWebpage(this.toolRegistry, url),
             notify: (message: string) => new Notice(message),
         });
 
@@ -235,7 +242,7 @@ export default class BaizerPlugin extends Plugin {
                     const text = await navigator.clipboard?.readText?.();
                     const result = await saveClipText({
                         text: text || '',
-                        saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+                        saveUrl: (url: string) => saveWebpage(this.toolRegistry, url),
                     });
 
                     if (result.success && result.path) {
@@ -297,7 +304,7 @@ export default class BaizerPlugin extends Plugin {
         // Register direct clip protocol:
         // obsidian://baizer-clip?url=<encoded-http-url>
         registerBaizerClipProtocolHandler(this, {
-            saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+            saveUrl: (url: string) => saveWebpage(this.toolRegistry, url),
             notify: (message: string) => new Notice(message),
             warn: (message: string) => console.warn(`[Baizer] ${message}`),
         });
@@ -367,7 +374,10 @@ export default class BaizerPlugin extends Plugin {
         // 持久化数据是不可信输入：按 Record<string, unknown> 收口，不断言成 PluginSettings。
         // `|| {}` 保留原语义（loadData 返回假值时兜底成空对象）；变量名沿用 raw——
         // test/settings-provider-migration.test.ts 用它作为定位迁移分支的源码锚点。
-        const raw: Record<string, unknown> = (await this.loadData()) || {};
+        const loaded: unknown = await this.loadData();
+        const raw: Record<string, unknown> = typeof loaded === 'object' && loaded !== null
+            ? (loaded as Record<string, unknown>)
+            : {};
         this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
 
         // 数据迁移：旧扁平格式 → 新 providers map
@@ -522,9 +532,9 @@ export default class BaizerPlugin extends Plugin {
 
         for (const m of rawUrlMatches) {
             new Notice(`📥 Auto-saving: ${m.url}`);
-            const result: ToolExecutionResult = await this.toolRegistry.execute('save_webpage', { url: m.url });
+            const result = await saveWebpage(this.toolRegistry, m.url);
 
-            if (result.success) {
+            if (result.success && result.path) {
                 const finalPath = result.path;
                 const linkText = `[[${finalPath}|Saved: ${finalPath.split('/').pop()?.replace('.md', '')}]]`;
 

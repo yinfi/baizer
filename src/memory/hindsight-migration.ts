@@ -11,7 +11,6 @@ import {
 import { DEFAULT_USER_PROFILE } from './types';
 import { HindsightStore, MigrationState } from './hindsight-store';
 import { MEMORY_DIR } from '../mcp/types';
-import { asRecord, isRecord } from '../utils/narrow';
 
 const PROFILE_PATH = `${MEMORY_DIR}/user-profile.json`;
 const SUMMARIES_PATH = `${MEMORY_DIR}/session-summaries.json`;
@@ -27,14 +26,8 @@ function previousMemoryPaths(app: App): { profile: string; summaries: string; me
 }
 
 type LegacyProfile = typeof DEFAULT_USER_PROFILE;
-
-/** 旧 session-summaries.json 中的一条记录(磁盘数据,字段均未经校验,保留未知字段原样回写)。 */
-type LegacySummary = Record<string, unknown>;
-
-function isLegacyWorkflow(item: unknown): item is LegacyProfile['workflows'][number] {
-  const record = asRecord(item);
-  return typeof record.name === 'string' && typeof record.description === 'string';
-}
+/** 旧版 JSON 文件解析出的、尚未校验的对象。字段类型一律为 unknown。 */
+type JsonObject = Record<string, unknown>;
 
 export async function importPreviousMemoryFiles(
   app: App,
@@ -47,18 +40,18 @@ export async function importPreviousMemoryFiles(
   const stateUpdate: Partial<MigrationState> = {};
 
   if (!state.previousProfileFileImported) {
-    const previousProfile = await readJson(app, previous.profile, null);
+    const previousProfile = await readJsonObject(app, previous.profile);
     if (previousProfile) {
-      const currentProfile = await readJson(app, PROFILE_PATH, null);
+      const currentProfile = await readJsonObject(app, PROFILE_PATH);
       await writeJson(app, PROFILE_PATH, mergeProfiles(previousProfile, currentProfile, now));
     }
     stateUpdate.previousProfileFileImported = true;
   }
 
   if (!state.previousSummariesFileImported) {
-    const previousSummaries = await readSummaries(app, previous.summaries);
+    const previousSummaries = await readJsonArray(app, previous.summaries);
     if (previousSummaries.length > 0) {
-      const currentSummaries = await readSummaries(app, SUMMARIES_PATH);
+      const currentSummaries = await readJsonArray(app, SUMMARIES_PATH);
       await writeJson(app, SUMMARIES_PATH, mergeSummaries(previousSummaries, currentSummaries));
     }
     stateUpdate.previousSummariesFileImported = true;
@@ -81,31 +74,31 @@ export async function migrateLegacyMemory(
   const stateUpdate: Partial<MigrationState> = {};
 
   if (!state.legacyProfileMigrated) {
-    const profile = await readJson(app, PROFILE_PATH, null);
+    const profile = await readJsonObject(app, PROFILE_PATH);
     if (profile) records.push(...profileToMemories(profile, now));
     stateUpdate.legacyProfileMigrated = true;
   }
 
   if (!state.legacySummariesMigrated) {
-    const summaries = await readSummaries(app, SUMMARIES_PATH);
+    const summaries = await readJsonArray(app, SUMMARIES_PATH);
     records.push(...summariesToMemories(summaries, now));
     stateUpdate.legacySummariesMigrated = true;
   }
 
   if (!state.previousPluginProfileMigrated) {
-    const profile = await readJson(app, previous.profile, null);
+    const profile = await readJsonObject(app, previous.profile);
     if (profile) records.push(...profileToMemories(profile, now));
     stateUpdate.previousPluginProfileMigrated = true;
   }
 
   if (!state.previousPluginSummariesMigrated) {
-    const summaries = await readSummaries(app, previous.summaries);
+    const summaries = await readJsonArray(app, previous.summaries);
     records.push(...summariesToMemories(summaries, now));
     stateUpdate.previousPluginSummariesMigrated = true;
   }
 
   if (!state.previousPluginMemoriesMigrated) {
-    const importedMemories = await readJson(app, previous.memories, []);
+    const importedMemories = await readJsonArray(app, previous.memories);
     records.push(...normalizeImportedMemories(importedMemories, now));
     stateUpdate.previousPluginMemoriesMigrated = true;
   }
@@ -118,7 +111,7 @@ export async function migrateLegacyMemory(
   }
 }
 
-function mergeProfiles(previous: unknown, current: unknown, now: number): LegacyProfile {
+function mergeProfiles(previous: JsonObject, current: JsonObject | null, now: number): LegacyProfile {
   const previousProfile = normalizeProfile(previous, now);
   const currentProfile = current ? normalizeProfile(current, now) : null;
   if (!currentProfile) return previousProfile;
@@ -147,16 +140,15 @@ function mergeProfiles(previous: unknown, current: unknown, now: number): Legacy
   };
 }
 
-function normalizeProfile(value: unknown, now: number): LegacyProfile {
-  const profile = asRecord(value);
-  const preferences = asRecord(profile.preferences);
-  const context = asRecord(profile.context);
-  const metadata = asRecord(profile.metadata);
-  const workflows = profile.workflows;
+function normalizeProfile(raw: unknown, now: number): LegacyProfile {
+  const value = asObject(raw);
+  const preferences = asObject(value.preferences);
+  const context = asObject(value.context);
+  const metadata = asObject(value.metadata);
   return {
-    name: typeof profile.name === 'string' ? profile.name : DEFAULT_USER_PROFILE.name,
-    profession: typeof profile.profession === 'string' ? profile.profession : DEFAULT_USER_PROFILE.profession,
-    expertise: arrayOf(profile.expertise),
+    name: typeof value.name === 'string' ? value.name : DEFAULT_USER_PROFILE.name,
+    profession: typeof value.profession === 'string' ? value.profession : DEFAULT_USER_PROFILE.profession,
+    expertise: arrayOf(value.expertise),
     preferences: {
       language: typeof preferences.language === 'string'
         ? preferences.language
@@ -166,8 +158,8 @@ function normalizeProfile(value: unknown, now: number): LegacyProfile {
         : DEFAULT_USER_PROFILE.preferences.responseStyle,
       topics: arrayOf(preferences.topics),
     },
-    workflows: Array.isArray(workflows)
-      ? (workflows as unknown[]).filter(isLegacyWorkflow)
+    workflows: Array.isArray(value.workflows)
+      ? (value.workflows as unknown[]).filter(isLegacyWorkflow)
       : [],
     context: {
       currentProjects: arrayOf(context.currentProjects),
@@ -183,13 +175,18 @@ function normalizeProfile(value: unknown, now: number): LegacyProfile {
   };
 }
 
-function mergeSummaries(previous: LegacySummary[], current: LegacySummary[]): LegacySummary[] {
-  const merged: LegacySummary[] = [];
+function isLegacyWorkflow(item: unknown): item is LegacyProfile['workflows'][number] {
+  const value = asObject(item);
+  return typeof value.name === 'string' && typeof value.description === 'string';
+}
+
+function mergeSummaries(previous: unknown[], current: unknown[]): JsonObject[] {
+  const merged: JsonObject[] = [];
   const seen = new Set<string>();
-  for (const summary of [...current, ...previous]) {
-    const text = summary.summary;
-    if (typeof text !== 'string' || !text.trim()) continue;
-    const key = `${typeof summary.timestamp === 'number' ? summary.timestamp : ''}:${text.trim()}`;
+  for (const item of [...current, ...previous]) {
+    const summary = asObject(item);
+    if (typeof summary.summary !== 'string' || !summary.summary.trim()) continue;
+    const key = `${typeof summary.timestamp === 'number' ? summary.timestamp : ''}:${summary.summary.trim()}`;
     if (seen.has(key)) continue;
     seen.add(key);
     merged.push(summary);
@@ -204,77 +201,71 @@ function normalizeImportedMemories(values: unknown, now: number): MemoryRecord[]
     .filter((memory): memory is MemoryRecord => memory !== null);
 }
 
-function normalizeImportedMemory(value: unknown, now: number): MemoryRecord | null {
-  const raw = asRecord(value);
-  const rawText = raw.text;
-  if (typeof rawText !== 'string' || !rawText.trim()) return null;
+function normalizeImportedMemory(raw: unknown, now: number): MemoryRecord | null {
+  const value = asObject(raw);
+  if (typeof value.text !== 'string' || !value.text.trim()) return null;
 
-  const type: MemoryType = isMemoryType(raw.type) ? raw.type : 'world';
-  const bankId = typeof raw.bankId === 'string' && raw.bankId.trim()
-    ? raw.bankId
+  const type = isMemoryType(value.type) ? value.type : 'world';
+  const bankId = typeof value.bankId === 'string' && value.bankId.trim()
+    ? value.bankId
     : DEFAULT_MEMORY_BANK_ID;
-  const source = normalizeSource(raw.source);
+  const source = normalizeSource(value.source);
   // 迁移导入同样必须脱敏:旧文件文本可能含密钥,且导入不经 retain 热路径。
-  const text = sanitizeMemoryText(rawText.trim());
+  const text = sanitizeMemoryText(value.text.trim());
   // normalizedText 一律基于脱敏后文本重算,不信任旧文件里可能含密钥的缓存值。
   const normalizedText = normalizeMemoryText(text);
 
   return {
-    id: typeof raw.id === 'string' && raw.id.trim()
-      ? raw.id
+    id: typeof value.id === 'string' && value.id.trim()
+      ? value.id
       : createMemoryId({ bankId, type, text, sourceKind: source.kind }),
     bankId,
     type,
     text,
     normalizedText,
-    entities: arrayOf(raw.entities),
-    tags: arrayOf(raw.tags),
+    entities: arrayOf(value.entities),
+    tags: arrayOf(value.tags),
     source,
-    confidence: numberOr(raw.confidence, 0.7),
-    createdAt: numberOr(raw.createdAt, now),
-    updatedAt: numberOr(raw.updatedAt, now),
-    mentionedAt: numberOr(raw.mentionedAt, now),
-    lastAccessedAt: typeof raw.lastAccessedAt === 'number' ? raw.lastAccessedAt : undefined,
-    accessCount: numberOr(raw.accessCount, 0),
-    supersedes: arrayOf(raw.supersedes),
-    evidenceIds: arrayOf(raw.evidenceIds),
+    confidence: numberOr(value.confidence, 0.7),
+    createdAt: numberOr(value.createdAt, now),
+    updatedAt: numberOr(value.updatedAt, now),
+    mentionedAt: numberOr(value.mentionedAt, now),
+    lastAccessedAt: typeof value.lastAccessedAt === 'number' ? value.lastAccessedAt : undefined,
+    accessCount: numberOr(value.accessCount, 0),
+    supersedes: arrayOf(value.supersedes),
+    evidenceIds: arrayOf(value.evidenceIds),
   };
 }
 
-/** 模板字符串插值用:与原 `${any}` 行为一致(对象会变 "[object Object]")。 */
-function interpolate(value: unknown): string {
-  return String(value);
-}
-
-function profileToMemories(value: unknown, now: number): MemoryRecord[] {
-  const profile = asRecord(value);
-  const preferences = asRecord(profile.preferences);
-  const context = asRecord(profile.context);
+function profileToMemories(profile: JsonObject, now: number): MemoryRecord[] {
   const texts: string[] = [];
-  if (profile.profession) texts.push(`User profession: ${interpolate(profile.profession)}`);
+  const preferences = asObject(profile.preferences);
+  const context = asObject(profile.context);
+  if (profile.profession) texts.push(`User profession: ${String(profile.profession)}`);
   for (const expertise of arrayOf(profile.expertise)) texts.push(`User expertise: ${expertise}`);
-  if (preferences.responseStyle) texts.push(`User response style preference: ${interpolate(preferences.responseStyle)}`);
+  if (preferences.responseStyle) {
+    texts.push(`User response style preference: ${String(preferences.responseStyle)}`);
+  }
   for (const project of arrayOf(context.currentProjects)) texts.push(`Current project: ${project}`);
   for (const goal of arrayOf(context.goals)) texts.push(`User goal: ${goal}`);
 
   return texts.map((text) => makeMemory(text, 'world', 'profile-migration', now, 0.8));
 }
 
-function summariesToMemories(summaries: LegacySummary[], now: number): MemoryRecord[] {
-  const result: MemoryRecord[] = [];
-  for (const summary of summaries) {
-    const text = asRecord(summary).summary;
-    if (typeof text !== 'string' || !text.trim()) continue;
-    const timestamp = asRecord(summary).timestamp;
-    result.push(makeMemory(
-      `Previous session: ${text.trim()}`,
+function summariesToMemories(summaries: unknown[], now: number): MemoryRecord[] {
+  const memories: MemoryRecord[] = [];
+  for (const item of summaries) {
+    const summary = asObject(item);
+    if (typeof summary.summary !== 'string' || !summary.summary.trim()) continue;
+    memories.push(makeMemory(
+      `Previous session: ${summary.summary.trim()}`,
       'experience',
       'summary-migration',
-      typeof timestamp === 'number' ? timestamp : now,
+      typeof summary.timestamp === 'number' ? summary.timestamp : now,
       0.65,
     ));
   }
-  return result;
+  return memories;
 }
 
 function makeMemory(
@@ -350,13 +341,13 @@ function isMemoryType(value: unknown): value is MemoryType {
   return value === 'world' || value === 'experience' || value === 'observation';
 }
 
-function normalizeSource(value: unknown): MemorySource {
-  const raw = asRecord(value);
-  const kind = isSourceKind(raw.kind) ? raw.kind : 'manual';
+function normalizeSource(raw: unknown): MemorySource {
+  const value = asObject(raw);
+  const kind = isSourceKind(value.kind) ? value.kind : 'manual';
   const source: MemorySource = { kind };
-  if (typeof raw.messageId === 'string') source.messageId = raw.messageId;
-  if (typeof raw.action === 'string') source.action = raw.action;
-  if (typeof raw.target === 'string') source.target = raw.target;
+  if (typeof value.messageId === 'string') source.messageId = value.messageId;
+  if (typeof value.action === 'string') source.action = value.action;
+  if (typeof value.target === 'string') source.target = value.target;
   return source;
 }
 
@@ -376,21 +367,34 @@ function extractSimpleEntities(text: string): string[] {
     .slice(0, 5);
 }
 
-/** 读取磁盘 JSON。结果是未校验的外部输入(unknown),调用方必须自行窄化。 */
-async function readJson(app: App, path: string, fallback: unknown): Promise<unknown> {
+/** 读取并解析 JSON;文件缺失或内容损坏时返回 undefined。解析结果未经校验,调用方必须窄化。 */
+async function readJson(app: App, path: string): Promise<unknown> {
   try {
     const adapter = app.vault.adapter;
-    if (!await adapter.exists(path)) return fallback;
+    if (!await adapter.exists(path)) return undefined;
     return JSON.parse(await adapter.read(path)) as unknown;
   } catch {
-    return fallback;
+    return undefined;
   }
 }
 
-/** 读取 summaries 文件;内容不是数组或元素不是对象时丢弃该部分,不让脏数据流入合并逻辑。 */
-async function readSummaries(app: App, path: string): Promise<LegacySummary[]> {
-  const raw = await readJson(app, path, []);
-  return Array.isArray(raw) ? (raw as unknown[]).filter(isRecord) : [];
+async function readJsonObject(app: App, path: string): Promise<JsonObject | null> {
+  const value = await readJson(app, path);
+  return isJsonObject(value) ? value : null;
+}
+
+async function readJsonArray(app: App, path: string): Promise<unknown[]> {
+  const value = await readJson(app, path);
+  return Array.isArray(value) ? (value as unknown[]) : [];
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 把任意值视为对象读取;非对象一律当作空对象,各字段随后按类型逐个窄化。 */
+function asObject(value: unknown): JsonObject {
+  return isJsonObject(value) ? value : {};
 }
 
 async function writeJson(app: App, path: string, value: unknown): Promise<void> {

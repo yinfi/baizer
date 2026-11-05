@@ -98,6 +98,24 @@ async function runTests() {
     expect(isPiApprovalResponse({ success: true })).toBe(false);
     expect(isPiApprovalResponse(null)).toBe(false);
   });
+
+  await test('rejects malformed approval payloads without throwing', () => {
+    expect(isPiApprovalResponse(undefined)).toBe(false);
+    expect(isPiApprovalResponse('approval_required')).toBe(false);
+    expect(isPiApprovalResponse(42)).toBe(false);
+    expect(isPiApprovalResponse({ approval_required: 'true' })).toBe(false);
+    expect(isPiApprovalResponse({ approvalRequired: true })).toBe(false);
+  });
+
+  await test('records a failed attempt for a malformed write result without inventing an error', () => {
+    const state = createPiFileWriteState(true);
+    recordPiFileWriteResult(state, 'update_file', 'not-an-object');
+    const text = resolvePiFinalText(state, 'updated A.md');
+
+    // 形状不对 → 既不算成功，也读不出 lastError，于是落到「未成功完成」的通用文案。
+    expect(text).toContain('No file was created or modified');
+    expect(text).toContain('no vault write tool completed successfully');
+  });
 }
 
 runTests().catch((e) => {

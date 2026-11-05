@@ -1,11 +1,11 @@
 // src/skills/builtin/knowledge/executor.ts
 
-import { Tool, ToolContext } from '../../types';
+import { Tool, ToolArgs, ToolContext } from '../../types';
+import { numArg, strArg, strArrayArg } from '../../tool-args';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import { QueryKnowledgeExecutor } from '../../../knowledge/query';
 import { FileBackExecutor } from '../../../knowledge/file-back';
-import { asNumber, asString, prop } from '../../../utils/narrow';
 
 /**
  * Knowledge 工具需要 executor 实例（运行时注入）
@@ -29,7 +29,10 @@ export function createKnowledgeTools(
     },
     async execute(args) {
       if (!queryExecutor) return { error: 'Knowledge system not initialized' };
-      return await queryExecutor.execute(args);
+      const query = strArg(args, 'query');
+      if (!query) return { error: 'Missing query parameter' };
+      const result = await queryExecutor.execute({ query, max_results: numArg(args, 'max_results') });
+      return { ...result };
     },
   };
 
@@ -50,7 +53,19 @@ export function createKnowledgeTools(
     },
     async execute(args) {
       if (!fileBackExecutor) return { error: 'Knowledge system not initialized' };
-      return await fileBackExecutor.execute(args);
+      const title = strArg(args, 'title');
+      const content = strArg(args, 'content');
+      if (title === undefined || content === undefined) {
+        return { success: false, error: 'Missing title or content parameter' };
+      }
+      return await fileBackExecutor.execute({
+        title,
+        content,
+        source_queries: strArrayArg(args, 'source_queries') ?? [],
+        related_sources: strArrayArg(args, 'related_sources') ?? [],
+        topics: strArrayArg(args, 'topics'),
+        source_url: strArg(args, 'source_url'),
+      });
     },
   };
 
@@ -59,11 +74,11 @@ export function createKnowledgeTools(
 
 export function createExecutor(registry: ToolRegistry): BuiltinExecutor {
   return {
-    async execute(args: unknown, ctx: ToolContext) {
+    async execute(args: ToolArgs, _ctx: ToolContext) {
       // simple mode: 直接执行 query_knowledge
-      const query = asString(prop(args, 'query')) || asString(prop(args, 'name')) || '';
+      const query = strArg(args, 'query') || strArg(args, 'name') || '';
       if (!query) return { error: 'Missing query parameter' };
-      return registry.execute('query_knowledge', { query, max_results: asNumber(prop(args, 'max_results')) || 3 });
+      return registry.execute('query_knowledge', { query, max_results: numArg(args, 'max_results') || 3 });
     },
   };
 }

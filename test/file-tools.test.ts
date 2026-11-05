@@ -272,6 +272,33 @@ async function runTests() {
       error: 'Writing .obsidian files is not allowed',
     });
   });
+
+  // 工具 args 是模型给的 JSON（外部输入）：非字符串 content 视为空内容，path 错误保持原文案。
+  await test('create_file treats non-string content as empty and keeps path errors', async () => {
+    const { app, created } = createMockApp();
+    const registry = new ToolRegistry(app, {
+      ...DEFAULT_SETTINGS,
+      allowFileCreation: true,
+      confirmExecutions: false,
+    });
+    registerVaultTools(registry);
+
+    const result = await registry.execute('create_file', {
+      path: 'Boards/numeric.canvas',
+      content: 42,
+    });
+    expect(result).toEqual({
+      success: true,
+      path: 'Boards/numeric.canvas',
+      message: 'File created: Boards/numeric.canvas',
+    });
+    expect(created).toEqual([{ path: 'Boards/numeric.canvas', content: '' }]);
+
+    expect(await registry.execute('create_file', null)).toEqual({
+      success: false,
+      error: 'Missing path parameter',
+    });
+  });
 }
 
 runTests().catch(console.error);

@@ -370,4 +370,71 @@ test('chunkDocument terminates when only heading is within overlap distance (no 
   expect(chunks.every(c => c.length > 0)).toBeTruthy();
 });
 
+// --- 回归：窄化后对畸形 AI 返回的处理 ---
+// 旧实现直接对 JSON.parse 的结果做属性访问/调用，遇到类型错误的字段会抛错，
+// 被外层 catch 吞掉 → 整份提取返回 null（编译被判失败）。
+// 现在按字段逐个窄化：坏字段被丢弃/归一化，基础字段仍然保留。
+
+test('parseCompilerResponse keeps returning null for a truthy non-array topics value (regression)', () => {
+  const response = '{"title":"T","topics":5,"concepts":[],"key_claims":[],"review_flags":[]}';
+  expect(parseCompilerResponse(response) === null).toBeTruthy();
+  // 假值 topics 仍视为「没有主题」。
+  expect(parseCompilerResponse('{"title":"T","topics":0}')!.topics.length).toBe(0);
+});
+
+test('parseCompilerResponse: a topic with a truthy non-string slug still yields null; strings and empty entries are tolerated (regression)', () => {
+  const bad = '{"title":"T","topics":[{"slug":5},{"slug":"ok","label":"OK"}]}';
+  expect(parseCompilerResponse(bad) === null).toBeTruthy();
+  const ok = '{"title":"T","topics":[{"slug":"ok","label":"OK"},"raw",{}]}';
+  const result = parseCompilerResponse(ok);
+  expect(result).toBeDefined();
+  expect(result!.topics.length).toBe(1);
+  expect(result!.topics[0].slug).toBe('ok');
+  expect(result!.topics[0].label).toBe('OK');
+});
+
+test('parseCompilerResponse coerces non-string concepts/key_claims/review_flags (regression)', () => {
+  const response = '{"title":"T","topics":[],"concepts":[1,"a"],"key_claims":[true],"review_flags":[2]}';
+  const result = parseCompilerResponse(response);
+  expect(result).toBeDefined();
+  expect(result!.concepts.length).toBe(2);
+  expect(result!.concepts[0]).toBe('1');
+  expect(result!.key_claims.length).toBe(1);
+  expect(result!.review_flags.length).toBe(1);
+  expect(result!.review_flags[0]).toBe('2');
+});
+
+test('parseCompilerResponse returns null when JSON is not an object (regression)', () => {
+  expect(parseCompilerResponse('[1,2,3]') === null).toBeTruthy();
+  expect(parseCompilerResponse('null') === null).toBeTruthy();
+  expect(parseCompilerResponse('"just a string"') === null).toBeTruthy();
+});
+
+test('parseCompilerResponse defaults non-string author/source_url/created_at to empty string (regression)', () => {
+  const response = '{"title":"T","author":5,"source_url":0,"created_at":null,"topics":[],"concepts":[],"key_claims":[],"review_flags":[]}';
+  const result = parseCompilerResponse(response);
+  expect(result).toBeDefined();
+  expect(result!.author).toBe('');
+  expect(result!.source_url).toBe('');
+  expect(result!.created_at).toBe('');
+});
+
+test('parseCompilerResponse filters malformed ontology entries (regression)', () => {
+  const response = JSON.stringify({
+    title: 'T',
+    topics: [],
+    concepts: [],
+    key_claims: [],
+    review_flags: [],
+    categorized_knowledge: [{ category: 'A', items: ['x', 1] }, null, { items: ['y'] }, 'nope'],
+    entities: [{ name: 'N', type: '人物' }, { name: 5, type: '人物' }, null],
+  });
+  const result = parseCompilerResponse(response);
+  expect(result).toBeDefined();
+  expect(result!.categorized_knowledge!.length).toBe(1);
+  expect(result!.categorized_knowledge![0].items.length).toBe(1);
+  expect(result!.entities!.length).toBe(1);
+  expect(result!.entities![0].name).toBe('N');
+});
+
 console.log('All compiler tests passed!');

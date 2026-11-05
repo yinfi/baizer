@@ -140,6 +140,53 @@ Instructions.`, '.obsidian/baizer/skills/clean-skill/SKILL.md');
     // 工具子集只在激活时成形，仍是"解析成功的那些"，未解析的仍被丢弃。
     expect(registry.activateSkill('typo-skill')?.tools.map(t => t.name)).toEqual(['real_tool']);
   });
+
+  // read_skill 的 args 是模型给的 JSON（外部输入）：缺参 / 错类型走既有错误，磁盘读不到时回退内存正文。
+  await test('read_skill narrows malformed args and falls back to in-memory instructions', async () => {
+    const { registerSkillReadTool } = await import('../src/skills/builtin/read-skill');
+
+    let diskContent: string | Error = new Error('EACCES');
+    const app = {
+      vault: {
+        adapter: {
+          read: async (_path: string) => {
+            if (diskContent instanceof Error) throw diskContent;
+            return diskContent;
+          },
+        },
+      },
+    } as any;
+    const toolRegistry = new ToolRegistry(app, DEFAULT_SETTINGS);
+    const resolved = {
+      filePath: '.obsidian/baizer/skills/demo/SKILL.md',
+      instructions: 'memory instructions',
+    };
+    const skillRegistry = {
+      resolveForRead: (name: string) => (name === 'demo' ? resolved : null),
+    } as any;
+    registerSkillReadTool(toolRegistry, skillRegistry);
+
+    expect(await toolRegistry.execute('read_skill', null)).toEqual({ error: 'Missing skill name' });
+    expect(await toolRegistry.execute('read_skill', { name: 42 })).toEqual({ error: 'Missing skill name' });
+    expect(await toolRegistry.execute('read_skill', { name: 'unknown' })).toEqual({
+      error: 'Skill "unknown" not found or disabled',
+    });
+
+    // 磁盘文件读失败 → 回退 resolveForRead 的内存正文；name 两端空白被裁掉。
+    expect(await toolRegistry.execute('read_skill', { name: '  demo  ' })).toEqual({
+      name: 'demo',
+      location: resolved.filePath,
+      instructions: 'memory instructions',
+    });
+
+    // 磁盘文件可读且非空 → 优先磁盘内容。
+    diskContent = 'disk instructions\n';
+    expect(await toolRegistry.execute('read_skill', { name: 'demo' })).toEqual({
+      name: 'demo',
+      location: resolved.filePath,
+      instructions: 'disk instructions\n',
+    });
+  });
 }
 
 runTests().catch((e) => {

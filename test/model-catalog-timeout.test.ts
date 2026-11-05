@@ -297,6 +297,75 @@ async function runTests() {
     expect(retried.error instanceof Error).toBe(true);
     expect(service.modelListInFlight.size).toBe(0);
   });
+
+  await test('(z) model list parsing ignores malformed rows and bodies', async () => {
+    const ok = (text: string) => async () => ({ status: 200, text }) as any;
+
+    const openai = await catalog.listModels(openaiConfig(), {
+      requestUrl: ok(JSON.stringify({ data: [null, 'x', 5, {}, { id: 7 }, { id: '  ' }, { id: 'gpt-4o ' }, { id: 'text-embedding-3' }, { id: 'b-model' }, { id: 'gpt-4o' }] })),
+    });
+    expect(openai.map((m: any) => m.value)).toEqual(['b-model', 'gpt-4o']);
+
+    for (const body of ['{}', 'null', '[]', '{"data":"x"}', '{"data":{}}']) {
+      expect(await catalog.listModels(openaiConfig(), { requestUrl: ok(body) })).toEqual([]);
+      expect(await catalog.listModels(anthropicConfig(), { requestUrl: ok(body) })).toEqual([]);
+    }
+
+    const anthropic = await catalog.listModels(anthropicConfig(), {
+      requestUrl: ok(JSON.stringify({ data: [null, { id: 3 }, { id: 'claude-a', display_name: 7 }, { id: 'claude-b', display_name: ' Claude B ' }, { id: 'claude-c', display_name: '   ' }] })),
+    });
+    expect(anthropic).toEqual([
+      { value: 'claude-a', label: 'claude-a' },
+      { value: 'claude-b', label: 'Claude B (claude-b)' },
+      { value: 'claude-c', label: 'claude-c' },
+    ]);
+  });
+
+  await test('(g) malformed model rows are dropped instead of failing the whole list', async () => {
+    const openaiModels = await catalog.listModels(openaiConfig(), {
+      requestUrl: async () => ({
+        status: 200,
+        text: JSON.stringify({
+          data: [
+            { id: 'gpt-4o' },
+            null,
+            'gpt-4o-mini',
+            { id: 42 },
+            { id: '  gpt-4o  ' },
+            { id: 'text-embedding-3-small' },
+          ],
+        }),
+      } as any),
+    });
+    // 非对象 / 非字符串 id 丢弃；id 去空白后按值去重；embedding 仍被关键词排除。
+    expect(openaiModels).toEqual([{ value: 'gpt-4o', label: 'gpt-4o' }]);
+
+    const anthropicModels = await catalog.listModels(anthropicConfig(), {
+      requestUrl: async () => ({
+        status: 200,
+        text: JSON.stringify({
+          data: [
+            { id: 'claude-x', display_name: '' },
+            { id: 'claude-y', display_name: 'Claude Y' },
+            { id: null },
+            'junk',
+          ],
+        }),
+      } as any),
+    });
+    expect(anthropicModels).toEqual([
+      { value: 'claude-x', label: 'claude-x' },
+      { value: 'claude-y', label: 'Claude Y (claude-y)' },
+    ]);
+  });
+
+  await test('(h) recognizes the listing-unsupported marker on plain objects', () => {
+    // 跨模块副本（或重建的异常）没有原型链，只能靠稳定 code 识别。
+    expect(catalog.isModelListingUnsupported({ code: 'model-listing-unsupported' })).toBe(true);
+    expect(catalog.isModelListingUnsupported({ code: 'something-else' })).toBe(false);
+    expect(catalog.isModelListingUnsupported('model-listing-unsupported')).toBe(false);
+    expect(catalog.isModelListingUnsupported(null)).toBe(false);
+  });
 }
 
 runTests().catch((e) => {

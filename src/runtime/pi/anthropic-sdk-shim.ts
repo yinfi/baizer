@@ -51,8 +51,6 @@
  *    （esbuild.config.mjs 的 aliasAnthropicSdkToShim 在构建期也做同样的核对。）
  */
 
-import { asString, prop } from '../../utils/narrow';
-
 /** Anthropic 官方端点（与 src/mcp/types.ts 的 DEFAULT_PROVIDERS.anthropic.baseUrl 一致）。 */
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
 
@@ -82,6 +80,17 @@ export interface AnthropicShimRequestOptions {
   headers?: Record<string, string | null | undefined>;
   /** pi 传 0 并自己用 retryProviderRequest 重试，本模块不实现重试。 */
   maxRetries?: number;
+}
+
+/**
+ * messages.create 的请求体。协议层由 pi-ai 负责组装,shim 不解释其内容,
+ * 只摘掉 betas / user_profile_id / workspace_id 三个字段,其余原样序列化。
+ */
+export interface AnthropicShimCreateParams {
+  betas?: unknown;
+  user_profile_id?: unknown;
+  workspace_id?: unknown;
+  [key: string]: unknown;
 }
 
 /** 构造函数入参，字段名逐字对齐 pi 的 createClient。 */
@@ -127,10 +136,12 @@ export class APIError extends Error {
     this.type = type ?? null;
   }
 
-  /** 与 SDK 的 APIError.makeMessage 逐字一致。error 是解析后的响应体,当外部输入处理。 */
+  /** 与 SDK 的 APIError.makeMessage 逐字一致。 */
   static makeMessage(status: number | undefined, error: unknown, message: string | undefined): string {
-    const errorMessage = prop(error, 'message');
-    const msg = errorMessage
+    const errorMessage: unknown = typeof error === 'object' && error !== null
+      ? (error as { message?: unknown }).message
+      : undefined;
+    const msg: string | undefined = errorMessage
       ? typeof errorMessage === 'string'
         ? errorMessage
         : JSON.stringify(errorMessage)
@@ -147,7 +158,6 @@ export class APIError extends Error {
    * 与 SDK 的 APIError.generate 等价（SDK 会按 status 返回 AuthenticationError /
    * RateLimitError 等子类；pi 只做 `instanceof APIError` 与读 status/type，
    * 故这里统一返回 APIError，避免为一个没人检查的类名多写 8 个空子类）。
-   * errorResponse 是解析后的响应体,当外部输入处理。
    */
   static generate(
     status: number | undefined,
@@ -155,7 +165,14 @@ export class APIError extends Error {
     message: string | undefined,
     headers: Headers | undefined,
   ): APIError {
-    const type = asString(prop(prop(errorResponse, 'error'), 'type'));
+    const inner: unknown = typeof errorResponse === 'object' && errorResponse !== null
+      ? (errorResponse as { error?: unknown }).error
+      : undefined;
+    const rawType: unknown = typeof inner === 'object' && inner !== null
+      ? (inner as { type?: unknown }).type
+      : undefined;
+    // 构造函数的 type 形参是 string | null | undefined;非字符串(畸形响应体)一律按「无 type」处理。
+    const type = typeof rawType === 'string' ? rawType : undefined;
     return new APIError(status, errorResponse, message, headers, type);
   }
 }
@@ -231,7 +248,7 @@ function joinUrl(baseURL: string | undefined, path: string): string {
 }
 
 /** JSON.parse，失败返回 undefined（对齐 SDK 的 safeJSON）。 */
-function safeJson(text: string): any {
+function safeJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
@@ -276,20 +293,20 @@ export default class Anthropic {
     });
   }
 
-  get beta(): { messages: { create: (params: any, options?: AnthropicShimRequestOptions) => AnthropicAPIPromise } } {
+  get beta(): { messages: { create: (params: AnthropicShimCreateParams, options?: AnthropicShimRequestOptions) => AnthropicAPIPromise } } {
     return { messages: { create: (params, options) => this.createMessage(params, options) } };
   }
 
   /** 非 beta 别名；pi 不用，但保留以免调用方切过去时缺方法。 */
-  get messages(): { create: (params: any, options?: AnthropicShimRequestOptions) => AnthropicAPIPromise } {
+  get messages(): { create: (params: AnthropicShimCreateParams, options?: AnthropicShimRequestOptions) => AnthropicAPIPromise } {
     return this.beta.messages;
   }
 
-  private createMessage(params: any, options?: AnthropicShimRequestOptions): AnthropicAPIPromise {
+  private createMessage(params: AnthropicShimCreateParams, options?: AnthropicShimRequestOptions): AnthropicAPIPromise {
     return new AnthropicAPIPromise(() => this.performRequest(params, options));
   }
 
-  private async performRequest(params: any, options?: AnthropicShimRequestOptions): Promise<Response> {
+  private async performRequest(params: AnthropicShimCreateParams, options?: AnthropicShimRequestOptions): Promise<Response> {
     // SDK 的 beta/messages.create 会把这三个字段从 body 里摘掉，betas 转成 header。
     const { betas, user_profile_id: _userProfileId, workspace_id: _workspaceId, ...body } = params ?? {};
 
@@ -353,9 +370,7 @@ export default class Anthropic {
    * （绕 CORS + 保留流式），模块加载期取到的会是替换前的原生 fetch。
    */
   private resolveFetch(): typeof fetch {
-    // window.fetch 可能被 main.ts 的 installRequestUrlFetchFallback() 运行期替换;
-    // 这里按声明类型读取(window 本身自带 fetch?: typeof fetch),不绕成 any。
-    const impl: typeof fetch | undefined = this.fetch ?? window.fetch;
+    const impl: typeof fetch | undefined = this.fetch ?? (window as { fetch?: typeof fetch }).fetch;
     if (typeof impl !== 'function') {
       throw new Error('anthropic-sdk-shim: no fetch implementation available in this environment.');
     }
@@ -393,8 +408,8 @@ export default class Anthropic {
   /** 非 2xx → APIError，读取 body 的规则照抄 SDK 的 client.js（errText → safeJSON → generate）。 */
   private async toApiError(response: Response): Promise<APIError> {
     const errText = await response.text().catch((error: unknown) => {
-      const message = asString(prop(error, 'message'));
-      return message ?? String(error);
+      const message = typeof error === 'object' && error !== null ? (error as { message?: unknown }).message : undefined;
+      return String(message ?? error);
     });
     const errJson = safeJson(errText);
     const errMessage = errJson ? undefined : errText;

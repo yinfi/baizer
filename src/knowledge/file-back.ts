@@ -3,7 +3,7 @@
 import { App } from 'obsidian';
 import { DEFAULT_WIKI_FOLDER, WIKI_ARTICLES_SUBFOLDER } from './types';
 import { WikiIndexer } from './indexer';
-import { asString, prop } from '../utils/narrow';
+import { errorMessage } from './ontology';
 
 /**
  * 生成 file-back ID
@@ -110,8 +110,8 @@ export class FileBackExecutor {
       await this.indexer.rebuildIndex();
 
       return { success: true, path: filePath };
-    } catch (e: unknown) {
-      return { success: false, error: asString(prop(e, 'message')) };
+    } catch (e) {
+      return { success: false, error: errorMessage(e) };
     }
   }
 }
