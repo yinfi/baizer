@@ -1,7 +1,6 @@
 import { parse } from 'yaml';
 import { PLUGIN_DATA_DIR } from '../mcp/types';
 import { computeSchemaHash } from '../knowledge/ontology';
-import { asString, prop } from '../utils/narrow';
 
 export interface ListedFilesLike {
   files: string[];
@@ -130,8 +129,9 @@ async function readBuiltinSourceHash(
 ): Promise<string | null> {
   if (!await adapter.exists(sourcePath)) return null;
   try {
-    const parsed = JSON.parse(await adapter.read(sourcePath)) as unknown;
-    return asString(prop(parsed, 'bundleHash')) ?? null;
+    const parsed = JSON.parse(await adapter.read(sourcePath)) as { bundleHash?: unknown } | null;
+    // JSON 为 null 时旧实现读 .bundleHash 会抛错并落入 catch → null,这里显式等价
+    return typeof parsed?.bundleHash === 'string' ? parsed.bundleHash : null;
   } catch {
     return null;
   }
@@ -259,17 +259,17 @@ function parseProvenance(frontmatter: string): SkillProvenance | null {
     return null;
   }
 
-  const source = prop(fm, 'source');
-  if (!source || typeof source !== 'object') return null;
+  const rawSource = typeof fm === 'object' && fm !== null ? (fm as { source?: unknown }).source : undefined;
+  if (!rawSource || typeof rawSource !== 'object') return null;
+  const source = rawSource as { plugin?: unknown; body_hash?: unknown; version?: unknown };
 
-  const plugin = asString(prop(source, 'plugin'))?.trim() ?? '';
-  const bodyHash = asString(prop(source, 'body_hash'))?.trim() ?? '';
+  const plugin = typeof source.plugin === 'string' ? source.plugin.trim() : '';
+  const bodyHash = typeof source.body_hash === 'string' ? source.body_hash.trim() : '';
   if (!plugin || !bodyHash) return null;
 
-  const rawVersion = prop(source, 'version');
-  const version = rawVersion === undefined || rawVersion === null
+  const version = source.version === undefined || source.version === null
     ? ''
-    : String(rawVersion).trim();
+    : String(source.version).trim();
   return { plugin, version, bodyHash };
 }
 
@@ -286,7 +286,8 @@ export async function readSkillProvenanceFromFile(
   try {
     raw = await readTextIfExists(adapter, filePath);
   } catch (e: unknown) {
-    console.warn(`[skill-files] Failed to read provenance from ${filePath}:`, prop(e, 'message') ?? e);
+    const message = typeof e === 'object' && e !== null ? (e as { message?: unknown }).message : undefined;
+    console.warn(`[skill-files] Failed to read provenance from ${filePath}:`, message ?? e);
     return absentProvenance();
   }
   if (raw === null) return absentProvenance();

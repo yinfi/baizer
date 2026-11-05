@@ -29,9 +29,9 @@ export class ThinkingRenderer {
   constructor(private timeline: HTMLElement, options: ThinkingRendererOptions = {}) {
     this.now = options.now ?? (() => Date.now());
     this.setIntervalFn = options.setInterval
-      ?? ((handler, ms) => globalThis.setInterval(handler, ms));
+      ?? ((handler, ms) => window.setInterval(handler, ms));
     this.clearIntervalFn = options.clearInterval
-      ?? ((id) => globalThis.clearInterval(id as number));
+      ?? ((id) => window.clearInterval(id as number));
   }
 
   appendThinking(content: string) {

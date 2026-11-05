@@ -1,14 +1,8 @@
 import { requestUrl } from 'obsidian';
-import { Tool, ToolContext } from '../../types';
+import { Tool, ToolArgs, ToolContext } from '../../types';
+import { strArg } from '../../tool-args';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
-import { asString, prop } from '../../../utils/narrow';
-
-interface WebSearchResult {
-  title: string;
-  link: string;
-  snippet: string;
-}
 
 interface WebSearchDeps {
   requestUrl: typeof requestUrl;
@@ -17,7 +11,7 @@ interface WebSearchDeps {
 
 const defaultDeps: WebSearchDeps = {
   requestUrl: (options) => requestUrl(options),
-  wait: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+  wait: (ms) => new Promise(resolve => window.setTimeout(resolve, ms)),
 };
 
 export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
@@ -38,11 +32,11 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
       },
       required: ['query'],
     },
-    async execute(rawArgs: unknown, _ctx: ToolContext) {
-      const query = asString(prop(rawArgs, 'query')) ?? '';
-      const timeRange = asString(prop(rawArgs, 'time_range'));
+    async execute(args, _ctx) {
+      const query = strArg(args, 'query') ?? '';
+      const timeRange = strArg(args, 'time_range');
       let searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-      if (timeRange) searchUrl += `&df=${timeRange}`;
+      if (timeRange) searchUrl += `&df=${encodeURIComponent(timeRange)}`;
 
       try {
         let html = '';
@@ -62,7 +56,7 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
           return { results: [], message: 'No results found or parsing failed.' };
         }
 
-        const results: WebSearchResult[] = [];
+        const results: { title: string; link: string; snippet: string }[] = [];
         let match;
         let count = 0;
         const regex = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
@@ -78,7 +72,7 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
         return results.length === 0
           ? { results: [], message: 'No results found or parsing failed.' }
           : { results };
-      } catch (error) {
+      } catch (error: unknown) {
         return { error: `Search failed: ${error instanceof Error ? error.message : String(error)}` };
       }
     },
@@ -88,7 +82,7 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
 const webSearchTool = createWebSearchTool();
 
 export const executor: BuiltinExecutor = {
-  async execute(args: unknown, ctx: ToolContext) {
+  async execute(args: ToolArgs, ctx: ToolContext) {
     return webSearchTool.execute(args, ctx);
   },
 };

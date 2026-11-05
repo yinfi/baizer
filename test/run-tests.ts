@@ -36,6 +36,7 @@ const tests = [
   'test/ghost-text.test.ts',
   'test/guardian-completion.test.ts',
   'test/file-operation-contract.test.ts',
+  'test/unknown-narrowing.test.ts',
   'test/chat-controller.test.ts',
   'test/message-projection.test.ts',
   'test/selection-menu.test.ts',
@@ -96,6 +97,7 @@ const tests = [
   'test/web-clipper.test.ts',
   'test/web-search.test.ts',
   'test/knowledge/compiler.test.ts',
+  'test/knowledge/executor.test.ts',
   'test/knowledge-status-service.test.ts',
   'test/knowledge/file-back.test.ts',
   'test/knowledge/indexer.test.ts',
@@ -108,6 +110,7 @@ const tests = [
   'test/knowledge/watcher.test.ts',
   'test/knowledge/frontmatter-idempotent.test.ts',
   'test/knowledge/frontmatter-fallback.test.ts',
+  'test/knowledge/narrowing-regression.test.ts',
   'test/throttle.test.ts',
   'test/action-registry.test.ts',
   'test/selection-context-builder.test.ts',
@@ -123,7 +126,7 @@ const tests = [
 for (const testFile of tests) {
   console.log(`Running ${testFile}...`);
   try {
-    execSync(`npx tsx --tsconfig tsconfig.test.json ${testFile}`, {
+    execSync(`npx tsx --tsconfig tsconfig.test.json --require ./test/setup-window.cjs ${testFile}`, {
       stdio: 'inherit',
       cwd: process.cwd(),
     });

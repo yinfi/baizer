@@ -4,7 +4,7 @@
 import { App, TFile, Notice } from 'obsidian';
 import { MetadataIndex } from './metadata-index';
 import { logger } from '../utils/logger';
-import { prop } from '../utils/narrow';
+import { isRecord } from './ontology';
 import {
   DEFAULT_WIKI_FOLDER,
   WIKI_INDEX_BASE_FILENAME,
@@ -92,7 +92,7 @@ export class WikiIndexer {
     if (oldIndex && oldIndex instanceof TFile) {
       const content = await this.app.vault.read(oldIndex);
       if (content.includes('knowledge_generated: true')) {
-        await this.app.vault.trash(oldIndex, true);
+        await this.app.fileManager.trashFile(oldIndex);
         logger.info('Migrated: removed legacy index.md', 'WikiIndexer');
       }
     }
@@ -105,7 +105,7 @@ export class WikiIndexer {
     for (const file of topicFiles) {
       const content = await this.app.vault.read(file);
       if (content.includes('knowledge_generated: true')) {
-        await this.app.vault.trash(file, true);
+        await this.app.fileManager.trashFile(file);
       }
     }
     if (topicFiles.length > 0) {
@@ -136,8 +136,10 @@ export class WikiIndexer {
 
     try {
       await this.app.vault.create(basePath, content);
-    } catch (e: unknown) {
-      if (String(prop(e, 'message') ?? e).includes('File already exists')) {
+    } catch (e) {
+      // 对齐旧 `e?.message ?? e` 语义：类 Error 对象取其 message，其余取原值
+      const detail = isRecord(e) && e.message !== undefined ? e.message : e;
+      if (String(detail).includes('File already exists')) {
         await adapter.write(basePath, content);
         return;
       }

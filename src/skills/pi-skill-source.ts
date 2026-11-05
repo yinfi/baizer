@@ -12,7 +12,6 @@
 //   - executionMode: direct（execute 直接返回）| instructions（注入指引）
 
 import { parse } from 'yaml';
-import { asArray, asString, prop } from '../utils/narrow';
 
 /**
  * skill 的数据模型（本地定义）。
@@ -64,13 +63,12 @@ export function parseBuiltinSkill(md: string, filePath: string): LoadedSkill | n
   const normalized = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const match = normalized.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
 
-  // YAML 解析结果是外部输入:以 unknown 承接,逐字段显式窄化。
-  let fm: unknown = {};
+  let fm: Record<string, unknown> = {};
   let body = normalized.trim();
   if (match) {
     try {
-      const parsedFrontmatter: unknown = parse(match[1]);
-      fm = parsedFrontmatter ?? {};
+      const parsedFm: unknown = parse(match[1]);
+      fm = typeof parsedFm === 'object' && parsedFm !== null ? (parsedFm as Record<string, unknown>) : {};
     } catch {
       // frontmatter YAML 解析失败：视为无 frontmatter，全文作 body。
       fm = {};
@@ -78,8 +76,8 @@ export function parseBuiltinSkill(md: string, filePath: string): LoadedSkill | n
     body = match[2].trim();
   }
 
-  const name = asString(prop(fm, 'name'))?.trim() ?? '';
-  const description = asString(prop(fm, 'description'))?.trim() ?? '';
+  const name = typeof fm.name === 'string' ? fm.name.trim() : '';
+  const description = typeof fm.description === 'string' ? fm.description.trim() : '';
   if (!name || !description) return null;
 
   // name 校验（保 SkillLoader parity）：小写字母/数字/连字符，≤64。
@@ -95,25 +93,29 @@ export function parseBuiltinSkill(md: string, filePath: string): LoadedSkill | n
       description,
       content: body,
       filePath,
-      disableModelInvocation: prop(fm, 'disable-model-invocation') === true,
+      disableModelInvocation: fm['disable-model-invocation'] === true,
     },
     sidecar: {
-      tools: (asArray(prop(fm, 'tools')) ?? []).filter(isString),
-      triggers: normalizeTriggers(prop(fm, 'triggers')),
-      executionMode: prop(fm, 'mode') === 'simple' ? 'direct' : 'instructions',
+      tools: stringItems(fm.tools) ?? [],
+      triggers: normalizeTriggers(fm.triggers),
+      executionMode: fm.mode === 'simple' ? 'direct' : 'instructions',
     },
   };
 }
 
-function isString(value: unknown): value is string {
-  return typeof value === 'string';
+/** 数组则只保留其中的字符串元素;不是数组返回 undefined。 */
+function stringItems(value: unknown): string[] | undefined {
+  return Array.isArray(value)
+    ? (value as unknown[]).filter((item): item is string => typeof item === 'string')
+    : undefined;
 }
 
 /** 归一化 triggers：只保留 commands / keywords 的字符串数组，其余丢弃。 */
 function normalizeTriggers(raw: unknown): SkillSidecar['triggers'] {
   if (!raw || typeof raw !== 'object') return undefined;
-  const commands = asArray(prop(raw, 'commands'))?.filter(isString);
-  const keywords = asArray(prop(raw, 'keywords'))?.filter(isString);
+  const triggers = raw as { commands?: unknown; keywords?: unknown };
+  const commands = stringItems(triggers.commands);
+  const keywords = stringItems(triggers.keywords);
   if (!commands?.length && !keywords?.length) return undefined;
   return { commands, keywords };
 }

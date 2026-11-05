@@ -1,7 +1,8 @@
 import type { App } from 'obsidian';
 import * as obsidian from 'obsidian';
 import { Readability } from '@mozilla/readability';
-import { Tool, ToolContext } from '../../types';
+import { Tool, ToolArgs, ToolContext, ToolResult } from '../../types';
+import { strArg } from '../../tool-args';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import {
@@ -11,7 +12,6 @@ import {
   resolveAsrConfig,
 } from '../../../mcp/types';
 import * as videoUtils from '../../../utils/video_utils';
-import { asString, prop } from '../../../utils/narrow';
 import { resolveSavedNotePath } from '../../../mcp/save-path';
 import type { ModelService } from '../../../services/model-service';
 import {
@@ -255,19 +255,13 @@ async function buildNonTranscriptContent(params: {
   );
 }
 
-/** save_webpage 工具入参窄化后的内部契约。 */
-interface SaveWebpageArgs {
-  url: string;
-  filename?: string;
-}
-
 async function saveVideo(
   url: string,
-  args: SaveWebpageArgs,
+  filenameArg: string | undefined,
   ctx: ToolContext,
   modelService: SummaryModel,
   deps: WebClipperDeps,
-): Promise<any> {
+): Promise<ToolResult | null> {
   const transcript = await deps.getVideoTranscript(url);
   if (!transcript) return null;
 
@@ -372,7 +366,7 @@ async function saveVideo(
     });
   }
 
-  let filename = sanitizeTitle(args.filename || transcript.title);
+  let filename = sanitizeTitle(filenameArg || transcript.title);
   if (!filename.endsWith('.md')) filename += '.md';
   const finalPath = resolveSavedNotePath(
     filename,
@@ -388,7 +382,7 @@ async function saveVideo(
   return { success: true, path: finalPath, message: `Video Note Saved: ${finalPath}` };
 }
 
-async function saveWebpage(url: string, args: SaveWebpageArgs, ctx: ToolContext, deps: WebClipperDeps): Promise<any> {
+async function saveWebpage(url: string, filenameArg: string | undefined, ctx: ToolContext, deps: WebClipperDeps): Promise<ToolResult> {
   const response = await deps.requestUrl({
     url,
     headers: {
@@ -486,7 +480,7 @@ async function saveWebpage(url: string, args: SaveWebpageArgs, ctx: ToolContext,
     throw new Error('Failed to convert webpage content to Markdown');
   }
 
-  let filename = args.filename || title;
+  let filename = filenameArg || title;
   if (!filename.endsWith('.md')) filename += '.md';
   const finalPath = resolveSavedNotePath(
     filename,
@@ -519,20 +513,18 @@ export function createSaveWebpageTool(modelService: SummaryModel, deps: WebClipp
       },
       required: ['url'],
     },
-    async execute(rawArgs: unknown, ctx: ToolContext) {
+    async execute(args, ctx) {
       // 入口即检查:已中断(上游超时/用户取消)则不发起任何网络请求或写盘。
       if (ctx.signal?.aborted) {
         return { success: false, error: 'Aborted before saving note', aborted: true };
       }
-      const args: SaveWebpageArgs = {
-        url: asString(prop(rawArgs, 'url')) ?? '',
-        filename: asString(prop(rawArgs, 'filename')),
-      };
+      const url = strArg(args, 'url') ?? '';
+      const filename = strArg(args, 'filename');
       try {
-        const videoResult = await saveVideo(args.url, args, ctx, modelService, deps);
+        const videoResult = await saveVideo(url, filename, ctx, modelService, deps);
         if (videoResult) return videoResult;
-        return await saveWebpage(args.url, args, ctx, deps);
-      } catch (e) {
+        return await saveWebpage(url, filename, ctx, deps);
+      } catch (e: unknown) {
         return { success: false, error: e instanceof Error ? e.message : String(e) };
       }
     },
@@ -542,7 +534,7 @@ export function createSaveWebpageTool(modelService: SummaryModel, deps: WebClipp
 export function createExecutor(modelService: SummaryModel): BuiltinExecutor {
   const tool = createSaveWebpageTool(modelService);
   return {
-    async execute(args: unknown, ctx: ToolContext) {
+    async execute(args: ToolArgs, ctx: ToolContext) {
       return tool.execute(args, ctx);
     },
   };

@@ -268,7 +268,7 @@ export class HindsightStore {
   private async tryReadMemories(path: string): Promise<MemoryRecord[] | null> {
     try {
       if (!await this.adapter().exists(path)) return null;
-      const parsed = JSON.parse(await this.adapter().read(path));
+      const parsed: unknown = JSON.parse(await this.adapter().read(path));
       return Array.isArray(parsed) ? (parsed as MemoryRecord[]) : null;
     } catch {
       return null;

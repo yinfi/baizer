@@ -1,5 +1,4 @@
 import { App } from 'obsidian';
-import { prop } from '../utils/narrow';
 import {
     MemoryMutationResult,
     MemoryView,
@@ -13,9 +12,9 @@ import {
     sanitizeMemoryText,
     tokenizeForRetrieval,
     withTextTimeout,
+    MemoryRecord,
     RetainTurnInput,
     RetainLessonInput,
-    MemoryRecord,
 } from './hindsight-types';
 import { HindsightConsolidator } from './hindsight-consolidator';
 import { importPreviousMemoryFiles, migrateLegacyMemory } from './hindsight-migration';
@@ -311,7 +310,7 @@ export class MemoryManager {
         if (!text) return [];
         let parsed: unknown;
         try {
-            parsed = JSON.parse(text);
+            parsed = JSON.parse(text) as unknown;
         } catch {
             // 非 JSON:退化成按行的纯文本(无实体)。
             return text.split('\n')
@@ -324,13 +323,12 @@ export class MemoryManager {
         const result: Array<{ text: string; entities?: string[] }> = [];
         for (const el of parsed as unknown[]) {
             // 兼容:元素可能是对象 {text,entities} 或纯字符串。
-            const elText = prop(el, 'text');
-            const rawText = typeof el === 'string' ? el : (typeof elText === 'string' ? elText : '');
+            const obj = (typeof el === 'object' && el !== null) ? el as Record<string, unknown> : null;
+            const rawText = typeof el === 'string' ? el : (obj && typeof obj.text === 'string' ? obj.text : '');
             const clean = sanitizeMemoryText(rawText.replace(/^[-*\d.\s]+/, '').trim());
             if (clean.length < 2) continue;
-            const elEntities = prop(el, 'entities');
-            const entities = Array.isArray(elEntities)
-                ? (elEntities as unknown[]).map((x) => String(x))
+            const entities = (obj && Array.isArray(obj.entities))
+                ? (obj.entities as unknown[]).map((x) => String(x))
                 : undefined;
             result.push({ text: clean, entities });
             if (result.length >= 5) break;
@@ -344,7 +342,7 @@ export class MemoryManager {
         if (!text) return [];
         let items: string[] = [];
         try {
-            const parsed: unknown = JSON.parse(text);
+            const parsed = JSON.parse(text) as unknown;
             if (Array.isArray(parsed)) items = (parsed as unknown[]).map((x) => String(x));
         } catch {
             items = text.split('\n');
@@ -736,7 +734,7 @@ export class MemoryManager {
     }
 
     private tagsForText(text: string): string[] {
-        const tags: string[] = [];
+        const tags = [];
         const normalizedText = normalizeMemoryText(text);
         if (/prefer|偏好|喜欢/i.test(text)) tags.push('preference');
         if (/project|项目/i.test(text)) tags.push('project');

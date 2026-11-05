@@ -1,4 +1,4 @@
-import type { Model } from '@earendil-works/pi-ai';
+import type { Api, Model } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { ChatContextItem, StreamEvent, ToolDefinition } from '../models/interfaces';
 import type { MemoryManager } from '../memory/memory-manager';
@@ -25,7 +25,7 @@ import type { ActiveRunController } from './active-run-controller';
  * 避免 runtime 自己拼装 provider 细节。
  */
 export interface NativeChatHandle {
-  model: Model<any>;
+  model: Model<Api>;
   /**
    * pi 1.3.0 的 `AgentOptions.streamFn` 是必填字段，`Agent` 不再自己按 model.api
    * 路由到 api-registry。提供时优先使用（测试注入「假 LLM 响应」的入口）；

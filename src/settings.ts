@@ -12,7 +12,7 @@ import type {
 } from './skills/builtin/plugin-ctrl/plugin-watcher';
 import { t, getLocale, Locale } from './i18n/zh';
 import { createRenderScheduler, type RenderScheduler } from './utils/render-scheduler';
-import { asString, prop } from './utils/narrow';
+import { thrownMessage } from './utils/thrown-message';
 
 export type SettingsSectionId =
     | 'overview'
@@ -80,8 +80,6 @@ interface SettingsSectionMeta {
     description: string;
     keywords: string[];
 }
-
-const SETTINGS_FALLBACK_STYLE_ID = 'baizer-settings-fallback-styles';
 
 export function getSettingsFallbackCss(): string {
     return `
@@ -667,20 +665,21 @@ export function getSettingsFallbackCss(): string {
 }
 `;
 }
+let settingsFallbackSheet: CSSStyleSheet | null = null;
+
+/**
+ * 兜底样式以 constructable stylesheet 挂到 document.adoptedStyleSheets(排在 styles.css 之后,
+ * 优先级与原先末尾注入的 <style> 相同),不再创建 <style> 元素。重复调用只刷新内容(t() 随 locale 变化)。
+ */
 function ensureSettingsFallbackStyles(): void {
     const doc = typeof document === 'undefined' ? null : document;
-    if (!doc) return;
+    if (!doc || typeof CSSStyleSheet === 'undefined' || !('adoptedStyleSheets' in doc)) return;
 
-    const existing = doc.getElementById(SETTINGS_FALLBACK_STYLE_ID);
-    if (existing) {
-        existing.textContent = getSettingsFallbackCss();
-        return;
+    if (!settingsFallbackSheet) settingsFallbackSheet = new CSSStyleSheet();
+    settingsFallbackSheet.replaceSync(getSettingsFallbackCss());
+    if (!doc.adoptedStyleSheets.includes(settingsFallbackSheet)) {
+        doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, settingsFallbackSheet];
     }
-
-    const styleEl = doc.createElement('style');
-    styleEl.id = SETTINGS_FALLBACK_STYLE_ID;
-    styleEl.textContent = getSettingsFallbackCss();
-    doc.head?.appendChild(styleEl);
 }
 
 // 惰性求值：t() 依赖当前 locale，必须在调用时（而非模块加载时）求值，
@@ -1376,7 +1375,7 @@ export function renderModelField(container: HTMLElement, deps: ModelFieldDeps): 
             deps.onLoaded?.(result);
             if (deps.isStale()) return;
             applyState(result);
-        } catch (caught: any) {
+        } catch (caught: unknown) {
             // getAvailableModelsWithStatus 自己吞异常并回落，这里只兜底意外抛出：
             // 仍然保持可手填，但如实报成 error，不假装「列表可用」。
             if (deps.isStale()) return;
@@ -2175,7 +2174,7 @@ export class SettingTab extends PluginSettingTab {
                 limit: 25,
             });
         } catch (error: unknown) {
-            this.memoryError = asString(prop(error, 'message')) || t('Failed to load memory.');
+            this.memoryError = thrownMessage(error) || t('Failed to load memory.');
         } finally {
             this.memoryLoading = false;
             this.renderAccordion();
@@ -2860,7 +2859,7 @@ export class SettingTab extends PluginSettingTab {
                         label,
                         stage: 'unreachable',
                         endpoint,
-                        reason: asString(prop(error, 'message')) || t('unknown reason'),
+                        reason: thrownMessage(error) || t('unknown reason'),
                     });
                 }
 
@@ -3768,7 +3767,7 @@ export class SettingTab extends PluginSettingTab {
             statusEl.title = title;
         } catch (e: unknown) {
             if (!statusEl.isConnected) return;
-            statusEl.textContent = `${t('Ontology status unavailable')}: ${String(prop(e, 'message'))}`;
+            statusEl.textContent = `${t('Ontology status unavailable')}: ${thrownMessage(e)}`;
         }
     }
 

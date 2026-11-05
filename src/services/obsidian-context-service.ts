@@ -217,9 +217,9 @@ export class ObsidianContextService {
     if (!backlinkMap) return [];
 
     // Current Obsidian wraps the map in `data`; retain direct-map compatibility.
-    const paths = backlinkMap instanceof Map ? backlinkMap
+    const paths: Map<string, unknown> | Record<string, unknown> = backlinkMap instanceof Map ? backlinkMap
       : backlinkMap.data instanceof Map ? backlinkMap.data : backlinkMap;
-    const entries = Array.from(paths instanceof Map ? paths.keys() : Object.keys(paths));
+    const entries: string[] = Array.from(paths instanceof Map ? paths.keys() : Object.keys(paths));
     const results: Array<{ path: string; summary: string }> = [];
 
     for (const path of entries.slice(0, this.options.maxBacklinks)) {

@@ -85,7 +85,7 @@ export class ConversationStore {
             }
 
             const raw = await adapter.read(this.path);
-            const parsed = JSON.parse(raw);
+            const parsed: unknown = JSON.parse(raw);
             if (!this.isConversationFile(parsed)) {
                 return this.emptyFile();
             }

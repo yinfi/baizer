@@ -282,10 +282,12 @@ async function runTests() {
   await test('the persisted settings entry point no longer asserts untrusted JSON', () => {
     expect(mainSource.includes('(raw as any)')).toBeFalsy();
     expect(mainSource.includes('const old = raw as any')).toBeFalsy();
-    expect(mainSource.includes('const raw: Record<string, unknown> = (await this.loadData()) || {};')).toBeTruthy();
+    // loadData() 返回 any：先收进 unknown，再按「非 null 对象才采用，否则空对象」窄化。
+    expect(mainSource.includes('const loaded: unknown = await this.loadData();')).toBeTruthy();
+    expect(mainSource.includes('const raw: Record<string, unknown> = typeof loaded === \'object\' && loaded !== null')).toBeTruthy();
     expect(mainSource.includes('const old: LegacyFlatSettings = raw;')).toBeTruthy();
-    // `|| {}` 而不是 `?? {}`：loadData 返回假值时也要兜底成空对象。
     expect(mainSource.includes('(await this.loadData()) ?? {}')).toBeFalsy();
+    expect(mainSource.includes('(await this.loadData()) || {}')).toBeFalsy();
   });
 
   // ── 4. 事件/回调接线没有因为类型清理而改变 ──

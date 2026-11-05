@@ -127,7 +127,6 @@ export class ShellView extends ItemView {
     /** 流式增量渲染:尾部未闭合内容的纯文本节点。块一旦闭合(遇到围栏外空行)即晋升进 streamStableEl。 */
     private streamTailEl: HTMLElement | null = null;
     /** 流式增量渲染:闪烁光标,始终位于尾部之后。 */
-    private streamCursorEl: HTMLElement | null = null;
     /** 已晋升为稳定块的文本前缀长度(streamAccumulatedText 的字符数),尾部从此处开始。 */
     private streamRenderedLen = 0;
     private streamAccumulatedText: string = '';
@@ -876,7 +875,7 @@ export class ShellView extends ItemView {
         if (this.dehydratedEntries.has(el)) return;
         const height = el.offsetHeight;
         if (height <= 0) return; // 不可见(display:none 的后台 tab 或尚未布局)——不处理
-        const fragment = document.createDocumentFragment();
+        const fragment = createFragment();
         while (el.firstChild) fragment.appendChild(el.firstChild);
         el.setCssStyles({ minHeight: `${height}px` });
         el.classList.add('shell-entry-dehydrated');
@@ -1030,7 +1029,6 @@ export class ShellView extends ItemView {
         // 让下一轮正文从头开始块级渲染,不残留上一轮的稳定块。
         this.streamStableEl = null;
         this.streamTailEl = null;
-        this.streamCursorEl = null;
         this.streamRenderedLen = 0;
     }
 
@@ -1066,9 +1064,7 @@ export class ShellView extends ItemView {
             this.streamContent.empty();
             this.streamStableEl = this.streamContent.createDiv({ cls: 'shell-stream-stable' });
             this.streamTailEl = this.streamContent.createDiv({ cls: 'shell-stream-plaintext' });
-            this.streamCursorEl = document.createElement('span');
-            this.streamCursorEl.className = 'shell-stream-cursor';
-            this.streamContent.appendChild(this.streamCursorEl);
+            this.streamContent.createSpan({ cls: 'shell-stream-cursor' });
             this.streamRenderedLen = 0;
         }
 
@@ -1223,7 +1219,6 @@ export class ShellView extends ItemView {
         this.streamContent = null;
         this.streamStableEl = null;
         this.streamTailEl = null;
-        this.streamCursorEl = null;
         this.streamRenderedLen = 0;
         this.streamAccumulatedText = '';
         this.streamPriorLastAiId = null;
@@ -1328,7 +1323,11 @@ export class ShellView extends ItemView {
             return;
         }
 
-        const target = approval.target || approval.args?.path || approval.args?.filename;
+        const argPath = approval.args?.path;
+        const argFilename = approval.args?.filename;
+        const target = approval.target
+            || (typeof argPath === 'string' ? argPath : '')
+            || (typeof argFilename === 'string' ? argFilename : '');
         if (target) {
             await this.openApprovalTarget(target);
         }
@@ -1432,7 +1431,7 @@ export class ShellView extends ItemView {
 
     private stopHeartbeat() {
         if (this.heartbeatInterval) {
-            clearInterval(this.heartbeatInterval);
+            window.clearInterval(this.heartbeatInterval);
             this.heartbeatInterval = null;
         }
     }
@@ -1508,7 +1507,7 @@ export class ShellView extends ItemView {
                 (this.app as AppWithCommands).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
             },
             onCopyPath: (path) => {
-                void globalThis.navigator?.clipboard?.writeText?.(path);
+                void window.navigator?.clipboard?.writeText?.(path);
                 new Notice('Copied note path.');
             },
             onOpenSettings: () => this.openPluginSettings(),
@@ -2571,7 +2570,6 @@ export class ShellView extends ItemView {
         this.streamContent = null;
         this.streamStableEl = null;
         this.streamTailEl = null;
-        this.streamCursorEl = null;
         this.streamRenderedLen = 0;
         this.streamAccumulatedText = '';
         this.streamPriorLastAiId = null;

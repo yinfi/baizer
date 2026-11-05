@@ -68,8 +68,7 @@ class GuardianDotMarker extends GutterMarker {
     }
 
     toDOM() {
-        const dot = document.createElement('div');
-        dot.className = `guardian-gutter-marker guardian-${this.state}`;
+        const dot = createDiv({ cls: `guardian-gutter-marker guardian-${this.state}` });
 
         // Click handler to toggle mode
         dot.onclick = (e) => {
@@ -113,7 +112,7 @@ interface GuardianMarkerState {
 // StateField to manage Gutter Markers (Follows Cursor)
 const guardianMarkerField = StateField.define<GuardianMarkerState>({
     create() {
-        return { set: RangeSet.empty, effectiveState: GuardianState.Idle, from: -1 };
+        return { set: RangeSet.of<GutterMarker>([]), effectiveState: GuardianState.Idle, from: -1 };
     },
 
     update(prev, tr) {

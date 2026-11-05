@@ -3,6 +3,18 @@
 import { App, TFile } from 'obsidian';
 import { WIKI_HEALTH_SUBFOLDER } from './types';
 import { getFilesByKnowledgeStatus } from './frontmatter';
+import { readNonEmptyString } from './ontology';
+
+/** 解析 frontmatter 中以 JSON 字符串存储的数组字段；结果非数组时返回 [] */
+function parseJsonStringList(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    // 非 JSON 字符串：忽略
+  }
+  return [];
+}
 
 export type LintIssueType =
   | 'missing_summary'
@@ -152,9 +164,10 @@ export class KnowledgeLinter {
     const doneFiles = getFilesByKnowledgeStatus(this.app, 'done');
     const doneInfo = doneFiles.map(f => {
       const cache = this.app.metadataCache.getFileCache(f);
+      const summaryPath: unknown = cache?.frontmatter?.knowledge_summary;
       return {
         path: f.path,
-        summaryPath: cache?.frontmatter?.knowledge_summary ?? null
+        summaryPath: typeof summaryPath === 'string' ? summaryPath : null
       };
     });
     allIssues.push(...checkMissingSummaries(doneInfo, existingFiles));
@@ -172,20 +185,20 @@ export class KnowledgeLinter {
       const fm = cache?.frontmatter;
       if (!fm || !fm.knowledge_generated) continue;
 
-      const title = fm.title || file.basename;
+      const title = readNonEmptyString(fm.title) ?? file.basename;
       let reviewFlags: string[] = [];
       if (Array.isArray(fm.review_flags)) {
-        reviewFlags = fm.review_flags;
+        reviewFlags = fm.review_flags.map(String);
       } else if (typeof fm.review_flags === 'string') {
-        try { reviewFlags = JSON.parse(fm.review_flags); } catch { /* malformed frontmatter: keep the empty default */ }
+        reviewFlags = parseJsonStringList(fm.review_flags);
       }
       summaries.push({ path: file.path, title, reviewFlags });
 
       let concepts: string[] = [];
       if (Array.isArray(fm.concepts)) {
-        concepts = fm.concepts;
+        concepts = fm.concepts.map(String);
       } else if (typeof fm.concepts === 'string') {
-        try { concepts = JSON.parse(fm.concepts); } catch { /* malformed frontmatter: keep the empty default */ }
+        concepts = parseJsonStringList(fm.concepts);
       }
       for (const c of concepts) {
         if (!conceptMap[c]) conceptMap[c] = [];
@@ -207,7 +220,7 @@ export class KnowledgeLinter {
     const reportPath = `${reportDir}/report.md`;
 
     if (!this.app.vault.getAbstractFileByPath(reportDir)) {
-      try { await this.app.vault.createFolder(reportDir); } catch { /* folder may already exist (concurrent create) */ }
+      try { await this.app.vault.createFolder(reportDir); } catch {}
     }
 
     const existing = this.app.vault.getAbstractFileByPath(reportPath);

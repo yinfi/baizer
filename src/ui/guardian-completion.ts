@@ -248,12 +248,12 @@ export class GuardianCompletionService {
     const timeoutMs = mode === 'deep'
       ? (this.deps.deepCompletionTimeoutMs ?? 20000)
       : (this.deps.completionTimeoutMs ?? 9000);
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let timeoutHandle: number | null = null;
     try {
       return await Promise.race([
         this.completeAutoInner(input),
         new Promise<GuardianCompletionResult>((resolve) => {
-          timeoutHandle = setTimeout(() => {
+          timeoutHandle = window.setTimeout(() => {
             this.emitDiagnostic({
               stage: 'completion-timeout',
               requestId: input.requestId,
@@ -266,7 +266,7 @@ export class GuardianCompletionService {
       ]);
     } finally {
       if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
+        window.clearTimeout(timeoutHandle);
       }
     }
   }
@@ -571,12 +571,12 @@ export class GuardianCompletionService {
       contextLength: query.length,
     });
 
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let timeoutHandle: number | null = null;
     let timedOut = false;
     const raw = await Promise.race([
       fetcher(query),
       new Promise<string>((resolve) => {
-        timeoutHandle = setTimeout(() => {
+        timeoutHandle = window.setTimeout(() => {
           timedOut = true;
           this.emitDiagnostic({
             stage: 'knowledge-timeout',
@@ -589,7 +589,7 @@ export class GuardianCompletionService {
       }),
     ]);
     if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
+      window.clearTimeout(timeoutHandle);
     }
     if (raw) {
       this.emitDiagnostic({
@@ -631,14 +631,14 @@ export class GuardianCompletionService {
       contextLength: query.length,
     });
 
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let timeoutHandle: number | null = null;
     const raw = await Promise.race([
       recall.call(this.deps.modelService, query, 500).catch(() => ''),
       new Promise<string>((resolve) => {
-        timeoutHandle = setTimeout(() => resolve(''), timeoutMs);
+        timeoutHandle = window.setTimeout(() => resolve(''), timeoutMs);
       }),
     ]);
-    if (timeoutHandle) clearTimeout(timeoutHandle);
+    if (timeoutHandle) window.clearTimeout(timeoutHandle);
 
     this.emitDiagnostic({
       stage: 'deep-memory-finished',

@@ -64,11 +64,12 @@ async function runTests() {
         modified.push(file.path);
       },
       read: async () => 'current',
-      trash: async () => { },
+      configDir: '.obsidian',
       rename: async () => { },
       getMarkdownFiles: () => [],
       getFiles: () => [],
     },
+    fileManager: { trashFile: async () => { } },
     metadataCache: {
       getFirstLinkpathDest: (path: string) => files.get(path) || null,
     },

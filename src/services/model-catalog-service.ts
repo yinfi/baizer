@@ -3,7 +3,6 @@ import { ModelOption } from '../models/interfaces';
 import { ProviderConfig } from '../mcp/types';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import { logger } from '../utils/logger';
-import { asArray, asString, prop } from '../utils/narrow';
 
 /**
  * model-catalog-service —— provider 元数据服务（非 runtime）。
@@ -49,13 +48,7 @@ export class ModelListingUnsupportedError extends Error {
 /** 判断错误是否为「端点不支持列模型」（而非 key / 网络 / 限流问题）。 */
 export function isModelListingUnsupported(error: unknown): error is ModelListingUnsupportedError {
   return error instanceof ModelListingUnsupportedError
-    || prop(error, 'code') === 'model-listing-unsupported';
-}
-
-/** 解析 /models 响应体并取出 `data` 数组；形状不符时返回空数组。 */
-function parseModelRows(text: string | undefined): unknown[] {
-  const data: unknown = JSON.parse(text || '{}');
-  return asArray(prop(data, 'data')) ?? [];
+    || (typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'model-listing-unsupported');
 }
 
 /**
@@ -119,7 +112,7 @@ function requestModelsWithTimeout(
     let settled = false;
 
     function cleanup(): void {
-      clearTimeout(timer);
+      window.clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
     }
 
@@ -134,7 +127,7 @@ function requestModelsWithTimeout(
       finish(() => reject(createAbortError()));
     }
 
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       finish(() => reject(new Error(`Model list request timed out after ${timeoutMs}ms: ${url}`)));
     }, Math.max(0, timeoutMs));
 
@@ -282,15 +275,15 @@ async function listOpenAICompatModels(config: ProviderConfig, deps?: ModelCatalo
     'dall-e', 'image', 'audio-preview', 'omni-moderation',
   ];
 
-  const options = rows
-    .map((row: unknown) => (asString(prop(row, 'id'))?.trim() ?? ''))
-    .filter((id: string) => {
+  const options: ModelOption[] = rows
+    .map((row) => readTrimmedString(row, 'id'))
+    .filter((id) => {
       if (!id) return false;
       const lower = id.toLowerCase();
       return !excludedKeywords.some(keyword => lower.includes(keyword));
     })
-    .map((id: string) => ({ value: id, label: id }))
-    .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
+    .map((id): ModelOption => ({ value: id, label: id }))
+    .sort((a, b) => a.value.localeCompare(b.value));
 
   return dedupeByValue(options);
 }
@@ -332,18 +325,31 @@ async function listAnthropicModels(config: ProviderConfig, deps?: ModelCatalogDe
   const rows = parseModelRows(response.text);
 
   const options: ModelOption[] = rows
-    .map((row: unknown): ModelOption | null => {
-      const value = asString(prop(row, 'id'))?.trim() ?? '';
+    .map((row): ModelOption | null => {
+      const value = readTrimmedString(row, 'id');
       if (!value) return null;
-      const rawDisplayName = asString(prop(row, 'display_name'))?.trim() ?? '';
-      const displayName = rawDisplayName.length > 0 ? rawDisplayName : value;
+      const displayName = readTrimmedString(row, 'display_name') || value;
       const label = displayName === value ? value : `${displayName} (${value})`;
       return { value, label };
     })
-    .filter((option: ModelOption | null): option is ModelOption => option !== null)
-    .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
+    .filter((option): option is ModelOption => option !== null)
+    .sort((a, b) => a.value.localeCompare(b.value));
 
   return dedupeByValue(options);
+}
+
+/** 解析 /models 响应体，取出 `data` 数组；形状不符时返回空数组。 */
+function parseModelRows(text: string | undefined): unknown[] {
+  const data: unknown = JSON.parse(text || '{}');
+  const rows = typeof data === 'object' && data !== null ? (data as { data?: unknown }).data : undefined;
+  return Array.isArray(rows) ? rows : [];
+}
+
+/** 读取对象上的字符串字段并 trim；非字符串或字段缺失时返回空串。 */
+function readTrimmedString(row: unknown, key: string): string {
+  if (typeof row !== 'object' || row === null) return '';
+  const value = (row as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function dedupeByValue(options: ModelOption[]): ModelOption[] {

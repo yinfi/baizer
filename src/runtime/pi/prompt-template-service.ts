@@ -30,8 +30,6 @@ export interface PromptTemplateEnv {
   readTextFile(path: string): Promise<{ ok: true; value: string } | { ok: false; error: unknown }>;
 }
 
-const DEFAULT_COMMANDS_DIR = '.obsidian/baizer-commands';
-
 /**
  * 用户自定义 slash 命令服务。
  *
@@ -51,7 +49,8 @@ export class PromptTemplateService {
 
   constructor(
     private readonly env: PromptTemplateEnv | null | undefined,
-    private readonly commandsDir: string = DEFAULT_COMMANDS_DIR,
+    /** 命令模板目录(vault 相对,位于 Vault#configDir 下)。 */
+    private readonly commandsDir: string,
   ) {}
 
   /**
