@@ -254,7 +254,7 @@ async function runTests() {
     expect(between.includes('Notice')).toBeFalsy();
   });
 
-  await test('the legacy flat-format branch no longer synthesises a gemini entry nor migrates Google credentials', () => {
+  await test('the legacy flat-format branch delegates mapping to the pure migration helper and still persists it', () => {
     const branchStart = mainSource.indexOf('if (!raw.providers');
     const branchEnd = mainSource.indexOf('// 确保 providers 中包含所有默认 provider', branchStart);
 
@@ -269,8 +269,10 @@ async function runTests() {
       .map(line => line.replace(/\/\/.*$/, ''))
       .join('\n');
 
-    // 旧格式仍然迁移 OpenAI 兼容那几家的凭证……
-    expect(branchCode.includes('old.openaiApiKey')).toBeTruthy();
+    // 字段映射集中在 buildProvidersFromLegacySettings（行为覆盖见
+    // main-lint-cleanup.test.ts），分支本身只负责触发条件 + 接线 + 落盘。
+    expect(branchCode.includes('buildProvidersFromLegacySettings')).toBeTruthy();
+    expect(branchCode.includes('saveData')).toBeTruthy();
     // ……但不再有 gemini 条目，也不再把 Google 的 key/model 塞进别的协议。
     expect(branchCode.toLowerCase().includes('gemini')).toBeFalsy();
     expect(branchCode.includes('old.apiKey')).toBeFalsy();
