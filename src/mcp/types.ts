@@ -386,6 +386,72 @@ export function pruneUnsupportedProviders(
     return kept;
 }
 
+/**
+ * 旧版（providers map 之前）data.json 的扁平设置。
+ *
+ * 只声明迁移分支实际读取的字段，且全部可选：它描述的是「历史上可能以这些
+ * 键名出现过什么」，不是一份完整的有效设置。持久化数据是不可信输入，入口处
+ * 先按 `Record<string, unknown>` 收窄，再把这个视图用于迁移分支。
+ *
+ * 刻意不包含旧版 Google 的 `apiKey` / `primaryModel`：'gemini' 协议已移除，
+ * 把 Google 凭证塞进一个 openai-compatible 条目只会得到「看着配好了、实际
+ * 必然失败」的 provider，所以那两项不再迁移。
+ */
+export interface LegacyFlatSettings {
+    provider?: string;
+    openaiApiKey?: string;
+    openaiBaseUrl?: string;
+    openaiModel?: string;
+    deepseekApiKey?: string;
+    deepseekBaseUrl?: string;
+    deepseekModel?: string;
+    qwenApiKey?: string;
+    qwenBaseUrl?: string;
+    qwenModel?: string;
+}
+
+export interface LegacyFlatSettingsMigration {
+    /** 旧版选中的 provider 原样带入（可能是已移除的 'gemini'，由后续修复步骤挪走）。 */
+    activeProvider: string;
+    providers: Record<string, ProviderConfig>;
+}
+
+/**
+ * 旧扁平设置 → providers map。纯函数，与 mergeProviderDefaults /
+ * pruneUnsupportedProviders 同类：只做字段映射，不落盘、不改入参。
+ * loadSettings 负责在迁移分支里决定何时 saveData。
+ */
+export function buildProvidersFromLegacySettings(
+    legacy: LegacyFlatSettings
+): LegacyFlatSettingsMigration {
+    return {
+        activeProvider: legacy.provider || 'openai',
+        providers: {
+            'openai': {
+                type: 'openai-compatible' as const,
+                label: 'OpenAI',
+                apiKey: legacy.openaiApiKey || '',
+                baseUrl: legacy.openaiBaseUrl || 'https://api.openai.com/v1',
+                model: legacy.openaiModel || 'gpt-4o'
+            },
+            'deepseek': {
+                type: 'openai-compatible' as const,
+                label: 'DeepSeek',
+                apiKey: legacy.deepseekApiKey || '',
+                baseUrl: legacy.deepseekBaseUrl || 'https://api.deepseek.com',
+                model: legacy.deepseekModel || 'deepseek-chat'
+            },
+            'qwen': {
+                type: 'openai-compatible' as const,
+                label: 'Qwen',
+                apiKey: legacy.qwenApiKey || '',
+                baseUrl: legacy.qwenBaseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                model: legacy.qwenModel || 'qwen-turbo'
+            }
+        }
+    };
+}
+
 /** 转写端点与模型的可配置覆盖项。空字符串一律表示「沿用 provider / 内置默认」。 */
 export interface AsrOverrides {
     asrBaseUrl?: string;

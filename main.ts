@@ -1,7 +1,7 @@
-import { Plugin, Notice, MarkdownView, TFile, addIcon } from 'obsidian';
+import { Plugin, Notice, MarkdownView, MarkdownFileInfo, TFile, addIcon, Editor } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
-import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, mergeProviderDefaults, pruneUnsupportedProviders } from './src/mcp/types';
+import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, mergeProviderDefaults, pruneUnsupportedProviders, LegacyFlatSettings, buildProvidersFromLegacySettings } from './src/mcp/types';
 import { setLocale, Locale } from './src/i18n/zh';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
@@ -38,6 +38,13 @@ import { ObsidianContextService } from './src/services/obsidian-context-service'
 import { USER_SKILLS_DIR } from './src/skills/skill-files';
 import { logger } from './src/utils/logger';
 import { installRequestUrlFetchFallback } from './src/utils/request-url-fetch';
+import { getErrorMessage } from './src/utils/error-message';
+
+/**
+ * `workspace.on('editor-change')` 回调的第二个参数，按 Obsidian 的事件声明使用
+ * 具体类型，避免用 `any` 把这个外部契约抹平。
+ */
+type EditorChangeInfo = MarkdownView | MarkdownFileInfo;
 
 export default class BaizerPlugin extends Plugin {
     settings: PluginSettings;
@@ -65,7 +72,7 @@ export default class BaizerPlugin extends Plugin {
     private guardianEscalationTimer: number | null = null;
     private guardianEscalatedAnchors: Set<string> = new Set();
 
-    private onEditorChange = (editor: any, info: any) => {
+    private onEditorChange = (editor: Editor, info: EditorChangeInfo) => {
         void this.queueGuardianCheck(editor, info);
     };
 
@@ -166,7 +173,7 @@ export default class BaizerPlugin extends Plugin {
                 VIEW_TYPE_SHELL,
                 (leaf) => new ShellView(leaf, this.modelService, this)
             );
-        } catch (e) {
+        } catch {
             // hot reload 时 view type 可能已注册，忽略
             logger.info('View type already registered, skipping.', 'Baizer');
         }
@@ -175,7 +182,7 @@ export default class BaizerPlugin extends Plugin {
         // 用自定义 BZ 字标(描边圆角方 + 填充字),避免复用系统 'terminal'(>_) 与命令面板撞脸;
         // 18px 下双描边字母易糊,故字母用填充、外框用描边,复刻头部品牌块观感。
         addIcon('baizer-bz', `<g fill="none" stroke="currentColor" stroke-width="8" stroke-linejoin="round"><rect x="8" y="8" width="84" height="84" rx="20"/></g><text x="50" y="50" fill="currentColor" font-family="-apple-system,'Segoe UI',sans-serif" font-size="46" font-weight="800" text-anchor="middle" dominant-baseline="central" letter-spacing="-2">BZ</text>`);
-        this.addRibbonIcon('baizer-bz', `Open ${PLUGIN_NAME}`, (evt: MouseEvent) => {
+        this.addRibbonIcon('baizer-bz', `Open ${PLUGIN_NAME}`, () => {
             void this.activateView();
         });
 
@@ -200,8 +207,8 @@ export default class BaizerPlugin extends Plugin {
                     } else {
                         new Notice(`Failed to save URL: ${result.error || 'unknown error'}`);
                     }
-                } catch (e: any) {
-                    new Notice(`Failed to read clipboard: ${e?.message || 'unknown error'}`);
+                } catch (e) {
+                    new Notice(`Failed to read clipboard: ${getErrorMessage(e)}`);
                 }
             },
         });
@@ -321,41 +328,20 @@ export default class BaizerPlugin extends Plugin {
     }
 
     async loadSettings() {
-        const raw = await this.loadData() || {};
+        // 持久化数据是不可信输入：入口先按 Record<string, unknown> 收窄，
+        // 迁移分支只读取旧扁平格式实际存在的字段（LegacyFlatSettings）。
+        const raw: Record<string, unknown> = await this.loadData() || {};
         this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
 
         // 数据迁移：旧扁平格式 → 新 providers map
-        if (!raw.providers && (raw as any).provider) {
-            const old = raw as any;
+        const legacy = raw as LegacyFlatSettings;
+        if (!raw.providers && legacy.provider) {
             // 旧格式的 provider 可能是已移除的 'gemini'：原样记下来即可，
             // 下面的 activeProvider 修复步骤会把它挪到仍然存在的 provider 上。
-            this.settings.activeProvider = old.provider || 'openai';
-            // 旧格式里的 Google 凭证（old.apiKey / old.primaryModel）不再迁移：
-            // 'gemini' 协议已移除，把 Google 的 key 塞进一个 openai-compatible 条目
-            // 只会得到一个看着配好了、实际必然失败的 provider。
-            this.settings.providers = {
-                'openai': {
-                    type: 'openai-compatible' as const,
-                    label: 'OpenAI',
-                    apiKey: old.openaiApiKey || '',
-                    baseUrl: old.openaiBaseUrl || 'https://api.openai.com/v1',
-                    model: old.openaiModel || 'gpt-4o'
-                },
-                'deepseek': {
-                    type: 'openai-compatible' as const,
-                    label: 'DeepSeek',
-                    apiKey: old.deepseekApiKey || '',
-                    baseUrl: old.deepseekBaseUrl || 'https://api.deepseek.com',
-                    model: old.deepseekModel || 'deepseek-chat'
-                },
-                'qwen': {
-                    type: 'openai-compatible' as const,
-                    label: 'Qwen',
-                    apiKey: old.qwenApiKey || '',
-                    baseUrl: old.qwenBaseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-                    model: old.qwenModel || 'qwen-turbo'
-                }
-            };
+            // 字段映射（含不再迁移的 Google 凭证）集中在纯函数里，便于回归测试。
+            const migrated = buildProvidersFromLegacySettings(legacy);
+            this.settings.activeProvider = migrated.activeProvider;
+            this.settings.providers = migrated.providers;
             // 持久化迁移结果
             await this.saveData(this.settings);
         }
@@ -450,7 +436,7 @@ export default class BaizerPlugin extends Plugin {
         // Group 1: Wikilink [[...]]
         // Group 2: Markdown Link [text](url)
         // Group 3: Raw URL http...
-        const regex = /(\[\[.*?\]\])|(\[.*?\]\(.*?\))|(https?:\/\/[^\s\)]+)/g;
+        const regex = /(\[\[.*?\]\])|(\[.*?\]\(.*?\))|(https?:\/\/[^\s)]+)/g;
 
         let newContent = content;
         let modified = false;
@@ -492,7 +478,7 @@ export default class BaizerPlugin extends Plugin {
         }
     }
 
-    private queueGuardianCheck(editor: any, info: any) {
+    private queueGuardianCheck(editor: Editor, info: EditorChangeInfo) {
         // 用户打字即取消待确认的升级:停留被打破,说明不再是「卡住」。
         this.clearGuardianEscalationTimer();
         if (this.guardianCheckTimer !== null) {
