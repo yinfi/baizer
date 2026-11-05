@@ -3,7 +3,7 @@ import { PluginSettings, ProviderConfig } from '../mcp/types';
 import { MemoryManager } from '../memory/memory-manager';
 import { MemoryMutationResult, MemoryView, MemoryViewRequest, UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
-import { GenerationOptions, ModelOption, StreamEvent } from '../models/interfaces';
+import { ChatContextItem, GenerationOptions, ModelOption, StreamEvent } from '../models/interfaces';
 import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry, SkillSummary } from '../skills/types';
@@ -140,7 +140,7 @@ export class ModelService {
      * 摘要不再自己生成——pi 的 compact() 复用 Harness 的 provider(getApiKeyAndHeaders)。
      */
     private initializeSessionManager() {
-        const adapter = (this.app?.vault as any)?.adapter;
+        const adapter = this.app?.vault?.adapter;
         if (!adapter || typeof adapter.read !== 'function' || typeof adapter.append !== 'function') {
             this.sessionManager = null;
             this.harnessEnv = null;
@@ -520,7 +520,7 @@ export class ModelService {
 
     async chat(
         userMessage: string,
-        contextItems: any[],
+        contextItems: ChatContextItem[],
         selection: string = '',
         source: GenerationSource = 'shell',
         obsidianContext?: ObsidianContextSnapshot,
@@ -560,7 +560,7 @@ export class ModelService {
 
     async *chatStream(
         userMessage: string,
-        contextItems: any[],
+        contextItems: ChatContextItem[],
         selection: string = '',
         source: GenerationSource | AbortSignal = 'shell',
         obsidianContext?: ObsidianContextSnapshot,
@@ -699,7 +699,7 @@ export class ModelService {
         try {
             const { branch, all } = await this.sessionManager.getBranchEntries(conversationId);
             if (branch.length === 0) return null;
-            return projectBranchToMessages(branch as any, all as any);
+            return projectBranchToMessages(branch, all);
         } catch (e) {
             logger.warn('Failed to project session branch.', 'ModelService.getBranchProjection');
             return null;
@@ -782,9 +782,8 @@ export class ModelService {
         source?: 'shell' | 'guardian' | 'selection-menu' | 'slash-edit';
     }): Promise<string | null> {
         if (!this.memoryManager) return null;
-        const retainLesson = (this.memoryManager as any).retainLesson;
-        if (typeof retainLesson !== 'function') return null;
-        return await retainLesson.call(this.memoryManager, input);
+        if (typeof this.memoryManager.retainLesson !== 'function') return null;
+        return await this.memoryManager.retainLesson(input);
     }
 
     getAvailableTools() {

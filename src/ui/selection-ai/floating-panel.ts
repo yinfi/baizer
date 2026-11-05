@@ -23,8 +23,8 @@ export function loadPanelRect(storage: Pick<Storage, 'getItem'> = localStorage):
   try {
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const p = JSON.parse(raw);
-    if (typeof p?.left === 'number' && typeof p?.top === 'number' && typeof p?.width === 'number' && typeof p?.height === 'number') return p;
+    const p = JSON.parse(raw) as Partial<PanelRect> | null;
+    if (typeof p?.left === 'number' && typeof p?.top === 'number' && typeof p?.width === 'number' && typeof p?.height === 'number') return p as PanelRect;
     return null;
   } catch { return null; }
 }

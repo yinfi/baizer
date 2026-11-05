@@ -3,6 +3,7 @@ import { OntologyUpdateMode } from "../knowledge/types";
 import { Locale } from "../i18n/zh";
 import type { KnowledgeRuntime } from "../knowledge/runtime";
 import type { ToolRegistry } from "../skills/tool-registry";
+import type { ModelService } from "../services/model-service";
 
 // ===== 品牌配置 — 改名只需改这里 =====
 export const PLUGIN_ID = 'baizer';
@@ -13,6 +14,7 @@ export const PLUGIN_DATA_DIR = `.obsidian/${PLUGIN_ID}`;
 
 declare module "obsidian" {
     interface App {
+        /** Obsidian 未公开：插件宿主。getPlugin 返回第三方插件实例，形状由各插件自定义（外部数据）。 */
         plugins: {
             manifests: Record<string, PluginManifest>;
             enabledPlugins: Set<string>;
@@ -22,6 +24,23 @@ declare module "obsidian" {
             listCommands(): Command[];
             executeCommandById(id: string): boolean;
         };
+        /**
+         * Obsidian 未公开：设置面板宿主。只声明实际用到的成员。
+         * 热键页签在 openTabById('hotkeys') 之后才有 activeTab。
+         */
+        setting: {
+            open(): void;
+            openTabById(id: string): void;
+            activeTab: { setQuery(query: string): void };
+        };
+        /** Obsidian 未公开：核心插件（bases 等）的开关状态。 */
+        internalPlugins?: {
+            plugins?: Record<string, { enabled: boolean } | undefined>;
+        };
+    }
+    interface MetadataCache {
+        /** Obsidian 未公开：是否已完成首次索引（未初始化时 `resolved` 事件才是可靠信号）。 */
+        initialized?: boolean;
     }
 }
 
@@ -463,7 +482,8 @@ export function resolveAsrConfig(params: {
 
 export interface IPlugin extends Plugin {
     settings: PluginSettings;
-    modelService: any;
+    /** 具体实现是 ModelService（main.ts 的 BaizerPlugin 已声明为该类型）。 */
+    modelService: ModelService;
     saveSettings(): Promise<void>;
     // 轻量落盘：仅写盘，不重建 provider/guardian/knowledge（纯 UI 字段用）。
     saveSettingsLight?(): Promise<void>;

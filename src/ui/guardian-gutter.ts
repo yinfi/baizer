@@ -56,7 +56,7 @@ const guardianLineStateField = StateField.define<{ line: number; state: Guardian
 
 // Guardian Gutter Marker
 class GuardianDotMarker extends GutterMarker {
-    constructor(private state: GuardianState, private view: EditorView) {
+    constructor(private state: GuardianState, private view: EditorView | null) {
         super();
     }
 
@@ -76,8 +76,8 @@ class GuardianDotMarker extends GutterMarker {
             e.preventDefault();
             e.stopPropagation();
 
-            const currentMode = this.view.state.field(guardianModeField);
-            this.view.dispatch({
+            const currentMode = this.view!.state.field(guardianModeField);
+            this.view!.dispatch({
                 effects: setGuardianMode.of(!currentMode)
             });
         };
@@ -160,7 +160,7 @@ const guardianMarkerField = StateField.define<GuardianMarkerState>({
         // SIMPLER: Just use a global window event or similar? No, that's messy.
         // Better: The `gutter` extension allows `domEventHandlers`. We can handle clicks there!
 
-        const marker = new GuardianDotMarker(effectiveState, null as any); // View will be handled in domEventHandlers
+        const marker = new GuardianDotMarker(effectiveState, null); // View will be handled in domEventHandlers
         return {
             set: RangeSet.of([marker.range(lineBlock.from)]),
             effectiveState,

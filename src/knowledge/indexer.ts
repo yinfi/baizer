@@ -73,7 +73,7 @@ export class WikiIndexer {
 
   /** 检测 Bases 核心插件是否启用，未启用则提示 */
   checkBasesPlugin(): void {
-    const internalPlugins = (this.app as any).internalPlugins;
+    const internalPlugins = this.app.internalPlugins;
     const basesPlugin = internalPlugins?.plugins?.['bases'];
     if (!basesPlugin || !basesPlugin.enabled) {
       new Notice(

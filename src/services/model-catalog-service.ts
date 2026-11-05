@@ -1,4 +1,4 @@
-import { requestUrl } from 'obsidian';
+import { requestUrl, type RequestUrlParam, type RequestUrlResponse } from 'obsidian';
 import { ModelOption } from '../models/interfaces';
 import { ProviderConfig } from '../mcp/types';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
@@ -62,7 +62,8 @@ function isListingUnsupportedStatus(status: number): boolean {
 
 /** 可注入的 REST 依赖（沿用 request-url-fetch.ts / web-search 的 deps 模式，便于测试）。 */
 export interface ModelCatalogDeps {
-  requestUrl: (options: any) => Promise<any>;
+  /** 与 Obsidian `requestUrl` 同签名：返回结构化的 HTTP 响应（外部数据仍在调用侧解析）。 */
+  requestUrl: (options: RequestUrlParam) => Promise<RequestUrlResponse>;
 }
 
 /** provider 类型 → 静态能力声明。旧 provider 层的 getCapabilities 是硬编码常量，此处按 type 直接返回。 */

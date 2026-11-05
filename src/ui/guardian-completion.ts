@@ -786,12 +786,18 @@ export class GuardianCompletionService {
   }
 }
 
-function parseGuardianJson(response: string): any | null {
+/** Guardian 模型返回的 JSON 形态。字段可能缺失,由调用方逐项校验后才消费。 */
+interface GuardianJsonResponse {
+  type?: string;
+  suggestion?: unknown;
+}
+
+function parseGuardianJson(response: string): GuardianJsonResponse | null {
   for (let start = response.indexOf('{'); start >= 0; start = response.indexOf('{', start + 1)) {
     const candidate = extractJsonObjectAt(response, start);
     if (!candidate) continue;
     try {
-      return JSON.parse(candidate);
+      return JSON.parse(candidate) as GuardianJsonResponse;
     } catch {
       continue;
     }

@@ -12,11 +12,15 @@ import {
 } from '../../../mcp/types';
 import * as videoUtils from '../../../utils/video_utils';
 import { resolveSavedNotePath } from '../../../mcp/save-path';
+import type { ModelService } from '../../../services/model-service';
 import {
   AudioTranscriptionResult,
   createVideoTranscriptionService,
   formatTimestampedTranscript,
 } from '../../../services/video-transcription';
+
+/** 本 skill 只用到 ModelService 的无状态生成能力（main.ts 注入真 ModelService）。 */
+type SummaryModel = Pick<ModelService, 'generate'>;
 
 interface WebClipperDeps {
   getVideoTranscript: typeof videoUtils.getVideoTranscript;
@@ -148,7 +152,7 @@ function buildVideoSummaryContent(opts: {
 }
 
 async function summarizeTranscript(
-  modelService: any,
+  modelService: SummaryModel,
   transcript: { title: string; text: string },
 ): Promise<string | null> {
   if (!modelService || typeof modelService.generate !== 'function') return null;
@@ -177,7 +181,7 @@ Task:
 }
 
 async function summarizeVideoMetadata(
-  modelService: any,
+  modelService: SummaryModel,
   video: { title: string; description?: string },
 ): Promise<string | null> {
   if (!modelService || typeof modelService.generate !== 'function') return null;
@@ -218,7 +222,7 @@ async function buildNonTranscriptContent(params: {
   transcript: videoUtils.VideoTranscript;
   finalUrl: string;
   baseTags: string[];
-  modelService: any;
+  modelService: SummaryModel;
   deps: WebClipperDeps;
 }): Promise<string> {
   const { transcript, finalUrl, baseTags, modelService, deps } = params;
@@ -254,7 +258,7 @@ async function saveVideo(
   url: string,
   args: any,
   ctx: ToolContext,
-  modelService: any,
+  modelService: SummaryModel,
   deps: WebClipperDeps,
 ): Promise<any> {
   const transcript = await deps.getVideoTranscript(url);
@@ -494,7 +498,7 @@ async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebCl
   return { success: true, path: finalPath, message: `Webpage Saved: ${finalPath}` };
 }
 
-export function createSaveWebpageTool(modelService: any, deps: WebClipperDeps = defaultDeps): Tool {
+export function createSaveWebpageTool(modelService: SummaryModel, deps: WebClipperDeps = defaultDeps): Tool {
   return {
     name: 'save_webpage',
     description: 'Save a webpage or video transcript to a new note.',
@@ -524,7 +528,7 @@ export function createSaveWebpageTool(modelService: any, deps: WebClipperDeps = 
   };
 }
 
-export function createExecutor(modelService: any): BuiltinExecutor {
+export function createExecutor(modelService: SummaryModel): BuiltinExecutor {
   const tool = createSaveWebpageTool(modelService);
   return {
     async execute(args: any, ctx: ToolContext) {
@@ -533,6 +537,6 @@ export function createExecutor(modelService: any): BuiltinExecutor {
   };
 }
 
-export function registerTools(registry: ToolRegistry, modelService: any): void {
+export function registerTools(registry: ToolRegistry, modelService: SummaryModel): void {
   registry.register(createSaveWebpageTool(modelService));
 }

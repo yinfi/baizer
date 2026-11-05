@@ -40,6 +40,24 @@ import { logger } from './src/utils/logger';
 import { installRequestUrlFetchFallback } from './src/utils/request-url-fetch';
 import { thrownMessage } from './src/utils/thrown-message';
 
+/** Obsidian Editor 上未在公开 d.ts 暴露的 CodeMirror 6 视图。 */
+type EditorWithCm = Editor & { cm?: EditorView };
+
+/** save_webpage 等 vault 写工具的返回形态(工具契约未导出统一类型)。 */
+interface ToolExecutionResult {
+    success: boolean;
+    path: string;
+    error?: string;
+}
+
+/**
+ * 判断抛出值是否为 AbortError(跨 realm 的异常对象同样按 name 识别,与旧行为一致)。
+ */
+function isAbortThrown(error: unknown): boolean {
+    return (typeof error === 'object' && error !== null || typeof error === 'function')
+        && 'name' in error && typeof error.name === 'string' && error.name === 'AbortError';
+}
+
 /**
  * 旧版扁平设置：data.json 里没有 providers、只有 provider + 各家 xxxApiKey 的历史格式。
  *
@@ -504,7 +522,7 @@ export default class BaizerPlugin extends Plugin {
 
         for (const m of rawUrlMatches) {
             new Notice(`📥 Auto-saving: ${m.url}`);
-            const result = await this.toolRegistry.execute('save_webpage', { url: m.url });
+            const result: ToolExecutionResult = await this.toolRegistry.execute('save_webpage', { url: m.url });
 
             if (result.success) {
                 const finalPath = result.path;
@@ -564,7 +582,7 @@ export default class BaizerPlugin extends Plugin {
         }, delay);
     }
 
-    private async runAutoGuardianCheck(editor: any) {
+    private async runAutoGuardianCheck(editor: Editor) {
         if (!this.settings.guardianAutoMode) {
             this.logGuardianAuto('auto skipped', { reason: 'auto-disabled' });
             return;
@@ -572,7 +590,7 @@ export default class BaizerPlugin extends Plugin {
 
         const cursor = editor.getCursor();
         const lineNumber = cursor.line + 1;
-        const view = (editor as any).cm as EditorView;
+        const view = (editor as EditorWithCm).cm;
         const activePath = this.app.workspace.getActiveFile?.()?.path || '';
         if (!view) {
             this.logGuardianAuto('auto skipped', {
@@ -728,9 +746,9 @@ export default class BaizerPlugin extends Plugin {
             if (result.quality.weak) {
                 this.maybeScheduleEscalation(editor, GUARDIAN_WEAK_COMPLETION_REASON);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             // 被单飞 abort（新输入触发了新请求）属正常丢弃，不显示为错误。
-            if (error?.name === 'AbortError') {
+            if (isAbortThrown(error)) {
                 this.logGuardianAuto('completion aborted', {
                     requestSeq,
                     reason: 'superseded',
@@ -760,7 +778,7 @@ export default class BaizerPlugin extends Plugin {
      * 锚点 key:文件路径 + 行号 + 该行全文。行内容/行号一变即视为换位置,
      * 用于区分「停在原地没辙」与「正在往下写」。
      */
-    private guardianAnchorKey(editor: any, activePath: string): string {
+    private guardianAnchorKey(editor: Editor, activePath: string): string {
         const cursor = editor.getCursor();
         return `${activePath}|${cursor.line}|${editor.getLine(cursor.line) || ''}`;
     }
@@ -776,7 +794,7 @@ export default class BaizerPlugin extends Plugin {
      * 快补无果后,若属 A+B 类且开关开、锚点未升过,起 1.2s 停留确认;
      * 计时结束时光标仍在原锚点(用户没走也没打字)才升级到深补全。一锚点只升一次。
      */
-    private maybeScheduleEscalation(editor: any, reason: string): void {
+    private maybeScheduleEscalation(editor: Editor, reason: string): void {
         const activePath = this.app.workspace.getActiveFile?.()?.path || '';
         const anchorKey = this.guardianAnchorKey(editor, activePath);
 
@@ -822,13 +840,13 @@ export default class BaizerPlugin extends Plugin {
      * - 'escalation'(快补无果/平庸自动升级):系统主动给 → 光标处「deep thinking…」ghost,
      *   一打字即中断(abort 在途请求 + ghost 由 docChanged 自动清),无果给可见 ghost 回执。
      */
-    private async runDeepGuardianCheck(editor: any, source: 'manual' | 'escalation' = 'manual') {
+    private async runDeepGuardianCheck(editor: Editor, source: 'manual' | 'escalation' = 'manual') {
         const isEscalation = source === 'escalation';
         if (!this.settings.enableGuardian) {
             if (!isEscalation) new Notice('Baizer Guardian 未启用，请先在设置中开启。');
             return;
         }
-        const view = (editor as any).cm as EditorView;
+        const view = (editor as EditorWithCm).cm;
         if (!view) return;
 
         const activePath = this.app.workspace.getActiveFile?.()?.path || '';
@@ -923,9 +941,9 @@ export default class BaizerPlugin extends Plugin {
                 result.line,
                 this.shouldShowGuardianGutter() ? GuardianState.HasSuggestion : GuardianState.Idle,
             );
-        } catch (error: any) {
+        } catch (error: unknown) {
             notice?.hide();
-            if (error?.name === 'AbortError') {
+            if (isAbortThrown(error)) {
                 if (isEscalation) hideGhostText(view);
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
@@ -933,7 +951,7 @@ export default class BaizerPlugin extends Plugin {
             if (isEscalation) {
                 hideGhostText(view);
             } else {
-                new Notice(`深度补全失败：${error?.message || 'unknown'}`);
+                new Notice(`深度补全失败：${thrownMessage(error) || 'unknown'}`);
             }
             logger.error('Deep completion failed', error, 'Baizer Guardian', { requestSeq, activePath });
             updateGuardianState(view, lineNumber, GuardianState.Error);
@@ -944,7 +962,7 @@ export default class BaizerPlugin extends Plugin {
         }
     }
 
-    private logGuardianAuto(message: string, metadata?: Record<string, any>, level: 'info' | 'warn' | 'debug' = 'info') {
+    private logGuardianAuto(message: string, metadata?: Record<string, unknown>, level: 'info' | 'warn' | 'debug' = 'info') {
         const safeMetadata = {
             autoMode: this.settings.guardianAutoMode,
             enabled: this.settings.enableGuardian,
@@ -960,7 +978,7 @@ export default class BaizerPlugin extends Plugin {
         }
     }
 
-    private formatGuardianLogMetadata(metadata: Record<string, any>): string {
+    private formatGuardianLogMetadata(metadata: Record<string, unknown>): string {
         const keys = [
             'requestSeq',
             'reason',
@@ -998,7 +1016,7 @@ export default class BaizerPlugin extends Plugin {
         return parts.length ? ` ${parts.join(' ')}` : '';
     }
 
-    private formatGuardianLogValue(value: any): string {
+    private formatGuardianLogValue(value: unknown): string {
         if (Array.isArray(value)) return `[${value.join(',')}]`;
         if (typeof value === 'string') return JSON.stringify(value);
         return String(value);
@@ -1031,7 +1049,7 @@ export default class BaizerPlugin extends Plugin {
         return this.settings.guardianUIStyle === 'gutter' || this.settings.guardianUIStyle === 'hybrid';
     }
 
-    async runGuardianCheck(editor: any, info: any, manualInstruction?: string) {
+    async runGuardianCheck(editor: Editor, info: MarkdownView | MarkdownFileInfo | null, manualInstruction?: string) {
         if (!this.settings.enableGuardian) {
             this.logGuardianAuto(manualInstruction ? 'manual skipped' : 'auto skipped', {
                 reason: 'guardian-disabled',
@@ -1045,7 +1063,7 @@ export default class BaizerPlugin extends Plugin {
 
         const cursor = editor.getCursor();
         const lineNumber = cursor.line + 1;
-        const view = editor.cm as EditorView;
+        const view = (editor as EditorWithCm).cm;
         if (!view) return;
         const document = view.state.doc;
         const isStale = () => view.state.doc !== document

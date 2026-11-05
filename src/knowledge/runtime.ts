@@ -1,6 +1,6 @@
 // src/knowledge/runtime.ts
 
-import { App, TFile, Notice } from 'obsidian';
+import { App, Plugin, TFile, Notice } from 'obsidian';
 import { debounce } from '../utils/throttle';
 import { logger } from '../utils/logger';
 import { PluginSettings } from '../mcp/types';
@@ -140,7 +140,7 @@ export class KnowledgeRuntime {
 
   async initialize(): Promise<void> {
     // 等待 metadataCache 就绪后再构建索引和执行启动逻辑
-    if ((this.app.metadataCache as any).initialized) {
+    if (this.app.metadataCache.initialized) {
       this.metadataIndex.rebuild();
       await this.onMetadataReady();
     } else {
@@ -262,7 +262,7 @@ export class KnowledgeRuntime {
     return staleFiles.length;
   }
 
-  registerCommands(plugin: any): void {
+  registerCommands(plugin: Plugin): void {
     plugin.addCommand({
       id: 'knowledge-compile-this',
       name: 'Knowledge: Compile this note',
@@ -374,10 +374,10 @@ export class KnowledgeRuntime {
     });
   }
 
-  registerEvents(plugin: any): void {
+  registerEvents(plugin: Plugin): void {
     // 文件创建：始终注册到 frontmatter
     plugin.registerEvent(
-      this.app.vault.on('create', (file: any) => {
+      this.app.vault.on('create', (file) => {
         if (file instanceof TFile && file.extension === 'md') {
           this.watcher.onFileCreate(file);
         }
@@ -386,7 +386,7 @@ export class KnowledgeRuntime {
 
     // 文件修改：已完成的标记回 pending
     plugin.registerEvent(
-      this.app.vault.on('modify', (file: any) => {
+      this.app.vault.on('modify', (file) => {
         if (file instanceof TFile && file.extension === 'md') {
           this.watcher.onFileModify(file);
         }
@@ -404,7 +404,7 @@ export class KnowledgeRuntime {
 
     // 文件删除：更新内存索引
     plugin.registerEvent(
-      this.app.vault.on('delete', (file: any) => {
+      this.app.vault.on('delete', (file) => {
         if (file instanceof TFile) {
           this.metadataIndex.onFileDeleted(file.path);
         }

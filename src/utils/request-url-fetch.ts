@@ -96,9 +96,48 @@ function resolveUrl(input: RequestInfo | URL): string {
 /* Node http/https 传输层（Obsidian 桌面 renderer，绕过 CORS、支持流式） */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Node http/https 模块的最小本地接口：桌面端 renderer 通过 CJS require 取得这两个模块，
+ * 官方 obsidian.d.ts 不覆盖它们，故在此按实际用到的成员收窄（Electron/Node 扩展边界）。
+ */
+interface NodeHttpModule {
+  request(
+    url: URL,
+    options: { method: string; headers: Record<string, string> },
+    callback: (res: NodeIncomingMessage) => void,
+  ): NodeClientRequest;
+}
+
+/** Node ClientRequest 的最小接口（只用到 error 监听、end 与 destroy）。 */
+interface NodeClientRequest {
+  on(event: 'error', listener: (error: unknown) => void): unknown;
+  end(data?: Uint8Array): void;
+  destroy(): void;
+}
+
+/**
+ * Node 响应头：取值为单值或数组（set-cookie 等），location 恒为单值。
+ * 显式声明 location 是为了让重定向分支无需再做强转。
+ */
+interface NodeResponseHeaders extends Record<string, string | string[] | undefined> {
+  location?: string;
+}
+
+/** Node IncomingMessage 的最小接口（只用到状态码/头/resume/destroy 与三个事件）。 */
+interface NodeIncomingMessage {
+  statusCode?: number;
+  statusMessage?: string;
+  headers: NodeResponseHeaders;
+  resume(): void;
+  destroy(): void;
+  on(event: 'data', listener: (chunk: Uint8Array) => void): unknown;
+  on(event: 'end', listener: () => void): unknown;
+  on(event: 'error', listener: (error: unknown) => void): unknown;
+}
+
 interface NodeTransport {
-  https: any;
-  http: any;
+  https: NodeHttpModule;
+  http: NodeHttpModule;
 }
 
 let cachedNodeTransport: NodeTransport | null | undefined;
@@ -111,8 +150,9 @@ function getNodeTransport(): NodeTransport | null {
   if (cachedNodeTransport !== undefined) return cachedNodeTransport;
   cachedNodeTransport = null;
   try {
-    const g = globalThis as any;
-    const requireFn =
+    // 只声明实际用到的成员；globalThis 只出现一次，避免新增 obsidianmd/no-global-this 命中。
+    const g = globalThis as { require?: (id: string) => NodeHttpModule };
+    const requireFn: ((id: string) => NodeHttpModule) | null =
       typeof g.require === 'function'
         ? g.require
         : typeof require === 'function'
@@ -188,7 +228,7 @@ function nodeRequest(
   return new Promise<Response>((resolve, reject) => {
     const mod = url.protocol === 'https:' ? transport.https : transport.http;
     let settled = false;
-    let req: any = null;
+    let req: NodeClientRequest | null = null;
 
     const cleanupSignal = () => {
       signal?.removeEventListener('abort', onAbort);
@@ -213,7 +253,7 @@ function nodeRequest(
           ...(body ? { 'content-length': String(body.byteLength) } : {}),
         },
       },
-      (res: any) => {
+      (res: NodeIncomingMessage) => {
         if (settled) return;
         const status = res.statusCode ?? 0;
         const location = res.headers?.location;
@@ -241,7 +281,7 @@ function nodeRequest(
       },
     );
 
-    req.on('error', (error: any) => fail(error));
+    req.on('error', (error: unknown) => fail(error));
     if (signal) {
       if (signal.aborted) {
         onAbort();
@@ -261,7 +301,7 @@ function stripBodyHeaders(headers: Record<string, string>): Record<string, strin
   return next;
 }
 
-function buildNodeResponse(res: any, signal?: AbortSignal): Response {
+function buildNodeResponse(res: NodeIncomingMessage, signal?: AbortSignal): Response {
   const status = res.statusCode ?? 200;
   const statusText = res.statusMessage ?? '';
 
@@ -286,7 +326,7 @@ function buildNodeResponse(res: any, signal?: AbortSignal): Response {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
-      const onData = (chunk: any) => {
+      const onData = (chunk: Uint8Array) => {
         if (closed) return;
         try {
           // chunk 是 Node Buffer（Uint8Array 子类）→ 拷贝成独立 Uint8Array
@@ -304,7 +344,7 @@ function buildNodeResponse(res: any, signal?: AbortSignal): Response {
           /* 已关闭 */
         }
       };
-      const onError = (error: any) => {
+      const onError = (error: unknown) => {
         if (closed) return;
         closed = true;
         controller.error(error instanceof Error ? error : new Error(String(error)));
@@ -353,7 +393,9 @@ type StreamingRequestUrlParam = Parameters<typeof obsidianRequestUrl>[0] & { str
 
 /** Obsidian 流式响应体：Node 风格事件流（'data' / 'end' / 'error'）。 */
 interface StreamableBody {
-  on(event: 'data' | 'end' | 'error', listener: (...args: any[]) => void): unknown;
+  on(event: 'data', listener: (chunk: unknown) => void): unknown;
+  on(event: 'end', listener: () => void): unknown;
+  on(event: 'error', listener: (error: unknown) => void): unknown;
 }
 
 /**
@@ -412,7 +454,7 @@ export async function requestUrlFetch(
     throw: false,
     // 请求流式响应：仅部分 Obsidian 版本运行时支持，d.ts 未声明。
     stream: true,
-  } as StreamingRequestUrlParam as any);
+  } as StreamingRequestUrlParam);
 
   // 下载期间被 abort：不再交付数据
   if (signal?.aborted) {
@@ -426,7 +468,7 @@ export async function requestUrlFetch(
   }
 
   // 若运行时真的提供了事件流 body（部分版本），逐块交付
-  const streamBody = (res as any)?.body as StreamableBody | undefined;
+  const streamBody = (res as { body?: StreamableBody }).body;
   if (streamBody && typeof streamBody.on === 'function') {
     return buildStreamingResponse(status, res.headers, streamBody, signal);
   }
@@ -472,7 +514,7 @@ function buildStreamingResponse(
           /* 已关闭 */
         }
       };
-      const onError = (err: any) => {
+      const onError = (err: unknown) => {
         if (closed) return;
         closed = true;
         controller.error(err instanceof Error ? err : new Error(String(err)));

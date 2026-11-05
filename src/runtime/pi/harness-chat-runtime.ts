@@ -1,7 +1,7 @@
-import type { Agent as PiAgent, AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { Agent as PiAgent, AgentEvent, AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { StreamEvent } from '../../models/interfaces';
 import { BaseChatRuntime } from '../base-chat-runtime';
-import { ChatRuntime, PreparedChatTurn } from '../runtime-types';
+import { ChatRuntime, NativeChatHandle, PreparedChatTurn } from '../runtime-types';
 import {
   createPiFileWriteState,
   formatPiApprovalMessage,
@@ -175,7 +175,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       if (!mapped) return;
 
       if (mapped.type === 'tool_result') {
-        const raw = unwrapPiToolResult((event as any).result);
+        const raw = unwrapPiToolResult(event.result);
         recordPiFileWriteResult(fileWriteState, mapped.name, raw);
         if (isPiApprovalResponse(raw)) {
           approvalMessage = formatPiApprovalMessage(raw);
@@ -344,6 +344,17 @@ async function extractTurnEntryIds(
 }
 
 /**
+ * resolveModelHandle 接受的句柄形态：生产实现是 NativeChatHandle；
+ * 另兼容旧/测试句柄直接给 apiKey 字符串的形态。
+ */
+interface ModelHandleLike {
+  model: NativeChatHandle['model'];
+  getApiKey?: () => string | Promise<string>;
+  getHeaders?: () => Record<string, string> | undefined;
+  apiKey?: string;
+}
+
+/**
  * 从 NativeChatHandle 解析出 model、apiKey 取值器与自定义 header 取值器。
  * 兼容两种句柄形态:
  *  - 旧形态 { model, streamFn } —— streamFn 已被 Harness 弃用,仅从其闭包无法取 key;
@@ -351,17 +362,19 @@ async function extractTurnEntryIds(
  *  - 新形态 { model, getApiKey } 或 { model, apiKey }。
  * getHeaders 缺省(句柄未提供)时返回 undefined,等价于不发任何自定义 header。
  */
-function resolveModelHandle(handle: any): {
-  model: any;
+function resolveModelHandle(handle: ModelHandleLike): {
+  model: NativeChatHandle['model'];
   getApiKey: () => Promise<string>;
   getHeaders: () => Record<string, string> | undefined;
 } {
   const model = handle.model;
-  const getHeaders = typeof handle.getHeaders === 'function'
-    ? () => handle.getHeaders()
+  const headerGetter = handle.getHeaders;
+  const getHeaders = typeof headerGetter === 'function'
+    ? () => headerGetter.call(handle)
     : () => undefined;
-  if (typeof handle.getApiKey === 'function') {
-    return { model, getApiKey: async () => (await handle.getApiKey()) ?? '', getHeaders };
+  const apiKeyGetter = handle.getApiKey;
+  if (typeof apiKeyGetter === 'function') {
+    return { model, getApiKey: async () => (await apiKeyGetter.call(handle)) ?? '', getHeaders };
   }
   if (typeof handle.apiKey === 'string') {
     const key = handle.apiKey;
@@ -407,7 +420,7 @@ async function persistTurnMessages(session: ConversationSession, messages: Agent
  * 复用既有 pi-event-adapter(它按 turn_start/message_update/tool_execution_* 分派),
  * Harness 事件形状与底层 agentLoop 事件一致,故可直接复用。
  */
-function mapHarnessEvent(event: any): StreamEvent | undefined {
+function mapHarnessEvent(event: AgentEvent): StreamEvent | undefined {
   return mapPiEventToStreamEvent(event);
 }
 

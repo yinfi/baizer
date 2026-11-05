@@ -1,9 +1,9 @@
-import { ItemView, WorkspaceLeaf, Notice, MarkdownView, setIcon } from 'obsidian';
+import { App, Editor, ItemView, TFile, WorkspaceLeaf, Notice, MarkdownView, setIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
 import { ChatController, ChatTurnRequest, MessageAddedOptions } from './chat-controller';
-import { ContextManager } from '../services/context-manager';
+import { ContextItem, ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
 import { DEFAULT_SETTINGS, IPlugin, PLUGIN_ID, PLUGIN_NAME, VIEW_TYPE_SHELL } from '../mcp/types';
 import { ChatTurnOutcome, StreamEvent } from '../models/interfaces';
@@ -32,6 +32,25 @@ import { ConversationStore } from './history/conversation-store';
 import { showGhostText } from './ghost-text';
 import { GrowthToken, ScrollFollowController } from './scroll/scroll-follow-controller';
 import { debounce } from '../utils/throttle';
+import { thrownMessage } from '../utils/thrown-message';
+
+/** Obsidian App 上未在公开 d.ts 暴露的内部命令 API。 */
+type AppWithCommands = App & {
+    commands?: { executeCommandById?(commandId: string): boolean };
+};
+
+/** Obsidian App 上未在公开 d.ts 暴露的设置页 API。 */
+type AppWithSetting = App & {
+    setting: { open(): void; openTabById(id: string): void };
+};
+
+/** Obsidian App 上未在公开 d.ts 暴露的插件注册表。 */
+type AppWithPluginRegistry = App & {
+    plugins: { plugins: Record<string, IPlugin> };
+};
+
+/** Obsidian Editor 上未在公开 d.ts 暴露的 CodeMirror 6 视图。 */
+type EditorWithCm = Editor & { cm?: EditorView };
 
 export { VIEW_TYPE_SHELL };
 
@@ -464,9 +483,9 @@ export class ShellView extends ItemView {
                 description: command.description,
             }));
             // 用户自定义命令(.obsidian/baizer-commands/*.md)并入 skill 通道一起展示。
-            const userCommands = (typeof (this.modelService as any).getUserCommandsSync === 'function'
-                ? (this.modelService as any).getUserCommandsSync()
-                : []).map((command: any) => ({
+            const userCommands = (typeof this.modelService.getUserCommandsSync === 'function'
+                ? this.modelService.getUserCommandsSync()
+                : []).map((command) => ({
                     command: command.command,
                     description: command.description,
                 }));
@@ -664,7 +683,7 @@ export class ShellView extends ItemView {
         const existing = new Set(this.contextManager.getContexts().map(item => item.id));
         for (const item of request.context) {
             if (!item?.id || existing.has(item.id)) continue;
-            this.contextManager.addContext(item);
+            this.contextManager.addContext(item as ContextItem);
             existing.add(item.id);
         }
         const chipsContainer = this.getContextChipsContainer();
@@ -788,7 +807,7 @@ export class ShellView extends ItemView {
         const button = bar.createEl('button', {
             cls: 'shell-unread-button',
             text: t('New output · Back to latest'),
-        }) as HTMLButtonElement;
+        });
         button.setAttr('type', 'button');
         button.addEventListener('click', () => this.scrollFollow?.scrollToLatest());
         this.unreadBarEl = bar;
@@ -1023,8 +1042,8 @@ export class ShellView extends ItemView {
     private flushPendingStepDivider() {
         if (!this.pendingStepDivider || !this.streamTimeline) return;
         this.pendingStepDivider = false;
-        const divider = (this.streamTimeline as any).createDiv({ cls: 'shell-think-step-divider think-node' }) as HTMLElement;
-        (divider as any).createSpan({ cls: 'shell-think-step-label', text: `Step ${this.streamStepCount}` });
+        const divider = this.streamTimeline.createDiv({ cls: 'shell-think-step-divider think-node' });
+        divider.createSpan({ cls: 'shell-think-step-label', text: `Step ${this.streamStepCount}` });
     }
 
     /**
@@ -1255,7 +1274,7 @@ export class ShellView extends ItemView {
                 onFork: (message, newText) => this.handleForkFromAi(message, newText),
                 onSwitchBranch: (message, targetLeafId) => this.handleSwitchBranch(message, targetLeafId),
                 onReviewCodeBlock: (content) => this.reviewCodeBlock(content),
-                onUndoWorkspaceEdit: (editId) => this.chatController.undoWorkspaceEdit(editId),
+                onUndoWorkspaceEdit: (editId) => { void this.chatController.undoWorkspaceEdit(editId); },
                 onInternalLinkClick: (href) => {
                     void this.app.workspace.openLinkText(href, '', false);
                 },
@@ -1315,14 +1334,14 @@ export class ShellView extends ItemView {
         }
 
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        const editor = activeView?.editor as any;
-        const cmView = editor?.cm as EditorView | undefined;
+        const editor: EditorWithCm | undefined = activeView?.editor;
+        const cmView = editor?.cm;
         if (!cmView) {
             new Notice('Open the target note in source mode to show the preview.');
             return;
         }
 
-        const line = Math.max(1, editor?.getCursor?.()?.line + 1 || 1);
+        const line = Math.max(1, (editor?.getCursor?.()?.line ?? NaN) + 1 || 1);
         const ch = Math.max(0, editor?.getCursor?.()?.ch || 0);
         showGhostText(cmView, this.buildApprovalGhostPreview(previewText), line, ch);
         new Notice('Preview shown in the editor. Use the approval card buttons to approve or reject.');
@@ -1331,8 +1350,9 @@ export class ShellView extends ItemView {
     private async openApprovalTarget(path: string) {
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!file) return;
+        if (!(file instanceof TFile)) return;
         const leaf = this.app.workspace.getLeaf(false);
-        await leaf?.openFile?.(file as any);
+        await leaf?.openFile?.(file);
     }
 
     private buildApprovalGhostPreview(content: string) {
@@ -1485,7 +1505,7 @@ export class ShellView extends ItemView {
                 void this.openKnowledgeSummaryForPath(path);
             },
             onRunLint: () => {
-                (this.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
+                (this.app as AppWithCommands).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
             },
             onCopyPath: (path) => {
                 void globalThis.navigator?.clipboard?.writeText?.(path);
@@ -1568,11 +1588,11 @@ export class ShellView extends ItemView {
     private async openKnowledgeSummaryForPath(path: string) {
         const status = await this.plugin?.knowledgeRuntime?.getStatusService?.()?.getNoteStatus?.(path);
         const summaryPath = status?.summaryPath;
-        if (summaryPath && typeof (this.app.workspace as any)?.openLinkText === 'function') {
-            await (this.app.workspace as any).openLinkText(summaryPath, '', false);
+        if (summaryPath && typeof this.app.workspace?.openLinkText === 'function') {
+            await this.app.workspace.openLinkText(summaryPath, '', false);
             return;
         }
-        (this.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
+        (this.app as AppWithCommands).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
     }
 
     private excludeCurrentNoteContext(path: string) {
@@ -1604,10 +1624,9 @@ export class ShellView extends ItemView {
     }
 
     private openPluginSettings() {
-        // @ts-ignore - app setting tab activation
-        this.app.setting.open();
-        // @ts-ignore - activate plugin settings tab
-        this.app.setting.openTabById(PLUGIN_ID);
+        const app = this.app as AppWithSetting;
+        app.setting.open();
+        app.setting.openTabById(PLUGIN_ID);
     }
 
     /**
@@ -1746,10 +1765,10 @@ export class ShellView extends ItemView {
                 activeProviderId,
                 activeModelId,
             });
-        } catch (error: any) {
+        } catch (error: unknown) {
             if (requestId !== this.modelLoadRequestId) return;
             logger.warn(
-                `Failed to load model list: ${error?.message || 'Unknown error'}`,
+                `Failed to load model list: ${thrownMessage(error) || 'Unknown error'}`,
                 'ShellView.refreshInputToolbarModels'
             );
             this.inputToolbar.updateModels({
@@ -1806,10 +1825,9 @@ export class ShellView extends ItemView {
         const plugin = this.getPluginInstance();
         const config = plugin?.settings?.providers?.[id];
         new Notice(`${config?.label || id} API Key is not configured. Please configure it in settings.`);
-        // @ts-ignore - app setting tab activation
-        this.app.setting.open();
-        // @ts-ignore - activate plugin settings tab
-        this.app.setting.openTabById(PLUGIN_ID);
+        const app = this.app as AppWithSetting;
+        app.setting.open();
+        app.setting.openTabById(PLUGIN_ID);
         void this.refreshInputToolbarModels();
     }
 
@@ -1919,7 +1937,7 @@ export class ShellView extends ItemView {
     }
 
     private getPluginInstance(): IPlugin | undefined {
-        return this.plugin ?? (this.app as any).plugins.plugins[PLUGIN_ID];
+        return this.plugin ?? (this.app as AppWithPluginRegistry).plugins.plugins[PLUGIN_ID];
     }
 
     private ensureActiveTabSession(): ShellTabSession {

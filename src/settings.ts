@@ -4,6 +4,8 @@ import { ModelOption } from './models/interfaces';
 import type { AvailableModelsResult } from './services/model-service';
 import { checkAvailabilityWithStatus } from './services/model-catalog-service';
 import { OntologyUpdateMode } from './knowledge/types';
+import type { MemoryRecord } from './memory/hindsight-types';
+import type { MemoryView } from './memory/types';
 import type {
     DerivedSkillRegenerateBlocker,
     DerivedSkillStatus,
@@ -1698,7 +1700,7 @@ export class SettingTab extends PluginSettingTab {
     // 切换到其它 provider 时重置为展开。此前「激活==展开」耦合导致再点无法折叠(用户反馈)。
     private activeProviderDetailCollapsed = false;
     private connectionTestStatus: ConnectionTestStatus = { state: 'idle', message: '' };
-    private memoryView: any = null;
+    private memoryView: MemoryView | null = null;
     private memorySearchQuery = '';
     private memoryActiveTab: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = 'overview';
     private memoryLoading = false;
@@ -2051,7 +2053,7 @@ export class SettingTab extends PluginSettingTab {
         }
     }
 
-    private getVisibleMemoryRecords(): any[] {
+    private getVisibleMemoryRecords(): MemoryRecord[] {
         const sections = this.memoryView?.sections;
         if (!sections) return [];
         if (this.memoryActiveTab === 'observations') return sections.observations || [];
@@ -2877,8 +2879,8 @@ export class SettingTab extends PluginSettingTab {
             .addButton(btn => btn
                 .setButtonText(t('Configure Hotkey'))
                 .onClick(() => {
-                    (this.app as any).setting.openTabById('hotkeys');
-                    (this.app as any).setting.activeTab.setQuery('Guardian: Manual Trigger');
+                    this.app.setting.openTabById('hotkeys');
+                    this.app.setting.activeTab.setQuery('Guardian: Manual Trigger');
                 }));
 
         new Setting(containerEl)
@@ -3459,7 +3461,7 @@ export class SettingTab extends PluginSettingTab {
 
         const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
         this.createActionButton(actions, t('Open ontology'), async () => {
-            const runtime = (this.plugin as any).knowledgeRuntime;
+            const runtime = this.plugin.knowledgeRuntime;
             if (!runtime?.openOntologyFile) {
                 new Notice(t('Knowledge runtime is not available.'));
                 return;
@@ -3468,7 +3470,7 @@ export class SettingTab extends PluginSettingTab {
             await this.refreshOntologyStatus(ontologyStatusEl);
         });
         this.createActionButton(actions, t('Discover'), async () => {
-            const runtime = (this.plugin as any).knowledgeRuntime;
+            const runtime = this.plugin.knowledgeRuntime;
             if (!runtime?.discoverOntology) {
                 new Notice(t('Knowledge runtime is not available.'));
                 return;
@@ -3478,7 +3480,7 @@ export class SettingTab extends PluginSettingTab {
             await this.refreshOntologyStatus(ontologyStatusEl);
         }, 'accent');
         this.createActionButton(actions, t('Preview'), async () => {
-            const runtime = (this.plugin as any).knowledgeRuntime;
+            const runtime = this.plugin.knowledgeRuntime;
             if (!runtime?.discoverOntologyPreview) {
                 new Notice(t('Knowledge runtime is not available.'));
                 return;
@@ -3488,7 +3490,7 @@ export class SettingTab extends PluginSettingTab {
             new Notice(preview.message);
         });
         this.createActionButton(actions, t('Mark stale pending'), async () => {
-            const runtime = (this.plugin as any).knowledgeRuntime;
+            const runtime = this.plugin.knowledgeRuntime;
             if (!runtime?.markOntologyStaleFilesPending) {
                 new Notice(t('Knowledge runtime is not available.'));
                 return;
@@ -3571,7 +3573,7 @@ export class SettingTab extends PluginSettingTab {
     }
 
     private async refreshOntologyStatus(statusEl: HTMLElement): Promise<void> {
-        const runtime = (this.plugin as any).knowledgeRuntime;
+        const runtime = this.plugin.knowledgeRuntime;
         if (!runtime?.getOntologyStatus) {
             statusEl.textContent = t('Ontology status: Knowledge runtime is not available.');
             return;

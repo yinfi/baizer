@@ -23,7 +23,7 @@ export interface ThrottleOptions {
     trailing?: boolean;
 }
 
-export interface ThrottledFn<T extends (...args: any[]) => any> {
+export interface ThrottledFn<T extends (...args: never[]) => unknown> {
     (...args: Parameters<T>): void;
     /** 立即执行已挂起的 trailing 调用并重置节流状态 */
     flush(): void;
@@ -42,7 +42,7 @@ export interface ThrottledFn<T extends (...args: any[]) => any> {
  * save('a'); // 立即执行
  * save('b'); // 500ms 后执行（trailing）
  */
-export function throttle<T extends (...args: any[]) => any>(
+export function throttle<T extends (...args: never[]) => unknown>(
     fn: T,
     options: ThrottleOptions = {}
 ): ThrottledFn<T> {
@@ -137,7 +137,7 @@ export interface DebounceOptions {
     leading?: boolean;
 }
 
-export interface DebouncedFn<T extends (...args: any[]) => any> {
+export interface DebouncedFn<T extends (...args: never[]) => unknown> {
     (...args: Parameters<T>): void;
     /** 立即执行挂起的 trailing 调用并重置状态 */
     flush(): void;
@@ -160,7 +160,7 @@ export interface DebouncedFn<T extends (...args: any[]) => any> {
  * // leading：立即响应，窗口内忽略重复（类似 Obsidian debounce 第三参数 false）
  * const log = debounce(handleEvent, { wait: 1000, leading: true });
  */
-export function debounce<T extends (...args: any[]) => any>(
+export function debounce<T extends (...args: never[]) => unknown>(
     fn: T,
     options: DebounceOptions = {}
 ): DebouncedFn<T> {
@@ -242,7 +242,7 @@ export function debounce<T extends (...args: any[]) => any>(
  * saveMap.call('notes/a.md', 'hello');
  * saveMap.call('notes/b.md', 'world'); // b 独立于 a 的节流窗口
  */
-export class ThrottleMap<TKey, TArgs extends any[]> {
+export class ThrottleMap<TKey, TArgs extends unknown[]> {
     private readonly fn: (...args: [TKey, ...TArgs]) => void;
     private readonly options: ThrottleOptions;
     private readonly map = new Map<TKey, ThrottledFn<(...args: [TKey, ...TArgs]) => void>>();
