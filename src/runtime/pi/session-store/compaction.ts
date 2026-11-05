@@ -25,6 +25,8 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
   keepRecentTokens: 20000,
 };
 
+import { asString, isRecord } from '../../../utils/narrow';
+
 /** 消息的 token 用量（形如 pi-ai 的 Usage，只读本模块关心的字段）。 */
 export interface UsageLike {
   totalTokens?: number;
@@ -47,11 +49,6 @@ export function calculateContextTokens(usage: UsageLike): number {
   return usage.totalTokens || (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
 }
 
-/** 内容块来自 pi 透传的会话数据，先收成 unknown 再逐字段窄化。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 /**
  * 取消息里的真实 usage。与旧实现一致：只有**非 aborted / 非 error** 的 assistant 消息
  * 的 usage 才可信（中断或失败的回合 usage 不完整）。
@@ -70,8 +67,9 @@ export function estimateTokens(message: EstimableMessage): number {
     chars = content.length;
   } else if (Array.isArray(content)) {
     for (const block of content) {
-      if (isRecord(block) && block.type === 'text' && typeof block.text === 'string') {
-        chars += block.text.length;
+      if (isRecord(block) && block.type === 'text') {
+        const text = asString(block.text);
+        if (text !== undefined) chars += text.length;
       }
     }
   }

@@ -1,4 +1,5 @@
 import { extractFirstHttpUrl } from './clip-input';
+import { prop } from '../utils/narrow';
 
 export interface ClipProtocolParams {
   [key: string]: string | undefined;
@@ -74,10 +75,7 @@ export class BaizerClipProtocolHandler {
 }
 
 function isDuplicateProtocolHandlerError(error: unknown): boolean {
-  const rawMessage = typeof error === 'object' && error !== null && 'message' in error
-    ? error.message
-    : undefined;
-  const message = String(rawMessage || error || '');
+  const message = String(prop(error, 'message') || error || '');
   return message.includes('baizer-clip') && message.includes('already registered');
 }
 

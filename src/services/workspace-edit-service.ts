@@ -1,6 +1,7 @@
 import { App, TFile } from 'obsidian';
 import { ToolRegistry } from '../skills/tool-registry';
 import { getFileWriteResultPath } from '../utils/file-operation-contract';
+import { asBoolean, asString, prop } from '../utils/narrow';
 
 export type WorkspaceEditKind = 'create' | 'update';
 
@@ -49,11 +50,6 @@ const DIRECT_APPLY_WRITE_TOOLS = new Set([
 
 export function isDirectApplyWorkspaceTool(name: string): boolean {
   return DIRECT_APPLY_WRITE_TOOLS.has(name);
-}
-
-/** 工具结果是运行时透传数据，先收成 unknown 再逐字段窄化。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 export class WorkspaceEditService {
@@ -202,10 +198,10 @@ export class WorkspaceEditService {
     fallbackPath: string,
   ): string {
     if (action === 'create_note') {
-      if (isRecord(result)) {
-        if (typeof result.path === 'string') return result.path;
-        if (typeof result.target === 'string') return result.target;
-      }
+      const resultPath = asString(prop(result, 'path'));
+      if (resultPath !== undefined) return resultPath;
+      const resultTarget = asString(prop(result, 'target'));
+      if (resultTarget !== undefined) return resultTarget;
       return fallbackPath;
     }
     return getFileWriteResultPath(action, result, args) || fallbackPath;
@@ -234,8 +230,7 @@ export class WorkspaceEditService {
   }
 
   private isSuccessfulToolResult(result: unknown): boolean {
-    if (!isRecord(result)) return false;
-    return result.success === true || result.status === 'success';
+    return asBoolean(prop(result, 'success')) === true || asString(prop(result, 'status')) === 'success';
   }
 
   private createId(): string {

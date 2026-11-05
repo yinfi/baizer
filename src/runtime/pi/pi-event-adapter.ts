@@ -1,29 +1,30 @@
 import type { StreamEvent } from '../../models/interfaces';
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
+import { asArray, asString, isRecord, prop } from '../../utils/narrow';
 
-/** 工具结果是 pi 透传的运行时数据，先收成 unknown 再逐字段窄化。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function getContentText(result: unknown): string | undefined {
-  if (!isRecord(result) || !Array.isArray(result.content)) return undefined;
-  const first = result.content[0];
-  return isRecord(first) && typeof first.text === 'string' ? first.text : undefined;
+/**
+ * pi `tool_execution_end` 的 `result` 字段是库里的 `any`(见 `types.d.ts`),
+ * 实际形状是 `{ content: [{ type, text }], details: {...} }`
+ * (`pi-tool-adapter.ts` 的 `execute` 产出,或库内 `createErrorToolResult` 的兜底)。
+ * 当作外部输入用 `unknown` + 窄化读取,不假设字段一定存在。
+ */
+function firstContentText(result: unknown): string | undefined {
+  const content = asArray(prop(result, 'content'));
+  const first = content?.[0];
+  return isRecord(first) ? asString(first.text) : undefined;
 }
 
 export function unwrapPiToolResult(result: unknown): unknown {
-  if (isRecord(result) && isRecord(result.details)
-    && Object.prototype.hasOwnProperty.call(result.details, 'baizerResponse')) {
-    return result.details.baizerResponse;
+  const details = prop(result, 'details');
+  if (isRecord(details) && Object.prototype.hasOwnProperty.call(details, 'baizerResponse')) {
+    return details.baizerResponse;
   }
-  const contentText = getContentText(result);
-  if (contentText !== undefined) {
+  const text = firstContentText(result);
+  if (typeof text === 'string') {
     try {
-      const parsed: unknown = JSON.parse(contentText);
-      return parsed;
+      return JSON.parse(text);
     } catch {
-      return { message: contentText };
+      return { message: text };
     }
   }
   return result;
@@ -101,9 +102,7 @@ export function mapPiEventToStreamEvent(event: AgentEvent): StreamEvent | undefi
 }
 
 function getToolErrorMessage(result: unknown): string | undefined {
-  if (isRecord(result)) {
-    const details = result.details;
-    if (isRecord(details) && typeof details.error === 'string') return details.error;
-  }
-  return getContentText(result);
+  const detailsError = asString(prop(prop(result, 'details'), 'error'));
+  if (detailsError !== undefined) return detailsError;
+  return firstContentText(result);
 }

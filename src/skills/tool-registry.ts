@@ -3,8 +3,8 @@
 import { App } from 'obsidian';
 import { PluginSettings } from '../mcp/types';
 import { ToolDefinition } from '../models/interfaces';
-import { thrownMessage } from '../utils/thrown-message';
 import { Tool, ToolContext } from './types';
+import { prop } from '../utils/narrow';
 
 /**
  * 原子工具注册表
@@ -80,7 +80,7 @@ export class ToolRegistry {
       return await tool.execute(args, ctx);
     } catch (e: unknown) {
       console.error(`[ToolRegistry] Tool "${name}" execution error:`, e);
-      return { error: thrownMessage(e) || String(e) };
+      return { error: prop(e, 'message') };
     }
   }
 

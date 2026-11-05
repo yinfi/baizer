@@ -30,6 +30,7 @@ import {
   ResolvedAsrConfig,
   resolveAsrConfig,
 } from '../mcp/types';
+import { asArray, asString, prop } from '../utils/narrow';
 import { extractJsonAssignment } from '../utils/video_utils';
 import {
   ASR_TARGET_SAMPLE_RATE,
@@ -74,32 +75,6 @@ interface VideoTranscriptionDeps {
   decodeAudio: AudioDecoder;
 }
 
-/** 外部输入（页面内嵌 JSON / 端点响应）先收成 unknown，再逐字段窄化。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function optionalString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-/**
- * 旧 Web Audio 实现的 decodeAudioData 只走回调并返回 undefined，
- * 因此仍需检测返回值是否为 thenable，而不是直接 await。
- */
-function isAudioBufferThenable(value: unknown): value is PromiseLike<AudioBuffer> {
-  return typeof value === 'object'
-    && value !== null
-    && 'then' in value
-    && typeof value.then === 'function';
-}
-
-/** Web Audio 的构造器：标准名与旧 WebKit 前缀名。 */
-interface WebAudioGlobals {
-  OfflineAudioContext?: typeof OfflineAudioContext;
-  webkitOfflineAudioContext?: typeof OfflineAudioContext;
-}
-
 /**
  * 用 Web Audio 解码成 PCM。
  *
@@ -113,33 +88,46 @@ interface WebAudioGlobals {
  * 而调用方在解码失败时还要拿原缓冲走整轨回退路径。
  */
 export async function decodeWithWebAudio(bytes: ArrayBuffer): Promise<PcmSource> {
-  const globalScope: WebAudioGlobals = globalThis;
-  const Ctor = globalScope.OfflineAudioContext ?? globalScope.webkitOfflineAudioContext;
-  if (typeof Ctor !== 'function') {
+  const Ctor: unknown = prop(globalThis, 'OfflineAudioContext') || prop(globalThis, 'webkitOfflineAudioContext');
+  if (!isOfflineAudioContextCtor(Ctor)) {
     throw new Error('Web Audio (OfflineAudioContext) is unavailable in this environment');
   }
 
   const context = new Ctor(1, 1, ASR_TARGET_SAMPLE_RATE);
-  const decoded = await new Promise<AudioBuffer | null>((resolve, reject) => {
-    const maybePromise: Promise<AudioBuffer> | undefined = context.decodeAudioData(bytes.slice(0), resolve, reject);
-    if (isAudioBufferThenable(maybePromise)) {
-      void maybePromise.then(resolve, reject);
+  const decoded = await new Promise<unknown>((resolve, reject) => {
+    const maybePromise = context.decodeAudioData(bytes.slice(0), resolve, reject);
+    if (maybePromise && typeof maybePromise.then === 'function') {
+      maybePromise.then(resolve, reject);
     }
   });
 
-  if (!decoded || typeof decoded.getChannelData !== 'function' || !(decoded.length > 0)) {
+  if (!isDecodedPcm(decoded)) {
     throw new Error('Decoded audio contains no samples');
   }
 
-  // AudioBuffer 只有 numberOfChannels，没有 channelCount；改动前直接断言成 PcmSource，
-  // 于是 asr-chunking 一直按「channelCount 缺省 = 单声道」只读 channel 0。
-  // 这里显式构造时保留该既有语义，不让本次类型收敛顺手改掉混音行为。
-  return {
-    sampleRate: decoded.sampleRate,
-    length: decoded.length,
-    channelCount: 1,
-    getChannelData: (channel: number) => decoded.getChannelData(channel),
-  };
+  return decoded;
+}
+
+/** Web Audio OfflineAudioContext 中本模块用到的最小形状(平台 API 边界)。 */
+interface OfflineAudioContextLike {
+  decodeAudioData(
+    data: ArrayBuffer,
+    onSuccess: (decoded: unknown) => void,
+    onError: (reason: unknown) => void,
+  ): PromiseLike<unknown> | undefined;
+}
+
+type OfflineAudioContextCtor = new (channels: number, length: number, sampleRate: number) => OfflineAudioContextLike;
+
+function isOfflineAudioContextCtor(value: unknown): value is OfflineAudioContextCtor {
+  return typeof value === 'function';
+}
+
+/** 解码结果必须带 getChannelData 且有样本;其余字段(采样率等)由调用方继续校验。 */
+function isDecodedPcm(value: unknown): value is PcmSource {
+  return !!value
+    && typeof prop(value, 'getChannelData') === 'function'
+    && Number(prop(value, 'length')) > 0;
 }
 
 const defaultDeps: VideoTranscriptionDeps = {
@@ -198,46 +186,28 @@ export function isParameterRejection(error: unknown): boolean {
 function pickBilibiliAudioUrl(html: string): string | null {
   const playInfo = extractJsonAssignment(html, 'window.__playinfo__=')
     || extractJsonAssignment(html, '__playinfo__=');
-  const playInfoData = isRecord(playInfo) ? playInfo.data : undefined;
-  const dash = isRecord(playInfoData) ? playInfoData.dash : undefined;
-  const audioTracks = isRecord(dash) ? dash.audio : undefined;
-  if (!Array.isArray(audioTracks) || audioTracks.length === 0) return null;
+  const audioTracks = asArray(prop(prop(prop(playInfo, 'data'), 'dash'), 'audio'));
+  if (!audioTracks || audioTracks.length === 0) return null;
 
-  const candidates = audioTracks.filter(isRecord);
-  const selected = candidates.find(
-    (track) => optionalString(track.baseUrl) || optionalString(track.base_url),
-  ) ?? candidates[0];
-  if (!selected) return null;
-
-  const direct = optionalString(selected.baseUrl) || optionalString(selected.base_url);
-  if (direct) return direct;
-
-  // 与改动前一致：备用地址只取数组第 0 项。
-  const backups = [
-    Array.isArray(selected.backupUrl) ? selected.backupUrl[0] : undefined,
-    Array.isArray(selected.backup_url) ? selected.backup_url[0] : undefined,
-  ];
-  for (const backup of backups) {
-    const url = optionalString(backup);
-    if (url) return url;
-  }
-
-  return null;
+  const selected: unknown = audioTracks.find((track) => prop(track, 'baseUrl') || prop(track, 'base_url'))
+    || audioTracks[0];
+  return asString(
+    prop(selected, 'baseUrl')
+    || prop(selected, 'base_url')
+    || asArray(prop(selected, 'backupUrl'))?.[0]
+    || asArray(prop(selected, 'backup_url'))?.[0],
+  ) || null;
 }
 
 function pickYouTubeAudioUrl(html: string): string | null {
   const playerResponse = extractJsonAssignment(html, 'var ytInitialPlayerResponse = ')
     || extractJsonAssignment(html, 'ytInitialPlayerResponse = ')
     || extractJsonAssignment(html, 'ytInitialPlayerResponse=');
-  const streamingData = isRecord(playerResponse) ? playerResponse.streamingData : undefined;
-  const formats = isRecord(streamingData) ? streamingData.adaptiveFormats : undefined;
-  if (!Array.isArray(formats)) return null;
+  const formats = asArray(prop(prop(playerResponse, 'streamingData'), 'adaptiveFormats'));
+  if (!formats) return null;
 
-  const selected = formats.find((format) => isRecord(format)
-    && typeof format.mimeType === 'string'
-    && format.mimeType.startsWith('audio/'));
-  if (!isRecord(selected)) return null;
-  return optionalString(selected.url) ?? null;
+  const selected = formats.find((format) => asString(prop(format, 'mimeType'))?.startsWith('audio/'));
+  return asString(prop(selected, 'url')) || null;
 }
 
 async function resolveAudio(params: {
@@ -294,16 +264,14 @@ export function parseTranscriptionPayload(
   window: ChunkWindow,
 ): { text: string; segments: TranscriptSegment[] } {
   const segments: TranscriptSegment[] = [];
-  const body = isRecord(payload) ? payload : {};
 
-  const rawSegments = body.segments;
-  if (Array.isArray(rawSegments)) {
+  const rawSegments = asArray(prop(payload, 'segments'));
+  if (rawSegments) {
     for (const raw of rawSegments) {
-      const segment = isRecord(raw) ? raw : {};
-      const text = typeof segment.text === 'string' ? segment.text.trim() : '';
+      const text = asString(prop(raw, 'text'))?.trim() ?? '';
       if (!text) continue;
-      const start = Number(segment.start);
-      const end = Number(segment.end);
+      const start = Number(prop(raw, 'start'));
+      const end = Number(prop(raw, 'end'));
       segments.push({
         start: Number.isFinite(start) ? window.startSec + start : window.startSec,
         end: Number.isFinite(end) ? window.startSec + end : window.endSec,
@@ -312,7 +280,7 @@ export function parseTranscriptionPayload(
     }
   }
 
-  const flat = typeof body.text === 'string' ? body.text.trim() : '';
+  const flat = asString(prop(payload, 'text'))?.trim() ?? '';
   if (segments.length === 0 && flat) {
     segments.push({ start: window.startSec, end: window.endSec, text: flat });
   }
@@ -388,7 +356,8 @@ async function postTranscriptionRequest(params: TranscriptionRequestParams): Pro
     );
   }
 
-  const body: unknown = typeof response.json === 'function' ? await response.json() : {};
+  if (typeof response.json !== 'function') return {};
+  const body: unknown = await response.json();
   return body;
 }
 

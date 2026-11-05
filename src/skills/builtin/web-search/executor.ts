@@ -2,7 +2,13 @@ import { requestUrl } from 'obsidian';
 import { Tool, ToolContext } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
-import { thrownMessage } from '../../../utils/thrown-message';
+import { asString, prop } from '../../../utils/narrow';
+
+interface WebSearchResult {
+  title: string;
+  link: string;
+  snippet: string;
+}
 
 interface WebSearchDeps {
   requestUrl: typeof requestUrl;
@@ -32,9 +38,9 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
       },
       required: ['query'],
     },
-    async execute(args, _ctx) {
-      const query = readStringArg(args, 'query');
-      const timeRange = readStringArg(args, 'time_range');
+    async execute(rawArgs: unknown, _ctx: ToolContext) {
+      const query = asString(prop(rawArgs, 'query')) ?? '';
+      const timeRange = asString(prop(rawArgs, 'time_range'));
       let searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
       if (timeRange) searchUrl += `&df=${timeRange}`;
 
@@ -56,7 +62,7 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
           return { results: [], message: 'No results found or parsing failed.' };
         }
 
-        const results: any[] = [];
+        const results: WebSearchResult[] = [];
         let match;
         let count = 0;
         const regex = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
@@ -72,28 +78,17 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
         return results.length === 0
           ? { results: [], message: 'No results found or parsing failed.' }
           : { results };
-      } catch (error: unknown) {
-        return { error: `Search failed: ${thrownMessage(error) || String(error)}` };
+      } catch (error) {
+        return { error: `Search failed: ${error instanceof Error ? error.message : String(error)}` };
       }
     },
   };
 }
 
-/** 工具 args 是模型生成的 JSON（外部输入）：非字符串字段一律视为缺省。 */
-function readStringArg(args: unknown, key: string): string {
-  if (!isRecord(args)) return '';
-  const value = args[key];
-  return typeof value === 'string' ? value : '';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 const webSearchTool = createWebSearchTool();
 
 export const executor: BuiltinExecutor = {
-  async execute(args: any, ctx: ToolContext) {
+  async execute(args: unknown, ctx: ToolContext) {
     return webSearchTool.execute(args, ctx);
   },
 };

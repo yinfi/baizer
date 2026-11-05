@@ -1,5 +1,5 @@
 import { requestUrl, Notice } from 'obsidian';
-import { thrownMessage } from './thrown-message';
+import { asArray, asString, prop } from './narrow';
 
 export interface VideoTranscript {
     text: string;
@@ -23,11 +23,6 @@ const defaultDeps: VideoTranscriptDeps = {
     requestUrl: (options) => requestUrl(options),
     userAgent: DEFAULT_USER_AGENT,
 };
-
-/** 外部输入（页面内嵌 JSON / 第三方接口响应）先收成 unknown，再逐字段窄化。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null;
-}
 
 function extractBalancedJson(source: string, marker: string): unknown {
     const markerIndex = source.indexOf(marker);
@@ -60,8 +55,7 @@ function extractBalancedJson(source: string, marker: string): unknown {
             depth--;
             if (depth === 0) {
                 try {
-                    const parsed: unknown = JSON.parse(source.slice(braceStart, i + 1));
-                    return parsed;
+                    return JSON.parse(source.slice(braceStart, i + 1));
                 } catch {
                     return null;
                 }
@@ -70,6 +64,11 @@ function extractBalancedJson(source: string, marker: string): unknown {
     }
 
     return null;
+}
+
+/** 读取 catch 到的值的 `.message`;保持原 `e.message` 的取值语义(缺失时为 "undefined")。 */
+function errorMessageOf(error: unknown): string {
+    return String(prop(error, 'message'));
 }
 
 async function fetchText(
@@ -136,11 +135,8 @@ async function getYoutubeTranscript(url: string, deps: VideoTranscriptDeps): Pro
             });
         }
 
-        const captionTracksValue: unknown = JSON.parse(captionsMatch[1]);
-        const captionTracks = Array.isArray(captionTracksValue)
-            ? captionTracksValue.filter(isRecord)
-            : [];
-        if (captionTracks.length === 0) {
+        const captionTracks = asArray(JSON.parse(captionsMatch[1]) as unknown);
+        if (!captionTracks || captionTracks.length === 0) {
             return buildMetadataOnlyResult({
                 title,
                 platform: 'youtube',
@@ -150,50 +146,43 @@ async function getYoutubeTranscript(url: string, deps: VideoTranscriptDeps): Pro
             });
         }
 
-        const selectedTrack = captionTracks.find((track) => track.languageCode === 'en')
-            ?? captionTracks[0];
-        const baseUrl = typeof selectedTrack.baseUrl === 'string' ? selectedTrack.baseUrl : '';
-        if (!baseUrl) {
-            return buildMetadataOnlyResult({
-                title,
-                platform: 'youtube',
-                author,
-                url,
-                description,
-            });
+        let selectedTrack: unknown = captionTracks.find((track) => prop(track, 'languageCode') === 'en');
+        if (!selectedTrack) {
+            selectedTrack = captionTracks[0];
         }
+        const trackBaseUrl = asString(prop(selectedTrack, 'baseUrl')) ?? '';
 
         let transcriptText = '';
         try {
             const transcriptResponse = await deps.requestUrl({
-                url: baseUrl,
+                url: trackBaseUrl,
                 headers: {
                     'User-Agent': deps.userAgent,
                 },
             });
             transcriptText = transcriptResponse.text;
         } catch {
-            const transcriptResponse = await deps.requestUrl({ url: baseUrl });
+            const transcriptResponse = await deps.requestUrl({ url: trackBaseUrl });
             transcriptText = transcriptResponse.text;
         }
 
         if (!transcriptText) {
             try {
                 const jsonResponse = await deps.requestUrl({
-                    url: `${baseUrl}&fmt=json3`,
+                    url: `${trackBaseUrl}&fmt=json3`,
                     headers: {
                         'User-Agent': deps.userAgent,
                     },
                 });
-                const jsonData: unknown = JSON.parse(jsonResponse.text);
-                const events = isRecord(jsonData) ? jsonData.events : undefined;
-                const text = Array.isArray(events)
+                const jsonData = JSON.parse(jsonResponse.text) as unknown;
+                const events = asArray(prop(jsonData, 'events'));
+                const text = events
                     ? events
                         .map((event) => {
-                            if (!isRecord(event) || !Array.isArray(event.segs)) return '';
-                            return event.segs
-                                .map((seg) => (isRecord(seg) && typeof seg.utf8 === 'string' ? seg.utf8 : ''))
-                                .join('');
+                            const segs = asArray(prop(event, 'segs'));
+                            return segs
+                                ? segs.map((seg) => prop(seg, 'utf8')).join('')
+                                : '';
                         })
                         .filter(Boolean)
                         .join(' ')
@@ -252,9 +241,9 @@ async function getYoutubeTranscript(url: string, deps: VideoTranscriptDeps): Pro
             transcriptSource: 'platform-subtitle',
             needsTranscription: false,
         };
-    } catch (error: unknown) {
-        console.error('Failed to get YouTube transcript', error);
-        new Notice(`YouTube Transcript Error: ${thrownMessage(error)}`);
+    } catch (e: unknown) {
+        console.error('Failed to get YouTube transcript', e);
+        new Notice(`YouTube Transcript Error: ${errorMessageOf(e)}`);
         return null;
     }
 }
@@ -314,31 +303,28 @@ async function getBilibiliTranscript(url: string, deps: VideoTranscriptDeps): Pr
                 'User-Agent': deps.userAgent,
             },
         });
-        const subtitleData: unknown = JSON.parse(subtitleResponse.text);
-        const subtitlePayload = isRecord(subtitleData) ? subtitleData.data : undefined;
-        const subtitleSection = isRecord(subtitlePayload) ? subtitlePayload.subtitle : undefined;
-        const subtitles = isRecord(subtitleSection) ? subtitleSection.subtitles : undefined;
+        const subtitleData = JSON.parse(subtitleResponse.text) as unknown;
+        const subtitles = prop(prop(prop(subtitleData, 'data'), 'subtitle'), 'subtitles');
 
         let text = '';
         if (Array.isArray(subtitles) && subtitles.length > 0) {
-            const candidates = subtitles.filter(isRecord);
-            const selectedSubtitle = candidates.find(
-                (subtitle) => typeof subtitle.url === 'string' && subtitle.url.length > 0,
-            ) ?? candidates[0];
-            const selectedUrl = selectedSubtitle && typeof selectedSubtitle.url === 'string'
-                ? selectedSubtitle.url
-                : '';
+            const subtitleList = subtitles as unknown[];
+            const selectedSubtitle: unknown = subtitleList.find((subtitle) => prop(subtitle, 'url')) || subtitleList[0];
+            const selectedUrl = prop(selectedSubtitle, 'url');
             if (selectedUrl) {
-                const subtitleUrl = selectedUrl.startsWith('http')
-                    ? selectedUrl
-                    : `https:${selectedUrl}`;
+                const selectedUrlText = asString(selectedUrl);
+                if (selectedUrlText === undefined) {
+                    // 与原行为一致:非字符串 url 在 startsWith 处抛 TypeError,由外层 catch 处理。
+                    throw new TypeError('selectedSubtitle.url.startsWith is not a function');
+                }
+                const subtitleUrl = selectedUrlText.startsWith('http')
+                    ? selectedUrlText
+                    : `https:${selectedUrlText}`;
                 const transcriptResponse = await deps.requestUrl({ url: subtitleUrl });
-                const transcriptJson: unknown = JSON.parse(transcriptResponse.text);
-                const body = isRecord(transcriptJson) ? transcriptJson.body : undefined;
-                if (Array.isArray(body)) {
-                    text = body
-                        .map((item) => (isRecord(item) && typeof item.content === 'string' ? item.content : ''))
-                        .join(' ');
+                const transcriptJson = JSON.parse(transcriptResponse.text) as unknown;
+                const body = asArray(prop(transcriptJson, 'body'));
+                if (body) {
+                    text = body.map((item) => prop(item, 'content')).join(' ');
                 }
             }
         }
@@ -376,9 +362,9 @@ async function getBilibiliTranscript(url: string, deps: VideoTranscriptDeps): Pr
             transcriptSource: 'platform-subtitle',
             needsTranscription: false,
         };
-    } catch (error: unknown) {
-        console.error('Failed to get Bilibili transcript', error);
-        new Notice(`Bilibili Transcript Error: ${thrownMessage(error)}`);
+    } catch (e: unknown) {
+        console.error('Failed to get Bilibili transcript', e);
+        new Notice(`Bilibili Transcript Error: ${errorMessageOf(e)}`);
         return null;
     }
 }

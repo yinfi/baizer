@@ -1,26 +1,11 @@
 import { BuiltinExecutor } from '../../skill-registry';
 import { Tool } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
-import { thrownMessage } from '../../../utils/thrown-message';
+import { asString, isPlainRecord, prop } from '../../../utils/narrow';
 
 const NODE_TYPES = new Set(['text', 'file', 'link', 'group']);
 const SIDES = new Set(['top', 'right', 'bottom', 'left']);
 const ENDS = new Set(['none', 'arrow']);
-
-/** 工具 args 是模型生成的 JSON，.canvas 内容也是外部输入：先窄化再读字段。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function readField(value: unknown, key: string): unknown {
-  return isRecord(value) ? value[key] : undefined;
-}
-
-/** 只在类型正确时取字符串，避免把非字符串值塞进 Set.has / 模板串。 */
-function readStringField(value: unknown, key: string): string | undefined {
-  const field = readField(value, key);
-  return typeof field === 'string' ? field : undefined;
-}
 
 export const executor: BuiltinExecutor = {
   async execute() {
@@ -40,8 +25,8 @@ const validateJsonCanvas: Tool = {
   },
   executionMode: 'parallel',
   risk: 'read',
-  async execute(args) {
-    return validateCanvasContent(readField(args, 'content'));
+  async execute(args: unknown) {
+    return validateCanvasContent(prop(args, 'content'));
   },
 };
 
@@ -58,14 +43,15 @@ export function validateCanvasContent(content: unknown): { success: boolean; err
   let canvas: unknown;
   try {
     canvas = JSON.parse(content);
-  } catch (error: unknown) {
-    return { success: false, errors: [`Invalid JSON: ${thrownMessage(error)}`] };
+  } catch (error) {
+    return { success: false, errors: [`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`] };
   }
 
-  if (!isRecord(canvas)) {
+  if (!isPlainRecord(canvas)) {
     return { success: false, errors: ['Canvas root must be an object'] };
   }
 
+  // null/undefined 沿用改动前 `?? []` 的语义（视为未提供 → 空数组）；只有非数组才报错。
   const nodes = canvas.nodes ?? [];
   const edges = canvas.edges ?? [];
   if (!Array.isArray(nodes) || !Array.isArray(edges)) {
@@ -78,53 +64,53 @@ export function validateCanvasContent(content: unknown): { success: boolean; err
   const allIds = new Set<string>();
 
   nodes.forEach((node: unknown, index: number) => {
-    const nodeId = readStringField(node, 'id');
-    validateId(nodeId, `nodes[${index}].id`, allIds, errors);
+    validateId(prop(node, 'id'), `nodes[${index}].id`, allIds, errors);
+    const nodeId = asString(prop(node, 'id'));
     if (nodeId !== undefined) nodeIds.add(nodeId);
 
-    const nodeType = readStringField(node, 'type');
-    if (!nodeType || !NODE_TYPES.has(nodeType)) {
+    const nodeType = asString(prop(node, 'type'));
+    if (nodeType === undefined || !NODE_TYPES.has(nodeType)) {
       errors.push(`nodes[${index}].type must be one of text, file, link, group`);
     }
 
     for (const field of ['x', 'y', 'width', 'height']) {
-      if (!Number.isInteger(readField(node, field))) {
+      if (!Number.isInteger(prop(node, field))) {
         errors.push(`nodes[${index}].${field} must be an integer`);
       }
     }
 
-    if (nodeType === 'text' && typeof readField(node, 'text') !== 'string') {
+    if (nodeType === 'text' && typeof prop(node, 'text') !== 'string') {
       errors.push(`nodes[${index}] text nodes require a text field`);
     }
-    if (nodeType === 'file' && typeof readField(node, 'file') !== 'string') {
+    if (nodeType === 'file' && typeof prop(node, 'file') !== 'string') {
       errors.push(`nodes[${index}] file nodes require a file field`);
     }
-    if (nodeType === 'link' && typeof readField(node, 'url') !== 'string') {
+    if (nodeType === 'link' && typeof prop(node, 'url') !== 'string') {
       errors.push(`nodes[${index}] link nodes require a url field`);
     }
   });
 
   edges.forEach((edge: unknown, index: number) => {
-    validateId(readField(edge, 'id'), `edges[${index}].id`, allIds, errors);
+    validateId(prop(edge, 'id'), `edges[${index}].id`, allIds, errors);
     for (const field of ['fromNode', 'toNode']) {
-      const value = readStringField(edge, field);
-      if (value === undefined) {
+      const nodeRef = asString(prop(edge, field));
+      if (nodeRef === undefined) {
         errors.push(`edges[${index}].${field} must be a node id`);
-      } else if (!nodeIds.has(value)) {
-        errors.push(`edges[${index}].${field} references missing node "${value}"`);
+      } else if (!nodeIds.has(nodeRef)) {
+        errors.push(`edges[${index}].${field} references missing node "${nodeRef}"`);
       }
     }
 
     for (const field of ['fromSide', 'toSide']) {
-      const value = readField(edge, field);
-      if (value !== undefined && !(typeof value === 'string' && SIDES.has(value))) {
+      const side = prop(edge, field);
+      if (side !== undefined && !SIDES.has(asString(side) ?? '')) {
         errors.push(`edges[${index}].${field} must be one of top, right, bottom, left`);
       }
     }
 
     for (const field of ['fromEnd', 'toEnd']) {
-      const value = readField(edge, field);
-      if (value !== undefined && !(typeof value === 'string' && ENDS.has(value))) {
+      const end = prop(edge, field);
+      if (end !== undefined && !ENDS.has(asString(end) ?? '')) {
         errors.push(`edges[${index}].${field} must be none or arrow`);
       }
     }

@@ -9,7 +9,8 @@ import {
   getPendingReason,
   KnowledgePendingReason,
 } from './frontmatter';
-import { computeSchemaHash, extractFrontmatter, isRecord } from './ontology';
+import { computeSchemaHash, extractFrontmatter } from './ontology';
+import { asRecord, asString as narrowAsString, asArray } from '../utils/narrow';
 import { thrownMessage } from '../utils/thrown-message';
 
 /**
@@ -45,21 +46,8 @@ export interface CompileAllPendingOptions {
   fileConcurrency?: number;
 }
 
-function asString(value: unknown): string | undefined {
+function asString(value: any): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-/** 外部模型输出里的 topics 元素：仅接受对象形状，其余按坏条目丢弃。 */
-function readTopicRef(value: unknown): TopicRef | null {
-  if (!isRecord(value)) return null;
-  const slug = typeof value.slug === 'string' ? value.slug : '';
-  const label = typeof value.label === 'string' ? value.label : '';
-  const normalized = normalizeTopicSlug(slug || label);
-  return normalized.length > 0 ? { slug: normalized, label: label || slug } : null;
-}
-
-function asStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
 function summarySourceIdFromPath(summaryPath: string): string {
@@ -389,37 +377,65 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
     const jsonStr = fenceMatch ? fenceMatch[1].trim() : response.trim();
 
     const parsed: unknown = JSON.parse(jsonStr);
-    if (!isRecord(parsed) || typeof parsed.title !== 'string') return null;
+    const parsedRecord = asRecord(parsed);
+    const titleVal = parsedRecord.title;
+    if (typeof titleVal !== 'string') return null;
 
-    const topics: TopicRef[] = (Array.isArray(parsed.topics) ? parsed.topics : [])
-      .map(readTopicRef)
-      .filter((t): t is TopicRef => t !== null);
+    // 保持原行为:topics 为真值但不是数组、或元素为 null/undefined、或 slug/label 为非字符串真值时,
+    // 原实现会在 .map / 属性访问 / normalizeTopicSlug 处抛错,被外层 catch 吞掉后整体返回 null。
+    const topicsVal = parsedRecord.topics;
+    if (topicsVal && !Array.isArray(topicsVal)) return null;
+    const rawTopics = asArray(topicsVal) || [];
+    const topics: TopicRef[] = rawTopics.map((t: unknown) => {
+      if (t === null || t === undefined) throw new TypeError('topic entry is null');
+      const tRecord = asRecord(t);
+      const slugSource: unknown = tRecord.slug || tRecord.label || '';
+      const labelSource: unknown = tRecord.label || tRecord.slug || '';
+      if (typeof slugSource !== 'string' || typeof labelSource !== 'string') {
+        throw new TypeError('topic slug/label must be a string');
+      }
+      return { slug: normalizeTopicSlug(slugSource), label: labelSource };
+    }).filter((t: TopicRef) => t.slug.length > 0);
 
-    const reviewFlags: string[] = asStringArray(parsed.review_flags);
+    const rawReviewFlags = asArray(parsedRecord.review_flags);
+    const reviewFlags: string[] = rawReviewFlags ? rawReviewFlags as string[] : [];
 
     // Ontology 字段解析（fail-visible：解析失败不影响基础字段）
     let categorized_knowledge: CompilerExtraction['categorized_knowledge'];
     let entities: CompilerExtraction['entities'];
 
     try {
-      if (Array.isArray(parsed.categorized_knowledge)) {
-        categorized_knowledge = parsed.categorized_knowledge
-          .filter((ck): ck is { category: string; items: unknown[] } =>
-            isRecord(ck) && typeof ck.category === 'string' && Array.isArray(ck.items))
-          .map((ck) => ({
-            category: ck.category,
-            items: asStringArray(ck.items),
-          }));
+      const rawCategorizedKnowledge = asArray(parsedRecord.categorized_knowledge);
+      if (rawCategorizedKnowledge) {
+        categorized_knowledge = rawCategorizedKnowledge
+          .filter((ck: unknown) => {
+            const ckRecord = asRecord(ck);
+            return typeof ckRecord.category === 'string' && Array.isArray(ckRecord.items);
+          })
+          .map((ck: unknown) => {
+            const ckRecord = asRecord(ck);
+            const items = asArray(ckRecord.items) || [];
+            return {
+              category: ckRecord.category as string,
+              items: items.filter((i: unknown) => typeof i === 'string') as string[],
+            };
+          });
       }
-      if (Array.isArray(parsed.entities)) {
-        entities = parsed.entities
-          .filter((e): e is { name: string; type: string; description?: unknown } =>
-            isRecord(e) && typeof e.name === 'string' && typeof e.type === 'string')
-          .map((e) => ({
-            name: e.name,
-            type: e.type,
-            description: typeof e.description === 'string' ? e.description : '',
-          }));
+      const rawEntities = asArray(parsedRecord.entities);
+      if (rawEntities) {
+        entities = rawEntities
+          .filter((e: unknown) => {
+            const eRecord = asRecord(e);
+            return typeof eRecord.name === 'string' && typeof eRecord.type === 'string';
+          })
+          .map((e: unknown) => {
+            const eRecord = asRecord(e);
+            return {
+              name: eRecord.name as string,
+              type: eRecord.type as string,
+              description: typeof eRecord.description === 'string' ? eRecord.description : '',
+            };
+          });
       }
     } catch {
       // Ontology 字段解析失败，标记到 review_flags
@@ -427,14 +443,17 @@ export function parseCompilerResponse(response: string): CompilerExtraction | nu
       console.warn('[parseCompilerResponse] Ontology fields parse failed, base fields preserved');
     }
 
+    const rawConcepts = asArray(parsedRecord.concepts);
+    const rawKeyClaims = asArray(parsedRecord.key_claims);
+
     return {
-      title: parsed.title || '',
-      author: typeof parsed.author === 'string' ? parsed.author : '',
-      source_url: typeof parsed.source_url === 'string' ? parsed.source_url : '',
-      created_at: typeof parsed.created_at === 'string' ? parsed.created_at : '',
+      title: titleVal || '',
+      author: narrowAsString(parsedRecord.author) || '',
+      source_url: narrowAsString(parsedRecord.source_url) || '',
+      created_at: narrowAsString(parsedRecord.created_at) || '',
       topics,
-      concepts: asStringArray(parsed.concepts),
-      key_claims: asStringArray(parsed.key_claims),
+      concepts: rawConcepts ? (rawConcepts as string[]) : [],
+      key_claims: rawKeyClaims ? (rawKeyClaims as string[]) : [],
       review_flags: reviewFlags,
       categorized_knowledge,
       entities,
@@ -681,7 +700,7 @@ export class KnowledgeCompiler {
         summary: summaryPath,
       });
       return summaryPath;
-    } catch (e) {
+    } catch (e: unknown) {
       try {
         await setKnowledgeStatus(this.app, file, 'failed', { error: thrownMessage(e) });
       } catch { /* frontmatter 写入也失败了，忽略 */ }

@@ -1,6 +1,7 @@
 import { App } from 'obsidian';
 
 import { PLUGIN_DATA_DIR } from '../mcp/types';
+import { asRecord, isRecord } from '../utils/narrow';
 
 export const OPERATION_AUDIT_LOG_DIR = PLUGIN_DATA_DIR;
 export const OPERATION_AUDIT_LOG_PATH = `${OPERATION_AUDIT_LOG_DIR}/operations.json`;
@@ -106,10 +107,6 @@ interface VaultAdapter {
 
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_MAX_REQUESTS = 500;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
 
 export class OperationAuditLog {
   private readonly maxRecords: number;
@@ -277,25 +274,27 @@ export class OperationAuditLog {
 
       const raw = await adapter.read(this.path);
       const parsed: unknown = JSON.parse(raw);
-      if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.operations)) {
+      const parsedRecord = asRecord(parsed);
+      const operationsRaw = parsedRecord.operations;
+      if (!isRecord(parsed) || parsedRecord.version !== 1 || !Array.isArray(operationsRaw)) {
         return this.emptyFile();
       }
 
-      const operations: unknown[] = parsed.operations;
-      const requestsValue: unknown = parsed.requests;
-      const requests: unknown[] = Array.isArray(requestsValue) ? requestsValue : [];
+      const requestsRaw = parsedRecord.requests;
 
       // 逐条过滤而非「一条坏就整份丢弃」：旧数据/手改残留不应抹掉整段审计历史。
       return {
         version: 1,
-        operations: operations
-          .filter((record): record is OperationRecord => this.isOperationRecord(record))
+        operations: (operationsRaw as unknown[])
+          .filter((record: unknown): record is OperationRecord => this.isOperationRecord(record))
           .map((record) => this.cloneRecord(record)),
-        requests: requests
-          .filter((record): record is ApprovalRequestRecord => this.isRequestRecord(record))
-          .map((record) => ({ ...record })),
-        requestsPrunedBefore: typeof parsed.requestsPrunedBefore === 'number'
-          ? parsed.requestsPrunedBefore
+        requests: Array.isArray(requestsRaw)
+          ? (requestsRaw as unknown[])
+            .filter((record: unknown): record is ApprovalRequestRecord => this.isRequestRecord(record))
+            .map((record) => ({ ...record }))
+          : [],
+        requestsPrunedBefore: typeof parsedRecord.requestsPrunedBefore === 'number'
+          ? parsedRecord.requestsPrunedBefore
           : 0,
       };
     } catch {

@@ -3,6 +3,7 @@ import { ModelOption } from '../models/interfaces';
 import { ProviderConfig } from '../mcp/types';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import { logger } from '../utils/logger';
+import { asArray, asString, prop } from '../utils/narrow';
 
 /**
  * model-catalog-service —— provider 元数据服务（非 runtime）。
@@ -21,11 +22,6 @@ import { logger } from '../utils/logger';
 const ANTHROPIC_VERSION = '2023-06-01';
 /** Anthropic 官方端点。注意官方 baseUrl **不带** /v1（见 src/mcp/types.ts 的说明）。 */
 const ANTHROPIC_DEFAULT_BASE_URL = 'https://api.anthropic.com';
-
-/** 外部输入（端点 JSON）先收成 unknown，再逐字段窄化。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
 
 /**
  * 「这个端点没有列模型能力」——与「这个端点不能推理」是两件事，必须可区分。
@@ -53,7 +49,13 @@ export class ModelListingUnsupportedError extends Error {
 /** 判断错误是否为「端点不支持列模型」（而非 key / 网络 / 限流问题）。 */
 export function isModelListingUnsupported(error: unknown): error is ModelListingUnsupportedError {
   return error instanceof ModelListingUnsupportedError
-    || (typeof error === 'object' && error !== null && 'code' in error && error.code === 'model-listing-unsupported');
+    || prop(error, 'code') === 'model-listing-unsupported';
+}
+
+/** 解析 /models 响应体并取出 `data` 数组；形状不符时返回空数组。 */
+function parseModelRows(text: string | undefined): unknown[] {
+  const data: unknown = JSON.parse(text || '{}');
+  return asArray(prop(data, 'data')) ?? [];
 }
 
 /**
@@ -273,23 +275,22 @@ async function listOpenAICompatModels(config: ProviderConfig, deps?: ModelCatalo
     throw new Error(`OpenAI models API error: ${response.status}`);
   }
 
-  const data: unknown = JSON.parse(response.text || '{}');
-  const rows: unknown[] = isRecord(data) && Array.isArray(data.data) ? data.data : [];
+  const rows = parseModelRows(response.text);
 
   const excludedKeywords = [
     'embedding', 'whisper', 'tts', 'transcribe', 'moderation',
     'dall-e', 'image', 'audio-preview', 'omni-moderation',
   ];
 
-  const options: ModelOption[] = rows
-    .map((row) => (isRecord(row) && typeof row.id === 'string' ? row.id.trim() : ''))
-    .filter((id) => {
+  const options = rows
+    .map((row: unknown) => (asString(prop(row, 'id'))?.trim() ?? ''))
+    .filter((id: string) => {
       if (!id) return false;
       const lower = id.toLowerCase();
       return !excludedKeywords.some(keyword => lower.includes(keyword));
     })
-    .map((id) => ({ value: id, label: id }))
-    .sort((a, b) => a.value.localeCompare(b.value));
+    .map((id: string) => ({ value: id, label: id }))
+    .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
 
   return dedupeByValue(options);
 }
@@ -328,23 +329,19 @@ async function listAnthropicModels(config: ProviderConfig, deps?: ModelCatalogDe
     throw new Error(`Anthropic models API error: ${response.status}`);
   }
 
-  const data: unknown = JSON.parse(response.text || '{}');
-  const rows: unknown[] = isRecord(data) && Array.isArray(data.data) ? data.data : [];
+  const rows = parseModelRows(response.text);
 
   const options: ModelOption[] = rows
-    .map((row): ModelOption | null => {
-      const record = isRecord(row) ? row : {};
-      const value = typeof record.id === 'string' ? record.id.trim() : '';
+    .map((row: unknown): ModelOption | null => {
+      const value = asString(prop(row, 'id'))?.trim() ?? '';
       if (!value) return null;
-      const rawDisplayName = record.display_name;
-      const displayName = typeof rawDisplayName === 'string' && rawDisplayName.trim().length > 0
-        ? rawDisplayName.trim()
-        : value;
+      const rawDisplayName = asString(prop(row, 'display_name'))?.trim() ?? '';
+      const displayName = rawDisplayName.length > 0 ? rawDisplayName : value;
       const label = displayName === value ? value : `${displayName} (${value})`;
       return { value, label };
     })
-    .filter((option): option is ModelOption => option !== null)
-    .sort((a, b) => a.value.localeCompare(b.value));
+    .filter((option: ModelOption | null): option is ModelOption => option !== null)
+    .sort((a: ModelOption, b: ModelOption) => a.value.localeCompare(b.value));
 
   return dedupeByValue(options);
 }

@@ -5,6 +5,7 @@ import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import { QueryKnowledgeExecutor } from '../../../knowledge/query';
 import { FileBackExecutor } from '../../../knowledge/file-back';
+import { asNumber, asString, prop } from '../../../utils/narrow';
 
 /**
  * Knowledge 工具需要 executor 实例（运行时注入）
@@ -56,22 +57,13 @@ export function createKnowledgeTools(
   return [queryKnowledge, fileBackKnowledge];
 }
 
-/** 外部工具入参（模型生成）的窄化：只认对象，字段按类型校验。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 export function createExecutor(registry: ToolRegistry): BuiltinExecutor {
   return {
     async execute(args: unknown, ctx: ToolContext) {
       // simple mode: 直接执行 query_knowledge
-      const rawQuery = isRecord(args) ? args.query ?? args.name : undefined;
-      const query = typeof rawQuery === 'string' ? rawQuery : '';
+      const query = asString(prop(args, 'query')) || asString(prop(args, 'name')) || '';
       if (!query) return { error: 'Missing query parameter' };
-      const rawMaxResults = isRecord(args) ? args.max_results : undefined;
-      // 与旧实现 `args?.max_results || 3` 对齐：0/NaN/非数字一律回退 3。
-      const maxResults = typeof rawMaxResults === 'number' && rawMaxResults ? rawMaxResults : 3;
-      return registry.execute('query_knowledge', { query, max_results: maxResults });
+      return registry.execute('query_knowledge', { query, max_results: asNumber(prop(args, 'max_results')) || 3 });
     },
   };
 }

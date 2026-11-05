@@ -4,6 +4,7 @@
 import { App, TFile, Notice } from 'obsidian';
 import { MetadataIndex } from './metadata-index';
 import { logger } from '../utils/logger';
+import { prop } from '../utils/narrow';
 import {
   DEFAULT_WIKI_FOLDER,
   WIKI_INDEX_BASE_FILENAME,
@@ -135,10 +136,8 @@ export class WikiIndexer {
 
     try {
       await this.app.vault.create(basePath, content);
-    } catch (e) {
-      // 与旧实现 `String(e?.message ?? e)` 逐值对齐：对象自带的 message 优先，否则文本化整个抛出值。
-      const message = typeof e === 'object' && e !== null && 'message' in e ? e.message : undefined;
-      if (String(message ?? e).includes('File already exists')) {
+    } catch (e: unknown) {
+      if (String(prop(e, 'message') ?? e).includes('File already exists')) {
         await adapter.write(basePath, content);
         return;
       }

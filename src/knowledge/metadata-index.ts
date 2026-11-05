@@ -3,37 +3,30 @@
 
 import { App, TFile } from 'obsidian';
 import { ArticleMeta, WIKI_ARTICLES_SUBFOLDER, normalizeTopicSlug } from './types';
-
-/** 外部输入（metadataCache frontmatter）的窄化：只接受非 null、非数组的对象。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+import { asArray, asRecord, asString } from '../utils/narrow';
 
 /**
  * 从 metadataCache 的 frontmatter 中提取 topics 数组
  * 兼容新格式 ["label"] 和旧格式 [{slug, label}]
  */
-function extractTopics(fm: Record<string, unknown>): string[] {
-  const raw = fm.topics;
-  if (!Array.isArray(raw)) return [];
-  return raw.map((t) => {
+function extractTopics(fm: Record<string, any>): string[] {
+  const raw = asArray(fm.topics);
+  if (!raw) return [];
+  return raw.map((t: unknown) => {
     if (typeof t === 'string') return t;
-    if (isRecord(t) && typeof t.label === 'string') return t.label;
+    const label = asString(asRecord(t).label);
+    if (label) return label;
     return '';
-  }).filter((s) => s.length > 0);
+  }).filter((s: string) => s.length > 0);
 }
 
 /**
  * 从 metadataCache 的 frontmatter 中提取字符串数组字段
  */
-function extractStringArray(fm: Record<string, unknown>, key: string): string[] {
+function extractStringArray(fm: Record<string, any>, key: string): string[] {
   const raw = fm[key];
   if (typeof raw === 'string') {
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.map(String);
-      return [raw];
-    } catch { return [raw]; }
+    try { return JSON.parse(raw); } catch { return [raw]; }
   }
   if (Array.isArray(raw)) return raw.map(String);
   return [];
@@ -41,7 +34,7 @@ function extractStringArray(fm: Record<string, unknown>, key: string): string[] 
 
 function parseStringList(value: string): string[] {
   try {
-    const parsed: unknown = JSON.parse(value);
+    const parsed = JSON.parse(value);
     if (Array.isArray(parsed)) return parsed.map(String);
   } catch {
     // Fall through to a single item.
@@ -49,34 +42,42 @@ function parseStringList(value: string): string[] {
   return value ? [value] : [];
 }
 
-function extractCategorizedKnowledge(fm: Record<string, unknown>): { category: string; items: string[] }[] {
-  const raw = fm.categorized_knowledge;
-  if (!Array.isArray(raw)) return [];
+function extractCategorizedKnowledge(fm: Record<string, any>): { category: string; items: string[] }[] {
+  const raw = asArray(fm.categorized_knowledge);
+  if (!raw) return [];
   return raw
-    .filter((entry): entry is { category: string; items?: unknown } =>
-      isRecord(entry) && typeof entry.category === 'string')
-    .map((entry) => ({
-      category: entry.category,
-      items: Array.isArray(entry.items)
-        ? entry.items.map(String)
-        : typeof entry.items === 'string'
-          ? parseStringList(entry.items)
-          : [],
-    }))
+    .filter((entry: unknown) => typeof asRecord(entry).category === 'string')
+    .map((entry: unknown) => {
+      const entryRecord = asRecord(entry);
+      const items = entryRecord.items;
+      return {
+        category: entryRecord.category as string,
+        items: Array.isArray(items)
+          ? items.map(String)
+          : typeof items === 'string'
+            ? parseStringList(items)
+            : [],
+      };
+    })
     .filter((entry) => entry.category.length > 0);
 }
 
-function extractEntities(fm: Record<string, unknown>): { name: string; type: string; description: string }[] {
-  const raw = fm.entities;
-  if (!Array.isArray(raw)) return [];
+function extractEntities(fm: Record<string, any>): { name: string; type: string; description: string }[] {
+  const raw = asArray(fm.entities);
+  if (!raw) return [];
   return raw
-    .filter((entry): entry is { name: string; type: string; description?: unknown } =>
-      isRecord(entry) && typeof entry.name === 'string' && typeof entry.type === 'string')
-    .map((entry) => ({
-      name: entry.name,
-      type: entry.type,
-      description: typeof entry.description === 'string' ? entry.description : '',
-    }))
+    .filter((entry: unknown) => {
+      const entryRecord = asRecord(entry);
+      return typeof entryRecord.name === 'string' && typeof entryRecord.type === 'string';
+    })
+    .map((entry: unknown) => {
+      const entryRecord = asRecord(entry);
+      return {
+        name: entryRecord.name as string,
+        type: entryRecord.type as string,
+        description: typeof entryRecord.description === 'string' ? entryRecord.description : '',
+      };
+    })
     .filter((entry) => entry.name.length > 0);
 }
 

@@ -3,8 +3,7 @@ export interface LogEntry {
     level: 'debug' | 'info' | 'warn' | 'error';
     message: string;
     context?: string;
-    /** 异常值来自任意调用点，保留原值与序列化后的形状。 */
-    error?: unknown;
+    error?: any;
     /** 调用方附带的诊断上下文，形状由调用点决定（只透传给控制台/日志导出）。 */
     metadata?: unknown;
 }
@@ -38,11 +37,11 @@ export class Logger {
         this.log('warn', message, context, undefined, metadata);
     }
 
-    error(message: string, error?: unknown, context?: string, metadata?: unknown) {
+    error(message: string, error?: any, context?: string, metadata?: unknown) {
         this.log('error', message, context, error, metadata);
     }
 
-    private log(level: LogEntry['level'], message: string, context?: string, error?: unknown, metadata?: unknown) {
+    private log(level: LogEntry['level'], message: string, context?: string, error?: any, metadata?: unknown) {
         const entry: LogEntry = {
             timestamp: new Date().toISOString(),
             level,
@@ -65,7 +64,7 @@ export class Logger {
         }
     }
 
-    private serializeError(error: unknown): unknown {
+    private serializeError(error: unknown): any {
         if (error instanceof Error) {
             return {
                 name: error.name,
@@ -74,9 +73,8 @@ export class Logger {
                 cause: error.cause ? this.serializeError(error.cause) : undefined
             };
         }
-        const fallbackMessage = error === undefined || error === null ? '' : String(error);
         return {
-            message: fallbackMessage || 'Unknown error',
+            message: (error === null || error === undefined ? '' : String(error)) || 'Unknown error',
             data: error
         };
     }

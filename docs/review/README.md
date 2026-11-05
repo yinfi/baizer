@@ -146,7 +146,7 @@ Passed 只是页面报告，不是本次独立安全审计结论；Disclosures �
 |---|---|---|
 | B0 证据基线 | 完整分类清单、扫描版本、规则映射、本地复现器、进度跟踪 | ✅ 本 PR |
 | B1 内部契约（`no-unsafe-member-access` 的「内部契约」根因） | 冗余 `as any`/`any` 标注 → 具名类型（UI 元素 helper、已声明的服务方法、插件公开字段、Obsidian 公开 API 类型） | ✅ 本 PR（全仓 1188 → 543；`main.ts` + `src/ui/**` 436 → 0；剩 543 属 B2 外部输入） |
-| B2 `no-unsafe-member-access` 的外部输入部分 | `JSON.parse`、磁盘设置/记忆记录、vault adapter、旧数据迁移、任意事件 payload：`unknown` + 明确窄化。涉及 `src/settings.ts`、`src/memory/hindsight-migration.ts`、`src/memory/memory-manager.ts`、`src/knowledge/{compiler,metadata-index,ontology,frontmatter}.ts`、`src/services/{model-catalog-service,video-transcription,operation-audit-log}.ts`、`src/utils/{request-url-fetch,video_utils}.ts`、`src/skills/builtin/{json-canvas,obsidian-bases,web-clipper}/executor.ts` 等 | ✅ 本 PR（issue #89；本批 560 → 0，40 个命中文件全部清零；见 §7） |
+| B2 `no-unsafe-member-access` 的外部输入部分 | `JSON.parse`、磁盘设置/记忆记录、vault adapter、旧数据迁移、任意事件 payload：`unknown` + 明确窄化。涉及 `src/settings.ts`、`src/memory/hindsight-migration.ts`、`src/memory/memory-manager.ts`、`src/knowledge/{compiler,metadata-index,ontology,frontmatter}.ts`、`src/services/{model-catalog-service,video-transcription,operation-audit-log}.ts`、`src/utils/{request-url-fetch,video_utils}.ts`、`src/skills/builtin/{json-canvas,obsidian-bases,web-clipper}/executor.ts` 等 | ⏳ 待排期 |
 | B3 Obsidian API 偏好规则 | `prefer-window-timers` 36、`prefer-create-el` 10、`no-global-this` 9、`hardcoded-config-path` 8、`prefer-file-manager-trash-file` 4、`no-console` 2、`fetch` 1、`prefer-setting-definitions` 1 | ⏳ 待排期（部分会改变行为语义，需单独说明与回归） |
 | B4 CSS（stylelint 类别） | `!important` 24、`:has` 4、浏览器特性 4、重复属性 1 | ⏳ 待排期（视觉变更，需 Before/After 截图） |
 | B5 Info / 杂项类别 | unused vars 20、deprecated 字段 6（其中 `sessionRef`/`timeoutMs` 是有意保留的兼容字段，修前需确认策略）、empty block 4、case declarations 2、unbound-method 2、无必要转义 8、irregular whitespace 1 | ⏳ 待排期 |
@@ -239,74 +239,7 @@ node scripts/review-scan/scorecard-inventory.mjs --out /tmp/new-snapshot.json   
 npm run build && npx eslint . && npx tsc --noEmit && npm test
 ```
 
-## 7. B2 验证记录（issue #89）
-
-issue #89 治理的就是 B2：`@typescript-eslint/no-unsafe-member-access` 剩余 560 处（40 个文件，
-基线 commit `941b1a2`，release 1.6.0）。本 PR 把外部输入/外部契约全部改为 `unknown` + 显式窄化，
-该规则在本地复现口径下**清零**。
-
-### 7.1 扫描口径
-
-命令：`node scripts/review-scan/reproduce-eslint.mjs`（与审核器同款 eslint 9.37.0 +
-eslint-plugin-obsidianmd 0.4.1 + typescript-eslint 8.61.1 与同一忽略清单）。
-基线：`941b1a241dcdd568ab0a04fc6245f049c5022d48`（= issue #89 记录的扫描版本）；
-修复后：本 PR 分支。
-
-| 规则 | 修复前 | 修复后 | 变化 |
-|---|---|---|---|
-| `@typescript-eslint/no-unsafe-member-access` | 560 | **0** | −560（本批目标，40 个命中文件全部清零） |
-| `@typescript-eslint/no-unsafe-assignment` | 266 | 53 | −213 |
-| `@typescript-eslint/no-explicit-any` | 224 | 53 | −171 |
-| `@typescript-eslint/no-unsafe-call` | 99 | 0 | −99 |
-| `@typescript-eslint/no-unsafe-argument` | 91 | 18 | −73 |
-| `@typescript-eslint/no-unsafe-return` | 46 | 11 | −35 |
-| `@typescript-eslint/no-unnecessary-type-assertion` | 51 | 48 | −3 |
-| 其余类别（窗口计时器、`:has`、`!important`、info 类等） | — | — | 0（未新增，留待 B3–B5） |
-| 全部规则消息合计 | 1489 | 328 | −1161 |
-
-按目录拆（`no-unsafe-member-access`）：`src/memory` 113 → 0（2 文件）、`src/knowledge` 85 → 0（8 文件）、
-`src/skills` 180 → 0（13 文件）、`src/services` 108 → 0（6 文件）、`src/runtime/pi` 32 → 0（7 文件）、
-`src/utils` + `src/settings.ts` 42 → 0（4 文件）；合计 40 文件 560 → 0，逐规则核对**没有任何规则计数增加**。
-
-### 7.2 项目要求检查
-
-| 检查 | 结果 |
-|---|---|
-| `npm run build` | ✅ 成功（`dist/main.js` 产出正常） |
-| `npx eslint .` | ✅ 0 error；warning 266 → 95，无新增 |
-| `npx tsc --noEmit` | ✅ 0 error |
-| `npm test` | ✅ 114 个测试文件全部 PASS |
-| 复现扫描 | ✅ 见 §7.1；`no-unsafe-member-access` 0 |
-| 扫描配置/忽略清单/`eslint-disable` | ✅ 未改动仓库 eslint 配置、未扩大 ignore、未新增 disable（`git diff` 无新增 `eslint-disable`/`@ts-ignore`/`as any`） |
-
-### 7.3 行为保持与例外（reviewer 请重点看）
-
-窄化只改变**畸形外部输入**的处理方式；schema 合规的输入（模型输出、工具 args、HTTP/页面响应、
-旧数据、设置迁移）运行时结果保持不变。主要例外：
-
-1. 工具 args / 页面/接口 JSON 的坏字段不再以「类型谎报」方式流入下游（例如把非字符串真值当字符串用），
-   而是按字段类型丢弃或回退到既有默认值；旧实现会抛 `TypeError` 的畸形输入现在显式走既有错误/空结果分支
-   （如 `search_vault` 空查询 → `{ matches: [] }`、`open_file` 缺 `path` → `Missing path parameter`）。
-2. 模型输出解析（`parseCompilerResponse`、`parseDiscoveryResponse`）的非法*字段*现在逐字段丢弃并保留基础字段，
-   不再因某个字段形状非法而整份返回 null；字段缺失/合法输入与旧实现一致。
-3. `catch` 由 `any` 改 `unknown` 后统一沿用既有 `src/utils/thrown-message.ts`：对 `Error` 完全一致；
-   对非对象抛出值，旧模板会显示 `undefined`，现在为空串或调用方既有回退文案（沿用 #82 的约定）。
-4. `decodeWithWebAudio` 显式构造 `PcmSource` 并固定 `channelCount: 1`：旧代码把 `AudioBuffer` 直接断言成
-   `PcmSource`，`numberOfChannels` 从未生效，一直是单声道语义；此改动保持该语义，不引入混音。
-5. 未改动 `Tool`/`Skill` 接口、eslint 配置、tsconfig、package.json 或依赖；公共导出签名只在
-   `unknown` 方向上收紧（`getFileWriteResultPath` 等），调用方行为不变。
-
-新增回归覆盖：28 个测试文件（26 个扩展 + `test/knowledge/{executor,metadata-index}.test.ts` 两个新增），
-覆盖畸形工具 args、旧数据迁移回退、模型/接口坏响应、审计日志坏行丢弃、设置迁移兜底等路径。
-
-### 7.4 复跑方式
-
-```bash
-node scripts/review-scan/reproduce-eslint.mjs --out review-eslint-report.json   # 同口径复现
-npm run build && npx eslint . && npx tsc --noEmit && npm test
-```
-
-## 8. 维护约定
+## 7. 维护约定
 
 1. 每次发布并重新提交审核后，重跑 `scorecard-inventory.mjs` 更新快照，并把展页新计数写回本目录；
    分类增减时同步更新 §3 表格。

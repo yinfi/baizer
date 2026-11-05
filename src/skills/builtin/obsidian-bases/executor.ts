@@ -2,22 +2,9 @@ import { parse } from 'yaml';
 import { BuiltinExecutor } from '../../skill-registry';
 import { Tool } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
-import { thrownMessage } from '../../../utils/thrown-message';
+import { asArray, asRecord, asString, isPlainRecord, prop } from '../../../utils/narrow';
 
 const VIEW_TYPES = new Set(['table', 'cards', 'list', 'map']);
-
-/** 工具 args 是模型生成的 JSON，.base 内容也是外部输入：先窄化再读字段。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isObjectValue(value: unknown): value is object {
-  return typeof value === 'object' && value !== null;
-}
-
-function readField(value: unknown, key: string): unknown {
-  return isRecord(value) ? value[key] : undefined;
-}
 
 export const executor: BuiltinExecutor = {
   async execute() {
@@ -37,8 +24,8 @@ const validateBaseYaml: Tool = {
   },
   executionMode: 'parallel',
   risk: 'read',
-  async execute(args) {
-    return validateBaseYamlContent(readField(args, 'content'));
+  async execute(args: unknown) {
+    return validateBaseYamlContent(prop(args, 'content'));
   },
 };
 
@@ -54,12 +41,12 @@ export function validateBaseYamlContent(content: unknown): { success: boolean; e
   let base: unknown;
   try {
     base = parse(content);
-  } catch (error: unknown) {
-    return { success: false, errors: [`Invalid YAML: ${thrownMessage(error)}`] };
+  } catch (error) {
+    return { success: false, errors: [`Invalid YAML: ${error instanceof Error ? error.message : String(error)}`] };
   }
 
   const errors: string[] = [];
-  if (!isRecord(base)) {
+  if (!isPlainRecord(base)) {
     return { success: false, errors: ['Base root must be a YAML object'] };
   }
 
@@ -67,8 +54,8 @@ export function validateBaseYamlContent(content: unknown): { success: boolean; e
   validateObjectField(base.properties, 'properties', errors);
   validateObjectField(base.summaries, 'summaries', errors);
 
-  const views = base.views;
-  if (!Array.isArray(views) || views.length === 0) {
+  const views = asArray(base.views);
+  if (!views || views.length === 0) {
     errors.push('views must be a non-empty array');
   } else {
     validateViews(views, errors);
@@ -86,13 +73,13 @@ function validateObjectField(value: unknown, label: string, errors: string[]): v
 
 function validateViews(views: unknown[], errors: string[]): void {
   views.forEach((view, index) => {
-    if (!isRecord(view)) {
+    if (!isPlainRecord(view)) {
       errors.push(`views[${index}] must be an object`);
       return;
     }
 
-    const viewType = view.type;
-    if (typeof viewType !== 'string' || !VIEW_TYPES.has(viewType)) {
+    const viewType = asString(view.type);
+    if (viewType === undefined || !VIEW_TYPES.has(viewType)) {
       errors.push(`views[${index}].type must be one of table, cards, list, map`);
     }
 
@@ -104,7 +91,7 @@ function validateViews(views: unknown[], errors: string[]): void {
       errors.push(`views[${index}].filters must be a filter string or filter object`);
     }
 
-    if (view.groupBy !== undefined && !isRecord(view.groupBy)) {
+    if (view.groupBy !== undefined && (!view.groupBy || typeof view.groupBy !== 'object' || Array.isArray(view.groupBy))) {
       errors.push(`views[${index}].groupBy must be an object when present`);
     }
 
@@ -117,8 +104,9 @@ function isFilterShape(value: unknown): boolean {
 }
 
 function validateFormulaReferences(base: Record<string, unknown>, errors: string[]): void {
-  const formulas = isRecord(base.formulas)
-    ? new Set(Object.keys(base.formulas))
+  const rawFormulas = base.formulas;
+  const formulas = isPlainRecord(rawFormulas)
+    ? new Set(Object.keys(rawFormulas))
     : new Set<string>();
 
   for (const reference of collectFormulaReferences(base)) {
@@ -132,28 +120,20 @@ function validateFormulaReferences(base: Record<string, unknown>, errors: string
 function collectFormulaReferences(base: Record<string, unknown>): string[] {
   const references = new Set<string>();
 
-  const properties = base.properties;
-  if (isObjectValue(properties)) {
-    for (const key of Object.keys(properties)) {
-      addFormulaReference(key, references);
-    }
+  for (const key of Object.keys(asRecord(base.properties))) {
+    addFormulaReference(key, references);
   }
 
-  const views = base.views;
-  for (const view of Array.isArray(views) ? views : []) {
-    const order = readField(view, 'order');
-    for (const value of Array.isArray(order) ? order : []) {
+  for (const view of asArray(base.views) ?? []) {
+    for (const value of asArray(prop(view, 'order')) ?? []) {
       addFormulaReference(value, references);
     }
-    const groupByProperty = readField(readField(view, 'groupBy'), 'property');
+    const groupByProperty = prop(prop(view, 'groupBy'), 'property');
     if (groupByProperty) {
       addFormulaReference(groupByProperty, references);
     }
-    const summaries = readField(view, 'summaries');
-    if (isObjectValue(summaries)) {
-      for (const key of Object.keys(summaries)) {
-        addFormulaReference(key, references);
-      }
+    for (const key of Object.keys(asRecord(prop(view, 'summaries')))) {
+      addFormulaReference(key, references);
     }
   }
 

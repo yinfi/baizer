@@ -1,7 +1,7 @@
 import { parse } from 'yaml';
 import { PLUGIN_DATA_DIR } from '../mcp/types';
 import { computeSchemaHash } from '../knowledge/ontology';
-import { thrownMessage } from '../utils/thrown-message';
+import { asString, prop } from '../utils/narrow';
 
 export interface ListedFilesLike {
   files: string[];
@@ -130,16 +130,11 @@ async function readBuiltinSourceHash(
 ): Promise<string | null> {
   if (!await adapter.exists(sourcePath)) return null;
   try {
-    const parsed: unknown = JSON.parse(await adapter.read(sourcePath));
-    return isRecord(parsed) && typeof parsed.bundleHash === 'string' ? parsed.bundleHash : null;
+    const parsed = JSON.parse(await adapter.read(sourcePath)) as unknown;
+    return asString(prop(parsed, 'bundleHash')) ?? null;
   } catch {
     return null;
   }
-}
-
-/** JSON / YAML 解析结果是外部输入：先校验是否为普通对象，再读字段。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function hashSkillContent(content: string): string {
@@ -264,16 +259,17 @@ function parseProvenance(frontmatter: string): SkillProvenance | null {
     return null;
   }
 
-  const source = isRecord(fm) ? fm.source : undefined;
-  if (!isRecord(source)) return null;
+  const source = prop(fm, 'source');
+  if (!source || typeof source !== 'object') return null;
 
-  const plugin = typeof source.plugin === 'string' ? source.plugin.trim() : '';
-  const bodyHash = typeof source.body_hash === 'string' ? source.body_hash.trim() : '';
+  const plugin = asString(prop(source, 'plugin'))?.trim() ?? '';
+  const bodyHash = asString(prop(source, 'body_hash'))?.trim() ?? '';
   if (!plugin || !bodyHash) return null;
 
-  const version = source.version === undefined || source.version === null
+  const rawVersion = prop(source, 'version');
+  const version = rawVersion === undefined || rawVersion === null
     ? ''
-    : String(source.version).trim();
+    : String(rawVersion).trim();
   return { plugin, version, bodyHash };
 }
 
@@ -290,7 +286,7 @@ export async function readSkillProvenanceFromFile(
   try {
     raw = await readTextIfExists(adapter, filePath);
   } catch (e: unknown) {
-    console.warn(`[skill-files] Failed to read provenance from ${filePath}:`, thrownMessage(e) || String(e));
+    console.warn(`[skill-files] Failed to read provenance from ${filePath}:`, prop(e, 'message') ?? e);
     return absentProvenance();
   }
   if (raw === null) return absentProvenance();

@@ -11,7 +11,7 @@ import {
   resolveAsrConfig,
 } from '../../../mcp/types';
 import * as videoUtils from '../../../utils/video_utils';
-import { thrownMessage } from '../../../utils/thrown-message';
+import { asString, prop } from '../../../utils/narrow';
 import { resolveSavedNotePath } from '../../../mcp/save-path';
 import type { ModelService } from '../../../services/model-service';
 import {
@@ -46,17 +46,6 @@ const defaultDeps: WebClipperDeps = {
   },
   transcribeVideoAudio: (params) => transcriptionService.transcribeFromVideoUrl(params),
 };
-
-/** 工具 args 是模型生成的 JSON（外部输入）：非字符串字段一律视为缺省。 */
-function readStringArg(args: unknown, key: string): string {
-  if (!isRecord(args)) return '';
-  const value = args[key];
-  return typeof value === 'string' ? value : '';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
 
 function extractTags(text: string): string[] {
   const tags: string[] = [];
@@ -266,9 +255,15 @@ async function buildNonTranscriptContent(params: {
   );
 }
 
+/** save_webpage 工具入参窄化后的内部契约。 */
+interface SaveWebpageArgs {
+  url: string;
+  filename?: string;
+}
+
 async function saveVideo(
   url: string,
-  args: unknown,
+  args: SaveWebpageArgs,
   ctx: ToolContext,
   modelService: SummaryModel,
   deps: WebClipperDeps,
@@ -377,7 +372,7 @@ async function saveVideo(
     });
   }
 
-  let filename = sanitizeTitle(readStringArg(args, 'filename') || transcript.title);
+  let filename = sanitizeTitle(args.filename || transcript.title);
   if (!filename.endsWith('.md')) filename += '.md';
   const finalPath = resolveSavedNotePath(
     filename,
@@ -393,7 +388,7 @@ async function saveVideo(
   return { success: true, path: finalPath, message: `Video Note Saved: ${finalPath}` };
 }
 
-async function saveWebpage(url: string, args: unknown, ctx: ToolContext, deps: WebClipperDeps): Promise<any> {
+async function saveWebpage(url: string, args: SaveWebpageArgs, ctx: ToolContext, deps: WebClipperDeps): Promise<any> {
   const response = await deps.requestUrl({
     url,
     headers: {
@@ -491,7 +486,7 @@ async function saveWebpage(url: string, args: unknown, ctx: ToolContext, deps: W
     throw new Error('Failed to convert webpage content to Markdown');
   }
 
-  let filename = readStringArg(args, 'filename') || title;
+  let filename = args.filename || title;
   if (!filename.endsWith('.md')) filename += '.md';
   const finalPath = resolveSavedNotePath(
     filename,
@@ -524,18 +519,21 @@ export function createSaveWebpageTool(modelService: SummaryModel, deps: WebClipp
       },
       required: ['url'],
     },
-    async execute(args, ctx) {
+    async execute(rawArgs: unknown, ctx: ToolContext) {
       // 入口即检查:已中断(上游超时/用户取消)则不发起任何网络请求或写盘。
       if (ctx.signal?.aborted) {
         return { success: false, error: 'Aborted before saving note', aborted: true };
       }
-      const url = readStringArg(args, 'url');
+      const args: SaveWebpageArgs = {
+        url: asString(prop(rawArgs, 'url')) ?? '',
+        filename: asString(prop(rawArgs, 'filename')),
+      };
       try {
-        const videoResult = await saveVideo(url, args, ctx, modelService, deps);
+        const videoResult = await saveVideo(args.url, args, ctx, modelService, deps);
         if (videoResult) return videoResult;
-        return await saveWebpage(url, args, ctx, deps);
-      } catch (e: unknown) {
-        return { success: false, error: thrownMessage(e) || String(e) };
+        return await saveWebpage(args.url, args, ctx, deps);
+      } catch (e) {
+        return { success: false, error: e instanceof Error ? e.message : String(e) };
       }
     },
   };
@@ -544,7 +542,7 @@ export function createSaveWebpageTool(modelService: SummaryModel, deps: WebClipp
 export function createExecutor(modelService: SummaryModel): BuiltinExecutor {
   const tool = createSaveWebpageTool(modelService);
   return {
-    async execute(args: any, ctx: ToolContext) {
+    async execute(args: unknown, ctx: ToolContext) {
       return tool.execute(args, ctx);
     },
   };

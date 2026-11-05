@@ -5,26 +5,17 @@ import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import { pluginSkillFilePath } from '../../skill-files';
 import { checkPluginControl, needsApproval } from '../../../permissions/permission-service';
+import { prop } from '../../../utils/narrow';
 
-/** 工具 args / 插件实例都来自外部（模型 JSON、第三方插件）：先窄化再取值。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+/** get_plugin_commands / get_plugin_settings 的入参(由 parameters schema 约束)。 */
+interface PluginIdArgs {
+  pluginId: string;
 }
 
-function readStringArg(args: unknown, key: string): string {
-  if (!isRecord(args)) return '';
-  const value = args[key];
-  return typeof value === 'string' ? value : '';
-}
-
-function isTruthyFlag(args: unknown, key: string): boolean {
-  return isRecord(args) && Boolean(args[key]);
-}
-
-/** 插件实例形状由各插件自定义：settings 与 data 都是未公开字段。 */
-function readPluginConfig(plugin: unknown): unknown {
-  if (!isRecord(plugin)) return {};
-  return plugin.settings || plugin.data || {};
+/** execute_plugin_command 的入参;approved 由审批流程回填。 */
+interface ExecutePluginCommandArgs {
+  commandId: string;
+  approved?: boolean;
 }
 
 export function getPluginCommandPreconditions(): string[] {
@@ -65,13 +56,12 @@ const getPluginCommands: Tool = {
     },
     required: ['pluginId'],
   },
-  async execute(args, ctx) {
+  async execute(args: PluginIdArgs, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const pluginId = readStringArg(args, 'pluginId');
     const cmds = ctx.app.commands.listCommands()
-      .filter((c) => c.id.startsWith(pluginId + ':'))
+      .filter((c) => c.id.startsWith(args.pluginId + ':'))
       .map((c) => ({ id: c.id, name: c.name }));
-    return { pluginId, commands: cmds, count: cmds.length };
+    return { pluginId: args.pluginId, commands: cmds, count: cmds.length };
   },
 };
 
@@ -87,15 +77,15 @@ const getPluginSettings: Tool = {
     },
     required: ['pluginId'],
   },
-  async execute(args, ctx) {
+  async execute(args: PluginIdArgs, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const pluginId = readStringArg(args, 'pluginId');
-    const plugin: unknown = ctx.app.plugins.getPlugin(pluginId);
+    // getPlugin 返回第三方插件实例(外部数据),以 unknown 接收后显式窄化。
+    const plugin: unknown = ctx.app.plugins.getPlugin(args.pluginId);
     if (!plugin) return { error: 'Plugin not found or not enabled' };
-    const raw = readPluginConfig(plugin);
+    const raw = prop(plugin, 'settings') || prop(plugin, 'data') || {};
     const allowValues = ctx.settings.allowPluginConfigValues === true;
     return {
-      pluginId,
+      pluginId: args.pluginId,
       settings: redactPluginSettings(raw, { allowValues, depth: 0 }),
       redactionNote: allowValues
         ? 'Values returned per user setting; sensitive keys still redacted.'
@@ -194,23 +184,22 @@ const executePluginCommand: Tool = {
     },
     required: ['commandId'],
   },
-  async execute(args, ctx) {
+  async execute(args: ExecutePluginCommandArgs, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const commandId = readStringArg(args, 'commandId');
-    if (needsApproval('plugin-control', ctx.settings) && !isTruthyFlag(args, 'approved')) {
+    if (needsApproval('plugin-control', ctx.settings) && !args.approved) {
       return {
         approval_required: true,
         action: 'execute_plugin_command',
-        target: commandId,
+        target: args.commandId,
         args: {
-          commandId,
+          commandId: args.commandId,
         },
-        message: `Approval required to execute plugin command: ${commandId}`,
+        message: `Approval required to execute plugin command: ${args.commandId}`,
         preview: {
           kind: 'plugin-command',
-          target: commandId,
+          target: args.commandId,
           summary: 'Execute plugin command',
-          commandId,
+          commandId: args.commandId,
           preconditions: getPluginCommandPreconditions(),
           risk: 'medium',
           supportsPartialApply: false,
@@ -219,10 +208,10 @@ const executePluginCommand: Tool = {
       };
     }
 
-    const success = ctx.app.commands.executeCommandById(commandId);
+    const success = ctx.app.commands.executeCommandById(args.commandId);
     return success
-      ? { success: true, message: `✅ Executed: ${commandId}` }
-      : { success: false, error: `Command not found: ${commandId}` };
+      ? { success: true, message: `✅ Executed: ${args.commandId}` }
+      : { success: false, error: `Command not found: ${args.commandId}` };
   },
 };
 

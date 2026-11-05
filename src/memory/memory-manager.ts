@@ -1,4 +1,5 @@
 import { App } from 'obsidian';
+import { prop } from '../utils/narrow';
 import {
     MemoryMutationResult,
     MemoryView,
@@ -8,30 +9,19 @@ import {
     collectSupersededIds,
     createMemoryId,
     DEFAULT_MEMORY_BANK_ID,
-    MemoryRecord,
     normalizeMemoryText,
     sanitizeMemoryText,
     tokenizeForRetrieval,
     withTextTimeout,
     RetainTurnInput,
     RetainLessonInput,
+    MemoryRecord,
 } from './hindsight-types';
 import { HindsightConsolidator } from './hindsight-consolidator';
 import { importPreviousMemoryFiles, migrateLegacyMemory } from './hindsight-migration';
 import { HindsightRetriever } from './hindsight-retriever';
 import { HindsightStore } from './hindsight-store';
 import { logger } from '../utils/logger';
-
-/** LLM distill 输出里的一条：{text, entities} 或纯字符串（旧格式/降级）。 */
-interface DistilledItem {
-    text: string;
-    entities?: string[];
-}
-
-/** LLM 输出（JSON.parse）的窄化入口：只接受非 null、非数组的对象。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 interface MemoryManagerOptions {
     privacyMode?: boolean;
@@ -316,7 +306,7 @@ export class MemoryManager {
      * 解析 distill 的结构化返回:元素为 {text, entities}(新格式)或纯字符串(旧格式/降级)。
      * text 走脱敏+去前缀符号,entities 原样(交给 createMemoryRecord 的 normalizeEntities 清洗)。
      */
-    private parseDistilledItems(raw: string): DistilledItem[] {
+    private parseDistilledItems(raw: string): Array<{ text: string; entities?: string[] }> {
         const text = (raw || '').trim();
         if (!text) return [];
         let parsed: unknown;
@@ -331,15 +321,16 @@ export class MemoryManager {
                 .map((line) => ({ text: line }));
         }
         if (!Array.isArray(parsed)) return [];
-        const result: DistilledItem[] = [];
-        for (const el of parsed) {
+        const result: Array<{ text: string; entities?: string[] }> = [];
+        for (const el of parsed as unknown[]) {
             // 兼容:元素可能是对象 {text,entities} 或纯字符串。
-            const entry = isRecord(el) ? el : null;
-            const rawText = typeof el === 'string' ? el : (entry && typeof entry.text === 'string' ? entry.text : '');
+            const elText = prop(el, 'text');
+            const rawText = typeof el === 'string' ? el : (typeof elText === 'string' ? elText : '');
             const clean = sanitizeMemoryText(rawText.replace(/^[-*\d.\s]+/, '').trim());
             if (clean.length < 2) continue;
-            const entities = entry && Array.isArray(entry.entities)
-                ? entry.entities.map((x) => String(x))
+            const elEntities = prop(el, 'entities');
+            const entities = Array.isArray(elEntities)
+                ? (elEntities as unknown[]).map((x) => String(x))
                 : undefined;
             result.push({ text: clean, entities });
             if (result.length >= 5) break;
@@ -354,7 +345,7 @@ export class MemoryManager {
         let items: string[] = [];
         try {
             const parsed: unknown = JSON.parse(text);
-            if (Array.isArray(parsed)) items = parsed.map((x) => String(x));
+            if (Array.isArray(parsed)) items = (parsed as unknown[]).map((x) => String(x));
         } catch {
             items = text.split('\n');
         }
@@ -604,7 +595,7 @@ export class MemoryManager {
      */
     private findStaleSameTopic(record: MemoryRecord, existing: MemoryRecord[]): MemoryRecord[] {
         if (record.type !== 'world') return [];
-        const recordTopics = record.tags.filter((t: string) =>
+        const recordTopics = record.tags.filter((t) =>
             MemoryManager.SINGLE_VALUE_TOPICS.includes(t));
         if (recordTopics.length === 0) return [];
         const topicSet = new Set(recordTopics);
@@ -613,7 +604,7 @@ export class MemoryManager {
         let bestSim = 0;
         for (const e of existing) {
             if (e.type !== 'world' || e.id === record.id) continue;
-            if (!e.tags.some((t: string) => topicSet.has(t))) continue;
+            if (!e.tags.some((t) => topicSet.has(t))) continue;
             const sim = this.tokenJaccard(e.normalizedText, record.normalizedText);
             if (sim >= MemoryManager.TOPIC_REPLACE_MIN
                 && sim < MemoryManager.TOPIC_REPLACE_MAX
@@ -656,7 +647,7 @@ export class MemoryManager {
         }
 
         const text = memory.normalizedText || normalizeMemoryText(memory.text || '');
-        const tags = new Set((memory.tags || []).map((tag: string) => tag.toLowerCase()));
+        const tags = new Set((memory.tags || []).map((tag) => tag.toLowerCase()));
 
         switch (field) {
             case 'profession':
@@ -745,7 +736,7 @@ export class MemoryManager {
     }
 
     private tagsForText(text: string): string[] {
-        const tags = [];
+        const tags: string[] = [];
         const normalizedText = normalizeMemoryText(text);
         if (/prefer|偏好|喜欢/i.test(text)) tags.push('preference');
         if (/project|项目/i.test(text)) tags.push('project');
