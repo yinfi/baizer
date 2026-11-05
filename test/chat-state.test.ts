@@ -221,6 +221,42 @@ async function runTests() {
       },
     }]);
   });
+  await test('clones approval lifecycle state inside messages', () => {
+    const state = new ChatState('tab-1');
+
+    state.addMessage({
+      id: 'm-approval-state',
+      role: 'system',
+      content: 'Approval required',
+      timestamp: 5,
+      approval: {
+        id: 'req-state-1',
+        action: 'delete_note',
+        target: 'Docs/a.md',
+        args: { path: 'Docs/a.md' },
+        message: 'Approval required',
+      },
+      approvalState: {
+        status: 'failed',
+        outcome: {
+          status: 'failed',
+          error: 'File is locked',
+          detail: 'File is locked',
+          completedAt: 5,
+          retryable: true,
+        },
+      },
+    } as any);
+
+    const messages = state.getMessages();
+    messages[0].approvalState.outcome.error = 'Mutated';
+    messages[0].approvalState.outcome.retryable = false;
+
+    const restored = state.getMessages()[0].approvalState;
+    expect(restored.status).toBe('failed');
+    expect(restored.outcome.error).toBe('File is locked');
+    expect(restored.outcome.retryable).toBe(true);
+  });
 }
 
 runTests().catch((e) => {

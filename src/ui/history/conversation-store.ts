@@ -144,6 +144,14 @@ export class ConversationStore {
                         preview: cloneChangePreview(message.approval.preview),
                     }
                     : undefined,
+                approvalState: message.approvalState
+                    ? {
+                        ...message.approvalState,
+                        outcome: message.approvalState.outcome
+                            ? { ...message.approvalState.outcome }
+                            : undefined,
+                    }
+                    : undefined,
                 metadata: message.metadata
                     ? {
                         ...message.metadata,

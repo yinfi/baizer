@@ -1,5 +1,6 @@
 import { ApprovalRequest } from './approval-card';
 import type { ChatTurnOutcome } from '../models/interfaces';
+import type { ApprovalState } from '../services/approval-execution';
 import type { WorkspaceEditSummary } from '../services/workspace-edit-service';
 
 export type ShellMessageRole = 'user' | 'ai' | 'system';
@@ -29,6 +30,12 @@ export interface ChatMessage {
     forkSourceText?: string;
     feedback?: 'up' | 'down' | null;
     approval?: ApprovalRequest;
+    /**
+     * 审批生命周期快照。请求(presentation)与结果分开持久化：
+     * 切换 tab / 销毁视图后重新挂载时，卡片仍能从消息投影恢复成
+     * pending / running / succeeded / failed / rejected / unknown。
+     */
+    approvalState?: ApprovalState;
     metadata?: {
         providerId?: string;
         modelId?: string;

@@ -1,4 +1,4 @@
-﻿import { App, MarkdownView, TFile } from 'obsidian';
+import { App, MarkdownView, TFile } from 'obsidian';
 import { ModelService } from '../services/model-service';
 import { ChatTurnOutcome, StreamEvent } from '../models/interfaces';
 import { logger } from '../utils/logger';
@@ -12,6 +12,11 @@ import {
     isSuccessfulWriteToolResult,
 } from '../utils/file-operation-contract';
 import { ApprovalRequest } from './approval-card';
+import {
+    ApprovalExecutionOutcome,
+    ApprovalOutcome,
+    ApprovalState,
+} from '../services/approval-execution';
 import { buildSelectionPreview } from './diff/change-preview';
 import { ChatMessage } from './types';
 import { WorkspaceEditSummary } from '../services/workspace-edit-service';
@@ -49,6 +54,8 @@ export interface ChatControllerOptions {
     onMessageAdded?: (message: ChatMessage, options?: MessageAddedOptions) => void;
     /** 消息已从本控制器的列表移除(重试替换失败消息时)。宿主同步删投影。 */
     onMessageRemoved?: (messageId: string) => void;
+    /** 已存在消息的字段被更新(审批状态流转)。宿主据此同步投影并原位重画卡片。 */
+    onMessageUpdated?: (message: ChatMessage) => void;
     onStatusChanged?: (isResponding: boolean) => void;
     onStreamEvent?: (event: StreamEvent) => void;
     /** /clear 时触发:宿主清空该 tab 的可见历史(tab.state)并重渲。 */
@@ -66,6 +73,7 @@ export class ChatController {
     // private isResponding: boolean = false; // Unused
     private onMessageAdded?: (message: ChatMessage, options?: MessageAddedOptions) => void;
     private onMessageRemoved?: (messageId: string) => void;
+    private onMessageUpdated?: (message: ChatMessage) => void;
     private onStatusChanged?: (isResponding: boolean) => void;
     private onStreamEvent?: (event: StreamEvent) => void;
     private onClear?: () => void;
@@ -91,6 +99,7 @@ export class ChatController {
         this.conversationId = options.conversationId;
         this.onMessageAdded = options.onMessageAdded;
         this.onMessageRemoved = options.onMessageRemoved;
+        this.onMessageUpdated = options.onMessageUpdated;
         this.onStatusChanged = options.onStatusChanged;
         this.onStreamEvent = options.onStreamEvent;
         this.onClear = options.onClear;
@@ -116,7 +125,28 @@ export class ChatController {
      * 不接管的话,恢复会话后 👍/👎 按 id 回查必然落空,又回到静默空操作(ADR 0002)。
      */
     public adoptMessages(messages: ChatMessage[]) {
-        this.messages = messages.map(message => ({ ...message }));
+        this.messages = messages.map(message => this.normalizeAdoptedApproval(message));
+        // 视图销毁/应用重启可能留下 status=running 的审批：用执行登记表/审计记录
+        // 把「还在跑」「已结束」「未知」区分开，绝不在恢复时盲目重放写入。
+        void this.reconcileRunningApprovals();
+    }
+
+    /**
+     * 旧会话快照里的审批请求没有 id（本票之前的结构）。恢复时补一个稳定身份，
+     * 否则执行登记表无法去重，重挂载后的第二次点击可能重复写盘。
+     */
+    private normalizeAdoptedApproval(message: ChatMessage): ChatMessage {
+        if (!message.approval || message.approval.id) return { ...message };
+        const next: ChatMessage = {
+            ...message,
+            approval: {
+                ...message.approval,
+                id: createApprovalRequestId(),
+                conversationId: message.approval.conversationId ?? this.conversationId,
+            },
+        };
+        this.onMessageUpdated?.(next);
+        return next;
     }
 
     public clearHistory() {
@@ -565,6 +595,10 @@ export class ChatController {
     private toApprovalRequest(result: any): ApprovalRequest | null {
         if (!result?.approval_required) return null;
         return {
+            id: typeof result.requestId === 'string' && result.requestId
+                ? result.requestId
+                : createApprovalRequestId(),
+            conversationId: this.conversationId,
             action: result.action,
             target: result.target,
             args: result.args || {},
@@ -589,22 +623,258 @@ export class ChatController {
         this.addMessage('system', this.formatSlashCommandResult(result));
     }
 
-    public async approveApproval(request: ApprovalRequest) {
+    /**
+     * 批准一条审批消息。
+     *
+     * 按消息 id（而不是卡片 DOM）定位请求：消息里的 request.id 是执行登记表的键，
+     * 所以双击、键盘重复触发、重挂载后的第二次点击都只会执行一次。
+     */
+    public async approveApproval(messageId: string) {
+        await this.runApproval(messageId, false);
+    }
+
+    /** 失败后的显式重试；只允许 failed 且 retryable 的终态。 */
+    public async retryApproval(messageId: string) {
+        await this.runApproval(messageId, true);
+    }
+
+    /**
+     * 拒绝：不执行任何工具调用，只把请求标记为 rejected 并留在消息流里。
+     */
+    public rejectApproval(messageId: string) {
+        const message = this.findApprovalMessage(messageId);
+        if (!message) return;
+        const state = message.approvalState ?? { status: 'pending' };
+        if (state.status !== 'pending') return;
+
+        this.updateApprovalState(messageId, {
+            status: 'rejected',
+            outcome: {
+                status: 'rejected',
+                detail: t('No write was performed.'),
+                target: message.approval?.target,
+                completedAt: Date.now(),
+            },
+        });
+    }
+
+    /**
+     * 结果未知时先核实，不直接重放写入。
+     * 执行登记表里还有 in-flight Promise 就等它；否则查审计记录判断「是否执行过」。
+     */
+    public async recheckApproval(messageId: string) {
+        const message = this.findApprovalMessage(messageId);
+        const request = message?.approval;
+        if (!message || !request) return;
+        const state = message.approvalState ?? { status: 'pending' };
+        if (state.status !== 'unknown') return;
+
+        const reconcile = (this.api as any).reconcileApprovedAction;
+        if (typeof reconcile !== 'function') {
+            this.updateApprovalState(messageId, {
+                ...state,
+                status: 'unknown',
+                outcome: {
+                    ...state.outcome,
+                    status: 'unknown',
+                    detail: t('Cannot verify the result automatically. Check the target manually.'),
+                    retryable: false,
+                    completedAt: Date.now(),
+                },
+            });
+            return;
+        }
+
         this.setResponding(true);
         try {
-            // 传 conversationId:批准后的真实结果由 ModelService 回灌进该会话的 pi session,
-            // 使下一轮模型看到动作已执行而非停留在审批占位上失忆。
-            const result = await (this.api as any).executeApprovedAction(request.action, request.args, this.conversationId);
-            this.handleStructuredResult(result, request.action, request.args);
+            const outcome = await reconcile.call(
+                this.api,
+                request.id,
+                request.action,
+                request.args,
+                this.conversationId,
+            );
+            this.applyExecutionOutcome(messageId, request, outcome);
         } catch (error: any) {
-            this.handleError(error);
+            this.updateApprovalState(messageId, {
+                status: 'unknown',
+                outcome: {
+                    status: 'unknown',
+                    error: error?.message || String(error),
+                    detail: t('Could not verify the result. Check the target manually.'),
+                    retryable: false,
+                    completedAt: Date.now(),
+                },
+            });
         } finally {
             this.setResponding(false);
         }
     }
 
-    public cancelApproval(request: ApprovalRequest) {
-        this.addMessage('system', `Cancelled: ${request.target}`);
+    private async runApproval(messageId: string, retry: boolean) {
+        const message = this.findApprovalMessage(messageId);
+        const request = message?.approval;
+        if (!message || !request) return;
+
+        const state = message.approvalState ?? { status: 'pending' };
+        const allowed = retry
+            ? state.status === 'failed' && state.outcome?.retryable !== false
+            : state.status === 'pending';
+        if (!allowed) return;
+
+        if (!this.approvalBelongsToThisConversation(request)) {
+            this.updateApprovalState(messageId, {
+                status: 'failed',
+                outcome: {
+                    status: 'failed',
+                    detail: t('This approval belongs to another conversation, so it was not executed.'),
+                    retryable: false,
+                    completedAt: Date.now(),
+                },
+            });
+            return;
+        }
+
+        // 先落 running 再执行：即使视图随后被销毁，重新挂载时也不会把 pending 当成可再次点击。
+        this.updateApprovalState(messageId, { status: 'running' });
+        this.setResponding(true);
+        try {
+            // 传 conversationId:批准后的真实结果由 ModelService 回灌进该会话的 pi session,
+            // 使下一轮模型看到动作已执行而非停留在审批占位上失忆。
+            const result = await (this.api as any).executeApprovedAction(
+                request.action,
+                request.args,
+                this.conversationId,
+                { requestId: request.id, retry },
+            );
+            this.applyExecutionOutcome(messageId, request, result);
+        } catch (error: any) {
+            this.updateApprovalState(messageId, {
+                status: 'unknown',
+                outcome: {
+                    status: 'unknown',
+                    error: error?.message || String(error),
+                    detail: t('The action was interrupted before its result was recorded. Check the target before retrying.'),
+                    retryable: false,
+                    completedAt: Date.now(),
+                },
+            });
+        } finally {
+            this.setResponding(false);
+        }
+    }
+
+    private applyExecutionOutcome(
+        messageId: string,
+        request: ApprovalRequest,
+        execution: ApprovalExecutionOutcome | any,
+    ) {
+        const outcome = this.toApprovalOutcome(execution, request);
+        this.updateApprovalState(messageId, { status: outcome.status, outcome });
+        if (outcome.status === 'succeeded') {
+            const raw = execution?.kind === 'approval-execution' ? execution.result : execution;
+            void this.openFileFromToolResult(request.action, raw, request.args);
+        }
+    }
+
+    private toApprovalOutcome(
+        execution: ApprovalExecutionOutcome | any,
+        request: ApprovalRequest,
+    ): ApprovalOutcome {
+        if (execution?.kind === 'approval-execution') {
+            return {
+                status: execution.status,
+                detail: execution.detail,
+                error: execution.error,
+                target: execution.target ?? request.target,
+                completedAt: execution.completedAt ?? Date.now(),
+                retryable: execution.retryable,
+            };
+        }
+
+        // 兼容测试桩/旧调用方返回的裸工具结果。
+        const succeeded = execution?.success === true || execution?.status === 'success';
+        return {
+            status: succeeded ? 'succeeded' : 'failed',
+            detail: succeeded ? execution?.message : undefined,
+            error: succeeded ? undefined : (execution?.error || execution?.message || t('The action failed.')),
+            target: request.target,
+            completedAt: Date.now(),
+            retryable: !succeeded,
+        };
+    }
+
+    private findApprovalMessage(messageId: string): ChatMessage | undefined {
+        return this.messages.find(message => message.id === messageId && !!message.approval);
+    }
+
+    private approvalBelongsToThisConversation(request: ApprovalRequest): boolean {
+        // 旧快照可能没有 conversationId；有值时必须是当前会话，防止把 A 会话的请求在 B 会话执行。
+        return !request.conversationId
+            || !this.conversationId
+            || request.conversationId === this.conversationId;
+    }
+
+    private updateApprovalState(messageId: string, approvalState: ApprovalState) {
+        const index = this.messages.findIndex(message => message.id === messageId);
+        if (index < 0) return;
+        const next: ChatMessage = { ...this.messages[index], approvalState };
+        this.messages[index] = next;
+        this.onMessageUpdated?.(next);
+    }
+
+    /**
+     * 恢复投影时处理 status=running 的审批：
+     * - 登记表里仍在跑 → 等它结束并落终态；
+     * - 登记表有结果 → 直接落终态；
+     * - 都没有 → 查审计记录；查不到才标记为「未执行，可安全重试」。
+     */
+    private async reconcileRunningApprovals() {
+        const running = this.messages.filter(
+            message => message.approval && message.approvalState?.status === 'running',
+        );
+        if (running.length === 0) return;
+        const reconcile = (this.api as any).reconcileApprovedAction;
+        if (typeof reconcile !== 'function') {
+            for (const message of running) {
+                this.updateApprovalState(message.id, {
+                    status: 'unknown',
+                    outcome: {
+                        status: 'unknown',
+                        detail: t('The action was interrupted before its result was recorded. Check the target before retrying.'),
+                        retryable: false,
+                        completedAt: Date.now(),
+                    },
+                });
+            }
+            return;
+        }
+
+        for (const message of running) {
+            const request = message.approval;
+            if (!request) continue;
+            try {
+                const outcome = await reconcile.call(
+                    this.api,
+                    request.id,
+                    request.action,
+                    request.args,
+                    this.conversationId,
+                );
+                this.applyExecutionOutcome(message.id, request, outcome);
+            } catch (error: any) {
+                this.updateApprovalState(message.id, {
+                    status: 'unknown',
+                    outcome: {
+                        status: 'unknown',
+                        error: error?.message || String(error),
+                        detail: t('Could not verify the result. Check the target manually.'),
+                        retryable: false,
+                        completedAt: Date.now(),
+                    },
+                });
+            }
+        }
     }
 
     public cancelActiveStream(): boolean {
@@ -941,7 +1211,12 @@ export class ChatController {
     }
 
     private addApprovalMessage(request: ApprovalRequest) {
-        this.addMessage('system', request.message, request);
+        const enriched: ApprovalRequest = {
+            ...request,
+            id: request.id || createApprovalRequestId(),
+            conversationId: request.conversationId ?? this.conversationId,
+        };
+        this.addMessage('system', enriched.message, enriched);
     }
 
     private setResponding(status: boolean) {
@@ -1379,3 +1654,11 @@ export class ChatController {
     }
 }
 
+
+/**
+ * 审批请求身份：时间戳 + 随机后缀，随消息投影持久化。
+ * 不用数组下标/消息 id，因为请求在会话快照里要独立于 presentation 存在。
+ */
+function createApprovalRequestId(): string {
+    return `approval-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}

@@ -55,9 +55,28 @@ class FakeScrollContainer {
     scrollHeight = 0;
     clientHeight = 300;
     scrollCalls = 0;
+    /** 内容变短导致 scrollTop 被 clamp 时，浏览器会异步补一个 scroll 事件。 */
+    private pendingScrollEvents = 0;
+
+    /** 模拟内容高度变化：变矮时 clamp scrollTop 并排入一次 scroll 事件（真实布局行为）。 */
+    setScrollHeight(px: number): void {
+        this.scrollHeight = px;
+        const max = this.maxScrollTop();
+        if (this.scrollTop > max) {
+            this.scrollTop = max;
+            this.pendingScrollEvents += 1;
+        }
+    }
 
     grow(px: number): void {
-        this.scrollHeight += px;
+        this.setScrollHeight(this.scrollHeight + px);
+    }
+
+    /** 取出并清空待投递的 scroll 事件数（由宿主在下一拍派发给 controller）。 */
+    takeScrollEvents(): number {
+        const count = this.pendingScrollEvents;
+        this.pendingScrollEvents = 0;
+        return count;
     }
 
     maxScrollTop(): number {
@@ -91,6 +110,12 @@ function createScheduler() {
                 for (const task of tasks) task();
             }
         },
+        /** 只跑当前这一拍，不执行回调里新排的定时器（用于恢复重试的分步断言）。 */
+        flushOnce() {
+            const tasks = [...pending.values()];
+            pending.clear();
+            for (const task of tasks) task();
+        },
         size() {
             return pending.size;
         },
@@ -101,9 +126,11 @@ function createHarness() {
     const container = new FakeScrollContainer();
     const scheduler = createScheduler();
     const unreadEvents: Array<[string, boolean]> = [];
+    const generation = { value: 0 };
     const controller = new ScrollFollowController({
         getContainer: () => container,
         onUnreadChange: (sessionId, unread) => unreadEvents.push([sessionId, unread]),
+        getRenderGeneration: () => generation.value,
         schedule: scheduler.schedule,
         cancel: scheduler.cancel,
         restoreDelayMs: 0,
@@ -118,6 +145,15 @@ function createHarness() {
             scheduler.flush();
         },
         flush: () => scheduler.flush(),
+        /** 模拟异步渲染代次前进（切换 tab、开启新回合）。 */
+        bumpGeneration() {
+            generation.value += 1;
+        },
+        /** 派发布局 clamp 产生的 scroll 事件（真实浏览器会在下一拍投递）。 */
+        flushScrollEvents() {
+            const count = container.takeScrollEvents();
+            for (let i = 0; i < count; i++) controller.handleScroll();
+        },
         /** 模拟一次新输出到达：内容增长 + 增长前后按真实调用顺序通知策略。 */
         output(px: number, markUnread = true) {
             const token = controller.captureGrowth();
@@ -298,16 +334,17 @@ async function runTests() {
 
     await test('a pending position restore cannot override an immediate user scroll-up', () => {
         const h = createHarness();
-        h.container.scrollHeight = 1600;
+        h.container.setScrollHeight(1600);
         h.activate('a', 'new');
         h.container.scrollTop = 500;
         h.controller.handleScroll();
         h.controller.prepareForSessionSwitch();
         h.activate('b', 'new');
 
-        // 切回 A：位置恢复还在 50ms 队列里，用户已经上翻。
+        // 切回 A：位置恢复还在 50ms 队列里，用户已经用滚轮上翻。
         h.controller.activateSession('a', 'restore');
         h.container.scrollTop = 300;
+        h.controller.handleUserScrollIntentUp();
         h.controller.handleScroll();
         h.flush();
 
@@ -315,9 +352,29 @@ async function runTests() {
         expect(h.controller.isFollowing()).toBe(false);
     });
 
-    await test('any user scroll while a position restore is pending cancels the restore', () => {
+    await test('a bare scroll event during restore is ignored and the saved anchor is restored', () => {
         const h = createHarness();
-        h.container.scrollHeight = 1600;
+        h.container.setScrollHeight(1600);
+        h.activate('a', 'new');
+        h.container.scrollTop = 500;
+        h.controller.handleScroll();
+        h.controller.prepareForSessionSwitch();
+        h.activate('b', 'new');
+
+        // 切回 A 时布局会先产生过渡 scroll（旧内容高度、clamp 等），它不是用户意图：
+        // 恢复必须照常执行，跟随/未读也不得被这次 scroll 改写。
+        h.controller.activateSession('a', 'restore');
+        h.container.scrollTop = 1300;
+        h.controller.handleScroll();
+        h.flush();
+
+        expect(h.container.scrollTop).toBe(500);
+        expect(h.controller.isFollowing()).toBe(false);
+    });
+
+    await test('real input during restore cancels it', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1600);
         h.activate('a', 'new');
         h.container.scrollTop = 500;
         h.controller.handleScroll();
@@ -325,13 +382,210 @@ async function runTests() {
         h.activate('b', 'new');
 
         h.controller.activateSession('a', 'restore');
-        // 向下滚但未回到近底区：仍属于用户在动视口，恢复不能覆盖。
+        // 用户按下滚动条 / 触摸 / 键盘滚动键：真实输入，恢复让位。
         h.container.scrollTop = 700;
-        h.controller.handleScroll();
+        h.controller.handleUserScrollIntent();
+        const callsBefore = h.container.scrollCalls;
         h.flush();
 
         expect(h.container.scrollTop).toBe(700);
+        expect(h.container.scrollCalls).toBe(callsBefore);
         expect(h.controller.isFollowing()).toBe(false);
+    });
+
+    await test('a plain click during restore does not lose the saved anchor', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1600);
+        h.activate('a', 'new');
+        h.container.scrollTop = 500;
+        h.controller.handleScroll();
+        h.controller.prepareForSessionSwitch();
+        h.activate('b', 'new');
+
+        h.controller.activateSession('a', 'restore');
+        // 点击/选文本：pointerdown 取消了恢复，但 pointerup 时视口没有移动。
+        h.container.scrollTop = 1300;
+        h.controller.handleUserScrollIntent();
+        h.controller.handleUserScrollIntentEnd();
+        h.flush();
+
+        expect(h.container.scrollTop).toBe(500);
+    });
+
+    await test('a pointer drag that moved the viewport is not replayed on pointerup', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1600);
+        h.activate('a', 'new');
+        h.container.scrollTop = 500;
+        h.controller.handleScroll();
+        h.controller.prepareForSessionSwitch();
+        h.activate('b', 'new');
+
+        h.controller.activateSession('a', 'restore');
+        h.container.scrollTop = 900;
+        h.controller.handleUserScrollIntent();
+        h.container.scrollTop = 400;
+        h.controller.handleScroll();
+        h.controller.handleUserScrollIntentEnd();
+        h.flush();
+
+        expect(h.container.scrollTop).toBe(400);
+        expect(h.controller.isFollowing()).toBe(false);
+    });
+
+    await test('restore retries when the content has not grown enough to reach the anchor', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1200);
+        h.activate('a', 'new');
+        h.container.scrollTop = 500;
+        h.controller.handleScroll();
+        h.controller.prepareForSessionSwitch();
+        h.activate('b', 'new');
+
+        // 切回 A 时内容还没长回来：max=0，500 被 clamp 到 0。
+        h.container.setScrollHeight(200);
+        h.controller.activateSession('a', 'restore');
+        h.scheduler.flushOnce();
+        expect(h.container.scrollTop).toBe(0);
+
+        // 异步 Markdown 把内容补上后，重试把读者放回 500。
+        h.container.setScrollHeight(1000);
+        h.flush();
+
+        expect(h.container.scrollTop).toBe(500);
+    });
+
+    await test('a restore timer that fires after switching away leaves the phase idle', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1600);
+        h.activate('a', 'new');
+        h.container.scrollTop = 500;
+        h.controller.handleScroll();
+        h.controller.prepareForSessionSwitch();
+
+        h.controller.activateSession('a', 'restore');
+        h.activate('b', 'new');
+        h.flush();
+
+        expect(h.controller.getSessionState('a')?.restorePhase).toBe('idle');
+    });
+
+    await test('a clamp scroll during restore is layout noise, not a user scroll', () => {
+        const h = createHarness();
+        // A 是矮会话：暂停在 150，还有未读；B 是高会话，停在底部。
+        h.container.setScrollHeight(500);
+        h.activate('a', 'new');
+        h.container.scrollTop = 150;
+        h.controller.handleUserScrollIntentUp();
+        h.controller.handleScroll();
+        h.output(10);
+        expect(h.controller.isFollowing()).toBe(false);
+        expect(h.controller.hasUnread()).toBe(true);
+
+        h.controller.prepareForSessionSwitch();
+        h.container.setScrollHeight(3000);
+        h.activate('b', 'new');
+        expect(h.container.scrollTop).toBe(h.container.maxScrollTop());
+        h.controller.prepareForSessionSwitch();
+
+        // 切回 A：内容重建后高度只有 500，浏览器把 scrollTop 从 2700 clamp 到 200，
+        // 并在恢复定时器执行前投递一次 scroll。它不能取消恢复、也不能重开跟随/清未读。
+        h.container.setScrollHeight(500);
+        h.controller.activateSession('a', 'restore');
+        h.flushScrollEvents();
+        h.flush();
+
+        expect(h.container.scrollTop).toBe(150);
+        expect(h.controller.isFollowing()).toBe(false);
+        expect(h.controller.hasUnread()).toBe(true);
+    });
+
+    await test('switching away before a pending restore keeps the saved anchor', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1600);
+        h.activate('a', 'new');
+        h.container.scrollTop = 500;
+        h.controller.handleScroll();
+        h.controller.prepareForSessionSwitch();
+
+        // 回到 A 后恢复还没执行就再次切走：过渡位置不能覆盖已保存的 500。
+        h.controller.activateSession('a', 'restore');
+        h.container.scrollTop = 1300;
+        h.controller.prepareForSessionSwitch();
+        h.activate('b', 'new');
+        h.flush();
+        h.controller.activateSession('a', 'restore');
+        h.flush();
+
+        expect(h.container.scrollTop).toBe(500);
+    });
+
+    await test('a stale render generation cannot schedule a follow scroll', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1200);
+        h.activate('a', 'new');
+        // 增长前仍在跟随、近底，但渲染期间切了 tab / 开了新回合：代次已前进，token 过期。
+        const token = h.controller.captureGrowth();
+        h.bumpGeneration();
+        const callsBefore = h.container.scrollCalls;
+        h.container.grow(200);
+        h.controller.afterGrowth(token, { markUnread: true });
+        h.flush();
+
+        expect(h.container.scrollCalls).toBe(callsBefore);
+        expect(h.controller.hasUnread()).toBe(false);
+    });
+
+    await test('growth token snapshots near-bottom and following before the content grows', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1200);
+        h.activate('a', 'new');
+        const followingToken = h.controller.captureGrowth();
+        expect(followingToken?.nearBottom).toBe(true);
+        expect(followingToken?.following).toBe(true);
+
+        h.container.scrollTop = 200;
+        h.controller.handleScroll();
+        const pausedToken = h.controller.captureGrowth();
+        expect(pausedToken?.nearBottom).toBe(false);
+        expect(pausedToken?.following).toBe(false);
+    });
+
+    await test('a layout growth that leaves the reader above the threshold does not snap to bottom', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1200);
+        h.activate('a', 'new');
+        // 图片延迟加载 / 代码块展开把内容撑高 300px，但没有用户 scroll 事件：
+        // following 仍是 true，读者实际上已在距底 300px 处。
+        h.container.grow(300);
+        expect(h.controller.isFollowing()).toBe(true);
+        const callsBefore = h.container.scrollCalls;
+
+        h.output(80);
+
+        // 新输出不能用增长后的新高度回判「原来在底部」：保持阅读锚点，只点亮返回入口。
+        expect(h.container.scrollTop).toBe(900);
+        expect(h.container.scrollCalls).toBe(callsBefore);
+        expect(h.controller.isFollowing()).toBe(false);
+        expect(h.controller.hasUnread()).toBe(true);
+    });
+
+    await test('several growths in one tick schedule a single follow scroll', () => {
+        const h = createHarness();
+        h.container.setScrollHeight(1200);
+        h.activate('a', 'new');
+        const callsBefore = h.container.scrollCalls;
+
+        for (let i = 0; i < 4; i++) {
+            const token = h.controller.captureGrowth();
+            h.container.grow(10);
+            h.controller.afterGrowth(token, { markUnread: true });
+        }
+        expect(h.container.scrollCalls).toBe(callsBefore);
+
+        h.flush();
+        expect(h.container.scrollCalls).toBe(callsBefore + 1);
+        expect(h.container.scrollTop).toBe(h.container.maxScrollTop());
     });
 
     await test('a growth token captured in another session is ignored', () => {

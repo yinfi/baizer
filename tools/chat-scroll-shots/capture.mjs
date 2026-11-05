@@ -321,6 +321,8 @@ const MEASURE_SCRIPT = `(() => {
     appVersion: (app.manifest && app.manifest.version) || null,
     pluginVersion: (() => { try { return app.plugins.plugins['${PLUGIN_ID}'].manifest.version; } catch (e) { return null; } })(),
     locale: window.localStorage.getItem('language'),
+    activeTabId: view.tabManager && view.tabManager.getActiveTab() ? view.tabManager.getActiveTab().id : null,
+    tabCount: view.tabManager && view.tabManager.getAllTabs ? view.tabManager.getAllTabs().length : null,
     viewRect,
     splitRect,
     outputRect: rect(out),
@@ -348,6 +350,461 @@ const MEASURE_SCRIPT = `(() => {
     documentOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
   };
 })()`;
+
+// ==================== issue #75: real-DOM timing regression scenarios ====================
+//
+// These scenarios reproduce the three post-#70 timing defects in a real Obsidian
+// window. They are only meaningful with real layout (scrollTop clamping, async
+// scroll events, async Markdown rendering), which jsdom cannot provide.
+//
+// - tab-switch-clamp: a tall tab B -> short paused tab A. Rebuilding/hiding shows
+//   only A; the browser clamps scrollTop to A's max and emits a scroll event. It
+//   must not cancel A's restore or reopen follow/clear unread.
+// - async-render-identity: A's Markdown block is still rendering when the user
+//   switches to B; when it resolves it must not scroll B.
+// - layout-growth-threshold: an image-like layout growth pushes the reader above
+//   the 80px threshold with no scroll event; the next output must not snap down.
+
+const TIMING_SCENARIOS = new Set([
+    'tab-switch-clamp',
+    'async-render-identity',
+    'layout-growth-threshold',
+    'approval-card-resize',
+]);
+
+const INSTALL_TIMING_HELPERS = `(() => {
+  const viewType = '${VIEW_TYPE}';
+  const getView = () => app.workspace.getLeavesOfType(viewType)[0].view;
+  const measure = () => (${MEASURE_SCRIPT});
+  const body = (label) => [
+    '### ' + label,
+    '',
+    '聊天滚动应在读者上翻后保持阅读锚点，不得因为新的 token、Markdown 定型、过程块折叠展开或图片加载被拉回底部。',
+    '',
+    '- 仅当更新前处于接近底部（距底 < 80px）且允许跟随时才跟随；',
+    '- 用户主动上翻立即暂停自动跟随；',
+    '- 暂停后确有新输出时才显示“有新输出 · 回到最新”；',
+    '',
+    '滚动行为不应改变推理内容或工具调用结果，只调整视口交互。这里用一段足够高的正文把输出区撑满，',
+    '以便在同一个阅读位置比较修复前后的视口。',
+    '',
+    '> 这是截图夹具文本，不代表真实的模型输出。',
+    ''
+  ].join('\\n');
+  const seed = (count, tag) => {
+    const view = getView();
+    for (let i = 0; i < count; i++) {
+      const isUser = i % 3 === 2;
+      view.appendMessage({
+        id: tag + '-' + i,
+        role: isUser ? 'user' : 'ai',
+        content: isUser ? ('请继续说明第 ' + (i + 1) + ' 点。') : body(tag + ' 第 ' + (i + 1) + ' 段'),
+        timestamp: Date.now() + i,
+      });
+    }
+    return { count, scrollHeight: view.outputContainer.scrollHeight };
+  };
+  const pause = (anchor) => {
+    const view = getView();
+    const out = view.outputContainer;
+    const max = Math.max(0, out.scrollHeight - out.clientHeight);
+    const target = Math.min(anchor, Math.max(0, max - 160));
+    out.scrollTo({ top: target, behavior: 'instant' });
+    out.dispatchEvent(new Event('scroll'));
+    return { anchor, target, scrollTop: Math.round(out.scrollTop), max };
+  };
+  const appendFixtureImage = (height) => {
+    const view = getView();
+    const holder = view.getActiveMessageContainer();
+    const el = document.createElement('div');
+    el.className = 'timing-fixture-image';
+    el.setAttribute('data-fixture', 'simulated-image');
+    el.style.cssText = [
+      'height:' + height + 'px',
+      'margin:8px 0',
+      'border:1px dashed var(--background-modifier-border)',
+      'border-radius:8px',
+      'padding:8px 12px',
+      'box-sizing:border-box',
+      'color:var(--text-muted)',
+      'font-size:12px',
+      'background:repeating-linear-gradient(45deg, var(--background-secondary), var(--background-secondary) 12px, var(--background-primary) 12px, var(--background-primary) 24px)',
+    ].join(';');
+    el.textContent = '模拟图片（截图夹具：真实场景为延迟加载的图片）';
+    holder.appendChild(el);
+    return {
+      height,
+      scrollHeight: view.outputContainer.scrollHeight,
+      scrollTop: Math.round(view.outputContainer.scrollTop),
+    };
+  };
+  const armRenderGate = () => {
+    const renderer = getView().getMessageRenderer();
+    const original = renderer.renderAiContent.bind(renderer);
+    const state = { armed: true, started: false, released: false, release: null };
+    renderer.renderAiContent = (...args) => {
+      if (!state.armed) return original(...args);
+      state.armed = false;
+      state.started = true;
+      const rendered = original(...args);
+      return new Promise((resolve, reject) => {
+        state.release = () => { state.released = true; rendered.then(resolve, reject); };
+      });
+    };
+    window.__timingGate = state;
+    return true;
+  };
+  const releaseRenderGate = () => {
+    const state = window.__timingGate;
+    if (!state || typeof state.release !== 'function') return { released: false };
+    state.release();
+    return { released: true };
+  };
+  const approvalMessage = (id, approvalState) => ({
+    id,
+    role: 'ai',
+    content: '',
+    timestamp: Date.now(),
+    approval: {
+      id: 'req-' + id,
+      conversationId: getView().tabManager.getActiveTab() ? getView().tabManager.getActiveTab().id : 'capture',
+      action: 'delete_note',
+      target: 'Projects/季度计划.md',
+      args: { path: 'Projects/季度计划.md' },
+      message: 'Approval required to delete note: Projects/季度计划.md',
+      preview: {
+        kind: 'note-delete',
+        target: 'Projects/季度计划.md',
+        summary: 'Delete note',
+        oldContent: '# 季度计划\\n\\n- 目标一\\n- 目标二',
+        risk: 'high',
+        preconditions: ['The target file must still exist.'],
+        supportsPartialApply: false,
+        undoable: false,
+      },
+    },
+    approvalState: approvalState || { status: 'pending' },
+  });
+  const appendApprovalCard = (id, approvalState) => {
+    const view = getView();
+    const msg = approvalMessage(id, approvalState);
+    view.appendMessage(msg, false);
+    return { id, status: msg.approvalState.status };
+  };
+  const updateApprovalCard = (id, approvalState) => {
+    const view = getView();
+    const tab = view.tabManager.getActiveTab();
+    if (!tab) return false;
+    view.handleTabMessageUpdated(tab.id, approvalMessage(id, approvalState));
+    return true;
+  };
+  const approvalCardHeight = (id) => {
+    const card = document.querySelector('.shell-entry[data-message-id="' + id + '"] .shell-approval-card');
+    return card ? Math.round(card.getBoundingClientRect().height) : null;
+  };
+  window.__timing = {
+    getView, measure, seed, pause, appendFixtureImage, armRenderGate, releaseRenderGate,
+    approvalMessage, appendApprovalCard, updateApprovalCard, approvalCardHeight,
+  };
+  return true;
+})()`;
+
+async function runTimingScenario(name, { session, delay }) {
+    const steps = [];
+    const data = {};
+    await session.evaluate(INSTALL_TIMING_HELPERS);
+
+    if (name === 'tab-switch-clamp') {
+        steps.push({ seedA: await session.evaluate(`window.__timing.seed(6, 'a')`) });
+        await delay(1000);
+        steps.push({ pauseA: await session.evaluate(`window.__timing.pause(150)`) });
+        await delay(200);
+        // A 暂停后到达一条新输出：点亮它自己的「有新输出」入口。
+        steps.push({
+            unreadA: await session.evaluate(`(async () => {
+              window.__timing.getView().appendMessage({ id: 'a-unread', role: 'ai', content: '暂停后到达的新输出。', timestamp: Date.now() });
+              await new Promise((r) => setTimeout(r, 500));
+              return window.__timing.measure();
+            })()`),
+        });
+        const beforeSwitch = await session.evaluate(`window.__timing.measure()`);
+        data.beforeSwitchA = beforeSwitch;
+        const aTabId = beforeSwitch.activeTabId;
+        steps.push({
+            createB: await session.evaluate(`(async () => {
+              await window.__timing.getView().createAndShowTab();
+              return window.__timing.measure();
+            })()`),
+        });
+        steps.push({ seedB: await session.evaluate(`window.__timing.seed(14, 'b')`) });
+        await delay(1200);
+        // B 是一个停在新输出处、处于跟随状态的长会话。显式滚到底并派发 scroll，
+        // 免得修复前后「新 tab 首屏是否已贴底」的差异影响后面 clamp 的起点。
+        steps.push({
+            followBToBottom: await session.evaluate(`(() => {
+              const out = window.__timing.getView().outputContainer;
+              out.scrollTo({ top: Math.max(0, out.scrollHeight - out.clientHeight), behavior: 'instant' });
+              out.dispatchEvent(new Event('scroll'));
+              return { scrollTop: Math.round(out.scrollTop) };
+            })()`),
+        });
+        await delay(250);
+        data.bTab = await session.evaluate(`window.__timing.measure()`);
+        steps.push({
+            switchBackA: await session.evaluate(`(async () => {
+              const view = window.__timing.getView();
+              const out = view.outputContainer;
+              // B 确实停在比 A 底部更靠下的位置，切回 A 时浏览器才会把共享容器的
+              // scrollTop 从 B 的位置 clamp 到 A 的新 max。
+              out.scrollTo({ top: out.scrollHeight, behavior: 'instant' });
+              const bScrollTop = Math.round(out.scrollTop);
+              await view.switchTab(${JSON.stringify(aTabId)});
+              // 无头/被遮挡的 Chromium 偶尔会合并或丢掉 clamp 后浏览器生成的 scroll，
+              // 所以这里把视口放到 A 的 max（clamp 的结果），并在同一微任务里派发一次
+              // 真实 DOM scroll 事件，让「恢复窗口内收到 clamp 滚动」这一时序确定复现。
+              const maxAtSwitch = Math.max(0, out.scrollHeight - out.clientHeight);
+              out.scrollTo({ top: maxAtSwitch, behavior: 'instant' });
+              const clampedScrollTop = Math.round(out.scrollTop);
+              out.dispatchEvent(new Event('scroll'));
+              return { bScrollTop, maxAtSwitch, clampedScrollTop };
+            })()`),
+        });
+        await delay(900);
+        const after = await session.evaluate(`window.__timing.measure()`);
+        const switchBack = steps[steps.length - 1].switchBackA;
+        return {
+            steps,
+            before: beforeSwitch,
+            after,
+            data,
+            assertions: {
+                scenario: name,
+                activeTabIsA: after.activeTabId === aTabId,
+                // 证明切换确实触发了「B 的位置超出 A 的底部 -> scrollTop 被 clamp 到 A 的 max」。
+                clampReproducedOnSwitch: switchBack.maxAtSwitch > 0
+                    && switchBack.clampedScrollTop === switchBack.maxAtSwitch
+                    && switchBack.bScrollTop > switchBack.maxAtSwitch,
+                restoredReadingAnchor: Math.abs(after.scrollTop - beforeSwitch.scrollTop) <= 2,
+                stillPaused: after.follow ? after.follow.following === false : null,
+                unreadPreserved: after.follow ? after.follow.unread === true : null,
+                unreadEntryVisible: after.unreadBar.visible === true,
+                readingAnchorIsNotBottom: after.distanceFromBottom > 80,
+            },
+        };
+    }
+
+    if (name === 'async-render-identity') {
+        steps.push({ seedA: await session.evaluate(`window.__timing.seed(3, 'a')`) });
+        await delay(800);
+        steps.push({ arm: await session.evaluate(`window.__timing.armRenderGate()`) });
+        steps.push({
+            streamA: await session.evaluate(`(() => {
+              const view = window.__timing.getView();
+              view.handleStreamEvent({ type: 'thinking', content: '正在渲染一个会异步完成的 Markdown 块。' });
+              view.handleStreamEvent({
+                type: 'text_delta',
+                content: '第一段已闭合的正文，渲染完成前用户会切到另一个会话。\\n\\n尾部还在增长。',
+              });
+              return true;
+            })()`),
+        });
+        await session.waitFor('window.__timingGate && window.__timingGate.started === true', {
+            timeoutMs: 20000,
+            label: 'A 的 Markdown 渲染已经挂起（gate started）',
+        });
+        steps.push({
+            createB: await session.evaluate(`(async () => {
+              await window.__timing.getView().createAndShowTab();
+              return window.__timing.measure();
+            })()`),
+        });
+        steps.push({ seedB: await session.evaluate(`window.__timing.seed(14, 'b')`) });
+        await delay(1200);
+        steps.push({
+            followBToBottom: await session.evaluate(`(() => {
+              const out = window.__timing.getView().outputContainer;
+              out.scrollTo({ top: Math.max(0, out.scrollHeight - out.clientHeight), behavior: 'instant' });
+              out.dispatchEvent(new Event('scroll'));
+              return { scrollTop: Math.round(out.scrollTop) };
+            })()`),
+        });
+        await delay(200);
+        // B 在底部跟随；滞后加载的图片只撑高内容，不产生用户 scroll。
+        steps.push({ fixture: await session.evaluate(`window.__timing.appendFixtureImage(600)`) });
+        await delay(250);
+        const before = await session.evaluate(`window.__timing.measure()`);
+        data.bBeforeRelease = before;
+        steps.push({ release: await session.evaluate(`window.__timing.releaseRenderGate()`) });
+        await delay(900);
+        const after = await session.evaluate(`window.__timing.measure()`);
+        data.gate = await session.evaluate(
+            `({ started: !!window.__timingGate && window.__timingGate.started, released: !!window.__timingGate && window.__timingGate.released })`,
+        );
+        return {
+            steps,
+            before,
+            after,
+            data,
+            assertions: {
+                scenario: name,
+                staleRenderCallbackRan: data.gate ? data.gate.released === true : null,
+                viewportUnchanged: Math.abs(after.scrollTop - before.scrollTop) <= 2,
+                distanceFromBottomUnchanged: Math.abs(after.distanceFromBottom - before.distanceFromBottom) <= 2,
+                stillFollowingB: after.follow ? after.follow.following === true : null,
+                noUnreadOnB: after.follow ? after.follow.unread === false : null,
+            },
+        };
+    }
+
+    if (name === 'layout-growth-threshold') {
+        steps.push({ seedA: await session.evaluate(`window.__timing.seed(12, 'a')`) });
+        await delay(1300);
+        steps.push({
+            followAToBottom: await session.evaluate(`(() => {
+              const out = window.__timing.getView().outputContainer;
+              out.scrollTo({ top: Math.max(0, out.scrollHeight - out.clientHeight), behavior: 'instant' });
+              out.dispatchEvent(new Event('scroll'));
+              return { scrollTop: Math.round(out.scrollTop), maxScrollTop: Math.round(Math.max(0, out.scrollHeight - out.clientHeight)) };
+            })()`),
+        });
+        await delay(200);
+        // 图片延迟加载：内容撑高 600px，但没有用户 scroll，following 仍为 true。
+        steps.push({ fixture: await session.evaluate(`window.__timing.appendFixtureImage(600)`) });
+        await delay(300);
+        const before = await session.evaluate(`window.__timing.measure()`);
+        data.beforeStream = before;
+        steps.push({
+            stream: await session.evaluate(`(() => {
+              window.__timing.getView().handleStreamEvent({
+                type: 'text_delta',
+                content: '布局撑高之后到达的新输出：读者应在原阅读位置，不被拉回底部。\\n\\n继续增长的正文。',
+              });
+              return true;
+            })()`),
+        });
+        await delay(1000);
+        const after = await session.evaluate(`window.__timing.measure()`);
+        return {
+            steps,
+            before,
+            after,
+            data,
+            assertions: {
+                scenario: name,
+                followingBefore: before.follow ? before.follow.following === true : null,
+                preStreamAboveThreshold: before.distanceFromBottom > 80,
+                viewportStayedAtReadingAnchor: Math.abs(after.scrollTop - before.scrollTop) <= 2,
+                pausedAfterGrowth: after.follow ? after.follow.following === false : null,
+                unreadEntryVisible: after.unreadBar.visible === true,
+            },
+        };
+    }
+
+    if (name === 'approval-card-resize') {
+        steps.push({ seedA: await session.evaluate(`window.__timing.seed(8, 'a')`) });
+        await delay(1100);
+        steps.push({
+            followBottom: await session.evaluate(`(() => {
+              const out = window.__timing.getView().outputContainer;
+              out.scrollTo({ top: Math.max(0, out.scrollHeight - out.clientHeight), behavior: 'instant' });
+              out.dispatchEvent(new Event('scroll'));
+              return { scrollTop: Math.round(out.scrollTop) };
+            })()`),
+        });
+        await delay(200);
+
+        // 变矮：pending 卡片（预览 + 操作按钮）就地重画成 succeeded。
+        steps.push({ appendPendingShrink: await session.evaluate(`window.__timing.appendApprovalCard('approval-shrink', { status: 'pending' })`) });
+        await delay(700);
+        steps.push({
+            followBottomBeforeShrink: await session.evaluate(`(() => {
+              const out = window.__timing.getView().outputContainer;
+              out.scrollTo({ top: Math.max(0, out.scrollHeight - out.clientHeight), behavior: 'instant' });
+              out.dispatchEvent(new Event('scroll'));
+              return { scrollTop: Math.round(out.scrollTop) };
+            })()`),
+        });
+        await delay(200);
+        const shrinkBefore = await session.evaluate(`({
+          height: window.__timing.approvalCardHeight('approval-shrink'),
+          metrics: window.__timing.measure(),
+        })`);
+        steps.push({
+            shrinkToSucceeded: await session.evaluate(`window.__timing.updateApprovalCard('approval-shrink', {
+              status: 'succeeded',
+              outcome: {
+                status: 'succeeded',
+                detail: 'Deleted successfully.',
+                target: 'Projects/季度计划.md',
+                completedAt: Date.now(),
+                retryable: false,
+              },
+            })`),
+        });
+        await delay(500);
+        const shrinkAfter = await session.evaluate(`({
+          height: window.__timing.approvalCardHeight('approval-shrink'),
+          metrics: window.__timing.measure(),
+        })`);
+
+        // 变高：另一张 pending 卡片就地重画成 failed（长错误 + 重试按钮）。
+        steps.push({ appendPendingGrow: await session.evaluate(`window.__timing.appendApprovalCard('approval-grow', { status: 'pending' })`) });
+        await delay(700);
+        steps.push({
+            followBottomBeforeGrow: await session.evaluate(`(() => {
+              const out = window.__timing.getView().outputContainer;
+              out.scrollTo({ top: Math.max(0, out.scrollHeight - out.clientHeight), behavior: 'instant' });
+              out.dispatchEvent(new Event('scroll'));
+              return { scrollTop: Math.round(out.scrollTop) };
+            })()`),
+        });
+        await delay(200);
+        const growBefore = await session.evaluate(`({
+          height: window.__timing.approvalCardHeight('approval-grow'),
+          metrics: window.__timing.measure(),
+        })`);
+        steps.push({
+            growToFailed: await session.evaluate(`window.__timing.updateApprovalCard('approval-grow', {
+              status: 'failed',
+              outcome: {
+                status: 'failed',
+                detail: '删除失败（夹具）。',
+                error: 'Permission denied while deleting Projects/季度计划.md. The file may be open in another pane, locked by the vault indexer, or protected by a read-only workspace. Retry after closing the file or restoring write permission.',
+                completedAt: Date.now(),
+                retryable: true,
+              },
+            })`),
+        });
+        await delay(500);
+        const growAfter = await session.evaluate(`({
+          height: window.__timing.approvalCardHeight('approval-grow'),
+          metrics: window.__timing.measure(),
+        })`);
+
+        return {
+            steps,
+            before: growBefore.metrics,
+            after: growAfter.metrics,
+            data: { shrinkBefore, shrinkAfter, growBefore, growAfter },
+            assertions: {
+                scenario: name,
+                cardShrank: shrinkBefore.height != null && shrinkAfter.height != null
+                    ? shrinkBefore.height - shrinkAfter.height > 20
+                    : null,
+                shrinkKeptFollowing: shrinkAfter.metrics.follow ? shrinkAfter.metrics.follow.following === true : null,
+                shrinkNoUnread: shrinkAfter.metrics.follow ? shrinkAfter.metrics.follow.unread === false : null,
+                shrinkAtBottom: shrinkAfter.metrics.distanceFromBottom <= 2,
+                cardGrew: growBefore.height != null && growAfter.height != null
+                    ? growAfter.height - growBefore.height > 10
+                    : null,
+                growAtBottom: growAfter.metrics.distanceFromBottom <= 2,
+                growStillFollowing: growAfter.metrics.follow ? growAfter.metrics.follow.following === true : null,
+            },
+        };
+    }
+
+    throw new Error(`Unknown timing scenario: ${name}`);
+}
 
 async function screenshot(session, outPath, clip) {
     const result = await session.send('Page.captureScreenshot', {
@@ -389,6 +846,7 @@ async function main() {
             'sidebar-height': { type: 'string', default: '900' },
             theme: { type: 'string', default: 'dark' },
             phase: { type: 'string', default: 'after' },
+            scenario: { type: 'string', default: 'reading-anchor' },
             revision: { type: 'string', default: '' },
             label: { type: 'string', default: 'chat-scroll' },
             port: { type: 'string', default: '9341' },
@@ -405,6 +863,10 @@ async function main() {
 
     if (!values['plugin-dir'] || !values.out) {
         throw new Error('--plugin-dir and --out are required');
+    }
+    const scenario = values.scenario;
+    if (scenario !== 'reading-anchor' && !TIMING_SCENARIOS.has(scenario)) {
+        throw new Error(`Unknown --scenario ${scenario}; expected reading-anchor or ${[...TIMING_SCENARIOS].join('/')}`);
     }
 
     const pluginDir = path.resolve(values['plugin-dir']);
@@ -435,6 +897,7 @@ async function main() {
         capturedAt: new Date().toISOString(),
         out: outPath,
         scenario: {
+            name: values.scenario,
             seedCount,
             streamChunks,
             scrollAnchorFraction: 0.35,
@@ -495,38 +958,58 @@ async function main() {
         report.steps.push({ fitViewWidth: await fitViewWidth(session, viewWidth) });
         await delay(300);
 
-        report.steps.push({ seed: await session.evaluate(SEED_SCRIPT(seedCount)) });
-        report.steps.push({ scrollUp: await session.evaluate(SCROLL_UP_SCRIPT) });
+        let beforeStream = null;
+        let afterStream = null;
+        if (TIMING_SCENARIOS.has(scenario)) {
+            const run = await runTimingScenario(scenario, { session, delay });
+            report.steps.push(...run.steps);
+            report.scenarioData = run.data;
+            beforeStream = run.before;
+            afterStream = run.after;
+            report.beforeStream = beforeStream;
+            report.afterStream = afterStream;
+            report.assertions = run.assertions;
+        } else {
+            report.steps.push({ seed: await session.evaluate(SEED_SCRIPT(seedCount)) });
+            report.steps.push({ scrollUp: await session.evaluate(SCROLL_UP_SCRIPT) });
 
-        const beforeStream = await session.evaluate(MEASURE_SCRIPT);
-        report.beforeStream = beforeStream;
+            beforeStream = await session.evaluate(MEASURE_SCRIPT);
+            report.beforeStream = beforeStream;
 
-        for (let i = 0; i < streamChunks; i++) {
-            await session.evaluate(STREAM_CHUNK_SCRIPT(i));
-            await delay(260);
+            for (let i = 0; i < streamChunks; i++) {
+                await session.evaluate(STREAM_CHUNK_SCRIPT(i));
+                await delay(260);
+            }
+            await delay(700);
+
+            afterStream = await session.evaluate(MEASURE_SCRIPT);
+            report.afterStream = afterStream;
+
+            const targetTop = Number(report.steps.find((s) => s.scrollUp)?.scrollUp.anchor ?? 0);
+            report.assertions = {
+                viewportStayedAtReadingAnchor: Math.abs(afterStream.scrollTop - targetTop) <= 2,
+                unreadEntryVisible: afterStream.unreadBar.visible === true,
+                unreadEntryText: afterStream.unreadBar.text,
+                unreadEntryWithinViewport: afterStream.unreadBar.withinViewport !== false,
+                noHorizontalOverflow: afterStream.horizontalOverflow === false && afterStream.documentOverflow === false,
+                viewWidthMatchesRequested: Math.abs((afterStream.viewRect?.width ?? 0) - viewWidth) <= 2,
+            };
+
+            if (!report.assertions.viewportStayedAtReadingAnchor) {
+                report.limitations.push('the viewport did not stay at the requested reading anchor; see scrollTop fields');
+            }
         }
-        await delay(700);
-
-        const afterStream = await session.evaluate(MEASURE_SCRIPT);
-        report.afterStream = afterStream;
-
-        const targetTop = Number(report.steps.find((s) => s.scrollUp)?.scrollUp.anchor ?? 0);
-        report.assertions = {
-            viewportStayedAtReadingAnchor: Math.abs(afterStream.scrollTop - targetTop) <= 2,
-            unreadEntryVisible: afterStream.unreadBar.visible === true,
-            unreadEntryText: afterStream.unreadBar.text,
-            unreadEntryWithinViewport: afterStream.unreadBar.withinViewport !== false,
-            noHorizontalOverflow: afterStream.horizontalOverflow === false && afterStream.documentOverflow === false,
-            viewWidthMatchesRequested: Math.abs((afterStream.viewRect?.width ?? 0) - viewWidth) <= 2,
-        };
 
         if (values.phase === 'before') {
             report.limitations.push(
-                'baseline phase has no scroll-follow controller or return entry, so follow/unread fields are null and the entry is absent by design',
+                'baseline phase is the pre-fix build: failing timing assertions are the expected reproduction, not an infrastructure error',
             );
         }
-        if (!report.assertions.viewportStayedAtReadingAnchor) {
-            report.limitations.push('the viewport did not stay at the requested reading anchor; see scrollTop fields');
+        const failed = Object.entries(report.assertions ?? {})
+            .filter(([key, value]) => key !== 'scenario' && value === false)
+            .map(([key]) => key);
+        if (failed.length > 0) {
+            report.limitations.push(`failed assertions: ${failed.join(', ')}`);
         }
 
         const clip = {

@@ -17,7 +17,9 @@ interface MessageRendererOptions {
   component: unknown;
   renderMarkdown?: MarkdownRender;
   onApprove?: (message: ChatMessage) => void | Promise<void>;
-  onCancel?: (message: ChatMessage) => void | Promise<void>;
+  onReject?: (message: ChatMessage) => void | Promise<void>;
+  onApprovalRetry?: (message: ChatMessage) => void | Promise<void>;
+  onApprovalRecheck?: (message: ChatMessage) => void | Promise<void>;
   onFocusApprovalPreview?: (message: ChatMessage) => void | Promise<void>;
   onCopy?: (content: string, message: ChatMessage) => void | Promise<void>;
   /** 点赞:用户认可该回答,归档到知识库。 */
@@ -41,7 +43,6 @@ interface MessageRendererOptions {
   onReviewCodeBlock?: (content: string) => void | Promise<void>;
   onUndoWorkspaceEdit?: (editId: string) => void | Promise<void>;
   onInternalLinkClick?: (href: string) => void;
-  onScrollRequest?: () => void;
   onRenderError?: (error: unknown) => void;
 }
 
@@ -69,6 +70,7 @@ export class MessageRenderer {
 
   async renderMessage(container: HTMLElement, message: ChatMessage): Promise<HTMLElement> {
     const entry = (container as any).createDiv({ cls: `shell-entry ${message.role}` }) as HTMLElement;
+    if (typeof entry.setAttribute === 'function') entry.setAttribute('data-message-id', message.id);
 
     try {
       if (message.metadata?.workspaceEdit) {
@@ -77,27 +79,7 @@ export class MessageRenderer {
         (entry as any).addClass?.('shell-approval-entry') ?? entry.classList.add('shell-approval-entry');
         (entry as any).createDiv({ cls: 'shell-approval-avatar', text: 'AI' });
         const approvalBody = (entry as any).createDiv({ cls: 'shell-approval-message-body' }) as HTMLElement;
-        const removeApprovalEntry = () => {
-          if (typeof (entry as any).remove === 'function') {
-            (entry as any).remove();
-            return;
-          }
-          const parent = (entry as any).parentElement;
-          if (parent?.children) {
-            parent.children = Array.from(parent.children).filter((child) => child !== entry);
-          }
-        };
-        renderApprovalCard(approvalBody, message.approval, {
-          onApprove: () => {
-            removeApprovalEntry();
-            return this.options.onApprove?.(message);
-          },
-          onCancel: () => {
-            removeApprovalEntry();
-            return this.options.onCancel?.(message);
-          },
-          onFocusPreview: () => this.options.onFocusApprovalPreview?.(message),
-        });
+        this.renderApproval(approvalBody, message);
       } else if (message.role === 'ai') {
         if (message.content) {
           await this.renderAiContent(entry, message.content);
@@ -126,8 +108,23 @@ export class MessageRenderer {
       this.setText(entry, t('Error rendering message'));
     }
 
-    this.options.onScrollRequest?.();
     return entry;
+  }
+
+  /**
+   * 渲染/重渲一张审批卡。宿主在审批状态变化时只清空并重画这一块，
+   * 不重排整条消息流（避免长对话在点击后跳到底部，也保住键盘焦点上下文）。
+   */
+  renderApproval(container: HTMLElement, message: ChatMessage): void {
+    if (!message.approval) return;
+    renderApprovalCard(container, message.approval, {
+      messageId: message.id,
+      onApprove: () => this.options.onApprove?.(message),
+      onReject: () => this.options.onReject?.(message),
+      onRetry: () => this.options.onApprovalRetry?.(message),
+      onRecheck: () => this.options.onApprovalRecheck?.(message),
+      onFocusPreview: () => this.options.onFocusApprovalPreview?.(message),
+    }, message.approvalState ?? { status: 'pending' });
   }
 
   async renderAiContent(

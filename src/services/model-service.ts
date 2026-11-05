@@ -29,6 +29,7 @@ import {
 } from './generation-strategy-service';
 import { ObsidianContextSnapshot } from './obsidian-context-service';
 import { OperationAuditLog } from './operation-audit-log';
+import { ApprovalExecutionOutcome, ApprovalExecutionRegistry } from './approval-execution';
 import { WorkspaceEditService } from './workspace-edit-service';
 
 /**
@@ -77,6 +78,8 @@ export class ModelService {
     private skillRegistry: SkillRegistry;
     private toolRegistry: ToolRegistry;
     private operationAuditLog: OperationAuditLog;
+    /** 审批执行登记表：以 request id 为键，跨控制器/视图重挂载保证最多执行一次。 */
+    private readonly approvalExecutionRegistry = new ApprovalExecutionRegistry();
     private workspaceEditService: WorkspaceEditService;
     /**
      * Harness 会话生命周期管理器。仅当 vault.adapter 可用时启用(桌面与移动端均有,测试 mock 可能缺失)。
@@ -863,18 +866,95 @@ export class ModelService {
         });
     }
 
+    /**
+     * 执行一次已批准的写入。
+     *
+     * `options.requestId` 是审批请求身份：同一 id 的重复调用复用登记表里的
+     * in-flight Promise / 已完成结果，成功结果永不重放。`retry` 只对失败结果生效。
+     */
     async executeApprovedAction(
         action: string,
         args: Record<string, any>,
         conversationId?: string,
-    ): Promise<any> {
-        const result = await this.toolRegistry.execute(action, {
-            ...args,
-            approved: true,
-        });
+        options: { requestId?: string; retry?: boolean } = {},
+    ): Promise<ApprovalExecutionOutcome> {
+        const run = () => this.performApprovedAction(action, args, conversationId, options.requestId);
+        if (!options.requestId) return run();
+        return this.approvalExecutionRegistry.run(options.requestId, run, { retry: options.retry });
+    }
+
+    /**
+     * 核实一次「结果未知」的审批，不执行任何写入。
+     * 登记表里有结果就直接用；否则查审计记录判断是否执行过。
+     */
+    async reconcileApprovedAction(
+        requestId: string,
+        action: string,
+        args: Record<string, any>,
+        conversationId?: string,
+    ): Promise<ApprovalExecutionOutcome> {
+        const record = this.approvalExecutionRegistry.peek(requestId);
+        if (record?.state === 'running') {
+            return record.promise as Promise<ApprovalExecutionOutcome>;
+        }
+        if (record?.state === 'done' && record.outcome) {
+            return record.outcome;
+        }
+
+        const records = await this.operationAuditLog.list();
+        if (records.some(record => record.id === requestId)) {
+            return {
+                kind: 'approval-execution',
+                status: 'unknown',
+                target: getFileWriteResultPath(action, {}, args) || action,
+                detail: 'The action ran but its result was not recorded. Check the target manually.',
+                completedAt: Date.now(),
+                retryable: false,
+            };
+        }
+
+        return {
+            kind: 'approval-execution',
+            status: 'failed',
+            target: getFileWriteResultPath(action, {}, args) || action,
+            detail: 'No execution record was found. Verify the target, then retry.',
+            completedAt: Date.now(),
+            retryable: true,
+        };
+    }
+
+    private async performApprovedAction(
+        action: string,
+        args: Record<string, any>,
+        conversationId: string | undefined,
+        requestId: string | undefined,
+    ): Promise<ApprovalExecutionOutcome> {
+        const target = getFileWriteResultPath(action, {}, args)
+            || args?.path || args?.filename || args?.oldPath || action;
+        let result: any;
+        try {
+            result = await this.toolRegistry.execute(action, {
+                ...args,
+                approved: true,
+            });
+        } catch (error: any) {
+            // 工具抛错时无法判断副作用是否发生：返回 unknown，UI 会要求先核实。
+            return {
+                kind: 'approval-execution',
+                status: 'unknown',
+                target,
+                error: error?.message || String(error),
+                detail: 'The action was interrupted before its result was recorded. Check the target before retrying.',
+                completedAt: Date.now(),
+                retryable: false,
+            };
+        }
+
+        const resolvedTarget = getFileWriteResultPath(action, result, args) || target;
         await this.recordOperationAudit({
+            id: requestId,
             action,
-            target: getFileWriteResultPath(action, result, args) || action,
+            target: resolvedTarget,
             approvalSource: 'user-click',
             undoable: this.isUndoableApprovedAction(action),
         });
@@ -887,7 +967,20 @@ export class ModelService {
                 this.buildApprovalOutcomeText(action, args, result),
             );
         }
-        return result;
+
+        const succeeded = result?.success === true || result?.status === 'success';
+        return {
+            kind: 'approval-execution',
+            status: succeeded ? 'succeeded' : 'failed',
+            target: resolvedTarget,
+            detail: succeeded
+                ? (typeof result?.message === 'string' ? result.message : 'The action completed successfully.')
+                : (typeof result?.message === 'string' ? result.message : 'The action failed.'),
+            error: succeeded ? undefined : (result?.error || result?.message || 'The action failed.'),
+            completedAt: Date.now(),
+            retryable: !succeeded,
+            result,
+        };
     }
 
     /**
@@ -1058,6 +1151,7 @@ export class ModelService {
     }
 
     private async recordOperationAudit(input: {
+        id?: string;
         action: string;
         target: string;
         approvalSource: 'user-click' | 'direct-write';
@@ -1068,6 +1162,7 @@ export class ModelService {
 
         const config = this.getActiveProviderConfig();
         await this.operationAuditLog.record({
+            id: input.id,
             action: input.action,
             target: input.target,
             provider: this.settings?.activeProvider,

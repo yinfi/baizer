@@ -71,6 +71,9 @@ export class ShellView extends ItemView {
     private dirtyTabs = new Set<TabId>();
     // 滚动跟随策略:每会话的跟随/未读/阅读位置,以及延迟滚动回调的会话身份校验。
     private scrollFollow: ScrollFollowController | null = null;
+    // 流式渲染代次:切换 tab / 开新回合时自增,异步渲染回调用旧代次 token 一律丢弃,
+    // 避免一次迟到的 Markdown 完成回调滚动另一个会话或另一个回合的视口。
+    private renderGeneration = 0;
     // 「有新输出 · 回到最新」入口:仅当活动会话暂停跟随后确有新输出时显示。
     private unreadBarEl: HTMLElement | null = null;
     private unreadButtonEl: HTMLButtonElement | null = null;
@@ -201,9 +204,23 @@ export class ShellView extends ItemView {
     private handleDropBound = (e: DragEvent) => this.handleDrop(e);
     // 停止无条件贴底后,scroll 事件负责「上翻暂停 / 回到底部恢复」。
     private handleOutputScrollBound = () => this.scrollFollow?.handleScroll();
+    // 真实输入:恢复位置还没执行时取消它。布局/切 tab 产生的 scroll 不经过这里。
+    private handleOutputScrollIntentBound = () => this.scrollFollow?.handleUserScrollIntent();
+    // 真实输入结束:普通点击/选文本没有移动视口时,把被取消的恢复重新排上。
+    private handleOutputScrollIntentEndBound = () => this.scrollFollow?.handleUserScrollIntentEnd();
     // 滚轮向上是明确的阅读意图:立即暂停,不等 scroll 事件或下一次 token。
     private handleOutputWheelBound = (e: WheelEvent) => {
         if (e.deltaY < 0) this.scrollFollow?.handleUserScrollIntentUp();
+        else this.scrollFollow?.handleUserScrollIntent();
+    };
+    // 键盘滚动键同样是真实输入(ArrowUp/Down、PageUp/Down、Home/End、空格)。
+    private handleOutputKeyDownBound = (e: KeyboardEvent) => {
+        // 焦点在按钮/链接/输入框上时，空格与方向键是控件操作，不是滚动视口。
+        const target = e.target as HTMLElement | null;
+        if (target?.closest('button, a, input, textarea, select, [role="button"]')) return;
+        if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) {
+            this.scrollFollow?.handleUserScrollIntent();
+        }
     };
 
     constructor(leaf: WorkspaceLeaf, modelService: ModelService, private plugin?: IPlugin) {
@@ -263,7 +280,6 @@ export class ShellView extends ItemView {
             },
             onDone: (finalText, outcome) => this.finalizeStream(outcome ?? 'completed', finalText),
             onError: (message) => this.finalizeStream('failed', undefined, message),
-            onScrollRequest: () => this.followScrollIfEnabled(),
         });
     }
 
@@ -742,6 +758,7 @@ export class ShellView extends ItemView {
         this.scrollFollow?.dispose();
         this.scrollFollow = new ScrollFollowController({
             getContainer: () => this.outputContainer ?? null,
+            getRenderGeneration: () => this.renderGeneration,
             onUnreadChange: (sessionId, unread) => {
                 if (this.tabManager.getActiveTab()?.id !== sessionId) return;
                 this.updateUnreadBar(unread);
@@ -752,6 +769,13 @@ export class ShellView extends ItemView {
     private bindScrollFollowListeners() {
         this.outputContainer.addEventListener('scroll', this.handleOutputScrollBound, { passive: true });
         this.outputContainer.addEventListener('wheel', this.handleOutputWheelBound, { passive: true });
+        // 恢复位置期间只有真实输入能取消它;pointerdown/touchstart 覆盖拖滚动条与触摸滑动。
+        this.outputContainer.addEventListener('pointerdown', this.handleOutputScrollIntentBound, { passive: true });
+        this.outputContainer.addEventListener('touchstart', this.handleOutputScrollIntentBound, { passive: true });
+        this.outputContainer.addEventListener('keydown', this.handleOutputKeyDownBound);
+        // 普通点击/选文本结束时若视口没动,恢复原阅读锚点(见 handleUserScrollIntentEnd)。
+        this.outputContainer.addEventListener('pointerup', this.handleOutputScrollIntentEndBound, { passive: true });
+        this.outputContainer.addEventListener('touchend', this.handleOutputScrollIntentEndBound, { passive: true });
     }
 
     /**
@@ -777,18 +801,13 @@ export class ShellView extends ItemView {
         this.unreadButtonEl?.setAttr('aria-hidden', String(!unread));
     }
 
-    /** 内容增长前捕获会话身份,增长后交给策略决定是否贴底/点亮未读。 */
+    /** 内容增长前捕获会话身份、近底/跟随快照与渲染代次,增长后交给策略决定是否贴底/点亮未读。 */
     private captureScrollGrowth(): GrowthToken | null {
         return this.scrollFollow?.captureGrowth() ?? null;
     }
 
     private afterScrollGrowth(token: GrowthToken | null, markUnread: boolean) {
         this.scrollFollow?.afterGrowth(token, { markUnread });
-    }
-
-    /** 跟随中才贴底;已暂停时保持阅读锚点。 */
-    private followScrollIfEnabled() {
-        this.scrollFollow?.followActiveIfEnabled();
     }
 
     // ==================== T14: 消息 DOM 虚拟化 ====================
@@ -927,6 +946,8 @@ export class ShellView extends ItemView {
         this.loadingIndicatorEl?.remove();
         this.loadingIndicatorEl = null;
 
+        // 新回合换了一棵流式 DOM 树:旧回合还在 await 的渲染回调从此过期。
+        this.renderGeneration += 1;
         this.streamContainer = this.getActiveMessageContainer().createDiv({ cls: 'shell-entry ai shell-stream-container' });
         this.streamTimeline = this.streamContainer.createDiv({ cls: 'shell-think-timeline' });
         const streamTimeline = this.streamTimeline;
@@ -1050,10 +1071,13 @@ export class ShellView extends ItemView {
     /** 把一段已闭合的 Markdown 文本渲染进一个新的稳定块节点并追加,冻结不再重渲。 */
     private async appendStableBlock(markdown: string) {
         if (!this.streamStableEl) return;
+        // 入队时捕获 token:await 之后活动会话可能已经切走、渲染代次也可能已前进,
+        // 完成回调只能滚动发起时的会话,过期即丢弃。
+        const growth = this.captureScrollGrowth();
         const blockEl = this.streamStableEl.createDiv({ cls: 'shell-stream-block' });
         await this.getMessageRenderer().renderAiContent(blockEl, markdown);
-        // Markdown 渲染完成可能再改变高度:跟随中补一次贴底;暂停时不动作。
-        this.followScrollIfEnabled();
+        // Markdown 渲染完成可能再改变高度:仍属同一会话/同一代次且增长前跟随并近底时补一次贴底。
+        this.afterScrollGrowth(growth, false);
     }
 
 
@@ -1200,14 +1224,16 @@ export class ShellView extends ItemView {
                 app: this.app,
                 component: this,
                 onApprove: async (message) => {
-                    if (message.approval) {
-                        await this.chatController.approveApproval(message.approval);
-                    }
+                    await this.chatController.approveApproval(message.id);
                 },
-                onCancel: (message) => {
-                    if (message.approval) {
-                        this.chatController.cancelApproval(message.approval);
-                    }
+                onReject: (message) => {
+                    this.chatController.rejectApproval(message.id);
+                },
+                onApprovalRetry: async (message) => {
+                    await this.chatController.retryApproval(message.id);
+                },
+                onApprovalRecheck: async (message) => {
+                    await this.chatController.recheckApproval(message.id);
                 },
                 onFocusApprovalPreview: async (message) => {
                     if (message.approval) {
@@ -1233,7 +1259,6 @@ export class ShellView extends ItemView {
                 onInternalLinkClick: (href) => {
                     void this.app.workspace.openLinkText(href, '', false);
                 },
-                onScrollRequest: () => this.followScrollIfEnabled(),
                 onRenderError: (error) => {
                     logger.error('Markdown rendering failed', error, 'ShellView');
                 },
@@ -1300,7 +1325,7 @@ export class ShellView extends ItemView {
         const line = Math.max(1, editor?.getCursor?.()?.line + 1 || 1);
         const ch = Math.max(0, editor?.getCursor?.()?.ch || 0);
         showGhostText(cmView, this.buildApprovalGhostPreview(previewText), line, ch);
-        new Notice('Preview shown in the editor. Hover approval icons for actions.');
+        new Notice('Preview shown in the editor. Use the approval card buttons to approve or reject.');
     }
 
     private async openApprovalTarget(path: string) {
@@ -1345,6 +1370,11 @@ export class ShellView extends ItemView {
         if (this.outputContainer) {
             this.outputContainer.removeEventListener('scroll', this.handleOutputScrollBound);
             this.outputContainer.removeEventListener('wheel', this.handleOutputWheelBound as EventListener);
+            this.outputContainer.removeEventListener('pointerdown', this.handleOutputScrollIntentBound);
+            this.outputContainer.removeEventListener('touchstart', this.handleOutputScrollIntentBound);
+            this.outputContainer.removeEventListener('keydown', this.handleOutputKeyDownBound);
+            this.outputContainer.removeEventListener('pointerup', this.handleOutputScrollIntentEndBound);
+            this.outputContainer.removeEventListener('touchend', this.handleOutputScrollIntentEndBound);
         }
         this.unreadBarEl = null;
         this.unreadButtonEl = null;
@@ -1925,6 +1955,7 @@ export class ShellView extends ItemView {
             conversationId: id,
             onMessageAdded: (msg, options) => this.handleTabMessageAdded(id, msg, options),
             onMessageRemoved: (messageId) => this.handleTabMessageRemoved(id, messageId),
+            onMessageUpdated: (msg) => this.handleTabMessageUpdated(id, msg),
             onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
             onStreamEvent: (event) => this.handleTabStreamEvent(id, event),
             onClear: () => this.handleTabClear(id),
@@ -1977,6 +2008,59 @@ export class ShellView extends ItemView {
         } else {
             this.dirtyTabs.add(tabId);
         }
+    }
+
+    /**
+     * 审批状态变化：更新只读投影，并只重画这一张卡片。
+     *
+     * 不重排整条消息流，既避免长对话在点击后跳到最底部，也保住键盘焦点上下文。
+     * 卡片元素按 `data-message-id` 定位；视图重挂载后由 renderActiveTabMessages
+     * 从投影里的 approvalState 重建，不依赖旧 DOM 是否存在。
+     */
+    private handleTabMessageUpdated(tabId: TabId, msg: ChatMessage) {
+        const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
+        tab?.state.updateMessage(msg.id, msg);
+        // 审批结果要能跨视图关闭/应用重启回看：状态一变就落一次快照。
+        if (tab) void this.persistTab(tab);
+
+        if (this.tabManager.getActiveTab()?.id !== tabId) {
+            this.dirtyTabs.add(tabId);
+            return;
+        }
+
+        const container = this.getActiveMessageContainer();
+        const entry = container.querySelector(`.shell-entry[data-message-id="${msg.id}"]`) as HTMLElement | null;
+        const body = entry?.querySelector('.shell-approval-message-body') as HTMLElement | null;
+        if (!body) return;
+
+        // 只有焦点原本就在这张卡片里时才把焦点移到新状态区：
+        // 后台 reconcile 完成时用户可能在输入框里打字，不能抢焦点。
+        const active = document.activeElement as HTMLElement | null;
+        const hadFocus = !!active && !!entry && entry.contains(active);
+
+        // 就地重画会改变卡片高度（按钮区消失/详情行数变化）。与内容增长同样处理：
+        // 跟随且近底才贴底，暂停时保持锚点；不是新输出，不点亮未读。
+        const growth = this.captureScrollGrowth();
+        body.empty();
+        this.getMessageRenderer().renderApproval(body, msg);
+        if (hadFocus) this.focusApprovalState(entry, msg);
+        this.afterScrollGrowth(growth, false);
+    }
+
+    /**
+     * 状态流转后把焦点留在卡片内：处理中/终态聚焦状态区（读屏会播报），
+     * 失败/未知聚焦重试或核实按钮，键盘用户可以继续操作。
+     */
+    private focusApprovalState(entry: HTMLElement | null, msg: ChatMessage) {
+        if (!entry) return;
+        const status = msg.approvalState?.status;
+        const selector = status === 'failed'
+            ? '.shell-approval-retry'
+            : status === 'unknown'
+                ? '.shell-approval-recheck'
+                : '.shell-approval-processing, .shell-approval-outcome';
+        const target = entry.querySelector(selector) as HTMLElement | null;
+        target?.focus?.();
     }
 
     /** /clear:清空该 tab 的可见历史(tab.state)并重渲(修 /clear 不清屏)。 */
@@ -2460,6 +2544,8 @@ export class ShellView extends ItemView {
 
     private resetStreamState() {
         this.debouncedRenderStream.cancel();
+        // 流式 DOM 被丢弃:此前排队的异步渲染回调(稳定块、定型渲染)一律过期。
+        this.renderGeneration += 1;
         // 丢弃流时主动释放思考计时器,避免 interval 泄漏(切换/关闭标签页会走到这里)。
         this.thinkingRenderer?.dispose();
         this.streamContainer = null;

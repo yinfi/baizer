@@ -1,0 +1,407 @@
+{
+  "harness": "tools/approval-card-shots/capture.mjs",
+  "label": "after-running-narrow",
+  "phase": "after",
+  "revision": "8fcadc4",
+  "state": "running",
+  "obsidian": "Chrome/128.0.6613.186",
+  "theme": "dark",
+  "locale": "zh",
+  "requestedSidebarWidth": 300,
+  "plugin": {
+    "enabled": {
+      "steps": [
+        "plugins.loadManifests()"
+      ],
+      "error": null,
+      "loaded": true,
+      "restrictedMode": false
+    },
+    "loaded": true,
+    "version": "1.5.0"
+  },
+  "sidebar": {
+    "via": "rightSplit.setSize",
+    "splitWidth": 300,
+    "viewWidth": 276,
+    "windowWidth": 1280
+  },
+  "injection": {
+    "ok": true,
+    "messages": 2,
+    "viewWidth": 276,
+    "requestedWidth": 300
+  },
+  "viewport": {
+    "windowInnerWidth": 1280,
+    "windowInnerHeight": 1000,
+    "viewRect": {
+      "x": 992,
+      "y": 82,
+      "width": 276,
+      "height": 886,
+      "right": 1268,
+      "bottom": 968
+    },
+    "documentScroll": {
+      "x": 0,
+      "y": 0
+    }
+  },
+  "card": {
+    "found": true,
+    "rect": {
+      "x": 1044,
+      "y": 245.89,
+      "width": 209,
+      "height": 431.36,
+      "right": 1253,
+      "bottom": 677.25
+    },
+    "className": "shell-approval-card is-high-risk is-running",
+    "scrollWidth": 207,
+    "clientWidth": 207,
+    "title": "需要审批:删除内容",
+    "risk": "高 风险",
+    "warning": "",
+    "state": "is-running",
+    "outcome": null,
+    "processing": "处理中…"
+  },
+  "facts": [
+    {
+      "label": "操作",
+      "value": "delete_note",
+      "rect": {
+        "x": 1055,
+        "y": 296.34,
+        "width": 187,
+        "height": 13.64,
+        "right": 1242,
+        "bottom": 309.98
+      },
+      "valueRect": {
+        "x": 1127,
+        "y": 296.34,
+        "width": 115,
+        "height": 13.64,
+        "right": 1242,
+        "bottom": 309.98
+      },
+      "valueOverflow": false,
+      "valueWrapped": false
+    },
+    {
+      "label": "目标",
+      "value": "Projects/季度计划.md",
+      "rect": {
+        "x": 1055,
+        "y": 312.98,
+        "width": 187,
+        "height": 13.64,
+        "right": 1242,
+        "bottom": 326.63
+      },
+      "valueRect": {
+        "x": 1127,
+        "y": 312.98,
+        "width": 115,
+        "height": 13.64,
+        "right": 1242,
+        "bottom": 326.63
+      },
+      "valueOverflow": false,
+      "valueWrapped": false
+    }
+  ],
+  "buttons": [
+    {
+      "label": "拒绝",
+      "ariaLabel": "拒绝",
+      "title": "拒绝",
+      "className": "shell-approval-btn shell-approval-cancel",
+      "disabled": true,
+      "rect": {
+        "x": 1055,
+        "y": 594.25,
+        "width": 187,
+        "height": 32,
+        "right": 1242,
+        "bottom": 626.25
+      },
+      "visible": true
+    },
+    {
+      "label": "批准本次删除",
+      "ariaLabel": "批准本次删除",
+      "title": "批准本次删除",
+      "className": "shell-approval-btn shell-approval-confirm is-danger",
+      "disabled": true,
+      "rect": {
+        "x": 1055,
+        "y": 634.25,
+        "width": 187,
+        "height": 32,
+        "right": 1242,
+        "bottom": 666.25
+      },
+      "visible": true
+    }
+  ],
+  "actionOverlaps": [],
+  "checks": {
+    "cardVisible": true,
+    "noCardHorizontalOverflow": true,
+    "noViewHorizontalOverflow": true,
+    "noDocumentHorizontalOverflow": true,
+    "buttonsInsideCard": true,
+    "noButtonOverlap": true,
+    "visibleTextActions": true,
+    "hasHighRiskWarning": false,
+    "factsReadable": true,
+    "cardFitsViewport": true
+  },
+  "verdict": {
+    "allPass": false
+  },
+  "capture": {
+    "clip": {
+      "x": 992,
+      "y": 82,
+      "width": 276,
+      "height": 886
+    },
+    "png": {
+      "width": 276,
+      "height": 886
+    },
+    "bytes": 40947
+  },
+  "limitations": [
+    "Colour, contrast, font rendering and animation are not asserted.",
+    "The approval scenario is injected into the real view projection; the card itself is the production renderer.",
+    "The screenshot is clipped to the Baizer workbench view; Obsidian chrome outside it is not part of the evidence."
+  ],
+  "harnessInfo": {
+    "exe": "C:\\Program Files\\Obsidian\\Obsidian.exe",
+    "pluginDir": "\\\\wsl$\\Ubuntu\\home\\yinfei\\.dsh\\state\\superagent\\work\\approval-card-state-f2cba00d2915\\dist",
+    "vaultDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
+    "vaultKey": "f230a63f4db30aad",
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.5.0",
+      "minAppVersion": "1.7.2",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    },
+    "copiedPluginFiles": [
+      {
+        "file": "main.js",
+        "bytes": 2778664
+      },
+      {
+        "file": "manifest.json",
+        "bytes": 324
+      },
+      {
+        "file": "styles.css",
+        "bytes": 115716
+      }
+    ],
+    "theme": "dark",
+    "requestedSidebarWidth": 300,
+    "windowHeight": 1000,
+    "phase": "after",
+    "revision": "8fcadc4",
+    "label": "after-running-narrow",
+    "state": "running",
+    "pid": 248796,
+    "browser": "Chrome/128.0.6613.186",
+    "target": {
+      "id": "BADD28CAE0E2372B02717886BDC60521",
+      "url": "app://obsidian.md/index.html"
+    },
+    "plugin": {
+      "enabled": {
+        "steps": [
+          "plugins.loadManifests()"
+        ],
+        "error": null,
+        "loaded": true,
+        "restrictedMode": false
+      },
+      "loaded": true,
+      "version": "1.5.0"
+    },
+    "viewportOverride": {
+      "applied": true
+    },
+    "sidebar": {
+      "via": "rightSplit.setSize",
+      "splitWidth": 300,
+      "viewWidth": 276,
+      "windowWidth": 1280
+    },
+    "injection": {
+      "ok": true,
+      "messages": 2,
+      "viewWidth": 276,
+      "requestedWidth": 300
+    },
+    "metrics": {
+      "viewport": {
+        "windowInnerWidth": 1280,
+        "windowInnerHeight": 1000,
+        "viewRect": {
+          "x": 992,
+          "y": 82,
+          "width": 276,
+          "height": 886,
+          "right": 1268,
+          "bottom": 968
+        },
+        "documentScroll": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      "card": {
+        "found": true,
+        "rect": {
+          "x": 1044,
+          "y": 245.89,
+          "width": 209,
+          "height": 431.36,
+          "right": 1253,
+          "bottom": 677.25
+        },
+        "className": "shell-approval-card is-high-risk is-running",
+        "scrollWidth": 207,
+        "clientWidth": 207,
+        "title": "需要审批:删除内容",
+        "risk": "高 风险",
+        "warning": "",
+        "state": "is-running",
+        "outcome": null,
+        "processing": "处理中…"
+      },
+      "facts": [
+        {
+          "label": "操作",
+          "value": "delete_note",
+          "rect": {
+            "x": 1055,
+            "y": 296.34,
+            "width": 187,
+            "height": 13.64,
+            "right": 1242,
+            "bottom": 309.98
+          },
+          "valueRect": {
+            "x": 1127,
+            "y": 296.34,
+            "width": 115,
+            "height": 13.64,
+            "right": 1242,
+            "bottom": 309.98
+          },
+          "valueOverflow": false,
+          "valueWrapped": false
+        },
+        {
+          "label": "目标",
+          "value": "Projects/季度计划.md",
+          "rect": {
+            "x": 1055,
+            "y": 312.98,
+            "width": 187,
+            "height": 13.64,
+            "right": 1242,
+            "bottom": 326.63
+          },
+          "valueRect": {
+            "x": 1127,
+            "y": 312.98,
+            "width": 115,
+            "height": 13.64,
+            "right": 1242,
+            "bottom": 326.63
+          },
+          "valueOverflow": false,
+          "valueWrapped": false
+        }
+      ],
+      "buttons": [
+        {
+          "label": "拒绝",
+          "ariaLabel": "拒绝",
+          "title": "拒绝",
+          "className": "shell-approval-btn shell-approval-cancel",
+          "disabled": true,
+          "rect": {
+            "x": 1055,
+            "y": 594.25,
+            "width": 187,
+            "height": 32,
+            "right": 1242,
+            "bottom": 626.25
+          },
+          "visible": true
+        },
+        {
+          "label": "批准本次删除",
+          "ariaLabel": "批准本次删除",
+          "title": "批准本次删除",
+          "className": "shell-approval-btn shell-approval-confirm is-danger",
+          "disabled": true,
+          "rect": {
+            "x": 1055,
+            "y": 634.25,
+            "width": 187,
+            "height": 32,
+            "right": 1242,
+            "bottom": 666.25
+          },
+          "visible": true
+        }
+      ],
+      "actionOverlaps": [],
+      "checks": {
+        "cardVisible": true,
+        "noCardHorizontalOverflow": true,
+        "noViewHorizontalOverflow": true,
+        "noDocumentHorizontalOverflow": true,
+        "buttonsInsideCard": true,
+        "noButtonOverlap": true,
+        "visibleTextActions": true,
+        "hasHighRiskWarning": false,
+        "factsReadable": true,
+        "cardFitsViewport": true
+      },
+      "verdict": {
+        "allPass": false
+      },
+      "limitations": [
+        "Colour, contrast, font rendering and animation are not asserted.",
+        "The approval scenario is injected into the real view projection; the card itself is the production renderer.",
+        "The screenshot is clipped to the Baizer workbench view; Obsidian chrome outside it is not part of the evidence."
+      ]
+    },
+    "capture": {
+      "clip": {
+        "x": 992,
+        "y": 82,
+        "width": 276,
+        "height": 886
+      },
+      "png": {
+        "width": 276,
+        "height": 886
+      },
+      "bytes": 40947
+    }
+  }
+}

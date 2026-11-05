@@ -12,7 +12,6 @@ interface StreamControllerDeps {
   // outcome 是本轮唯一终态来源(completed / cancelled),failed 走 onError。
   onDone: (finalText?: string, outcome?: ChatTurnOutcome) => void;
   onError: (message: string) => void;
-  onScrollRequest?: () => void;
 }
 
 export class StreamController {
@@ -46,7 +45,5 @@ export class StreamController {
         this.deps.onError(event.message);
         break;
     }
-
-    this.deps.onScrollRequest?.();
   }
 }
