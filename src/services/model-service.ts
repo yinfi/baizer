@@ -28,8 +28,9 @@ import {
     GenerationStrategyService,
 } from './generation-strategy-service';
 import { ObsidianContextSnapshot } from './obsidian-context-service';
-import { OperationAuditLog } from './operation-audit-log';
+import { ApprovalRequestState, OperationAuditLog, OperationOutcome } from './operation-audit-log';
 import { ApprovalExecutionOutcome, ApprovalExecutionRegistry } from './approval-execution';
+import { t } from '../i18n/zh';
 import { WorkspaceEditService } from './workspace-edit-service';
 
 /**
@@ -885,42 +886,141 @@ export class ModelService {
 
     /**
      * 核实一次「结果未知」的审批，不执行任何写入。
-     * 登记表里有结果就直接用；否则查审计记录判断是否执行过。
+     *
+     * 顺序：登记表里的成功结果是终态，直接复用；其余情况一律查持久化状态。
+     * 登记表里的 `unknown` 只说明「上次尝试没有落终态」，本身不提供任何新信息——
+     * 必须先核实，才能决定它是「确实执行过」还是「可以安全重试」（#76 P1）。
+     * 核实确认「没有成功落盘」后解锁登记表，用户点重试才会真正再执行一次。
      */
     async reconcileApprovedAction(
         requestId: string,
         action: string,
         args: Record<string, any>,
         conversationId?: string,
+        options: { requestedAt?: number } = {},
     ): Promise<ApprovalExecutionOutcome> {
-        const record = this.approvalExecutionRegistry.peek(requestId);
-        if (record?.state === 'running') {
-            return record.promise as Promise<ApprovalExecutionOutcome>;
-        }
-        if (record?.state === 'done' && record.outcome) {
-            return record.outcome;
-        }
-
-        const records = await this.operationAuditLog.list();
-        if (records.some(record => record.id === requestId)) {
-            return {
-                kind: 'approval-execution',
-                status: 'unknown',
-                target: getFileWriteResultPath(action, {}, args) || action,
-                detail: 'The action ran but its result was not recorded. Check the target manually.',
-                completedAt: Date.now(),
-                retryable: false,
-            };
+        const inflight = this.approvalExecutionRegistry.peek(requestId);
+        if (inflight?.state === 'running') {
+            const settled = await (inflight.promise as Promise<ApprovalExecutionOutcome>);
+            // 执行期间点了「检查结果」：落定结果足够明确就直接用，不再重复核实。
+            if (settled.status === 'succeeded' || settled.retryable !== false) return settled;
         }
 
-        return {
-            kind: 'approval-execution',
-            status: 'failed',
-            target: getFileWriteResultPath(action, {}, args) || action,
-            detail: 'No execution record was found. Verify the target, then retry.',
-            completedAt: Date.now(),
-            retryable: true,
-        };
+        const cached = this.approvalExecutionRegistry.peek(requestId);
+        if (cached?.state === 'done' && cached.outcome) {
+            if (cached.outcome.status === 'succeeded') return cached.outcome;
+            if (cached.outcome.retryable !== false) return cached.outcome;
+        }
+
+        const verification = await this.verifyApprovalExecution(requestId, options.requestedAt);
+        const target = getFileWriteResultPath(action, {}, args) || action;
+
+        switch (verification) {
+            case 'executed':
+                return {
+                    kind: 'approval-execution',
+                    status: 'unknown',
+                    target,
+                    detail: t('The action ran but its result was not recorded. Check the target manually.'),
+                    completedAt: Date.now(),
+                    retryable: false,
+                };
+            case 'attempting':
+                return {
+                    kind: 'approval-execution',
+                    status: 'unknown',
+                    target,
+                    detail: t('The action started but never reported a result. Check the target before retrying.'),
+                    completedAt: Date.now(),
+                    retryable: false,
+                };
+            case 'expired':
+                return {
+                    kind: 'approval-execution',
+                    status: 'unknown',
+                    target,
+                    detail: t('The execution record has expired, so the result cannot be verified. Check the target manually.'),
+                    completedAt: Date.now(),
+                    retryable: false,
+                };
+            case 'unverified':
+                return {
+                    kind: 'approval-execution',
+                    status: 'unknown',
+                    target,
+                    detail: t('Could not verify the result. Check the target manually.'),
+                    completedAt: Date.now(),
+                    retryable: false,
+                };
+            default:
+                // 明确失败过，或从未执行：「结果未知」可以解除，重试才是安全的。
+                this.approvalExecutionRegistry.unlock(requestId);
+                return {
+                    kind: 'approval-execution',
+                    status: 'failed',
+                    target,
+                    detail: t('No successful execution record was found. Verify the target, then retry.'),
+                    completedAt: Date.now(),
+                    retryable: true,
+                };
+        }
+    }
+
+    /**
+     * 读持久化的请求执行状态，判断「是否真的执行过」。
+     *
+     * - `executed`：成功记录在案 → 不能重放；
+     * - `attempting`：开始执行后没有落终态（进程中断）→ 可能已经写成，不能直接重试；
+     * - `failed`：明确失败过 → 可安全重试；
+     * - `expired`：请求状态已被条数上限淘汰 → 无法确认，不能放行重试；
+     * - `none`：从未执行过；
+     * - `unverified`：审计读不出来 → 同样不放行。
+     */
+    private async verifyApprovalExecution(
+        requestId: string,
+        requestedAt?: number,
+    ): Promise<'executed' | 'attempting' | 'failed' | 'expired' | 'none' | 'unverified'> {
+        try {
+            const request = await this.operationAuditLog.getRequestState(requestId);
+            if (request) {
+                if (request.state === 'succeeded') return 'executed';
+                if (request.state === 'attempting') return 'attempting';
+                return 'failed';
+            }
+
+            // 旧版本文件没有请求状态：退回操作记录判断（旧记录只在成功时写出，故缺省按成功看）。
+            const related = (await this.operationAuditLog.list())
+                .filter(record => record.id === requestId);
+            if (related.some(record => (record.outcome ?? 'succeeded') === 'succeeded')) return 'executed';
+            if (related.some(record => record.outcome === 'attempt-failed')) return 'failed';
+
+            // 请求状态可能已被条数上限淘汰：无法确认「没执行过」时不能放行重试。
+            const prunedBefore = await this.operationAuditLog.getPrunedRequestBefore();
+            if (prunedBefore > 0 && (requestedAt === undefined || requestedAt < prunedBefore)) {
+                return 'expired';
+            }
+            return 'none';
+        } catch (error) {
+            logger.warn(
+                `Failed to verify the approval execution state for ${requestId}`,
+                'ModelService.verifyApprovalExecution',
+                error,
+            );
+            return 'unverified';
+        }
+    }
+
+    private async readApprovalRequestState(requestId: string): Promise<ApprovalRequestState | undefined> {
+        try {
+            return (await this.operationAuditLog.getRequestState(requestId))?.state;
+        } catch (error) {
+            logger.warn(
+                `Failed to read the approval request state for ${requestId}`,
+                'ModelService.readApprovalRequestState',
+                error,
+            );
+            return undefined;
+        }
     }
 
     private async performApprovedAction(
@@ -931,6 +1031,24 @@ export class ModelService {
     ): Promise<ApprovalExecutionOutcome> {
         const target = getFileWriteResultPath(action, {}, args)
             || args?.path || args?.filename || args?.oldPath || action;
+
+        if (requestId) {
+            // 登记表按上限淘汰后，同一请求可能再进来一次：持久化状态里的「已成功」是最后一道闸。
+            const prior = await this.readApprovalRequestState(requestId);
+            if (prior === 'succeeded') {
+                return {
+                    kind: 'approval-execution',
+                    status: 'unknown',
+                    target,
+                    detail: t('This action already completed, so it was not run again. Check the target to review the result.'),
+                    completedAt: Date.now(),
+                    retryable: false,
+                };
+            }
+            // 执行前先留「开始执行」的凭据：进程被杀时，这是唯一能说明「可能已经写成」的证据。
+            await this.beginApprovalRequest(requestId, action, target);
+        }
+
         let result: any;
         try {
             result = await this.toolRegistry.execute(action, {
@@ -938,49 +1056,135 @@ export class ModelService {
                 approved: true,
             });
         } catch (error: any) {
-            // 工具抛错时无法判断副作用是否发生：返回 unknown，UI 会要求先核实。
+            // 工具抛错时无法判断副作用是否发生：留一条失败尝试记录，返回 unknown 要求先核实。
+            await this.recordApprovedActionAudit({
+                id: requestId,
+                action,
+                target,
+                outcome: 'attempt-failed',
+            });
             return {
                 kind: 'approval-execution',
                 status: 'unknown',
                 target,
                 error: error?.message || String(error),
-                detail: 'The action was interrupted before its result was recorded. Check the target before retrying.',
+                detail: t('The action was interrupted before its result was recorded. Check the target before retrying.'),
                 completedAt: Date.now(),
                 retryable: false,
             };
         }
 
         const resolvedTarget = getFileWriteResultPath(action, result, args) || target;
-        await this.recordOperationAudit({
+        const succeeded = result?.success === true || result?.status === 'success';
+
+        // 审计写盘失败不能让「已经写成功」的动作看起来失败（#76 P2-A）。
+        const auditRecorded = await this.recordApprovedActionAudit({
             id: requestId,
             action,
             target: resolvedTarget,
-            approvalSource: 'user-click',
-            undoable: this.isUndoableApprovedAction(action),
+            outcome: succeeded ? 'succeeded' : 'attempt-failed',
         });
+
         // 把真实执行结果回灌进该会话的 pi session,使下一轮模型看到「用户批准了、动作已执行」
         // 而非停留在审批占位上失忆。session 是跨轮上下文唯一真相源(UI 历史不回灌)。
         // 失败静默——回灌是增强,不能让已成功执行的动作看起来失败。
-        if (this.sessionManager) {
-            await this.sessionManager.appendApprovalOutcome(
-                conversationId,
-                this.buildApprovalOutcomeText(action, args, result),
+        try {
+            if (this.sessionManager) {
+                await this.sessionManager.appendApprovalOutcome(
+                    conversationId,
+                    this.buildApprovalOutcomeText(action, args, result),
+                );
+            }
+        } catch (error) {
+            logger.warn(
+                `Failed to append the approval outcome for "${action}" to the session`,
+                'ModelService.performApprovedAction',
+                error,
             );
         }
 
-        const succeeded = result?.success === true || result?.status === 'success';
         return {
             kind: 'approval-execution',
             status: succeeded ? 'succeeded' : 'failed',
             target: resolvedTarget,
-            detail: succeeded
-                ? (typeof result?.message === 'string' ? result.message : 'The action completed successfully.')
-                : (typeof result?.message === 'string' ? result.message : 'The action failed.'),
-            error: succeeded ? undefined : (result?.error || result?.message || 'The action failed.'),
+            detail: this.buildExecutionDetail(result, succeeded, auditRecorded),
+            error: succeeded ? undefined : (result?.error || result?.message || t('The action failed.')),
             completedAt: Date.now(),
             retryable: !succeeded,
-            result,
+            result: this.summarizeExecutionResult(result),
         };
+    }
+
+    /**
+     * 结果摘要。detail 只放「成功/失败」的主文案，具体错误走 error；
+     * 审计一旦没写成，主文案后追加可见提示，避免用户以为审计链正常（#76 P2-A）。
+     */
+    private buildExecutionDetail(result: any, succeeded: boolean, auditRecorded: boolean): string {
+        const base = succeeded
+            ? (typeof result?.message === 'string' ? result.message : t('The action completed successfully.'))
+            : t('The action failed.');
+        return auditRecorded ? base : `${base} ${t('The audit log entry was not written.')}`;
+    }
+
+    /**
+     * 只保留宿主打开落盘文件所需的字段，不把整个工具返回留在登记表里（#76 P3）。
+     */
+    private summarizeExecutionResult(result: any): unknown {
+        if (!result || typeof result !== 'object') return undefined;
+        const summary: Record<string, unknown> = {};
+        for (const key of ['success', 'status', 'path', 'target'] as const) {
+            if (result[key] !== undefined) summary[key] = result[key];
+        }
+        return summary;
+    }
+
+    private async beginApprovalRequest(requestId: string, action: string, target: string): Promise<void> {
+        try {
+            await this.operationAuditLog.beginRequest({ id: requestId, action, target });
+        } catch (error) {
+            // 登记失败只是少了「可能执行过」的证据，不阻断用户已批准的动作。
+            logger.warn(
+                `Failed to record the start of approval "${requestId}"`,
+                'ModelService.beginApprovalRequest',
+                error,
+            );
+        }
+    }
+
+    /**
+     * 写一条审批执行记录（同时更新请求状态），失败只 warn 并返回 false。
+     * 写盘动作本身已经发生，审计失败绝不能把它降级成 unknown/失败。
+     */
+    private async recordApprovedActionAudit(input: {
+        id?: string;
+        action: string;
+        target: string;
+        outcome: OperationOutcome;
+    }): Promise<boolean> {
+        try {
+            const entry = {
+                action: input.action,
+                target: input.target,
+                provider: this.settings?.activeProvider,
+                model: this.getActiveProviderConfig()?.model,
+                approvalSource: 'user-click' as const,
+                undoable: this.isUndoableApprovedAction(input.action),
+                outcome: input.outcome,
+            };
+            if (input.id) {
+                await this.operationAuditLog.finishRequest({ ...entry, id: input.id });
+            } else {
+                await this.operationAuditLog.record(entry);
+            }
+            return true;
+        } catch (error) {
+            logger.warn(
+                `Failed to write the operation audit for "${input.action}"`,
+                'ModelService.recordApprovedActionAudit',
+                error,
+            );
+            return false;
+        }
     }
 
     /**
@@ -1158,7 +1362,14 @@ export class ModelService {
         previousContent?: string;
         undoable: boolean;
     }): Promise<void> {
-        if (!input.target) return;
+        if (!input.target) {
+            // 目标为空时跳过审计，但必须留下可见痕迹：静默跳过等于审计链无声断裂。
+            logger.warn(
+                `Skipped the operation audit for "${input.action}": no target was resolved`,
+                'ModelService.recordOperationAudit',
+            );
+            return;
+        }
 
         const config = this.getActiveProviderConfig();
         await this.operationAuditLog.record({

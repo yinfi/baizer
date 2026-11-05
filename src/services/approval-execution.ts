@@ -10,6 +10,8 @@
  * 本模块不依赖 Obsidian，也不依赖 UI，方便单测。
  */
 
+import { t } from '../i18n/zh';
+
 /** 审批卡在 UI 上的状态。请求本身由 `ApprovalRequest.id` 标识。 */
 export type ApprovalStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'rejected' | 'unknown';
 
@@ -47,7 +49,10 @@ export interface ApprovalExecutionOutcome {
   completedAt: number;
   /** false 表示「已执行/结果未知」，不允许直接重试。 */
   retryable?: boolean;
-  /** 原始工具结果，供宿主打开落盘文件等既有行为使用。 */
+  /**
+   * 原始工具结果的可展示投影，仅供宿主打开落盘文件等既有行为使用。
+   * 只保留 success/status/path/target 等几个字段，不保存整个工具返回（见 #76 P3）。
+   */
   result?: unknown;
 }
 
@@ -60,7 +65,24 @@ interface ApprovalExecutionRecord {
   state: 'running' | 'done';
   promise?: Promise<ApprovalExecutionOutcome>;
   outcome?: ApprovalExecutionOutcome;
+  /**
+   * 核实放行标记：只有 `reconcile` 核实「上次尝试没有成功落盘」后才置位，
+   * 让 `run(..., { retry: true })` 能绕过 `retryable === false` 的缓存。
+   * 成功后记录被新结果替换，标记自然消失，因此只放行一次。
+   */
+  retryVerified?: boolean;
 }
+
+export interface ApprovalExecutionRegistryOptions {
+  /**
+   * 已结束记录条数上限，防止长会话只增不减（#76 P3）。
+   * 只淘汰最早的成功记录：成功是终态、且审批状态已随会话快照持久化；
+   * `unknown`/`failed` 仍要留给核实与重试，不淘汰。
+   */
+  maxRecords?: number;
+}
+
+const DEFAULT_MAX_RECORDS = 100;
 
 /**
  * 进程内执行登记表。
@@ -72,9 +94,25 @@ interface ApprovalExecutionRecord {
  */
 export class ApprovalExecutionRegistry {
   private readonly records = new Map<string, ApprovalExecutionRecord>();
+  private readonly maxRecords: number;
+
+  constructor(options: ApprovalExecutionRegistryOptions = {}) {
+    this.maxRecords = Math.max(1, options.maxRecords ?? DEFAULT_MAX_RECORDS);
+  }
 
   peek(requestId: string): ApprovalExecutionRecord | undefined {
     return this.records.get(requestId);
+  }
+
+  /**
+   * 核实路径专用：放行一次「结果未知」的显式重试。
+   *
+   * 只能由核实流程（`ModelService.reconcileApprovedAction` 确认上次尝试没有成功落盘）
+   * 调用；UI 的重试按钮自己不能解锁，否则重试就成了盲写。
+   */
+  unlock(requestId: string): void {
+    const record = this.records.get(requestId);
+    if (record?.state === 'done') record.retryVerified = true;
   }
 
   async run(
@@ -85,23 +123,19 @@ export class ApprovalExecutionRegistry {
     const existing = this.records.get(requestId);
     if (existing?.state === 'running') return existing.promise as Promise<ApprovalExecutionOutcome>;
 
-    // 已成功的结果是终态：即使调用方传了 retry，也不能再执行一次。
-    if (existing?.state === 'done' && existing.outcome?.status === 'succeeded') {
-      return existing.outcome;
-    }
-    // 失败/未知默认复用记录；只有显式 retry 才重新执行。
-    if (existing?.state === 'done' && !options.retry) {
-      return existing.outcome as ApprovalExecutionOutcome;
-    }
-    // 「未知」不能重放（副作用可能已经发生）；调用方必须先核实。
-    if (existing?.state === 'done' && existing.outcome?.retryable === false) {
-      return existing.outcome;
+    if (existing?.state === 'done' && existing.outcome) {
+      // 已成功的结果是终态：即使调用方传了 retry，也不能再执行一次。
+      if (existing.outcome.status === 'succeeded') return existing.outcome;
+      // 失败/未知默认复用记录；只有显式 retry 才重新执行。
+      if (!options.retry) return existing.outcome;
+      // 「未知」不能重放（副作用可能已经发生）；核实流程解锁后才放行这一次。
+      if (existing.outcome.retryable === false && !existing.retryVerified) return existing.outcome;
     }
 
     const promise = (async () => {
       try {
         const outcome = await execute();
-        this.records.set(requestId, { state: 'done', outcome });
+        this.store(requestId, { state: 'done', outcome });
         return outcome;
       } catch (error) {
         // 工具抛错时无法判断副作用是否已经发生：登记为 unknown，要求先核实再重试。
@@ -110,16 +144,37 @@ export class ApprovalExecutionRegistry {
           kind: 'approval-execution',
           status: 'unknown',
           error: message,
-          detail: 'The action was interrupted before its result was recorded. Check the target before retrying.',
+          detail: t('The action was interrupted before its result was recorded. Check the target before retrying.'),
           completedAt: Date.now(),
           retryable: false,
         };
-        this.records.set(requestId, { state: 'done', outcome });
+        this.store(requestId, { state: 'done', outcome });
         return outcome;
       }
     })();
 
     this.records.set(requestId, { state: 'running', promise });
     return promise;
+  }
+
+  private store(requestId: string, record: ApprovalExecutionRecord) {
+    this.records.set(requestId, record);
+    this.evictFinishedSuccesses();
+  }
+
+  /**
+   * 超过上限时从最早的成功记录开始淘汰。
+   *
+   * Map 保持插入顺序，所以遍历顺序≈登记顺序；`running` 与不可重放的未知/失败记录不淘汰，
+   * 它们数量有限（每次审批最多一条）且仍参与核实/重试。
+   */
+  private evictFinishedSuccesses() {
+    if (this.records.size <= this.maxRecords) return;
+    for (const [requestId, record] of this.records) {
+      if (this.records.size <= this.maxRecords) return;
+      if (record.state === 'done' && record.outcome?.status === 'succeeded') {
+        this.records.delete(requestId);
+      }
+    }
   }
 }
