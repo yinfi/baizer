@@ -37,7 +37,6 @@ interface MessageRendererOptions {
   onReviewCodeBlock?: (content: string) => void | Promise<void>;
   onUndoWorkspaceEdit?: (editId: string) => void | Promise<void>;
   onInternalLinkClick?: (href: string) => void;
-  onScrollRequest?: () => void;
   onRenderError?: (error: unknown) => void;
 }
 
@@ -97,7 +96,6 @@ export class MessageRenderer {
       this.setText(entry, t('Error rendering message'));
     }
 
-    this.options.onScrollRequest?.();
     return entry;
   }
 

@@ -7,10 +7,13 @@
  * activateSession。
  *
  * 两条不可退让的规则：
- * 1. 是否跟随看「内容增长前」的跟随状态，绝不能在内容变高后重新用新高度判断
- *    「用户原来是否在底部」——那会把读者上翻后仍算作跟随，直接拉回底部。
- * 2. 延迟滚动必须绑定发起时的会话身份。tab 切换后，旧会话遗留的回调只能丢弃，
+ * 1. 是否跟随看「内容增长前」的快照（近底 + 跟随），绝不能在内容变高后重新用新高度
+ *    判断「用户原来是否在底部」——那会把读者上翻后仍算作跟随，直接拉回底部。
+ * 2. 延迟滚动必须绑定发起时的会话身份与渲染代次。tab 切换或新一轮渲染后，旧回调只能丢弃，
  *    不能滚动新会话的视口。
+ *
+ * 恢复阶段（activateSession 到恢复定时器执行之间）收到的 scroll 一律当成布局产物：
+ * 只忽略，不改跟随/未读/阅读位置；只有真实输入（handleUserScrollIntent*）才取消恢复。
  */
 
 /** 距底小于该值视为「接近底部」，允许恢复自动跟随。 */
@@ -21,6 +24,9 @@ const FOLLOW_SCROLL_DELAY_MS = 0;
 
 /** 切换/重建会话后恢复阅读位置的延迟：等异步 Markdown 渲染把高度补上。 */
 const RESTORE_POSITION_DELAY_MS = 50;
+
+/** 恢复落位被 clamp 时最多顺延重试的次数（高度可能还在异步长出来）。 */
+const RESTORE_RETRY_LIMIT = 2;
 
 export interface ScrollMetrics {
     scrollTop: number;
@@ -33,6 +39,8 @@ export interface ScrollContainer extends ScrollMetrics {
     scrollTo?: (options?: ScrollToOptions) => void;
 }
 
+export type RestorePhase = 'idle' | 'restoring';
+
 export interface ScrollSessionState {
     /** 自动跟随新输出。用户主动上翻立即置 false，点「回到最新」或滚回近底恢复。 */
     following: boolean;
@@ -43,13 +51,26 @@ export interface ScrollSessionState {
     initialized: boolean;
     /** 本次激活后用户已主动上翻：待执行的「恢复位置」不能再把读者拉回去。 */
     restoreBlocked: boolean;
-    /** 激活后的位置恢复仍在队列里；期间任何外部滚动都视为用户意图。 */
-    restorePending: boolean;
+    /**
+     * 激活后的位置恢复阶段。'restoring' 期间出现的 scroll 只可能是布局、切 tab 或
+     * scrollTop clamp 的产物，不是用户意图：既不能取消恢复，也不能改写跟随/未读。
+     */
+    restorePhase: RestorePhase;
+    /** 待恢复的目标；被真实输入取消后仍保留，普通点击未移动视口时可重放。 */
+    restoreTarget: number | 'bottom' | null;
+    /** 真实输入取消恢复时的 scrollTop；pointerup/touchend 未移动视口时据此重放。 */
+    restoreIntentTop: number | null;
 }
 
-/** 内容增长前捕获的会话身份。增长后回调必须带上它，过期即丢弃。 */
+/** 内容增长前捕获的状态快照。增长后回调必须带上它，过期即丢弃。 */
 export interface GrowthToken {
     sessionId: string;
+    /** 增长前是否已在近底区：决定这次增长后要不要贴底。 */
+    nearBottom: boolean;
+    /** 增长前是否处于自动跟随。 */
+    following: boolean;
+    /** 宿主渲染代次：异步渲染完成时若代次已变，token 已过期。 */
+    renderGeneration: number;
 }
 
 export type SessionActivationMode = 'new' | 'restore';
@@ -58,6 +79,8 @@ export interface ScrollFollowControllerOptions {
     getContainer: () => ScrollContainer | null;
     /** 未读状态变化通知；宿主只在 id 仍是活动会话时更新入口 UI。 */
     onUnreadChange?: (sessionId: string, unread: boolean) => void;
+    /** 宿主的流式渲染代次；异步回调据此判断自己是否已过期。 */
+    getRenderGeneration?: () => number;
     schedule?: (callback: () => void, delayMs: number) => unknown;
     cancel?: (handle: unknown) => void;
     /** 恢复位置的延迟，默认 50ms；测试可设 0。 */
@@ -82,7 +105,9 @@ export function createScrollSessionState(): ScrollSessionState {
         scrollTop: 0,
         initialized: false,
         restoreBlocked: false,
-        restorePending: false,
+        restorePhase: 'idle',
+        restoreTarget: null,
+        restoreIntentTop: null,
     };
 }
 
@@ -94,6 +119,7 @@ export class ScrollFollowController {
 
     private readonly getContainer: () => ScrollContainer | null;
     private readonly onUnreadChange?: (sessionId: string, unread: boolean) => void;
+    private readonly getRenderGeneration?: () => number;
     private readonly schedule: (callback: () => void, delayMs: number) => unknown;
     private readonly cancel: (handle: unknown) => void;
     private readonly restoreDelayMs: number;
@@ -101,6 +127,7 @@ export class ScrollFollowController {
     constructor(options: ScrollFollowControllerOptions) {
         this.getContainer = options.getContainer;
         this.onUnreadChange = options.onUnreadChange;
+        this.getRenderGeneration = options.getRenderGeneration;
         this.schedule = options.schedule
             ?? ((callback, delayMs) => (typeof window !== 'undefined'
                 ? window.setTimeout(callback, delayMs)
@@ -130,42 +157,78 @@ export class ScrollFollowController {
     }
 
     /**
-     * 内容增长前调用。返回的 token 只携带会话身份：增长后的滚动由当时的跟随状态决定，
-     * 不重新测量距底距离。
+     * 内容增长前调用。token 快照「增长前」的会话身份、是否近底、是否跟随与渲染代次：
+     * 增长本身会改变距底距离，增长后再用新高度回判会把上翻的读者误拉回底部。
      */
     captureGrowth(): GrowthToken | null {
         if (this.disposed || !this.activeSessionId) return null;
-        return { sessionId: this.activeSessionId };
+        const state = this.sessions.get(this.activeSessionId);
+        const metrics = this.readMetrics();
+        return {
+            sessionId: this.activeSessionId,
+            nearBottom: metrics ? isNearBottom(metrics) : false,
+            following: state?.following ?? true,
+            renderGeneration: this.renderGeneration(),
+        };
     }
 
     /**
      * 内容增长后调用。
-     * - 跟随中：安排滚到底。
-     * - 已暂停：不回滚；只有 markUnread 的新输出才点亮返回入口。
-     * 过期会话（切换 tab 后旧回调）直接丢弃。
+     * - 增长前近底且跟随、此刻仍跟随：安排滚到底。
+     * - 否则不回滚；markUnread 的新输出点亮返回入口。
+     * 过期会话/过期渲染代次（切换 tab 或新一轮渲染后的旧回调）直接丢弃。
      */
     afterGrowth(token: GrowthToken | null, options: { markUnread?: boolean } = {}): void {
         if (!token || this.disposed) return;
         if (token.sessionId !== this.activeSessionId) return;
+        if (token.renderGeneration !== this.renderGeneration()) return;
         const state = this.sessions.get(token.sessionId);
         if (!state) return;
 
-        if (state.following) {
+        if (token.following && token.nearBottom && state.following) {
             this.scheduleFollowScroll(token.sessionId);
             return;
         }
-        if (options.markUnread) this.setUnread(token.sessionId, true);
+        if (!options.markUnread) return;
+        // 增长前已离开近底区却仍挂着 following：布局变化（图片延迟加载、块折展）
+        // 把读者带离了底部，这里如实暂停跟随，让下一次输出也不会再贴底。
+        if (state.following && !token.nearBottom) state.following = false;
+        if (!state.following) this.setUnread(token.sessionId, true);
     }
 
     /**
-     * 活动会话若仍在跟随，安排一次滚到底。用于消息渲染完成等「内容可能已增长」的时机；
-     * 暂停时什么都不做，绝不把读者拉回底部。
+     * 真实输入（可滚动区域的 wheel / touchstart / keydown / pointerdown）到达。
+     * 若位置恢复尚未执行，取消它；恢复阶段本身的布局 scroll 不走这里。
      */
-    followActiveIfEnabled(): void {
-        if (this.disposed || !this.activeSessionId) return;
-        const state = this.sessions.get(this.activeSessionId);
-        if (!state?.following) return;
-        this.scheduleFollowScroll(this.activeSessionId);
+    handleUserScrollIntent(): void {
+        if (this.disposed) return;
+        const state = this.activeState();
+        if (!state || state.restorePhase !== 'restoring') return;
+        state.restoreBlocked = true;
+        state.restorePhase = 'idle';
+        const metrics = this.readMetrics();
+        state.restoreIntentTop = metrics ? metrics.scrollTop : null;
+        this.cancelTimer(this.activeSessionId as string);
+    }
+
+    /**
+     * 真实输入结束（pointerup / touchend）。若这次交互没有移动视口（普通点击、选文本、
+     * 点链接），把被取消的恢复重新排队，避免读者停在被 clamp 的默认位置。
+     */
+    handleUserScrollIntentEnd(): void {
+        if (this.disposed) return;
+        const sessionId = this.activeSessionId;
+        if (!sessionId) return;
+        const state = this.sessions.get(sessionId);
+        if (!state || state.restoreIntentTop == null || state.restoreTarget == null) return;
+        const startTop = state.restoreIntentTop;
+        state.restoreIntentTop = null;
+        const metrics = this.readMetrics();
+        if (!metrics) return;
+        if (Math.abs(metrics.scrollTop - startTop) > 0.5) return;
+        state.restoreBlocked = false;
+        state.restorePhase = 'restoring';
+        this.scheduleRestore(sessionId, state.restoreTarget);
     }
 
     /** 用户明确向上滚动（滚轮上推）时立即暂停，不等 scroll 事件追上。 */
@@ -175,10 +238,15 @@ export class ScrollFollowController {
         if (!state) return;
         state.following = false;
         state.restoreBlocked = true;
+        state.restorePhase = 'idle';
+        state.restoreIntentTop = null;
+        this.cancelTimer(this.activeSessionId as string);
     }
 
     /**
      * 滚动事件处理。
+     * - 恢复阶段（激活后到位置落定前）：布局、切 tab、内容变短 clamp 都会产生 scroll，
+     *   不能当成用户意图——只忽略，恢复与跟随/未读保持不变。
      * - 向上移动（scrollTop 变小）说明读者主动上翻：立即暂停跟随。
      * - 回到近底区（<= 80px）：恢复跟随并清除未读。
      * 程序化滚到底只会让 scrollTop 变大，不会被误判为上翻。
@@ -191,9 +259,8 @@ export class ScrollFollowController {
         const metrics = this.readMetrics();
         if (!state || !metrics) return;
 
-        // 位置恢复尚未执行时收到 scroll 事件：只可能是用户在动视口（恢复本身在回调里
-        // 才发生），此时放弃恢复，避免把刚做出的滚动动作拉回去。
-        if (state.restorePending) state.restoreBlocked = true;
+        // 恢复尚未执行：期间的 scroll 只可能是布局产物，不更新保存位置、不改跟随/未读。
+        if (state.restorePhase === 'restoring') return;
 
         // 任何向下的 scrollTop 减少都是读者的上翻意图；程序化贴底只会让 scrollTop 变大。
         const movedUp = metrics.scrollTop < state.scrollTop - 0.5;
@@ -201,7 +268,7 @@ export class ScrollFollowController {
 
         if (movedUp) {
             state.following = false;
-            // 切回会话后 50ms 内的位置恢复不应覆盖用户刚做出的上翻。
+            // 切回会话后位置恢复不应覆盖用户刚做出的上翻。
             state.restoreBlocked = true;
             return;
         }
@@ -219,7 +286,9 @@ export class ScrollFollowController {
         if (!state) return;
 
         state.following = true;
-        state.restorePending = false;
+        state.restorePhase = 'idle';
+        state.restoreTarget = null;
+        state.restoreIntentTop = null;
         this.cancelTimer(this.activeSessionId);
         this.applyScrollTop(this.maxScrollTop());
         this.setUnread(this.activeSessionId, false);
@@ -230,6 +299,7 @@ export class ScrollFollowController {
     /**
      * 切换会话前调用：把当前可见位置记到活动会话上。
      * 跟随中的会话记为底部（切回时继续贴底）；暂停中的会话记为精确 scrollTop（恢复阅读锚点）。
+     * 若该会话的位置恢复还没执行，保留待恢复的锚点，不被过渡布局位置覆盖。
      */
     prepareForSessionSwitch(): void {
         if (this.disposed || !this.activeSessionId) return;
@@ -237,6 +307,7 @@ export class ScrollFollowController {
         const metrics = this.readMetrics();
         if (!state || !metrics) return;
         state.initialized = true;
+        if (state.restorePhase === 'restoring') return;
         state.scrollTop = state.following ? this.maxScrollTop(metrics) : metrics.scrollTop;
     }
 
@@ -253,11 +324,13 @@ export class ScrollFollowController {
         const hadPosition = state.initialized;
         state.initialized = true;
         state.restoreBlocked = false;
-        state.restorePending = true;
+        state.restorePhase = 'restoring';
 
         const target = mode === 'new' || !hadPosition
             ? 'bottom' as const
             : state.following ? 'bottom' as const : state.scrollTop;
+        state.restoreTarget = target;
+        state.restoreIntentTop = null;
 
         if (mode === 'new') {
             state.following = true;
@@ -317,18 +390,41 @@ export class ScrollFollowController {
         this.onUnreadChange?.(sessionId, unread);
     }
 
-    private scheduleRestore(sessionId: string, target: number | 'bottom'): void {
+    private scheduleRestore(sessionId: string, target: number | 'bottom', attempt = 0): void {
+        this.cancelTimer(sessionId);
         this.timers.set(sessionId, this.schedule(() => {
             this.timers.delete(sessionId);
-            if (this.disposed || this.activeSessionId !== sessionId) return;
             const state = this.sessions.get(sessionId);
-            if (!state) return;
-            state.restorePending = false;
+            // 先结束恢复阶段再判活动/阻断，避免该会话残留 'restoring'。
+            if (state) state.restorePhase = 'idle';
+            if (this.disposed || this.activeSessionId !== sessionId || !state) return;
             if (state.restoreBlocked) return;
             this.applyScrollTop(target === 'bottom' ? this.maxScrollTop() : target);
+            if (target === 'bottom') {
+                state.restoreTarget = null;
+                state.restoreIntentTop = null;
+                return;
+            }
+            const metrics = this.readMetrics();
+            // 目标位置比当前 max 更靠下：内容高度还没长够，落位被 clamp。顺延一拍重试。
+            if (metrics && metrics.scrollTop < target - 2 && attempt < RESTORE_RETRY_LIMIT) {
+                state.restorePhase = 'restoring';
+                this.scheduleRestore(sessionId, target, attempt + 1);
+                return;
+            }
+            state.restoreTarget = null;
+            state.restoreIntentTop = null;
         }, this.restoreDelayMs));
     }
 
+    private renderGeneration(): number {
+        return this.getRenderGeneration?.() ?? 0;
+    }
+
+    /**
+     * 同一 tick 内多次内容增长只安排一次贴底：timers 以会话为键，
+     * 已有待执行回调时直接复用，避免逐块渲染把视口反复拉到底。
+     */
     private scheduleFollowScroll(sessionId: string): void {
         if (this.timers.has(sessionId)) return;
         this.timers.set(sessionId, this.schedule(() => {
