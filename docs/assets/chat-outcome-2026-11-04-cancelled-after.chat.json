@@ -1,7 +1,7 @@
 {
   "label": "chat-cancelled-after",
   "phase": "after",
-  "revision": "agent/stream-outcomes-52bd6029d6ee",
+  "revision": "3b188cd",
   "scenario": "cancel",
   "viewport": {
     "requested": {
@@ -15,11 +15,11 @@
   },
   "theme": "dark",
   "plugin": {
-    "dir": "C:\\Users\\Public\\baizer-shots\\after",
+    "dir": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\resolve-pr73-conflicts-6a1d60c67309\\dist",
     "files": [
       {
         "file": "main.js",
-        "bytes": 2771570
+        "bytes": 2813448
       },
       {
         "file": "manifest.json",
@@ -27,7 +27,7 @@
       },
       {
         "file": "styles.css",
-        "bytes": 115833
+        "bytes": 119688
       }
     ],
     "manifest": {
@@ -43,7 +43,7 @@
   },
   "userDataDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-chat-outcome-65\\userdata",
   "vaultDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-chat-outcome-65\\vault",
-  "logPath": "C:\\Users\\Admin\\AppData\\Local\\Temp\\chat-outcome-shot-252284.log",
+  "logPath": "C:\\Users\\Admin\\AppData\\Local\\Temp\\chat-outcome-shot-10548.log",
   "modals": {
     "trust": {
       "present": true,
@@ -63,7 +63,7 @@
       "mode": "cancel",
       "url": "/v1/chat/completions",
       "model": "fake-model",
-      "at": "2026-11-04T10:04:37.085Z"
+      "at": "2026-11-05T00:55:45.873Z"
     }
   ],
   "facts": [
@@ -78,11 +78,11 @@
       "systemMessages": [
         "[System] Kernel initialized."
       ],
-      "answerText": "Here is a slow answer that keeps streaming",
+      "answerText": "Here is a slow answer that keeps streaming until the user stops it.",
       "timelineCollapsed": false,
       "timelineSummary": "Thinking in progress...",
       "aiEntries": 1
     }
   ],
-  "capturedAt": "2026-11-04T10:04:39.589Z"
+  "capturedAt": "2026-11-05T00:55:48.454Z"
 }
