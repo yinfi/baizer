@@ -13,6 +13,7 @@ import {
 import { SkillRegistry } from '../../skill-registry';
 import { PluginSkillGenerator } from './skill-generator';
 import { logger } from '../../../utils/logger';
+import { asString, prop } from '../../../utils/narrow';
 import { t } from '../../../i18n/zh';
 
 const POLL_INTERVAL_MS = 10_000;
@@ -277,8 +278,8 @@ export class PluginWatcher {
       if (await this.app.vault.adapter.exists(filePath)) {
         await adapter.remove(filePath);
       }
-    } catch (e: any) {
-      console.error(`[PluginWatcher] Failed to delete skill file for ${pluginId}:`, e?.message ?? e);
+    } catch (e: unknown) {
+      console.error(`[PluginWatcher] Failed to delete skill file for ${pluginId}:`, prop(e, 'message') ?? e);
       return false;
     }
 
@@ -433,8 +434,8 @@ export class PluginWatcher {
       const info = await this.generator.collectPluginInfo(facts.pluginId);
       const content = await this.generator.generateSkillMd(info);
       await this.generator.writeSkillFile(facts.pluginId, content, 'replace');
-    } catch (e: any) {
-      const reason = String(e?.message ?? e);
+    } catch (e: unknown) {
+      const reason = String(prop(e, 'message') ?? e);
       // 原因不能只进 console：设置页要能回答「哪个插件失败、为什么」，
       // 这条路径与启动扫描一样是生成，失败的留痕口径必须一致。
       this.generationFailures.set(facts.pluginId, reason);
@@ -495,8 +496,8 @@ export class PluginWatcher {
     const path = `.obsidian/plugins/${pluginId}/manifest.json`;
     try {
       const raw = await this.app.vault.adapter.read(path);
-      const manifest = JSON.parse(raw);
-      return manifest.version || '';
+      const manifest = JSON.parse(raw) as unknown;
+      return asString(prop(manifest, 'version')) || '';
     } catch {
       const fallback = this.app.plugins?.manifests?.[pluginId];
       return fallback?.version || '';
@@ -510,8 +511,8 @@ export class PluginWatcher {
     );
     if (marker === null) return '';
     try {
-      const parsed = JSON.parse(marker);
-      return parsed.version || '';
+      const parsed = JSON.parse(marker) as unknown;
+      return asString(prop(parsed, 'version')) || '';
     } catch {
       return '';
     }
@@ -736,13 +737,13 @@ export class PluginWatcher {
       this.generationFailures.delete(pluginId);
       logger.info(`Generated skill for: ${pluginId}`, 'PluginWatcher');
       return true;
-    } catch (e: any) {
+    } catch (e: unknown) {
       this.failedRetries.set(pluginId, retries + 1);
       // 原因不能只进 console：设置页要能回答「哪个插件失败、为什么」。
-      this.generationFailures.set(pluginId, String(e?.message ?? e));
+      this.generationFailures.set(pluginId, String(prop(e, 'message') ?? e));
       console.error(
         `[PluginWatcher] Failed to generate skill for ${pluginId} `
-        + `(attempt ${retries + 1}/${MAX_RETRIES}):`, e.message,
+        + `(attempt ${retries + 1}/${MAX_RETRIES}):`, prop(e, 'message'),
       );
       return false;
     }

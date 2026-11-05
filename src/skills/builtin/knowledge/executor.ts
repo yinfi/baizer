@@ -5,6 +5,7 @@ import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import { QueryKnowledgeExecutor } from '../../../knowledge/query';
 import { FileBackExecutor } from '../../../knowledge/file-back';
+import { asNumber, asString, prop } from '../../../utils/narrow';
 
 /**
  * Knowledge 工具需要 executor 实例（运行时注入）
@@ -58,11 +59,11 @@ export function createKnowledgeTools(
 
 export function createExecutor(registry: ToolRegistry): BuiltinExecutor {
   return {
-    async execute(args: any, ctx: ToolContext) {
+    async execute(args: unknown, ctx: ToolContext) {
       // simple mode: 直接执行 query_knowledge
-      const query = args?.query || args?.name || '';
+      const query = asString(prop(args, 'query')) || asString(prop(args, 'name')) || '';
       if (!query) return { error: 'Missing query parameter' };
-      return registry.execute('query_knowledge', { query, max_results: args?.max_results || 3 });
+      return registry.execute('query_knowledge', { query, max_results: asNumber(prop(args, 'max_results')) || 3 });
     },
   };
 }

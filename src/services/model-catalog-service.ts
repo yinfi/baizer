@@ -3,6 +3,7 @@ import { ModelOption } from '../models/interfaces';
 import { ProviderConfig } from '../mcp/types';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import { logger } from '../utils/logger';
+import { asArray, asString, prop } from '../utils/narrow';
 
 /**
  * model-catalog-service —— provider 元数据服务（非 runtime）。
@@ -48,7 +49,13 @@ export class ModelListingUnsupportedError extends Error {
 /** 判断错误是否为「端点不支持列模型」（而非 key / 网络 / 限流问题）。 */
 export function isModelListingUnsupported(error: unknown): error is ModelListingUnsupportedError {
   return error instanceof ModelListingUnsupportedError
-    || (typeof error === 'object' && error !== null && (error as any).code === 'model-listing-unsupported');
+    || prop(error, 'code') === 'model-listing-unsupported';
+}
+
+/** 解析 /models 响应体并取出 `data` 数组；形状不符时返回空数组。 */
+function parseModelRows(text: string | undefined): unknown[] {
+  const data: unknown = JSON.parse(text || '{}');
+  return asArray(prop(data, 'data')) ?? [];
 }
 
 /**
@@ -268,8 +275,7 @@ async function listOpenAICompatModels(config: ProviderConfig, deps?: ModelCatalo
     throw new Error(`OpenAI models API error: ${response.status}`);
   }
 
-  const data = JSON.parse(response.text || '{}');
-  const rows = Array.isArray(data?.data) ? data.data : [];
+  const rows = parseModelRows(response.text);
 
   const excludedKeywords = [
     'embedding', 'whisper', 'tts', 'transcribe', 'moderation',
@@ -277,7 +283,7 @@ async function listOpenAICompatModels(config: ProviderConfig, deps?: ModelCatalo
   ];
 
   const options = rows
-    .map((row: any) => (typeof row?.id === 'string' ? row.id.trim() : ''))
+    .map((row: unknown) => (asString(prop(row, 'id'))?.trim() ?? ''))
     .filter((id: string) => {
       if (!id) return false;
       const lower = id.toLowerCase();
@@ -323,16 +329,14 @@ async function listAnthropicModels(config: ProviderConfig, deps?: ModelCatalogDe
     throw new Error(`Anthropic models API error: ${response.status}`);
   }
 
-  const data = JSON.parse(response.text || '{}');
-  const rows = Array.isArray(data?.data) ? data.data : [];
+  const rows = parseModelRows(response.text);
 
   const options: ModelOption[] = rows
-    .map((row: any): ModelOption | null => {
-      const value = typeof row?.id === 'string' ? row.id.trim() : '';
+    .map((row: unknown): ModelOption | null => {
+      const value = asString(prop(row, 'id'))?.trim() ?? '';
       if (!value) return null;
-      const displayName = typeof row?.display_name === 'string' && row.display_name.trim().length > 0
-        ? row.display_name.trim()
-        : value;
+      const rawDisplayName = asString(prop(row, 'display_name'))?.trim() ?? '';
+      const displayName = rawDisplayName.length > 0 ? rawDisplayName : value;
       const label = displayName === value ? value : `${displayName} (${value})`;
       return { value, label };
     })

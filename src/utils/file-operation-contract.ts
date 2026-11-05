@@ -1,3 +1,5 @@
+import { asString, prop } from './narrow';
+
 export const FILE_OPERATION_CONTRACT_TEXT =
   'The user is asking you to create, save, update, or otherwise modify a vault file. You must call an appropriate vault write tool such as create_file, create_note, update_file, update_note, append_to_note, save_webpage, rename_note, or delete_note. Do not provide copy-paste instructions, raw file contents, or claims that a file was created unless a write tool actually runs successfully.';
 
@@ -110,15 +112,17 @@ export function isFileWriteToolName(name: string): boolean {
   return (FILE_WRITE_TOOL_NAMES as readonly string[]).includes(name);
 }
 
-export function isSuccessfulWriteToolResult(result: any): boolean {
-  return result?.success === true || result?.status === 'success';
+export function isSuccessfulWriteToolResult(result: unknown): boolean {
+  return prop(result, 'success') === true || prop(result, 'status') === 'success';
 }
 
-export function getFileWriteError(result: any): string {
-  if (typeof result?.error === 'string' && result.error.trim()) return result.error.trim();
-  if (typeof result?.message === 'string' && result.message.trim()) {
-    if (result?.success === false || result?.status === 'error') {
-      return result.message.trim();
+export function getFileWriteError(result: unknown): string {
+  const error = asString(prop(result, 'error'))?.trim();
+  if (error) return error;
+  const message = asString(prop(result, 'message'))?.trim();
+  if (message) {
+    if (prop(result, 'success') === false || prop(result, 'status') === 'error') {
+      return message;
     }
   }
   return '';
@@ -135,13 +139,22 @@ export function buildFileWriteFailureMessage(attemptedWrite: boolean, lastError?
 
 export function getFileWriteResultPath(
   action: string,
-  result: any,
-  args: Record<string, any>,
+  result: unknown,
+  args: Record<string, unknown>,
 ): string {
-  if (typeof result?.path === 'string') return result.path;
-  if (typeof result?.target === 'string') return result.target;
-  if (action === 'create_note' && typeof args.filename === 'string') return args.filename;
-  if (action === 'rename_note' && typeof args.newPath === 'string') return args.newPath;
-  if (typeof args.path === 'string') return args.path;
+  const resultPath = asString(prop(result, 'path'));
+  if (resultPath !== undefined) return resultPath;
+  const resultTarget = asString(prop(result, 'target'));
+  if (resultTarget !== undefined) return resultTarget;
+  if (action === 'create_note') {
+    const filename = asString(args.filename);
+    if (filename !== undefined) return filename;
+  }
+  if (action === 'rename_note') {
+    const newPath = asString(args.newPath);
+    if (newPath !== undefined) return newPath;
+  }
+  const argPath = asString(args.path);
+  if (argPath !== undefined) return argPath;
   return '';
 }
