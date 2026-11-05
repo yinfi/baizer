@@ -1,0 +1,2340 @@
+{
+  "tool": "tools/plugin-review-baseline/report.mjs",
+  "config": "tools/plugin-review-baseline/eslint.review.config.mjs",
+  "targets": [
+    "main.ts",
+    "src"
+  ],
+  "eslintVersion": "9.39.5",
+  "source": {
+    "kind": "captured-json",
+    "path": "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\typed-baseline.json",
+    "sha256": "49e7b303bbf90879c0179d44bf0ddd3dfa30c2a53bdf285f9dab4ee0fda96d73",
+    "describe": "captured ESLint JSON formatter output (`../../../../../../ADMINI~1/AppData/Local/Temp/typed-baseline.json`)"
+  },
+  "totals": {
+    "filesLinted": 127,
+    "filesWithProblems": 88,
+    "errors": 90,
+    "warnings": 2972,
+    "problems": 3062
+  },
+  "rules": [
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "count": 1194,
+      "errors": 0,
+      "warnings": 1194
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "count": 564,
+      "errors": 0,
+      "warnings": 564
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "count": 486,
+      "errors": 0,
+      "warnings": 486
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "count": 396,
+      "errors": 0,
+      "warnings": 396
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "count": 162,
+      "errors": 0,
+      "warnings": 162
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "count": 75,
+      "errors": 0,
+      "warnings": 75
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "count": 63,
+      "errors": 0,
+      "warnings": 63
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "count": 38,
+      "errors": 38,
+      "warnings": 0
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-vars",
+      "count": 18,
+      "errors": 0,
+      "warnings": 18
+    },
+    {
+      "ruleId": "@typescript-eslint/no-misused-promises",
+      "count": 14,
+      "errors": 0,
+      "warnings": 14
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-expressions",
+      "count": 11,
+      "errors": 11,
+      "warnings": 0
+    },
+    {
+      "ruleId": "@typescript-eslint/no-redundant-type-constituents",
+      "count": 10,
+      "errors": 10,
+      "warnings": 0
+    },
+    {
+      "ruleId": "@typescript-eslint/no-floating-promises",
+      "count": 8,
+      "errors": 8,
+      "warnings": 0
+    },
+    {
+      "ruleId": "no-useless-escape",
+      "count": 7,
+      "errors": 7,
+      "warnings": 0
+    },
+    {
+      "ruleId": "@typescript-eslint/ban-ts-comment",
+      "count": 4,
+      "errors": 4,
+      "warnings": 0
+    },
+    {
+      "ruleId": "prefer-const",
+      "count": 4,
+      "errors": 4,
+      "warnings": 0
+    },
+    {
+      "ruleId": "@typescript-eslint/no-base-to-string",
+      "count": 3,
+      "errors": 3,
+      "warnings": 0
+    },
+    {
+      "ruleId": "@typescript-eslint/unbound-method",
+      "count": 2,
+      "errors": 2,
+      "warnings": 0
+    },
+    {
+      "ruleId": "no-case-declarations",
+      "count": 2,
+      "errors": 2,
+      "warnings": 0
+    },
+    {
+      "ruleId": "no-irregular-whitespace",
+      "count": 1,
+      "errors": 1,
+      "warnings": 0
+    }
+  ],
+  "ruleFiles": [
+    {
+      "ruleId": "@typescript-eslint/ban-ts-comment",
+      "file": "src/ui/shell-view.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-base-to-string",
+      "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-base-to-string",
+      "file": "src/utils/request-url-fetch.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-base-to-string",
+      "file": "src/utils/thrown-message.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/chat-controller.ts",
+      "count": 74
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/renderers/message-renderer.ts",
+      "count": 71
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/memory/hindsight-migration.ts",
+      "count": 24
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/services/model-service.ts",
+      "count": 22
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/renderers/thinking-renderer.ts",
+      "count": 17
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/renderers/tool-renderer.ts",
+      "count": 17
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/components/knowledge-status-panel.ts",
+      "count": 16
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/utils/request-url-fetch.ts",
+      "count": 14
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "main.ts",
+      "count": 13
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/services/video-transcription.ts",
+      "count": 13
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/settings.ts",
+      "count": 13
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/builtin/web-clipper/executor.ts",
+      "count": 13
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/shell-view.ts",
+      "count": 13
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/knowledge/ontology.ts",
+      "count": 12
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+      "count": 11
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/utils/logger.ts",
+      "count": 11
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/memory/memory-manager.ts",
+      "count": 10
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/knowledge/metadata-index.ts",
+      "count": 9
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+      "count": 9
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/utils/throttle.ts",
+      "count": 9
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/utils/video_utils.ts",
+      "count": 9
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/knowledge/compiler.ts",
+      "count": 8
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+      "count": 8
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/knowledge/runtime.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/runtime/pi/harness-chat-runtime.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/approval-card.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/runtime/pi/pi-tool-adapter.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/services/workspace-edit-service.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/types.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/selection-menu.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/models/interfaces.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/services/model-catalog-service.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/services/obsidian-context-service.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/builtin/obsidian-bases/executor.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/runtime/base-chat-runtime.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/runtime/pi/pi-event-adapter.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/builtin/json-canvas/executor.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/pi-skill-source.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/components/context-chips.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/tabs/tab-bar.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/utils/file-operation-contract.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/knowledge/ontology-service.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/mcp/types.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/runtime/pi/session-store/compaction.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/builtin/vault-ops.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/builtin/web-search/executor.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/tool-registry.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/knowledge/frontmatter.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/knowledge/indexer.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/runtime/pi/pi-approval-policy.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/runtime/pi/pi-native-model.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/services/operation-audit-log.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/skill-files.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/skill-registry.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/components/change-preview-card.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/components/command-dropdown.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/components/input-toolbar.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/controllers/stream-controller.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/history/conversation-store.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/knowledge/file-back.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/runtime/runtime-types.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/services/clip-protocol.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/skills/builtin/knowledge/executor.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/guardian-completion.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/guardian-gutter.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "file": "src/ui/renderers/code-block-renderer.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-floating-promises",
+      "file": "src/settings.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-floating-promises",
+      "file": "main.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-floating-promises",
+      "file": "src/knowledge/runtime.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-floating-promises",
+      "file": "src/ui/chat-controller.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-floating-promises",
+      "file": "src/ui/shell-view.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-misused-promises",
+      "file": "src/settings.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-misused-promises",
+      "file": "src/ui/shell-view.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-misused-promises",
+      "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-misused-promises",
+      "file": "src/ui/controllers/context-controller.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-redundant-type-constituents",
+      "file": "src/memory/hindsight-migration.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-redundant-type-constituents",
+      "file": "src/ui/chat-controller.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-redundant-type-constituents",
+      "file": "src/utils/video_utils.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-redundant-type-constituents",
+      "file": "src/ui/guardian-completion.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/settings.ts",
+      "count": 15
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/ui/shell-view.ts",
+      "count": 10
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/ui/components/input-toolbar.ts",
+      "count": 8
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "main.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/runtime/pi/session-store/compaction.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/runtime/pi/session-store/migrate.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/runtime/pi/harness-chat-runtime.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/runtime/pi/session-store/conversation-session.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/services/model-service.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/ui/components/attachment-modal.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/memory/hindsight-store.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/runtime/pi/harness-session-manager.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/runtime/pi/vault-session-fs.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/services/obsidian-context-service.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/services/operation-audit-log.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/ui/chat-controller.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/ui/components/history-menu.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/ui/history/conversation-store.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/ui/renderers/thinking-renderer.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/ui/scroll/scroll-follow-controller.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unnecessary-type-assertion",
+      "file": "src/utils/request-url-fetch.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/skills/builtin/vault-ops.ts",
+      "count": 28
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "main.ts",
+      "count": 19
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/ui/chat-controller.ts",
+      "count": 18
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/memory/memory-manager.ts",
+      "count": 13
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/settings.ts",
+      "count": 11
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/ui/shell-view.ts",
+      "count": 9
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/knowledge/frontmatter.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/skills/builtin/obsidian-bases/executor.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/services/model-catalog-service.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/skills/builtin/json-canvas/executor.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/skills/builtin/web-clipper/executor.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/utils/request-url-fetch.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/memory/hindsight-migration.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/runtime/base-chat-runtime.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/services/model-service.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/knowledge/metadata-index.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/knowledge/ontology.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/services/obsidian-context-service.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/skills/builtin/knowledge/executor.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/ui/diff-modal.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/ui/guardian-completion.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/ui/selection-menu.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/knowledge/compiler.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/runtime/pi/pi-event-adapter.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/runtime/pi/pi-tool-adapter.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/services/video-transcription.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/skills/builtin/read-skill.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/skills/builtin/web-search/executor.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/ui/components/knowledge-status-panel.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/ui/guardian-gutter.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/ui/renderers/code-block-renderer.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-argument",
+      "file": "src/ui/renderers/thinking-renderer.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/chat-controller.ts",
+      "count": 62
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "main.ts",
+      "count": 34
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/memory/hindsight-migration.ts",
+      "count": 26
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/builtin/vault-ops.ts",
+      "count": 23
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/settings.ts",
+      "count": 22
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+      "count": 21
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/services/video-transcription.ts",
+      "count": 19
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/utils/request-url-fetch.ts",
+      "count": 19
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/knowledge/compiler.ts",
+      "count": 18
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+      "count": 18
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/knowledge/metadata-index.ts",
+      "count": 17
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/services/model-service.ts",
+      "count": 16
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/utils/video_utils.ts",
+      "count": 15
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/runtime/pi/harness-chat-runtime.ts",
+      "count": 12
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/services/model-catalog-service.ts",
+      "count": 12
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/approval-card.ts",
+      "count": 11
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/knowledge/frontmatter.ts",
+      "count": 9
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/memory/memory-manager.ts",
+      "count": 9
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/runtime/pi/pi-event-adapter.ts",
+      "count": 9
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/guardian-completion.ts",
+      "count": 9
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/knowledge/ontology.ts",
+      "count": 8
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/builtin/web-clipper/executor.ts",
+      "count": 8
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/knowledge/linter.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/skill-files.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/shell-view.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/pi-skill-source.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/runtime/base-chat-runtime.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/utils/logger.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/components/change-preview-card.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/components/knowledge-status-panel.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/renderers/code-block-renderer.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/runtime/pi/pi-tool-adapter.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/builtin/json-canvas/executor.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/builtin/knowledge/executor.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/builtin/read-skill.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/knowledge/indexer.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/knowledge/ontology-service.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/services/context-manager.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/services/workspace-edit-service.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/knowledge/file-back.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/memory/hindsight-store.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/services/obsidian-context-service.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/services/operation-audit-log.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/builtin/obsidian-bases/executor.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/skills/tool-registry.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/diff-modal.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/guardian-gutter.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/history/conversation-store.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/renderers/message-renderer.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-assignment",
+      "file": "src/ui/selection-ai/floating-panel.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/renderers/message-renderer.ts",
+      "count": 69
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/approval-card.ts",
+      "count": 31
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/chat-controller.ts",
+      "count": 27
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/settings.ts",
+      "count": 25
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/memory/memory-manager.ts",
+      "count": 19
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "main.ts",
+      "count": 16
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/components/knowledge-status-panel.ts",
+      "count": 15
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/memory/hindsight-migration.ts",
+      "count": 14
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/utils/request-url-fetch.ts",
+      "count": 14
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/renderers/tool-renderer.ts",
+      "count": 13
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/shell-view.ts",
+      "count": 13
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/knowledge/runtime.ts",
+      "count": 12
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/services/model-catalog-service.ts",
+      "count": 11
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/renderers/thinking-renderer.ts",
+      "count": 11
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/components/change-preview-card.ts",
+      "count": 10
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/services/video-transcription.ts",
+      "count": 8
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/utils/video_utils.ts",
+      "count": 8
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/knowledge/compiler.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/renderers/code-block-renderer.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/knowledge/ontology.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/guardian-completion.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/services/obsidian-context-service.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/skills/builtin/vault-ops.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/utils/file-operation-contract.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/knowledge/frontmatter.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/skills/builtin/web-clipper/executor.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/runtime/base-chat-runtime.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/runtime/pi/harness-chat-runtime.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/skills/builtin/json-canvas/executor.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/skills/pi-skill-source.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/skills/skill-files.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/components/context-chips.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/components/input-toolbar.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/tabs/tab-bar.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/knowledge/metadata-index.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/services/model-service.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/services/operation-audit-log.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/skills/builtin/read-skill.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/components/command-dropdown.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/ui/history/conversation-store.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-call",
+      "file": "src/utils/logger.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/chat-controller.ts",
+      "count": 151
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/settings.ts",
+      "count": 79
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/memory/hindsight-migration.ts",
+      "count": 76
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/renderers/message-renderer.ts",
+      "count": 71
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/builtin/vault-ops.ts",
+      "count": 65
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "main.ts",
+      "count": 47
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/memory/memory-manager.ts",
+      "count": 37
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/knowledge/compiler.ts",
+      "count": 35
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+      "count": 33
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/approval-card.ts",
+      "count": 32
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/services/video-transcription.ts",
+      "count": 30
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/builtin/obsidian-bases/executor.ts",
+      "count": 30
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/shell-view.ts",
+      "count": 27
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/runtime/pi/pi-event-adapter.ts",
+      "count": 26
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/services/model-catalog-service.ts",
+      "count": 25
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/builtin/json-canvas/executor.ts",
+      "count": 25
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/utils/video_utils.ts",
+      "count": 24
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/services/model-service.ts",
+      "count": 23
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/utils/request-url-fetch.ts",
+      "count": 22
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/components/knowledge-status-panel.ts",
+      "count": 21
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+      "count": 18
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/renderers/tool-renderer.ts",
+      "count": 18
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/knowledge/ontology.ts",
+      "count": 17
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/knowledge/metadata-index.ts",
+      "count": 16
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/services/operation-audit-log.ts",
+      "count": 16
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/renderers/thinking-renderer.ts",
+      "count": 16
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/runtime/pi/harness-chat-runtime.ts",
+      "count": 15
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/knowledge/runtime.ts",
+      "count": 14
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/services/obsidian-context-service.ts",
+      "count": 14
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/utils/file-operation-contract.ts",
+      "count": 14
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/guardian-completion.ts",
+      "count": 13
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/knowledge/frontmatter.ts",
+      "count": 12
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/skill-files.ts",
+      "count": 11
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/runtime/base-chat-runtime.ts",
+      "count": 10
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+      "count": 10
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/builtin/web-clipper/executor.ts",
+      "count": 10
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/components/change-preview-card.ts",
+      "count": 10
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/history/conversation-store.ts",
+      "count": 10
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+      "count": 8
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/renderers/code-block-renderer.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/services/workspace-edit-service.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/pi-skill-source.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/knowledge/indexer.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/builtin/web-search/executor.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/components/context-chips.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/selection-ai/floating-panel.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/tabs/tab-bar.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/runtime/pi/session-store/compaction.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/builtin/knowledge/executor.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/selection-menu.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/knowledge/ontology-service.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/builtin/read-skill.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/components/command-dropdown.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/ui/components/input-toolbar.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/knowledge/file-back.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/runtime/pi/pi-approval-policy.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/runtime/pi/pi-native-model.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/runtime/pi/pi-tool-adapter.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/services/clip-protocol.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/skills/tool-registry.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-member-access",
+      "file": "src/utils/logger.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/memory/memory-manager.ts",
+      "count": 9
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/services/obsidian-context-service.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/settings.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/ui/chat-controller.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/utils/file-operation-contract.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "main.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/knowledge/metadata-index.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/runtime/pi/harness-chat-runtime.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/skills/builtin/web-clipper/executor.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/utils/video_utils.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/knowledge/ontology-service.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/runtime/pi/pi-event-adapter.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/services/video-transcription.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/ui/approval-card.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/ui/diff-modal.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/ui/shell-view.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/knowledge/frontmatter.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/services/model-catalog-service.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/services/model-service.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/services/operation-audit-log.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/services/workspace-edit-service.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/skills/builtin/knowledge/executor.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/skills/builtin/web-search/executor.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/skills/skill-files.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/ui/components/change-preview-card.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/ui/guardian-completion.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/ui/history/conversation-store.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/ui/renderers/thinking-renderer.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/ui/renderers/tool-renderer.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unsafe-return",
+      "file": "src/ui/selection-ai/floating-panel.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-expressions",
+      "file": "src/ui/renderers/message-renderer.ts",
+      "count": 10
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-expressions",
+      "file": "src/ui/components/knowledge-status-panel.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-vars",
+      "file": "src/services/model-service.ts",
+      "count": 7
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-vars",
+      "file": "src/knowledge/runtime.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-vars",
+      "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-vars",
+      "file": "src/skills/skill-registry.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-vars",
+      "file": "src/knowledge/compiler.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-vars",
+      "file": "src/skills/builtin/knowledge/executor.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-vars",
+      "file": "src/skills/builtin/vault-ops.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-vars",
+      "file": "src/ui/components/attachment-modal.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/no-unused-vars",
+      "file": "src/ui/components/knowledge-status-panel.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/runtime/pi/session-store/memory-adapter.ts",
+      "count": 6
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/runtime/pi/harness-chat-runtime.ts",
+      "count": 5
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/settings.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+      "count": 4
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/knowledge/runtime.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/runtime/pi/vault-session-fs.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/skills/builtin/json-canvas/executor.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/skills/builtin/obsidian-bases/executor.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/skills/builtin/vault-ops.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/ui/shell-view.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "main.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/knowledge/linter.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/knowledge/ontology-service.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/knowledge/query.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/runtime/base-chat-runtime.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/runtime/pi/harness-env.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/require-await",
+      "file": "src/ui/selection-menu.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "@typescript-eslint/unbound-method",
+      "file": "src/ui/guardian-completion.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "no-case-declarations",
+      "file": "src/ui/chat-controller.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "no-irregular-whitespace",
+      "file": "src/knowledge/runtime.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "no-useless-escape",
+      "file": "src/services/clip-input.ts",
+      "count": 3
+    },
+    {
+      "ruleId": "no-useless-escape",
+      "file": "src/knowledge/runtime.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "no-useless-escape",
+      "file": "src/services/inbox-autosave.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "no-useless-escape",
+      "file": "src/skills/builtin/web-clipper/executor.ts",
+      "count": 1
+    },
+    {
+      "ruleId": "prefer-const",
+      "file": "src/ui/ghost-text.ts",
+      "count": 2
+    },
+    {
+      "ruleId": "prefer-const",
+      "file": "src/ui/guardian-gutter.ts",
+      "count": 2
+    }
+  ],
+  "files": [
+    {
+      "file": "src/ui/chat-controller.ts",
+      "problems": 342
+    },
+    {
+      "file": "src/ui/renderers/message-renderer.ts",
+      "problems": 222
+    },
+    {
+      "file": "src/settings.ts",
+      "problems": 184
+    },
+    {
+      "file": "src/memory/hindsight-migration.ts",
+      "problems": 148
+    },
+    {
+      "file": "main.ts",
+      "problems": 140
+    },
+    {
+      "file": "src/skills/builtin/vault-ops.ts",
+      "problems": 126
+    },
+    {
+      "file": "src/memory/memory-manager.ts",
+      "problems": 97
+    },
+    {
+      "file": "src/ui/shell-view.ts",
+      "problems": 93
+    },
+    {
+      "file": "src/ui/approval-card.ts",
+      "problems": 83
+    },
+    {
+      "file": "src/skills/builtin/plugin-ctrl/executor.ts",
+      "problems": 79
+    },
+    {
+      "file": "src/services/model-service.ts",
+      "problems": 75
+    },
+    {
+      "file": "src/utils/request-url-fetch.ts",
+      "problems": 75
+    },
+    {
+      "file": "src/services/video-transcription.ts",
+      "problems": 73
+    },
+    {
+      "file": "src/knowledge/compiler.ts",
+      "problems": 70
+    },
+    {
+      "file": "src/utils/video_utils.ts",
+      "problems": 61
+    },
+    {
+      "file": "src/ui/components/knowledge-status-panel.ts",
+      "problems": 59
+    },
+    {
+      "file": "src/services/model-catalog-service.ts",
+      "problems": 58
+    },
+    {
+      "file": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+      "problems": 53
+    },
+    {
+      "file": "src/ui/renderers/tool-renderer.ts",
+      "problems": 49
+    },
+    {
+      "file": "src/knowledge/metadata-index.ts",
+      "problems": 48
+    },
+    {
+      "file": "src/ui/renderers/thinking-renderer.ts",
+      "problems": 47
+    },
+    {
+      "file": "src/runtime/pi/harness-chat-runtime.ts",
+      "problems": 46
+    },
+    {
+      "file": "src/knowledge/ontology.ts",
+      "problems": 45
+    },
+    {
+      "file": "src/skills/builtin/obsidian-bases/executor.ts",
+      "problems": 43
+    },
+    {
+      "file": "src/runtime/pi/pi-event-adapter.ts",
+      "problems": 42
+    },
+    {
+      "file": "src/skills/builtin/web-clipper/executor.ts",
+      "problems": 42
+    },
+    {
+      "file": "src/knowledge/runtime.ts",
+      "problems": 41
+    },
+    {
+      "file": "src/skills/builtin/json-canvas/executor.ts",
+      "problems": 40
+    },
+    {
+      "file": "src/ui/guardian-completion.ts",
+      "problems": 34
+    },
+    {
+      "file": "src/knowledge/frontmatter.ts",
+      "problems": 32
+    },
+    {
+      "file": "src/services/obsidian-context-service.ts",
+      "problems": 32
+    },
+    {
+      "file": "src/runtime/pi/anthropic-sdk-shim.ts",
+      "problems": 30
+    },
+    {
+      "file": "src/ui/components/change-preview-card.ts",
+      "problems": 27
+    },
+    {
+      "file": "src/utils/file-operation-contract.ts",
+      "problems": 26
+    },
+    {
+      "file": "src/runtime/base-chat-runtime.ts",
+      "problems": 25
+    },
+    {
+      "file": "src/skills/builtin/plugin-ctrl/plugin-watcher.ts",
+      "problems": 23
+    },
+    {
+      "file": "src/skills/skill-files.ts",
+      "problems": 23
+    },
+    {
+      "file": "src/services/operation-audit-log.ts",
+      "problems": 22
+    },
+    {
+      "file": "src/ui/renderers/code-block-renderer.ts",
+      "problems": 20
+    },
+    {
+      "file": "src/skills/pi-skill-source.ts",
+      "problems": 18
+    },
+    {
+      "file": "src/utils/logger.ts",
+      "problems": 18
+    },
+    {
+      "file": "src/ui/history/conversation-store.ts",
+      "problems": 16
+    },
+    {
+      "file": "src/services/workspace-edit-service.ts",
+      "problems": 15
+    },
+    {
+      "file": "src/ui/components/input-toolbar.ts",
+      "problems": 14
+    },
+    {
+      "file": "src/ui/selection-menu.ts",
+      "problems": 12
+    },
+    {
+      "file": "src/runtime/pi/pi-tool-adapter.ts",
+      "problems": 11
+    },
+    {
+      "file": "src/skills/builtin/knowledge/executor.ts",
+      "problems": 11
+    },
+    {
+      "file": "src/knowledge/ontology-service.ts",
+      "problems": 10
+    },
+    {
+      "file": "src/ui/components/context-chips.ts",
+      "problems": 10
+    },
+    {
+      "file": "src/ui/tabs/tab-bar.ts",
+      "problems": 10
+    },
+    {
+      "file": "src/runtime/pi/session-store/compaction.ts",
+      "problems": 9
+    },
+    {
+      "file": "src/skills/builtin/web-search/executor.ts",
+      "problems": 9
+    },
+    {
+      "file": "src/utils/throttle.ts",
+      "problems": 9
+    },
+    {
+      "file": "src/knowledge/indexer.ts",
+      "problems": 8
+    },
+    {
+      "file": "src/knowledge/linter.ts",
+      "problems": 8
+    },
+    {
+      "file": "src/skills/builtin/read-skill.ts",
+      "problems": 7
+    },
+    {
+      "file": "src/runtime/pi/session-store/memory-adapter.ts",
+      "problems": 6
+    },
+    {
+      "file": "src/skills/types.ts",
+      "problems": 6
+    },
+    {
+      "file": "src/ui/selection-ai/floating-panel.ts",
+      "problems": 6
+    },
+    {
+      "file": "src/models/interfaces.ts",
+      "problems": 5
+    },
+    {
+      "file": "src/skills/tool-registry.ts",
+      "problems": 5
+    },
+    {
+      "file": "src/ui/components/command-dropdown.ts",
+      "problems": 5
+    },
+    {
+      "file": "src/ui/diff-modal.ts",
+      "problems": 5
+    },
+    {
+      "file": "src/ui/guardian-gutter.ts",
+      "problems": 5
+    },
+    {
+      "file": "src/skills/skill-registry.ts",
+      "problems": 4
+    },
+    {
+      "file": "src/knowledge/file-back.ts",
+      "problems": 3
+    },
+    {
+      "file": "src/mcp/types.ts",
+      "problems": 3
+    },
+    {
+      "file": "src/runtime/pi/pi-approval-policy.ts",
+      "problems": 3
+    },
+    {
+      "file": "src/runtime/pi/pi-native-model.ts",
+      "problems": 3
+    },
+    {
+      "file": "src/runtime/pi/session-store/migrate.ts",
+      "problems": 3
+    },
+    {
+      "file": "src/runtime/pi/vault-session-fs.ts",
+      "problems": 3
+    },
+    {
+      "file": "src/services/clip-input.ts",
+      "problems": 3
+    },
+    {
+      "file": "src/ui/components/attachment-modal.ts",
+      "problems": 3
+    },
+    {
+      "file": "src/memory/hindsight-store.ts",
+      "problems": 2
+    },
+    {
+      "file": "src/runtime/pi/session-store/conversation-session.ts",
+      "problems": 2
+    },
+    {
+      "file": "src/services/clip-protocol.ts",
+      "problems": 2
+    },
+    {
+      "file": "src/services/context-manager.ts",
+      "problems": 2
+    },
+    {
+      "file": "src/ui/controllers/stream-controller.ts",
+      "problems": 2
+    },
+    {
+      "file": "src/ui/ghost-text.ts",
+      "problems": 2
+    },
+    {
+      "file": "src/knowledge/query.ts",
+      "problems": 1
+    },
+    {
+      "file": "src/runtime/pi/harness-env.ts",
+      "problems": 1
+    },
+    {
+      "file": "src/runtime/pi/harness-session-manager.ts",
+      "problems": 1
+    },
+    {
+      "file": "src/runtime/runtime-types.ts",
+      "problems": 1
+    },
+    {
+      "file": "src/services/inbox-autosave.ts",
+      "problems": 1
+    },
+    {
+      "file": "src/ui/components/history-menu.ts",
+      "problems": 1
+    },
+    {
+      "file": "src/ui/controllers/context-controller.ts",
+      "problems": 1
+    },
+    {
+      "file": "src/ui/scroll/scroll-follow-controller.ts",
+      "problems": 1
+    },
+    {
+      "file": "src/utils/thrown-message.ts",
+      "problems": 1
+    }
+  ]
+}
