@@ -205,7 +205,7 @@ B2 的判定标准：新增 `unknown` 窄化时，对旧数据的行为（保留
 | 检查 | 结果 |
 |---|---|
 | `npm run build` | ✅ 成功（`dist/main.js` 产出正常） |
-| `npx eslint .`（仓库自带 lint，独立于 build） | ✅ **0 error**；warning **611 → 265**，逐规则无增加 |
+| `npx eslint .`（仓库自带 lint，独立于 build） | ✅ **0 error**；warning **611 → 263**，逐规则无增加 |
 | `npx tsc --noEmit` | ✅ 0 error |
 | `npm test` | ✅ 109 个测试文件全部 PASS |
 | 复现扫描 | ✅ 见 §6.1；逐规则核对：**没有任何规则计数增加** |
