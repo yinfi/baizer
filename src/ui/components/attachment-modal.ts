@@ -83,7 +83,7 @@ export class AttachmentModal extends Modal {
         this.fileInput = contentEl.createEl('input', {
             cls: 'baizer-hidden',
             attr: { type: 'file', multiple: 'true', accept: '.md,.txt,.json,.csv,.js,.ts,.py,text/*' },
-        }) as HTMLInputElement;
+        });
 
         dropZone.addEventListener('click', () => this.fileInput?.click());
         this.fileInput.addEventListener('change', () => {
@@ -117,7 +117,7 @@ export class AttachmentModal extends Modal {
         this.confirmButton = actions.createEl('button', {
             text: t('Attach'),
             cls: 'mod-cta',
-        }) as HTMLButtonElement;
+        });
         this.confirmButton.addEventListener('click', () => this.submit());
         this.updateConfirmState();
     }
@@ -140,7 +140,7 @@ export class AttachmentModal extends Modal {
             try {
                 const content = await this.readAsText(file);
                 this.pending.set(file.name, { name: file.name, content, size: file.size });
-            } catch (err) {
+            } catch {
                 new Notice(`${t('Failed to read')} "${file.name}".`);
             }
         }

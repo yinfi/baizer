@@ -231,7 +231,7 @@ function safeStringify(value: unknown) {
 
   try {
     return JSON.stringify(value ?? null, null, 2);
-  } catch (_error) {
+  } catch {
     return String(value);
   }
 }

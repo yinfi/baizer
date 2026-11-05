@@ -31,9 +31,9 @@ export async function importPreviousMemoryFiles(
   const stateUpdate: Partial<MigrationState> = {};
 
   if (!state.previousProfileFileImported) {
-    const previousProfile = await readJson<any | null>(app, PREVIOUS_PROFILE_PATH, null);
+    const previousProfile = await readJson<any>(app, PREVIOUS_PROFILE_PATH, null);
     if (previousProfile) {
-      const currentProfile = await readJson<any | null>(app, PROFILE_PATH, null);
+      const currentProfile = await readJson<any>(app, PROFILE_PATH, null);
       await writeJson(app, PROFILE_PATH, mergeProfiles(previousProfile, currentProfile, now));
     }
     stateUpdate.previousProfileFileImported = true;
@@ -64,7 +64,7 @@ export async function migrateLegacyMemory(
   const stateUpdate: Partial<MigrationState> = {};
 
   if (!state.legacyProfileMigrated) {
-    const profile = await readJson<any | null>(app, PROFILE_PATH, null);
+    const profile = await readJson<any>(app, PROFILE_PATH, null);
     if (profile) records.push(...profileToMemories(profile, now));
     stateUpdate.legacyProfileMigrated = true;
   }
@@ -76,7 +76,7 @@ export async function migrateLegacyMemory(
   }
 
   if (!state.previousPluginProfileMigrated) {
-    const profile = await readJson<any | null>(app, PREVIOUS_PROFILE_PATH, null);
+    const profile = await readJson<any>(app, PREVIOUS_PROFILE_PATH, null);
     if (profile) records.push(...profileToMemories(profile, now));
     stateUpdate.previousPluginProfileMigrated = true;
   }
@@ -101,7 +101,7 @@ export async function migrateLegacyMemory(
   }
 }
 
-function mergeProfiles(previous: any, current: any | null, now: number): LegacyProfile {
+function mergeProfiles(previous: any, current: any, now: number): LegacyProfile {
   const previousProfile = normalizeProfile(previous, now);
   const currentProfile = current ? normalizeProfile(current, now) : null;
   if (!currentProfile) return previousProfile;

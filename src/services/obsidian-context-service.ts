@@ -41,6 +41,14 @@ const DEFAULT_OPTIONS: Required<ServiceOptions> = {
   maxSectionChars: 1200,
 };
 
+/**
+ * Obsidian 的公开 `View` 类型未声明 `editor`（运行时由 MarkdownView 提供）。
+ * 用类型守卫收窄，避免在取编辑器时写类型断言。
+ */
+function isViewWithEditor(view: View): view is View & { editor: Editor } {
+  return 'editor' in view;
+}
+
 export class ObsidianContextService {
   private readonly options: Required<ServiceOptions>;
 
@@ -77,7 +85,8 @@ export class ObsidianContextService {
     const tags = this.extractTags(cache);
     const outgoingLinks = this.extractOutgoingLinks(cache);
     const content = includeCurrent ? await this.app.vault.read(activeFile) : '';
-    const editor = includeCurrent ? (this.app.workspace.getMostRecentLeaf?.()?.view as (View & { editor?: Editor }) | undefined)?.editor : null;
+    const view = includeCurrent ? this.app.workspace.getMostRecentLeaf?.()?.view ?? null : null;
+    const editor = view && isViewWithEditor(view) ? view.editor : null;
     const selectionText = includeCurrent ? this.normalizeSelection(editor?.getSelection?.()) : null;
     const selectionLine = includeCurrent ? this.normalizeLine(editor?.getCursor?.('from')?.line) : null;
     const activeHeading = includeCurrent ? this.findActiveHeading(content, selectionLine) : null;

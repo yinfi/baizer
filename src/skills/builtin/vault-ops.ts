@@ -548,7 +548,7 @@ async function ensureParentFolder(app: App, path: string): Promise<void> {
   if (!folderPath || app.vault.getAbstractFileByPath(folderPath)) return;
   try {
     await app.vault.createFolder(folderPath);
-  } catch (e) {
+  } catch {
     // 文件夹可能已存在（并发创建）
   }
 }

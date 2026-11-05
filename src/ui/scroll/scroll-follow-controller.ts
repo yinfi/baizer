@@ -135,7 +135,7 @@ export class ScrollFollowController {
         this.cancel = options.cancel
             ?? ((handle) => {
                 if (typeof window !== 'undefined') window.clearTimeout(handle as number);
-                else clearTimeout(handle as unknown as NodeJS.Timeout);
+                else clearTimeout(handle as NodeJS.Timeout);
             });
         this.restoreDelayMs = options.restoreDelayMs ?? RESTORE_POSITION_DELAY_MS;
     }

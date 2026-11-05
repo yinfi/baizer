@@ -102,7 +102,8 @@ export class FileBackExecutor {
 
       const articlesDir = `${this.wikiFolder}/${WIKI_ARTICLES_SUBFOLDER}`;
       if (!this.app.vault.getAbstractFileByPath(articlesDir)) {
-        try { await this.app.vault.createFolder(articlesDir); } catch {}
+        // 目录已存在时 createFolder 会抛错，忽略即可（后续 create 仍会校验路径）。
+        try { await this.app.vault.createFolder(articlesDir); } catch { /* 已存在即忽略 */ }
       }
 
       await this.app.vault.create(filePath, markdown);

@@ -55,7 +55,7 @@ function extractTags(text: string): string[] {
 }
 
 function sanitizeTitle(title: string): string {
-  let clean = title.replace(/[\\/:*?"<>|#^\[\]]/g, '-').replace(/\s+/g, ' ').trim();
+  let clean = title.replace(/[\\/:*?"<>|#^[\]]/g, '-').replace(/\s+/g, ' ').trim();
   if (!clean || clean.replace(/-/g, '').trim().length === 0) {
     const now = new Date();
     clean = `Clipping ${now.toISOString().split('T')[0]} ${now.getHours()}-${now.getMinutes()}-${now.getSeconds()}`;
@@ -85,7 +85,7 @@ async function ensureFolder(app: App, path: string): Promise<void> {
   if (!folder || app.vault.getAbstractFileByPath(folder)) return;
   try {
     await app.vault.createFolder(folder);
-  } catch (_) {
+  } catch {
     // Folder may already exist when multiple saves race.
   }
 }
@@ -175,7 +175,7 @@ Task:
     const clean = typeof summary === 'string' ? summary.trim() : '';
     if (!clean || clean.startsWith('Error:')) return null;
     return clean;
-  } catch (_) {
+  } catch {
     return null;
   }
 }
@@ -204,7 +204,7 @@ Task:
     const clean = typeof summary === 'string' ? summary.trim() : '';
     if (!clean || clean.startsWith('Error:')) return null;
     return clean;
-  } catch (_) {
+  } catch {
     return null;
   }
 }
@@ -442,7 +442,7 @@ async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebCl
       jsContent.querySelectorAll('script, style').forEach(node => node.remove());
       try {
         markdown = deps.htmlToMarkdown(jsContent.innerHTML);
-      } catch (_) {
+      } catch {
         markdown = '';
       }
     }
@@ -453,7 +453,7 @@ async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebCl
       .forEach(sel => {
         try {
           doc.querySelectorAll(sel).forEach(node => node.remove());
-        } catch (_) {
+        } catch {
           // Ignore invalid selectors for unusual HTML fragments.
         }
       });
@@ -463,13 +463,13 @@ async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebCl
     if (article?.content) {
       try {
         markdown = deps.htmlToMarkdown(article.content);
-      } catch (_) {
+      } catch {
         markdown = '';
       }
     } else {
       try {
         markdown = deps.htmlToMarkdown(html);
-      } catch (_) {
+      } catch {
         markdown = '';
       }
     }

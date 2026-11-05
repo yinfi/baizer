@@ -415,7 +415,7 @@ export class KnowledgeRuntime {
   /** Guardian 知识上下文 */
   async getGuardianKnowledgeContext(editorContext: string): Promise<string> {
     const keywords = editorContext
-      .split(/[\s,，。！？、；：""''（）\[\]{}]+/)
+      .split(/[\s,，。！？、；：""''（）[\]{}]+/)
       .filter(w => w.length >= 2)
       .slice(0, 10)
       .join(' ');
@@ -447,7 +447,7 @@ export class KnowledgeRuntime {
    */
   async getGuardianDeepKnowledgeContext(editorContext: string): Promise<string> {
     const keywords = editorContext
-      .split(/[\s,，。！？、；：""''（）\[\]{}]+/)
+      .split(/[\s,，。！？、；：""''（）[\]{}]+/)
       .filter(w => w.length >= 2)
       .slice(0, 10)
       .join(' ');
@@ -479,7 +479,7 @@ export class KnowledgeRuntime {
       if (!(file instanceof TFile)) return '';
       const raw = await this.app.vault.cachedRead(file);
       const body = raw
-        .replace(/^﻿?---\r?\n[\s\S]*?\r?\n---\r?\n?/, '') // 剥 YAML frontmatter
+        .replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/, '') // 剥 YAML frontmatter
         .replace(/^#+\s.*$/gm, '')                              // 去标题行
         .replace(/\n{2,}/g, '\n')
         .trim();

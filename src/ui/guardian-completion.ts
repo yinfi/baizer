@@ -551,9 +551,10 @@ export class GuardianCompletionService {
   ): Promise<string> {
     const runtime = this.deps.knowledgeRuntime;
     const deep = input.mode === 'deep';
+    // 显式 bind：方法引用一旦被解绑使用，fast/deep 两条召回路径都可能丢失 this。
     const fetcher = deep
-      ? runtime?.getGuardianDeepKnowledgeContext
-      : runtime?.getGuardianKnowledgeContext;
+      ? runtime?.getGuardianDeepKnowledgeContext?.bind(runtime)
+      : runtime?.getGuardianKnowledgeContext?.bind(runtime);
     if (!fetcher) return '';
 
     const startedAt = Date.now();
@@ -574,7 +575,7 @@ export class GuardianCompletionService {
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     let timedOut = false;
     const raw = await Promise.race([
-      fetcher.call(runtime, query),
+      fetcher(query),
       new Promise<string>((resolve) => {
         timeoutHandle = setTimeout(() => {
           timedOut = true;
@@ -664,7 +665,7 @@ export class GuardianCompletionService {
       context.cursorPrefix,
       context.cursorSuffix,
       context.localBlock,
-    ].join(' ');
+    ].join('\u0000');
   }
 
   private readCache(key: string): { suggestion: string; quality: GuardianQualityDecision } | null {

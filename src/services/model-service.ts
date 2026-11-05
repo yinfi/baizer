@@ -34,6 +34,14 @@ import { t } from '../i18n/zh';
 import { WorkspaceEditService } from './workspace-edit-service';
 
 /**
+ * 旧版全局单例 sessionRef 的落盘形状：仅供 loadSessionRef 做一次性迁移读取，
+ * 让迁移代码不必直接触碰 PluginSettings 上那个已标记废弃的字段。
+ */
+interface LegacySessionRefSettings {
+    sessionRef?: PersistedSessionRef | null;
+}
+
+/**
  * 「模型列表 + 它为什么是这个列表」。
  *
  * 存在的理由：`getAvailableModels()` 在抓取失败时会静默回落到 `getFallbackModels()`，
@@ -142,7 +150,7 @@ export class ModelService {
 
     /**
      * 构造 Harness 会话管理器 + ExecutionEnv(同源,同一 vault adapter)。
-     * 会话引用存进插件 data(settings.sessionRef),实现跨重启恢复。
+     * 会话引用存进插件 data(settings.sessionRefs,按 conversationId 分别存),实现跨重启恢复。
      * vault.adapter 不可用时静默跳过(退化为每轮全新内存会话)。
      *
      * 自动压缩阈值取当前模型上下文窗口(settings 可运行期改动,用 getter 取最新值);
@@ -169,7 +177,7 @@ export class ModelService {
             this.harnessEnv = createHarnessExecutionEnv(vaultAdapter);
             // 用户自定义命令服务与 harnessEnv 同源;懒加载模板(首次列命令/执行时读盘)。
             this.promptTemplateService = new PromptTemplateService(this.harnessEnv);
-        } catch (error) {
+        } catch {
             logger.warn('Failed to initialize HarnessSessionManager; falling back to in-memory sessions.', 'ModelService');
             this.sessionManager = null;
             this.harnessEnv = null;
@@ -181,9 +189,12 @@ export class ModelService {
         const refs = this.settings.sessionRefs;
         if (refs && refs[conversationId]) return refs[conversationId];
         // 迁移兜底:旧版全局单例 sessionRef 归属到第一个来取的会话,取后清空避免重复认领。
-        if (this.settings.sessionRef) {
-            const legacy = this.settings.sessionRef;
-            this.settings.sessionRef = null;
+        // 旧字段已标 @deprecated,这里经 LegacySessionRefSettings 结构化读取,
+        // 让迁移代码继续可用而已,正常代码不应再直接读写该字段。
+        const legacySettings = this.settings as unknown as LegacySessionRefSettings;
+        const legacy = legacySettings.sessionRef;
+        if (legacy) {
+            legacySettings.sessionRef = null;
             (this.settings.sessionRefs ??= {})[conversationId] = legacy;
             return legacy;
         }
@@ -685,7 +696,9 @@ export class ModelService {
         try {
             // timeoutMs 不再单独消费：pi 的无状态生成走原生 signal 硬中断，
             // 旧的 requestUrl 超时语义由调用方用 AbortSignal 表达（见下）。
-            const { skipGenerationPlan, signal, timeoutMs, ...providerOptions } = options ?? {};
+            // 注意不要解构 timeoutMs：它已 @deprecated，且下面的 providerOptions 只按需取用字段，
+            // 不整体透传，留在 options 里不会传给 pi。
+            const { skipGenerationPlan, signal, ...providerOptions } = options ?? {};
             if (signal?.aborted) {
                 throw new DOMException('Generation aborted', 'AbortError');
             }
@@ -736,7 +749,7 @@ export class ModelService {
         if (this.sessionManager && conversationId) {
             try {
                 await this.sessionManager.clear(conversationId);
-            } catch (error) {
+            } catch {
                 logger.warn('Failed to start a fresh persistent session on clear.', 'ModelService.clearSession');
             }
         }
@@ -768,7 +781,7 @@ export class ModelService {
             const { branch, all } = await this.sessionManager.getBranchEntries(conversationId);
             if (branch.length === 0) return null;
             return projectBranchToMessages(branch, all);
-        } catch (e) {
+        } catch {
             logger.warn('Failed to project session branch.', 'ModelService.getBranchProjection');
             return null;
         }
@@ -784,7 +797,7 @@ export class ModelService {
             const ok = await this.sessionManager.moveToBranch(conversationId, targetLeafEntryId);
             if (!ok) return null;
             return this.getBranchProjection(conversationId);
-        } catch (e) {
+        } catch {
             logger.warn('Failed to switch session branch.', 'ModelService.switchBranch');
             return null;
         }
@@ -809,7 +822,7 @@ export class ModelService {
                 await this.sessionManager.supersedeUserEntry(conversationId, userEntryId);
             }
             return await this.sessionManager.prepareForkAtUser(conversationId, userEntryId);
-        } catch (e) {
+        } catch {
             logger.warn('Failed to prepare retry/fork position.', 'ModelService.prepareRetryFromUser');
             return false;
         }

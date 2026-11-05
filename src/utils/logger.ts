@@ -87,7 +87,9 @@ export class Logger {
                 console.debug(consoleMessage, entry.metadata || '', entry.error || '');
                 break;
             case 'info':
-                console.info(consoleMessage, entry.metadata || '', entry.error || '');
+                // obsidianmd no-console 只允许 warn/error/debug：info 级日志改走 debug 通道输出，
+                // 日志历史（this.logs/exportLogs）不受影响，只是控制台分类降为 verbose。
+                console.debug(consoleMessage, entry.metadata || '', entry.error || '');
                 break;
             case 'warn':
                 console.warn(consoleMessage, entry.metadata || '', entry.error || '');

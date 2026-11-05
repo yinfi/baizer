@@ -177,7 +177,7 @@ export class KnowledgeLinter {
       if (Array.isArray(fm.review_flags)) {
         reviewFlags = fm.review_flags;
       } else if (typeof fm.review_flags === 'string') {
-        try { reviewFlags = JSON.parse(fm.review_flags); } catch {}
+        try { reviewFlags = JSON.parse(fm.review_flags); } catch { /* 非法 JSON：按空审阅标记处理 */ }
       }
       summaries.push({ path: file.path, title, reviewFlags });
 
@@ -185,7 +185,7 @@ export class KnowledgeLinter {
       if (Array.isArray(fm.concepts)) {
         concepts = fm.concepts;
       } else if (typeof fm.concepts === 'string') {
-        try { concepts = JSON.parse(fm.concepts); } catch {}
+        try { concepts = JSON.parse(fm.concepts); } catch { /* 非法 JSON：按空概念列表处理 */ }
       }
       for (const c of concepts) {
         if (!conceptMap[c]) conceptMap[c] = [];
@@ -207,7 +207,8 @@ export class KnowledgeLinter {
     const reportPath = `${reportDir}/report.md`;
 
     if (!this.app.vault.getAbstractFileByPath(reportDir)) {
-      try { await this.app.vault.createFolder(reportDir); } catch {}
+      // 目录已存在时 createFolder 会抛错，忽略即可（后续 create/modify 仍会校验路径）。
+      try { await this.app.vault.createFolder(reportDir); } catch { /* 已存在即忽略 */ }
     }
 
     const existing = this.app.vault.getAbstractFileByPath(reportPath);
