@@ -1,10 +1,11 @@
 import { App, Notice, TFile, setIcon } from 'obsidian';
 import { PLUGIN_ID } from '../../mcp/types';
+import type { IPlugin } from '../../mcp/types';
 import { KnowledgeNoteStatus } from '../../knowledge/status-service';
 
 interface KnowledgeStatusPanelOptions {
   app: App;
-  plugin?: any;
+  plugin?: IPlugin;
   onAddRelatedContext?: (path: string) => void;
   onExcludeCurrentContext?: (path: string) => void;
   onOpenKnowledgeSettings?: () => void;
@@ -25,7 +26,8 @@ export class KnowledgeStatusPanel {
   async refresh() {
     const seq = ++this.refreshSeq;
     this.container.empty();
-    (this.container as any).addClass?.('shell-knowledge-status-panel') ?? this.container.classList.add('shell-knowledge-status-panel');
+    this.container.addClass?.('shell-knowledge-status-panel');
+    this.container.classList.add('shell-knowledge-status-panel');
 
     const activeFile = this.options.app.workspace.getActiveFile?.();
     if (!(activeFile instanceof TFile)) {
@@ -49,13 +51,13 @@ export class KnowledgeStatusPanel {
       return;
     }
 
-    this.renderStatus(activeFile, status, runtime);
+    this.renderStatus(activeFile, status);
   }
 
   private renderEmpty(message: string) {
-    const body = (this.container as any).createDiv({ cls: 'shell-knowledge-status-empty' }) as HTMLElement;
-    if (typeof (body as any).setText === 'function') {
-      (body as any).setText(message);
+    const body = this.container.createDiv({ cls: 'shell-knowledge-status-empty' });
+    if (typeof body.setText === 'function') {
+      body.setText(message);
     } else {
       body.textContent = message;
     }
@@ -64,29 +66,28 @@ export class KnowledgeStatusPanel {
   private renderStatus(
     activeFile: TFile,
     status: KnowledgeNoteStatus,
-    runtime: any,
   ) {
-    const strip = (this.container as any).createDiv({
+    const strip = this.container.createDiv({
       cls: `shell-knowledge-status-strip is-${status.state}`,
       attr: {
         role: 'button',
         tabindex: '0',
         'aria-label': `Current note: ${activeFile.basename}. ${this.buildSummary(status)}`,
       },
-    }) as HTMLElement;
+    });
 
-    const icon = (strip as any).createDiv({ cls: 'shell-knowledge-status-file-icon' }) as HTMLElement;
+    const icon = strip.createDiv({ cls: 'shell-knowledge-status-file-icon' });
     this.setIconFn(icon, 'file-text');
-    (strip as any).createSpan({ cls: 'shell-knowledge-status-title', text: activeFile.basename });
+    strip.createSpan({ cls: 'shell-knowledge-status-title', text: activeFile.basename });
 
-    const exclude = (strip as any).createEl('button', {
+    const exclude = strip.createEl('button', {
       cls: 'shell-knowledge-status-exclude clickable-icon',
       attr: {
         type: 'button',
         'aria-label': 'Exclude current note from context',
         title: 'Exclude current note from context',
       },
-    }) as HTMLElement;
+    });
     this.setIconFn(exclude, 'x');
     exclude.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -110,9 +111,9 @@ export class KnowledgeStatusPanel {
       return;
     }
 
-    const menu = (parent as any).createDiv({ cls: 'shell-knowledge-status-action-row' }) as HTMLElement;
+    const menu = parent.createDiv({ cls: 'shell-knowledge-status-action-row' });
     this.createMenuItem(menu, 'Compile note', 'refresh-cw', async () => {
-      const result = await (this.options.plugin?.knowledgeRuntime ?? null)?.compileByPath?.(activeFile.path);
+      const result = await this.options.plugin?.knowledgeRuntime?.compileByPath?.(activeFile.path);
       if (result) {
         new Notice(`Knowledge compile: ${result.success} success, ${result.failed} failed`);
       }
@@ -123,14 +124,14 @@ export class KnowledgeStatusPanel {
     });
     this.createMenuItem(menu, 'Open wiki summary', 'external-link', () => {
       const summaryPath = status.summaryPath;
-      if (summaryPath && typeof (this.options.app.workspace as any)?.openLinkText === 'function') {
-        void (this.options.app.workspace as any).openLinkText(summaryPath, '', false);
+      if (summaryPath && typeof this.options.app.workspace?.openLinkText === 'function') {
+        void this.options.app.workspace.openLinkText(summaryPath, '', false);
         return;
       }
-      (this.options.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
+      this.options.app.commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
     });
     this.createMenuItem(menu, 'Run knowledge lint', 'scan-line', () => {
-      (this.options.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
+      this.options.app.commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
     });
     this.createMenuItem(menu, 'Copy note path', 'copy', () => {
       void globalThis.navigator?.clipboard?.writeText?.(activeFile.path);
@@ -147,10 +148,10 @@ export class KnowledgeStatusPanel {
     icon: string,
     handler: () => void | Promise<void>,
   ) {
-    const item = (container as any).createEl('button', {
+    const item = container.createEl('button', {
       cls: 'shell-knowledge-status-icon-action',
       attr: { type: 'button', 'aria-label': label, title: label },
-    }) as HTMLElement;
+    });
     this.setIconFn(item, icon);
     item.addEventListener('click', () => {
       void handler();

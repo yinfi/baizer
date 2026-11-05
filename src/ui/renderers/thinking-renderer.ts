@@ -31,7 +31,7 @@ export class ThinkingRenderer {
     this.setIntervalFn = options.setInterval
       ?? ((handler, ms) => globalThis.setInterval(handler, ms));
     this.clearIntervalFn = options.clearInterval
-      ?? ((id) => globalThis.clearInterval(id as any));
+      ?? ((id) => globalThis.clearInterval(id));
   }
 
   appendThinking(content: string) {
@@ -146,19 +146,19 @@ export class ThinkingRenderer {
     const cls = opts.active
       ? 'baizer-thinking-block think-node is-thinking'
       : 'baizer-thinking-block think-node is-complete is-collapsed';
-    const block = (this.timeline as any).createDiv({ cls }) as HTMLElement;
+    const block = this.timeline.createDiv({ cls });
 
-    const header = (block as any).createDiv({ cls: 'baizer-thinking-header' }) as HTMLElement;
-    (header as any).createSpan({ cls: 'baizer-thinking-caret', text: '>' });
-    (header as any).createSpan({ cls: 'baizer-thinking-label', text: 'Thinking' });
+    const header = block.createDiv({ cls: 'baizer-thinking-header' });
+    header.createSpan({ cls: 'baizer-thinking-caret', text: '>' });
+    header.createSpan({ cls: 'baizer-thinking-label', text: 'Thinking' });
     if (opts.active) {
-      (header as any).createSpan({ cls: 'baizer-thinking-timer', text: '0s' });
+      header.createSpan({ cls: 'baizer-thinking-timer', text: '0s' });
     }
     this.setAttribute(header, 'role', 'button');
     this.setAttribute(header, 'tabindex', '0');
     this.setAttribute(header, 'aria-expanded', String(opts.active));
 
-    (block as any).createDiv({ cls: 'baizer-thinking-content' });
+    block.createDiv({ cls: 'baizer-thinking-content' });
     header.addEventListener('click', () => this.toggleCollapsed(block));
     header.addEventListener('keydown', (event: KeyboardEvent) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -231,37 +231,37 @@ export class ThinkingRenderer {
   }
 
   private setAttribute(el: HTMLElement, name: string, value: string) {
-    if (typeof (el as any).setAttribute === 'function') {
-      (el as any).setAttribute(name, value);
+    if (typeof el.setAttribute === 'function') {
+      el.setAttribute(name, value);
     }
   }
 
   private hasClass(el: HTMLElement, name: string) {
-    if (typeof (el as any).hasClass === 'function') {
-      return (el as any).hasClass(name);
+    if (typeof el.hasClass === 'function') {
+      return el.hasClass(name);
     }
     return el.classList.contains(name);
   }
 
   private addClass(el: HTMLElement, name: string) {
-    if (typeof (el as any).addClass === 'function') {
-      (el as any).addClass(name);
+    if (typeof el.addClass === 'function') {
+      el.addClass(name);
     } else {
       el.classList.add(name);
     }
   }
 
   private removeClass(el: HTMLElement, name: string) {
-    if (typeof (el as any).removeClass === 'function') {
-      (el as any).removeClass(name);
+    if (typeof el.removeClass === 'function') {
+      el.removeClass(name);
     } else {
       el.classList.remove(name);
     }
   }
 
   private toggleClass(el: HTMLElement, name: string, enabled: boolean) {
-    if (typeof (el as any).toggleClass === 'function') {
-      (el as any).toggleClass(name, enabled);
+    if (typeof el.toggleClass === 'function') {
+      el.toggleClass(name, enabled);
       return;
     }
 

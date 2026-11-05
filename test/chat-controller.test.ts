@@ -3,6 +3,7 @@
   clearInterval,
 };
 
+import { readFileSync } from 'fs';
 import { TFile, TFolder } from 'obsidian';
 
 (global as any).localStorage = {
@@ -821,6 +822,224 @@ async function runTests() {
     expect(messages[messages.length - 1].content).toContain('Archived to the knowledge wiki');
 
     controller.cleanup();
+  });
+
+  // ── issue #69 batch 1: getErrorText/getErrorName narrowing + isApprovalRequiredResult ──
+  //
+  // chat-controller.ts 把 14 处 `catch (error: any)` 换成了 `unknown` + 两个模块私有
+  // 辅助函数 getErrorText/getErrorName，语义必须与旧的 `error?.message || fallback`
+  // 逐值一致（包括真值非字符串 message 要显示，而不是被「只认字符串」悄悄丢弃）。
+  // 两个函数都是模块私有，不可 import；下面优先走真实公开入口
+  // (undoWorkspaceEdit 的 catch、processCommand 流式 catch 的 isAbortError 分支)
+  // 实测行为，并用源码取证锁住实现没有在之后drift。
+
+  const chatControllerSource = readFileSync('src/ui/chat-controller.ts', 'utf8');
+
+  await test('getErrorText source: truthy message of any type is String()-ed, falsy/missing is undefined', () => {
+    // 锁住实现没有退化成「只接受 Error」或「只接受 string message」。
+    expect(chatControllerSource.includes('function getErrorText(error: unknown): string | undefined')).toBe(true);
+    const bodyStart = chatControllerSource.indexOf('function getErrorText(error: unknown)');
+    const body = chatControllerSource.slice(bodyStart, chatControllerSource.indexOf('\n}', bodyStart));
+    expect(body.includes("typeof error === 'object' && error !== null")).toBe(true);
+    // 真值但非字符串的 message(数字/布尔/普通对象)必须仍被转成文本返回,不能因为
+    // 「只接受 string」而丢弃;具体转换手段允许随实现演进(当前用模板插值 + 显式
+    // 抑制 no-base-to-string,而不是裸 `String()`),因此这里只锁语义、不锁字面写法。
+    expect(body.includes("if (!message) return undefined;")).toBe(true);
+    expect(body.includes("if (typeof message === 'string') return message;")).toBe(true);
+    expect(/return\s*`\$\{message\}`;/.test(body)).toBe(true);
+    expect(body.includes('instanceof Error')).toBe(false);
+  });
+
+  await test('getErrorName source: only a string name is accepted (mirrors `error?.name`, no coercion)', () => {
+    expect(chatControllerSource.includes('function getErrorName(error: unknown): string | undefined')).toBe(true);
+    const bodyStart = chatControllerSource.indexOf('function getErrorName(error: unknown)');
+    const body = chatControllerSource.slice(bodyStart, chatControllerSource.indexOf('\n}', bodyStart));
+    expect(body.includes("typeof name === 'string'")).toBe(true);
+  });
+
+  await test('undoWorkspaceEdit surfaces getErrorText(error) || fallback value-for-value through the real catch path', async () => {
+    const cases: { thrown: unknown; expected: string }[] = [
+      { thrown: new Error('boom'), expected: 'boom' },
+      // 非 Error 但带 message 的对象：不能因为「只接受 Error」丢掉可读信息。
+      { thrown: { message: 'denied' }, expected: 'denied' },
+      // 跨 realm / null-prototype 对象照样能读到 message。
+      { thrown: Object.assign(Object.create(null), { message: 'cross realm' }), expected: 'cross realm' },
+      // 真值非字符串 message 必须显示，这正是 issue #69 明确禁止丢弃的那一格。
+      { thrown: { message: 123 }, expected: '123' },
+      { thrown: { message: true }, expected: 'true' },
+      // 假值/缺失 message 落回调用方的 fallback 文案。
+      { thrown: new Error(''), expected: 'Unable to undo workspace edit.' },
+      { thrown: { message: 0 }, expected: 'Unable to undo workspace edit.' },
+      { thrown: { message: false }, expected: 'Unable to undo workspace edit.' },
+      { thrown: null, expected: 'Unable to undo workspace edit.' },
+      { thrown: {}, expected: 'Unable to undo workspace edit.' },
+      // 非对象抛出值同样没有 .message，原实现 `error?.message` 下也拿不到信息。
+      { thrown: 'boom', expected: 'Unable to undo workspace edit.' },
+      { thrown: 42, expected: 'Unable to undo workspace edit.' },
+      { thrown: undefined, expected: 'Unable to undo workspace edit.' },
+    ];
+
+    for (const { thrown, expected } of cases) {
+      const failed: string[] = [];
+      const controller = new ChatController({
+        app: {} as any,
+        api: {
+          getSkillCommands: () => [],
+          executeSlashSkillCommand: async () => ({ success: true }),
+          chat: async () => 'fallback',
+          chatStream: async function* () { },
+          clearSession: async () => { },
+          getUserProfile: () => null,
+          updateProfile: async () => { },
+          getAvailableTools: () => [],
+          undoWorkspaceEdit: async () => { throw thrown; },
+        } as any,
+        onWorkspaceEditUndoFailed: (message: string) => failed.push(message),
+      });
+
+      const result = await controller.undoWorkspaceEdit('edit-1');
+
+      expect(result).toEqual({ success: false, error: expected });
+      expect(failed).toEqual([expected]);
+
+      controller.cleanup();
+    }
+  });
+
+  await test('streaming catch tells AbortError (by name, via getErrorName) apart from an ordinary thrown error (via getErrorText)', async () => {
+    // isAbortError() === getErrorName(error) === 'AbortError'. 一个带 AbortError 名字
+    // 但不是 Error 实例的跨 realm/普通对象也要被认成中止，不能因为「只接受 Error.name」
+    // 退化成走失败分支。
+    const streamEventsAbort: any[] = [];
+    const controllerAbort = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'fallback',
+        chatStream: async function* () {
+          yield { type: 'text_delta', content: 'partial' };
+          throw Object.assign(Object.create(null), { name: 'AbortError', message: 'ignored' });
+        },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onStreamEvent: (event: any) => streamEventsAbort.push(event),
+    });
+
+    await controllerAbort.processCommand('Stream something');
+
+    expect(streamEventsAbort.map(event => event.type)).toEqual(['text_delta', 'done']);
+    expect(streamEventsAbort[streamEventsAbort.length - 1].outcome).toBe('cancelled');
+    controllerAbort.cleanup();
+
+    // 真值非字符串 message（{ message: 123 }）走 getErrorText，在失败分支里原样显示为 '123'，
+    // 不是因为「非 Error」或「非字符串」被丢弃成通用 fallback。
+    const streamEventsFail: any[] = [];
+    const controllerFail = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'fallback',
+        chatStream: async function* () {
+          yield { type: 'text_delta', content: 'partial' };
+          throw { message: 123 };
+        },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onStreamEvent: (event: any) => streamEventsFail.push(event),
+    });
+
+    await controllerFail.processCommand('Stream something');
+
+    const errorEvent = streamEventsFail.find(event => event.type === 'error');
+    expect(errorEvent.message).toBe('123');
+    expect(streamEventsFail[streamEventsFail.length - 1].outcome).toBe('failed');
+    controllerFail.cleanup();
+  });
+
+  await test('handleSlashCommand catch (getErrorText) reports a non-Error message instead of a generic fallback', async () => {
+    const messages: any[] = [];
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [{ command: '/save', skillName: 'web-clipper', description: 'Save webpage to vault' }],
+        executeSlashSkillCommand: async () => { throw { message: 'denied' }; },
+        chat: async () => 'fallback',
+        chatStream: async function* () { },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+      onMessageAdded: (message: any) => messages.push(message),
+    });
+
+    await controller.processCommand('/save https://example.com');
+
+    expect(messages[messages.length - 1].content).toBe('Error: denied');
+    controller.cleanup();
+  });
+
+  await test('isApprovalRequiredResult (toApprovalRequest) accepts a real approval-required payload and rejects a plain successful result', async () => {
+    const controller = new ChatController({
+      app: {} as any,
+      api: {
+        getSkillCommands: () => [],
+        executeSlashSkillCommand: async () => ({ success: true }),
+        chat: async () => 'fallback',
+        chatStream: async function* () { },
+        clearSession: async () => { },
+        getUserProfile: () => null,
+        updateProfile: async () => { },
+        getAvailableTools: () => [],
+      } as any,
+    });
+
+    const approvalPayload = {
+      approval_required: true,
+      action: 'delete_note',
+      target: 'Notes/secret.md',
+      requestId: 'req-1',
+      args: { path: 'Notes/secret.md' },
+      message: 'Delete this note?',
+    };
+    const approvalRequest = (controller as any).toApprovalRequest(approvalPayload);
+    expect(approvalRequest).toEqual({
+      id: 'req-1',
+      conversationId: undefined,
+      action: 'delete_note',
+      target: 'Notes/secret.md',
+      args: { path: 'Notes/secret.md' },
+      message: 'Delete this note?',
+      preview: undefined,
+    });
+
+    // 一个普通成功结果（没有 approval_required 判别位）必须被拒绝，不能误判成审批请求。
+    const plainResult = { success: true, path: 'Notes/secret.md', message: 'Deleted.' };
+    expect((controller as any).toApprovalRequest(plainResult)).toBe(null);
+
+    // approval_required 为假值（非 true）也要被拒绝 —— 与原 `if (!result?.approval_required)` 的真值判断一致。
+    expect((controller as any).toApprovalRequest({ approval_required: false, action: 'x', target: 'y' })).toBe(null);
+    expect((controller as any).toApprovalRequest(null)).toBe(null);
+    expect((controller as any).toApprovalRequest(undefined)).toBe(null);
+
+    controller.cleanup();
+  });
+
+  await test('ToolResultView / isApprovalRequiredResult source shape: approval_required stays the discriminant, guard keeps truthy semantics', () => {
+    const typesSource = readFileSync('src/ui/types.ts', 'utf8');
+    expect(typesSource.includes('export interface ToolResultView {')).toBe(true);
+    expect(typesSource.includes('export type ApprovalRequiredToolResult = ToolResultView & {')).toBe(true);
+    expect(typesSource.includes('approval_required: true;')).toBe(true);
+    expect(typesSource.includes('export function isApprovalRequiredResult(')).toBe(true);
+    expect(typesSource.includes('return !!result?.approval_required;')).toBe(true);
   });
 }
 

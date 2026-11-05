@@ -69,16 +69,17 @@ export class MessageRenderer {
   }
 
   async renderMessage(container: HTMLElement, message: ChatMessage): Promise<HTMLElement> {
-    const entry = (container as any).createDiv({ cls: `shell-entry ${message.role}` }) as HTMLElement;
+    const entry = container.createDiv({ cls: `shell-entry ${message.role}` });
     if (typeof entry.setAttribute === 'function') entry.setAttribute('data-message-id', message.id);
 
     try {
       if (message.metadata?.workspaceEdit) {
         this.renderWorkspaceEdit(entry, message);
       } else if (message.approval) {
-        (entry as any).addClass?.('shell-approval-entry') ?? entry.classList.add('shell-approval-entry');
-        (entry as any).createDiv({ cls: 'shell-approval-avatar', text: 'AI' });
-        const approvalBody = (entry as any).createDiv({ cls: 'shell-approval-message-body' }) as HTMLElement;
+        entry.addClass?.('shell-approval-entry');
+        entry.classList.add('shell-approval-entry');
+        entry.createDiv({ cls: 'shell-approval-avatar', text: 'AI' });
+        const approvalBody = entry.createDiv({ cls: 'shell-approval-message-body' });
         this.renderApproval(approvalBody, message);
       } else if (message.role === 'ai') {
         if (message.content) {
@@ -97,7 +98,8 @@ export class MessageRenderer {
         if (status) {
           this.renderSystemStatus(entry, status);
         } else if (this.isCancelledSystemMessage(message.content)) {
-          (entry as any).addClass?.('shell-system-cancelled') ?? entry.classList.add('shell-system-cancelled');
+          entry.addClass?.('shell-system-cancelled');
+          entry.classList.add('shell-system-cancelled');
           this.setText(entry, `${t('[System]')} ${message.content}`);
         } else {
           this.setText(entry, `${t('[System]')} ${message.content}`);
@@ -160,34 +162,34 @@ export class MessageRenderer {
     if (!outcome || outcome === 'completed') return null;
 
     const cancelled = outcome === 'cancelled';
-    const card = (container as any).createDiv({
+    const card = container.createDiv({
       cls: `shell-turn-outcome shell-turn-${outcome}`,
-    }) as HTMLElement;
+    });
     this.setAttribute(card, 'role', cancelled ? 'status' : 'alert');
 
-    const icon = (card as any).createSpan({
+    const icon = card.createSpan({
       cls: 'shell-turn-outcome-icon',
       text: cancelled ? '\u25A0' : '!',
-    }) as HTMLElement;
+    });
     this.setAttribute(icon, 'aria-hidden', 'true');
 
-    const body = (card as any).createDiv({ cls: 'shell-turn-outcome-body' }) as HTMLElement;
-    (body as any).createDiv({
+    const body = card.createDiv({ cls: 'shell-turn-outcome-body' });
+    body.createDiv({
       cls: 'shell-turn-outcome-title',
       text: cancelled ? t('Stopped — the answer is incomplete') : t('Generation failed'),
     });
     const reason = message.metadata?.failureReason;
     if (!cancelled && reason) {
-      (body as any).createDiv({ cls: 'shell-turn-outcome-reason', text: reason });
+      body.createDiv({ cls: 'shell-turn-outcome-reason', text: reason });
     }
 
-    const actions = (card as any).createDiv({ cls: 'shell-turn-outcome-actions' }) as HTMLElement;
+    const actions = card.createDiv({ cls: 'shell-turn-outcome-actions' });
     if (!cancelled && this.options.onRetryTurn) {
-      const retryButton = (actions as any).createEl('button', {
+      const retryButton = actions.createEl('button', {
         cls: 'shell-turn-retry',
         text: t('Retry'),
         attr: { type: 'button' },
-      }) as HTMLButtonElement;
+      });
       retryButton.addEventListener('click', () => {
         // 处理中禁用重复重试:双击只允许一个在途请求(控制器还有一层 isRunActive 守卫)。
         if (retryButton.disabled) return;
@@ -198,11 +200,11 @@ export class MessageRenderer {
       });
     }
     if (this.options.onRestoreDraft && this.options.canRestoreDraft?.(message)) {
-      const restoreButton = (actions as any).createEl('button', {
+      const restoreButton = actions.createEl('button', {
         cls: 'shell-turn-restore',
         text: t('Restore draft'),
         attr: { type: 'button' },
-      }) as HTMLElement;
+      });
       restoreButton.addEventListener('click', () => {
         void this.options.onRestoreDraft?.(message);
       });
@@ -212,12 +214,12 @@ export class MessageRenderer {
   }
 
   addActionToolbar(container: HTMLElement, message: ChatMessage) {
-    const toolbar = (container as any).createDiv({ cls: 'shell-feedback-bar shell-message-actions' }) as HTMLElement;
-    const copyButton = (toolbar as any).createEl('button', {
+    const toolbar = container.createDiv({ cls: 'shell-feedback-bar shell-message-actions' });
+    const copyButton = toolbar.createEl('button', {
       cls: 'shell-message-action-btn shell-copy-btn clickable-icon',
       title: t('Copy message'),
       attr: { 'aria-label': t('Copy message') },
-    }) as HTMLElement;
+    });
     setIcon(copyButton, 'copy');
     copyButton.addEventListener('click', () => {
       void this.copyMessage(message);
@@ -228,11 +230,11 @@ export class MessageRenderer {
 
     // 重试(阶段C):对该 ai 回复重新生成,产生兄弟分支。仅在宿主接入且该消息已锚定会话树时可用。
     if (this.options.onRetry && message.sessionEntryId && !incomplete) {
-      const retryButton = (toolbar as any).createEl('button', {
+      const retryButton = toolbar.createEl('button', {
         cls: 'shell-message-action-btn shell-retry-btn clickable-icon',
         title: t('Regenerate (keep original answer as a branch)'),
         attr: { 'aria-label': t('Regenerate') },
-      }) as HTMLElement;
+      });
       setIcon(retryButton, 'refresh-cw');
       retryButton.addEventListener('click', () => {
         void this.options.onRetry?.(message);
@@ -242,28 +244,29 @@ export class MessageRenderer {
     // 点赞:用户认可该回答 → 归档到知识库(onFeedbackUp 内部走 file-back)。
     // 仅在宿主接入归档通路时渲染,避免点了无反应的死按钮。
     if (this.options.onFeedbackUp && !incomplete) {
-      const upButton = (toolbar as any).createEl('button', {
+      const upButton = toolbar.createEl('button', {
         cls: 'shell-feedback-btn shell-thumbs-up clickable-icon',
         title: t('Approve and save to knowledge base'),
         attr: { 'aria-label': t('Approve and save to knowledge base') },
-      }) as HTMLElement;
+      });
       setIcon(upButton, 'thumbs-up');
       upButton.addEventListener('click', () => {
         // 点赞归档是一次性动作:点击后立即禁用,防止重复触发多次归档。
-        if ((upButton as HTMLButtonElement).disabled) return;
-        (upButton as HTMLButtonElement).disabled = true;
-        (upButton as any).addClass?.('active') ?? upButton.classList.add('active');
+        if (upButton.disabled) return;
+        upButton.disabled = true;
+        upButton.addClass?.('active');
+        upButton.classList.add('active');
         void this.options.onFeedbackUp?.(message);
       });
     }
 
     // 点踩:用户不满意 → 展开内联输入问「哪里不好」,提交后回调 onFeedbackDown(message, reason)。
     if (this.options.onFeedbackDown && !incomplete) {
-      const downButton = (toolbar as any).createEl('button', {
+      const downButton = toolbar.createEl('button', {
         cls: 'shell-feedback-btn shell-thumbs-down clickable-icon',
         title: t('Not satisfied — tell AI what to improve'),
         attr: { 'aria-label': t('Not satisfied — tell AI what to improve') },
-      }) as HTMLElement;
+      });
       setIcon(downButton, 'thumbs-down');
       downButton.addEventListener('click', () => {
         this.toggleNegativeFeedbackInput(container, toolbar, downButton, message);
@@ -274,11 +277,11 @@ export class MessageRenderer {
     // 改写后从该问题重新提问,原问答保留为兄弟分支。放在 ai 操作栏是因为流结束时才渲染,
     // 能拿到真实 entryId(user 消息在发送时渲染,拿不到);统一入口也更直观。
     if (this.options.onFork && message.sessionEntryId && !incomplete) {
-      const forkButton = (toolbar as any).createEl('button', {
+      const forkButton = toolbar.createEl('button', {
         cls: 'shell-message-action-btn shell-fork-btn clickable-icon',
         title: t('Fork: edit the question and regenerate (keep current conversation as a branch)'),
         attr: { 'aria-label': t('Fork') },
-      }) as HTMLElement;
+      });
       setIcon(forkButton, 'git-branch');
       forkButton.addEventListener('click', () => {
         this.toggleForkInput(container, message);
@@ -296,17 +299,17 @@ export class MessageRenderer {
   /** 在操作栏内渲染兄弟分支 `< index/count >` 切换控件。 */
   private renderBranchNav(toolbar: HTMLElement, message: ChatMessage) {
     const branch = message.branch!;
-    const nav = (toolbar as any).createDiv({ cls: 'shell-branch-nav' }) as HTMLElement;
-    const prev = (nav as any).createEl('button', {
+    const nav = toolbar.createDiv({ cls: 'shell-branch-nav' });
+    const prev = nav.createEl('button', {
       cls: 'shell-branch-prev clickable-icon',
       attr: { type: 'button', title: t('Previous branch'), 'aria-label': t('Previous branch') },
-    }) as HTMLElement;
+    });
     setIcon(prev, 'chevron-left');
-    (nav as any).createSpan({ cls: 'shell-branch-count', text: `${branch.index + 1}/${branch.count}` });
-    const next = (nav as any).createEl('button', {
+    nav.createSpan({ cls: 'shell-branch-count', text: `${branch.index + 1}/${branch.count}` });
+    const next = nav.createEl('button', {
       cls: 'shell-branch-next clickable-icon',
       attr: { type: 'button', title: t('Next branch'), 'aria-label': t('Next branch') },
-    }) as HTMLElement;
+    });
     setIcon(next, 'chevron-right');
 
     const go = (targetIndex: number) => {
@@ -320,28 +323,28 @@ export class MessageRenderer {
 
   /** 分叉输入:预填原问题,提交 → onFork(message, newText);Esc / 再次点击收起。 */
   private toggleForkInput(container: HTMLElement, message: ChatMessage) {
-    const existing = (container as any).querySelector?.('.shell-fork-box') as HTMLElement | null;
+    const existing = container.querySelector?.('.shell-fork-box');
     if (existing) {
-      (existing as any).remove?.();
+      existing.remove?.();
       return;
     }
 
-    const box = (container as any).createDiv({ cls: 'shell-fork-box shell-edit-box' }) as HTMLElement;
-    const input = (box as any).createEl('textarea', {
+    const box = container.createDiv({ cls: 'shell-fork-box shell-edit-box' });
+    const input = box.createEl('textarea', {
       cls: 'shell-edit-input',
       attr: { 'aria-label': t('Edit the question and ask again') },
-    }) as HTMLTextAreaElement;
+    });
     input.value = message.forkSourceText ?? '';
-    const submit = (box as any).createEl('button', {
+    const submit = box.createEl('button', {
       cls: 'shell-edit-submit',
       text: t('Ask again'),
       attr: { type: 'button' },
-    }) as HTMLElement;
+    });
 
     const commit = () => {
       const text = (input.value || '').trim();
       if (!text) { input.focus(); return; }
-      (box as any).remove?.();
+      box.remove?.();
       void this.options.onFork?.(message, text);
     };
     submit.addEventListener('click', commit);
@@ -351,7 +354,7 @@ export class MessageRenderer {
         commit();
       } else if (event.key === 'Escape') {
         event.preventDefault();
-        (box as any).remove?.();
+        box.remove?.();
       }
     });
     setTimeout(() => input.focus?.(), 0);
@@ -367,20 +370,20 @@ export class MessageRenderer {
     const canNavigate = !!this.options.onSwitchBranch && !!branch && branch.count > 1;
     if (!canEdit && !canNavigate) return;
 
-    const bar = (container as any).createDiv({ cls: 'shell-user-actions shell-branch-bar' }) as HTMLElement;
+    const bar = container.createDiv({ cls: 'shell-user-actions shell-branch-bar' });
 
     if (canNavigate && branch) {
-      const nav = (bar as any).createDiv({ cls: 'shell-branch-nav' }) as HTMLElement;
-      const prev = (nav as any).createEl('button', {
+      const nav = bar.createDiv({ cls: 'shell-branch-nav' });
+      const prev = nav.createEl('button', {
         cls: 'shell-branch-prev clickable-icon',
         attr: { type: 'button', title: t('Previous branch'), 'aria-label': t('Previous branch') },
-      }) as HTMLElement;
+      });
       setIcon(prev, 'chevron-left');
-      (nav as any).createSpan({ cls: 'shell-branch-count', text: `${branch.index + 1}/${branch.count}` });
-      const next = (nav as any).createEl('button', {
+      nav.createSpan({ cls: 'shell-branch-count', text: `${branch.index + 1}/${branch.count}` });
+      const next = nav.createEl('button', {
         cls: 'shell-branch-next clickable-icon',
         attr: { type: 'button', title: t('Next branch'), 'aria-label': t('Next branch') },
-      }) as HTMLElement;
+      });
       setIcon(next, 'chevron-right');
 
       const go = (targetIndex: number) => {
@@ -393,10 +396,10 @@ export class MessageRenderer {
     }
 
     if (canEdit) {
-      const editButton = (bar as any).createEl('button', {
+      const editButton = bar.createEl('button', {
         cls: 'shell-message-action-btn shell-edit-btn clickable-icon',
         attr: { type: 'button', title: t('Edit and ask again (keep original conversation as a branch)'), 'aria-label': t('Edit and ask again') },
-      }) as HTMLElement;
+      });
       setIcon(editButton, 'pencil');
       editButton.addEventListener('click', () => {
         this.toggleEditInput(container, bar, message);
@@ -406,28 +409,28 @@ export class MessageRenderer {
 
   /** 编辑重问的内联输入:预填原文,提交 → onEdit(message, newText);Esc 收起。 */
   private toggleEditInput(container: HTMLElement, bar: HTMLElement, message: ChatMessage) {
-    const existing = (container as any).querySelector?.('.shell-edit-box') as HTMLElement | null;
+    const existing = container.querySelector?.('.shell-edit-box');
     if (existing) {
-      (existing as any).remove?.();
+      existing.remove?.();
       return;
     }
 
-    const box = (container as any).createDiv({ cls: 'shell-edit-box' }) as HTMLElement;
-    const input = (box as any).createEl('textarea', {
+    const box = container.createDiv({ cls: 'shell-edit-box' });
+    const input = box.createEl('textarea', {
       cls: 'shell-edit-input',
       attr: { 'aria-label': t('Edit message content') },
-    }) as HTMLTextAreaElement;
+    });
     input.value = message.content;
-    const submit = (box as any).createEl('button', {
+    const submit = box.createEl('button', {
       cls: 'shell-edit-submit',
       text: t('Ask again'),
       attr: { type: 'button' },
-    }) as HTMLElement;
+    });
 
     const commit = () => {
       const text = (input.value || '').trim();
       if (!text) { input.focus(); return; }
-      (box as any).remove?.();
+      box.remove?.();
       void this.options.onEdit?.(message, text);
     };
     submit.addEventListener('click', commit);
@@ -437,7 +440,7 @@ export class MessageRenderer {
         commit();
       } else if (event.key === 'Escape') {
         event.preventDefault();
-        (box as any).remove?.();
+        box.remove?.();
       }
     });
     setTimeout(() => input.focus?.(), 0);
@@ -453,28 +456,30 @@ export class MessageRenderer {
     downButton: HTMLElement,
     message: ChatMessage,
   ) {
-    const existing = (container as any).querySelector?.('.shell-feedback-reason') as HTMLElement | null;
+    const existing = container.querySelector?.('.shell-feedback-reason');
     if (existing) {
-      (existing as any).remove?.();
-      (downButton as any).removeClass?.('active') ?? downButton.classList.remove('active');
+      existing.remove?.();
+      downButton.removeClass?.('active');
+      downButton.classList.remove('active');
       return;
     }
 
-    (downButton as any).addClass?.('active') ?? downButton.classList.add('active');
-    const box = (container as any).createDiv({ cls: 'shell-feedback-reason' }) as HTMLElement;
-    const input = (box as any).createEl('input', {
+    downButton.addClass?.('active');
+    downButton.classList.add('active');
+    const box = container.createDiv({ cls: 'shell-feedback-reason' });
+    const input = box.createEl('input', {
       cls: 'shell-feedback-reason-input',
       attr: {
         type: 'text',
         placeholder: t('What was wrong? AI will improve and answer again'),
         'aria-label': t('Feedback: what to improve'),
       },
-    }) as HTMLInputElement;
-    const submit = (box as any).createEl('button', {
+    });
+    const submit = box.createEl('button', {
       cls: 'shell-feedback-reason-submit',
       text: t('Improve answer'),
       attr: { type: 'button' },
-    }) as HTMLElement;
+    });
 
     let committed = false;
     const commit = () => {
@@ -486,7 +491,7 @@ export class MessageRenderer {
       // 防 Enter + 按钮 click 双触发:提交一次后置位,后续触发直接忽略。
       if (committed) return;
       committed = true;
-      (box as any).remove?.();
+      box.remove?.();
       void this.options.onFeedbackDown?.(message, reason);
     };
 
@@ -497,8 +502,9 @@ export class MessageRenderer {
         commit();
       } else if (event.key === 'Escape') {
         event.preventDefault();
-        (box as any).remove?.();
-        (downButton as any).removeClass?.('active') ?? downButton.classList.remove('active');
+        box.remove?.();
+        downButton.removeClass?.('active');
+        downButton.classList.remove('active');
       }
     });
 
@@ -515,8 +521,8 @@ export class MessageRenderer {
   }
 
   private setText(entry: HTMLElement, text: string) {
-    if (typeof (entry as any).setText === 'function') {
-      (entry as any).setText(text);
+    if (typeof entry.setText === 'function') {
+      entry.setText(text);
     } else {
       entry.textContent = text;
     }
@@ -538,15 +544,17 @@ export class MessageRenderer {
   }
 
   private renderSystemStatus(entry: HTMLElement, status: ParsedSystemStatus) {
-    (entry as any).addClass?.('shell-system-status') ?? entry.classList.add('shell-system-status');
-    (entry as any).addClass?.(`shell-system-status-${status.kind}`) ?? entry.classList.add(`shell-system-status-${status.kind}`);
+    entry.addClass?.('shell-system-status');
+    entry.classList.add('shell-system-status');
+    entry.addClass?.(`shell-system-status-${status.kind}`);
+    entry.classList.add(`shell-system-status-${status.kind}`);
 
-    const icon = (entry as any).createSpan({ cls: 'shell-system-status-icon', text: '✓' }) as HTMLElement;
+    const icon = entry.createSpan({ cls: 'shell-system-status-icon', text: '✓' });
     this.setAttribute(icon, 'aria-hidden', 'true');
 
-    const main = (entry as any).createSpan({ cls: 'shell-system-status-main' }) as HTMLElement;
-    (main as any).createSpan({ cls: 'shell-system-status-action', text: status.label });
-    (main as any).createSpan({
+    const main = entry.createSpan({ cls: 'shell-system-status-main' });
+    main.createSpan({ cls: 'shell-system-status-action', text: status.label });
+    main.createSpan({
       cls: 'shell-system-status-target',
       text: this.basename(status.target),
       title: status.target,
@@ -557,33 +565,35 @@ export class MessageRenderer {
     const edit = message.metadata?.workspaceEdit;
     if (!edit) return;
 
-    (entry as any).addClass?.('shell-workspace-edit-entry') ?? entry.classList.add('shell-workspace-edit-entry');
+    entry.addClass?.('shell-workspace-edit-entry');
+    entry.classList.add('shell-workspace-edit-entry');
     if (edit.status === 'undone') {
-      (entry as any).addClass?.('is-undone') ?? entry.classList.add('is-undone');
+      entry.addClass?.('is-undone');
+      entry.classList.add('is-undone');
     }
 
-    const row = (entry as any).createDiv({ cls: 'shell-workspace-edit-row' }) as HTMLElement;
-    (row as any).createSpan({ cls: 'shell-workspace-edit-bullet', text: '\u2022' });
-    (row as any).createSpan({
+    const row = entry.createDiv({ cls: 'shell-workspace-edit-row' });
+    row.createSpan({ cls: 'shell-workspace-edit-bullet', text: '\u2022' });
+    row.createSpan({
       cls: 'shell-workspace-edit-name',
       text: this.basename(edit.path),
       title: edit.path,
     });
-    (row as any).createSpan({
+    row.createSpan({
       cls: 'shell-workspace-edit-meta',
       text: this.formatWorkspaceEditMeta(edit),
     });
 
     if (edit.status !== 'applied') return;
 
-    const undoButton = (row as any).createEl('button', {
+    const undoButton = row.createEl('button', {
       cls: 'clickable-icon shell-workspace-edit-undo',
       attr: {
         type: 'button',
         title: `${t('Undo')} ${edit.path}`,
         'aria-label': `${t('Undo')} ${edit.path}`,
       },
-    }) as HTMLElement;
+    });
     setIcon(undoButton, 'undo-2');
     undoButton.addEventListener('click', (event) => {
       event.preventDefault?.();
@@ -606,8 +616,8 @@ export class MessageRenderer {
   }
 
   private setAttribute(el: HTMLElement, name: string, value: string) {
-    if (typeof (el as any).setAttribute === 'function') {
-      (el as any).setAttribute(name, value);
+    if (typeof el.setAttribute === 'function') {
+      el.setAttribute(name, value);
     }
   }
 }

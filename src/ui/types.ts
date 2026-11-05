@@ -1,7 +1,10 @@
 import { ApprovalRequest } from './approval-card';
+import type { App } from 'obsidian';
+import type { KnowledgeRuntime } from '../knowledge/runtime';
 import type { ChatTurnOutcome } from '../models/interfaces';
 import type { ApprovalState } from '../services/approval-execution';
 import type { WorkspaceEditSummary } from '../services/workspace-edit-service';
+import type { ChangePreview } from './diff/change-preview';
 
 export type ShellMessageRole = 'user' | 'ai' | 'system';
 
@@ -75,3 +78,99 @@ export interface ConversationSnapshot {
     currentNote?: string;
     pinnedAt?: number;
 }
+
+/**
+ * `file_back_knowledge` 的返回契约。
+ * `ToolRegistry.execute` 声明为 `Promise<any>`,这里收窄为归档流程实际消费的字段。
+ */
+export interface FileBackToolResult {
+    success?: boolean;
+    path?: string;
+    error?: string;
+}
+
+/** file-back 调用点用到的最小工具注册表契约。 */
+export interface FileBackToolRegistry {
+    execute(name: string, args: unknown): Promise<FileBackToolResult>;
+}
+
+/**
+ * Baizer 宿主插件实例中 UI 层需要读取的成员。
+ * 与 main.ts 的 `BaizerPlugin` 字段对应(知识运行时可能尚未初始化,故可为 null)。
+ */
+export interface BaizerPluginHost {
+    knowledgeRuntime?: KnowledgeRuntime | null;
+    toolRegistry?: FileBackToolRegistry;
+}
+
+/** Obsidian 未公开 `App.plugins` 注册表的类型,这里只声明本项目读取的路径。 */
+interface AppWithPluginRegistry {
+    plugins?: {
+        plugins?: Record<string, BaizerPluginHost | undefined>;
+    };
+}
+
+/**
+ * 从 Obsidian 内部插件注册表取回 Baizer 插件实例。
+ * 这是 UI 层读取 `app.plugins.plugins[PLUGIN_ID]` 的唯一入口,避免散落的 `as any`。
+ * 注册表缺失(非官方运行时/测试桩)时返回 undefined,调用方按「未初始化」处理。
+ */
+export function getBaizerPluginHost(app: App, pluginId: string): BaizerPluginHost | undefined {
+    return (app as App & AppWithPluginRegistry).plugins?.plugins?.[pluginId];
+}
+
+/**
+ * UI 层读取工具结果的契约。
+ *
+ * 运行时来源(`StreamEvent['tool_result'].result`、`ToolRegistry.execute`)仍是 `any`
+ * ——工具结果形态由各工具自己定义。这里集中声明宿主实际读取的字段,调用方在边界处
+ * 一次性收窄,后续成员访问即受类型保护,不必逐个 `as any`。
+ * 除 `workspaceEdit` 外的字段都可能缺省,读取方需自行回退。
+ */
+export interface ToolResultView {
+    success?: boolean;
+    status?: string;
+    error?: string;
+    message?: string;
+    path?: string;
+    target?: string;
+    /** 写入类工具落盘后回传的 workspace 编辑摘要(供撤销/打开落盘文件)。 */
+    workspaceEdit?: WorkspaceEditSummary;
+    /** 审批请求载荷的判别位。 */
+    approval_required?: boolean;
+    /** 审批请求身份(登记表键)。 */
+    requestId?: string;
+    /** 审批动作名与作用对象。 */
+    action?: string;
+    /** 审批动作参数。 */
+    args?: Record<string, unknown>;
+    /** 审批预览。 */
+    preview?: ChangePreview;
+}
+
+/**
+ * `approval_required` 为真时的工具结果:此时 `action` / `target` 由工具保证存在,
+ * 可直接写入 `ApprovalRequest`(与旧实现 `result.action` 的取值语义一致)。
+ */
+export type ApprovalRequiredToolResult = ToolResultView & {
+    approval_required: true;
+    action: string;
+    target: string;
+};
+
+/**
+ * 判别一次工具结果是否为审批请求。
+ * 与原 `if (!result?.approval_required) return null` 的运行时语义完全一致(真值判断)。
+ */
+export function isApprovalRequiredResult(
+    result: ToolResultView | null | undefined,
+): result is ApprovalRequiredToolResult {
+    return !!result?.approval_required;
+}
+
+/**
+ * 兼容测试桩/旧调用方返回的「裸工具结果」:没有 `kind` 判别字段,
+ * 靠 `success` / `status` 判断成败。与 `ApprovalExecutionOutcome` 组成联合后,
+ * `kind === 'approval-execution'` 即可把两者分开。
+ */
+export type LegacyApprovalToolResult = ToolResultView & { kind?: undefined };

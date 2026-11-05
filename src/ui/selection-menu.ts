@@ -3,10 +3,12 @@ import { EditorView, tooltips } from '@codemirror/view';
 import { Extension, EditorState } from '@codemirror/state';
 import { ModelService } from '../services/model-service';
 import { ChatController } from './chat-controller';
+import type { ChatControllerOptions } from './chat-controller';
 import { ChatMessage } from './types';
 import { SuggestList } from './components/suggest-list';
 import { SuggestionItem, SuggestionType } from './controllers/input-controller';
 import { SELECTION_ACTIONS, getAction, buildActionPrompt } from './selection-ai/action-registry';
+import type { SelectionAction } from './selection-ai/action-registry';
 import { SelectionContextBuilder } from './selection-ai/selection-context-builder';
 import { FloatingPanel } from './selection-ai/floating-panel';
 import {
@@ -27,6 +29,19 @@ let activeExplainPanel: FloatingPanel | null = null;
 // 状态层把 chat 态的 controller 只约束到 cleanup()(以免状态层依赖 obsidian/app 层);
 // 本文件写入的始终是 ChatController,取回时按具体类型使用。
 type ChatMenuState = Extract<SelectionMenuState, { type: 'chat' }> & { controller: ChatController };
+
+/** 宿主可注入的回调子集(取自 ChatController 公开的构造参数形状)。 */
+type ControllerHooks = Pick<ChatControllerOptions, 'onStreamEvent' | 'onMessageAdded' | 'onStatusChanged'>;
+
+/**
+ * 把宿主回调挂到控制器上。
+ * ChatController 把这几个字段声明为 private(官方入口是构造参数),而浮窗/内联面板的
+ * DOM 要到控制器构造之后才建好,只能事后注入。Object.assign 与 `controller.onX = fn`
+ * 语义完全一致(都是写实例自有属性),但不依赖 `as any` 绕过可见性。
+ */
+function attachControllerHooks(controller: ChatController, hooks: ControllerHooks): void {
+    Object.assign(controller, hooks);
+}
 
 interface PluginContext {
     app: App;
@@ -196,7 +211,7 @@ function openPanel(
     view: EditorView,
     context: PluginContext,
     state: Extract<SelectionMenuState, { type: 'toolbar' }>,
-    action: { id: string; label: string; context: any },
+    action: SelectionAction,
     selection: string,
 ) {
     // 单例:开新浮窗前销毁上一个,避免多开堆叠。
@@ -222,7 +237,9 @@ function openPanel(
         },
     });
     // ChatController 的流事件转发进浮窗渲染(thinking 折叠 + 流式正文)。
-    (controller as any).onStreamEvent = (event: any) => panel.handleStreamEvent(event);
+    attachControllerHooks(controller, {
+        onStreamEvent: (event) => panel.handleStreamEvent(event),
+    });
     activeExplainPanel = panel;
 
     // 首轮:动作模板 + 装配上下文 = 真实 prompt(发模型);displayText=intent(不进消息流,仅占位)。
@@ -274,14 +291,18 @@ function createChatPanel(
     };
 
     renderMessages();
-    (state.controller as any).onMessageAdded = () => renderMessages();
+    attachControllerHooks(state.controller, {
+        onMessageAdded: () => renderMessages(),
+    });
 
     const statusContainer = container.createDiv({ cls: 'guardian-status-bar baizer-hidden' });
     statusContainer.setText(t('Thinking...'));
-    (state.controller as any).onStatusChanged = (isResponding: boolean) => {
-        if (isResponding) statusContainer.removeClass('baizer-hidden');
-        else statusContainer.addClass('baizer-hidden');
-    };
+    attachControllerHooks(state.controller, {
+        onStatusChanged: (isResponding) => {
+            if (isResponding) statusContainer.removeClass('baizer-hidden');
+            else statusContainer.addClass('baizer-hidden');
+        },
+    });
 
     const inputWrapper = container.createDiv({ cls: 'guardian-input-wrapper' });
     const textarea = inputWrapper.createEl('textarea', {

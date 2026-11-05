@@ -18,14 +18,23 @@ export function clampRect(rect: PanelRect, viewport: { width: number; height: nu
   return { left, top, width, height };
 }
 
+/** 校验从 localStorage 读回的未知值是否满足 PanelRect 形状。 */
+function isPanelRect(value: unknown): value is PanelRect {
+  if (typeof value !== 'object' || value === null) return false;
+  if (!('left' in value) || !('top' in value) || !('width' in value) || !('height' in value)) return false;
+  return typeof value.left === 'number'
+    && typeof value.top === 'number'
+    && typeof value.width === 'number'
+    && typeof value.height === 'number';
+}
+
 /** 从 localStorage 读上次矩形;无/损坏返回 null。 */
 export function loadPanelRect(storage: Pick<Storage, 'getItem'> = localStorage): PanelRect | null {
   try {
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const p = JSON.parse(raw);
-    if (typeof p?.left === 'number' && typeof p?.top === 'number' && typeof p?.width === 'number' && typeof p?.height === 'number') return p;
-    return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isPanelRect(parsed) ? parsed : null;
   } catch { return null; }
 }
 

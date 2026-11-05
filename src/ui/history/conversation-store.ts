@@ -23,6 +23,26 @@ interface VaultAdapter {
     mkdir(path: string): Promise<void>;
 }
 
+/**
+ * 磁盘上的会话文件是外部输入：先收成 `unknown`，再逐字段显式判定类型。
+ * 直接按 `any` 读字段的话，字段名写错时类型系统不会报错，坏数据会静默通过校验。
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object';
+}
+
+/** 单条会话记录的必填字段校验（与 ConversationSnapshot 的必填项一一对应）。 */
+function isConversationRecord(value: unknown): boolean {
+    if (!isRecord(value)) return false;
+    return typeof value.id === 'string'
+        && typeof value.title === 'string'
+        && typeof value.createdAt === 'number'
+        && typeof value.updatedAt === 'number'
+        && typeof value.providerId === 'string'
+        && typeof value.modelId === 'string'
+        && Array.isArray(value.messages);
+}
+
 export class ConversationStore {
     private readonly maxConversations: number;
     private readonly path: string;
@@ -69,7 +89,7 @@ export class ConversationStore {
             }
 
             const raw = await adapter.read(this.path);
-            const parsed = JSON.parse(raw);
+            const parsed: unknown = JSON.parse(raw);
             if (!this.isConversationFile(parsed)) {
                 return this.emptyFile();
             }
@@ -104,26 +124,19 @@ export class ConversationStore {
     }
 
     private getAdapter(): VaultAdapter {
-        return this.app.vault.adapter as unknown as VaultAdapter;
+        // Obsidian 的 DataAdapter 已经具备这四个方法，无需再经过 any 中转。
+        return this.app.vault.adapter;
     }
 
     private emptyFile(): ConversationFile {
         return { version: 1, conversations: [] };
     }
 
-    private isConversationFile(value: any): value is ConversationFile {
-        return value
-            && value.version === 1
+    private isConversationFile(value: unknown): value is ConversationFile {
+        if (!isRecord(value)) return false;
+        return value.version === 1
             && Array.isArray(value.conversations)
-            && value.conversations.every((conversation: any) => (
-                typeof conversation?.id === 'string'
-                && typeof conversation.title === 'string'
-                && typeof conversation.createdAt === 'number'
-                && typeof conversation.updatedAt === 'number'
-                && typeof conversation.providerId === 'string'
-                && typeof conversation.modelId === 'string'
-                && Array.isArray(conversation.messages)
-            ));
+            && value.conversations.every(isConversationRecord);
     }
 
     private sortAndClone(conversations: ConversationSnapshot[]): ConversationSnapshot[] {

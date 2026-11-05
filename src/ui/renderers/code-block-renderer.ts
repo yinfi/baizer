@@ -16,7 +16,7 @@ export class CodeBlockRenderer {
   private processCodeBlocks(container: HTMLElement) {
     const codeBlocks = Array.from(container.querySelectorAll('pre > code'));
     codeBlocks.forEach((codeBlock) => {
-      const pre = codeBlock.parentElement as any;
+      const pre = codeBlock.parentElement;
       if (!pre || pre.querySelector?.('.shell-code-block-header')) return;
 
       const header = pre.createDiv({ cls: 'shell-code-block-header' });

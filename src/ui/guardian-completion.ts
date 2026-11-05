@@ -574,7 +574,9 @@ export class GuardianCompletionService {
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     let timedOut = false;
     const raw = await Promise.race([
-      fetcher.call(runtime, query),
+      // tsconfig 未开 strictBindCallApply,Function.prototype.call 的返回值退化为 any,
+      // 这里显式还原被调用方法声明的返回类型(运行时行为不变)。
+      fetcher.call(runtime, query) as Promise<string>,
       new Promise<string>((resolve) => {
         timeoutHandle = setTimeout(() => {
           timedOut = true;
@@ -633,7 +635,8 @@ export class GuardianCompletionService {
 
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     const raw = await Promise.race([
-      recall.call(this.deps.modelService, query, 500).catch(() => ''),
+      // 同上:`.call` 在此退化为 any,先还原 Promise<string> 再挂 .catch。
+      (recall.call(this.deps.modelService, query, 500) as Promise<string>).catch(() => ''),
       new Promise<string>((resolve) => {
         timeoutHandle = setTimeout(() => resolve(''), timeoutMs);
       }),
@@ -664,7 +667,7 @@ export class GuardianCompletionService {
       context.cursorPrefix,
       context.cursorSuffix,
       context.localBlock,
-    ].join(' ');
+    ].join('\0');
   }
 
   private readCache(key: string): { suggestion: string; quality: GuardianQualityDecision } | null {
@@ -686,7 +689,8 @@ export class GuardianCompletionService {
     this.completionCache.set(key, { suggestion, quality, expiresAt: Date.now() + ttl });
     // 容量上限：超出则按插入顺序淘汰最旧条目（Map 迭代序即插入序）。
     while (this.completionCache.size > GuardianCompletionService.CACHE_MAX_ENTRIES) {
-      const oldest = this.completionCache.keys().next().value;
+      // MapIterator.next() 的 IteratorResult.value 在 lib 里含 any 分支,显式收窄。
+      const oldest = this.completionCache.keys().next().value as string | undefined;
       if (oldest === undefined) break;
       this.completionCache.delete(oldest);
     }
@@ -786,12 +790,18 @@ export class GuardianCompletionService {
   }
 }
 
-function parseGuardianJson(response: string): any | null {
+/** 模型返回的 JSON 属不可信输入:字段一律以 unknown 收窄,由调用方做 typeof 校验。 */
+interface GuardianJsonPayload {
+  type?: unknown;
+  suggestion?: unknown;
+}
+
+function parseGuardianJson(response: string): GuardianJsonPayload | null {
   for (let start = response.indexOf('{'); start >= 0; start = response.indexOf('{', start + 1)) {
     const candidate = extractJsonObjectAt(response, start);
     if (!candidate) continue;
     try {
-      return JSON.parse(candidate);
+      return JSON.parse(candidate) as GuardianJsonPayload;
     } catch {
       continue;
     }

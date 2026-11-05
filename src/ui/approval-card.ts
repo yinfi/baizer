@@ -77,7 +77,7 @@ interface ApprovalCardHandlers {
  * 因此旧 DOM 释放不会丢请求。
  */
 export function renderApprovalCard(
-  container: any,
+  container: HTMLElement,
   request: ApprovalRequest,
   handlers: ApprovalCardHandlers,
   state: ApprovalState = { status: 'pending' },
@@ -138,7 +138,7 @@ export function renderApprovalCard(
 }
 
 function renderDecisionActions(
-  card: any,
+  card: HTMLElement,
   request: ApprovalRequest,
   handlers: ApprovalCardHandlers,
   risk: 'low' | 'medium' | 'high',
@@ -146,11 +146,11 @@ function renderDecisionActions(
   running: boolean,
 ) {
   const actions = card.createDiv({ cls: 'shell-approval-actions' });
-  const buttons: HTMLElement[] = [];
+  const buttons: HTMLButtonElement[] = [];
   let clicked = false;
   const disableAllButtons = () => {
     for (const button of buttons) {
-      (button as HTMLButtonElement).disabled = true;
+      button.disabled = true;
       button.setAttribute('aria-disabled', 'true');
     }
   };
@@ -194,7 +194,7 @@ function renderDecisionActions(
 }
 
 function renderOutcome(
-  card: any,
+  card: HTMLElement,
   state: ApprovalState,
   handlers: ApprovalCardHandlers,
 ) {
@@ -219,7 +219,7 @@ function renderOutcome(
     const button = createTextButton(actions, 'shell-approval-retry', t('Retry'), false, () => {
       if (clicked) return;
       clicked = true;
-      (button as HTMLButtonElement).disabled = true;
+      button.disabled = true;
       button.setAttribute('aria-disabled', 'true');
       void handlers.onRetry?.();
     });
@@ -232,7 +232,7 @@ function renderOutcome(
     const button = createTextButton(actions, 'shell-approval-recheck', t('Check result'), false, () => {
       if (clicked) return;
       clicked = true;
-      (button as HTMLButtonElement).disabled = true;
+      button.disabled = true;
       button.setAttribute('aria-disabled', 'true');
       void handlers.onRecheck?.();
     });
@@ -243,18 +243,18 @@ function renderOutcome(
 }
 
 function createTextButton(
-  container: any,
+  container: HTMLElement,
   className: string,
   label: string,
   disabled: boolean,
   onClick: () => void,
-) {
+): HTMLButtonElement {
   const button = container.createEl('button', {
     cls: `shell-approval-btn ${className}`,
     attr: { type: 'button', title: label, 'aria-label': label },
-  }) as HTMLElement;
+  });
   button.textContent = label;
-  (button as HTMLButtonElement).disabled = disabled;
+  button.disabled = disabled;
   if (disabled) button.setAttribute('aria-disabled', 'true');
   button.addEventListener('click', onClick);
   return button;
@@ -296,23 +296,23 @@ function actionVerb(request: ApprovalRequest): string {
 }
 
 function createIconButton(
-  container: any,
+  container: HTMLElement,
   className: string,
   icon: string,
   label: string,
   setIconFn: (el: HTMLElement, icon: string) => void,
   onClick: () => void,
-) {
+): HTMLButtonElement {
   const button = container.createEl('button', {
     cls: `shell-approval-btn shell-approval-icon-btn ${className}`,
     attr: { type: 'button', title: label, 'aria-label': label },
-  }) as HTMLElement;
+  });
   setIconFn(button, icon);
   button.addEventListener('click', onClick);
   return button;
 }
 
-function renderFact(container: any, label: string, value: string, valueClass: string) {
+function renderFact(container: HTMLElement, label: string, value: string, valueClass: string) {
   const row = container.createDiv({ cls: 'shell-approval-fact' });
   row.createDiv({ cls: 'shell-approval-fact-label', text: label });
   row.createDiv({ cls: `shell-approval-fact-value ${valueClass}`, text: value });

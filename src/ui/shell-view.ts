@@ -1,9 +1,9 @@
-import { ItemView, WorkspaceLeaf, Notice, MarkdownView, setIcon } from 'obsidian';
+import { App, Editor, ItemView, WorkspaceLeaf, Notice, MarkdownView, setIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
 import { ChatController, ChatTurnRequest, MessageAddedOptions } from './chat-controller';
-import { ContextManager } from '../services/context-manager';
+import { ContextManager, ContextItem } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
 import { DEFAULT_SETTINGS, IPlugin, PLUGIN_ID, PLUGIN_NAME, VIEW_TYPE_SHELL } from '../mcp/types';
 import { ChatTurnOutcome, StreamEvent } from '../models/interfaces';
@@ -32,6 +32,7 @@ import { ConversationStore } from './history/conversation-store';
 import { showGhostText } from './ghost-text';
 import { GrowthToken, ScrollFollowController } from './scroll/scroll-follow-controller';
 import { debounce } from '../utils/throttle';
+import { thrownMessage } from '../utils/thrown-message';
 
 export { VIEW_TYPE_SHELL };
 
@@ -464,12 +465,15 @@ export class ShellView extends ItemView {
                 description: command.description,
             }));
             // 用户自定义命令(.obsidian/baizer-commands/*.md)并入 skill 通道一起展示。
-            const userCommands = (typeof (this.modelService as any).getUserCommandsSync === 'function'
-                ? (this.modelService as any).getUserCommandsSync()
-                : []).map((command: any) => ({
-                    command: command.command,
-                    description: command.description,
-                }));
+            // 用 ModelService 上的真实签名约束元素类型;any 断言会让 .map 回调退化成 any。
+            const userCommandEntries: ReturnType<ModelService['getUserCommandsSync']> =
+                typeof this.modelService.getUserCommandsSync === 'function'
+                    ? this.modelService.getUserCommandsSync()
+                    : [];
+            const userCommands = userCommandEntries.map(command => ({
+                command: command.command,
+                description: command.description,
+            }));
             const mergedSkillLike = [...skillCommands, ...userCommands];
             const skillCommandLabels = new Set(mergedSkillLike.map(command => command.command));
             return buildCommandSuggestions(
@@ -634,13 +638,14 @@ export class ShellView extends ItemView {
                 if (chipsContainer) this.renderContextChips(chipsContainer);
                 await this.refreshKnowledgeStatusPanel();
             }
-        } catch (error) {
+        } catch (error: unknown) {
             logger.error('Command processing failed', error, 'ShellView.processCommand');
             if (request) this.restoreDraft(request);
             this.appendMessage({
                 id: 'error-' + Date.now(),
                 role: 'system',
-                content: `Error processing command: ${error.message}`,
+                // 逐值对齐原 `error.message`(含取不到时的 undefined),只收窄类型不改运行时。
+                content: `Error processing command: ${(error as { message?: string }).message}`,
                 timestamp: Date.now()
             });
         } finally {
@@ -662,7 +667,8 @@ export class ShellView extends ItemView {
 
         // 只在活动 tab 上恢复;contextManager 就是活动 tab 的实例。
         const existing = new Set(this.contextManager.getContexts().map(item => item.id));
-        for (const item of request.context) {
+        // ChatTurnRequest.context 在 chat-controller 里是 any[],此处按真实元素类型收窄。
+        for (const item of request.context as ContextItem[]) {
             if (!item?.id || existing.has(item.id)) continue;
             this.contextManager.addContext(item);
             existing.add(item.id);
@@ -1023,8 +1029,9 @@ export class ShellView extends ItemView {
     private flushPendingStepDivider() {
         if (!this.pendingStepDivider || !this.streamTimeline) return;
         this.pendingStepDivider = false;
-        const divider = (this.streamTimeline as any).createDiv({ cls: 'shell-think-step-divider think-node' }) as HTMLElement;
-        (divider as any).createSpan({ cls: 'shell-think-step-label', text: `Step ${this.streamStepCount}` });
+        // createDiv/createSpan 由 obsidian 的 Node 增强声明,无需 any。
+        const divider = this.streamTimeline.createDiv({ cls: 'shell-think-step-divider think-node' });
+        divider.createSpan({ cls: 'shell-think-step-label', text: `Step ${this.streamStepCount}` });
     }
 
     /**
@@ -1315,8 +1322,9 @@ export class ShellView extends ItemView {
         }
 
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        const editor = activeView?.editor as any;
-        const cmView = editor?.cm as EditorView | undefined;
+        // Editor 未公开 cm(CodeMirror 6 视图),用交叉类型补上;其余成员仍是公开签名。
+        const editor: (Editor & { cm?: EditorView }) | undefined = activeView?.editor;
+        const cmView = editor?.cm;
         if (!cmView) {
             new Notice('Open the target note in source mode to show the preview.');
             return;
@@ -1485,7 +1493,7 @@ export class ShellView extends ItemView {
                 void this.openKnowledgeSummaryForPath(path);
             },
             onRunLint: () => {
-                (this.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
+                this.internalApp.commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
             },
             onCopyPath: (path) => {
                 void globalThis.navigator?.clipboard?.writeText?.(path);
@@ -1568,11 +1576,12 @@ export class ShellView extends ItemView {
     private async openKnowledgeSummaryForPath(path: string) {
         const status = await this.plugin?.knowledgeRuntime?.getStatusService?.()?.getNoteStatus?.(path);
         const summaryPath = status?.summaryPath;
-        if (summaryPath && typeof (this.app.workspace as any)?.openLinkText === 'function') {
-            await (this.app.workspace as any).openLinkText(summaryPath, '', false);
+        // Workspace.openLinkText 是公开 API,无需断言(保留原有 ?. 语义)。
+        if (summaryPath && typeof this.app.workspace?.openLinkText === 'function') {
+            await this.app.workspace.openLinkText(summaryPath, '', false);
             return;
         }
-        (this.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
+        this.internalApp.commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
     }
 
     private excludeCurrentNoteContext(path: string) {
@@ -1604,10 +1613,8 @@ export class ShellView extends ItemView {
     }
 
     private openPluginSettings() {
-        // @ts-ignore - app setting tab activation
-        this.app.setting.open();
-        // @ts-ignore - activate plugin settings tab
-        this.app.setting.openTabById(PLUGIN_ID);
+        this.internalApp.setting.open();
+        this.internalApp.setting.openTabById(PLUGIN_ID);
     }
 
     /**
@@ -1746,10 +1753,10 @@ export class ShellView extends ItemView {
                 activeProviderId,
                 activeModelId,
             });
-        } catch (error: any) {
+        } catch (error: unknown) {
             if (requestId !== this.modelLoadRequestId) return;
             logger.warn(
-                `Failed to load model list: ${error?.message || 'Unknown error'}`,
+                `Failed to load model list: ${thrownMessage(error) || 'Unknown error'}`,
                 'ShellView.refreshInputToolbarModels'
             );
             this.inputToolbar.updateModels({
@@ -1806,10 +1813,8 @@ export class ShellView extends ItemView {
         const plugin = this.getPluginInstance();
         const config = plugin?.settings?.providers?.[id];
         new Notice(`${config?.label || id} API Key is not configured. Please configure it in settings.`);
-        // @ts-ignore - app setting tab activation
-        this.app.setting.open();
-        // @ts-ignore - activate plugin settings tab
-        this.app.setting.openTabById(PLUGIN_ID);
+        this.internalApp.setting.open();
+        this.internalApp.setting.openTabById(PLUGIN_ID);
         void this.refreshInputToolbarModels();
     }
 
@@ -1918,8 +1923,24 @@ export class ShellView extends ItemView {
         }
     }
 
+    /**
+     * Obsidian 未公开的内部 API:app.commands / app.setting / app.plugins 都不在公开 d.ts 里。
+     * 集中一处做最小断言,避免 any 扩散到每个调用点。
+     */
+    private get internalApp(): App & {
+        commands?: { executeCommandById?(id: string): boolean };
+        setting: { open(): void; openTabById(id: string): void };
+        plugins: { plugins: Record<string, IPlugin> };
+    } {
+        return this.app as App & {
+            commands?: { executeCommandById?(id: string): boolean };
+            setting: { open(): void; openTabById(id: string): void };
+            plugins: { plugins: Record<string, IPlugin> };
+        };
+    }
+
     private getPluginInstance(): IPlugin | undefined {
-        return this.plugin ?? (this.app as any).plugins.plugins[PLUGIN_ID];
+        return this.plugin ?? this.internalApp.plugins.plugins[PLUGIN_ID];
     }
 
     private ensureActiveTabSession(): ShellTabSession {
