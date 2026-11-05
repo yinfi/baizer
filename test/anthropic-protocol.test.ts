@@ -919,6 +919,28 @@ async function runTests() {
     expect(calls.length).toBe(0);
   });
 
+  // ---- #81：requestUrl 原生无超时，弱网/挂死端点会让设置页的模型下拉无限期停在
+  // Loading。listModels 必须在应用层超时内放弃等待一个永不 settle 的请求。 ----
+  await test('listModels(anthropic): a hung request rejects via the application-level timeout instead of waiting forever', async () => {
+    const deps = {
+      requestUrl: async () => new Promise<any>(() => {}), // 永不 resolve/reject，模拟弱网挂起
+    } as any;
+
+    const start = Date.now();
+    let caught: any;
+    try {
+      await listModels(anthropicConfig(), deps);
+    } catch (error: any) {
+      caught = error;
+    }
+    const elapsedMs = Date.now() - start;
+
+    expect(caught).toBeTruthy();
+    expect(caught.message).toContain('timed out');
+    // 超时必须是秒级的应用层上限，不是「挂到进程结束」；留足裕量但要远小于真实网络超时。
+    expect(elapsedMs < 15000).toBeTruthy();
+  });
+
   // ---- F2：探活三态。404 必须报「活着但不会列模型」，不能报成绿色的「可达」 ----
   // 旧行为：checkAvailability 把 404 压成 true，连接测试于是对刚回 404 的 URL 报
   // 「model list reachable at <url>」，而同一屏的模型输入框同时说列不了模型。

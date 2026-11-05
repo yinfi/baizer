@@ -1694,6 +1694,13 @@ export class SettingTab extends PluginSettingTab {
     private didInitExpand = false;
     // P0-1 局部刷新：display() 只建一次骨架（hero+搜索），accordionHost 内容由 renderAccordion() 单独重绘。
     private accordionHost: HTMLElement | null = null;
+    // #81：renderAccordion() 在自身同步构建循环中会调用 renderSectionContent()，
+    // 某些分区（如 memory）在挂载时会同步（await 之前）触发回来再调一次 renderAccordion()
+    // （见 refreshMemoryView），导致外层循环还在往已被 host.empty() 换掉的旧容器里 append，
+    // 产生重复构建与游离 DOM。这里把「正在渲染中」的重入请求收集起来，等当前这趟构建完整
+    // 跑完后统一补一次，而不是立刻在循环中间重新开始。
+    private isRenderingAccordion = false;
+    private pendingAccordionRerender = false;
     private searchQuery = '';
     private revealApiKey = false;
     // 激活 provider 卡片的详情是否折叠。默认展开(false)；再次点击当前激活卡即切换折叠态，
@@ -1705,6 +1712,14 @@ export class SettingTab extends PluginSettingTab {
     private memoryActiveTab: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = 'overview';
     private memoryLoading = false;
     private memoryError = '';
+    // #81：知识库分区每次整页/局部重绘都无条件触发 refreshOntologyStatus()，
+    // 其内部 getGlobalCounts() 对所有被跟踪笔记串行 await 读盘，是 O(笔记数) 的开销。
+    // 展开态下任何一次 renderAccordion()（哪怕由完全不相关的分区触发）都会重跑一次。
+    // 用一个短 TTL 的「上次结果」缓存承接分区重挂载场景：挂载时若缓存未过期，直接复用
+    // 渲染好的文案，不重新发起遍历；显式操作（Open ontology / Discover / Recompile 等）
+    // 仍然各自直接调用 refreshOntologyStatus() 走真实刷新，不受这个 TTL 影响。
+    private ontologyStatusCache: { text: string; title: string; timestamp: number } | null = null;
+    private static readonly ONTOLOGY_STATUS_CACHE_TTL_MS = 5000;
     // textarea 逐击键写盘代价高：包一层 400ms debounce，末尾触发一次落盘。
     private debouncedPersist: Debouncer<[], Promise<void>> = debounce(
         () => this.persistSettings(),
@@ -1807,6 +1822,27 @@ export class SettingTab extends PluginSettingTab {
     // 局部刷新入口：只重绘 accordion 宿主内的内容，不触碰 hero/搜索框。
     // 所有 section 内的 onChange/click 现在都调用它（而非整页 display()），从而保留焦点与其它分区的展开态。
     private renderAccordion(): void {
+        // #81：部分分区（memory）在同步挂载过程中会回调回来再触发一次 renderAccordion()
+        // （refreshMemoryView 在它的首个 await 之前就调用）。真的重入会让外层循环继续往
+        // 已经被内层 host.empty() 扔掉的旧节点里 append，产生游离 DOM 和双倍渲染。
+        // 这里把重入请求压成「跑完当前这趟后再补一次」，不在栈中间重新开始构建。
+        if (this.isRenderingAccordion) {
+            this.pendingAccordionRerender = true;
+            return;
+        }
+        this.isRenderingAccordion = true;
+        try {
+            this.renderAccordionOnce();
+        } finally {
+            this.isRenderingAccordion = false;
+            if (this.pendingAccordionRerender) {
+                this.pendingAccordionRerender = false;
+                this.renderAccordion();
+            }
+        }
+    }
+
+    private renderAccordionOnce(): void {
         const host = this.accordionHost;
         if (!host) {
             // 骨架尚未建立（理论上不会发生），退回整页构建。
@@ -3457,7 +3493,16 @@ export class SettingTab extends PluginSettingTab {
             cls: 'baizer-settings-inline-note',
             text: t('Ontology status: loading...'),
         });
-        void this.refreshOntologyStatus(ontologyStatusEl);
+        // #81：知识库分区随便哪次 renderAccordion() 都会重挂载到这里（哪怕触发源是
+        // 别的分区），挂载即无条件重新遍历全库笔记代价太高。缓存未过期时直接复用上次
+        // 结果渲染，不再重新发起遍历；过期或首次打开仍然老路径刷新。
+        const cached = this.ontologyStatusCache;
+        if (cached && Date.now() - cached.timestamp < SettingTab.ONTOLOGY_STATUS_CACHE_TTL_MS) {
+            ontologyStatusEl.textContent = cached.text;
+            ontologyStatusEl.title = cached.title;
+        } else {
+            void this.refreshOntologyStatus(ontologyStatusEl);
+        }
 
         const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
         this.createActionButton(actions, t('Open ontology'), async () => {
@@ -3587,16 +3632,20 @@ export class SettingTab extends PluginSettingTab {
             const counts = runtime.getStatusService
                 ? await runtime.getStatusService().getGlobalCounts()
                 : null;
-            // 局部重绘会替换掉旧的 statusEl；异步回来时若该节点已脱离文档,放弃写入,避免向已卸载节点做无效写(P0-2 一致性)。
-            if (!statusEl.isConnected) return;
             // P1-4: 状态串走 i18n,枚举值仍保留原值(供进阶用户识别),但前缀/字段名中文化。
             const parts = [
                 `${t('Ontology')}: ${status.kind}`,
             ];
             if (readiness) parts.push(`${t('discovery')}: ${readiness.kind}`);
             if (counts) parts.push(`${t('stale notes')}: ${counts.stale}`);
-            statusEl.textContent = parts.join('  ·  ');
-            statusEl.title = `${t('path')}: ${status.path}`;
+            const text = parts.join('  ·  ');
+            const title = `${t('path')}: ${status.path}`;
+            // #81: 结果进短 TTL 缓存，供分区重挂载时直接复用，不必每次都重新串行遍历全库。
+            this.ontologyStatusCache = { text, title, timestamp: Date.now() };
+            // 局部重绘会替换掉旧的 statusEl；异步回来时若该节点已脱离文档,放弃写入,避免向已卸载节点做无效写(P0-2 一致性)。
+            if (!statusEl.isConnected) return;
+            statusEl.textContent = text;
+            statusEl.title = title;
         } catch (e: any) {
             if (!statusEl.isConnected) return;
             statusEl.textContent = `${t('Ontology status unavailable')}: ${e.message}`;

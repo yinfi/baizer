@@ -23,6 +23,26 @@ const ANTHROPIC_VERSION = '2023-06-01';
 const ANTHROPIC_DEFAULT_BASE_URL = 'https://api.anthropic.com';
 
 /**
+ * 列模型请求的应用层超时。
+ *
+ * 背景（#81）：Obsidian `requestUrl` 没有 `AbortSignal`/超时参数，弱网或 Captive Portal
+ * 下请求可以挂起到系统级 TCP 超时（经验上可达数十秒到数分钟）。设置页每次整页/分区重绘都会
+ * 无条件重新拉一次模型清单（见 renderModelField 的 `void load(false)`），移动端弱网下
+ * 请求挂起期间主线程被反复唤醒、下拉长期停在 Loading，这是 issue 列的嫌疑点之二。
+ * 这里不改调用时机（那属于「清空缓存」那一层的职责），只保证单次请求不会无限挂起。
+ */
+const MODEL_LISTING_TIMEOUT_MS = 10_000;
+
+/** requestUrl 没有取消能力；超时只能让等待方提前放弃，底层请求可能仍在飞，但不再占用调用方。 */
+function withRequestTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+/**
  * 「这个端点没有列模型能力」——与「这个端点不能推理」是两件事，必须可区分。
  *
  * 理由：Anthropic 兼容网关里只实现 POST /v1/messages 的很多，GET /v1/models 常常没做。
@@ -174,11 +194,15 @@ export async function checkAvailability(config: ProviderConfig, deps?: ModelCata
 
 async function listOpenAICompatModels(config: ProviderConfig): Promise<ModelOption[]> {
   const url = `${config.baseUrl || 'https://api.openai.com/v1'}/models`;
-  const response = await requestUrl({
-    url,
-    method: 'GET',
-    headers: { 'Authorization': `Bearer ${config.apiKey}` },
-  });
+  const response = await withRequestTimeout(
+    requestUrl({
+      url,
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${config.apiKey}` },
+    }),
+    MODEL_LISTING_TIMEOUT_MS,
+    'OpenAI models API',
+  );
   if (response.status !== 200) {
     throw new Error(`OpenAI models API error: ${response.status}`);
   }
@@ -221,14 +245,18 @@ async function listAnthropicModels(config: ProviderConfig, deps?: ModelCatalogDe
   const baseUrl = (config.baseUrl?.trim() || ANTHROPIC_DEFAULT_BASE_URL).replace(/\/+$/, '');
   const url = `${baseUrl}/v1/models`;
 
-  const response = await doRequest({
-    url,
-    method: 'GET',
-    headers: {
-      'x-api-key': config.apiKey,
-      'anthropic-version': ANTHROPIC_VERSION,
-    },
-  });
+  const response = await withRequestTimeout(
+    doRequest({
+      url,
+      method: 'GET',
+      headers: {
+        'x-api-key': config.apiKey,
+        'anthropic-version': ANTHROPIC_VERSION,
+      },
+    }),
+    MODEL_LISTING_TIMEOUT_MS,
+    'Anthropic models API',
+  );
 
   if (response.status !== 200) {
     // 端点没有列模型能力 → 单独的错误类，让 UI 能区分「列不了模型」与「用不了」。
