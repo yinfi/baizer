@@ -1,0 +1,88 @@
+{
+  "label": "chat-failed-after",
+  "phase": "after",
+  "revision": "3b188cd",
+  "scenario": "failure",
+  "viewport": {
+    "requested": {
+      "width": 1100,
+      "height": 900
+    },
+    "actual": {
+      "width": 1100,
+      "height": 900
+    }
+  },
+  "theme": "dark",
+  "plugin": {
+    "dir": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\resolve-pr73-conflicts-6a1d60c67309\\dist",
+    "files": [
+      {
+        "file": "main.js",
+        "bytes": 2813448
+      },
+      {
+        "file": "manifest.json",
+        "bytes": 324
+      },
+      {
+        "file": "styles.css",
+        "bytes": 119688
+      }
+    ],
+    "manifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.5.0",
+      "minAppVersion": "1.7.2",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    }
+  },
+  "userDataDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-chat-outcome-65\\userdata",
+  "vaultDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-chat-outcome-65\\vault",
+  "logPath": "C:\\Users\\Admin\\AppData\\Local\\Temp\\chat-outcome-shot-26180.log",
+  "modals": {
+    "trust": {
+      "present": true,
+      "clicked": "Trust author and enable plugins"
+    },
+    "releaseNotesDetached": 0
+  },
+  "pluginEnable": {
+    "steps": [
+      "plugins.loadManifests()"
+    ],
+    "error": null,
+    "loaded": true
+  },
+  "serverLog": [
+    {
+      "mode": "failure",
+      "url": "/v1/chat/completions",
+      "model": "fake-model",
+      "at": "2026-11-05T00:55:21.383Z"
+    }
+  ],
+  "facts": [
+    {
+      "hasFailureCard": true,
+      "hasCancelledCard": false,
+      "outcomeTitle": "Generation failed",
+      "outcomeReason": "network error",
+      "hasRetryButton": true,
+      "hasRestoreDraftButton": true,
+      "inputValue": "Explain the terminal-state handling in one short paragraph.",
+      "systemMessages": [
+        "[System] Kernel initialized."
+      ],
+      "answerText": "Here is the partial answer that was already streamed. The provider will drop the connection before finishing.",
+      "timelineCollapsed": false,
+      "timelineSummary": "Thinking in progress...",
+      "aiEntries": 1
+    }
+  ],
+  "capturedAt": "2026-11-05T00:55:23.512Z"
+}

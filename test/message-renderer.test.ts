@@ -620,6 +620,85 @@ async function runTests() {
     container.querySelector('.shell-edit-submit')?.click();
     expect(edited).toEqual([{ id: 'u1', text: 'revised question' }]);
   });
+
+  // 终态:失败卡片带原因 + 重试;双击只允许一个在途请求;有现场时提供恢复草稿。
+  await test('failed ai message renders a reason card with retry and optional draft restore', async () => {
+    const retried: string[] = [];
+    const restored: string[] = [];
+    const renderer = new MessageRenderer({
+      app: {}, component: {},
+      onRetryTurn: async (m) => { retried.push(m.id); },
+      canRestoreDraft: () => true,
+      onRestoreDraft: (m) => { restored.push(m.id); },
+    });
+    const container = new FakeElement();
+    await renderer.renderMessage(container as any, {
+      id: 'a-failed',
+      role: 'ai',
+      content: 'partial answer',
+      timestamp: 1,
+      metadata: { outcome: 'failed', failureReason: 'network down' },
+    });
+
+    const entry = container.children[0];
+    const card = entry.querySelector('.shell-turn-failed');
+    expect(!!card).toBe(true);
+    expect(entry.querySelector('.shell-turn-outcome-title')?.textContent).toBe('Generation failed');
+    expect(entry.querySelector('.shell-turn-outcome-reason')?.textContent).toBe('network down');
+    // 部分正文仍可读、可复制(操作栏保留复制)。
+    expect(entry.textContent).toContain('partial answer');
+    expect(!!entry.querySelector('.shell-copy-btn')).toBe(true);
+    // 失败不是可评价的回答:不出现点赞/点踩/分支重试。
+    expect(!!entry.querySelector('.shell-thumbs-up')).toBe(false);
+    expect(!!entry.querySelector('.shell-retry-btn')).toBe(false);
+
+    const retry = entry.querySelector('.shell-turn-retry');
+    retry?.click();
+    retry?.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(retried).toEqual(['a-failed']);
+
+    entry.querySelector('.shell-turn-restore')?.click();
+    expect(restored).toEqual(['a-failed']);
+  });
+
+  // 终态:取消显示「已停止,答案不完整」,不提供重试,也不伪装成成功摘要。
+  await test('cancelled ai message renders a stopped card without retry', async () => {
+    const renderer = new MessageRenderer({
+      app: {}, component: {},
+      onRetryTurn: () => { throw new Error('should not be called'); },
+    });
+    const container = new FakeElement();
+    await renderer.renderMessage(container as any, {
+      id: 'a-cancelled',
+      role: 'ai',
+      content: 'partial answer',
+      timestamp: 1,
+      metadata: { outcome: 'cancelled', interrupted: true },
+    });
+
+    const entry = container.children[0];
+    expect(!!entry.querySelector('.shell-turn-cancelled')).toBe(true);
+    expect(entry.querySelector('.shell-turn-outcome-title')?.textContent)
+      .toBe('Stopped — the answer is incomplete');
+    expect(!!entry.querySelector('.shell-turn-retry')).toBe(false);
+    expect(entry.textContent).toContain('partial answer');
+  });
+
+  // 成功与历史消息(无 outcome)不渲染终态卡片。
+  await test('completed and legacy ai messages render no outcome card', async () => {
+    const renderer = new MessageRenderer({ app: {}, component: {} });
+    const container = new FakeElement();
+    await renderer.renderMessage(container as any, {
+      id: 'a-ok', role: 'ai', content: 'done', timestamp: 1,
+      metadata: { outcome: 'completed' },
+    });
+    await renderer.renderMessage(container as any, {
+      id: 'a-legacy', role: 'ai', content: 'old', timestamp: 2,
+    });
+
+    expect(!!container.querySelector('.shell-turn-outcome')).toBe(false);
+  });
 }
 
 runTests().catch((e) => {

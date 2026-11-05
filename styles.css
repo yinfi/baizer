@@ -1160,6 +1160,118 @@ textarea.shell-input::placeholder {
     color: var(--interactive-accent);
 }
 
+/* ── 终态卡片(失败 / 取消)────────────────────────────────────────────
+ * 失败默认保留过程展开,卡片就地给出「原因 + 重试」;取消给出「已停止,答案不完整」。
+ * 成功不渲染卡片;历史消息没有 outcome 时也按成功处理。 */
+.shell-turn-outcome {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-left-width: 3px;
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+    font-size: var(--font-ui-small);
+}
+
+.shell-turn-outcome.shell-turn-failed {
+    border-left-color: var(--text-error);
+}
+
+.shell-turn-outcome.shell-turn-cancelled {
+    border-left-color: var(--text-muted);
+}
+
+.shell-turn-outcome-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.shell-turn-failed .shell-turn-outcome-icon {
+    color: var(--text-on-accent);
+    background: var(--text-error);
+}
+
+.shell-turn-cancelled .shell-turn-outcome-icon {
+    color: var(--text-muted);
+    font-size: 9px;
+}
+
+.shell-turn-outcome-body {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.shell-turn-outcome-title {
+    color: var(--text-normal);
+    font-weight: 600;
+}
+
+.shell-turn-outcome-reason {
+    color: var(--text-muted);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.shell-turn-outcome-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.shell-turn-retry,
+.shell-turn-restore {
+    padding: 2px 10px;
+    border-radius: var(--radius-s);
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: var(--font-ui-smaller);
+    cursor: pointer;
+}
+
+.shell-turn-retry {
+    border-color: var(--interactive-accent);
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.shell-turn-retry:hover:not(:disabled) {
+    background: var(--interactive-accent-hover);
+}
+
+.shell-turn-retry:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.shell-turn-restore:hover {
+    background: var(--background-modifier-hover);
+}
+
+/* 失败/取消的过程摘要不再用「已完成」的弱化语气,但仍可点击折叠。 */
+.shell-think-timeline.is-failed .think-summary-text {
+    color: var(--text-error);
+}
+
+.shell-think-timeline.is-cancelled .think-summary-text {
+    color: var(--text-muted);
+}
+
 .shell-change-preview-card {
     display: flex;
     flex-direction: column;

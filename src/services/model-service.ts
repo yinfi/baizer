@@ -572,7 +572,7 @@ export class ModelService {
 
         if (!this.hasValidConfig()) {
             const providerLabel = this.getActiveProviderConfig()?.label || 'AI';
-            yield { type: 'error' as const, message: `${providerLabel} API Key not configured!` };
+            yield { type: 'error' as const, message: `${providerLabel} API Key not configured!`, outcome: 'failed' as const };
             return;
         }
 
@@ -598,7 +598,7 @@ export class ModelService {
                 throw e;
             }
             logger.error('Stream chat failed', e, 'ModelService.chatStream');
-            yield { type: 'error' as const, message: e.message };
+            yield { type: 'error' as const, message: e.message, outcome: 'failed' as const };
         }
     }
 

@@ -28,6 +28,12 @@ interface MessageRendererOptions {
   onFeedbackDown?: (message: ChatMessage, reason: string) => void | Promise<void>;
   /** 重试(阶段C):对某条 ai 回复重新生成,产生兄弟分支。 */
   onRetry?: (message: ChatMessage) => void | Promise<void>;
+  /** 失败/取消卡片的重试:按原请求重跑,不重复插入 user 消息。 */
+  onRetryTurn?: (message: ChatMessage) => void | Promise<void>;
+  /** 失败卡片是否还有可恢复的草稿现场(刷新后内存丢失则为 false,不渲染死按钮)。 */
+  canRestoreDraft?: (message: ChatMessage) => boolean;
+  /** 失败卡片「恢复草稿」:把原输入与附件取回输入区。 */
+  onRestoreDraft?: (message: ChatMessage) => void | Promise<void>;
   /** 编辑重问(阶段C):改写某条 user 消息文本后重跑,产生兄弟分支。 */
   onEdit?: (message: ChatMessage, newText: string) => void | Promise<void>;
   /** 分叉(阶段C):在 ai 回复底部操作栏触发,编辑对应问题后重跑,产生兄弟分支。 */
@@ -75,8 +81,14 @@ export class MessageRenderer {
         const approvalBody = (entry as any).createDiv({ cls: 'shell-approval-message-body' }) as HTMLElement;
         this.renderApproval(approvalBody, message);
       } else if (message.role === 'ai') {
-        await this.renderAiContent(entry, message.content);
-        this.addActionToolbar(entry, message);
+        if (message.content) {
+          await this.renderAiContent(entry, message.content);
+        }
+        // 终态卡片与实时收尾共用同一渲染:失败/取消在回放里也必须一眼可辨。
+        this.renderTurnOutcome(entry, message);
+        if (message.content) {
+          this.addActionToolbar(entry, message);
+        }
       } else if (message.role === 'user') {
         this.setText(entry, message.content);
         this.addUserMessageControls(entry, message);
@@ -137,6 +149,68 @@ export class MessageRenderer {
     this.codeBlockRenderer.process(container);
   }
 
+  /**
+   * 渲染失败/取消终态卡片(与 shell-view 的实时收尾共用)。
+   * - 失败:显示原因,并提供「重试」(有现场时还有「恢复草稿」);
+   * - 取消:显示「已停止,答案不完整」,已生成正文仍在上方,可读可复制。
+   * completed 或缺省终态不渲染任何东西。
+   */
+  renderTurnOutcome(container: HTMLElement, message: ChatMessage): HTMLElement | null {
+    const outcome = message.metadata?.outcome;
+    if (!outcome || outcome === 'completed') return null;
+
+    const cancelled = outcome === 'cancelled';
+    const card = (container as any).createDiv({
+      cls: `shell-turn-outcome shell-turn-${outcome}`,
+    }) as HTMLElement;
+    this.setAttribute(card, 'role', cancelled ? 'status' : 'alert');
+
+    const icon = (card as any).createSpan({
+      cls: 'shell-turn-outcome-icon',
+      text: cancelled ? '\u25A0' : '!',
+    }) as HTMLElement;
+    this.setAttribute(icon, 'aria-hidden', 'true');
+
+    const body = (card as any).createDiv({ cls: 'shell-turn-outcome-body' }) as HTMLElement;
+    (body as any).createDiv({
+      cls: 'shell-turn-outcome-title',
+      text: cancelled ? t('Stopped — the answer is incomplete') : t('Generation failed'),
+    });
+    const reason = message.metadata?.failureReason;
+    if (!cancelled && reason) {
+      (body as any).createDiv({ cls: 'shell-turn-outcome-reason', text: reason });
+    }
+
+    const actions = (card as any).createDiv({ cls: 'shell-turn-outcome-actions' }) as HTMLElement;
+    if (!cancelled && this.options.onRetryTurn) {
+      const retryButton = (actions as any).createEl('button', {
+        cls: 'shell-turn-retry',
+        text: t('Retry'),
+        attr: { type: 'button' },
+      }) as HTMLButtonElement;
+      retryButton.addEventListener('click', () => {
+        // 处理中禁用重复重试:双击只允许一个在途请求(控制器还有一层 isRunActive 守卫)。
+        if (retryButton.disabled) return;
+        retryButton.disabled = true;
+        void Promise.resolve(this.options.onRetryTurn?.(message)).catch(() => {
+          retryButton.disabled = false;
+        });
+      });
+    }
+    if (this.options.onRestoreDraft && this.options.canRestoreDraft?.(message)) {
+      const restoreButton = (actions as any).createEl('button', {
+        cls: 'shell-turn-restore',
+        text: t('Restore draft'),
+        attr: { type: 'button' },
+      }) as HTMLElement;
+      restoreButton.addEventListener('click', () => {
+        void this.options.onRestoreDraft?.(message);
+      });
+    }
+
+    return card;
+  }
+
   addActionToolbar(container: HTMLElement, message: ChatMessage) {
     const toolbar = (container as any).createDiv({ cls: 'shell-feedback-bar shell-message-actions' }) as HTMLElement;
     const copyButton = (toolbar as any).createEl('button', {
@@ -149,8 +223,11 @@ export class MessageRenderer {
       void this.copyMessage(message);
     });
 
+    // 失败/取消不是可评价的「回答」:只保留复制,重试由终态卡片承担。
+    const incomplete = message.metadata?.outcome === 'failed' || message.metadata?.outcome === 'cancelled';
+
     // 重试(阶段C):对该 ai 回复重新生成,产生兄弟分支。仅在宿主接入且该消息已锚定会话树时可用。
-    if (this.options.onRetry && message.sessionEntryId) {
+    if (this.options.onRetry && message.sessionEntryId && !incomplete) {
       const retryButton = (toolbar as any).createEl('button', {
         cls: 'shell-message-action-btn shell-retry-btn clickable-icon',
         title: t('Regenerate (keep original answer as a branch)'),
@@ -164,7 +241,7 @@ export class MessageRenderer {
 
     // 点赞:用户认可该回答 → 归档到知识库(onFeedbackUp 内部走 file-back)。
     // 仅在宿主接入归档通路时渲染,避免点了无反应的死按钮。
-    if (this.options.onFeedbackUp) {
+    if (this.options.onFeedbackUp && !incomplete) {
       const upButton = (toolbar as any).createEl('button', {
         cls: 'shell-feedback-btn shell-thumbs-up clickable-icon',
         title: t('Approve and save to knowledge base'),
@@ -181,7 +258,7 @@ export class MessageRenderer {
     }
 
     // 点踩:用户不满意 → 展开内联输入问「哪里不好」,提交后回调 onFeedbackDown(message, reason)。
-    if (this.options.onFeedbackDown) {
+    if (this.options.onFeedbackDown && !incomplete) {
       const downButton = (toolbar as any).createEl('button', {
         cls: 'shell-feedback-btn shell-thumbs-down clickable-icon',
         title: t('Not satisfied — tell AI what to improve'),
@@ -196,7 +273,7 @@ export class MessageRenderer {
     // 分叉(阶段C):在底部操作栏直接给一个「分叉」入口——展开预填原问题的输入,
     // 改写后从该问题重新提问,原问答保留为兄弟分支。放在 ai 操作栏是因为流结束时才渲染,
     // 能拿到真实 entryId(user 消息在发送时渲染,拿不到);统一入口也更直观。
-    if (this.options.onFork && message.sessionEntryId) {
+    if (this.options.onFork && message.sessionEntryId && !incomplete) {
       const forkButton = (toolbar as any).createEl('button', {
         cls: 'shell-message-action-btn shell-fork-btn clickable-icon',
         title: t('Fork: edit the question and regenerate (keep current conversation as a branch)'),

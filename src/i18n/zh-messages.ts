@@ -557,6 +557,9 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Feedback: what to improve': '反馈:哪里需要改进',
     'Improve answer': '改进重答',
     'Undo': '撤销',
+    'Generation failed': '生成失败',
+    'Stopped — the answer is incomplete': '已停止，答案不完整',
+    'Restore draft': '恢复草稿',
 
     // ── 选区 AI(action-registry / inline-diff / rewrite-runner / selection-menu)──
     'Polish': '润色',
