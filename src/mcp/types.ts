@@ -386,6 +386,22 @@ export function pruneUnsupportedProviders(
     return kept;
 }
 
+/**
+ * 读取旧版扁平设置（data.json 里没有 providers、只有 provider + 各家 xxxApiKey）
+ * 里的字符串字段，配合调用处的 `|| 默认值` 使用。
+ *
+ * 与 isSupportedProviderType 同样的理由：入参直接面对 data.json，可能是数字、对象，
+ * 或干脆是别的写法，调用方不该为了调用它先做一次不安全的断言。返回 undefined 表示
+ * 「这里没有可用的字符串」，默认值由调用方决定。
+ *
+ * 注意这是一处有意的行为收口：旧实现写作 `old.openaiApiKey || ''`，脏数据下的
+ * `apiKey: 123` 会被原样写进 ProviderConfig；现在这类值按「未设置」处理。
+ * 字符串（含空串）与旧实现逐值一致——空串仍会走调用处的 `|| 默认值`。
+ */
+export function legacyFlatString(value: unknown): string | undefined {
+    return typeof value === 'string' ? value : undefined;
+}
+
 /** 转写端点与模型的可配置覆盖项。空字符串一律表示「沿用 provider / 内置默认」。 */
 export interface AsrOverrides {
     asrBaseUrl?: string;
