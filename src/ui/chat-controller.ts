@@ -693,6 +693,8 @@ export class ChatController {
                 request.action,
                 request.args,
                 this.conversationId,
+                // 消息创建时间用于区分「记录已过期」：审计状态被上限淘汰后不能再假设「没执行过」。
+                { requestedAt: message.timestamp },
             );
             this.applyExecutionOutcome(messageId, request, outcome);
         } catch (error: any) {
@@ -860,6 +862,7 @@ export class ChatController {
                     request.action,
                     request.args,
                     this.conversationId,
+                    { requestedAt: message.timestamp },
                 );
                 this.applyExecutionOutcome(message.id, request, outcome);
             } catch (error: any) {

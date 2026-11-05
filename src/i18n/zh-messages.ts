@@ -537,6 +537,14 @@ export const ZH_MESSAGES: Record<string, string> = {
     'The action was interrupted before its result was recorded. Check the target before retrying.': '操作中断，结果未记录。请先检查目标状态再重试。',
     'Could not verify the result. Check the target manually.': '无法核实结果，请手动检查目标状态。',
     'Cannot verify the result automatically. Check the target manually.': '无法自动核实结果，请手动检查目标状态。',
+    // #76：结果未知的核实结论、审计写盘失败提示。卡片上的英文硬编码一律走这里。
+    'The action ran but its result was not recorded. Check the target manually.': '操作已执行，但结果未记录。请手动检查目标。',
+    'The action started but never reported a result. Check the target before retrying.': '操作已开始执行但没有返回结果。请先检查目标状态再重试。',
+    'The execution record has expired, so the result cannot be verified. Check the target manually.': '执行记录已过期，无法核实结果。请手动检查目标。',
+    'No successful execution record was found. Verify the target, then retry.': '未找到成功执行记录。请先检查目标状态再重试。',
+    'The action completed successfully.': '操作已成功完成。',
+    'The audit log entry was not written.': '审计日志未写入。',
+    'This action already completed, so it was not run again. Check the target to review the result.': '该操作已完成，未重复执行。请检查目标查看结果。',
 
     // ── 消息操作栏(message-renderer)──
     'Copy message': '复制消息',

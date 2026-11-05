@@ -377,6 +377,81 @@ async function sizeSidebar(session, width) {
   return result;
 }
 
+/**
+ * Optional interaction flows, applied after the scenario is injected.
+ *
+ * `recheck` reproduces the in-session "unknown" dead end from issue #76:
+ * the execution registry caches an `unknown` outcome (in production this happens
+ * when the write path throws after the tool ran), then the user clicks
+ * 「检查结果」. The button, reconcile call, state projection and in-place repaint
+ * are all production code; only the cached registry entry is seeded here because
+ * the harness cannot make a real vault write throw.
+ */
+async function seedUnknownCache(session) {
+  return session.evaluate(`(() => {
+    const app = window.app;
+    const leaf = app.workspace.getLeavesOfType('${VIEW_TYPE}')[0];
+    const view = leaf && leaf.view;
+    const tab = view && view.tabManager && view.tabManager.getActiveTab();
+    const tabSession = tab && view.tabSessions && view.tabSessions.get(tab.id);
+    const api = tabSession && tabSession.chatController && tabSession.chatController.api;
+    const registry = api && api.approvalExecutionRegistry;
+    if (!registry || !registry.records) return { seeded: false, error: 'execution registry unavailable' };
+    registry.records.set(${JSON.stringify(SCENARIO.approval.id)}, {
+      state: 'done',
+      outcome: {
+        kind: 'approval-execution',
+        status: 'unknown',
+        error: 'vault adapter crashed',
+        detail: 'The action was interrupted before its result was recorded. Check the target before retrying.',
+        target: ${JSON.stringify(SCENARIO.approval.target)},
+        completedAt: Date.now(),
+        retryable: false,
+      },
+    });
+    return { seeded: true };
+  })()`);
+}
+
+async function clickRecheck(session) {
+  const clicked = await session.evaluate(`(() => {
+    const button = document.querySelector('.shell-approval-recheck');
+    if (!button) return { clicked: false, error: 'no recheck button on the card' };
+    button.click();
+    return { clicked: true };
+  })()`);
+  const deadline = Date.now() + 5000;
+  let retryVisible = false;
+  while (Date.now() < deadline) {
+    retryVisible = await session.evaluate(`!!document.querySelector('.shell-approval-retry')`);
+    if (retryVisible) break;
+    await delay(200);
+  }
+  const after = await session.evaluate(`(() => {
+    const textOf = (el) => el ? (el.textContent || '').trim() : '';
+    return {
+      cardState: (() => {
+        const card = document.querySelector('.shell-approval-card');
+        return card ? Array.from(card.classList).find((name) => name.startsWith('is-') && !name.endsWith('-risk')) || null : null;
+      })(),
+      outcome: textOf(document.querySelector('.shell-approval-outcome')),
+      buttons: Array.from(document.querySelectorAll('.shell-approval-card button'))
+        .map((button) => textOf(button))
+        .filter(Boolean),
+    };
+  })()`);
+  return { clicked, retryVisible, after };
+}
+
+async function runFlow(session, flow) {
+  if (flow !== 'recheck') return null;
+  const seed = await seedUnknownCache(session);
+  await delay(300);
+  const interaction = await clickRecheck(session);
+  await delay(400);
+  return { flow, seed, interaction };
+}
+
 async function injectScenario(session, { width, state }) {
   const result = await session.evaluate(`(() => {
     const app = window.app;
@@ -546,6 +621,7 @@ async function main() {
       locale: { type: 'string', default: 'zh' },
       'ready-timeout': { type: 'string', default: '180000' },
       state: { type: 'string', default: 'pending' },
+      flow: { type: 'string' },
       'keep-open': { type: 'boolean', default: false },
     },
     allowPositionals: false,
@@ -633,6 +709,9 @@ async function main() {
     const injected = await injectScenario(session, { width: sidebarWidth, state: values.state });
     runInfo.injection = injected;
 
+    const flowResult = await runFlow(session, values.flow);
+    runInfo.flow = flowResult;
+
     const metrics = await session.evaluate(probeExpression());
     runInfo.metrics = metrics;
 
@@ -653,6 +732,7 @@ async function main() {
       phase: values.phase || null,
       revision: values.revision || null,
       state: values.state || 'pending',
+      flow: values.flow || null,
       obsidian: runInfo.browser,
       theme,
       locale: values.locale,
@@ -660,6 +740,7 @@ async function main() {
       plugin: runInfo.plugin,
       sidebar: runInfo.sidebar,
       injection: runInfo.injection,
+      flow: flowResult,
       viewport: metrics.viewport,
       card: metrics.card,
       facts: metrics.facts,

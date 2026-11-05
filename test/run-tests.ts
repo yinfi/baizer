@@ -56,6 +56,7 @@ const tests = [
   'test/tool-call-renderer.workbench.test.ts',
   'test/approval-flow.test.ts',
   'test/approval-lifecycle.test.ts',
+  'test/approval-in-place-update.test.ts',
   'test/operation-audit-log.test.ts',
   'test/workspace-edit-service.test.ts',
   'test/vault-permissions.test.ts',

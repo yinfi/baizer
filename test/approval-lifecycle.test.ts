@@ -30,6 +30,11 @@ function expect(actual: any) {
         throw new Error(`Expected "${actual}" to contain "${expected}"`);
       }
     },
+    toBeUndefined: () => {
+      if (actual !== undefined) {
+        throw new Error(`Expected undefined but got ${JSON.stringify(actual)}`);
+      }
+    },
   };
 }
 
@@ -303,6 +308,107 @@ async function runTests() {
     const second = await registry.run('req-retry', execute, { retry: true });
     expect(second.status).toBe('succeeded');
     expect(calls).toBe(2);
+  });
+
+  await test('unknown → recheck → retry really executes the tool a second time (#76 P1)', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const { ModelService } = await import('../src/services/model-service');
+
+    // 内存审计替身：与真实 OperationAuditLog 同形状（请求状态 + 操作记录）。
+    const operations: any[] = [];
+    const requests = new Map<string, any>();
+    const auditLog = {
+      record: async (input: any) => { operations.unshift({ ...input, timestamp: Date.now() }); },
+      list: async () => operations.slice(),
+      beginRequest: async (input: any) => {
+        requests.set(input.id, {
+          id: input.id, action: input.action, target: input.target,
+          state: 'attempting', timestamp: Date.now(), updatedAt: Date.now(),
+        });
+      },
+      finishRequest: async (input: any) => {
+        operations.unshift({ ...input, timestamp: Date.now() });
+        const previous = requests.get(input.id);
+        requests.set(input.id, {
+          id: input.id, action: input.action, target: input.target,
+          state: input.outcome, timestamp: previous?.timestamp ?? Date.now(), updatedAt: Date.now(),
+        });
+      },
+      getRequestState: async (id: string) => requests.get(id),
+      getPrunedRequestBefore: async () => 0,
+    };
+
+    const service: any = Object.create(ModelService.prototype);
+    service.approvalExecutionRegistry = new ApprovalExecutionRegistry();
+    service.operationAuditLog = auditLog;
+    service.settings = { activeProvider: 'openai' };
+    service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
+    service.sessionManager = null;
+
+    let calls = 0;
+    service.toolRegistry = {
+      execute: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('vault adapter crashed');
+        return { success: true, path: 'Docs/a.md', message: 'Deleted' };
+      },
+    };
+
+    const { controller, messages } = await createController({
+      executeApprovedAction: (...args: any[]) => service.executeApprovedAction(...args),
+      reconcileApprovedAction: (...args: any[]) => service.reconcileApprovedAction(...args),
+    });
+
+    controller.adoptMessages([approvalMessage()]);
+
+    // 1) 工具抛错 → unknown 且不可重试。
+    await controller.approveApproval('msg-1');
+    expect(messages[0].approvalState.status).toBe('unknown');
+    expect(messages[0].approvalState.outcome.retryable).toBe(false);
+    expect(calls).toBe(1);
+
+    // 2) 台账里只有 unknown 时，「检查结果」必须产生新信息：核实为可重试的失败。
+    await controller.recheckApproval('msg-1');
+    expect(messages[0].approvalState.status).toBe('failed');
+    expect(messages[0].approvalState.outcome.retryable).toBe(true);
+    expect(calls).toBe(1);
+
+    // 3) 重试真的第二次调用工具，并落到成功终态（不再回弹 unknown）。
+    await controller.retryApproval('msg-1');
+    expect(calls).toBe(2);
+    expect(messages[0].approvalState.status).toBe('succeeded');
+    expect(messages[0].approvalState.outcome.detail).toBe('Deleted');
+
+    // 4) 成功后依旧不可重放。
+    await controller.retryApproval('msg-1');
+    await controller.approveApproval('msg-1');
+    expect(calls).toBe(2);
+
+    controller.cleanup();
+  });
+
+  await test('execution registry caps finished successes and keeps actionable records (#76 P3)', async () => {
+    const registry = new ApprovalExecutionRegistry({ maxRecords: 2 } as any);
+    const succeed = async (at: number) => ({
+      kind: 'approval-execution' as const,
+      status: 'succeeded' as const,
+      completedAt: at,
+    });
+
+    await registry.run('req-a', () => succeed(1));
+    await registry.run('req-b', () => succeed(2));
+    await registry.run('req-c', () => succeed(3));
+
+    // 只淘汰最早的成功记录，最近两条仍可查到（成功不可重放）。
+    expect(registry.peek('req-a')).toBeUndefined();
+    expect(registry.peek('req-b') !== undefined).toBe(true);
+    expect(registry.peek('req-c') !== undefined).toBe(true);
+
+    const unknownRegistry = new ApprovalExecutionRegistry({ maxRecords: 1 } as any);
+    await unknownRegistry.run('req-unknown', async () => { throw new Error('crash'); });
+    await unknownRegistry.run('req-ok', () => succeed(4));
+    // 未知记录仍要留给核实/重试，不能被上限淘汰。
+    expect(unknownRegistry.peek('req-unknown') !== undefined).toBe(true);
   });
 }
 

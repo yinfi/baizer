@@ -35,6 +35,58 @@ async function test(name: string, fn: () => Promise<void>) {
   }
 }
 
+/**
+ * 审计日志的最小内存替身：与真实 OperationAuditLog 同形状，
+ * 让「重启」= 换一个新的审批执行登记表、审计数据保留。
+ */
+function createInMemoryAuditLog() {
+  const operations: any[] = [];
+  const requests = new Map<string, any>();
+  return {
+    operations,
+    requests,
+    record: async (input: any) => {
+      operations.unshift({ ...input, timestamp: Date.now() });
+    },
+    list: async () => operations.slice(),
+    beginRequest: async (input: { id: string; action: string; target: string }) => {
+      const now = Date.now();
+      requests.set(input.id, {
+        id: input.id,
+        action: input.action,
+        target: input.target,
+        state: 'attempting',
+        timestamp: now,
+        updatedAt: now,
+      });
+    },
+    finishRequest: async (input: any) => {
+      operations.unshift({ ...input, timestamp: Date.now() });
+      const previous = requests.get(input.id);
+      requests.set(input.id, {
+        id: input.id,
+        action: input.action,
+        target: input.target,
+        state: input.outcome,
+        timestamp: previous?.timestamp ?? Date.now(),
+        updatedAt: Date.now(),
+      });
+    },
+    getRequestState: async (id: string) => requests.get(id),
+    getPrunedRequestBefore: async () => 0,
+  };
+}
+
+function createApprovalService(ModelService: any, auditLog: any, registry: any) {
+  const service: any = Object.create(ModelService.prototype);
+  service.approvalExecutionRegistry = registry;
+  service.operationAuditLog = auditLog;
+  service.settings = { activeProvider: 'openai' };
+  service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
+  service.sessionManager = null;
+  return service;
+}
+
 async function runTests() {
   console.log('=== ModelService Tests ===');
   const { ModelService } = await import('../src/services/model-service');
@@ -378,7 +430,8 @@ async function runTests() {
       detail: 'approved execution',
       target: 'approved.md',
       retryable: false,
-      result: { success: true, message: 'approved execution' },
+      // 只保留打开落盘文件所需的投影，不再把整个工具返回挂在结果上（#76 P3）。
+      result: { success: true },
     });
     expect(calls).toEqual([{
       name: 'create_note',
@@ -395,6 +448,7 @@ async function runTests() {
       model: 'gpt-4o',
       approvalSource: 'user-click',
       undoable: true,
+      outcome: 'succeeded',
     }]);
     // 论断2:批准后的真实结果回灌进该会话 session,下一轮模型可见「已批准执行」。
     expect(outcomeCalls.length).toEqual(1);
@@ -455,8 +509,7 @@ async function runTests() {
 
   await test('executeApprovedAction deduplicates by request id and only retries after failure', async () => {
     const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
-    const service: any = Object.create(ModelService.prototype);
-    service.approvalExecutionRegistry = new ApprovalExecutionRegistry();
+    const service = createApprovalService(ModelService, createInMemoryAuditLog(), new ApprovalExecutionRegistry());
     let calls = 0;
     service.toolRegistry = {
       execute: async () => {
@@ -465,10 +518,6 @@ async function runTests() {
         return { success: true, message: 'done' };
       },
     };
-    service.operationAuditLog = { record: async () => { }, list: async () => [] };
-    service.settings = { activeProvider: 'openai' };
-    service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
-    service.sessionManager = null;
 
     const first = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-dedupe' });
     expect(first.status).toBe('failed');
@@ -489,20 +538,138 @@ async function runTests() {
     expect(calls).toBe(2);
   });
 
+  await test('unknown outcome is unlocked only by reconciliation, then the retry really executes again', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const auditLog = createInMemoryAuditLog();
+    const service = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    let calls = 0;
+    service.toolRegistry = {
+      execute: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('vault adapter crashed');
+        return { success: true, path: 'a.md', message: 'done' };
+      },
+    };
+
+    const first = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-unknown' });
+    expect({ status: first.status, retryable: first.retryable }).toEqual({ status: 'unknown', retryable: false });
+
+    // 重试按钮自己不能解锁：未核实前再点仍是缓存的 unknown，且不执行。
+    const blind = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-unknown', retry: true });
+    expect({ status: blind.status, calls }).toEqual({ status: 'unknown', calls: 1 });
+
+    // 核实路径确认「上次尝试明确失败」→ 允许重试。
+    const verified = await service.reconcileApprovedAction('req-unknown', 'delete_note', { path: 'a.md' }, 'tab-1');
+    expect({ status: verified.status, retryable: verified.retryable }).toEqual({ status: 'failed', retryable: true });
+
+    const retried = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-unknown', retry: true });
+    expect({ status: retried.status, calls }).toEqual({ status: 'succeeded', calls: 2 });
+
+    // 成功后仍然是终态，不会回弹、不会重放。
+    const replay = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-unknown', retry: true });
+    expect({ status: replay.status, calls }).toEqual({ status: 'succeeded', calls: 2 });
+  });
+
+  await test('a failing audit write does not downgrade a successful action', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const { setLocaleForTesting } = await import('../src/i18n/zh');
+    const auditLog = createInMemoryAuditLog();
+    auditLog.finishRequest = async () => {
+      throw new Error('disk is full');
+    };
+    const service = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    let calls = 0;
+    service.toolRegistry = {
+      execute: async () => {
+        calls += 1;
+        return { success: true, path: 'a.md', message: 'done' };
+      },
+    };
+
+    setLocaleForTesting(true);
+    try {
+      const result = await service.executeApprovedAction('update_note', { path: 'a.md', content: 'x' }, 'tab-1', { requestId: 'req-audit-fail' });
+
+      expect({
+        status: result.status,
+        retryable: result.retryable,
+        calls,
+      }).toEqual({ status: 'succeeded', retryable: false, calls: 1 });
+      // 审计失败要可见，但不能把已成功的写盘改写成失败；中文界面不得残留英文（#76 P2-A / P3）。
+      expect(String(result.detail).includes('审计日志未写入')).toBe(true);
+      expect(String(result.detail).includes('audit')).toBe(false);
+    } finally {
+      setLocaleForTesting(false);
+    }
+
+    // 底层写入只发生一次，不会被审计失败触发重放。
+    const again = await service.executeApprovedAction('update_note', { path: 'a.md', content: 'x' }, 'tab-1', { requestId: 'req-audit-fail', retry: true });
+    expect({ status: again.status, calls }).toEqual({ status: 'succeeded', calls: 1 });
+  });
+
+  await test('restart reconciliation tells a failed attempt from a successful execution', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const auditLog = createInMemoryAuditLog();
+
+    // 失败尝试：工具明确返回失败后进程重启。
+    const failing = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    failing.toolRegistry = { execute: async () => ({ success: false, error: 'locked' }) };
+    const failed = await failing.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-failed-restart' });
+    expect(failed.status).toBe('failed');
+
+    const restartedAfterFailure = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    const reconciledFailure = await restartedAfterFailure.reconcileApprovedAction(
+      'req-failed-restart', 'delete_note', { path: 'a.md' }, 'tab-1',
+    );
+    expect({ status: reconciledFailure.status, retryable: reconciledFailure.retryable })
+      .toEqual({ status: 'failed', retryable: true });
+
+    // 成功写入：进程重启后必须读成「已执行、结果未记录」，不允许重放。
+    const succeeding = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    succeeding.toolRegistry = { execute: async () => ({ success: true, path: 'a.md', message: 'done' }) };
+    const succeeded = await succeeding.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-succeeded-restart' });
+    expect(succeeded.status).toBe('succeeded');
+
+    const restartedAfterSuccess = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    const reconciledSuccess = await restartedAfterSuccess.reconcileApprovedAction(
+      'req-succeeded-restart', 'delete_note', { path: 'a.md' }, 'tab-1',
+    );
+    expect({ status: reconciledSuccess.status, retryable: reconciledSuccess.retryable })
+      .toEqual({ status: 'unknown', retryable: false });
+  });
+
+  await test('an expired request record is not treated as never executed', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const auditLog = createInMemoryAuditLog();
+    auditLog.getPrunedRequestBefore = async () => 5000;
+    const service = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+
+    const expired = await service.reconcileApprovedAction('req-old', 'delete_note', { path: 'a.md' }, 'tab-1', { requestedAt: 100 });
+    expect({ status: expired.status, retryable: expired.retryable }).toEqual({ status: 'unknown', retryable: false });
+
+    // 请求比淘汰水位新 → 没有记录就说明确实没执行过，可以重试。
+    const fresh = await service.reconcileApprovedAction('req-fresh', 'delete_note', { path: 'a.md' }, 'tab-1', { requestedAt: 9000 });
+    expect({ status: fresh.status, retryable: fresh.retryable }).toEqual({ status: 'failed', retryable: true });
+  });
+
   await test('reconcileApprovedAction distinguishes executed-but-unrecorded from never-executed', async () => {
     const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
-    const service: any = Object.create(ModelService.prototype);
-    service.approvalExecutionRegistry = new ApprovalExecutionRegistry();
-    service.settings = { activeProvider: 'openai' };
-    service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
+    const service = createApprovalService(ModelService, createInMemoryAuditLog(), new ApprovalExecutionRegistry());
 
+    // 旧文件只有操作记录（没有请求状态）：命中 id 的成功记录按「已执行」处理。
     service.operationAuditLog = {
       list: async () => [{ id: 'req-executed', action: 'delete_note', target: 'a.md', timestamp: 1, approvalSource: 'user-click', undoable: false }],
+      getRequestState: async () => undefined,
+      getPrunedRequestBefore: async () => 0,
     };
     const executed = await service.reconcileApprovedAction('req-executed', 'delete_note', { path: 'a.md' }, 'tab-1');
     expect({ status: executed.status, retryable: executed.retryable }).toEqual({ status: 'unknown', retryable: false });
 
-    service.operationAuditLog = { list: async () => [] };
+    service.operationAuditLog = {
+      list: async () => [],
+      getRequestState: async () => undefined,
+      getPrunedRequestBefore: async () => 0,
+    };
     const neverExecuted = await service.reconcileApprovedAction('req-never', 'delete_note', { path: 'a.md' }, 'tab-1');
     expect({ status: neverExecuted.status, retryable: neverExecuted.retryable }).toEqual({ status: 'failed', retryable: true });
   });
