@@ -3,6 +3,7 @@
 import { App, Plugin, TFile, Notice } from 'obsidian';
 import { debounce } from '../utils/throttle';
 import { logger } from '../utils/logger';
+import { prop } from '../utils/narrow';
 import { PluginSettings } from '../mcp/types';
 import { ModelService } from '../services/model-service';
 import { KnowledgeCompiler, findCurrentCompiledSummary } from './compiler';
@@ -597,8 +598,8 @@ export class KnowledgeRuntime {
       const path = await this.ontologyService.createSchemaFile(candidate.content);
       logger.info(`Ontology schema created at ${path}`, 'KnowledgeRuntime');
       return path;
-    } catch (e: any) {
-      console.error('[KnowledgeRuntime] Ontology discovery failed:', e.message);
+    } catch (e: unknown) {
+      console.error('[KnowledgeRuntime] Ontology discovery failed:', prop(e, 'message'));
       return null;
     }
   }

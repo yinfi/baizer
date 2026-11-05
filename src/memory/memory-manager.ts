@@ -1,4 +1,5 @@
 import { App } from 'obsidian';
+import { prop } from '../utils/narrow';
 import {
     MemoryMutationResult,
     MemoryView,
@@ -14,6 +15,7 @@ import {
     withTextTimeout,
     RetainTurnInput,
     RetainLessonInput,
+    MemoryRecord,
 } from './hindsight-types';
 import { HindsightConsolidator } from './hindsight-consolidator';
 import { importPreviousMemoryFiles, migrateLegacyMemory } from './hindsight-migration';
@@ -263,7 +265,7 @@ export class MemoryManager {
      * 返回 null = 交给上层规则回退(未注入 generate / LLM 失败 / LLM 超时 / LLM 判定无可记);
      * 返回 [] = 输入真空(user、assistant 都空),规则回退也产不出记录,无需回退。
      */
-    private async distillTurnMemories(input: RetainTurnInput, now: number): Promise<any[] | null> {
+    private async distillTurnMemories(input: RetainTurnInput, now: number): Promise<MemoryRecord[] | null> {
         const generate = this.options.generate;
         if (typeof generate !== 'function') return null;
 
@@ -307,7 +309,7 @@ export class MemoryManager {
     private parseDistilledItems(raw: string): Array<{ text: string; entities?: string[] }> {
         const text = (raw || '').trim();
         if (!text) return [];
-        let parsed: any;
+        let parsed: unknown;
         try {
             parsed = JSON.parse(text);
         } catch {
@@ -320,13 +322,15 @@ export class MemoryManager {
         }
         if (!Array.isArray(parsed)) return [];
         const result: Array<{ text: string; entities?: string[] }> = [];
-        for (const el of parsed) {
+        for (const el of parsed as unknown[]) {
             // 兼容:元素可能是对象 {text,entities} 或纯字符串。
-            const rawText = typeof el === 'string' ? el : (el && typeof el.text === 'string' ? el.text : '');
+            const elText = prop(el, 'text');
+            const rawText = typeof el === 'string' ? el : (typeof elText === 'string' ? elText : '');
             const clean = sanitizeMemoryText(rawText.replace(/^[-*\d.\s]+/, '').trim());
             if (clean.length < 2) continue;
-            const entities = (el && Array.isArray(el.entities))
-                ? el.entities.map((x: any) => String(x))
+            const elEntities = prop(el, 'entities');
+            const entities = Array.isArray(elEntities)
+                ? (elEntities as unknown[]).map((x) => String(x))
                 : undefined;
             result.push({ text: clean, entities });
             if (result.length >= 5) break;
@@ -340,8 +344,8 @@ export class MemoryManager {
         if (!text) return [];
         let items: string[] = [];
         try {
-            const parsed = JSON.parse(text);
-            if (Array.isArray(parsed)) items = parsed.map((x) => String(x));
+            const parsed: unknown = JSON.parse(text);
+            if (Array.isArray(parsed)) items = (parsed as unknown[]).map((x) => String(x));
         } catch {
             items = text.split('\n');
         }
@@ -513,8 +517,8 @@ export class MemoryManager {
      * - 用户消息:仅当 looksDurable(含偏好/项目/目标/自我陈述等信号)才存,存为 world;普通问答流水账不入库。
      * - 助手输出:仅当本轮有工具操作(toolResults,有实际动作发生)或用户消息 durable 时才存;否则丢弃闲聊回答。
      */
-    private buildTurnMemories(input: RetainTurnInput, now: number) {
-        const records = [];
+    private buildTurnMemories(input: RetainTurnInput, now: number): MemoryRecord[] {
+        const records: MemoryRecord[] = [];
         const userText = sanitizeMemoryText(input.userMessage.trim());
         const userDurable = !!userText && this.looksDurable(userText);
 
@@ -548,9 +552,9 @@ export class MemoryManager {
      * 去重写入:与库内"同 tag 集且文本高相似(token Jaccard ≥ 0.8)"的记录视为同一条,
      * 只更新其 mentionedAt(+可选 accessCount),不新增;否则正常 upsert。避免近义改写句无限堆叠。
      */
-    private async upsertDeduped(records: any[], now: number): Promise<void> {
+    private async upsertDeduped(records: MemoryRecord[], now: number): Promise<void> {
         const existing = await this.hindsightStore.listMemoriesRaw(DEFAULT_MEMORY_BANK_ID);
-        const toWrite: any[] = [];
+        const toWrite: MemoryRecord[] = [];
 
         for (const record of records) {
             const dup = existing.find((e) =>
@@ -589,18 +593,18 @@ export class MemoryManager {
      * 精度取舍:只退役窗口内"最相似"的一条(同维度改值),不误伤同 tag 但不同槽位的并存偏好;
      * 相似度过低(<MIN)说明是不同槽位,一律不退役。多值主题/experience 一律不触发。
      */
-    private findStaleSameTopic(record: any, existing: any[]): any[] {
+    private findStaleSameTopic(record: MemoryRecord, existing: MemoryRecord[]): MemoryRecord[] {
         if (record.type !== 'world') return [];
-        const recordTopics = record.tags.filter((t: string) =>
+        const recordTopics = record.tags.filter((t) =>
             MemoryManager.SINGLE_VALUE_TOPICS.includes(t));
         if (recordTopics.length === 0) return [];
         const topicSet = new Set(recordTopics);
 
-        let best: any = null;
+        let best: MemoryRecord | null = null;
         let bestSim = 0;
         for (const e of existing) {
             if (e.type !== 'world' || e.id === record.id) continue;
-            if (!e.tags.some((t: string) => topicSet.has(t))) continue;
+            if (!e.tags.some((t) => topicSet.has(t))) continue;
             const sim = this.tokenJaccard(e.normalizedText, record.normalizedText);
             if (sim >= MemoryManager.TOPIC_REPLACE_MIN
                 && sim < MemoryManager.TOPIC_REPLACE_MAX
@@ -637,13 +641,13 @@ export class MemoryManager {
         return this.hindsightStore.bumpConsolidateCounter();
     }
 
-    private shouldForgetHindsightMemory(memory: any, field: ForgetMemoryField): boolean {
+    private shouldForgetHindsightMemory(memory: MemoryRecord, field: ForgetMemoryField): boolean {
         if (!['name', 'profession', 'expertise', 'preferences', 'workflows', 'projects', 'goals'].includes(field)) {
             return false;
         }
 
         const text = memory.normalizedText || normalizeMemoryText(memory.text || '');
-        const tags = new Set((memory.tags || []).map((tag: string) => tag.toLowerCase()));
+        const tags = new Set((memory.tags || []).map((tag) => tag.toLowerCase()));
 
         switch (field) {
             case 'profession':
@@ -690,7 +694,7 @@ export class MemoryManager {
         polarity?: 'positive' | 'negative';
         // LLM 结构化抽取的实体(优先);缺省时回退正则版 extractEntities。
         entities?: string[];
-    }) {
+    }): MemoryRecord {
         const entities = (input.entities && input.entities.length > 0)
             ? this.normalizeEntities(input.entities)
             : this.extractEntities(input.text);
@@ -732,7 +736,7 @@ export class MemoryManager {
     }
 
     private tagsForText(text: string): string[] {
-        const tags = [];
+        const tags: string[] = [];
         const normalizedText = normalizeMemoryText(text);
         if (/prefer|偏好|喜欢/i.test(text)) tags.push('preference');
         if (/project|项目/i.test(text)) tags.push('project');

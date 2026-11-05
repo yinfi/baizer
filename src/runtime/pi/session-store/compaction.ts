@@ -25,6 +25,8 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
   keepRecentTokens: 20000,
 };
 
+import { asString, isRecord } from '../../../utils/narrow';
+
 /** 消息的 token 用量（形如 pi-ai 的 Usage，只读本模块关心的字段）。 */
 export interface UsageLike {
   totalTokens?: number;
@@ -65,8 +67,9 @@ export function estimateTokens(message: EstimableMessage): number {
     chars = content.length;
   } else if (Array.isArray(content)) {
     for (const block of content) {
-      if (block && typeof block === 'object' && block.type === 'text' && typeof block.text === 'string') {
-        chars += block.text.length;
+      if (isRecord(block) && block.type === 'text') {
+        const text = asString(block.text);
+        if (text !== undefined) chars += text.length;
       }
     }
   }

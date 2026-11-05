@@ -10,7 +10,7 @@
  *   // 然后把 model 和 streamFn 传给 pi agentLoop。
  */
 
-import type { AssistantMessage, Model } from '@earendil-works/pi-ai';
+import type { AssistantMessage, Model, TextContent } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 // streamSimple 只在运行期动态 import（与 harness-chat-runtime.ts 的 AgentHarness 同模式），
 // 避免 ESM-only pi-ai 在 CJS 测试环境（tsconfig.test.json module=commonjs）下
@@ -362,7 +362,7 @@ export function createNativeStreamFn(deps: NativeStreamDeps): StreamFn {
 function extractAssistantText(message: AssistantMessage): string {
   if (!message?.content?.length) return '';
   return message.content
-    .filter((block): block is { type: 'text'; text: string } => (block as any)?.type === 'text')
+    .filter((block): block is TextContent => block.type === 'text')
     .map(block => block.text)
     .join('');
 }
