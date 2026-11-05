@@ -245,6 +245,133 @@ async function runTests() {
     expect(memories.some((memory) => memory.id === 'mem_previous_plugin')).toBe(true);
   });
 
+  // ── 迁移数据窄化（旧文件形状不可信） ──────────────────────────────────────
+
+  await test('migration narrows malformed legacy profile/summary shapes without throwing', async () => {
+    const profilePath = '.obsidian/baizer-memory/user-profile.json';
+    const summariesPath = '.obsidian/baizer-memory/session-summaries.json';
+    const { app } = createApp({
+      [profilePath]: JSON.stringify({
+        profession: 42,
+        expertise: ['Obsidian plugins', 7, '', null],
+        preferences: { responseStyle: { verbose: true }, language: 9, topics: 'not-array' },
+        context: { currentProjects: ['Baizer'], goals: 42, challenges: null },
+        workflows: [{ name: 'w1', description: 'd1' }],
+        metadata: { totalInteractions: '4', createdAt: null, updatedAt: 2, lastProfileUpdate: 2 },
+      }),
+      [summariesPath]: JSON.stringify([
+        null,
+        42,
+        { timestamp: 'nope', summary: '  ' },
+        { summary: 'Valid summary.' },
+        { timestamp: 10, summary: 'Timestamped summary.' },
+      ]),
+    });
+    const store = new HindsightStore(app);
+    await store.ready();
+
+    const { migrateLegacyMemory } = await import('../src/memory/hindsight-migration');
+    await migrateLegacyMemory(app, store, 5000);
+
+    const memories = await store.listMemories();
+    const profileMemories = memories.filter((memory) => memory.source.kind === 'profile-migration');
+    const summaryMemories = memories.filter((memory) => memory.source.kind === 'summary-migration');
+    // 非字符串但真值的 profession/responseStyle 仍被文本化（保留旧容错）；
+    // expertise 数组里的数字/空串/ null 被丢弃。
+    expect(profileMemories.length).toBe(4);
+    expect(profileMemories.some((memory) => memory.text === 'User profession: 42')).toBe(true);
+    expect(profileMemories.some((memory) => memory.text === 'User expertise: Obsidian plugins')).toBe(true);
+    expect(profileMemories.some((memory) => memory.text.includes('User response style preference:'))).toBe(true);
+    expect(profileMemories.some((memory) => memory.text === 'Current project: Baizer')).toBe(true);
+    // 坏 summary 条目被丢弃，合法条目保留。
+    expect(summaryMemories.length).toBe(2);
+    expect(summaryMemories.some((memory) => memory.text.includes('Valid summary.'))).toBe(true);
+    expect(summaryMemories.some((memory) => memory.mentionedAt === 10)).toBe(true);
+  });
+
+  await test('migration ignores non-array/corrupt legacy JSON instead of rejecting', async () => {
+    const summariesPath = '.obsidian/baizer-memory/session-summaries.json';
+    const profilePath = '.obsidian/baizer-memory/user-profile.json';
+    const { app } = createApp({
+      [summariesPath]: '{"summary":"not-an-array"}',
+      [profilePath]: '{ this is not json',
+    });
+    const store = new HindsightStore(app);
+    await store.ready();
+
+    const { migrateLegacyMemory } = await import('../src/memory/hindsight-migration');
+    await migrateLegacyMemory(app, store, 5000);
+
+    const memories = await store.listMemories();
+    expect(memories.length).toBe(0);
+  });
+
+  await test('importPreviousMemoryFiles merges profile/summaries preserving old values and order', async () => {
+    const previousMemoryDir = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
+    const profilePath = '.obsidian/baizer-memory/user-profile.json';
+    const summariesPath = '.obsidian/baizer-memory/session-summaries.json';
+    const previousWorkflow = { name: 'w1', description: 'd1', frequency: 2, extra: true };
+    const { app, files } = createApp({
+      [`${previousMemoryDir}/user-profile.json`]: JSON.stringify({
+        name: 'Old Name',
+        profession: 'Previous profession',
+        expertise: ['a', 'b'],
+        preferences: { language: 'en', responseStyle: 'verbose', topics: ['t1'] },
+        workflows: [previousWorkflow],
+        context: { currentProjects: ['p1'], goals: ['g1'], challenges: [] },
+        metadata: { createdAt: 1, updatedAt: 2, totalInteractions: 1, lastProfileUpdate: 1 },
+      }),
+      [profilePath]: JSON.stringify({
+        name: 'New Name',
+        profession: '',
+        expertise: ['b', 'c'],
+        preferences: { language: '', responseStyle: 'concise', topics: ['t2'] },
+        workflows: [previousWorkflow, { name: 'w2', description: 'd2' }],
+        context: { currentProjects: ['p2'], goals: [], challenges: ['c1'] },
+        metadata: { createdAt: 5, updatedAt: 3, totalInteractions: 4, lastProfileUpdate: 3 },
+      }),
+      [`${previousMemoryDir}/session-summaries.json`]: JSON.stringify([
+        { timestamp: 10, summary: 'Shared' },
+      ]),
+      [summariesPath]: JSON.stringify([
+        { timestamp: 20, summary: 'Shared' },
+        { timestamp: 5, summary: 'Current only' },
+        null,
+      ]),
+    });
+    const store = new HindsightStore(app);
+    await store.ready();
+
+    const { importPreviousMemoryFiles } = await import('../src/memory/hindsight-migration');
+    await importPreviousMemoryFiles(app, store, 5000);
+
+    const mergedProfile = JSON.parse(files[profilePath]);
+    expect(mergedProfile.name).toBe('New Name');
+    expect(mergedProfile.profession).toBe('Previous profession');
+    expect(mergedProfile.expertise).toEqual(['a', 'b', 'c']);
+    expect(mergedProfile.preferences.language).toBe('en');
+    expect(mergedProfile.preferences.responseStyle).toBe('concise');
+    expect(mergedProfile.preferences.topics).toEqual(['t1', 't2']);
+    // workflows 原样保留（含额外字段），同内容去重，不擅自归一化。
+    expect(mergedProfile.workflows.length).toBe(2);
+    expect(mergedProfile.workflows[0]).toEqual(previousWorkflow);
+    expect(mergedProfile.context).toEqual({
+      currentProjects: ['p1', 'p2'],
+      goals: ['g1'],
+      challenges: ['c1'],
+    });
+    expect(mergedProfile.metadata).toEqual({
+      createdAt: 1,
+      updatedAt: 5000,
+      totalInteractions: 4,
+      lastProfileUpdate: 5000,
+    });
+
+    const mergedSummaries = JSON.parse(files[summariesPath]);
+    expect(mergedSummaries.length).toBe(3);
+    expect(mergedSummaries.map((entry: { timestamp: number }) => entry.timestamp)).toEqual([20, 10, 5]);
+  });
+
   // ── tokenizeForRetrieval unit tests ──────────────────────────────────────
 
   await test('tokenizeForRetrieval expands CJK runs into overlapping bigrams', async () => {

@@ -4,6 +4,11 @@
 import { App, TFile } from 'obsidian';
 import { extractFrontmatter } from './ontology';
 
+/** 自研 YAML 解析结果（外部输入）里的标量字段：非字符串一律视为缺失。 */
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 export type KnowledgeStatus = 'pending' | 'processing' | 'done' | 'failed';
 export type KnowledgePendingReason = 'new' | 'content_changed' | 'manual' | 'legacy' | 'interrupted';
 
@@ -357,9 +362,9 @@ export async function readSummaryFrontmatter(
     if (!frontmatter) return cached;
 
     return {
-      schema_hash: cached?.schema_hash || frontmatter.schema_hash || undefined,
-      content_hash: cached?.content_hash || frontmatter.content_hash || undefined,
-      compiled_at: cached?.compiled_at || frontmatter.compiled_at || undefined,
+      schema_hash: cached?.schema_hash || asString(frontmatter.schema_hash) || undefined,
+      content_hash: cached?.content_hash || asString(frontmatter.content_hash) || undefined,
+      compiled_at: cached?.compiled_at || asString(frontmatter.compiled_at) || undefined,
     };
   } catch {
     return cached;

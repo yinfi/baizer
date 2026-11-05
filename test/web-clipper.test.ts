@@ -406,6 +406,52 @@ async function runTests() {
     expect(saved).toContain('Audio transcription failed');
     expect(saved).toContain('upstream exploded');
   });
+
+  // 工具 args 是模型给的 JSON（外部输入）：非字符串 filename 不能把工具体打崩，也不能当文件名。
+  await test('falls back to the video title when the filename argument is not a string', async () => {
+    const notes: Record<string, string> = {};
+    const app = createMockApp(notes);
+    transcriptImpl = async (url: string) => ({
+      text: 'Transcript body for testing the filename fallback.',
+      title: 'Typed Filename Video',
+      platform: 'youtube',
+      author: 'Tester',
+      url,
+    });
+
+    const modelService = { generate: async () => '## Summary\n\n- key point' };
+    const tool = createSaveWebpageTool(modelService, deps);
+    const result = await tool.execute(
+      { url: 'https://youtu.be/typed-filename', filename: 42 },
+      { app, settings: DEFAULT_SETTINGS } as any,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.path).toBe('Clippings/Typed Filename Video.md');
+    expect(notes[result.path]).toContain('# Typed Filename Video');
+  });
+
+  await test('honors a string filename argument as the note name', async () => {
+    const notes: Record<string, string> = {};
+    const app = createMockApp(notes);
+    transcriptImpl = async (url: string) => ({
+      text: 'Transcript body for testing a custom filename.',
+      title: 'Ignored Title',
+      platform: 'youtube',
+      author: 'Tester',
+      url,
+    });
+
+    const modelService = { generate: async () => '## Summary\n\n- key point' };
+    const tool = createSaveWebpageTool(modelService, deps);
+    const result = await tool.execute(
+      { url: 'https://youtu.be/custom-filename', filename: 'Custom Name' },
+      { app, settings: DEFAULT_SETTINGS } as any,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.path).toBe('Clippings/Custom Name.md');
+  });
 }
 
 runTests().catch((e) => {

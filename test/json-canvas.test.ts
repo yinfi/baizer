@@ -136,6 +136,56 @@ async function runTests() {
     expectIncludes(result.errors, 'toNode', 'should report dangling edge');
     expectIncludes(result.errors, 'fromSide', 'should report invalid side');
   });
+
+  // 工具 args 是模型给的 JSON（外部输入）：缺参 / 错类型不能把工具体打崩。
+  await test('validate_json_canvas folds malformed args into the standard content error', async () => {
+    const toolRegistry = new ToolRegistry({} as any, DEFAULT_SETTINGS);
+    registerJsonCanvasTools(toolRegistry);
+
+    for (const args of [null, { content: 42 }, {}]) {
+      const result = await toolRegistry.execute('validate_json_canvas', args);
+      expect(
+        JSON.stringify(result) === JSON.stringify({
+          success: false,
+          errors: ['content must be a JSON string'],
+        }),
+        `unexpected result for ${JSON.stringify(args)}: ${JSON.stringify(result)}`,
+      );
+    }
+  });
+
+  // .canvas 文件可能被手改或由其他插件写入：节点/边是标量时必须逐条报错，不能抛异常。
+  await test('validate_json_canvas reports scalar nodes and edges instead of crashing', async () => {
+    const toolRegistry = new ToolRegistry({} as any, DEFAULT_SETTINGS);
+    registerJsonCanvasTools(toolRegistry);
+
+    const result = await toolRegistry.execute('validate_json_canvas', {
+      content: JSON.stringify({
+        nodes: [null, 42, { id: 'aaaaaaaaaaaaaaaa' }],
+        edges: [null, { id: 'wrong' }],
+      }),
+    });
+
+    expect(result.success === false, `malformed canvas should fail: ${JSON.stringify(result)}`);
+    expectIncludes(result.errors, 'nodes[0].id', 'scalar node should report a missing id');
+    expectIncludes(result.errors, 'nodes[1].type', 'scalar node should report a missing type');
+    expectIncludes(result.errors, 'nodes[2].type', 'node without type should be reported');
+    expectIncludes(result.errors, 'edges[0].id', 'scalar edge should report a missing id');
+    expectIncludes(result.errors, 'edges[1].fromNode', 'edge without fromNode should be reported');
+  });
+
+  await test('validate_json_canvas keeps the non-object-root and invalid-JSON errors', async () => {
+    const toolRegistry = new ToolRegistry({} as any, DEFAULT_SETTINGS);
+    registerJsonCanvasTools(toolRegistry);
+
+    const arrayRoot = await toolRegistry.execute('validate_json_canvas', { content: '[1,2]' });
+    expect(arrayRoot.success === false, `array root should fail: ${JSON.stringify(arrayRoot)}`);
+    expectIncludes(arrayRoot.errors, 'Canvas root must be an object', 'array root should be rejected');
+
+    const invalidJson = await toolRegistry.execute('validate_json_canvas', { content: '{oops' });
+    expect(invalidJson.success === false, 'invalid JSON should fail');
+    expectIncludes(invalidJson.errors, 'Invalid JSON', 'parse failures keep their existing text');
+  });
 }
 
 runTests().catch((e) => {

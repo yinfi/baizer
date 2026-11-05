@@ -60,6 +60,33 @@ async function runTests() {
     const result = await tool.execute({ query: 'obsidian' }, {} as any);
     expect(result.error).toContain('network down');
   });
+
+  // 工具 args 是模型给的 JSON（外部输入）：非字符串字段按缺省处理，不能把工具体打崩。
+  await test('ignores non-string query fields instead of crashing', async () => {
+    let requestedUrl = '';
+    const tool = createWebSearchTool({
+      requestUrl: async (options: any) => {
+        requestedUrl = options.url;
+        return { status: 200, text: `<html>${'x'.repeat(60)}</html>` };
+      },
+      wait: async () => undefined,
+    });
+
+    const result = await tool.execute({ query: 42, time_range: 7 }, {} as any);
+    // 非字符串 query 视为空查询；非字符串 time_range 不拼进 URL。
+    expect(requestedUrl).toBe('https://html.duckduckgo.com/html/?q=');
+    expect(Array.isArray(result.results)).toBe(true);
+  });
+
+  await test('treats null tool args as an empty query', async () => {
+    const tool = createWebSearchTool({
+      requestUrl: async (_options: any) => ({ status: 200, text: 'too short' }),
+      wait: async () => undefined,
+    });
+
+    const result = await tool.execute(null, {} as any);
+    expect(result.message).toContain('No results');
+  });
 }
 
 runTests().catch((e) => {
