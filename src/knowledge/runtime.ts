@@ -207,7 +207,7 @@ export class KnowledgeRuntime {
 
     if (this.settings.knowledgeAutoCompile && totalPending > 0) {
       logger.info(`${totalPending} pending notes, scheduling auto-compile...`, 'KnowledgeRuntime');
-      setTimeout(() => this.watcher.triggerCompile(), 10000);
+      window.setTimeout(() => this.watcher.triggerCompile(), 10000);
     }
   }
 

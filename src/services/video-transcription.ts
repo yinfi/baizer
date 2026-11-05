@@ -87,7 +87,7 @@ interface VideoTranscriptionDeps {
  * 而调用方在解码失败时还要拿原缓冲走整轨回退路径。
  */
 export async function decodeWithWebAudio(bytes: ArrayBuffer): Promise<PcmSource> {
-  const globalScope = globalThis as unknown as {
+  const globalScope = window as unknown as {
     OfflineAudioContext?: OfflineAudioContextConstructor;
     webkitOfflineAudioContext?: OfflineAudioContextConstructor;
   };
@@ -130,9 +130,28 @@ function isPcmSource(value: unknown): value is PcmSource {
   return isRecord(value) && typeof value.getChannelData === 'function';
 }
 
+/**
+ * 默认的 fetchImpl：经 Obsidian requestUrl 发送（不受 CORS 限制，移动端同样可用）。
+ * requestUrl 不接受 FormData，所以先借 Request 把 multipart 体序列化成 ArrayBuffer，
+ * 并沿用其带 boundary 的 Content-Type。只实现调用方用到的 Response 成员（ok/status/text/json）。
+ */
+async function requestUrlFetchImpl(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const req = new Request(input, init);
+  const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.arrayBuffer();
+  const headers: Record<string, string> = {};
+  req.headers.forEach((value, key) => { headers[key] = value; });
+  const res = await requestUrl({ url: req.url, method: req.method, headers, body, throw: false });
+  return {
+    ok: res.status >= 200 && res.status < 300,
+    status: res.status,
+    text: async () => res.text,
+    json: async () => res.json,
+  } as unknown as Response;
+}
+
 const defaultDeps: VideoTranscriptionDeps = {
   requestUrl: (options) => requestUrl(options),
-  fetchImpl: (input, init) => fetch(input, init),
+  fetchImpl: requestUrlFetchImpl,
   decodeAudio: (bytes) => decodeWithWebAudio(bytes),
 };
 

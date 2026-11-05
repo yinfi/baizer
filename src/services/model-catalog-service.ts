@@ -112,7 +112,7 @@ function requestModelsWithTimeout(
     let settled = false;
 
     function cleanup(): void {
-      clearTimeout(timer);
+      window.clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
     }
 
@@ -127,7 +127,7 @@ function requestModelsWithTimeout(
       finish(() => reject(createAbortError()));
     }
 
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       finish(() => reject(new Error(`Model list request timed out after ${timeoutMs}ms: ${url}`)));
     }, Math.max(0, timeoutMs));
 

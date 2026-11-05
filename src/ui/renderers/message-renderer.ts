@@ -354,7 +354,7 @@ export class MessageRenderer {
         box.remove?.();
       }
     });
-    setTimeout(() => input.focus?.(), 0);
+    window.setTimeout(() => input.focus?.(), 0);
   }
 
   /**
@@ -440,7 +440,7 @@ export class MessageRenderer {
         box.remove?.();
       }
     });
-    setTimeout(() => input.focus?.(), 0);
+    window.setTimeout(() => input.focus?.(), 0);
   }
 
   /**
@@ -502,7 +502,7 @@ export class MessageRenderer {
       }
     });
 
-    setTimeout(() => input.focus?.(), 0);
+    window.setTimeout(() => input.focus?.(), 0);
   }
 
   private async copyMessage(message: ChatMessage) {

@@ -370,11 +370,11 @@ export default class Anthropic {
    * （绕 CORS + 保留流式），模块加载期取到的会是替换前的原生 fetch。
    */
   private resolveFetch(): typeof fetch {
-    const impl: typeof fetch | undefined = this.fetch ?? (globalThis as { fetch?: typeof fetch }).fetch;
+    const impl: typeof fetch | undefined = this.fetch ?? (window as { fetch?: typeof fetch }).fetch;
     if (typeof impl !== 'function') {
       throw new Error('anthropic-sdk-shim: no fetch implementation available in this environment.');
     }
-    return impl.bind(globalThis);
+    return impl.bind(window);
   }
 
   private buildAbortSignal(options?: AnthropicShimRequestOptions): {
@@ -394,12 +394,12 @@ export default class Anthropic {
       if (caller.aborted) controller.abort();
       else caller.addEventListener('abort', abort, { once: true });
     }
-    const timer = setTimeout(abort, timeoutMs);
+    const timer = window.setTimeout(abort, timeoutMs);
 
     return {
       signal: controller.signal,
       cleanup: () => {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         caller?.removeEventListener('abort', abort);
       },
     };

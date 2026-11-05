@@ -73,11 +73,12 @@ function createMockApp() {
         }
         return contents.get(file.path) || '';
       },
-      trash: async () => { },
+      configDir: '.obsidian',
       rename: async () => { },
       getMarkdownFiles: () => [],
       getFiles: () => Array.from(files.values()),
     },
+    fileManager: { trashFile: async () => { } },
     metadataCache: {
       getFirstLinkpathDest: (path: string) => files.get(path) || null,
     },

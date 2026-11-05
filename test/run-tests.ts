@@ -126,7 +126,7 @@ const tests = [
 for (const testFile of tests) {
   console.log(`Running ${testFile}...`);
   try {
-    execSync(`npx tsx --tsconfig tsconfig.test.json ${testFile}`, {
+    execSync(`npx tsx --tsconfig tsconfig.test.json --require ./test/setup-window.cjs ${testFile}`, {
       stdio: 'inherit',
       cwd: process.cwd(),
     });

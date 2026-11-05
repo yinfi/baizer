@@ -92,7 +92,7 @@ export class WikiIndexer {
     if (oldIndex && oldIndex instanceof TFile) {
       const content = await this.app.vault.read(oldIndex);
       if (content.includes('knowledge_generated: true')) {
-        await this.app.vault.trash(oldIndex, true);
+        await this.app.fileManager.trashFile(oldIndex);
         logger.info('Migrated: removed legacy index.md', 'WikiIndexer');
       }
     }
@@ -105,7 +105,7 @@ export class WikiIndexer {
     for (const file of topicFiles) {
       const content = await this.app.vault.read(file);
       if (content.includes('knowledge_generated: true')) {
-        await this.app.vault.trash(file, true);
+        await this.app.fileManager.trashFile(file);
       }
     }
     if (topicFiles.length > 0) {

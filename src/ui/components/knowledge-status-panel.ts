@@ -139,7 +139,7 @@ export class KnowledgeStatusPanel {
       (this.options.app as AppWithCommands).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
     });
     this.createMenuItem(menu, 'Copy note path', 'copy', () => {
-      void globalThis.navigator?.clipboard?.writeText?.(activeFile.path);
+      void window.navigator?.clipboard?.writeText?.(activeFile.path);
       new Notice('Copied note path.');
     });
     this.createMenuItem(menu, 'Settings', 'settings', () => {

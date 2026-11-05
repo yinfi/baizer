@@ -15,9 +15,9 @@ const ACTIVE_NOTE_TIMEOUT_MS = 800;
 function withTimeout(p: Promise<string>, ms: number): Promise<string> {
   return new Promise<string>((resolve) => {
     let done = false;
-    const t = setTimeout(() => { if (!done) { done = true; resolve(''); } }, ms);
-    p.then((v) => { if (!done) { done = true; clearTimeout(t); resolve(v || ''); } })
-     .catch(() => { if (!done) { done = true; clearTimeout(t); resolve(''); } });
+    const t = window.setTimeout(() => { if (!done) { done = true; resolve(''); } }, ms);
+    p.then((v) => { if (!done) { done = true; window.clearTimeout(t); resolve(v || ''); } })
+     .catch(() => { if (!done) { done = true; window.clearTimeout(t); resolve(''); } });
   });
 }
 

@@ -321,7 +321,7 @@ export class PluginSkillGenerator {
         }
         // 202 或内容太短，等 2 秒后重试
         if (attempt < 2) {
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise(r => window.setTimeout(r, 2000));
         }
       }
       if (!html) return '';

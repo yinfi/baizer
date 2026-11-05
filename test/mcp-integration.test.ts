@@ -66,9 +66,10 @@ async function runTests() {
         const entry = files.get(file.path);
         if (entry) entry.content = content;
       },
-      trash: async () => { },
+      configDir: '.obsidian',
       rename: async () => { },
     },
+    fileManager: { trashFile: async () => { } },
     metadataCache: {
       getFirstLinkpathDest: (path: string) => files.get(path)?.file || null,
     },

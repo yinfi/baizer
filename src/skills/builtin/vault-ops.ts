@@ -242,7 +242,7 @@ const deleteNote: Tool = {
         undoable: true,
       });
     }
-    await ctx.app.vault.trash(file, true);
+    await ctx.app.fileManager.trashFile(file);
     return { success: true, message: `✅ Deleted: ${notePath}` };
   },
 };
@@ -442,8 +442,8 @@ const createFile: Tool = {
     if (scopeError) {
       return { success: false, error: scopeError };
     }
-    if (isObsidianConfigPath(pathResult.path)) {
-      return { success: false, error: 'Writing .obsidian files is not allowed' };
+    if (isObsidianConfigPath(ctx.app, pathResult.path)) {
+      return { success: false, error: `Writing ${ctx.app.vault.configDir} files is not allowed` };
     }
     const capabilityError = checkFileCapability('create', ctx.settings);
     if (capabilityError) {
@@ -498,8 +498,8 @@ const updateFile: Tool = {
     if (scopeError) {
       return { success: false, error: scopeError };
     }
-    if (isObsidianConfigPath(pathResult.path)) {
-      return { success: false, error: 'Writing .obsidian files is not allowed' };
+    if (isObsidianConfigPath(ctx.app, pathResult.path)) {
+      return { success: false, error: `Writing ${ctx.app.vault.configDir} files is not allowed` };
     }
     const capabilityError = checkFileCapability('modify', ctx.settings);
     if (capabilityError) {
@@ -564,8 +564,9 @@ function limitArg(value: unknown, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 }
 
-function isObsidianConfigPath(path: string): boolean {
-  return path === '.obsidian' || path.startsWith('.obsidian/');
+function isObsidianConfigPath(app: App, path: string): boolean {
+  const configDir = app.vault.configDir;
+  return path === configDir || path.startsWith(`${configDir}/`);
 }
 
 function isReadableVaultFile(file: unknown): file is TFile {

@@ -50,7 +50,7 @@ export function throttle<T extends (...args: never[]) => unknown>(
     const leading = options.leading ?? true;
     const trailing = options.trailing ?? true;
 
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timer: number | null = null;
     let lastCallTime: number | null = null;
     let pendingArgs: Parameters<T> | null = null;
 
@@ -60,7 +60,7 @@ export function throttle<T extends (...args: never[]) => unknown>(
     }
 
     function scheduleTrailing(args: Parameters<T>, remaining: number): void {
-        timer = setTimeout(() => {
+        timer = window.setTimeout(() => {
             timer = null;
             if (trailing && pendingArgs !== null) {
                 invoke(pendingArgs);
@@ -79,7 +79,7 @@ export function throttle<T extends (...args: never[]) => unknown>(
         if (remaining <= 0 || remaining > wait) {
             // 窗口已过期
             if (timer !== null) {
-                clearTimeout(timer);
+                window.clearTimeout(timer);
                 timer = null;
             }
             if (leading) {
@@ -101,7 +101,7 @@ export function throttle<T extends (...args: never[]) => unknown>(
 
     throttled.flush = function (): void {
         if (timer !== null) {
-            clearTimeout(timer);
+            window.clearTimeout(timer);
             timer = null;
         }
         if (pendingArgs !== null) {
@@ -113,7 +113,7 @@ export function throttle<T extends (...args: never[]) => unknown>(
 
     throttled.cancel = function (): void {
         if (timer !== null) {
-            clearTimeout(timer);
+            window.clearTimeout(timer);
             timer = null;
         }
         pendingArgs = null;
@@ -167,7 +167,7 @@ export function debounce<T extends (...args: never[]) => unknown>(
     const wait = options.wait ?? 300;
     const leading = options.leading ?? false;
 
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timer: number | null = null;
     let pendingArgs: Parameters<T> | null = null;
     let leadingFired = false;
 
@@ -179,7 +179,7 @@ export function debounce<T extends (...args: never[]) => unknown>(
                 leadingFired = true;
                 fn(...args);
                 // 计时器只设一次，窗口结束后重置状态
-                timer = setTimeout(() => {
+                timer = window.setTimeout(() => {
                     timer = null;
                     leadingFired = false;
                 }, wait);
@@ -188,8 +188,8 @@ export function debounce<T extends (...args: never[]) => unknown>(
         } else {
             // trailing 模式：每次调用都重置等待计时器，记录最新参数
             pendingArgs = args;
-            if (timer !== null) clearTimeout(timer);
-            timer = setTimeout(() => {
+            if (timer !== null) window.clearTimeout(timer);
+            timer = window.setTimeout(() => {
                 timer = null;
                 const args = pendingArgs!;
                 pendingArgs = null;
@@ -200,7 +200,7 @@ export function debounce<T extends (...args: never[]) => unknown>(
 
     debounced.flush = function (): void {
         if (timer !== null) {
-            clearTimeout(timer);
+            window.clearTimeout(timer);
             timer = null;
         }
         if (leading) {
@@ -219,7 +219,7 @@ export function debounce<T extends (...args: never[]) => unknown>(
 
     debounced.cancel = function (): void {
         if (timer !== null) {
-            clearTimeout(timer);
+            window.clearTimeout(timer);
             timer = null;
         }
         pendingArgs = null;

@@ -43,7 +43,7 @@ function createApp(existing: Record<string, string> = {}) {
       delete files[from];
     },
   };
-  return { app: { vault: { adapter } } as unknown as App, files };
+  return { app: { vault: { adapter, configDir: '.obsidian' } } as unknown as App, files };
 }
 
 async function run() {
