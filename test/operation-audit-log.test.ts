@@ -282,6 +282,40 @@ async function runTests() {
     const broken = createLog(OperationAuditLog, adapter);
     expect(await broken.log.list()).toEqual([]);
   });
+
+  await test('ignores non-object or wrong-shaped audit files and drops malformed entries individually', async () => {
+    const goodOp = { id: 'op-1', action: 'create_note', target: 'A.md', timestamp: 5, approvalSource: 'direct-write', undoable: true };
+    const goodReq = { id: 'req-1', action: 'create_note', target: 'A.md', state: 'succeeded', timestamp: 5, updatedAt: 6 };
+
+    for (const raw of ['null', '"text"', '42', '[]', '{"version":2,"operations":[]}', '{"version":1,"operations":"x"}', 'not json']) {
+      const adapter = new FakeAdapter();
+      adapter.files.set(OPERATION_AUDIT_LOG_PATH, raw);
+      const { log } = createLog(OperationAuditLog, adapter);
+      expect(await log.list()).toEqual([]);
+    }
+
+    const adapter = new FakeAdapter();
+    adapter.files.set(OPERATION_AUDIT_LOG_PATH, JSON.stringify({
+      version: 1,
+      operations: [
+        null, 'x', 7, [], {},
+        { ...goodOp, id: 9 },
+        { ...goodOp, approvalSource: 'other' },
+        { ...goodOp, undoable: 'yes' },
+        { ...goodOp, outcome: 'weird' },
+        goodOp,
+      ],
+      requests: [null, 'x', { ...goodReq, state: 'bogus' }, { ...goodReq, updatedAt: '6' }, goodReq],
+      requestsPrunedBefore: 'soon',
+    }));
+    const { log } = createLog(OperationAuditLog, adapter);
+    const ops = await log.list();
+    expect(ops.length).toBe(1);
+    expect(ops[0].id).toBe('op-1');
+    expect((await log.getRequestState('req-1'))?.state).toBe('succeeded');
+    expect(await log.getRequestState('bogus')).toBe(undefined);
+    expect(await log.getPrunedRequestBefore()).toBe(0);
+  });
 }
 
 runTests().catch((e) => {

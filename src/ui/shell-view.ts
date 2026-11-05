@@ -1328,7 +1328,11 @@ export class ShellView extends ItemView {
             return;
         }
 
-        const target = approval.target || approval.args?.path || approval.args?.filename;
+        const argPath = approval.args?.path;
+        const argFilename = approval.args?.filename;
+        const target = approval.target
+            || (typeof argPath === 'string' ? argPath : '')
+            || (typeof argFilename === 'string' ? argFilename : '');
         if (target) {
             await this.openApprovalTarget(target);
         }

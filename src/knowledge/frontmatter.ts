@@ -2,15 +2,23 @@
 // 通过 Obsidian frontmatter 管理知识编译状态，替代外部 registry
 
 import { App, TFile } from 'obsidian';
-import { extractFrontmatter } from './ontology';
-
-/** 自研 YAML 解析结果（外部输入）里的标量字段：非字符串一律视为缺失。 */
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
+import { extractFrontmatter, readNonEmptyString } from './ontology';
 
 export type KnowledgeStatus = 'pending' | 'processing' | 'done' | 'failed';
 export type KnowledgePendingReason = 'new' | 'content_changed' | 'manual' | 'legacy' | 'interrupted';
+
+const KNOWLEDGE_STATUS_VALUES: readonly KnowledgeStatus[] = ['pending', 'processing', 'done', 'failed'];
+const KNOWLEDGE_PENDING_REASON_VALUES: readonly KnowledgePendingReason[] = [
+  'new', 'content_changed', 'manual', 'legacy', 'interrupted',
+];
+
+function isKnowledgeStatus(value: unknown): value is KnowledgeStatus {
+  return KNOWLEDGE_STATUS_VALUES.some((candidate) => candidate === value);
+}
+
+function isKnowledgePendingReason(value: unknown): value is KnowledgePendingReason {
+  return KNOWLEDGE_PENDING_REASON_VALUES.some((candidate) => candidate === value);
+}
 
 /** frontmatter 中的知识编译字段 */
 export interface KnowledgeFrontmatter {
@@ -45,27 +53,23 @@ export function generateSourceId(): string {
 /** 通过 metadataCache 读取文件的 knowledge_status */
 export function getKnowledgeStatus(app: App, file: TFile): KnowledgeStatus | null {
   const cache = app.metadataCache.getFileCache(file);
-  const status = cache?.frontmatter?.knowledge_status;
-  if (!status) return null;
-  if (['pending', 'processing', 'done', 'failed'].includes(status)) {
-    return status as KnowledgeStatus;
-  }
-  return null;
+  const status: unknown = cache?.frontmatter?.knowledge_status;
+  if (!isKnowledgeStatus(status)) return null;
+  return status;
 }
 
 /** 通过 metadataCache 读取文件的 knowledge_source_id */
 export function getSourceId(app: App, file: TFile): string | null {
   const cache = app.metadataCache.getFileCache(file);
-  return cache?.frontmatter?.knowledge_source_id ?? null;
+  const sourceId: unknown = cache?.frontmatter?.knowledge_source_id;
+  return typeof sourceId === 'string' ? sourceId : null;
 }
 
 export function getPendingReason(app: App, file: TFile): KnowledgePendingReason | null {
   const cache = app.metadataCache.getFileCache(file);
-  const reason = cache?.frontmatter?.knowledge_pending_reason;
-  if (['new', 'content_changed', 'manual', 'legacy', 'interrupted'].includes(reason)) {
-    return reason as KnowledgePendingReason;
-  }
-  return null;
+  const reason: unknown = cache?.frontmatter?.knowledge_pending_reason;
+  if (!isKnowledgePendingReason(reason)) return null;
+  return reason;
 }
 
 type KnowledgeStatusExtra = {
@@ -337,10 +341,11 @@ export function getSummaryFrontmatter(
   const cache = app.metadataCache.getFileCache(file);
   if (!cache?.frontmatter) return null;
 
+  const frontmatter = cache.frontmatter;
   return {
-    schema_hash: cache.frontmatter.schema_hash || undefined,
-    content_hash: cache.frontmatter.content_hash || undefined,
-    compiled_at: cache.frontmatter.compiled_at || undefined,
+    schema_hash: readNonEmptyString(frontmatter.schema_hash),
+    content_hash: readNonEmptyString(frontmatter.content_hash),
+    compiled_at: readNonEmptyString(frontmatter.compiled_at),
   };
 }
 
@@ -362,9 +367,9 @@ export async function readSummaryFrontmatter(
     if (!frontmatter) return cached;
 
     return {
-      schema_hash: cached?.schema_hash || asString(frontmatter.schema_hash) || undefined,
-      content_hash: cached?.content_hash || asString(frontmatter.content_hash) || undefined,
-      compiled_at: cached?.compiled_at || asString(frontmatter.compiled_at) || undefined,
+      schema_hash: cached?.schema_hash || readNonEmptyString(frontmatter.schema_hash),
+      content_hash: cached?.content_hash || readNonEmptyString(frontmatter.content_hash),
+      compiled_at: cached?.compiled_at || readNonEmptyString(frontmatter.compiled_at),
     };
   } catch {
     return cached;

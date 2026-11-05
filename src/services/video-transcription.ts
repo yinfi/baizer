@@ -30,8 +30,7 @@ import {
   ResolvedAsrConfig,
   resolveAsrConfig,
 } from '../mcp/types';
-import { asArray, asString, prop } from '../utils/narrow';
-import { extractJsonAssignment } from '../utils/video_utils';
+import { extractJsonAssignment, isRecord, readPath } from '../utils/video_utils';
 import {
   ASR_TARGET_SAMPLE_RATE,
   ChunkWindow,
@@ -88,8 +87,12 @@ interface VideoTranscriptionDeps {
  * 而调用方在解码失败时还要拿原缓冲走整轨回退路径。
  */
 export async function decodeWithWebAudio(bytes: ArrayBuffer): Promise<PcmSource> {
-  const Ctor: unknown = prop(globalThis, 'OfflineAudioContext') || prop(globalThis, 'webkitOfflineAudioContext');
-  if (!isOfflineAudioContextCtor(Ctor)) {
+  const globalScope = globalThis as unknown as {
+    OfflineAudioContext?: OfflineAudioContextConstructor;
+    webkitOfflineAudioContext?: OfflineAudioContextConstructor;
+  };
+  const Ctor = globalScope.OfflineAudioContext || globalScope.webkitOfflineAudioContext;
+  if (typeof Ctor !== 'function') {
     throw new Error('Web Audio (OfflineAudioContext) is unavailable in this environment');
   }
 
@@ -101,33 +104,30 @@ export async function decodeWithWebAudio(bytes: ArrayBuffer): Promise<PcmSource>
     }
   });
 
-  if (!isDecodedPcm(decoded)) {
+  if (!isPcmSource(decoded) || !(decoded.length > 0)) {
     throw new Error('Decoded audio contains no samples');
   }
 
   return decoded;
 }
 
-/** Web Audio OfflineAudioContext 中本模块用到的最小形状(平台 API 边界)。 */
+/** decodeAudioData 的最小形状：同时兼容回调式（旧 Safari）与 Promise 式。 */
 interface OfflineAudioContextLike {
   decodeAudioData(
     data: ArrayBuffer,
     onSuccess: (decoded: unknown) => void,
-    onError: (reason: unknown) => void,
+    onError: (error: unknown) => void,
   ): PromiseLike<unknown> | undefined;
 }
 
-type OfflineAudioContextCtor = new (channels: number, length: number, sampleRate: number) => OfflineAudioContextLike;
+type OfflineAudioContextConstructor = new (
+  channels: number,
+  length: number,
+  sampleRate: number,
+) => OfflineAudioContextLike;
 
-function isOfflineAudioContextCtor(value: unknown): value is OfflineAudioContextCtor {
-  return typeof value === 'function';
-}
-
-/** 解码结果必须带 getChannelData 且有样本;其余字段(采样率等)由调用方继续校验。 */
-function isDecodedPcm(value: unknown): value is PcmSource {
-  return !!value
-    && typeof prop(value, 'getChannelData') === 'function'
-    && Number(prop(value, 'length')) > 0;
+function isPcmSource(value: unknown): value is PcmSource {
+  return isRecord(value) && typeof value.getChannelData === 'function';
 }
 
 const defaultDeps: VideoTranscriptionDeps = {
@@ -186,28 +186,37 @@ export function isParameterRejection(error: unknown): boolean {
 function pickBilibiliAudioUrl(html: string): string | null {
   const playInfo = extractJsonAssignment(html, 'window.__playinfo__=')
     || extractJsonAssignment(html, '__playinfo__=');
-  const audioTracks = asArray(prop(prop(prop(playInfo, 'data'), 'dash'), 'audio'));
-  if (!audioTracks || audioTracks.length === 0) return null;
+  const audioTracks = readPath(playInfo, ['data', 'dash', 'audio']);
+  if (!Array.isArray(audioTracks) || audioTracks.length === 0) return null;
 
-  const selected: unknown = audioTracks.find((track) => prop(track, 'baseUrl') || prop(track, 'base_url'))
-    || audioTracks[0];
-  return asString(
-    prop(selected, 'baseUrl')
-    || prop(selected, 'base_url')
-    || asArray(prop(selected, 'backupUrl'))?.[0]
-    || asArray(prop(selected, 'backup_url'))?.[0],
-  ) || null;
+  const tracks: unknown[] = audioTracks;
+  const selected = tracks.find((track) => readPath(track, ['baseUrl']) || readPath(track, ['base_url'])) || tracks[0];
+  const picked = readPath(selected, ['baseUrl'])
+    || readPath(selected, ['base_url'])
+    || firstElement(readPath(selected, ['backupUrl']))
+    || firstElement(readPath(selected, ['backup_url']));
+  return typeof picked === 'string' && picked ? picked : null;
+}
+
+/** 取未知值的首个元素；不是数组（或为空）时返回 undefined。 */
+function firstElement(value: unknown): unknown {
+  return Array.isArray(value) ? (value as unknown[])[0] : undefined;
 }
 
 function pickYouTubeAudioUrl(html: string): string | null {
   const playerResponse = extractJsonAssignment(html, 'var ytInitialPlayerResponse = ')
     || extractJsonAssignment(html, 'ytInitialPlayerResponse = ')
     || extractJsonAssignment(html, 'ytInitialPlayerResponse=');
-  const formats = asArray(prop(prop(playerResponse, 'streamingData'), 'adaptiveFormats'));
-  if (!formats) return null;
+  const formats = readPath(playerResponse, ['streamingData', 'adaptiveFormats']);
+  if (!Array.isArray(formats)) return null;
 
-  const selected = formats.find((format) => asString(prop(format, 'mimeType'))?.startsWith('audio/'));
-  return asString(prop(selected, 'url')) || null;
+  const candidates: unknown[] = formats;
+  const selected = candidates.find((format) => {
+    const mimeType = readPath(format, ['mimeType']);
+    return typeof mimeType === 'string' && mimeType.startsWith('audio/');
+  });
+  const url = readPath(selected, ['url']);
+  return typeof url === 'string' && url ? url : null;
 }
 
 async function resolveAudio(params: {
@@ -265,13 +274,14 @@ export function parseTranscriptionPayload(
 ): { text: string; segments: TranscriptSegment[] } {
   const segments: TranscriptSegment[] = [];
 
-  const rawSegments = asArray(prop(payload, 'segments'));
-  if (rawSegments) {
-    for (const raw of rawSegments) {
-      const text = asString(prop(raw, 'text'))?.trim() ?? '';
+  const rawSegments = readPath(payload, ['segments']);
+  if (Array.isArray(rawSegments)) {
+    for (const raw of rawSegments as unknown[]) {
+      const rawText = readPath(raw, ['text']);
+      const text = typeof rawText === 'string' ? rawText.trim() : '';
       if (!text) continue;
-      const start = Number(prop(raw, 'start'));
-      const end = Number(prop(raw, 'end'));
+      const start = Number(readPath(raw, ['start']));
+      const end = Number(readPath(raw, ['end']));
       segments.push({
         start: Number.isFinite(start) ? window.startSec + start : window.startSec,
         end: Number.isFinite(end) ? window.startSec + end : window.endSec,
@@ -280,7 +290,8 @@ export function parseTranscriptionPayload(
     }
   }
 
-  const flat = asString(prop(payload, 'text'))?.trim() ?? '';
+  const rawFlat = readPath(payload, ['text']);
+  const flat = typeof rawFlat === 'string' ? rawFlat.trim() : '';
   if (segments.length === 0 && flat) {
     segments.push({ start: window.startSec, end: window.endSec, text: flat });
   }
@@ -356,9 +367,7 @@ async function postTranscriptionRequest(params: TranscriptionRequestParams): Pro
     );
   }
 
-  if (typeof response.json !== 'function') return {};
-  const body: unknown = await response.json();
-  return body;
+  return typeof response.json === 'function' ? await response.json() as unknown : {};
 }
 
 /** 本次运行里 response_format 的协商状态。`degraded` 会被写成一条用户可见的 warning。 */

@@ -2,7 +2,6 @@ import { parse } from 'yaml';
 import { BuiltinExecutor } from '../../skill-registry';
 import { Tool } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
-import { asArray, asRecord, asString, isPlainRecord, prop } from '../../../utils/narrow';
 
 const VIEW_TYPES = new Set(['table', 'cards', 'list', 'map']);
 
@@ -24,8 +23,8 @@ const validateBaseYaml: Tool = {
   },
   executionMode: 'parallel',
   risk: 'read',
-  async execute(args: unknown) {
-    return validateBaseYamlContent(prop(args, 'content'));
+  async execute(args) {
+    return validateBaseYamlContent(args?.content);
   },
 };
 
@@ -38,27 +37,27 @@ export function validateBaseYamlContent(content: unknown): { success: boolean; e
     return { success: false, errors: ['content must be a YAML string'] };
   }
 
-  let base: unknown;
+  let parsed: unknown;
   try {
-    base = parse(content);
-  } catch (error) {
+    parsed = parse(content);
+  } catch (error: unknown) {
     return { success: false, errors: [`Invalid YAML: ${error instanceof Error ? error.message : String(error)}`] };
   }
 
   const errors: string[] = [];
-  if (!isPlainRecord(base)) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return { success: false, errors: ['Base root must be a YAML object'] };
   }
+  const base = parsed as Record<string, unknown>;
 
   validateObjectField(base.formulas, 'formulas', errors);
   validateObjectField(base.properties, 'properties', errors);
   validateObjectField(base.summaries, 'summaries', errors);
 
-  const views = asArray(base.views);
-  if (!views || views.length === 0) {
+  if (!Array.isArray(base.views) || base.views.length === 0) {
     errors.push('views must be a non-empty array');
   } else {
-    validateViews(views, errors);
+    validateViews(base.views, errors);
   }
 
   validateFormulaReferences(base, errors);
@@ -72,14 +71,14 @@ function validateObjectField(value: unknown, label: string, errors: string[]): v
 }
 
 function validateViews(views: unknown[], errors: string[]): void {
-  views.forEach((view, index) => {
-    if (!isPlainRecord(view)) {
+  views.forEach((rawView, index) => {
+    if (!rawView || typeof rawView !== 'object' || Array.isArray(rawView)) {
       errors.push(`views[${index}] must be an object`);
       return;
     }
+    const view = rawView as Record<string, unknown>;
 
-    const viewType = asString(view.type);
-    if (viewType === undefined || !VIEW_TYPES.has(viewType)) {
+    if (typeof view.type !== 'string' || !VIEW_TYPES.has(view.type)) {
       errors.push(`views[${index}].type must be one of table, cards, list, map`);
     }
 
@@ -104,9 +103,8 @@ function isFilterShape(value: unknown): boolean {
 }
 
 function validateFormulaReferences(base: Record<string, unknown>, errors: string[]): void {
-  const rawFormulas = base.formulas;
-  const formulas = isPlainRecord(rawFormulas)
-    ? new Set(Object.keys(rawFormulas))
+  const formulas = base.formulas && typeof base.formulas === 'object' && !Array.isArray(base.formulas)
+    ? new Set(Object.keys(base.formulas))
     : new Set<string>();
 
   for (const reference of collectFormulaReferences(base)) {
@@ -120,24 +118,32 @@ function validateFormulaReferences(base: Record<string, unknown>, errors: string
 function collectFormulaReferences(base: Record<string, unknown>): string[] {
   const references = new Set<string>();
 
-  for (const key of Object.keys(asRecord(base.properties))) {
+  for (const key of Object.keys(truthyObject(base.properties))) {
     addFormulaReference(key, references);
   }
 
-  for (const view of asArray(base.views) ?? []) {
-    for (const value of asArray(prop(view, 'order')) ?? []) {
+  const views: unknown[] = Array.isArray(base.views) ? base.views : [];
+  for (const rawView of views) {
+    const view = truthyObject(rawView);
+    const order: unknown[] = Array.isArray(view.order) ? view.order : [];
+    for (const value of order) {
       addFormulaReference(value, references);
     }
-    const groupByProperty = prop(prop(view, 'groupBy'), 'property');
-    if (groupByProperty) {
-      addFormulaReference(groupByProperty, references);
+    const groupBy = truthyObject(view.groupBy);
+    if (groupBy.property) {
+      addFormulaReference(groupBy.property, references);
     }
-    for (const key of Object.keys(asRecord(prop(view, 'summaries')))) {
+    for (const key of Object.keys(truthyObject(view.summaries))) {
       addFormulaReference(key, references);
     }
   }
 
   return [...references];
+}
+
+/** 对象则原样返回,其余(含 null/原始值)视为空对象;对应旧代码的 `x?.y || {}` 读取。 */
+function truthyObject(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 }
 
 function addFormulaReference(value: unknown, references: Set<string>): void {

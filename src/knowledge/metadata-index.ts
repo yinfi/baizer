@@ -3,30 +3,42 @@
 
 import { App, TFile } from 'obsidian';
 import { ArticleMeta, WIKI_ARTICLES_SUBFOLDER, normalizeTopicSlug } from './types';
-import { asArray, asRecord, asString } from '../utils/narrow';
+import { isRecord, readNonEmptyString, readString } from './ontology';
 
 /**
  * 从 metadataCache 的 frontmatter 中提取 topics 数组
  * 兼容新格式 ["label"] 和旧格式 [{slug, label}]
  */
-function extractTopics(fm: Record<string, any>): string[] {
-  const raw = asArray(fm.topics);
-  if (!raw) return [];
-  return raw.map((t: unknown) => {
-    if (typeof t === 'string') return t;
-    const label = asString(asRecord(t).label);
-    if (label) return label;
-    return '';
-  }).filter((s: string) => s.length > 0);
+function extractTopics(fm: Record<string, unknown>): string[] {
+  const raw = fm.topics;
+  if (!Array.isArray(raw)) return [];
+  const topics: string[] = [];
+  for (const t of raw) {
+    if (typeof t === 'string') {
+      if (t.length > 0) topics.push(t);
+      continue;
+    }
+    if (isRecord(t)) {
+      const label = t.label;
+      if (typeof label === 'string' && label.length > 0) topics.push(label);
+    }
+  }
+  return topics;
 }
 
 /**
  * 从 metadataCache 的 frontmatter 中提取字符串数组字段
  */
-function extractStringArray(fm: Record<string, any>, key: string): string[] {
+function extractStringArray(fm: Record<string, unknown>, key: string): string[] {
   const raw = fm[key];
   if (typeof raw === 'string') {
-    try { return JSON.parse(raw); } catch { return [raw]; }
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+      // 非 JSON 字符串：按单项处理
+    }
+    return [raw];
   }
   if (Array.isArray(raw)) return raw.map(String);
   return [];
@@ -34,7 +46,7 @@ function extractStringArray(fm: Record<string, any>, key: string): string[] {
 
 function parseStringList(value: string): string[] {
   try {
-    const parsed = JSON.parse(value);
+    const parsed: unknown = JSON.parse(value);
     if (Array.isArray(parsed)) return parsed.map(String);
   } catch {
     // Fall through to a single item.
@@ -42,43 +54,44 @@ function parseStringList(value: string): string[] {
   return value ? [value] : [];
 }
 
-function extractCategorizedKnowledge(fm: Record<string, any>): { category: string; items: string[] }[] {
-  const raw = asArray(fm.categorized_knowledge);
-  if (!raw) return [];
-  return raw
-    .filter((entry: unknown) => typeof asRecord(entry).category === 'string')
-    .map((entry: unknown) => {
-      const entryRecord = asRecord(entry);
-      const items = entryRecord.items;
-      return {
-        category: entryRecord.category as string,
-        items: Array.isArray(items)
-          ? items.map(String)
-          : typeof items === 'string'
-            ? parseStringList(items)
-            : [],
-      };
-    })
-    .filter((entry) => entry.category.length > 0);
+function extractCategorizedKnowledge(fm: Record<string, unknown>): { category: string; items: string[] }[] {
+  const raw = fm.categorized_knowledge;
+  if (!Array.isArray(raw)) return [];
+  const entries: { category: string; items: string[] }[] = [];
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue;
+    const category = entry.category;
+    if (typeof category !== 'string') continue;
+    const items = entry.items;
+    entries.push({
+      category,
+      items: Array.isArray(items)
+        ? items.map(String)
+        : typeof items === 'string'
+          ? parseStringList(items)
+          : [],
+    });
+  }
+  return entries.filter((entry) => entry.category.length > 0);
 }
 
-function extractEntities(fm: Record<string, any>): { name: string; type: string; description: string }[] {
-  const raw = asArray(fm.entities);
-  if (!raw) return [];
-  return raw
-    .filter((entry: unknown) => {
-      const entryRecord = asRecord(entry);
-      return typeof entryRecord.name === 'string' && typeof entryRecord.type === 'string';
-    })
-    .map((entry: unknown) => {
-      const entryRecord = asRecord(entry);
-      return {
-        name: entryRecord.name as string,
-        type: entryRecord.type as string,
-        description: typeof entryRecord.description === 'string' ? entryRecord.description : '',
-      };
-    })
-    .filter((entry) => entry.name.length > 0);
+function extractEntities(fm: Record<string, unknown>): { name: string; type: string; description: string }[] {
+  const raw = fm.entities;
+  if (!Array.isArray(raw)) return [];
+  const entries: { name: string; type: string; description: string }[] = [];
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue;
+    const name = entry.name;
+    const type = entry.type;
+    if (typeof name !== 'string' || typeof type !== 'string') continue;
+    const description = entry.description;
+    entries.push({
+      name,
+      type,
+      description: typeof description === 'string' ? description : '',
+    });
+  }
+  return entries.filter((entry) => entry.name.length > 0);
 }
 
 /**
@@ -127,20 +140,20 @@ export class MetadataIndex {
     // knowledge_generated 可能是布尔 true 或字符串 "true"
     if (!fm || (fm.knowledge_generated !== true && fm.knowledge_generated !== 'true')) return;
 
-    const sourceId = fm.knowledge_source_id || file.basename;
+    const sourceId = readNonEmptyString(fm.knowledge_source_id) ?? file.basename;
     const meta: ArticleMeta = {
       sourceId,
-      title: fm.title || file.basename,
+      title: readNonEmptyString(fm.title) ?? file.basename,
       summaryPath: file.path,
       topics: extractTopics(fm),
       concepts: extractStringArray(fm, 'concepts'),
       keyClaims: extractStringArray(fm, 'key_claims'),
-      compiledAt: fm.compiled_at || '',
-      sourceUrl: fm.source_url || undefined,
-      author: fm.author || undefined,
+      compiledAt: readString(fm.compiled_at) ?? '',
+      sourceUrl: readNonEmptyString(fm.source_url),
+      author: readNonEmptyString(fm.author),
       categorizedKnowledge: extractCategorizedKnowledge(fm),
       entities: extractEntities(fm),
-      schemaHash: fm.schema_hash || undefined,
+      schemaHash: readNonEmptyString(fm.schema_hash),
     };
     this.articles.set(sourceId, meta);
   }

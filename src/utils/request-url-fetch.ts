@@ -487,7 +487,7 @@ function buildStreamingResponse(
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
-      const onData = (chunk: any) => {
+      const onData = (chunk: unknown) => {
         if (closed) return;
         let bytes: Uint8Array;
         if (typeof chunk === 'string') {
@@ -496,8 +496,13 @@ function buildStreamingResponse(
           bytes = chunk;
         } else if (chunk instanceof ArrayBuffer) {
           bytes = new Uint8Array(chunk);
+        } else if (ArrayBuffer.isView(chunk)) {
+          // Buffer / 其它 TypedArray：按字节视图重新包装，不假定具体子类型
+          bytes = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
         } else {
-          bytes = new Uint8Array(chunk); // Buffer / 其它 TypedArray
+          // 未知分片形状：既非字符串也非二进制视图，判定为协议错误而非静默吞掉
+          onError(new Error(`Unsupported stream chunk type: ${Object.prototype.toString.call(chunk)}`));
+          return;
         }
         try {
           controller.enqueue(bytes);
@@ -582,6 +587,6 @@ function buildBufferedResponse(
 }
 
 function toAbortError(signal?: AbortSignal): Error {
-  const reason = signal?.reason;
+  const reason: unknown = signal?.reason;
   return reason instanceof Error ? reason : new DOMException('The operation was aborted.', 'AbortError');
 }

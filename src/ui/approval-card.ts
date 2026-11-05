@@ -49,7 +49,7 @@ export interface ApprovalRequest {
   conversationId?: string;
   action: string;
   target: string;
-  args: Record<string, any>;
+  args: Record<string, unknown>;
   message: string;
   preview?: ChangePreview;
 }
