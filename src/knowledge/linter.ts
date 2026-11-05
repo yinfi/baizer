@@ -3,6 +3,16 @@
 import { App, TFile } from 'obsidian';
 import { WIKI_HEALTH_SUBFOLDER } from './types';
 import { getFilesByKnowledgeStatus } from './frontmatter';
+import { asArray, asString, isPlainRecord } from '../utils/narrow';
+
+/**
+ * metadataCache 的 frontmatter 是外部 YAML 数据（索引签名值类型为 any），
+ * 统一收窄成 Record<string, unknown> 后再逐字段判断类型。
+ */
+function readFrontmatter(app: App, file: TFile): Record<string, unknown> | null {
+  const frontmatter: unknown = app.metadataCache.getFileCache(file)?.frontmatter;
+  return isPlainRecord(frontmatter) ? frontmatter : null;
+}
 
 export type LintIssueType =
   | 'missing_summary'
@@ -151,10 +161,10 @@ export class KnowledgeLinter {
     // 检查 done 状态文件的 summary 是否存在
     const doneFiles = getFilesByKnowledgeStatus(this.app, 'done');
     const doneInfo = doneFiles.map(f => {
-      const cache = this.app.metadataCache.getFileCache(f);
+      const fm = readFrontmatter(this.app, f);
       return {
         path: f.path,
-        summaryPath: cache?.frontmatter?.knowledge_summary ?? null
+        summaryPath: asString(fm?.knowledge_summary) ?? null
       };
     });
     allIssues.push(...checkMissingSummaries(doneInfo, existingFiles));
@@ -168,24 +178,39 @@ export class KnowledgeLinter {
     );
 
     for (const file of wikiFiles) {
-      const cache = this.app.metadataCache.getFileCache(file);
-      const fm = cache?.frontmatter;
+      const fm = readFrontmatter(this.app, file);
       if (!fm || !fm.knowledge_generated) continue;
 
-      const title = fm.title || file.basename;
+      const title = asString(fm.title) || file.basename;
       let reviewFlags: string[] = [];
-      if (Array.isArray(fm.review_flags)) {
-        reviewFlags = fm.review_flags;
-      } else if (typeof fm.review_flags === 'string') {
-        try { reviewFlags = JSON.parse(fm.review_flags); } catch {}
+      const rawReviewFlags = fm.review_flags;
+      const reviewFlagArray = asArray(rawReviewFlags);
+      if (reviewFlagArray) {
+        reviewFlags = reviewFlagArray.map(String);
+      } else if (typeof rawReviewFlags === 'string') {
+        try {
+          const parsed: unknown = JSON.parse(rawReviewFlags);
+          const parsedArray = asArray(parsed);
+          if (parsedArray) reviewFlags = parsedArray.map(String);
+        } catch {
+          // 非法 JSON：按无 review_flags 处理
+        }
       }
       summaries.push({ path: file.path, title, reviewFlags });
 
       let concepts: string[] = [];
-      if (Array.isArray(fm.concepts)) {
-        concepts = fm.concepts;
-      } else if (typeof fm.concepts === 'string') {
-        try { concepts = JSON.parse(fm.concepts); } catch {}
+      const rawConcepts = fm.concepts;
+      const conceptArray = asArray(rawConcepts);
+      if (conceptArray) {
+        concepts = conceptArray.map(String);
+      } else if (typeof rawConcepts === 'string') {
+        try {
+          const parsed: unknown = JSON.parse(rawConcepts);
+          const parsedArray = asArray(parsed);
+          if (parsedArray) concepts = parsedArray.map(String);
+        } catch {
+          // 非法 JSON：按无 concepts 处理
+        }
       }
       for (const c of concepts) {
         if (!conceptMap[c]) conceptMap[c] = [];

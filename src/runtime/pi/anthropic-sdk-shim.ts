@@ -51,7 +51,7 @@
  *    （esbuild.config.mjs 的 aliasAnthropicSdkToShim 在构建期也做同样的核对。）
  */
 
-import { asString, prop } from '../../utils/narrow';
+import { asString, isRecord, prop } from '../../utils/narrow';
 
 /** Anthropic 官方端点（与 src/mcp/types.ts 的 DEFAULT_PROVIDERS.anthropic.baseUrl 一致）。 */
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
@@ -231,12 +231,17 @@ function joinUrl(baseURL: string | undefined, path: string): string {
 }
 
 /** JSON.parse，失败返回 undefined（对齐 SDK 的 safeJSON）。 */
-function safeJson(text: string): any {
+function safeJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
     return undefined;
   }
+}
+
+/** 请求体是 pi 传入的外部弱类型输入；非对象时按空 body 处理（与原先 `params ?? {}` 同义）。 */
+function asMessageParams(params: unknown): Record<string, unknown> {
+  return isRecord(params) ? params : {};
 }
 
 /**
@@ -276,22 +281,22 @@ export default class Anthropic {
     });
   }
 
-  get beta(): { messages: { create: (params: any, options?: AnthropicShimRequestOptions) => AnthropicAPIPromise } } {
+  get beta(): { messages: { create: (params: unknown, options?: AnthropicShimRequestOptions) => AnthropicAPIPromise } } {
     return { messages: { create: (params, options) => this.createMessage(params, options) } };
   }
 
   /** 非 beta 别名；pi 不用，但保留以免调用方切过去时缺方法。 */
-  get messages(): { create: (params: any, options?: AnthropicShimRequestOptions) => AnthropicAPIPromise } {
+  get messages(): { create: (params: unknown, options?: AnthropicShimRequestOptions) => AnthropicAPIPromise } {
     return this.beta.messages;
   }
 
-  private createMessage(params: any, options?: AnthropicShimRequestOptions): AnthropicAPIPromise {
+  private createMessage(params: unknown, options?: AnthropicShimRequestOptions): AnthropicAPIPromise {
     return new AnthropicAPIPromise(() => this.performRequest(params, options));
   }
 
-  private async performRequest(params: any, options?: AnthropicShimRequestOptions): Promise<Response> {
+  private async performRequest(params: unknown, options?: AnthropicShimRequestOptions): Promise<Response> {
     // SDK 的 beta/messages.create 会把这三个字段从 body 里摘掉，betas 转成 header。
-    const { betas, user_profile_id: _userProfileId, workspace_id: _workspaceId, ...body } = params ?? {};
+    const { betas, user_profile_id: _userProfileId, workspace_id: _workspaceId, ...body } = asMessageParams(params);
 
     const headers = mergeHeaders(
       [

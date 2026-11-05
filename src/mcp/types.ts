@@ -18,7 +18,7 @@ declare module "obsidian" {
         plugins: {
             manifests: Record<string, PluginManifest>;
             enabledPlugins: Set<string>;
-            getPlugin(id: string): any;
+            getPlugin(id: string): unknown;
         };
         commands: {
             listCommands(): Command[];
@@ -492,7 +492,7 @@ export interface IPlugin extends Plugin {
     // 派生技能的管理入口（设置页读对账状态、重新生成、删除）。
     // 用最小结构类型而非 import PluginWatcher：types.ts 是底层模块，不该反向依赖 skills 层。
     pluginWatcher?: {
-        getDerivedSkillStatuses(): any[];
+        getDerivedSkillStatuses(): unknown[];
         getGenerationFailures(): ReadonlyMap<string, string>;
         // 返回值不写 any：设置页据 regenerated / blocker 决定提示哪一种结局，
         // any 会让日后改字段名时静默退化成「每次成功都报失败」。

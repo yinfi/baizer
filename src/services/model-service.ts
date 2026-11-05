@@ -10,7 +10,7 @@ import { SkillCommandEntry, SkillSummary } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
 import { buildAnthropicModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn, resolveCustomHeaders } from '../runtime/pi/pi-native-model';
 // 仅类型导入（编译期擦除），不把 ESM-only 的 pi-ai 主入口拉进 CJS 测试环境。
-import type { Model } from '@earendil-works/pi-ai';
+import type { Api, Model } from '@earendil-works/pi-ai';
 import { createHarnessExecutionEnv } from '../runtime/pi/harness-env';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import * as modelCatalog from './model-catalog-service';
@@ -22,7 +22,7 @@ import type { ChatMessage } from '../ui/types';
 import { createVaultFileAdapter } from '../runtime/pi/vault-session-fs';
 import { computeContentHash } from '../knowledge/compiler';
 import { getFileWriteResultPath } from '../utils/file-operation-contract';
-import { isRecord, prop } from '../utils/narrow';
+import { asString, isRecord, prop } from '../utils/narrow';
 import { thrownMessage } from '../utils/thrown-message';
 import {
     formatGenerationPlanBlock,
@@ -905,7 +905,7 @@ export class ModelService {
         return modelCatalog.getProviderCapabilities(this.getActiveProviderConfig());
     }
 
-    async executeSlashSkillCommand(command: string, input: string, conversationId?: string): Promise<any> {
+    async executeSlashSkillCommand(command: string, input: string, conversationId?: string): Promise<unknown> {
         const skill = this.skillRegistry.resolveByCommand(command);
         if (!skill) {
             return { success: false, error: `Unknown command: ${command}` };
@@ -944,7 +944,7 @@ export class ModelService {
      */
     async executeApprovedAction(
         action: string,
-        args: Record<string, any>,
+        args: Record<string, unknown>,
         conversationId?: string,
         options: { requestId?: string; retry?: boolean } = {},
     ): Promise<ApprovalExecutionOutcome> {
@@ -964,7 +964,7 @@ export class ModelService {
     async reconcileApprovedAction(
         requestId: string,
         action: string,
-        args: Record<string, any>,
+        args: Record<string, unknown>,
         conversationId?: string,
         options: { requestedAt?: number } = {},
     ): Promise<ApprovalExecutionOutcome> {
@@ -1094,12 +1094,12 @@ export class ModelService {
 
     private async performApprovedAction(
         action: string,
-        args: Record<string, any>,
+        args: Record<string, unknown>,
         conversationId: string | undefined,
         requestId: string | undefined,
     ): Promise<ApprovalExecutionOutcome> {
         const target = getFileWriteResultPath(action, {}, args)
-            || args?.path || args?.filename || args?.oldPath || action;
+            || asString(args.path) || asString(args.filename) || asString(args.oldPath) || action;
 
         if (requestId) {
             // 登记表按上限淘汰后，同一请求可能再进来一次：持久化状态里的「已成功」是最后一道闸。
@@ -1274,11 +1274,11 @@ export class ModelService {
      */
     private buildApprovalOutcomeText(
         action: string,
-        args: Record<string, any>,
+        args: Record<string, unknown>,
         result: unknown,
     ): string {
         const target = getFileWriteResultPath(action, result, args)
-            || args?.path || args?.filename || args?.target || '';
+            || asString(args.path) || asString(args.filename) || asString(args.target) || '';
         const targetSuffix = target ? ` (${target})` : '';
         const succeeded = this.isSuccessfulResult(result);
         if (succeeded) {
@@ -1288,7 +1288,7 @@ export class ModelService {
         return `[Approved action failed] The user approved "${action}"${targetSuffix} but it failed: ${error}`;
     }
 
-    async executeWorkspaceTool(action: string, args: Record<string, any>): Promise<any> {
+    async executeWorkspaceTool(action: string, args: Record<string, unknown>): Promise<unknown> {
         return this.workspaceEditService.executeWorkspaceTool(action, args);
     }
 
@@ -1373,7 +1373,7 @@ export class ModelService {
      * 注意 loadSettings 已经用 pruneUnsupportedProviders 丢掉不受支持的 type，
      * 所以正常路径走不到这里。
      */
-    private buildModelForConfig(config: ProviderConfig): Model<any> {
+    private buildModelForConfig(config: ProviderConfig): Model<Api> {
         switch (config.type) {
             case 'anthropic':
                 return buildAnthropicModel(config, this.settings.contextWindow, this.settings.thinkingLevel);

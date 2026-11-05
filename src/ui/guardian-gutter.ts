@@ -113,7 +113,7 @@ interface GuardianMarkerState {
 // StateField to manage Gutter Markers (Follows Cursor)
 const guardianMarkerField = StateField.define<GuardianMarkerState>({
     create() {
-        return { set: RangeSet.empty, effectiveState: GuardianState.Idle, from: -1 };
+        return { set: RangeSet.empty as RangeSet<GutterMarker>, effectiveState: GuardianState.Idle, from: -1 };
     },
 
     update(prev, tr) {

@@ -3,13 +3,13 @@
 
 import { App, TFile } from 'obsidian';
 import { ArticleMeta, WIKI_ARTICLES_SUBFOLDER, normalizeTopicSlug } from './types';
-import { asArray, asRecord, asString } from '../utils/narrow';
+import { asArray, asRecord, asString, isPlainRecord } from '../utils/narrow';
 
 /**
  * 从 metadataCache 的 frontmatter 中提取 topics 数组
  * 兼容新格式 ["label"] 和旧格式 [{slug, label}]
  */
-function extractTopics(fm: Record<string, any>): string[] {
+function extractTopics(fm: Record<string, unknown>): string[] {
   const raw = asArray(fm.topics);
   if (!raw) return [];
   return raw.map((t: unknown) => {
@@ -23,26 +23,32 @@ function extractTopics(fm: Record<string, any>): string[] {
 /**
  * 从 metadataCache 的 frontmatter 中提取字符串数组字段
  */
-function extractStringArray(fm: Record<string, any>, key: string): string[] {
+function extractStringArray(fm: Record<string, unknown>, key: string): string[] {
   const raw = fm[key];
   if (typeof raw === 'string') {
-    try { return JSON.parse(raw); } catch { return [raw]; }
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      const arr = asArray(parsed);
+      return arr ? arr.map(String) : [raw];
+    } catch { return [raw]; }
   }
-  if (Array.isArray(raw)) return raw.map(String);
+  const arr = asArray(raw);
+  if (arr) return arr.map(String);
   return [];
 }
 
 function parseStringList(value: string): string[] {
   try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) return parsed.map(String);
+    const parsed: unknown = JSON.parse(value);
+    const arr = asArray(parsed);
+    if (arr) return arr.map(String);
   } catch {
     // Fall through to a single item.
   }
   return value ? [value] : [];
 }
 
-function extractCategorizedKnowledge(fm: Record<string, any>): { category: string; items: string[] }[] {
+function extractCategorizedKnowledge(fm: Record<string, unknown>): { category: string; items: string[] }[] {
   const raw = asArray(fm.categorized_knowledge);
   if (!raw) return [];
   return raw
@@ -50,10 +56,11 @@ function extractCategorizedKnowledge(fm: Record<string, any>): { category: strin
     .map((entry: unknown) => {
       const entryRecord = asRecord(entry);
       const items = entryRecord.items;
+      const itemArray = asArray(items);
       return {
         category: entryRecord.category as string,
-        items: Array.isArray(items)
-          ? items.map(String)
+        items: itemArray
+          ? itemArray.map(String)
           : typeof items === 'string'
             ? parseStringList(items)
             : [],
@@ -62,7 +69,7 @@ function extractCategorizedKnowledge(fm: Record<string, any>): { category: strin
     .filter((entry) => entry.category.length > 0);
 }
 
-function extractEntities(fm: Record<string, any>): { name: string; type: string; description: string }[] {
+function extractEntities(fm: Record<string, unknown>): { name: string; type: string; description: string }[] {
   const raw = asArray(fm.entities);
   if (!raw) return [];
   return raw
@@ -123,24 +130,25 @@ export class MetadataIndex {
   /** 从 metadataCache 读取单个文件的 frontmatter 并索引 */
   private indexFile(file: TFile): void {
     const cache = this.app.metadataCache.getFileCache(file);
-    const fm = cache?.frontmatter;
+    const fm: unknown = cache?.frontmatter;
+    if (!isPlainRecord(fm)) return;
     // knowledge_generated 可能是布尔 true 或字符串 "true"
-    if (!fm || (fm.knowledge_generated !== true && fm.knowledge_generated !== 'true')) return;
+    if (fm.knowledge_generated !== true && fm.knowledge_generated !== 'true') return;
 
-    const sourceId = fm.knowledge_source_id || file.basename;
+    const sourceId = asString(fm.knowledge_source_id) || file.basename;
     const meta: ArticleMeta = {
       sourceId,
-      title: fm.title || file.basename,
+      title: asString(fm.title) || file.basename,
       summaryPath: file.path,
       topics: extractTopics(fm),
       concepts: extractStringArray(fm, 'concepts'),
       keyClaims: extractStringArray(fm, 'key_claims'),
-      compiledAt: fm.compiled_at || '',
-      sourceUrl: fm.source_url || undefined,
-      author: fm.author || undefined,
+      compiledAt: asString(fm.compiled_at) || '',
+      sourceUrl: asString(fm.source_url) || undefined,
+      author: asString(fm.author) || undefined,
       categorizedKnowledge: extractCategorizedKnowledge(fm),
       entities: extractEntities(fm),
-      schemaHash: fm.schema_hash || undefined,
+      schemaHash: asString(fm.schema_hash) || undefined,
     };
     this.articles.set(sourceId, meta);
   }

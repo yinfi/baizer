@@ -1,7 +1,7 @@
 import type { App } from 'obsidian';
 import * as obsidian from 'obsidian';
 import { Readability } from '@mozilla/readability';
-import { Tool, ToolContext } from '../../types';
+import { Tool, ToolArguments, ToolContext, ToolExecutionResult } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import {
@@ -267,7 +267,7 @@ async function saveVideo(
   ctx: ToolContext,
   modelService: SummaryModel,
   deps: WebClipperDeps,
-): Promise<any> {
+): Promise<ToolExecutionResult | null> {
   const transcript = await deps.getVideoTranscript(url);
   if (!transcript) return null;
 
@@ -388,7 +388,12 @@ async function saveVideo(
   return { success: true, path: finalPath, message: `Video Note Saved: ${finalPath}` };
 }
 
-async function saveWebpage(url: string, args: SaveWebpageArgs, ctx: ToolContext, deps: WebClipperDeps): Promise<any> {
+async function saveWebpage(
+  url: string,
+  args: SaveWebpageArgs,
+  ctx: ToolContext,
+  deps: WebClipperDeps,
+): Promise<ToolExecutionResult> {
   const response = await deps.requestUrl({
     url,
     headers: {
@@ -542,7 +547,7 @@ export function createSaveWebpageTool(modelService: SummaryModel, deps: WebClipp
 export function createExecutor(modelService: SummaryModel): BuiltinExecutor {
   const tool = createSaveWebpageTool(modelService);
   return {
-    async execute(args: unknown, ctx: ToolContext) {
+    async execute(args: ToolArguments, ctx: ToolContext) {
       return tool.execute(args, ctx);
     },
   };

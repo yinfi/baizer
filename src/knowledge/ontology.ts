@@ -8,7 +8,7 @@ import { asRecord, prop, asString, asArray } from '../utils/narrow';
  * 从原始 markdown 内容中提取 frontmatter 对象
  * 不依赖 Obsidian metadataCache，自行解析 YAML
  */
-export function extractFrontmatter(rawContent: string): Record<string, any> | null {
+export function extractFrontmatter(rawContent: string): Record<string, unknown> | null {
   if (!rawContent.startsWith('---')) return null;
   const endIdx = rawContent.indexOf('\n---', 3);
   if (endIdx === -1) return null;
@@ -25,8 +25,8 @@ export function extractFrontmatter(rawContent: string): Record<string, any> | nu
  * 简易 YAML 解析器 — 只处理 ontology schema 用到的结构：
  * 标量值、对象数组（- name: / description:）
  */
-function parseSimpleYaml(yaml: string): Record<string, any> {
-  const result: Record<string, any> = {};
+function parseSimpleYaml(yaml: string): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
   const lines = yaml.split('\n');
   let i = 0;
 
@@ -44,7 +44,7 @@ function parseSimpleYaml(yaml: string): Record<string, any> {
 
     // 值是数组（下一行以 - 开头）
     if (!inlineVal && i + 1 < lines.length && lines[i + 1].match(/^\s+-/)) {
-      const arr: any[] = [];
+      const arr: unknown[] = [];
       i++;
       while (i < lines.length) {
         const arrLine = lines[i];
@@ -77,10 +77,11 @@ function parseSimpleYaml(yaml: string): Record<string, any> {
       result[key] = arr;
     } else {
       // 标量值
-      let val: any = inlineVal.replace(/^"(.*)"$/, '$1');
-      if (val === 'true') val = true;
-      else if (val === 'false') val = false;
-      else if (/^\d+$/.test(val)) val = parseInt(val, 10);
+      const rawVal = inlineVal.replace(/^"(.*)"$/, '$1');
+      let val: string | boolean | number = rawVal;
+      if (rawVal === 'true') val = true;
+      else if (rawVal === 'false') val = false;
+      else if (/^\d+$/.test(rawVal)) val = parseInt(rawVal, 10);
       result[key] = val;
       i++;
     }

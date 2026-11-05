@@ -298,6 +298,51 @@ async function runTests() {
     assert(calls.length === 2, 'no extra calls');
   });
 
+  await test('knowledge tools: narrowed args drop invalid fields and reject missing required ones', async () => {
+    const { createKnowledgeTools } = await import('../src/skills/builtin/knowledge/executor');
+    const queryCalls: Array<Record<string, unknown>> = [];
+    const fileBackCalls: Array<Record<string, unknown>> = [];
+    const tools = createKnowledgeTools(
+      { execute: async (args: { query: string; max_results?: number }) => { queryCalls.push(args); return { query: args.query }; } } as any,
+      { execute: async (args: Record<string, unknown>) => { fileBackCalls.push(args); return { success: true }; } } as any,
+    );
+    const queryTool = tools.find(tool => tool.name === 'query_knowledge')!;
+    const fileBackTool = tools.find(tool => tool.name === 'file_back_knowledge')!;
+    const ctx = {} as any;
+
+    assertEqual(await queryTool.execute({ query: 'q', max_results: 5 }, ctx), { query: 'q' }, 'query forwarded');
+    assertEqual(queryCalls[0], { query: 'q', max_results: 5 }, 'valid max_results kept');
+    // 非 number 的 max_results 视为缺失（不再把外部值带进执行器）。
+    await queryTool.execute({ query: 'q', max_results: 'x' }, ctx);
+    assertEqual(queryCalls[1], { query: 'q' }, 'invalid max_results dropped');
+    for (const args of [null, undefined, {}, { query: 7 }]) {
+      assertEqual(await queryTool.execute(args, ctx), { error: 'Missing query parameter' }, 'missing query');
+    }
+
+    assertEqual(
+      await fileBackTool.execute(
+        { title: 'T', content: 'C', source_queries: ['q1'], topics: 'bad', extra: 'ignored' },
+        ctx,
+      ),
+      { success: true },
+      'file back forwarded',
+    );
+    assertEqual(fileBackCalls[0], {
+      title: 'T',
+      content: 'C',
+      source_queries: ['q1'],
+      related_sources: [],
+      topics: undefined,
+      source_url: undefined,
+    }, 'narrowed file-back args');
+    assertEqual(
+      await fileBackTool.execute({ title: 5, content: 'C' }, ctx),
+      { error: 'Missing title or content parameter' },
+      'missing title',
+    );
+    assert(fileBackCalls.length === 1, 'invalid file-back args do not reach the executor');
+  });
+
   // ---------- web-clipper ----------
   await test('save_webpage: non-object args and thrown values yield a failure result', async () => {
     const { createSaveWebpageTool } = await import('../src/skills/builtin/web-clipper/executor');

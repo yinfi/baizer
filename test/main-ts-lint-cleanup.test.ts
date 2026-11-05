@@ -282,10 +282,28 @@ async function runTests() {
   await test('the persisted settings entry point no longer asserts untrusted JSON', () => {
     expect(mainSource.includes('(raw as any)')).toBeFalsy();
     expect(mainSource.includes('const old = raw as any')).toBeFalsy();
-    expect(mainSource.includes('const raw: Record<string, unknown> = (await this.loadData()) || {};')).toBeTruthy();
+    // loadData 的 any 先落到 unknown，再一次性收窄成 Record（不再让 any 直接进 Record 赋值）。
+    expect(mainSource.includes('const loaded: unknown = await this.loadData();')).toBeTruthy();
+    expect(mainSource.includes('const raw = (loaded || {}) as Record<string, unknown>;')).toBeTruthy();
     expect(mainSource.includes('const old: LegacyFlatSettings = raw;')).toBeTruthy();
     // `|| {}` 而不是 `?? {}`：loadData 返回假值时也要兜底成空对象。
     expect(mainSource.includes('(await this.loadData()) ?? {}')).toBeFalsy();
+    expect(mainSource.includes('(loaded ?? {}) as Record<string, unknown>')).toBeFalsy();
+  });
+
+  await test('save_webpage results are narrowed at the tool boundary instead of trusted as any', () => {
+    // 工具返回形状不由契约导出：先 unknown 接住，再收窄成 ToolExecutionResult。
+    expect(mainSource.includes('function narrowToolExecutionResult(value: unknown): ToolExecutionResult')).toBeTruthy();
+    expect(mainSource.includes('const record = isRecord(value) ? value : {};')).toBeTruthy();
+    expect(mainSource.includes('success: Boolean(record.success),')).toBeTruthy();
+    expect(mainSource.includes("path: asString(record.path) ?? '',")).toBeTruthy();
+    expect(mainSource.includes('error: asString(record.error),')).toBeTruthy();
+
+    // 三个 saveUrl 回调与 onFileModify 的批量保存都必须经过该窄化，不再直接消费 any。
+    const narrowedCalls = mainSource.split('narrowToolExecutionResult(await this.toolRegistry.execute').length - 1;
+    expect(narrowedCalls).toBe(4);
+    expect(mainSource.includes("saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url })")).toBeFalsy();
+    expect(mainSource.includes("const result: ToolExecutionResult = await this.toolRegistry.execute('save_webpage'")).toBeFalsy();
   });
 
   // ── 4. 事件/回调接线没有因为类型清理而改变 ──

@@ -487,7 +487,7 @@ function buildStreamingResponse(
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
-      const onData = (chunk: any) => {
+      const onData = (chunk: unknown) => {
         if (closed) return;
         let bytes: Uint8Array;
         if (typeof chunk === 'string') {
@@ -497,7 +497,8 @@ function buildStreamingResponse(
         } else if (chunk instanceof ArrayBuffer) {
           bytes = new Uint8Array(chunk);
         } else {
-          bytes = new Uint8Array(chunk); // Buffer / 其它 TypedArray
+          // Buffer / 其它 TypedArray：仍按 Uint8Array 构造语义解释该值（与旧行为一致）。
+          bytes = new Uint8Array(chunk as ArrayBuffer);
         }
         try {
           controller.enqueue(bytes);
@@ -582,6 +583,6 @@ function buildBufferedResponse(
 }
 
 function toAbortError(signal?: AbortSignal): Error {
-  const reason = signal?.reason;
+  const reason: unknown = signal?.reason;
   return reason instanceof Error ? reason : new DOMException('The operation was aborted.', 'AbortError');
 }

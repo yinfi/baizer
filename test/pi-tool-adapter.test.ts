@@ -187,6 +187,45 @@ async function runTests() {
       expect(workspaceCalls).toEqual([]);
     }
   });
+  await test('non-object params payloads are reduced to empty arguments at the pi boundary', async () => {
+    const registryCalls: any[] = [];
+    const piTools = adaptToolDefinitionsToPi({
+      definitions: [{ name: 'read_note', description: 'Read note', parameters: { type: 'object', properties: {} } }],
+      toolRegistry: {
+        get: () => undefined,
+        execute: async (name: string, args: any) => {
+          registryCalls.push({ name, args });
+          return { success: true };
+        },
+      } as any,
+      workspaceEditService: null,
+      skillScope: { allowedToolNames: null },
+    });
+
+    for (const params of [null, undefined, 'text', 7, ['a']]) {
+      await piTools[0].execute('call_1', params);
+    }
+    expect(registryCalls.map(call => call.args)).toEqual([{}, {}, {}, {}, {}]);
+  });
+
+  await test('object params payloads are forwarded unchanged', async () => {
+    const registryCalls: any[] = [];
+    const piTools = adaptToolDefinitionsToPi({
+      definitions: [{ name: 'read_note', description: 'Read note', parameters: { type: 'object', properties: {} } }],
+      toolRegistry: {
+        get: () => undefined,
+        execute: async (name: string, args: any) => {
+          registryCalls.push({ name, args });
+          return { success: true };
+        },
+      } as any,
+      workspaceEditService: null,
+      skillScope: { allowedToolNames: null },
+    });
+    const params = { path: 'Notes/a.md', nested: { deep: true } };
+    await piTools[0].execute('call_1', params);
+    expect(registryCalls).toEqual([{ name: 'read_note', args: params }]);
+  });
 }
 
 runTests().catch((e) => {

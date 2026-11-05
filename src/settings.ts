@@ -1376,7 +1376,7 @@ export function renderModelField(container: HTMLElement, deps: ModelFieldDeps): 
             deps.onLoaded?.(result);
             if (deps.isStale()) return;
             applyState(result);
-        } catch (caught: any) {
+        } catch (caught: unknown) {
             // getAvailableModelsWithStatus 自己吞异常并回落，这里只兜底意外抛出：
             // 仍然保持可手填，但如实报成 error，不假装「列表可用」。
             if (deps.isStale()) return;
@@ -3832,7 +3832,8 @@ export class SettingTab extends PluginSettingTab {
 
         const watcher = this.plugin.pluginWatcher;
         const rows = watcher
-            ? getDerivedSkillRows(watcher.getDerivedSkillStatuses(), watcher.getGenerationFailures())
+            // 宿主接口为最小结构类型，派生状态数组按设置页消费的窄契约收口（写入方保证形状）。
+            ? getDerivedSkillRows(watcher.getDerivedSkillStatuses() as DerivedSkillStatus[], watcher.getGenerationFailures())
             : [];
 
         if (rows.length === 0) {

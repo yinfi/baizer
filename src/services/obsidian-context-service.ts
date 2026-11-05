@@ -219,7 +219,9 @@ export class ObsidianContextService {
     // Current Obsidian wraps the map in `data`; retain direct-map compatibility.
     const paths = backlinkMap instanceof Map ? backlinkMap
       : backlinkMap.data instanceof Map ? backlinkMap.data : backlinkMap;
-    const entries = Array.from(paths instanceof Map ? paths.keys() : Object.keys(paths));
+    // 反链键由宿主给出：只接受字符串（Map 键 / 对象键），非字符串条目原本也打不开文件。
+    const rawEntries: unknown[] = Array.from(paths instanceof Map ? paths.keys() : Object.keys(paths));
+    const entries = rawEntries.filter((entry): entry is string => typeof entry === 'string');
     const results: Array<{ path: string; summary: string }> = [];
 
     for (const path of entries.slice(0, this.options.maxBacklinks)) {

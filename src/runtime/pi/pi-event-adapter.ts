@@ -1,6 +1,6 @@
 import type { StreamEvent } from '../../models/interfaces';
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
-import { asArray, asString, isRecord, prop } from '../../utils/narrow';
+import { asArray, asRecord, asString, isRecord, prop } from '../../utils/narrow';
 
 /**
  * pi `tool_execution_end` 的 `result` 字段是库里的 `any`(见 `types.d.ts`),
@@ -80,7 +80,10 @@ export function mapPiEventToStreamEvent(event: AgentEvent): StreamEvent | undefi
       type: 'tool_call',
       id: event.toolCallId,
       name: event.toolName,
-      args: event.args || {},
+      // pi 侧 args 的静态类型是 any（外部弱类型边界）；StreamEvent.args 是
+      // Record<string, unknown>。保留原 `|| {}` 语义（缺失时给空对象），再显式收窄，
+      // 避免把 any 继续往下游扩散。
+      args: asRecord(event.args),
     };
   }
 

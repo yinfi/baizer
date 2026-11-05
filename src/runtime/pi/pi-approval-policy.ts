@@ -46,7 +46,7 @@ export function createPiFileWriteState(required: boolean): PiFileWriteState {
 export function recordPiFileWriteResult(
   state: PiFileWriteState,
   toolName: string,
-  result: any,
+  result: unknown,
 ): void {
   if (!state.required || !isFileWriteToolName(toolName)) return;
   state.attempted = true;

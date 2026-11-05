@@ -10,7 +10,7 @@ import {
 } from '../../skill-files';
 import { getPluginCommandPreconditions } from './executor';
 import { logger } from '../../../utils/logger';
-import { asRecord, asString, prop } from '../../../utils/narrow';
+import { asArray, asRecord, asString, prop } from '../../../utils/narrow';
 
 // ==================== 类型 ====================
 
@@ -34,6 +34,11 @@ interface CommandInfo {
 
 /** 写入意图：首次写入（已存在则保持原样）还是替换（无条件覆盖）。 */
 export type SkillWriteMode = 'first-write' | 'replace';
+
+/** community-plugins.json 的条目形状：id + repo 都是字符串才可用。 */
+function isCommunityPluginEntry(value: unknown): value is { id: string; repo: string } {
+  return typeof prop(value, 'id') === 'string' && typeof prop(value, 'repo') === 'string';
+}
 
 // ==================== 常量 ====================
 
@@ -256,7 +261,7 @@ export class PluginSkillGenerator {
       const url = 'https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json';
       const response = await requestUrl({ url });
       if (response.status !== 200) return '';
-      const plugins: Array<{ id: string; repo: string }> = JSON.parse(response.text);
+      const plugins = (asArray(JSON.parse(response.text)) ?? []).filter(isCommunityPluginEntry);
       // 缓存为 id -> repo 映射
       this.communityPluginsCache = {};
       for (const p of plugins) {

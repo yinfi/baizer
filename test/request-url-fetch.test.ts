@@ -92,6 +92,36 @@ async function runTests() {
     expect(done.done).toBe(true);
   });
 
+  await test('requestUrlFetch accepts string / Uint8Array / ArrayBuffer streaming chunks', async () => {
+    const listeners: Record<string, Function[]> = {};
+    const body = {
+      on: (ev: string, fn: Function) => {
+        (listeners[ev] ??= []).push(fn);
+        return body;
+      },
+      _emit: (ev: string, ...args: any[]) => {
+        (listeners[ev] ?? []).forEach((f) => f(...args));
+      },
+    };
+    const deps = { requestUrl: async () => ({ status: 200, headers: {}, body }) };
+    const res = await requestUrlFetch('https://example.com/stream', {}, deps as any);
+    const reader = res.body!.getReader();
+
+    const toBytes = (chunk: any): Uint8Array => chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+    const readText = async () => new TextDecoder().decode(toBytes((await reader.read()).value));
+
+    // 运行时的流式块类型不固定：三种已支持形态都要原样交付（不做字符串化）。
+    body._emit('data', 'a');
+    body._emit('data', new TextEncoder().encode('b'));
+    body._emit('data', new TextEncoder().encode('c').buffer);
+    body._emit('end');
+
+    expect(await readText()).toBe('a');
+    expect(await readText()).toBe('b');
+    expect(await readText()).toBe('c');
+    expect((await reader.read()).done).toBe(true);
+  });
+
   await test('nodeHttpFetch streams SSE chunks incrementally through node http', async () => {
     const http = await import('http');
     const server = http.createServer((req, res) => {

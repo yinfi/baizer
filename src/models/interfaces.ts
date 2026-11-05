@@ -27,22 +27,28 @@ export interface ChatContextItem {
     content?: string;
 }
 
+/**
+ * 工具参数的 JSON Schema。具体形状由各工具声明、供 pi 做参数校验，
+ * 故这里只约束「是 JSON 对象」，不重复声明 schema 细节。
+ */
+export type ToolParameterSchema = object;
+
 export interface ToolDefinition {
     name: string;
     description: string;
-    parameters: any;
+    parameters: ToolParameterSchema;
 }
 
 export interface ToolCall {
     id?: string;
     name: string;
-    args: any;
+    args: Record<string, unknown>;
 }
 
 export interface ToolResult {
     id?: string;
     name: string;
-    response: any;
+    response: unknown;
 }
 
 export interface GenerationOptions {
@@ -71,8 +77,8 @@ export type ChatTurnOutcome = 'completed' | 'failed' | 'cancelled';
 export type StreamEvent =
     | { type: 'thinking'; content: string }
     | { type: 'text_delta'; content: string }
-    | { type: 'tool_call'; name: string; args: any; id?: string }
-    | { type: 'tool_result'; name: string; result: any; error?: string }
+    | { type: 'tool_call'; name: string; args: Record<string, unknown>; id?: string }
+    | { type: 'tool_result'; name: string; result: unknown; error?: string }
     // 智能体一个工具循环回合的开始,用于把过程按「回合」分组展示(Step N)。
     | { type: 'step_boundary' }
     // 本轮结束后触发了自动压缩(functional-spec.md §4 决策表):pi 1.3.0 本身不发压缩事件,

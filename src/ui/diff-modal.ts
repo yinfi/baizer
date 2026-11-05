@@ -148,7 +148,7 @@ function splitLines(content: string): string[] {
 }
 
 function buildLcsTable(oldLines: string[], newLines: string[]): number[][] {
-    const table = Array.from({ length: oldLines.length + 1 }, () => Array(newLines.length + 1).fill(0));
+    const table: number[][] = Array.from({ length: oldLines.length + 1 }, () => Array<number>(newLines.length + 1).fill(0));
 
     for (let i = oldLines.length - 1; i >= 0; i--) {
         for (let j = newLines.length - 1; j >= 0; j--) {

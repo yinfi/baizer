@@ -46,7 +46,7 @@ export interface CompileAllPendingOptions {
   fileConcurrency?: number;
 }
 
-function asString(value: any): string | undefined {
+function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 

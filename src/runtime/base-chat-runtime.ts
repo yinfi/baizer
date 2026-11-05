@@ -9,6 +9,7 @@ import {
 } from '../utils/file-operation-contract';
 import { evaluateGenerationQuality } from '../services/generation-quality';
 import { formatGenerationPlanBlock, GenerationStrategyService } from '../services/generation-strategy-service';
+import type { ContextItem } from '../services/context-manager';
 import { PreparedChatTurn, ChatRuntime, ChatRuntimeDeps, ChatTurnRequest } from './runtime-types';
 import { logger } from '../utils/logger';
 
@@ -319,7 +320,9 @@ If no listed command fits, suggest a plain-language request instead.
       backlinks: [],
       recentNotes: [],
       explicitScopes: [],
-      contextItems: request.contextItems as any,
+      // 兜底上下文直接复用调用方给的 contextItems：它们来自 UI 的 ContextManager
+      // （本就是 ContextItem 的宽松视图），故在此按内部窄契约收口。
+      contextItems: request.contextItems as ContextItem[],
     };
   }
 

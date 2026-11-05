@@ -3,6 +3,7 @@
 
 import { App, TFile } from 'obsidian';
 import { extractFrontmatter } from './ontology';
+import { isPlainRecord } from '../utils/narrow';
 
 /** 自研 YAML 解析结果（外部输入）里的标量字段：非字符串一律视为缺失。 */
 function asString(value: unknown): string | undefined {
@@ -45,7 +46,7 @@ export function generateSourceId(): string {
 /** 通过 metadataCache 读取文件的 knowledge_status */
 export function getKnowledgeStatus(app: App, file: TFile): KnowledgeStatus | null {
   const cache = app.metadataCache.getFileCache(file);
-  const status = cache?.frontmatter?.knowledge_status;
+  const status = asString(cache?.frontmatter?.knowledge_status);
   if (!status) return null;
   if (['pending', 'processing', 'done', 'failed'].includes(status)) {
     return status as KnowledgeStatus;
@@ -56,13 +57,13 @@ export function getKnowledgeStatus(app: App, file: TFile): KnowledgeStatus | nul
 /** 通过 metadataCache 读取文件的 knowledge_source_id */
 export function getSourceId(app: App, file: TFile): string | null {
   const cache = app.metadataCache.getFileCache(file);
-  return cache?.frontmatter?.knowledge_source_id ?? null;
+  return asString(cache?.frontmatter?.knowledge_source_id) ?? null;
 }
 
 export function getPendingReason(app: App, file: TFile): KnowledgePendingReason | null {
   const cache = app.metadataCache.getFileCache(file);
-  const reason = cache?.frontmatter?.knowledge_pending_reason;
-  if (['new', 'content_changed', 'manual', 'legacy', 'interrupted'].includes(reason)) {
+  const reason = asString(cache?.frontmatter?.knowledge_pending_reason);
+  if (reason && ['new', 'content_changed', 'manual', 'legacy', 'interrupted'].includes(reason)) {
     return reason as KnowledgePendingReason;
   }
   return null;
@@ -335,12 +336,13 @@ export function getSummaryFrontmatter(
   if (!file || !(file instanceof TFile)) return null;
 
   const cache = app.metadataCache.getFileCache(file);
-  if (!cache?.frontmatter) return null;
+  const fm: unknown = cache?.frontmatter;
+  if (!isPlainRecord(fm)) return null;
 
   return {
-    schema_hash: cache.frontmatter.schema_hash || undefined,
-    content_hash: cache.frontmatter.content_hash || undefined,
-    compiled_at: cache.frontmatter.compiled_at || undefined,
+    schema_hash: asString(fm.schema_hash) || undefined,
+    content_hash: asString(fm.content_hash) || undefined,
+    compiled_at: asString(fm.compiled_at) || undefined,
   };
 }
 

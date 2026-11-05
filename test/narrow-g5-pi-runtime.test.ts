@@ -111,6 +111,18 @@ async function runTests() {
     assert.equal((await make(null)).terminate, false);
     assert.equal((await make('text')).terminate, false);
   });
+
+  await test('tool_execution_start narrows non-object args to an empty record and keeps object args', () => {
+    const start = (args: unknown) => mapPiEventToStreamEvent({
+      type: 'tool_execution_start', toolCallId: 'c', toolName: 't', args,
+    } as never) as { args?: unknown };
+
+    assert.deepEqual(start({ path: 'a.md', nested: { deep: true } }).args, { path: 'a.md', nested: { deep: true } });
+    assert.deepEqual(start(undefined).args, {});
+    assert.deepEqual(start(null).args, {});
+    assert.deepEqual(start('text').args, {});
+    assert.deepEqual(start(7).args, {});
+  });
 }
 
 runTests().catch((e) => {

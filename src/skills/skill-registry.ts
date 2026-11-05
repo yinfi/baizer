@@ -12,7 +12,9 @@ import {
   SkillCommandEntry,
   ActivatedSkill,
   ResolvedSkill,
+  ToolArguments,
   ToolContext,
+  ToolExecutionResult,
 } from './types';
 import { ToolRegistry } from './tool-registry';
 import { logger } from '../utils/logger';
@@ -32,7 +34,7 @@ import {
 
 /** 内置 Skill 的 executor：direct 模式（斜杠命令）时执行逻辑。 */
 export interface BuiltinExecutor {
-  execute(args: any, ctx: ToolContext): Promise<any>;
+  execute(args: ToolArguments, ctx: ToolContext): Promise<ToolExecutionResult>;
 }
 
 /** 注册表内部条目：skill 模型 + sidecar + 可选 executor + 来源标记。 */

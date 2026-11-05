@@ -541,6 +541,31 @@ async function runTests() {
     expect(outcomeCalls[0].text.includes('successfully')).toEqual(true);
   });
 
+  await test('executeApprovedAction narrows non-string target fields instead of leaking them into audit data', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const auditCalls: any[] = [];
+
+    service.toolRegistry = {
+      execute: async () => ({ success: false, error: 'File not found' }),
+    };
+    service.operationAuditLog = {
+      record: async (entry: any) => {
+        auditCalls.push(entry);
+      },
+    };
+    service.settings = { activeProvider: 'openai' };
+    service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
+    service.sessionManager = null;
+
+    // args 来自模型/持久化的外部数据：path / filename 可能是数字、null 等错类型，
+    // 只接受字符串，取不到时回落到 action 名（与旧的真值链行为一致）。
+    const result = await service.executeApprovedAction('delete_note', { path: 42, filename: null }, 'tab-1');
+
+    expect(result.target).toBe('delete_note');
+    expect(auditCalls.length).toBe(1);
+    expect(auditCalls[0].target).toBe('delete_note');
+  });
+
   await test('executeApprovedAction feeds a failure outcome back into the session', async () => {
     const service: any = Object.create(ModelService.prototype);
 

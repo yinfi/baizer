@@ -1,7 +1,7 @@
 import { App, TFile } from 'obsidian';
 import { ToolRegistry } from '../skills/tool-registry';
 import { getFileWriteResultPath } from '../utils/file-operation-contract';
-import { asBoolean, asString, prop } from '../utils/narrow';
+import { asBoolean, asRecord, asString, prop } from '../utils/narrow';
 
 export type WorkspaceEditKind = 'create' | 'update';
 
@@ -62,9 +62,10 @@ export class WorkspaceEditService {
     private readonly options: WorkspaceEditServiceOptions = {},
   ) {}
 
-  async executeWorkspaceTool(action: string, args: Record<string, any>): Promise<any> {
+  async executeWorkspaceTool(action: string, args: Record<string, unknown>): Promise<unknown> {
     if (!isDirectApplyWorkspaceTool(action)) {
-      return this.toolRegistry.execute(action, args);
+      const delegated: unknown = await this.toolRegistry.execute(action, args);
+      return delegated;
     }
 
     const expectedPath = this.resolveExpectedPath(action, args);
@@ -73,7 +74,7 @@ export class WorkspaceEditService {
       : { exists: false, content: '' };
 
     const approvedArgs = { ...args, approved: true };
-    const result = await this.toolRegistry.execute(action, approvedArgs);
+    const result: unknown = await this.toolRegistry.execute(action, approvedArgs);
     if (!this.isSuccessfulToolResult(result)) return result;
 
     const path = this.resolveResultPath(action, result, approvedArgs, expectedPath);
@@ -103,7 +104,7 @@ export class WorkspaceEditService {
 
     await this.notifyEditApplied(summary, beforeSnapshot.exists ? beforeSnapshot.content : undefined);
     await this.openFile(path);
-    return { ...result, workspaceEdit: { ...summary } };
+    return { ...asRecord(result), workspaceEdit: { ...summary } };
   }
 
   async undoWorkspaceEdit(editId: string): Promise<WorkspaceEditResult> {
@@ -180,7 +181,7 @@ export class WorkspaceEditService {
     };
   }
 
-  private resolveExpectedPath(action: string, args: Record<string, any>): string {
+  private resolveExpectedPath(action: string, args: Record<string, unknown>): string {
     if (action === 'create_note') {
       const filename = args.filename || args.path || args.name || '';
       if (!filename || typeof filename !== 'string') return '';
@@ -194,7 +195,7 @@ export class WorkspaceEditService {
   private resolveResultPath(
     action: string,
     result: unknown,
-    args: Record<string, any>,
+    args: Record<string, unknown>,
     fallbackPath: string,
   ): string {
     if (action === 'create_note') {

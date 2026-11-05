@@ -39,6 +39,7 @@ import { USER_SKILLS_DIR } from './src/skills/skill-files';
 import { logger } from './src/utils/logger';
 import { installRequestUrlFetchFallback } from './src/utils/request-url-fetch';
 import { thrownMessage } from './src/utils/thrown-message';
+import { asString, isRecord } from './src/utils/narrow';
 
 /** Obsidian Editor 上未在公开 d.ts 暴露的 CodeMirror 6 视图。 */
 type EditorWithCm = Editor & { cm?: EditorView };
@@ -48,6 +49,20 @@ interface ToolExecutionResult {
     success: boolean;
     path: string;
     error?: string;
+}
+
+/**
+ * save_webpage 的返回是工具层给的外部数据：只收窄这里真正消费的三个字段。
+ * success 沿用原来的真值判断；path / error 仅接受字符串，非字符串按缺省处理
+ * （原代码对非字符串 path 会在 split 处崩溃，对合法返回两者完全等价）。
+ */
+function narrowToolExecutionResult(value: unknown): ToolExecutionResult {
+    const record = isRecord(value) ? value : {};
+    return {
+        success: Boolean(record.success),
+        path: asString(record.path) ?? '',
+        error: asString(record.error),
+    };
 }
 
 /**
@@ -128,7 +143,7 @@ export default class BaizerPlugin extends Plugin {
         this.inboxAutosave = new InboxAutosaveCoordinator({
             app: this.app,
             getInboxPath: () => this.settings.wechatInboxPath,
-            saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+            saveUrl: async (url: string) => narrowToolExecutionResult(await this.toolRegistry.execute('save_webpage', { url })),
             notify: (message: string) => new Notice(message),
         });
 
@@ -235,7 +250,7 @@ export default class BaizerPlugin extends Plugin {
                     const text = await navigator.clipboard?.readText?.();
                     const result = await saveClipText({
                         text: text || '',
-                        saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+                        saveUrl: async (url: string) => narrowToolExecutionResult(await this.toolRegistry.execute('save_webpage', { url })),
                     });
 
                     if (result.success && result.path) {
@@ -297,7 +312,7 @@ export default class BaizerPlugin extends Plugin {
         // Register direct clip protocol:
         // obsidian://baizer-clip?url=<encoded-http-url>
         registerBaizerClipProtocolHandler(this, {
-            saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+            saveUrl: async (url: string) => narrowToolExecutionResult(await this.toolRegistry.execute('save_webpage', { url })),
             notify: (message: string) => new Notice(message),
             warn: (message: string) => console.warn(`[Baizer] ${message}`),
         });
@@ -364,10 +379,11 @@ export default class BaizerPlugin extends Plugin {
     }
 
     async loadSettings() {
-        // 持久化数据是不可信输入：按 Record<string, unknown> 收口，不断言成 PluginSettings。
+        // 持久化数据是不可信输入：先按 unknown 接住，再收窄成 Record 读取。
         // `|| {}` 保留原语义（loadData 返回假值时兜底成空对象）；变量名沿用 raw——
         // test/settings-provider-migration.test.ts 用它作为定位迁移分支的源码锚点。
-        const raw: Record<string, unknown> = (await this.loadData()) || {};
+        const loaded: unknown = await this.loadData();
+        const raw = (loaded || {}) as Record<string, unknown>;
         this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
 
         // 数据迁移：旧扁平格式 → 新 providers map
@@ -522,7 +538,7 @@ export default class BaizerPlugin extends Plugin {
 
         for (const m of rawUrlMatches) {
             new Notice(`📥 Auto-saving: ${m.url}`);
-            const result: ToolExecutionResult = await this.toolRegistry.execute('save_webpage', { url: m.url });
+            const result: ToolExecutionResult = narrowToolExecutionResult(await this.toolRegistry.execute('save_webpage', { url: m.url }));
 
             if (result.success) {
                 const finalPath = result.path;

@@ -1,5 +1,5 @@
 import { requestUrl } from 'obsidian';
-import { Tool, ToolContext } from '../../types';
+import { Tool, ToolArguments, ToolContext } from '../../types';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import { asString, prop } from '../../../utils/narrow';
@@ -88,7 +88,7 @@ export function createWebSearchTool(deps: WebSearchDeps = defaultDeps): Tool {
 const webSearchTool = createWebSearchTool();
 
 export const executor: BuiltinExecutor = {
-  async execute(args: unknown, ctx: ToolContext) {
+  async execute(args: ToolArguments, ctx: ToolContext) {
     return webSearchTool.execute(args, ctx);
   },
 };
