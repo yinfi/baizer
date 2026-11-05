@@ -409,6 +409,11 @@ async function seedUnknownCache(session) {
         retryable: false,
       },
     });
+    // The scenario was injected straight into the projection; the controller (owner of
+    // the click handlers) must adopt it, exactly as a restored conversation does.
+    if (tabSession.chatController.adoptMessages) {
+      tabSession.chatController.adoptMessages(tab.state.getMessages());
+    }
     return { seeded: true };
   })()`);
 }
@@ -732,7 +737,6 @@ async function main() {
       phase: values.phase || null,
       revision: values.revision || null,
       state: values.state || 'pending',
-      flow: values.flow || null,
       obsidian: runInfo.browser,
       theme,
       locale: values.locale,
