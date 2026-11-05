@@ -155,16 +155,16 @@ export class PluginSkillGenerator {
 
   async collectBasicPluginInfo(pluginId: string): Promise<PluginInfo> {
     const manifestData = await this.readManifest(pluginId);
-    const fallbackManifest = (this.app as any).plugins.manifests[pluginId];
+    const fallbackManifest = this.app.plugins.manifests[pluginId];
 
     const name = manifestData.name || fallbackManifest?.name || pluginId;
     const description = manifestData.description || fallbackManifest?.description || '';
 
-    const rawCommands = (this.app as any).commands.listCommands()
-      .filter((c: any) => c.id.startsWith(pluginId + ':'))
-      .map((c: any) => ({ id: c.id, name: c.name }));
-    const commands = rawCommands.map((c: any) => this.classifyCommand(c));
-    const plugin = (this.app as any).plugins.getPlugin(pluginId);
+    const rawCommands = this.app.commands.listCommands()
+      .filter((c) => c.id.startsWith(pluginId + ':'))
+      .map((c) => ({ id: c.id, name: c.name }));
+    const commands = rawCommands.map((c) => this.classifyCommand(c));
+    const plugin = this.app.plugins.getPlugin(pluginId);
     const rawSettings = plugin?.settings || plugin?.data || {};
     const settingsKeys = this.extractSettingsKeys(rawSettings);
 

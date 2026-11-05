@@ -101,16 +101,16 @@ export class ContextChips {
   }
 
   private addClass(el: HTMLElement, className: string) {
-    if (typeof (el as any).addClass === 'function') {
-      (el as any).addClass(className);
+    if (typeof el.addClass === 'function') {
+      el.addClass(className);
       return;
     }
     el.classList.add(className);
   }
 
   private removeClass(el: HTMLElement, className: string) {
-    if (typeof (el as any).removeClass === 'function') {
-      (el as any).removeClass(className);
+    if (typeof el.removeClass === 'function') {
+      el.removeClass(className);
       return;
     }
     el.classList.remove(className);

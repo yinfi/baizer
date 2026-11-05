@@ -2,8 +2,8 @@ import { ChatTurnOutcome, StreamEvent } from '../../models/interfaces';
 
 interface StreamControllerDeps {
   onThinking: (content: string) => void;
-  onToolCall: (name: string, args: any) => void;
-  onToolResult: (name: string, result: any, error?: string) => void;
+  onToolCall: (name: string, args: Record<string, unknown>) => void;
+  onToolResult: (name: string, result: unknown, error?: string) => void;
   onTextDelta: (content: string) => void;
   onStepBoundary?: () => void;
   // done 携带 runtime 定型后的最终文本:runtime 可能在结束前替换正文
@@ -23,7 +23,7 @@ export class StreamController {
         this.deps.onThinking(event.content);
         break;
       case 'tool_call':
-        this.deps.onToolCall(event.name, event.args);
+        this.deps.onToolCall(event.name, event.args as Record<string, unknown>);
         break;
       case 'tool_result':
         this.deps.onToolResult(event.name, event.result, event.error);

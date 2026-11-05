@@ -4,7 +4,8 @@ export interface LogEntry {
     message: string;
     context?: string;
     error?: any;
-    metadata?: any;
+    /** 调用方附带的诊断上下文，形状由调用点决定（只透传给控制台/日志导出）。 */
+    metadata?: unknown;
 }
 
 export class Logger {
@@ -24,23 +25,23 @@ export class Logger {
         return Logger.instance;
     }
 
-    debug(message: string, context?: string, metadata?: any) {
+    debug(message: string, context?: string, metadata?: unknown) {
         this.log('debug', message, context, undefined, metadata);
     }
 
-    info(message: string, context?: string, metadata?: any) {
+    info(message: string, context?: string, metadata?: unknown) {
         this.log('info', message, context, undefined, metadata);
     }
 
-    warn(message: string, context?: string, metadata?: any) {
+    warn(message: string, context?: string, metadata?: unknown) {
         this.log('warn', message, context, undefined, metadata);
     }
 
-    error(message: string, error?: any, context?: string, metadata?: any) {
+    error(message: string, error?: any, context?: string, metadata?: unknown) {
         this.log('error', message, context, error, metadata);
     }
 
-    private log(level: LogEntry['level'], message: string, context?: string, error?: any, metadata?: any) {
+    private log(level: LogEntry['level'], message: string, context?: string, error?: any, metadata?: unknown) {
         const entry: LogEntry = {
             timestamp: new Date().toISOString(),
             level,

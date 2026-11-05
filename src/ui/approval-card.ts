@@ -77,7 +77,7 @@ interface ApprovalCardHandlers {
  * 因此旧 DOM 释放不会丢请求。
  */
 export function renderApprovalCard(
-  container: any,
+  container: HTMLElement,
   request: ApprovalRequest,
   handlers: ApprovalCardHandlers,
   state: ApprovalState = { status: 'pending' },
@@ -138,7 +138,7 @@ export function renderApprovalCard(
 }
 
 function renderDecisionActions(
-  card: any,
+  card: HTMLElement,
   request: ApprovalRequest,
   handlers: ApprovalCardHandlers,
   risk: 'low' | 'medium' | 'high',
@@ -194,7 +194,7 @@ function renderDecisionActions(
 }
 
 function renderOutcome(
-  card: any,
+  card: HTMLElement,
   state: ApprovalState,
   handlers: ApprovalCardHandlers,
 ) {
@@ -243,7 +243,7 @@ function renderOutcome(
 }
 
 function createTextButton(
-  container: any,
+  container: HTMLElement,
   className: string,
   label: string,
   disabled: boolean,
@@ -296,7 +296,7 @@ function actionVerb(request: ApprovalRequest): string {
 }
 
 function createIconButton(
-  container: any,
+  container: HTMLElement,
   className: string,
   icon: string,
   label: string,
@@ -312,7 +312,7 @@ function createIconButton(
   return button;
 }
 
-function renderFact(container: any, label: string, value: string, valueClass: string) {
+function renderFact(container: HTMLElement, label: string, value: string, valueClass: string) {
   const row = container.createDiv({ cls: 'shell-approval-fact' });
   row.createDiv({ cls: 'shell-approval-fact-label', text: label });
   row.createDiv({ cls: `shell-approval-fact-value ${valueClass}`, text: value });

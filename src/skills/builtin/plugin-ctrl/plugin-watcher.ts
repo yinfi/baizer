@@ -364,7 +364,7 @@ export class PluginWatcher {
    */
   private withdrawalReason(pluginId: string): DerivedSkillWithdrawal | null {
     if (this.settings.allowPluginControl !== true) return 'withdrawn-plugin-control';
-    const enabled = (this.app as any).plugins?.enabledPlugins as Set<string> | undefined;
+    const enabled = this.app.plugins?.enabledPlugins;
     if (!enabled?.has(pluginId)) return 'withdrawn-missing';
     if (this.settings.pluginSkillExcludeList.includes(pluginId)) return 'withdrawn-excluded';
     return null;
@@ -472,7 +472,7 @@ export class PluginWatcher {
   }
 
   getEnabledPluginIds(): string[] {
-    const enabled = (this.app as any).plugins.enabledPlugins as Set<string>;
+    const enabled = this.app.plugins.enabledPlugins;
     return [...enabled].filter(id =>
       id !== PLUGIN_ID
       && !this.settings.pluginSkillExcludeList.includes(id)
@@ -498,7 +498,7 @@ export class PluginWatcher {
       const manifest = JSON.parse(raw);
       return manifest.version || '';
     } catch {
-      const fallback = (this.app as any).plugins?.manifests?.[pluginId];
+      const fallback = this.app.plugins?.manifests?.[pluginId];
       return fallback?.version || '';
     }
   }

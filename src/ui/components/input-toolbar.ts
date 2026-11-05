@@ -184,8 +184,8 @@ export class InputToolbar {
     this.runButtonEl.setAttribute('aria-label', label);
     this.runButtonEl.setAttribute('title', label);
     setIcon(this.runButtonEl, isResponding ? 'square' : 'send-horizontal');
-    (this.runButtonEl as any).toggleClass?.('is-stop', isResponding);
-    (this.runButtonEl as any).toggleClass?.('is-send', !isResponding);
+    this.runButtonEl.toggleClass?.('is-stop', isResponding);
+    this.runButtonEl.toggleClass?.('is-send', !isResponding);
   }
 
   /** 同步当前 thinking 档位到下拉框（由 ShellView 在 settings 变更/初始化时调用）。 */

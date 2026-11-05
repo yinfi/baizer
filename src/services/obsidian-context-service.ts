@@ -1,4 +1,4 @@
-import { App, TFile, Editor, View, MetadataCache } from 'obsidian';
+import { App, TFile, Editor, View, MetadataCache, CachedMetadata } from 'obsidian';
 import { ContextItem } from './context-manager';
 import { budgetTextBlock } from './context-budget';
 
@@ -23,6 +23,7 @@ export interface ObsidianContextSnapshot {
   backlinks: Array<{ path: string; summary: string }>;
   recentNotes: Array<{ path: string; title: string }>;
   explicitScopes: string[];
+  /** 本服务内部构造的窄契约（必填 id + 封闭 type 联合）；跨层调用方按 ChatContextItem 消费。 */
   contextItems: ContextItem[];
 }
 
@@ -152,17 +153,17 @@ export class ObsidianContextService {
     return typeof value === 'number' && value >= 0 ? value : null;
   }
 
-  private extractTags(cache: any): string[] {
+  private extractTags(cache: CachedMetadata): string[] {
     if (!Array.isArray(cache?.tags)) return [];
     return cache.tags
-      .map((tag: any) => (typeof tag?.tag === 'string' ? tag.tag : null))
+      .map((tag) => (typeof tag?.tag === 'string' ? tag.tag : null))
       .filter((tag: string | null): tag is string => !!tag);
   }
 
-  private extractOutgoingLinks(cache: any): string[] {
+  private extractOutgoingLinks(cache: CachedMetadata): string[] {
     if (!Array.isArray(cache?.links)) return [];
     return cache.links
-      .map((link: any) => (typeof link?.link === 'string' ? link.link : null))
+      .map((link) => (typeof link?.link === 'string' ? link.link : null))
       .filter((link: string | null): link is string => !!link);
   }
 
@@ -253,7 +254,7 @@ export class ObsidianContextService {
     return budgetTextBlock(normalized, this.options.maxSummaryChars);
   }
 
-  private toTitle(file: any): string {
+  private toTitle(file: TFile): string {
     return typeof file?.basename === 'string' && file.basename.length > 0
       ? file.basename
       : this.basename(file?.path || '');

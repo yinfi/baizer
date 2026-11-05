@@ -66,19 +66,19 @@ export class ToolRenderer {
 
   addToolCall(name: string, args: Record<string, unknown> = {}) {
     const id = `tool-${this.nodeCount + 1}`;
-    const node = (this.timeline as any).createDiv({ cls: 'baizer-tool-call think-node is-tool is-running' }) as HTMLElement;
+    const node = this.timeline.createDiv({ cls: 'baizer-tool-call think-node is-tool is-running' }) as HTMLElement;
     node.dataset.toolName = name;
     node.dataset.toolRunId = id;
 
-    const header = (node as any).createDiv({ cls: 'baizer-tool-header think-node-header' }) as HTMLElement;
-    (header as any).createSpan({ cls: 'baizer-tool-icon think-node-icon', text: 'tool' });
-    (header as any).createSpan({ cls: 'baizer-tool-label think-node-label', text: getToolSummary(name, args) });
-    (header as any).createSpan({ cls: 'baizer-tool-status', text: 'Running' });
+    const header = node.createDiv({ cls: 'baizer-tool-header think-node-header' }) as HTMLElement;
+    header.createSpan({ cls: 'baizer-tool-icon think-node-icon', text: 'tool' });
+    header.createSpan({ cls: 'baizer-tool-label think-node-label', text: getToolSummary(name, args) });
+    header.createSpan({ cls: 'baizer-tool-status', text: 'Running' });
     this.setAttribute(header, 'role', 'button');
     this.setAttribute(header, 'tabindex', '0');
     this.setAttribute(header, 'aria-expanded', 'false');
 
-    const detail = (node as any).createDiv({ cls: 'baizer-tool-detail think-node-detail' }) as HTMLElement;
+    const detail = node.createDiv({ cls: 'baizer-tool-detail think-node-detail' }) as HTMLElement;
     detail.textContent = `--- Input ---\n${safeStringify(args)}`;
 
     header.addEventListener('click', () => this.toggleExpanded(node, header));
@@ -158,8 +158,8 @@ export class ToolRenderer {
     const newNodes = Array.from(this.timeline.querySelectorAll('.baizer-tool-call'));
     if (newNodes.length > 0) return newNodes;
 
-    return Array.from(this.timeline.querySelectorAll('.think-node'))
-      .filter((node: any) => node.hasClass?.('is-tool') || node.classList?.contains?.('is-tool'));
+    return Array.from(this.timeline.querySelectorAll<HTMLElement>('.think-node'))
+      .filter((node) => node.hasClass?.('is-tool') || node.classList?.contains?.('is-tool'));
   }
 
   private toggleExpanded(node: HTMLElement, header: HTMLElement) {
@@ -169,37 +169,37 @@ export class ToolRenderer {
   }
 
   private setAttribute(el: HTMLElement, name: string, value: string) {
-    if (typeof (el as any).setAttribute === 'function') {
-      (el as any).setAttribute(name, value);
+    if (typeof el.setAttribute === 'function') {
+      el.setAttribute(name, value);
     }
   }
 
   private hasClass(el: HTMLElement, name: string) {
-    if (typeof (el as any).hasClass === 'function') {
-      return (el as any).hasClass(name);
+    if (typeof el.hasClass === 'function') {
+      return el.hasClass(name);
     }
     return el.classList.contains(name);
   }
 
   private addClass(el: HTMLElement, name: string) {
-    if (typeof (el as any).addClass === 'function') {
-      (el as any).addClass(name);
+    if (typeof el.addClass === 'function') {
+      el.addClass(name);
     } else {
       el.classList.add(name);
     }
   }
 
   private removeClass(el: HTMLElement, name: string) {
-    if (typeof (el as any).removeClass === 'function') {
-      (el as any).removeClass(name);
+    if (typeof el.removeClass === 'function') {
+      el.removeClass(name);
     } else {
       el.classList.remove(name);
     }
   }
 
   private toggleClass(el: HTMLElement, name: string, enabled: boolean) {
-    if (typeof (el as any).toggleClass === 'function') {
-      (el as any).toggleClass(name, enabled);
+    if (typeof el.toggleClass === 'function') {
+      el.toggleClass(name, enabled);
       return;
     }
 

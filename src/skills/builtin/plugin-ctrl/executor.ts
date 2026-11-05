@@ -21,9 +21,9 @@ const listPlugins: Tool = {
   parameters: { type: 'object', properties: {} },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const manifests = (ctx.app as any).plugins.manifests;
-    const enabled = (ctx.app as any).plugins.enabledPlugins;
-    const list = await Promise.all(Object.values(manifests).map(async (m: any) => ({
+    const manifests = ctx.app.plugins.manifests;
+    const enabled = ctx.app.plugins.enabledPlugins;
+    const list = await Promise.all(Object.values(manifests).map(async (m) => ({
       id: m.id, name: m.name, version: m.version,
       enabled: enabled.has(m.id), description: m.description,
       hasSkill: await ctx.app.vault.adapter.exists(pluginSkillFilePath(m.id)),
@@ -46,9 +46,9 @@ const getPluginCommands: Tool = {
   },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const cmds = (ctx.app as any).commands.listCommands()
-      .filter((c: any) => c.id.startsWith(args.pluginId + ':'))
-      .map((c: any) => ({ id: c.id, name: c.name }));
+    const cmds = ctx.app.commands.listCommands()
+      .filter((c) => c.id.startsWith(args.pluginId + ':'))
+      .map((c) => ({ id: c.id, name: c.name }));
     return { pluginId: args.pluginId, commands: cmds, count: cmds.length };
   },
 };
@@ -67,7 +67,7 @@ const getPluginSettings: Tool = {
   },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const plugin = (ctx.app as any).plugins.getPlugin(args.pluginId);
+    const plugin = ctx.app.plugins.getPlugin(args.pluginId);
     if (!plugin) return { error: 'Plugin not found or not enabled' };
     const raw = plugin.settings || plugin.data || {};
     const allowValues = ctx.settings.allowPluginConfigValues === true;
@@ -195,7 +195,7 @@ const executePluginCommand: Tool = {
       };
     }
 
-    const success = (ctx.app as any).commands.executeCommandById(args.commandId);
+    const success = ctx.app.commands.executeCommandById(args.commandId);
     return success
       ? { success: true, message: `✅ Executed: ${args.commandId}` }
       : { success: false, error: `Command not found: ${args.commandId}` };

@@ -1,4 +1,5 @@
 import type { StreamEvent } from '../../models/interfaces';
+import type { AgentEvent } from '@earendil-works/pi-agent-core';
 
 export function unwrapPiToolResult(result: any): any {
   if (result?.details && Object.prototype.hasOwnProperty.call(result.details, 'baizerResponse')) {
@@ -41,7 +42,7 @@ export function unwrapPiToolResult(result: any): any {
  * 经核对均不产出新的可观察 `StreamEvent`（`message_end` 的 provider 错误分支已被上游单独拦截，
  * 其余三类没有决策表要求的映射目标），函数对它们返回 `undefined`，与"不认识的事件类型"同处理。
  */
-export function mapPiEventToStreamEvent(event: any): StreamEvent | undefined {
+export function mapPiEventToStreamEvent(event: AgentEvent): StreamEvent | undefined {
   // turn_start: 智能体一个工具循环回合开始。透传为 step_boundary,
   // 让 UI 把「过程叙述 + 工具调用」按回合分组展示(Step N)。
   if (event.type === 'turn_start') {
