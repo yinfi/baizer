@@ -2,8 +2,8 @@
   "schema": "baizer-declarative-settings-layout/1",
   "label": "after-wide",
   "phase": "after",
-  "revision": "final",
-  "capturedAt": "2026-11-06T02:03:55.593Z",
+  "revision": "merge-main",
+  "capturedAt": "2026-11-06T02:30:51.024Z",
   "theme": "dark",
   "language": "zh",
   "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
@@ -76,11 +76,11 @@
         "clickable": true
       }
     ],
-    "contentText": "opencode\n当前服务商\nAI 请求使用此服务商。\n服务商名称\n显示在服务商列表中。名称为空会就地报错，而不是悄悄改回旧名称。\n协议\n该服务商使用的线协议。切换后只显示适用于该协议的字段。\nOpenAI 兼容\nAnthropic Messages API\nAPI 类型（Chat Completions / Responses）\n服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /chat/completions，不要把完整请求路径粘进来。\nChat Completions（/chat/completions）\nResponses（/responses）\n服务地址（Base URL）\n服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /chat/completions，不要把完整请求路径粘进来。 实际请求路径：https://opencode.ai/zen/go/v1/chat/completions\nAPI Key\n仅保存在本地，默认隐藏。用「显示」查看，用「清除」清空（会二次确认）。\n显示\n清除\n模型\n端点返回模型列表后可从列表选择，也可以直接输入模型 ID。\ndeepseek-v4.1-flash (Current)\n刷新列表\n未能获取模型列表：Model list request timed out after 10000ms: https://opencode.ai/zen/go/v1/models。可直接手填模型 ID。\n自定义请求头（高级）\n每行一条 \"Header-Name: value\"。用 {{conversationId}} 发送当前对话 ID；没有对话的一次性调用会跳过它。\nx-opencode-session: {{conversationId}}\n连接测试\n检查 https://opencode.ai/zen/go/v1/models 的模型列表是否可达。它不会真正发起生成，所以通过只说明「端点有响应」，不代表「模型能生成」。\n运行测试"
+    "contentText": "opencode\n当前服务商\nAI 请求使用此服务商。\n服务商名称\n显示在服务商列表中。名称为空会就地报错，而不是悄悄改回旧名称。\n协议\n该服务商使用的线协议。切换后只显示适用于该协议的字段。\nOpenAI 兼容\nAnthropic Messages API\nAPI 类型（Chat Completions / Responses）\n服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /chat/completions，不要把完整请求路径粘进来。\nChat Completions（/chat/completions）\nResponses（/responses）\n服务地址（Base URL）\n服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /chat/completions，不要把完整请求路径粘进来。 实际请求路径：https://opencode.ai/zen/go/v1/chat/completions\nAPI Key\n仅保存在本地，默认隐藏。用「显示」查看，用「清除」清空（会二次确认）。\n显示\n清除\n模型\n端点返回模型列表后可从列表选择，也可以直接输入模型 ID。\ndeepseek-v4.1-flash (Current)\n刷新列表\n未能获取模型列表：Request failed, status 401。可直接手填模型 ID。\n自定义请求头（高级）\n每行一条 \"Header-Name: value\"。用 {{conversationId}} 发送当前对话 ID；没有对话的一次性调用会跳过它。\nx-opencode-session: {{conversationId}}\n连接测试\n检查 https://opencode.ai/zen/go/v1/models 的模型列表是否可达。它不会真正发起生成，所以通过只说明「端点有响应」，不代表「模型能生成」。\n运行测试"
   },
   "image": {
     "path": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\docs\\assets\\declarative-settings-2026-11-06-after-wide.png",
-    "bytes": 102853,
+    "bytes": 104312,
     "width": 1353,
     "height": 1053,
     "requestedWidth": 1353,
@@ -113,12 +113,12 @@
       },
       {
         "file": "styles.css",
-        "bytes": 109332
+        "bytes": 109932
       }
     ],
     "scenarioPath": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
     "target": {
-      "id": "E6F971459F82FA5149E9D4FC97311082",
+      "id": "FD1DBDE57CD97ACD6E33855B2DAC5BE6",
       "url": "app://obsidian.md/index.html",
       "title": "obsidian - Obsidian 1.15.0"
     },
@@ -140,7 +140,7 @@
       }
     ],
     "domDump": null,
-    "pid": 23636,
+    "pid": 46444,
     "browser": "Chrome/128.0.6613.186",
     "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.7.7 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36",
     "blockingModals": {
@@ -178,8 +178,8 @@
     },
     "domStability": {
       "stable": true,
-      "signature": "5256|867",
-      "settledAfterMs": 1026
+      "signature": "5202|813",
+      "settledAfterMs": 1062
     }
   },
   "limitations": [

@@ -3,25 +3,32 @@
    ========================================================================== */
 
 .baizer-hidden {
-    display: none !important;
+    display: none;
 }
 
-/* Fix Obsidian parent containers to enable flexbox layout */
-.workspace-leaf-content:has(.baizer-shell-view) {
-    display: flex !important;
-    flex-direction: column !important;
+/* 带自身 display 声明的元素(同特异性、源码靠后会覆盖上面的 .baizer-hidden),在此补一条同类叠加规则。 */
+.shell-unread-bar.baizer-hidden {
+    display: none;
 }
 
-.workspace-leaf-content:has(.baizer-shell-view)>.view-content {
-    display: flex !important;
-    flex-direction: column !important;
-    flex: 1 !important;
+/* Fix Obsidian parent containers to enable flexbox layout.
+   Obsidian 给每个 leaf 的 .workspace-leaf-content 写入 data-type=<视图类型>,
+   直接按它命中 Baizer 视图,不再用父选择器向下反查子元素。 */
+.workspace-leaf-content[data-type="baizer-shell-view"] {
+    display: flex;
+    flex-direction: column;
+}
+
+.workspace-leaf-content[data-type="baizer-shell-view"] > .view-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
 }
 
 .baizer-shell-view {
-    display: flex !important;
-    flex-direction: column !important;
-    height: 100% !important;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
     width: 100%;
     overflow: hidden;
     /* 背景与字体统一由下方 `Refined Sidebar System` 段的 `.baizer-shell-view` 变量块接管
@@ -493,7 +500,12 @@ textarea.shell-input {
     overflow-y: auto;
     min-height: 80px;
     max-height: 200px;
-    box-shadow: none !important;
+    box-shadow: none;
+}
+
+/* Obsidian 对 textarea 的 :focus/:active 会补 box-shadow,这里用 :is() 叠加伪类特异性来压住。 */
+.baizer-shell-view textarea.shell-input:is(:hover, :focus, :focus-visible, :active) {
+    box-shadow: none;
 }
 
 textarea.shell-input::placeholder {
@@ -641,9 +653,9 @@ textarea.shell-input::placeholder {
 
 /* 去掉 CodeMirror 给 gutter 单元格(尤其当前行 activeLineGutter)的矩形背景高亮,
    否则圆形呼吸灯背后会透出一层深色方块。 */
-.guardian-gutter .cm-gutterElement,
-.guardian-gutter .cm-activeLineGutter {
-    background: transparent !important;
+.cm-editor .guardian-gutter .cm-gutterElement,
+.cm-editor .guardian-gutter .cm-activeLineGutter {
+    background: transparent;
 }
 
 .guardian-gutter-marker {
@@ -705,12 +717,12 @@ textarea.shell-input::placeholder {
 
 /* 注:guardian-pulse-slow 曾用于 idle/paused 呼吸,现两态改为静态,keyframe 已删(死代码)。 */
 
-.cm-line .guardian-ghost-text,
+.cm-editor .cm-content .cm-line .guardian-ghost-text,
 .guardian-ghost-text {
-    /* color/background 保留 !important:CM6 的 .cm-content 与语法高亮/选区层会强制这两项,
-       非 !important 顶不过。其余属性 CM 不设默认值,靠 .cm-line 后代特异性即可生效。 */
-    color: var(--color-green) !important;
-    background: color-mix(in srgb, var(--color-green) 15%, transparent) !important;
+    /* CM6 的 .cm-content 与语法高亮/选区层会设置 color/background;
+       用 .cm-editor .cm-content .cm-line 后代链抬高特异性压过它们。 */
+    color: var(--color-green);
+    background: color-mix(in srgb, var(--color-green) 15%, transparent);
     padding: 0 4px;
     border-radius: 3px;
     font-style: italic;
@@ -1055,10 +1067,6 @@ textarea.shell-input::placeholder {
     font-family: var(--font-interface);
     transition: opacity var(--baizer-transition-base);
     z-index: 5;
-}
-
-.shell-apply-btn:hover {
-    opacity: 1 !important;
 }
 
 /* Diff Modal */
@@ -2978,14 +2986,10 @@ textarea.shell-input {
 }
 
 
-.modal:has(.baizer-diff-modal) {
-    width: min(760px, calc(100vw - 56px));
-    max-width: min(760px, calc(100vw - 56px));
-}
-
-.baizer-diff-modal {
-    width: min(720px, calc(100vw - 72px)) !important;
-    height: auto !important;
+/* 叠加 .modal-content 类名,特异性高于 Obsidian 自带的 .modal-content 尺寸规则。 */
+.modal-content.baizer-diff-modal {
+    width: min(720px, calc(100vw - 72px));
+    height: auto;
     max-height: calc(100dvh - 96px);
     display: flex;
     flex-direction: column;
@@ -3049,8 +3053,8 @@ textarea.shell-input {
 }
 
 .baizer-diff-pane-code {
-    min-height: 84px !important;
-    max-height: min(24dvh, 190px) !important;
+    min-height: 84px;
+    max-height: min(24dvh, 190px);
 }
 
 .baizer-diff-empty {
@@ -3109,9 +3113,9 @@ textarea.shell-input {
 }
 
 @media (max-width: 700px) {
-    .modal:has(.baizer-diff-modal),
-    .baizer-diff-modal {
-        width: calc(100vw - 32px) !important;
+    .modal.baizer-diff-modal-window,
+    .modal-content.baizer-diff-modal {
+        width: calc(100vw - 32px);
         max-width: calc(100vw - 32px);
     }
 
@@ -3319,49 +3323,6 @@ textarea.shell-input {
     font-size: var(--font-smallest);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-}
-
-/* 声明式行里的全宽控件（render 回调）：name/desc 在上、控件独占一行，
-   长 Base URL / 多行 header / 模型选择器不再被原生右侧窄列压扁。 */
-.setting-item.baizer-setting-stacked {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-}
-
-.setting-item.baizer-setting-stacked .setting-item-info {
-    width: 100%;
-    margin-right: 0;
-}
-
-.setting-item.baizer-setting-stacked .setting-item-control {
-    width: 100%;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-    text-align: start;
-}
-
-.setting-item.baizer-setting-stacked .setting-item-control input[type="text"],
-.setting-item.baizer-setting-stacked .setting-item-control input[type="password"],
-.setting-item.baizer-setting-stacked .setting-item-control textarea,
-.setting-item.baizer-setting-stacked .setting-item-control select {
-    width: 100%;
-    min-width: 0;
-}
-
-.setting-item.baizer-setting-stacked .baizer-settings-model-field {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.setting-item.baizer-setting-stacked .baizer-settings-header-example {
-    width: 100%;
-}
-
-.setting-item.baizer-setting-stacked .baizer-settings-summary-list {
-    width: 100%;
 }
 
 .baizer-settings-empty-state {
@@ -3968,23 +3929,26 @@ textarea.shell-input {
  * 尊重系统「减少动态效果」偏好:关闭所有持续动画(流式光标闪烁、思考/知识脉冲等),
  * 并把过渡压到几乎瞬时,避免前庭敏感用户被动画困扰。前庭安全:仅去动效,不改布局。 */
 @media (prefers-reduced-motion: reduce) {
-    .baizer-shell-view *,
-    .baizer-shell-view *::before,
-    .baizer-shell-view *::after,
-    .guardian-selection-tooltip *,
-    .baizer-attachment-modal *,
-    .baizer-settings-page *,
-    .baizer-settings-page *::before,
-    .baizer-settings-page *::after {
-        animation-duration: 0.001ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.001ms !important;
-        scroll-behavior: auto !important;
+    /* 过渡时长全部走 --baizer-transition-* 变量(未定义时回退到 120ms/200ms),
+       在各作用域根上把变量压到近乎瞬时,不必逐个后代覆写 transition-duration。 */
+    .baizer-shell-view,
+    .baizer-settings-page,
+    .baizer-attachment-modal,
+    .guardian-selection-tooltip {
+        --baizer-transition-fast: 0.001ms linear;
+        --baizer-transition-base: 0.001ms linear;
     }
 
-    /* 流式光标改为静态显示,不再闪烁。 */
-    .shell-stream-cursor {
-        animation: none !important;
+    .baizer-shell-view .shell-output-area {
+        scroll-behavior: auto;
+    }
+
+    /* 持续动画逐条关闭(流式光标、思考/知识脉冲、审批转圈);选择器与原规则同特异性,靠位置靠后生效。 */
+    .shell-stream-cursor,
+    .think-node.is-thinking::before,
+    .shell-knowledge-status-strip.is-processing,
+    .shell-approval-processing::before {
+        animation: none;
     }
 }
 
@@ -4075,6 +4039,49 @@ textarea.shell-input {
     position: absolute; right: 2px; bottom: 2px;
     width: 14px; height: 14px; cursor: nwse-resize; opacity: .5;
     background: linear-gradient(135deg, transparent 50%, var(--text-muted) 50%);
+}
+
+/* 声明式行里的全宽控件（render 回调）：name/desc 在上、控件独占一行，
+   长 Base URL / 多行 header / 模型选择器不再被原生右侧窄列压扁。 */
+.setting-item.baizer-setting-stacked {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.setting-item.baizer-setting-stacked .setting-item-info {
+    width: 100%;
+    margin-right: 0;
+}
+
+.setting-item.baizer-setting-stacked .setting-item-control {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    text-align: start;
+}
+
+.setting-item.baizer-setting-stacked .setting-item-control input[type="text"],
+.setting-item.baizer-setting-stacked .setting-item-control input[type="password"],
+.setting-item.baizer-setting-stacked .setting-item-control textarea,
+.setting-item.baizer-setting-stacked .setting-item-control select {
+    width: 100%;
+    min-width: 0;
+}
+
+.setting-item.baizer-setting-stacked .baizer-settings-model-field {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.setting-item.baizer-setting-stacked .baizer-settings-header-example {
+    width: 100%;
+}
+
+.setting-item.baizer-setting-stacked .baizer-settings-summary-list {
+    width: 100%;
 }
 
 /* 声明式设置页的权限摘要与记忆浏览：这些规则原先只在注入的 fallback sheet 里，
