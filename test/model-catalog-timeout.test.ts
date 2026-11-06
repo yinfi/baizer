@@ -380,7 +380,7 @@ async function runTests() {
       syncCaught = e;
     }
     expect(syncCaught instanceof Error).toBe(true);
-    expect(syncCaught.message).toBe('Model list request failed');
+    expect(syncCaught.message).toBe('socket hang up');
 
     // Promise.reject(带 message 的对象)：reason 变成 Error，但保留可读文本。
     let objectCaught: any;

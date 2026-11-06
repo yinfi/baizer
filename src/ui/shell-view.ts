@@ -2,6 +2,7 @@ import { App, Editor, ItemView, TFile, WorkspaceLeaf, Notice, MarkdownView, setI
 import { EditorView } from '@codemirror/view';
 import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
+import { detach, voidHandler } from '../utils/promise-guard';
 import { ChatController, ChatTurnRequest, MessageAddedOptions } from './chat-controller';
 import { ContextItem, ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
@@ -33,7 +34,6 @@ import { showGhostText } from './ghost-text';
 import { GrowthToken, ScrollFollowController } from './scroll/scroll-follow-controller';
 import { debounce } from '../utils/throttle';
 import { thrownMessage } from '../utils/thrown-message';
-import { voidAsync } from '../utils/async-errors';
 
 /** Obsidian App 上未在公开 d.ts 暴露的内部命令 API。 */
 type AppWithCommands = App & {
@@ -182,7 +182,9 @@ export class ShellView extends ItemView {
         this.handleInput();
     };
 
-    private handleKeyDownBound = (e: KeyboardEvent) => {
+    // addEventListener 期望同步 void：voidHandler 让 preventDefault 等同步部分照常先跑，
+    // submitInput 之后的 reject 记日志，而不是变成 unhandled rejection。
+    private handleKeyDownBound = voidHandler(async (e: KeyboardEvent) => {
         if (this.suggestList.handleKeyDown(e)) {
             return;
         }
@@ -198,10 +200,9 @@ export class ShellView extends ItemView {
 
             this.inputEl.value = '';
             this.adjustHeight(); // Reset height
-            // keydown 监听器是同步 void 契约:不能返回 Promise,失败也不能是未处理 rejection。
-            voidAsync('ShellView: failed to submit input from Enter key', () => this.submitInput(query));
+            await this.submitInput(query);
         }
-    };
+    }, 'ShellView');
 
     private handleContainerClickBound = (e: MouseEvent) => {
         if (window.getSelection()?.toString()) return;
@@ -220,7 +221,7 @@ export class ShellView extends ItemView {
         this.inputEl.focus();
     };
 
-    private handlePasteBound = (e: ClipboardEvent) => this.handlePaste(e);
+    private handlePasteBound = voidHandler((e: ClipboardEvent) => this.handlePaste(e), 'ShellView');
     private handleDropBound = (e: DragEvent) => this.handleDrop(e);
     // 停止无条件贴底后,scroll 事件负责「上翻暂停 / 回到底部恢复」。
     private handleOutputScrollBound = () => this.scrollFollow?.handleScroll();
@@ -1140,21 +1141,19 @@ export class ShellView extends ItemView {
 
         if (this.streamContent && resolvedText) {
             // 流结束:把回复区切回 polite,让读屏把完成的整段回复播报一次(流式途中是 off)。
-            const contentEl = this.streamContent;
-            contentEl.setAttribute('aria-live', 'polite');
-            contentEl.empty();
-            this.getMessageRenderer().renderAiContent(
-                contentEl,
-                resolvedText,
-            ).then(() => {
-                // 定型渲染不是「新输出」:暂停时不得点亮未读,也不能把读者拉回底部。
-                this.afterScrollGrowth(growth, false);
-            }).catch((error: unknown) => {
-                // 定型渲染失败不能让终态区一片空白:记日志 + 纯文本兜底,滚动语义照旧。
-                logger.error('Final AI content render failed', error, 'ShellView');
-                contentEl.textContent = resolvedText;
-                this.afterScrollGrowth(growth, false);
-            });
+            this.streamContent.setAttribute('aria-live', 'polite');
+            this.streamContent.empty();
+            // 定型渲染失败时回复区会是空的：记日志，至少能从诊断日志里追到原因。
+            detach(
+                this.getMessageRenderer().renderAiContent(
+                    this.streamContent,
+                    resolvedText,
+                ).then(() => {
+                    // 定型渲染不是「新输出」:暂停时不得点亮未读,也不能把读者拉回底部。
+                    this.afterScrollGrowth(growth, false);
+                }),
+                'ShellView',
+            );
         }
 
         if (this.streamTimeline && this.streamNodeCount > 0) {
@@ -1298,22 +1297,20 @@ export class ShellView extends ItemView {
         }
 
         const originalContent = await this.app.vault.read(activeFile);
-        new DiffModal(this.app, originalContent, newContent, () => {
-            // DiffModal 的 onApply 是同步 void 契约:异步应用失败必须自己接住并让用户看到。
-            voidAsync(
-                'ShellView: failed to apply reviewed code-block change',
-                () => this.chatController.applyPreviewedChange({
-                    action: 'review_code_block',
-                    target: activeFile.path,
-                    previousContent: originalContent,
-                    apply: async () => {
-                        await this.app.vault.modify(activeFile, newContent);
-                        new Notice('Changes applied.');
-                    },
-                }),
-                () => new Notice(t('The action failed. See the developer console for details.')),
-            );
-        }).open();
+        // 用户点「应用」触发：失败必须让用户看到，否则会以为改动已写入。
+        new DiffModal(this.app, originalContent, newContent, voidHandler(async () => {
+            await this.chatController.applyPreviewedChange({
+                action: 'review_code_block',
+                target: activeFile.path,
+                previousContent: originalContent,
+                apply: async () => {
+                    await this.app.vault.modify(activeFile, newContent);
+                    new Notice('Changes applied.');
+                },
+            });
+        }, 'ShellView', (error) => {
+            new Notice(`Failed to apply changes: ${thrownMessage(error) || 'Unknown error'}`);
+        })).open();
     }
 
     private async refreshKnowledgeStatusPanel() {
@@ -1663,8 +1660,7 @@ export class ShellView extends ItemView {
         }).open();
     }
 
-    // 粘贴处理全程同步（FileReader 走回调），保持 void 返回以符合事件监听器契约。
-    private handlePaste(e: ClipboardEvent) {
+    private async handlePaste(e: ClipboardEvent) {
         const clipboard = e.clipboardData;
         if (!clipboard) return;
 

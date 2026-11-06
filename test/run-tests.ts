@@ -90,6 +90,7 @@ const tests = [
   'test/clip-protocol.test.ts',
   'test/plugin-skill-generator.test.ts',
   'test/plugin-watcher.test.ts',
+  'test/promise-guard.test.ts',
   'test/asr-chunking.test.ts',
   'test/video-transcription.test.ts',
   'test/video-utils.test.ts',
@@ -121,7 +122,6 @@ const tests = [
   'test/knowledge/compile-concurrency.test.ts',
   'test/cross-phase-smoke.test.ts',
   'test/narrow-g2-knowledge-services.test.ts',
-  'test/async-errors.test.ts',
 ];
 
 for (const testFile of tests) {

@@ -13,7 +13,7 @@ import {
 import { SkillRegistry } from '../../skill-registry';
 import { PluginSkillGenerator } from './skill-generator';
 import { logger } from '../../../utils/logger';
-import { voidAsync } from '../../../utils/async-errors';
+import { voidHandler } from '../../../utils/promise-guard';
 import { t } from '../../../i18n/zh';
 
 const POLL_INTERVAL_MS = 10_000;
@@ -563,10 +563,10 @@ export class PluginWatcher {
     // initialScan/checkChanges 内部只在 canGenerate() 通过时执行生成工作。
     logger.info('Starting...', 'PluginWatcher');
     await this.initialScan();
+    // checkChanges 只有 try/finally：读取/生成抛错会 reject。定时器回调不能 await，
+    // 失败记日志，下一轮轮询照常继续（pollingInFlight 已在 finally 里复位）。
     this.intervalId = window.setInterval(
-      // setInterval 回调是同步 void 契约：checkChanges 的 rejection 此前无人接收，
-      // 轮询失败的日志与提示都会丢；也不能 await（计时器不等待上一轮）。
-      () => voidAsync('PluginWatcher: polling cycle failed', () => this.checkChanges()),
+      voidHandler(() => this.checkChanges(), 'PluginWatcher'),
       POLL_INTERVAL_MS,
     );
   }

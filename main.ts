@@ -39,7 +39,7 @@ import { USER_SKILLS_DIR } from './src/skills/skill-files';
 import { logger } from './src/utils/logger';
 import { installRequestUrlFetchFallback } from './src/utils/request-url-fetch';
 import { thrownMessage } from './src/utils/thrown-message';
-import { voidAsync } from './src/utils/async-errors';
+import { detach } from './src/utils/promise-guard';
 
 /** Obsidian Editor 上未在公开 d.ts 暴露的 CodeMirror 6 视图。 */
 type EditorWithCm = Editor & { cm?: EditorView };
@@ -311,9 +311,8 @@ export default class BaizerPlugin extends Plugin {
         });
 
         // 启动插件 Skill 自动生成（后台异步，不阻塞）。watcher 已在 skill 加载后构造。
-        // 不 await：initialScan 是逐插件网络 + LLM 的分钟级工作，await 会卡住 onload。
-        // 失败必须可见：此前裸调用会让 rejection 变成未处理 rejection，onload 本身却看起来正常。
-        voidAsync('Baizer: plugin skill watcher failed to start', () => this.pluginWatcher?.start());
+        // start() 内部的初始扫描失败会 reject：记日志，不让它变成 unhandled rejection。
+        if (this.pluginWatcher) detach(this.pluginWatcher.start(), 'PluginWatcher');
     }
 
     onunload() {
@@ -369,9 +368,9 @@ export default class BaizerPlugin extends Plugin {
         }
 
         new GuardianModal(this.app, (instruction: string) => {
-            // Modal 的 onSubmit 是同步 void 契约：async 回调会漏掉当前调用栈之外的错误。
-            // runGuardianCheck 内部已处理常规失败（状态点回 Error），这里只兜底意外抛出。
-            voidAsync('Baizer: manual guardian completion failed', () => this.runGuardianCheck(view.editor, null, instruction));
+            // runGuardianCheck 内部已 try/catch 并更新 Guardian 状态；这里的 detach 兜底
+            // 其 catch 之外的失败（例如 collect 之前的同步逻辑），保证不成为 unhandled rejection。
+            detach(this.runGuardianCheck(view.editor, null, instruction), 'Guardian');
         }).open();
     }
 
