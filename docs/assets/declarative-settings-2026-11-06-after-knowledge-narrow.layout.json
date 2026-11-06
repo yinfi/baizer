@@ -1,0 +1,237 @@
+{
+  "schema": "baizer-declarative-settings-layout/1",
+  "label": "after-knowledge-narrow",
+  "phase": "after",
+  "revision": "final",
+  "capturedAt": "2026-11-06T02:05:04.941Z",
+  "theme": "dark",
+  "language": "zh",
+  "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+  "viewport": {
+    "requested": {
+      "width": 600,
+      "height": 900
+    },
+    "innerWidth": 600,
+    "innerHeight": 900,
+    "devicePixelRatio": 1
+  },
+  "page": {
+    "requestedPages": [
+      "知识库"
+    ],
+    "rows": [
+      {
+        "name": "知识编译",
+        "desc": "",
+        "cls": "setting-item setting-item-heading",
+        "clickable": true
+      },
+      {
+        "name": "源文件夹",
+        "desc": "要监视的文件夹，每行一个。",
+        "cls": "setting-item baizer-setting-stacked",
+        "clickable": true
+      },
+      {
+        "name": "Wiki 输出文件夹",
+        "desc": "存放已编译 wiki 页面的文件夹。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "自动编译",
+        "desc": "被监视的文件夹变化时自动编译笔记。",
+        "cls": "setting-item mod-toggle",
+        "clickable": true
+      },
+      {
+        "name": "单批最大编译数",
+        "desc": "单个批次内可编译的最大笔记数。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "本体",
+        "desc": "",
+        "cls": "setting-item setting-item-heading",
+        "clickable": true
+      },
+      {
+        "name": "本体状态",
+        "desc": "当前本体结构与待重编译文章计数。",
+        "cls": "setting-item baizer-setting-stacked",
+        "clickable": true
+      },
+      {
+        "name": "打开本体",
+        "desc": "打开本体结构文件进行查看或编辑。",
+        "cls": "setting-item mod-action tappable",
+        "clickable": true
+      },
+      {
+        "name": "发现",
+        "desc": "编译内容足够时，从知识库生成本体结构。",
+        "cls": "setting-item mod-action tappable",
+        "clickable": true
+      },
+      {
+        "name": "预览",
+        "desc": "预览发现结果，但不写入本体结构。",
+        "cls": "setting-item mod-action tappable",
+        "clickable": true
+      },
+      {
+        "name": "标记过期为待处理",
+        "desc": "把过期笔记标记为待重新编译。",
+        "cls": "setting-item mod-action tappable",
+        "clickable": true
+      },
+      {
+        "name": "本体高级设置",
+        "desc": "",
+        "cls": "setting-item setting-item-heading",
+        "clickable": true
+      },
+      {
+        "name": "启用本体 Schema",
+        "desc": "使用 Knowledge Wiki/_ontology.md 为后续编译加入稳定的分类与实体抽取。",
+        "cls": "setting-item mod-toggle",
+        "clickable": true
+      },
+      {
+        "name": "本体更新模式",
+        "desc": "手动：从不自动发现。建议：报告就绪度但不写入。自动：达到阈值时创建缺失的 schema。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "最少文章数",
+        "desc": "触发本体发现所需的最少已编译 wiki 文章数。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "最低主题频次",
+        "desc": "一个主题需出现这么多次才能影响本体发现。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "最低概念频次",
+        "desc": "一个概念需出现这么多次才能影响本体发现。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "自动重编译过期文章",
+        "desc": "本体变更后自动重编译受影响的笔记。若想先审阅过期笔记则保持关闭。",
+        "cls": "setting-item mod-toggle",
+        "clickable": true
+      }
+    ],
+    "contentText": "知识库\n知识编译\n源文件夹\n要监视的文件夹，每行一个。\nWiki 输出文件夹\n存放已编译 wiki 页面的文件夹。\n自动编译\n被监视的文件夹变化时自动编译笔记。\n单批最大编译数\n单个批次内可编译的最大笔记数。\n50\n本体\n本体状态\n当前本体结构与待重编译文章计数。\n本体: missing · 发现: insufficient_articles · 待重编译笔记: 0\n打开本体\n打开本体结构文件进行查看或编辑。\n发现\n编译内容足够时，从知识库生成本体结构。\n预览\n预览发现结果，但不写入本体结构。\n标记过期为待处理\n把过期笔记标记为待重新编译。\n本体高级设置\n启用本体 Schema\n使用 Knowledge Wiki/_ontology.md 为后续编译加入稳定的分类与实体抽取。\n本体更新模式\n手动：从不自动发现。建议：报告就绪度但不写入。自动：达到阈值时创建缺失的 schema。\n手动\n建议（推荐）\n缺失时自动创建\n最少文章数\n触发本体发现所需的最少已编译 wiki 文章数。\n最低主题频次\n一个主题需出现这么多次才能影响本体发现。\n最低概念频次\n一个概念需出现这么多次才能影响本体发现。\n自动重编译过期文章\n本体变更后自动重编译受影响的笔记。若想先审阅过期笔记则保持关闭。"
+  },
+  "image": {
+    "path": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\docs\\assets\\declarative-settings-2026-11-06-after-knowledge-narrow.png",
+    "bytes": 60609,
+    "width": 600,
+    "height": 900,
+    "requestedWidth": 600,
+    "requestedHeight": 900,
+    "sizeMatchesRequest": true
+  },
+  "harness": {
+    "exe": "C:\\Program Files\\Obsidian\\Obsidian.exe",
+    "pluginDir": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\dist",
+    "vaultDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
+    "vaultKey": "f230a63f4db30aad",
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.6.0",
+      "minAppVersion": "1.13.0",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    },
+    "copiedPluginFiles": [
+      {
+        "file": "main.js",
+        "bytes": 2838620
+      },
+      {
+        "file": "manifest.json",
+        "bytes": 325
+      },
+      {
+        "file": "styles.css",
+        "bytes": 109332
+      }
+    ],
+    "scenarioPath": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
+    "target": {
+      "id": "A873015B4C99F0D23D5D265F7FE78D2B",
+      "url": "app://obsidian.md/index.html",
+      "title": "obsidian - Obsidian 1.15.0"
+    },
+    "settingsPanelLocation": "popout-window",
+    "navigation": [
+      {
+        "text": "知识库",
+        "found": true,
+        "score": 100,
+        "clicked": "知识库 源文件夹、输出文件夹、编译状态与本体。",
+        "cls": "setting-item mod-navigable tappable"
+      }
+    ],
+    "domDump": null,
+    "pid": 43272,
+    "browser": "Chrome/128.0.6613.186",
+    "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.7.7 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36",
+    "blockingModals": {
+      "trust": {
+        "present": false,
+        "clicked": null
+      },
+      "strayModalsClosed": [],
+      "releaseNotes": {
+        "detached": 0
+      }
+    },
+    "pluginActivation": {
+      "steps": [
+        "plugins.loadManifests()"
+      ],
+      "error": null,
+      "loaded": true
+    },
+    "pluginSettings": {
+      "settingsLoaded": true,
+      "activeProvider": "opencode",
+      "providers": [
+        "cch",
+        "opencode",
+        "anthropic"
+      ],
+      "matched": true
+    },
+    "settings": {
+      "tabId": "baizer",
+      "isOpen": true,
+      "popoutCreated": true,
+      "settingsModalInMainDocument": false
+    },
+    "domStability": {
+      "stable": true,
+      "signature": "6565|542",
+      "settledAfterMs": 1040
+    }
+  },
+  "limitations": [
+    "Colour, contrast, font rendering, iconography and animation are NOT asserted.",
+    "This harness navigates by visible row text; a renamed row breaks navigation instead of silently measuring another row.",
+    "The pre-migration accordion UI has no declarative page entries; use ../provider-settings-shots/capture.mjs for Before evidence."
+  ]
+}

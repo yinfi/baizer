@@ -1,0 +1,389 @@
+{
+  "summary": {
+    "baseline": {
+      "path": "docs/assets/declarative-settings-2026-11-06-before-narrow.png",
+      "size": "600x900",
+      "lineCount": 43
+    },
+    "candidate": {
+      "path": "docs/assets/declarative-settings-2026-11-06-after-narrow.png",
+      "size": "600x900",
+      "lineCount": 40
+    },
+    "sameImageSize": true,
+    "tolerancePx": 4,
+    "matchedLines": 20,
+    "matchedWithinTolerance": 15,
+    "matchedOutsideTolerance": 5,
+    "onlyInBaseline": 21,
+    "onlyInCandidate": 20,
+    "verdict": {
+      "sameImageSize": true,
+      "everyMatchedLineWithinTolerance": false,
+      "identicalTextSets": false
+    }
+  },
+  "matchedOutsideTolerance": [
+    {
+      "text": "opencode",
+      "baseline": {
+        "x": 272,
+        "y": 171
+      },
+      "candidate": {
+        "x": 261,
+        "y": 249
+      },
+      "dx": -11,
+      "dy": 78,
+      "withinTolerance": false
+    },
+    {
+      "text": "服 务 商 名 称",
+      "baseline": {
+        "x": 286,
+        "y": 250
+      },
+      "candidate": {
+        "x": 252,
+        "y": 176
+      },
+      "dx": -34,
+      "dy": -74,
+      "withinTolerance": false
+    },
+    {
+      "text": "OpenAl 兼 容",
+      "baseline": {
+        "x": 297,
+        "y": 401
+      },
+      "candidate": {
+        "x": 263,
+        "y": 381
+      },
+      "dx": -34,
+      "dy": -20,
+      "withinTolerance": false
+    },
+    {
+      "text": "https.//opencode.ai/zen/go/vl",
+      "baseline": {
+        "x": 296,
+        "y": 722
+      },
+      "candidate": {
+        "x": 262,
+        "y": 629
+      },
+      "dx": -34,
+      "dy": -93,
+      "withinTolerance": false
+    },
+    {
+      "text": "API Key",
+      "baseline": {
+        "x": 286,
+        "y": 882
+      },
+      "candidate": {
+        "x": 252,
+        "y": 774
+      },
+      "dx": -34,
+      "dy": -108,
+      "withinTolerance": false
+    }
+  ],
+  "onlyInBaseline": [
+    {
+      "text": "服 务 商",
+      "at": {
+        "x": 241,
+        "y": 36
+      }
+    },
+    {
+      "text": "Q 索 ．",
+      "at": {
+        "x": 21,
+        "y": 50
+      }
+    },
+    {
+      "text": "cch",
+      "at": {
+        "x": 272,
+        "y": 113
+      }
+    },
+    {
+      "text": "第 三 方 牛",
+      "at": {
+        "x": 44,
+        "y": 337
+      }
+    },
+    {
+      "text": "雪 ± g t 一 5 五 ． 50 ]",
+      "at": {
+        "x": 283,
+        "y": 138
+      }
+    },
+    {
+      "text": "opencode",
+      "at": {
+        "x": 295,
+        "y": 283
+      }
+    },
+    {
+      "text": "商 身 份 与 协 议",
+      "at": {
+        "x": 330,
+        "y": 205
+      }
+    },
+    {
+      "text": "显 示 在 务 商 列 表 中 。 名 称 为 空 会 芹 也 报",
+      "at": {
+        "x": 286,
+        "y": 314
+      }
+    },
+    {
+      "text": "错 ， 而 不 杲 肖 改 回 旧 名 秘",
+      "at": {
+        "x": 286,
+        "y": 332
+      }
+    },
+    {
+      "text": "该 服 务 商 傅 凭 的 线 协 议 。 切 茜 只 显 示 过 蟊",
+      "at": {
+        "x": 286,
+        "y": 433
+      }
+    },
+    {
+      "text": "于 该 协 议 字 。",
+      "at": {
+        "x": 298,
+        "y": 450
+      }
+    },
+    {
+      "text": "API 类 型 (Chat Completions /",
+      "at": {
+        "x": 286,
+        "y": 489
+      }
+    },
+    {
+      "text": "Responses)",
+      "at": {
+        "x": 287,
+        "y": 507
+      }
+    },
+    {
+      "text": "Chat Completions",
+      "at": {
+        "x": 297,
+        "y": 539
+      }
+    },
+    {
+      "text": "服 务 她 匕 以 /vl 结 _ _ 0 些 n",
+      "at": {
+        "x": 286,
+        "y": 570
+      }
+    },
+    {
+      "text": "SDK 会 行 加 /chat/completions,",
+      "at": {
+        "x": 286,
+        "y": 588
+      }
+    },
+    {
+      "text": "不 要 吧 完 整 适 求 路 径 粘 迸 来 。",
+      "at": {
+        "x": 286,
+        "y": 606
+      }
+    },
+    {
+      "text": "连 接 址 与 凭 证",
+      "at": {
+        "x": 300,
+        "y": 644
+      }
+    },
+    {
+      "text": "服 务 地 址 (Base URL) 《 必 屢",
+      "at": {
+        "x": 286,
+        "y": 689
+      }
+    },
+    {
+      "text": "https://opencode.ai/zen/go/vl/chat/",
+      "at": {
+        "x": 287,
+        "y": 825
+      }
+    },
+    {
+      "text": "completions",
+      "at": {
+        "x": 286,
+        "y": 843
+      }
+    }
+  ],
+  "onlyInCandidate": [
+    {
+      "text": "Q 搜 索 设 “",
+      "at": {
+        "x": 21,
+        "y": 50
+      }
+    },
+    {
+      "text": "第 三 方 插 件",
+      "at": {
+        "x": 44,
+        "y": 337
+      }
+    },
+    {
+      "text": "当 前 服 务 商",
+      "at": {
+        "x": 253,
+        "y": 100
+      }
+    },
+    {
+      "text": "求 便 甲 吡 报 务 商 。",
+      "at": {
+        "x": 280,
+        "y": 121
+      }
+    },
+    {
+      "text": "显 示 在 商 列 表 中 。 名 称 为 空 会 芹 也 报 错 ， 而 不 杲",
+      "at": {
+        "x": 252,
+        "y": 197
+      }
+    },
+    {
+      "text": "肖 改 回 旧 名 秘",
+      "at": {
+        "x": 268,
+        "y": 213
+      }
+    },
+    {
+      "text": "该 服 商 傅 凭 的 线 协 议 。 切 舌 只 显 示 过 甲 于 该 协 议",
+      "at": {
+        "x": 252,
+        "y": 331
+      }
+    },
+    {
+      "text": "的 字 。",
+      "at": {
+        "x": 252,
+        "y": 346
+      }
+    },
+    {
+      "text": "API 类 型 (Chat Completions ／ Responses)",
+      "at": {
+        "x": 252,
+        "y": 445
+      }
+    },
+    {
+      "text": "服 务 她 匕 以 /vl 结 _ _ 0 些 n S DK 会 巨 行",
+      "at": {
+        "x": 252,
+        "y": 466
+      }
+    },
+    {
+      "text": "服 务 她 匕 以 /vl 结 _ _ 0 些 n SDK 会 巨 行",
+      "at": {
+        "x": 252,
+        "y": 662
+      }
+    },
+    {
+      "text": "讠 昼 加 /chat/completions, 不 要 吧 完 整 适 求 路 径 粘 迸",
+      "at": {
+        "x": 252,
+        "y": 481
+      }
+    },
+    {
+      "text": "讠 昼 加 /chat/completions, 不 要 吧 完 整 适 求 路 径 粘 迸",
+      "at": {
+        "x": 252,
+        "y": 680
+      }
+    },
+    {
+      "text": "来 。",
+      "at": {
+        "x": 252,
+        "y": 497
+      }
+    },
+    {
+      "text": "Chat Completions (/chat/completions]",
+      "at": {
+        "x": 263,
+        "y": 532
+      }
+    },
+    {
+      "text": "服 务 地 址 (Base URL)",
+      "at": {
+        "x": 252,
+        "y": 594
+      }
+    },
+    {
+      "text": "来 。 实 际 盾 求 苤 径",
+      "at": {
+        "x": 252,
+        "y": 698
+      }
+    },
+    {
+      "text": "https://opencode.ai/zen/go/vl/chat.com/letions",
+      "at": {
+        "x": 253,
+        "y": 716
+      }
+    },
+    {
+      "text": "仅 保 存 在 本 地 ， 默 认 。 丨 显 示 ] 苷 ， 丨 清",
+      "at": {
+        "x": 252,
+        "y": 794
+      }
+    },
+    {
+      "text": "除 ] 清 空 〔 会 二 次 人 ） 。",
+      "at": {
+        "x": 252,
+        "y": 810
+      }
+    }
+  ]
+}

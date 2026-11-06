@@ -5,12 +5,8 @@ import { FakeElement } from './ui-fakes';
 import { ModelService } from '../src/services/model-service';
 import { checkAvailabilityWithStatus } from '../src/services/model-catalog-service';
 import {
-  CONNECTION_FIELD_GROUP,
-  ConnectionFieldId,
   buildNewProviderConfig,
   describeRequestPath,
-  getConnectionFieldOrder,
-  getConnectionGroups,
   getConnectionTestReport,
   getConnectionTestStage,
   getConnectionTestStatusPresentation,
@@ -159,176 +155,38 @@ async function runTests() {
         lowest = Math.min(lowest, depth);
       }
     }
-    // 兜底 CSS 是注入 <style> 的模板字符串：少一个括号就会把后续所有规则吞掉，
+    // 兜底 CSS 是注入的模板字符串：少一个括号就会把后续所有规则吞掉，
     // 且只在运行时才看得出来。这里把「结构完整」纳入验收。
     expect({ depth, lowest }).toEqual({ depth: 0, lowest: 0 });
-    assert(
-      css.includes('@container (max-width: 840px)') && css.includes('@container (max-width: 640px)'),
-      'both narrow breakpoints must exist in the fallback stylesheet',
-    );
-    // 标题栏里序号徽章排在 Setting 之前，Setting 不再是 :first-child：
-    // 若不清零，Obsidian 默认的 .setting-item 上边框与内边距会在卡片标题上方多出一条线。
-    assert(
-      css.includes('.baizer-settings-connection-card-header .setting-item'),
-      'the card header must neutralize the .setting-item border/padding',
-    );
-    assert(
-      css.includes('.baizer-settings-connection-card-header { justify-content: flex-start; }'),
-      'the card header must not use space-between (it would push the title to the far right)',
-    );
   });
 
-  // ── F4/F5：副标题不许被裁切，且最窄窗口要拿到窄屏布局 ──
+  await test('declarative rows can host full-width imperative controls', () => {
+    // 声明式控件的右侧列很窄：长 Base URL、多行 header、模型选择器必须能整行展开，
+    // 否则会被压成截断值（迁移前 provider 详情页正是为此改成了单列）。
+    const css = getSettingsFallbackCss();
+    assert(css.includes('.setting-item.baizer-setting-stacked'), 'the fallback sheet must style stacked rows');
+    assert(css.includes('.setting-item.baizer-setting-stacked .setting-item-control input[type="text"]'),
+      'stacked rows must stretch text inputs to the row width');
+    assert(css.includes('.setting-item.baizer-setting-stacked .setting-item-control textarea'),
+      'stacked rows must stretch textareas to the row width');
+    const styles = readFileSync('styles.css', 'utf8');
+    assert(styles.includes('.setting-item.baizer-setting-stacked'), 'styles.css must style stacked rows too');
+  });
 
-  await test('the page subtitle never clips at any width', () => {
-    // F4：页面正文被 ellipsis 吃掉就是「读不到」。宽屏下副标题只落在 hero 左列
-    // （316px）而文字约 390px，此前 scrollWidth 390 > clientWidth 316，74px 永远看不到。
-    // 兜底表最后注入、优先级更高，所以两张表都必须干净。
-    const sources: Array<[string, string]> = [
-      ['fallback', stripCssComments(getSettingsFallbackCss())],
-      ['styles.css', stripCssComments(readFileSync('styles.css', 'utf8'))],
-    ];
-
-    for (const [name, css] of sources) {
-      const rule = css.match(/\.baizer-settings-subtitle\s*\{[^}]*\}/);
-      assert(Boolean(rule), `${name} must define .baizer-settings-subtitle`);
-      const body = rule![0];
-      assert(
-        !/nowrap/.test(body),
-        `${name}: .baizer-settings-subtitle must not use nowrap (it clips page body text)`,
-      );
-      assert(
-        !/text-overflow\s*:\s*ellipsis/.test(body),
-        `${name}: .baizer-settings-subtitle must not use an ellipsis`,
-      );
-      assert(
-        !/overflow\s*:\s*hidden/.test(body),
-        `${name}: .baizer-settings-subtitle must not hide its overflow`,
-      );
-      assert(
-        /white-space\s*:\s*normal/.test(body),
-        `${name}: .baizer-settings-subtitle must explicitly allow wrapping`,
-      );
+  await test('styles.css stays brace-balanced after the dead-rule cleanup', () => {
+    // 整份样式表是一个整体：删掉旧 accordion/provider-card 规则时少一个括号，
+    // 后面的全部规则都会被吞掉，而且只在真实界面上才看得出来。
+    const css = stripCssComments(readFileSync('styles.css', 'utf8'));
+    let depth = 0;
+    let lowest = 0;
+    for (const char of css) {
+      if (char === '{') depth += 1;
+      else if (char === '}') {
+        depth -= 1;
+        lowest = Math.min(lowest, depth);
+      }
     }
-
-    // 副标题横跨两列，宽屏才有整行可用（只靠换行仍会被挤成两行窄栏文字）。
-    for (const [name, css] of sources) {
-      assert(
-        css.includes('grid-template-areas: "title search" "subtitle subtitle"'),
-        `${name}: the hero must let the subtitle span both columns`,
-      );
-    }
-  });
-
-  await test('page body text is never clipped to a single line by the fallback sheet', () => {
-    // 同一个双重来源陷阱：兜底表最后注入、优先级更高，所以「styles.css 改好了」不等于
-    // 界面上改好了。分区描述就是第二个受害者——styles.css 是两行截断，兜底表却是单行
-    // nowrap+ellipsis，于是真实界面里只显示一行。
-    const fallback = stripCssComments(getSettingsFallbackCss());
-    const styles = stripCssComments(readFileSync('styles.css', 'utf8'));
-
-    for (const [name, css] of [['fallback', fallback], ['styles.css', styles]] as Array<[string, string]>) {
-      const rule = css.match(/\.baizer-settings-section-description\s*\{[^}]*\}/);
-      assert(Boolean(rule), `${name} must define .baizer-settings-section-description`);
-      assert(
-        !/nowrap/.test(rule![0]),
-        `${name}: .baizer-settings-section-description must not use nowrap`,
-      );
-      assert(
-        /-webkit-line-clamp\s*:\s*2/.test(rule![0]),
-        `${name}: .baizer-settings-section-description must clamp to two lines`,
-      );
-    }
-  });
-
-  await test('the narrow breakpoint sits above the app minimum window width', () => {
-    // F5：设置浮窗声明 minWidth: 600，600px 是真实用户能到的最窄窗口。
-    // 断点若 ≤600，最窄窗口会拿到宽屏布局 —— 恰好是唯一没被量过的一档。
-    const POPOUT_MIN_WIDTH = 600;
-    for (const [name, css] of [
-      ['fallback', getSettingsFallbackCss()],
-      ['styles.css', readFileSync('styles.css', 'utf8')],
-    ] as Array<[string, string]>) {
-      const widths = Array.from(css.matchAll(/@container \(max-width: (\d+)px\)/g))
-        .map(match => Number(match[1]))
-        // 只看会塌陷 hero 栅格的那个断点。
-        .filter(width => new RegExp(`@container \\(max-width: ${width}px\\)\\s*\\{\\s*\\.baizer-settings-hero`).test(css));
-      assert(widths.length > 0, `${name} must collapse the hero grid at some container width`);
-      const narrowest = Math.max(...widths);
-      assert(
-        narrowest > POPOUT_MIN_WIDTH,
-        `${name}: the hero-collapsing breakpoint (${narrowest}) must exceed the popout minimum (${POPOUT_MIN_WIDTH})`,
-      );
-      assert(
-        css.includes(`@container (max-width: ${narrowest}px)`),
-        `${name}: the narrow breakpoint must be declared as a container query`,
-      );
-    }
-  });
-
-  // ── 分组与字段顺序：配置流程 = 身份与协议 → 地址与凭证 → 模型 → 测试结果 ──
-
-  await test('renders the configuration flow in four ordered groups', () => {
-    expect(getConnectionGroups().map(group => group.id))
-      .toEqual(['identity', 'credentials', 'model', 'test']);
-    expect(getConnectionGroups().map(group => group.title)).toEqual([
-      'Provider identity and protocol',
-      'Connection address and credentials',
-      'Model',
-      'Test result',
-    ]);
-  });
-
-  await test('groups every field and keeps fields ordered inside the flow', () => {
-    const groupOrder = getConnectionGroups().map(group => group.id);
-
-    for (const type of ['openai-compatible', 'anthropic'] as const) {
-      const fields = getConnectionFieldOrder(type);
-      // 每个字段都必须归属于某个分组,否则它会掉出流程之外。
-      fields.forEach(field => assert(
-        Boolean(CONNECTION_FIELD_GROUP[field]),
-        `${field} has no group`,
-      ));
-      // 分组序号必须单调不减：字段不能跨组来回跳。
-      const indexes = fields.map(field => groupOrder.indexOf(CONNECTION_FIELD_GROUP[field]));
-      expect(indexes).toEqual([...indexes].sort((a, b) => a - b));
-      // 每个分组都要有字段,否则会出现空卡片。
-      expect(Array.from(new Set(fields.map(field => CONNECTION_FIELD_GROUP[field]))))
-        .toEqual(groupOrder);
-    }
-  });
-
-  await test('only OpenAI-compatible exposes the API type (flavor) field', () => {
-    const hasFlavor = (type: 'openai-compatible' | 'anthropic') =>
-      getConnectionFieldOrder(type).includes('apiFlavor');
-
-    expect({
-      openai: hasFlavor('openai-compatible'),
-      anthropic: hasFlavor('anthropic'),
-    }).toEqual({ openai: true, anthropic: false });
-  });
-
-  await test('every surviving protocol shows the service address', () => {
-    // 'gemini' 被移除后不存在「地址不适用」的协议：两种协议都要填地址
-    // （各自的 SDK 在其后追加端点路径），故 baseUrl 对二者都必须出现在字段序里。
-    const hasBaseUrl = (type: 'openai-compatible' | 'anthropic') =>
-      getConnectionFieldOrder(type).includes('baseUrl');
-
-    expect({
-      openai: hasBaseUrl('openai-compatible'),
-      anthropic: hasBaseUrl('anthropic'),
-    }).toEqual({ openai: true, anthropic: true });
-  });
-
-  await test('identity and protocol fields come before address, model and test', () => {
-    const fields = getConnectionFieldOrder('openai-compatible');
-    const at = (field: ConnectionFieldId) => fields.indexOf(field);
-
-    assert(at('providerName') < at('apiFlavor'), 'provider name must precede the API type');
-    assert(at('apiFlavor') < at('baseUrl'), 'API type must precede the service address');
-    assert(at('baseUrl') < at('apiKey'), 'address must precede the API key');
-    assert(at('apiKey') < at('model'), 'credentials must precede the model');
-    assert(at('model') < at('connectionTest'), 'model must precede the connection test');
+    expect({ depth, lowest }).toEqual({ depth: 0, lowest: 0 });
   });
 
   // ── 「API 类型」与「服务地址」不再同名 ──

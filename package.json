@@ -23,7 +23,7 @@
     "@types/ws": "^8.5.10",
     "esbuild": "0.17.19",
     "eslint": "^9.39.5",
-    "obsidian": "^1.5.7",
+    "obsidian": "^1.14.4",
     "tslib": "^2.4.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",

@@ -1,0 +1,197 @@
+{
+  "schema": "baizer-declarative-settings-layout/1",
+  "label": "after-root-narrow",
+  "phase": "after",
+  "revision": "final",
+  "capturedAt": "2026-11-06T02:04:15.095Z",
+  "theme": "dark",
+  "language": "zh",
+  "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+  "viewport": {
+    "requested": {
+      "width": 600,
+      "height": 900
+    },
+    "innerWidth": 600,
+    "innerHeight": 900,
+    "devicePixelRatio": 1
+  },
+  "page": {
+    "requestedPages": [],
+    "rows": [
+      {
+        "name": "需要关注",
+        "desc": "",
+        "cls": "setting-item setting-item-heading",
+        "clickable": true
+      },
+      {
+        "name": "权限过宽",
+        "desc": "请到「权限」页面处理。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "Anthropic 缺少 API Key",
+        "desc": "请到「连接」页面处理。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "连接",
+        "desc": "服务商、API Key、端点、模型与连接测试。",
+        "cls": "setting-item mod-navigable tappable",
+        "clickable": true
+      },
+      {
+        "name": "行为",
+        "desc": "上下文预算、系统提示词与运行时行为。",
+        "cls": "setting-item mod-navigable tappable",
+        "clickable": true
+      },
+      {
+        "name": "记忆",
+        "desc": "记忆的保留、召回、搜索与删除。",
+        "cls": "setting-item mod-navigable tappable",
+        "clickable": true
+      },
+      {
+        "name": "权限",
+        "desc": "仓库写入范围、文件操作、插件控制与确认。",
+        "cls": "setting-item mod-navigable tappable",
+        "clickable": true
+      },
+      {
+        "name": "技能",
+        "desc": "启用或禁用单个技能。这只控制可用性——技能开启并不会绕过上面的读写权限。",
+        "cls": "setting-item mod-navigable tappable",
+        "clickable": true
+      },
+      {
+        "name": "采集",
+        "desc": "收件箱、剪藏存储、微信导入、URL 采集与视频转写。",
+        "cls": "setting-item mod-navigable tappable",
+        "clickable": true
+      },
+      {
+        "name": "知识库",
+        "desc": "源文件夹、输出文件夹、编译状态与本体。",
+        "cls": "setting-item mod-navigable tappable",
+        "clickable": true
+      },
+      {
+        "name": "Guardian",
+        "desc": "行内写作辅助、触发模式与忽略的文件夹。",
+        "cls": "setting-item mod-navigable tappable",
+        "clickable": true
+      },
+      {
+        "name": "外观",
+        "desc": "工作台主题、字号与不透明度。",
+        "cls": "setting-item mod-navigable tappable",
+        "clickable": true
+      },
+      {
+        "name": "插件技能",
+        "desc": "技能生成、排除的插件与启动扫描。",
+        "cls": "setting-item mod-navigable tappable",
+        "clickable": true
+      }
+    ],
+    "contentText": "需要关注\n权限过宽\n请到「权限」页面处理。\nAnthropic 缺少 API Key\n请到「连接」页面处理。\n连接\n服务商、API Key、端点、模型与连接测试。\n行为\n上下文预算、系统提示词与运行时行为。\n记忆\n记忆的保留、召回、搜索与删除。\n权限\n仓库写入范围、文件操作、插件控制与确认。\n技能\n启用或禁用单个技能。这只控制可用性——技能开启并不会绕过上面的读写权限。\n采集\n收件箱、剪藏存储、微信导入、URL 采集与视频转写。\n知识库\n源文件夹、输出文件夹、编译状态与本体。\nGuardian\n行内写作辅助、触发模式与忽略的文件夹。\n外观\n工作台主题、字号与不透明度。\n插件技能\n技能生成、排除的插件与启动扫描。"
+  },
+  "image": {
+    "path": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\docs\\assets\\declarative-settings-2026-11-06-after-root-narrow.png",
+    "bytes": 59373,
+    "width": 600,
+    "height": 900,
+    "requestedWidth": 600,
+    "requestedHeight": 900,
+    "sizeMatchesRequest": true
+  },
+  "harness": {
+    "exe": "C:\\Program Files\\Obsidian\\Obsidian.exe",
+    "pluginDir": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\dist",
+    "vaultDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
+    "vaultKey": "f230a63f4db30aad",
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.6.0",
+      "minAppVersion": "1.13.0",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    },
+    "copiedPluginFiles": [
+      {
+        "file": "main.js",
+        "bytes": 2838620
+      },
+      {
+        "file": "manifest.json",
+        "bytes": 325
+      },
+      {
+        "file": "styles.css",
+        "bytes": 109332
+      }
+    ],
+    "scenarioPath": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
+    "target": {
+      "id": "2E979F05DB58BF53CC303371FD9637C0",
+      "url": "app://obsidian.md/index.html",
+      "title": "obsidian - Obsidian 1.15.0"
+    },
+    "settingsPanelLocation": "popout-window",
+    "navigation": [],
+    "domDump": null,
+    "pid": 45584,
+    "browser": "Chrome/128.0.6613.186",
+    "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.7.7 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36",
+    "blockingModals": {
+      "trust": {
+        "present": false,
+        "clicked": null
+      },
+      "strayModalsClosed": [],
+      "releaseNotes": {
+        "detached": 0
+      }
+    },
+    "pluginActivation": {
+      "steps": [
+        "plugins.loadManifests()"
+      ],
+      "error": null,
+      "loaded": true
+    },
+    "pluginSettings": {
+      "settingsLoaded": true,
+      "activeProvider": "opencode",
+      "providers": [
+        "cch",
+        "opencode",
+        "anthropic"
+      ],
+      "matched": true
+    },
+    "settings": {
+      "tabId": "baizer",
+      "isOpen": true,
+      "popoutCreated": true,
+      "settingsModalInMainDocument": false
+    },
+    "domStability": {
+      "stable": true,
+      "signature": "6293|309",
+      "settledAfterMs": 1043
+    }
+  },
+  "limitations": [
+    "Colour, contrast, font rendering, iconography and animation are NOT asserted.",
+    "This harness navigates by visible row text; a renamed row breaks navigation instead of silently measuring another row.",
+    "The pre-migration accordion UI has no declarative page entries; use ../provider-settings-shots/capture.mjs for Before evidence."
+  ]
+}

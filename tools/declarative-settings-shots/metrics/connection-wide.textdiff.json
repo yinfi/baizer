@@ -1,0 +1,417 @@
+{
+  "summary": {
+    "baseline": {
+      "path": "docs/assets/declarative-settings-2026-11-06-before-wide.png",
+      "size": "1353x1053",
+      "lineCount": 42
+    },
+    "candidate": {
+      "path": "docs/assets/declarative-settings-2026-11-06-after-wide.png",
+      "size": "1353x1053",
+      "lineCount": 43
+    },
+    "sameImageSize": true,
+    "tolerancePx": 4,
+    "matchedLines": 21,
+    "matchedWithinTolerance": 15,
+    "matchedOutsideTolerance": 6,
+    "onlyInBaseline": 21,
+    "onlyInCandidate": 22,
+    "verdict": {
+      "sameImageSize": true,
+      "everyMatchedLineWithinTolerance": false,
+      "identicalTextSets": false
+    }
+  },
+  "matchedOutsideTolerance": [
+    {
+      "text": "opencode",
+      "baseline": {
+        "x": 492,
+        "y": 173
+      },
+      "candidate": {
+        "x": 965,
+        "y": 184
+      },
+      "dx": 473,
+      "dy": 11,
+      "withinTolerance": false
+    },
+    {
+      "text": "服 务 商 名 称",
+      "baseline": {
+        "x": 506,
+        "y": 249
+      },
+      "candidate": {
+        "x": 466,
+        "y": 176
+      },
+      "dx": -40,
+      "dy": -73,
+      "withinTolerance": false
+    },
+    {
+      "text": "OpenAl 兼 容",
+      "baseline": {
+        "x": 517,
+        "y": 382
+      },
+      "candidate": {
+        "x": 1016,
+        "y": 260
+      },
+      "dx": 499,
+      "dy": -122,
+      "withinTolerance": false
+    },
+    {
+      "text": "Chat Completions (/chat/completions)",
+      "baseline": {
+        "x": 517,
+        "y": 485
+      },
+      "candidate": {
+        "x": 842,
+        "y": 337
+      },
+      "dx": 325,
+      "dy": -148,
+      "withinTolerance": false
+    },
+    {
+      "text": "服 务 地 址 (Base URL)",
+      "baseline": {
+        "x": 506,
+        "y": 599
+      },
+      "candidate": {
+        "x": 466,
+        "y": 422
+      },
+      "dx": -40,
+      "dy": -177,
+      "withinTolerance": false
+    },
+    {
+      "text": "API Key",
+      "baseline": {
+        "x": 506,
+        "y": 720
+      },
+      "candidate": {
+        "x": 466,
+        "y": 565
+      },
+      "dx": -40,
+      "dy": -155,
+      "withinTolerance": false
+    }
+  ],
+  "onlyInBaseline": [
+    {
+      "text": "Q 0",
+      "at": {
+        "x": 21,
+        "y": 49
+      }
+    },
+    {
+      "text": "第 三 方 插 件",
+      "at": {
+        "x": 44,
+        "y": 337
+      }
+    },
+    {
+      "text": "服 务 商",
+      "at": {
+        "x": 461,
+        "y": 35
+      }
+    },
+    {
+      "text": "cch",
+      "at": {
+        "x": 492,
+        "y": 115
+      }
+    },
+    {
+      "text": "opencode",
+      "at": {
+        "x": 515,
+        "y": 282
+      }
+    },
+    {
+      "text": "型 ： gp 松 5 · 5 巧",
+      "at": {
+        "x": 736,
+        "y": 117
+      }
+    },
+    {
+      "text": "型 ： deepæek-V4_l -flash",
+      "at": {
+        "x": 736,
+        "y": 175
+      }
+    },
+    {
+      "text": "服 务 商 身 份 与 协 议",
+      "at": {
+        "x": 520,
+        "y": 205
+      }
+    },
+    {
+      "text": "显 示 在 务 商 列 表 中 。 名 称 为 空 会 芹 也 报 错 ， 而 不 杲 肖 改 回 旧 名 秘",
+      "at": {
+        "x": 506,
+        "y": 313
+      }
+    },
+    {
+      "text": "该 服 务 商 傅 凭 的 线 协 议 。 切 茜 只 显 示 过 甲 于 该 协 议 字 。",
+      "at": {
+        "x": 506,
+        "y": 414
+      }
+    },
+    {
+      "text": "API 类 型 (Chat Completions / Responæs)",
+      "at": {
+        "x": 506,
+        "y": 453
+      }
+    },
+    {
+      "text": "服 务 地 匕 以 /vl 结 _ _ 0 些 n SDK 会 巨 行 讠 昼 加 /chat/completions, 不 要 吧 完 整 适 求 路 径 粘 迸 来 。",
+      "at": {
+        "x": 506,
+        "y": 517
+      }
+    },
+    {
+      "text": "连 接 址 与 凭 证",
+      "at": {
+        "x": 520,
+        "y": 555
+      }
+    },
+    {
+      "text": "https.//opencode.ai/zen/go/vl",
+      "at": {
+        "x": 516,
+        "y": 632
+      }
+    },
+    {
+      "text": "服 务 她 匕 以 /vl 结 _ _ 0 些 n SDK 会 巨 行 讠 昼 加 /chat/completions, 不 要 吧 完 整 适 求 路 径 粘 迸 来 。",
+      "at": {
+        "x": 506,
+        "y": 663
+      }
+    },
+    {
+      "text": "际 适 求 路 径 ： https://opencode.al/zen/go/vl/chat.com/letions",
+      "at": {
+        "x": 518,
+        "y": 681
+      }
+    },
+    {
+      "text": "仅 保 存 在 本 地 ， 默 认 。 丨 显 示 ] 苷 ， 丨 清 除 ] 清 空 〔 会 二 次 确 认 ） 。",
+      "at": {
+        "x": 506,
+        "y": 821
+      }
+    },
+    {
+      "text": "自 定 义 求 头 （ 级 ）",
+      "at": {
+        "x": 532,
+        "y": 859
+      }
+    },
+    {
+      "text": "deepseek-v4.1 -fiash",
+      "at": {
+        "x": 515,
+        "y": 985
+      }
+    },
+    {
+      "text": "deepseek-v4.1 -fiash (Current)",
+      "at": {
+        "x": 517,
+        "y": 1025
+      }
+    },
+    {
+      "text": "刷 新 列 表",
+      "at": {
+        "x": 1021,
+        "y": 1024
+      }
+    }
+  ],
+  "onlyInCandidate": [
+    {
+      "text": "Q 搜 索 设 “",
+      "at": {
+        "x": 21,
+        "y": 50
+      }
+    },
+    {
+      "text": "兰 前 务 商",
+      "at": {
+        "x": 466,
+        "y": 100
+      }
+    },
+    {
+      "text": "适 求 便 甲 1 比 商 ．",
+      "at": {
+        "x": 481,
+        "y": 121
+      }
+    },
+    {
+      "text": "显 示 在 服 务 商 列 表 中 。 名 称 为 空 会 就 地 报 岩 。 而 不 畏 悄 悄 改 回 旧 名 称 。",
+      "at": {
+        "x": 466,
+        "y": 197
+      }
+    },
+    {
+      "text": "该 服 务 商 便 用 的 协 议 。 切 扌 后 只 显 示 适 用 于 该 协 议 的 字 ·",
+      "at": {
+        "x": 466,
+        "y": 273
+      }
+    },
+    {
+      "text": "API 类 型 (Chat Completions / Responses)",
+      "at": {
+        "x": 466,
+        "y": 329
+      }
+    },
+    {
+      "text": "第 三 方 牛",
+      "at": {
+        "x": 44,
+        "y": 337
+      }
+    },
+    {
+      "text": "务 址 帛 以 /vl 结 尾 _ 一 OpenAl SDK 会 行 加",
+      "at": {
+        "x": 478,
+        "y": 350
+      }
+    },
+    {
+      "text": "/chat/completions, 不 要 吧 完 整 适 求 路 径 粘 迸 来 。",
+      "at": {
+        "x": 466,
+        "y": 366
+      }
+    },
+    {
+      "text": "https://opencode.ai/zen/go/vl",
+      "at": {
+        "x": 475,
+        "y": 456
+      }
+    },
+    {
+      "text": "服 务 地 址 邇 帛 以 ／ 01 结 尾 一 一 OpenAl SDK 会 行 加 /chat/completions, 不 要 吧 完 整 盾 求 苤 径 阽 进 来 · 清 求 路",
+      "at": {
+        "x": 465,
+        "y": 489
+      }
+    },
+    {
+      "text": "径 ： https://opencode.ai/zen/go/vl/chat.com/letions",
+      "at": {
+        "x": 466,
+        "y": 507
+      }
+    },
+    {
+      "text": "仅 俣 存 在 本 地 。 默 认 过 藏 。 用 「 显 示 」 苷 。 用 「 涂 」 空 （ 会 二 次 确 认 } 。",
+      "at": {
+        "x": 466,
+        "y": 585
+      }
+    },
+    {
+      "text": "蓊 中 回 型 列 表 后 可 从 列 表 远 。 也 可 入 椏 型 ID.",
+      "at": {
+        "x": 466,
+        "y": 738
+      }
+    },
+    {
+      "text": "deepseek-v4.1 -flash",
+      "at": {
+        "x": 475,
+        "y": 771
+      }
+    },
+    {
+      "text": "deepseek-v4.1 -flash (Current)",
+      "at": {
+        "x": 477,
+        "y": 811
+      }
+    },
+    {
+      "text": "思 新 列 表",
+      "at": {
+        "x": 886,
+        "y": 810
+      }
+    },
+    {
+      "text": "耒 茌 取 椏 型 列 表 ： Model list request timed out after 1 佣 佣 ms ： https://opencode.ai/zen/go/vl/models. 可 直 接 手",
+      "at": {
+        "x": 466,
+        "y": 841
+      }
+    },
+    {
+      "text": "埴 型 ID.",
+      "at": {
+        "x": 466,
+        "y": 860
+      }
+    },
+    {
+      "text": "自 定 义 请 求 头 （ 高 级 〕",
+      "at": {
+        "x": 467,
+        "y": 917
+      }
+    },
+    {
+      "text": "每 行 一 \"Header-Name ： value\". 用 {{conversationld}} 发 送 兰 前 对 话 旧 ； 沿 有 刘 话 的 一 次 性 甲 会 它 。",
+      "at": {
+        "x": 466,
+        "y": 938
+      }
+    },
+    {
+      "text": "x-opencode-session: {{conversationld})",
+      "at": {
+        "x": 474,
+        "y": 968
+      }
+    }
+  ]
+}

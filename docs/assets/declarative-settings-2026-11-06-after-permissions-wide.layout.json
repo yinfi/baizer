@@ -1,0 +1,213 @@
+{
+  "schema": "baizer-declarative-settings-layout/1",
+  "label": "after-permissions-wide",
+  "phase": "after",
+  "revision": "final",
+  "capturedAt": "2026-11-06T02:05:11.311Z",
+  "theme": "dark",
+  "language": "zh",
+  "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+  "viewport": {
+    "requested": {
+      "width": 1353,
+      "height": 1053
+    },
+    "innerWidth": 1353,
+    "innerHeight": 1053,
+    "devicePixelRatio": 1
+  },
+  "page": {
+    "requestedPages": [
+      "权限"
+    ],
+    "rows": [
+      {
+        "name": "权限预设",
+        "desc": "",
+        "cls": "setting-item setting-item-heading",
+        "clickable": true
+      },
+      {
+        "name": "只读",
+        "desc": "读取与分析笔记，不写入仓库。",
+        "cls": "setting-item mod-action tappable",
+        "clickable": true
+      },
+      {
+        "name": "受限写入",
+        "desc": "仅在明确配置的文件夹内写入。",
+        "cls": "setting-item mod-action tappable",
+        "clickable": true
+      },
+      {
+        "name": "自动化",
+        "desc": "允许受限写入，并减少重复确认。",
+        "cls": "setting-item mod-action tappable",
+        "clickable": true
+      },
+      {
+        "name": "开放访问",
+        "desc": "允许全仓库写入与插件控制。",
+        "cls": "setting-item mod-action tappable",
+        "clickable": true
+      },
+      {
+        "name": "当前生效权限",
+        "desc": "当前开关实际允许的操作。",
+        "cls": "setting-item baizer-setting-stacked",
+        "clickable": true
+      },
+      {
+        "name": "高级权限开关",
+        "desc": "",
+        "cls": "setting-item setting-item-heading",
+        "clickable": true
+      },
+      {
+        "name": "仓库写入范围",
+        "desc": "选择 AI 在仓库内可写入的范围。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "可写文件夹",
+        "desc": "每行一个仓库文件夹。AI 仅能在这些文件夹内创建或修改文件。",
+        "cls": "setting-item baizer-setting-stacked",
+        "clickable": true
+      },
+      {
+        "name": "允许创建文件",
+        "desc": "在满足所选写入范围后，允许创建笔记与文件。",
+        "cls": "setting-item mod-toggle",
+        "clickable": true
+      },
+      {
+        "name": "允许修改文件",
+        "desc": "在满足所选写入范围后，允许修改笔记与文件。",
+        "cls": "setting-item mod-toggle",
+        "clickable": true
+      },
+      {
+        "name": "允许插件控制",
+        "desc": "允许 AI 执行其它插件的命令。",
+        "cls": "setting-item mod-toggle",
+        "clickable": true
+      },
+      {
+        "name": "允许读取插件配置值",
+        "desc": "允许 AI 读取第三方插件的配置值。关闭时只返回键名与类型；无论此设置如何，API Key、令牌与密钥始终脱敏。",
+        "cls": "setting-item mod-toggle",
+        "clickable": true
+      },
+      {
+        "name": "执行前确认",
+        "desc": "在写入文件或运行命令前始终请求确认。",
+        "cls": "setting-item mod-toggle",
+        "clickable": true
+      }
+    ],
+    "contentText": "权限\n权限预设\n只读\n读取与分析笔记，不写入仓库。\n受限写入\n仅在明确配置的文件夹内写入。\n自动化\n允许受限写入，并减少重复确认。\n开放访问\n允许全仓库写入与插件控制。\n当前生效权限\n当前开关实际允许的操作。\n写入范围\nall-vault\n可写文件夹\n不适用\n创建文件\n允许\n修改文件\n禁止\n插件控制\n禁止\n执行确认\n需要\n当前权限较为宽泛。仅在自动化确有需要时才保持开启。\n高级权限开关\n仓库写入范围\n选择 AI 在仓库内可写入的范围。\n只读\n当前笔记\n配置的文件夹\n整个仓库\n允许创建文件\n在满足所选写入范围后，允许创建笔记与文件。\n允许修改文件\n在满足所选写入范围后，允许修改笔记与文件。\n允许插件控制\n允许 AI 执行其它插件的命令。\n允许读取插件配置值\n允许 AI 读取第三方插件的配置值。关闭时只返回键名与类型；无论此设置如何，API Key、令牌与密钥始终脱敏。\n执行前确认\n在写入文件或运行命令前始终请求确认。"
+  },
+  "image": {
+    "path": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\docs\\assets\\declarative-settings-2026-11-06-after-permissions-wide.png",
+    "bytes": 76922,
+    "width": 1353,
+    "height": 1053,
+    "requestedWidth": 1353,
+    "requestedHeight": 1053,
+    "sizeMatchesRequest": true
+  },
+  "harness": {
+    "exe": "C:\\Program Files\\Obsidian\\Obsidian.exe",
+    "pluginDir": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\dist",
+    "vaultDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
+    "vaultKey": "f230a63f4db30aad",
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.6.0",
+      "minAppVersion": "1.13.0",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    },
+    "copiedPluginFiles": [
+      {
+        "file": "main.js",
+        "bytes": 2838620
+      },
+      {
+        "file": "manifest.json",
+        "bytes": 325
+      },
+      {
+        "file": "styles.css",
+        "bytes": 109332
+      }
+    ],
+    "scenarioPath": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
+    "target": {
+      "id": "8EE50B595E566BFE8B1F90933CA9BB26",
+      "url": "app://obsidian.md/index.html",
+      "title": "obsidian - Obsidian 1.15.0"
+    },
+    "settingsPanelLocation": "popout-window",
+    "navigation": [
+      {
+        "text": "权限",
+        "found": true,
+        "score": 100,
+        "clicked": "权限 仓库写入范围、文件操作、插件控制与确认。",
+        "cls": "setting-item mod-navigable tappable"
+      }
+    ],
+    "domDump": null,
+    "pid": 39524,
+    "browser": "Chrome/128.0.6613.186",
+    "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.7.7 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36",
+    "blockingModals": {
+      "trust": {
+        "present": false,
+        "clicked": null
+      },
+      "strayModalsClosed": [],
+      "releaseNotes": {
+        "detached": 0
+      }
+    },
+    "pluginActivation": {
+      "steps": [
+        "plugins.loadManifests()"
+      ],
+      "error": null,
+      "loaded": true
+    },
+    "pluginSettings": {
+      "settingsLoaded": true,
+      "activeProvider": "opencode",
+      "providers": [
+        "cch",
+        "opencode",
+        "anthropic"
+      ],
+      "matched": true
+    },
+    "settings": {
+      "tabId": "baizer",
+      "isOpen": true,
+      "popoutCreated": true,
+      "settingsModalInMainDocument": false
+    },
+    "domStability": {
+      "stable": true,
+      "signature": "5338|413",
+      "settledAfterMs": 1041
+    }
+  },
+  "limitations": [
+    "Colour, contrast, font rendering, iconography and animation are NOT asserted.",
+    "This harness navigates by visible row text; a renamed row breaks navigation instead of silently measuring another row.",
+    "The pre-migration accordion UI has no declarative page entries; use ../provider-settings-shots/capture.mjs for Before evidence."
+  ]
+}
