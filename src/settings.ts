@@ -13,6 +13,8 @@ import type {
 import { t, getLocale, Locale } from './i18n/zh';
 import { createRenderScheduler, type RenderScheduler } from './utils/render-scheduler';
 import { thrownMessage } from './utils/thrown-message';
+import { logger } from './utils/logger';
+import { detach, voidHandler } from './utils/promise-guard';
 
 export type SettingsSectionId =
     | 'overview'
@@ -1757,18 +1759,30 @@ export class SettingTab extends PluginSettingTab {
     private ontologyStatusCache: { text: string; title: string; timestamp: number } | null = null;
     private static readonly ONTOLOGY_STATUS_CACHE_TTL_MS = 5000;
     // textarea 逐击键写盘代价高：包一层 400ms debounce，末尾触发一次落盘。
+    // debounce 回调返回的 Promise 会被 debounce 丢弃，落盘失败必须在这里接住：
+    // 记日志 + Notice，让用户知道刚才的修改没有保存。
     private debouncedPersist: Debouncer<[], Promise<void>> = debounce(
-        () => this.persistSettings(),
+        () => this.persistSettings().catch(this.reportAsyncFailure),
         400,
         false,
     );
     // 纯 UI 字段（外观主题/字号/不透明度）落盘：无需重建 provider/guardian/knowledge，走轻量保存 + debounce，
     // 避免拖动滑块时每格都重建 LLM 客户端（P0-3）。
     private debouncedPersistLight: Debouncer<[], Promise<void>> = debounce(
-        () => this.persistSettingsLight(),
+        () => this.persistSettingsLight().catch(this.reportAsyncFailure),
         400,
         false,
     );
+    // 设置页里所有「不能 await 的异步入口」（事件监听、Modal 回调、debounce）的统一失败出口。
+    // notifyFailure 只负责让用户看到；日志由 detach/voidHandler 记。
+    private readonly notifyFailure = (error: unknown): void => {
+        new Notice(`${t('Settings action failed')}: ${thrownMessage(error) || t('unknown reason')}`);
+    };
+    // debounce 回调里没有 detach 可用，自己记日志再提示。
+    private readonly reportAsyncFailure = (error: unknown): void => {
+        logger.error('Settings persist failed', error, 'SettingsTab');
+        this.notifyFailure(error);
+    };
     // 局部重绘调度：合并同一轮里的多次请求、禁止渲染中嵌套渲染（issue #81 卡死根因之一）。
     private renderScheduler: RenderScheduler = createRenderScheduler(() => this.renderAccordionNow());
     // 搜索逐键整页重建是移动端长任务的放大器：150ms 防抖 + 命中集合没变就不重绘。
@@ -1821,8 +1835,8 @@ export class SettingTab extends PluginSettingTab {
         this.debouncedSearchRender.cancel();
         this.removeVisibilityFlush();
         // 面板关闭时立即落盘 debounce 里未触发的最后一次编辑，避免丢改。
-        this.debouncedPersist.run();
-        this.debouncedPersistLight.run();
+        this.flushPersistedEdits();
+        detach(this.debouncedPersistLight.run(), 'SettingsTab');
         this.accordionHost = null;
         super.hide();
     }
@@ -1854,8 +1868,8 @@ export class SettingTab extends PluginSettingTab {
     private readonly handleVisibilityChange = (): void => {
         if (typeof document === 'undefined') return;
         if (document.visibilityState === 'visible') return;
-        this.debouncedPersist.run();
-        this.debouncedPersistLight.run();
+        this.flushPersistedEdits();
+        detach(this.debouncedPersistLight.run(), 'SettingsTab');
     };
 
     private installVisibilityFlush(): void {
@@ -2365,7 +2379,7 @@ export class SettingTab extends PluginSettingTab {
         const toolbar = shell.createDiv({ cls: 'baizer-settings-provider-toolbar' });
         toolbar.createDiv({ cls: 'baizer-settings-panel-title', text: t('Providers') });
         this.createActionButton(toolbar, t('+ Add'), async () => {
-            new AddProviderModal(this.app, async (draft) => {
+            new AddProviderModal(this.app, voidHandler(async (draft: AddProviderDraft) => {
                 const key = `custom-${Date.now()}`;
                 // 协议由用户在模态框里选（含 Anthropic）；此前硬编码 openai-compatible，
                 // 想加 Anthropic 网关只能先建好再回详情页改协议。
@@ -2376,7 +2390,7 @@ export class SettingTab extends PluginSettingTab {
                 await this.persistSettings();
                 this.revealApiKey = false;
                 this.renderAccordion();
-            }).open();
+            }, 'SettingsTab', this.notifyFailure)).open();
         }, 'accent');
 
         const providerList = shell.createDiv({ cls: 'baizer-settings-provider-list' });
@@ -2411,7 +2425,7 @@ export class SettingTab extends PluginSettingTab {
             buttonInner.createDiv({ cls: 'baizer-settings-provider-card-meta', text: meta.compactMeta });
             buttonInner.createSpan({ cls: `baizer-settings-badge is-${badgeTone}`, text: badgeLabel });
 
-            button.addEventListener('click', async () => {
+            button.addEventListener('click', voidHandler(async () => {
                 // 点当前激活卡：切换详情折叠/展开(可折叠已展开的详情)。
                 if (providerId === settings.activeProvider) {
                     this.activeProviderDetailCollapsed = !this.activeProviderDetailCollapsed;
@@ -2426,7 +2440,7 @@ export class SettingTab extends PluginSettingTab {
                 this.revealApiKey = false;
                 this.openSectionIds.add('connection');
                 this.renderAccordion();
-            });
+            }, 'SettingsTab', this.notifyFailure));
 
             // 删除移到卡片头部：图标按钮 + tooltip，低调可发现，不再是抢眼的实体红按钮。
             // 每张卡删自己（点哪张删哪张）；至少保留一个 provider 时禁用。
@@ -2563,7 +2577,7 @@ export class SettingTab extends PluginSettingTab {
                 // 但不再像此前那样只在 change 时保存——切走或面板重绘都不会丢名字。
                 this.debouncedPersist();
             });
-            input.addEventListener('change', async () => {
+            input.addEventListener('change', voidHandler(async () => {
                 // 名称非法时只保留就地报错，不改动已保存的名字（此前是静默回退旧值）。
                 if (validateProviderName(input.value).state !== 'ok') return;
                 activeConfig.label = input.value.trim();
@@ -2571,7 +2585,7 @@ export class SettingTab extends PluginSettingTab {
                 await this.persistSettings();
                 // 卡片标题要跟着改名走，否则用户看不到改名已生效。
                 this.renderAccordion();
-            });
+            }, 'SettingsTab', this.notifyFailure));
         }, {
             required: true,
             // 明确「必填」而不是静默回退旧名：此前清空名字后离开输入框，名字会悄悄变回旧值，
@@ -2588,7 +2602,7 @@ export class SettingTab extends PluginSettingTab {
                 select.createEl('option', { value: option.value, text: option.label });
             });
             select.value = activeConfig.type;
-            select.addEventListener('change', async () => {
+            select.addEventListener('change', voidHandler(async () => {
                 const nextType = select.value as ProviderType;
                 activeConfig.type = nextType;
                 // 服务地址的语义随协议变（Anthropic 不带 /v1、OpenAI 兼容通常带 /v1），
@@ -2602,7 +2616,7 @@ export class SettingTab extends PluginSettingTab {
                 await this.plugin.modelService.updateSettings(this.plugin.settings);
                 await this.persistSettings();
                 this.renderAccordion();
-            });
+            }, 'SettingsTab', this.notifyFailure));
         }, {
             hint: t('The wire protocol this provider speaks. Switching it only shows the fields that apply.'),
         });
@@ -2618,7 +2632,7 @@ export class SettingTab extends PluginSettingTab {
                 select.createEl('option', { value: 'completions', text: t('Chat Completions (/chat/completions)') });
                 select.createEl('option', { value: 'responses', text: t('Responses (/responses)') });
                 select.value = activeConfig.apiFlavor ?? 'completions';
-                select.addEventListener('change', async () => {
+                select.addEventListener('change', voidHandler(async () => {
                     activeConfig.apiFlavor = select.value as OpenAIApiFlavor;
                     this.flushPersistedEdits();
                     this.resetConnectionTestStatus();
@@ -2626,7 +2640,7 @@ export class SettingTab extends PluginSettingTab {
                     await this.plugin.modelService.updateSettings(this.plugin.settings);
                     await this.persistSettings();
                     this.renderAccordion();
-                });
+                }, 'SettingsTab', this.notifyFailure));
             }, {
                 // 只说方言与端点的关系，不写死当前地址——地址由下面「服务地址」那一行
                 // 实时给出实际请求路径，这里再抄一份会变成过期信息。
@@ -2890,7 +2904,8 @@ export class SettingTab extends PluginSettingTab {
      * 切换协议/重绘前必须调用：否则刚刚输入的地址或密钥会被随后重建的 DOM 丢回旧值。
      */
     private flushPersistedEdits(): void {
-        this.debouncedPersist.run();
+        // debouncedPersist 的回调已自带 catch（日志 + Notice）；detach 保证 run() 本身也不留悬空 Promise。
+        detach(this.debouncedPersist.run(), 'SettingsTab');
     }
 
     private renderConnectionField(
@@ -3281,7 +3296,7 @@ export class SettingTab extends PluginSettingTab {
         button.createEl('strong', { text: title });
         button.createEl('br');
         button.createSpan({ text: desc });
-        button.addEventListener('click', async () => {
+        button.addEventListener('click', voidHandler(async () => {
             // P1-1: 提权预设(open=开插件控制+全库写; automation=关执行确认)与单独开关保持一致的二次确认,
             // 避免一键预设静默绕过 allowPluginControl / confirmExecutions 的破坏性警告。
             const escalates = id === 'open' || id === 'automation';
@@ -3297,7 +3312,7 @@ export class SettingTab extends PluginSettingTab {
             }
             await this.applyPermissionPreset(id);
             this.renderAccordion();
-        });
+        }, 'SettingsTab', this.notifyFailure));
     }
 
     private async applyPermissionPreset(id: 'read-only' | 'configured-folders' | 'automation' | 'open'): Promise<void> {
@@ -3915,7 +3930,8 @@ export class SettingTab extends PluginSettingTab {
         button.disabled = disabled;
         button.addEventListener('click', () => {
             if (button.disabled) return;
-            void onClick();
+            // 所有设置页动作按钮的统一入口：onClick 失败时记日志并提示，而不是静默变成 unhandled rejection。
+            detach(onClick(), 'SettingsTab', this.notifyFailure);
         });
         return button;
     }
@@ -3952,7 +3968,10 @@ class MemoryConfirmModal extends Modal {
         });
         confirm.addEventListener('click', () => {
             this.close();
-            void this.onConfirm();
+            // 用户已确认的（常为破坏性）操作失败时必须告知，不能只留一个静默的 void。
+            detach(this.onConfirm(), 'SettingsTab', (error) => {
+                new Notice(`${t('Settings action failed')}: ${thrownMessage(error) || t('unknown reason')}`);
+            });
         });
     }
 
@@ -3998,7 +4017,9 @@ class AddProviderModal extends Modal {
             .setName(t('Protocol'))
             .setDesc(t('The wire protocol this provider speaks.'))
             .addDropdown(dropdown => {
-                getProtocolOptions().forEach(option => dropdown.addOption(option.value, option.label));
+                // 块体写法：DropdownComponent 带 then() 方法会被规则当成 thenable，
+                // 箭头函数隐式返回 addOption() 的结果会被误判为「返回 Promise」。
+                getProtocolOptions().forEach(option => { dropdown.addOption(option.value, option.label); });
                 dropdown.setValue(typeValue);
                 dropdown.onChange((value: string) => {
                     typeValue = value as ProviderType;
