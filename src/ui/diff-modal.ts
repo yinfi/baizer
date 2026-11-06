@@ -17,7 +17,8 @@ export class DiffModal extends Modal {
     }
 
     onOpen() {
-        const { contentEl } = this;
+        const { contentEl, modalEl } = this;
+        modalEl.addClass('baizer-diff-modal-window');
         contentEl.addClass('baizer-diff-modal');
 
         const header = contentEl.createDiv({ cls: 'baizer-diff-modal-header' });
