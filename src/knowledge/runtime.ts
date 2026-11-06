@@ -3,6 +3,7 @@
 import { App, Plugin, TFile, Notice } from 'obsidian';
 import { debounce } from '../utils/throttle';
 import { logger } from '../utils/logger';
+import { voidAsync } from '../utils/async-errors';
 import { PluginSettings } from '../mcp/types';
 import { ModelService } from '../services/model-service';
 import { KnowledgeCompiler, findCurrentCompiledSummary } from './compiler';
@@ -380,7 +381,9 @@ export class KnowledgeRuntime {
     plugin.registerEvent(
       this.app.vault.on('create', (file) => {
         if (file instanceof TFile && file.extension === 'md') {
-          this.watcher.onFileCreate(file);
+          // vault 事件是同步 void 契约，onFileCreate 却是异步落盘（source_id / pending 标记）。
+          // 不 await（事件不能被阻塞），但失败必须可见：此前 rejection 无人接收。
+          voidAsync('KnowledgeWatcher: failed to register created file', () => this.watcher.onFileCreate(file));
         }
       })
     );

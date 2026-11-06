@@ -150,6 +150,7 @@ Passed 只是页面报告，不是本次独立安全审计结论；Disclosures �
 | B3 Obsidian API 偏好规则 | `prefer-window-timers` 36、`prefer-create-el` 10、`no-global-this` 9、`hardcoded-config-path` 8、`prefer-file-manager-trash-file` 4、`no-console` 2、`fetch` 1、`prefer-setting-definitions` 1 | ⏳ 待排期（部分会改变行为语义，需单独说明与回归） |
 | B4 CSS（stylelint 类别） | `!important` 24、`:has` 4、浏览器特性 4、重复属性 1 | ⏳ 待排期（视觉变更，需 Before/After 截图） |
 | B5 Info / 杂项类别 | unused vars 20、deprecated 字段 6（其中 `sessionRef`/`timeoutMs` 是有意保留的兼容字段，修前需确认策略）、empty block 4、case declarations 2、unbound-method 2、无必要转义 8、irregular whitespace 1 | ⏳ 待排期 |
+| B6 Promise 规则（issue #92） | `no-misused-promises` 14、`no-floating-promises` 10、`prefer-promise-reject-errors` 2（展页同类合计 ≈26；含展页单列的「Promise-returning function 赋给期望 void 的属性」）。修的是「错误处理路径可能真的缺失」，不是纯风格 | ✅ 本 PR：同口径复现三规则归零；每处失败落点见 §6.6 |
 
 B2 的判定标准：新增 `unknown` 窄化时，对旧数据的行为（保留字段、默认值、回退文案）必须与现在一致，
 并为迁移/回退路径补回归测试；不能把 `any` 换成另一个宽泛断言。
@@ -286,6 +287,71 @@ npm run build && npx eslint . && npx tsc --noEmit && npm test
 | 同口径复现扫描 | ✅ 见上表；5 条规则归零，逐规则无上升 |
 
 展页计数仍以发布后重新提交审核复扫为准；本 PR 不含 UI/视觉变化，故不附 Before/After 截图。
+
+### 6.6 B6 验证记录（issue #92）：Promise 三条规则清零
+
+基线：`45bf8c7`（2026-11-06 的 main）；修复后：本 PR 分支。命令：`node scripts/review-scan/reproduce-eslint.mjs`
+（同 §6.1 口径：审核器同款规则与忽略清单）。
+
+| 规则 | 修复前 | 修复后 | 变化 |
+|---|---|---|---|
+| `@typescript-eslint/no-misused-promises` | 14 | **0** | −14 |
+| `@typescript-eslint/no-floating-promises` | 10 | **0** | −10 |
+| `@typescript-eslint/prefer-promise-reject-errors` | 2 | **0** | −2 |
+| 全部规则消息合计 | 35 | 9 | −26 |
+
+逐规则核对：**没有任何规则计数上升**；被改文件在复现结果的这三条规则下已不再出现。剩余 9 条属 B3/B5
+批次（deprecated 3、无必要断言 2、`no-unsupported-api` 2、`no-unsafe-return` 1、settings 声明式 1）。
+
+实现边界：不改规则开关、不扩 `ignores`、不加 `eslint-disable`。新增 `src/utils/async-errors.ts` 的
+`voidAsync(context, task, onError?)`，作为「fire-and-forget 失败必须可见」的唯一入口——rejection 一律进
+`logger.error`（开发者控制台 + 日志导出），需要用户可见的调用方再叠加 `Notice`；**没有空 `.catch(() => {})`**。
+
+#### 每处修复：失败路径现在去哪了
+
+| 文件:行（基线） | 规则 | 修复 | 失败落点 |
+|---|---|---|---|
+| `main.ts:313` `pluginWatcher.start()` | floating | 不 await（分钟级扫描不能卡 onload），改 `voidAsync` | `logger.error`；watcher 自身的 `notify` 仍提示扫描失败 |
+| `main.ts:369` `runGuardianCheck()`（GuardianModal 提交回调） | floating | 提交回调保持同步，异步工作走 `voidAsync` | `logger.error`；常规失败本来就由 `runGuardianCheck` 把 guardian 状态置为 Error |
+| `src/knowledge/runtime.ts:383` `watcher.onFileCreate()`（vault create 事件） | floating | 事件回调保持同步，走 `voidAsync` | `logger.error`；不再出现「新笔记没登记 pending 却没人知道」 |
+| `src/services/model-catalog-service.ts:143/148` `reject(error)` | prefer-promise-reject-errors | 非 Error 抛出值经 `asRejectionError()` 包成 Error（真 Error 原样透传，name/code 不丢） | 拒绝原因始终是 Error：`ModelService.getAvailableModels` 记 `logger.warn`，设置页模型行显示该错误文案 |
+| `src/settings.ts:1824/1825/1857/1858/2893` `debouncedPersist(.Light).run()` | floating | debounce 回调改成安全落盘（返回 void，类型 `Debouncer<[], void>`），`run()` 不再是 Promise | `logger.error` + `Notice`「保存失败: 原因」；此前保存失败用户完全看不到 |
+| `src/settings.ts:2368` AddProviderModal 的 `async (draft)` 提交 | misused | onSubmit 保持同步 void 契约，异步提交走 `runSafely` | `logger.error` + `Notice`「操作失败，请查看开发者控制台了解详情。」 |
+| `src/settings.ts:2414` provider 卡片 click | misused | 监听器改同步 + `runSafely` | 同上（切换 provider / 保存失败） |
+| `src/settings.ts:2566` provider 名称 change | misused | 同上 | 同上 |
+| `src/settings.ts:2591` 协议 change | misused | 同上 | 同上 |
+| `src/settings.ts:2621` API type change | misused | 同上 | 同上 |
+| `src/settings.ts:3284` 权限预设 click | misused | 监听器改同步 + `runSafely`；`MemoryConfirmModal` 的 `void this.onConfirm()` 也改为 `voidAsync` | 同上（含二次确认弹窗里的确认动作） |
+| `src/settings.ts:4001` `getProtocolOptions().forEach(option => dropdown.addOption(...))` | misused | 回调改成块体（不返回 Promise 样的值），行为不变 | 无异步工作，无需落点 |
+| `src/skills/builtin/plugin-ctrl/plugin-watcher.ts:566` `setInterval(() => checkChanges())` | misused | 同步回调内 `voidAsync` | `logger.error`；轮询异常不再静默中断自动生成/撤下 |
+| `src/ui/chat-controller.ts:601` `/file-back` 后台归档 | floating | `voidAsync` | `logger.error`；工具失败本来就转成会话内系统消息 |
+| `src/ui/controllers/context-controller.ts:48` `onOpenFile` 回调 | misused | 同步回调内 `voidAsync` | `logger.error`（从 context chip 打开链接失败不再无声） |
+| `src/ui/shell-view.ts:446/1402` keydown 监听器返回 Promise | misused | 监听器改同步，Enter 提交走 `voidAsync` | `logger.error`；提交失败仍由 `processCommand` 在会话里显示错误消息 |
+| `src/ui/shell-view.ts:452/1403` paste 监听器 `async` 但无 await | misused | 去掉无意义的 `async`（body 全同步） | 无 Promise，无需落点 |
+| `src/ui/shell-view.ts:1143` 定型渲染 `.then()` 无 rejection 分支 | floating | 增加 `.catch` | `logger.error` + 纯文本兜底，终态区不会白屏 |
+| `src/ui/shell-view.ts:1293` DiffModal 的 `async` 应用回调 | misused | 同步回调内 `voidAsync` | `logger.error` + `Notice` |
+
+#### 回归测试
+
+- `test/async-errors.test.ts`（新增）：用 `process.on('unhandledRejection')` 断言四件事——rejected
+  fire-and-forget Promise、任务内同步抛错、失败提示自身抛错都不会产生未处理 rejection；非 Error 的
+  rejection reason 不丢。这是 issue #92 要求的「至少覆盖一次 promise reject 不再是 unhandled」。
+- `test/model-catalog-timeout.test.ts` 新增 (i)：非 Error 抛出值 / 带 message 的对象经 `listModels` 后
+  reason 一定是 Error，真 Error 原样透传（name/code 不丢）。
+
+#### 项目要求检查
+
+| 检查 | 结果 |
+|---|---|
+| `npm run build` | ✅ |
+| `npx eslint .`（仓库自带 lint） | ✅ 0 error |
+| `npx tsc --noEmit` | ✅ 0 error |
+| `npm test` | ✅ 全部 PASS（含新增） |
+| 同口径复现扫描 | ✅ 见上表；三规则归零，逐规则无上升 |
+
+行为变化只在失败路径：正常保存/切换/渲染的界面与文案不变。新增的失败 `Notice` 是错误提示，不是
+布局/视觉设计变更；而基线在这些失败路径上刻意静默（未处理 rejection，用户看不到任何提示），
+因此没有可对照的同一画面，按 §6.5 同一口径不附 Before/After 截图。展页计数仍以发布后重新提交审核复扫为准。
 
 ## 7. 维护约定
 

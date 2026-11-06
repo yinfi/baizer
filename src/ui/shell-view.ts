@@ -33,6 +33,7 @@ import { showGhostText } from './ghost-text';
 import { GrowthToken, ScrollFollowController } from './scroll/scroll-follow-controller';
 import { debounce } from '../utils/throttle';
 import { thrownMessage } from '../utils/thrown-message';
+import { voidAsync } from '../utils/async-errors';
 
 /** Obsidian App 上未在公开 d.ts 暴露的内部命令 API。 */
 type AppWithCommands = App & {
@@ -181,7 +182,7 @@ export class ShellView extends ItemView {
         this.handleInput();
     };
 
-    private handleKeyDownBound = async (e: KeyboardEvent) => {
+    private handleKeyDownBound = (e: KeyboardEvent) => {
         if (this.suggestList.handleKeyDown(e)) {
             return;
         }
@@ -197,7 +198,8 @@ export class ShellView extends ItemView {
 
             this.inputEl.value = '';
             this.adjustHeight(); // Reset height
-            await this.submitInput(query);
+            // keydown 监听器是同步 void 契约:不能返回 Promise,失败也不能是未处理 rejection。
+            voidAsync('ShellView: failed to submit input from Enter key', () => this.submitInput(query));
         }
     };
 
@@ -1138,13 +1140,19 @@ export class ShellView extends ItemView {
 
         if (this.streamContent && resolvedText) {
             // 流结束:把回复区切回 polite,让读屏把完成的整段回复播报一次(流式途中是 off)。
-            this.streamContent.setAttribute('aria-live', 'polite');
-            this.streamContent.empty();
+            const contentEl = this.streamContent;
+            contentEl.setAttribute('aria-live', 'polite');
+            contentEl.empty();
             this.getMessageRenderer().renderAiContent(
-                this.streamContent,
+                contentEl,
                 resolvedText,
             ).then(() => {
                 // 定型渲染不是「新输出」:暂停时不得点亮未读,也不能把读者拉回底部。
+                this.afterScrollGrowth(growth, false);
+            }).catch((error: unknown) => {
+                // 定型渲染失败不能让终态区一片空白:记日志 + 纯文本兜底,滚动语义照旧。
+                logger.error('Final AI content render failed', error, 'ShellView');
+                contentEl.textContent = resolvedText;
                 this.afterScrollGrowth(growth, false);
             });
         }
@@ -1290,16 +1298,21 @@ export class ShellView extends ItemView {
         }
 
         const originalContent = await this.app.vault.read(activeFile);
-        new DiffModal(this.app, originalContent, newContent, async () => {
-            await this.chatController.applyPreviewedChange({
-                action: 'review_code_block',
-                target: activeFile.path,
-                previousContent: originalContent,
-                apply: async () => {
-                    await this.app.vault.modify(activeFile, newContent);
-                    new Notice('Changes applied.');
-                },
-            });
+        new DiffModal(this.app, originalContent, newContent, () => {
+            // DiffModal 的 onApply 是同步 void 契约:异步应用失败必须自己接住并让用户看到。
+            voidAsync(
+                'ShellView: failed to apply reviewed code-block change',
+                () => this.chatController.applyPreviewedChange({
+                    action: 'review_code_block',
+                    target: activeFile.path,
+                    previousContent: originalContent,
+                    apply: async () => {
+                        await this.app.vault.modify(activeFile, newContent);
+                        new Notice('Changes applied.');
+                    },
+                }),
+                () => new Notice(t('The action failed. See the developer console for details.')),
+            );
         }).open();
     }
 
@@ -1650,7 +1663,8 @@ export class ShellView extends ItemView {
         }).open();
     }
 
-    private async handlePaste(e: ClipboardEvent) {
+    // 粘贴处理全程同步（FileReader 走回调），保持 void 返回以符合事件监听器契约。
+    private handlePaste(e: ClipboardEvent) {
         const clipboard = e.clipboardData;
         if (!clipboard) return;
 

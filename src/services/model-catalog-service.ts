@@ -3,6 +3,7 @@ import { ModelOption } from '../models/interfaces';
 import { ProviderConfig } from '../mcp/types';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import { logger } from '../utils/logger';
+import { thrownMessage } from '../utils/thrown-message';
 
 /**
  * model-catalog-service —— provider 元数据服务（非 runtime）。
@@ -90,6 +91,17 @@ function createAbortError(): Error {
 }
 
 /**
+ * rejection reason 一律是 Error（prefer-promise-reject-errors）。
+ *
+ * 注入的请求实现（测试或旧运行环境）可能同步抛出字符串等非 Error 值；这里包一层 Error
+ * 并保留可读文本，使 listModels 的调用方（ModelService → 设置页状态行）拿到的始终是可展示的错误。
+ */
+function asRejectionError(reason: unknown, fallback: string): Error {
+  if (reason instanceof Error) return reason;
+  return new Error(thrownMessage(reason) || fallback);
+}
+
+/**
  * 给 requestUrl 调用套上「超时 + 取消」语义。
  *
  * requestUrl 本身不可中断，故这里只做 Promise.race：超时/abort 后立刻 reject，
@@ -140,12 +152,12 @@ function requestModelsWithTimeout(
     try {
       request = Promise.resolve(doRequest(options));
     } catch (error) {
-      finish(() => reject(error));
+      finish(() => reject(asRejectionError(error, 'Model list request failed')));
       return;
     }
     request.then(
       (response) => finish(() => resolve(response)),
-      (error) => finish(() => reject(error)),
+      (error) => finish(() => reject(asRejectionError(error, 'Model list request failed'))),
     );
   });
 }

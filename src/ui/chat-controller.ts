@@ -28,6 +28,7 @@ import { KnowledgeRuntime } from '../knowledge/runtime';
 import { ToolRegistry } from '../skills/tool-registry';
 import { ChangePreview } from './diff/change-preview';
 import { thrownMessage } from '../utils/thrown-message';
+import { voidAsync } from '../utils/async-errors';
 
 /** 工具/命令结果的松散公共字段。现有工具契约未导出统一类型,这里只声明 UI 实际消费的成员。 */
 interface ToolResultPayload {
@@ -597,8 +598,9 @@ export class ChatController {
                 break;
             }
             case '/file-back':
-        // 后台执行，不阻塞主流程
-                this.runFileBackInBackground(argStr.trim());
+        // 后台执行，不阻塞主流程；/file-back 会自己把工具失败转成系统消息，
+        // 这里再由 voidAsync 兜住其内部意外抛出（否则是未处理 rejection）。
+                voidAsync('ChatController: file-back failed', () => this.runFileBackInBackground(argStr.trim()));
                 break;
             case '/wiki:compile':
                 await this.handleWikiCompile(argStr);

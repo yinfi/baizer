@@ -524,6 +524,7 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Check result': '检查结果',
     'No write was performed.': '未执行任何写入。',
     'The action failed.': '操作失败。',
+    'The action failed. See the developer console for details.': '操作失败，请查看开发者控制台了解详情。',
     'High-risk action: this will': '高风险操作：将',
     '. Approving executes it immediately and may not be undoable.': '。批准后将立即执行，且可能无法撤销。',
     'delete': '删除',

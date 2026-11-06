@@ -121,6 +121,7 @@ const tests = [
   'test/knowledge/compile-concurrency.test.ts',
   'test/cross-phase-smoke.test.ts',
   'test/narrow-g2-knowledge-services.test.ts',
+  'test/async-errors.test.ts',
 ];
 
 for (const testFile of tests) {

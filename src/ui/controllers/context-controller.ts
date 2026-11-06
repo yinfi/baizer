@@ -2,6 +2,7 @@ import { App } from 'obsidian';
 import { ContextManager, ContextItem } from '../../services/context-manager';
 import { ObsidianContextService } from '../../services/obsidian-context-service';
 import { ContextChips } from '../components/context-chips';
+import { voidAsync } from '../../utils/async-errors';
 
 interface ContextControllerDeps {
   app: App;
@@ -45,7 +46,10 @@ export class ContextController {
   renderContextChips(container: HTMLElement, onRemove: (id: string) => void) {
     new ContextChips(container, {
       onRemove,
-      onOpenFile: (path) => this.deps.app.workspace.openLinkText(path, '', false),
+      // onOpenFile 是同步 void 回调；openLinkText 返回 Promise，裸返回会让打开失败无人知晓。
+      onOpenFile: (path) => {
+        voidAsync('ContextController: failed to open link from context chip', () => this.deps.app.workspace.openLinkText(path, '', false));
+      },
     }).update(this.deps.contextManager.getContexts());
   }
 

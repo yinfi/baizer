@@ -13,6 +13,7 @@ import {
 import { SkillRegistry } from '../../skill-registry';
 import { PluginSkillGenerator } from './skill-generator';
 import { logger } from '../../../utils/logger';
+import { voidAsync } from '../../../utils/async-errors';
 import { t } from '../../../i18n/zh';
 
 const POLL_INTERVAL_MS = 10_000;
@@ -563,7 +564,9 @@ export class PluginWatcher {
     logger.info('Starting...', 'PluginWatcher');
     await this.initialScan();
     this.intervalId = window.setInterval(
-      () => this.checkChanges(),
+      // setInterval 回调是同步 void 契约：checkChanges 的 rejection 此前无人接收，
+      // 轮询失败的日志与提示都会丢；也不能 await（计时器不等待上一轮）。
+      () => voidAsync('PluginWatcher: polling cycle failed', () => this.checkChanges()),
       POLL_INTERVAL_MS,
     );
   }
