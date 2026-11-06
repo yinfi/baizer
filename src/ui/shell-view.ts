@@ -2,6 +2,7 @@ import { App, Editor, ItemView, TFile, WorkspaceLeaf, Notice, MarkdownView, setI
 import { EditorView } from '@codemirror/view';
 import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
+import { detach, voidHandler } from '../utils/promise-guard';
 import { ChatController, ChatTurnRequest, MessageAddedOptions } from './chat-controller';
 import { ContextItem, ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
@@ -181,7 +182,9 @@ export class ShellView extends ItemView {
         this.handleInput();
     };
 
-    private handleKeyDownBound = async (e: KeyboardEvent) => {
+    // addEventListener 期望同步 void：voidHandler 让 preventDefault 等同步部分照常先跑，
+    // submitInput 之后的 reject 记日志，而不是变成 unhandled rejection。
+    private handleKeyDownBound = voidHandler(async (e: KeyboardEvent) => {
         if (this.suggestList.handleKeyDown(e)) {
             return;
         }
@@ -199,7 +202,7 @@ export class ShellView extends ItemView {
             this.adjustHeight(); // Reset height
             await this.submitInput(query);
         }
-    };
+    }, 'ShellView');
 
     private handleContainerClickBound = (e: MouseEvent) => {
         if (window.getSelection()?.toString()) return;
@@ -218,7 +221,7 @@ export class ShellView extends ItemView {
         this.inputEl.focus();
     };
 
-    private handlePasteBound = (e: ClipboardEvent) => this.handlePaste(e);
+    private handlePasteBound = voidHandler((e: ClipboardEvent) => this.handlePaste(e), 'ShellView');
     private handleDropBound = (e: DragEvent) => this.handleDrop(e);
     // 停止无条件贴底后,scroll 事件负责「上翻暂停 / 回到底部恢复」。
     private handleOutputScrollBound = () => this.scrollFollow?.handleScroll();
@@ -1138,15 +1141,24 @@ export class ShellView extends ItemView {
 
         if (this.streamContent && resolvedText) {
             // 流结束:把回复区切回 polite,让读屏把完成的整段回复播报一次(流式途中是 off)。
-            this.streamContent.setAttribute('aria-live', 'polite');
-            this.streamContent.empty();
-            this.getMessageRenderer().renderAiContent(
-                this.streamContent,
-                resolvedText,
-            ).then(() => {
-                // 定型渲染不是「新输出」:暂停时不得点亮未读,也不能把读者拉回底部。
-                this.afterScrollGrowth(growth, false);
-            });
+            const contentEl = this.streamContent;
+            contentEl.setAttribute('aria-live', 'polite');
+            contentEl.empty();
+            detach(
+                this.getMessageRenderer().renderAiContent(
+                    contentEl,
+                    resolvedText,
+                ).then(() => {
+                    // 定型渲染不是「新输出」:暂停时不得点亮未读,也不能把读者拉回底部。
+                    this.afterScrollGrowth(growth, false);
+                }).catch((error: unknown) => {
+                    // 定型渲染失败不能让终态区一片空白:记日志 + 纯文本兜底,滚动语义照旧。
+                    logger.error('Final AI content render failed', error, 'ShellView');
+                    contentEl.textContent = resolvedText;
+                    this.afterScrollGrowth(growth, false);
+                }),
+                'ShellView',
+            );
         }
 
         if (this.streamTimeline && this.streamNodeCount > 0) {
@@ -1290,7 +1302,8 @@ export class ShellView extends ItemView {
         }
 
         const originalContent = await this.app.vault.read(activeFile);
-        new DiffModal(this.app, originalContent, newContent, async () => {
+        // 用户点「应用」触发：失败必须让用户看到，否则会以为改动已写入。
+        new DiffModal(this.app, originalContent, newContent, voidHandler(async () => {
             await this.chatController.applyPreviewedChange({
                 action: 'review_code_block',
                 target: activeFile.path,
@@ -1300,7 +1313,9 @@ export class ShellView extends ItemView {
                     new Notice('Changes applied.');
                 },
             });
-        }).open();
+        }, 'ShellView', (error) => {
+            new Notice(`Failed to apply changes: ${thrownMessage(error) || 'Unknown error'}`);
+        })).open();
     }
 
     private async refreshKnowledgeStatusPanel() {

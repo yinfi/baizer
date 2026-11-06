@@ -2,6 +2,7 @@ import { App, MarkdownView, TFile } from 'obsidian';
 import { ModelService } from '../services/model-service';
 import { ChatTurnOutcome, StreamEvent } from '../models/interfaces';
 import { logger } from '../utils/logger';
+import { detach } from '../utils/promise-guard';
 import { t } from '../i18n/zh';
 import {
     buildFileWriteFailureMessage,
@@ -598,7 +599,8 @@ export class ChatController {
             }
             case '/file-back':
         // 后台执行，不阻塞主流程
-                this.runFileBackInBackground(argStr.trim());
+                // runFileBackInBackground 自己 try/catch 并以系统消息告知用户；detach 兜底其余意外 reject。
+                detach(this.runFileBackInBackground(argStr.trim()), 'ChatController');
                 break;
             case '/wiki:compile':
                 await this.handleWikiCompile(argStr);

@@ -13,6 +13,7 @@ import {
 import { SkillRegistry } from '../../skill-registry';
 import { PluginSkillGenerator } from './skill-generator';
 import { logger } from '../../../utils/logger';
+import { voidHandler } from '../../../utils/promise-guard';
 import { t } from '../../../i18n/zh';
 
 const POLL_INTERVAL_MS = 10_000;
@@ -562,8 +563,10 @@ export class PluginWatcher {
     // initialScan/checkChanges 内部只在 canGenerate() 通过时执行生成工作。
     logger.info('Starting...', 'PluginWatcher');
     await this.initialScan();
+    // checkChanges 只有 try/finally：读取/生成抛错会 reject。定时器回调不能 await，
+    // 失败记日志，下一轮轮询照常继续（pollingInFlight 已在 finally 里复位）。
     this.intervalId = window.setInterval(
-      () => this.checkChanges(),
+      voidHandler(() => this.checkChanges(), 'PluginWatcher'),
       POLL_INTERVAL_MS,
     );
   }

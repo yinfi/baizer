@@ -3,6 +3,7 @@ import { ModelOption } from '../models/interfaces';
 import { ProviderConfig } from '../mcp/types';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import { logger } from '../utils/logger';
+import { toError } from '../utils/promise-guard';
 
 /**
  * model-catalog-service —— provider 元数据服务（非 runtime）。
@@ -140,12 +141,12 @@ function requestModelsWithTimeout(
     try {
       request = Promise.resolve(doRequest(options));
     } catch (error) {
-      finish(() => reject(error));
+      finish(() => reject(toError(error)));
       return;
     }
     request.then(
       (response) => finish(() => resolve(response)),
-      (error) => finish(() => reject(error)),
+      (error: unknown) => finish(() => reject(toError(error))),
     );
   });
 }

@@ -39,6 +39,7 @@ import { USER_SKILLS_DIR } from './src/skills/skill-files';
 import { logger } from './src/utils/logger';
 import { installRequestUrlFetchFallback } from './src/utils/request-url-fetch';
 import { thrownMessage } from './src/utils/thrown-message';
+import { detach } from './src/utils/promise-guard';
 
 /** Obsidian Editor 上未在公开 d.ts 暴露的 CodeMirror 6 视图。 */
 type EditorWithCm = Editor & { cm?: EditorView };
@@ -310,7 +311,8 @@ export default class BaizerPlugin extends Plugin {
         });
 
         // 启动插件 Skill 自动生成（后台异步，不阻塞）。watcher 已在 skill 加载后构造。
-        this.pluginWatcher?.start();
+        // start() 内部的初始扫描失败会 reject：记日志，不让它变成 unhandled rejection。
+        if (this.pluginWatcher) detach(this.pluginWatcher.start(), 'PluginWatcher');
     }
 
     onunload() {
@@ -366,7 +368,9 @@ export default class BaizerPlugin extends Plugin {
         }
 
         new GuardianModal(this.app, (instruction: string) => {
-            this.runGuardianCheck(view.editor, null, instruction);
+            // runGuardianCheck 内部已 try/catch 并更新 Guardian 状态；这里的 detach 兜底
+            // 其 catch 之外的失败（例如 collect 之前的同步逻辑），保证不成为 unhandled rejection。
+            detach(this.runGuardianCheck(view.editor, null, instruction), 'Guardian');
         }).open();
     }
 

@@ -366,6 +366,50 @@ async function runTests() {
     expect(catalog.isModelListingUnsupported('model-listing-unsupported')).toBe(false);
     expect(catalog.isModelListingUnsupported(null)).toBe(false);
   });
+
+  await test('(i) rejection reasons are always Errors (non-Error throws keep readable text)', async () => {
+    // 注入实现同步抛出字符串：rejection reason 必须仍是 Error（prefer-promise-reject-errors），
+    // 这样 ModelService → 设置页状态行拿到的始终是可展示的错误。
+    let syncCaught: any;
+    try {
+      await catalog.listModels(openaiConfig(), {
+        requestUrl: (() => { throw 'socket hang up'; }) as any,
+        timeoutMs: 1000,
+      });
+    } catch (e) {
+      syncCaught = e;
+    }
+    expect(syncCaught instanceof Error).toBe(true);
+    expect(syncCaught.message).toBe('socket hang up');
+
+    // Promise.reject(带 message 的对象)：reason 变成 Error，但保留可读文本。
+    let objectCaught: any;
+    try {
+      await catalog.listModels(openaiConfig(), {
+        requestUrl: () => Promise.reject({ message: 'gateway down' }),
+        timeoutMs: 1000,
+      });
+    } catch (e) {
+      objectCaught = e;
+    }
+    expect(objectCaught instanceof Error).toBe(true);
+    expect(objectCaught.message).toBe('gateway down');
+
+    // 真 Error 原样透传：不额外包一层，name / code 等可辨识属性不丢。
+    const original = new Error('network down');
+    original.name = 'NetworkError';
+    let errorCaught: any;
+    try {
+      await catalog.listModels(openaiConfig(), {
+        requestUrl: () => Promise.reject(original),
+        timeoutMs: 1000,
+      });
+    } catch (e) {
+      errorCaught = e;
+    }
+    expect(errorCaught).toBe(original);
+    expect(errorCaught.name).toBe('NetworkError');
+  });
 }
 
 runTests().catch((e) => {

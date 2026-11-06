@@ -22,6 +22,8 @@ import type {
 } from './skills/builtin/plugin-ctrl/plugin-watcher';
 import { t, Locale } from './i18n/zh';
 import { thrownMessage } from './utils/thrown-message';
+import { logger } from './utils/logger';
+import { detach } from './utils/promise-guard';
 
 export type SettingsSectionId =
     | 'overview'
@@ -1186,17 +1188,29 @@ export class SettingTab extends PluginSettingTab {
     plugin: IPlugin;
 
     // 文本/滑块逐次落盘代价高：debounce 到一次保存。
+    // debounce 回调返回的 Promise 会被 debounce 丢弃，落盘失败必须在这里接住：
+    // 记日志 + Notice，让用户知道刚才的修改没有保存。
     private debouncedPersist: Debouncer<[], Promise<void>> = debounce(
-        () => this.persistSettings(),
+        () => this.persistSettings().catch(this.reportAsyncFailure),
         400,
         false,
     );
     // 纯 UI 字段（外观主题/字号/不透明度）走轻量保存 + debounce，避免拖动滑块时重建 LLM 客户端。
     private debouncedPersistLight: Debouncer<[], Promise<void>> = debounce(
-        () => this.persistSettingsLight(),
+        () => this.persistSettingsLight().catch(this.reportAsyncFailure),
         400,
         false,
     );
+    // 设置页里所有「不能 await 的异步入口」（事件监听、Modal 回调、debounce）的统一失败出口。
+    // notifyFailure 只负责让用户看到；日志由 detach/voidHandler 记。
+    private readonly notifyFailure = (error: unknown): void => {
+        new Notice(`${t('Settings action failed')}: ${thrownMessage(error) || t('unknown reason')}`);
+    };
+    // debounce 回调里没有 detach 可用，自己记日志再提示。
+    private readonly reportAsyncFailure = (error: unknown): void => {
+        logger.error('Settings persist failed', error, 'SettingsTab');
+        this.notifyFailure(error);
+    };
     private revealedApiKeys = new Set<string>();
     private connectionTestStatus = new Map<string, ConnectionTestStatus>();
     // 模型字段结果缓存：重绘/翻页都复用上次列表，只有用户点 Refresh list 才强制重取。
@@ -1407,10 +1421,15 @@ export class SettingTab extends PluginSettingTab {
         }
     }
 
+    /** debouncedPersist 的回调已自带 catch（日志 + Notice）；detach 保证 run() 本身也不留悬空 Promise。 */
+    private flushPersistedEdits(): void {
+        detach(this.debouncedPersist.run(), 'SettingsTab');
+    }
+
     hide(): void {
         // 面板关闭时立即落盘 debounce 里未触发的最后一次编辑，避免丢改。
-        void this.debouncedPersist.run();
-        void this.debouncedPersistLight.run();
+        this.flushPersistedEdits();
+        detach(this.debouncedPersistLight.run(), 'SettingsTab');
         super.hide();
     }
 
@@ -1565,7 +1584,7 @@ export class SettingTab extends PluginSettingTab {
             const key = `custom-${Date.now()}`;
             settings.providers[key] = buildNewProviderConfig(draft.type, draft.label, draft.baseUrl);
             settings.activeProvider = key;
-            void this.persistSettings().then(() => this.update());
+            detach(this.persistSettings().then(() => this.update()), 'SettingsTab', this.notifyFailure);
         }).open();
     }
 
@@ -2189,7 +2208,7 @@ export class SettingTab extends PluginSettingTab {
         // 提权预设（open=开插件控制+全库写；automation=关执行确认）与单独开关保持一致的二次确认。
         const escalates = preset === 'open' || preset === 'automation';
         if (!escalates) {
-            void this.applyPermissionPreset(preset).then(() => this.update());
+            detach(this.applyPermissionPreset(preset).then(() => this.update()), 'SettingsTab', this.notifyFailure);
             return;
         }
         const title = preset === 'open' ? t('Open access') : t('Automation');
@@ -2874,8 +2893,8 @@ export class SettingTab extends PluginSettingTab {
     private readonly handleVisibilityChange = (): void => {
         if (typeof document === 'undefined') return;
         if (document.visibilityState === 'visible') return;
-        void this.debouncedPersist.run();
-        void this.debouncedPersistLight.run();
+        this.flushPersistedEdits();
+        detach(this.debouncedPersistLight.run(), 'SettingsTab');
     };
 
     private installVisibilityFlush(): void {
@@ -3126,7 +3145,10 @@ class MemoryBrowserPage extends SettingPage {
         button.disabled = disabled;
         button.addEventListener('click', () => {
             if (button.disabled) return;
-            void onClick();
+            // 记忆子页所有动作按钮的统一入口：onClick 失败时记日志并提示，而不是静默变成 unhandled rejection。
+            detach(onClick(), 'SettingsTab', (error) => {
+                new Notice(`${t('Settings action failed')}: ${thrownMessage(error) || t('unknown reason')}`);
+            });
         });
         return button;
     }
@@ -3168,7 +3190,10 @@ class MemoryConfirmModal extends Modal {
         confirm.addEventListener('click', () => {
             this.confirmed = true;
             this.close();
-            void this.onConfirm();
+            // 用户已确认的（常为破坏性）操作失败时必须告知，不能只留一个静默的 void。
+            detach(this.onConfirm(), 'SettingsTab', (error) => {
+                new Notice(`${t('Settings action failed')}: ${thrownMessage(error) || t('unknown reason')}`);
+            });
         });
     }
 

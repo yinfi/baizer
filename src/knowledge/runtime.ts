@@ -3,6 +3,7 @@
 import { App, Plugin, TFile, Notice } from 'obsidian';
 import { debounce } from '../utils/throttle';
 import { logger } from '../utils/logger';
+import { detach } from '../utils/promise-guard';
 import { PluginSettings } from '../mcp/types';
 import { ModelService } from '../services/model-service';
 import { KnowledgeCompiler, findCurrentCompiledSummary } from './compiler';
@@ -380,7 +381,8 @@ export class KnowledgeRuntime {
     plugin.registerEvent(
       this.app.vault.on('create', (file) => {
         if (file instanceof TFile && file.extension === 'md') {
-          this.watcher.onFileCreate(file);
+          // vault 事件回调是同步 void：写 frontmatter 失败只能记日志，否则新文件会静默不进编译队列。
+          detach(this.watcher.onFileCreate(file), 'KnowledgeRuntime');
         }
       })
     );
