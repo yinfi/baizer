@@ -1,23 +1,19 @@
-/**
+﻿/**
  * 设置页性能回归测试（issue #81：移动端设置页卡死）
  *
- * 覆盖三块可脱离真实 Obsidian DOM 验证的行为：
- *  1. 重绘调度器：同一轮合并、渲染中不嵌套、取消后不再执行；
- *  2. 搜索闸门：命中分区不变时不必重绘；模型字段缓存键只随端点身份变化；
- *  3. renderModelField：命中缓存结果时不再发 /models，只有「Refresh list」才强制重取。
+ * 覆盖两块可脱离真实 Obsidian DOM 验证的行为：
+ *  1. 模型字段缓存键只随端点身份变化；
+ *  2. renderModelField：命中缓存结果时不再发 /models，只有「Refresh list」才强制重取。
  */
 
 import { setLocaleForTesting } from '../src/i18n/zh';
 import {
     MODEL_FIELD_CACHE_TTL_MS,
-    getMatchingSettingsSections,
     getModelFieldCacheKey,
-    isSameSettingsSectionList,
     renderModelField,
 } from '../src/settings';
 import type { ProviderConfig } from '../src/mcp/types';
 import type { AvailableModelsResult } from '../src/services/model-service';
-import { createRenderScheduler } from '../src/utils/render-scheduler';
 import { FakeElement } from './ui-fakes';
 
 // 断言用英文原文 key（t() 在非中文环境返回原文），与运行环境无关。
@@ -119,72 +115,6 @@ function providerConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig
 
 async function runTests() {
     console.log('=== Settings Performance Tests ===');
-
-    await test('render scheduler coalesces many requests into a single render', () => {
-        let renders = 0;
-        const pending: Array<() => void> = [];
-        const scheduler = createRenderScheduler(() => { renders++; }, callback => pending.push(callback));
-
-        for (let i = 0; i < 20; i++) scheduler.request();
-        expect(renders).toBe(0);
-        expect(pending.length).toBe(1);
-
-        pending.shift()!();
-        expect(renders).toBe(1);
-        assert(!scheduler.isScheduled(), 'scheduler must be idle after a coalesced render');
-    });
-
-    await test('render scheduler never nests a render requested from inside a render', () => {
-        let renders = 0;
-        let depth = 0;
-        let maxDepth = 0;
-        let requestAgain = true;
-        const pending: Array<() => void> = [];
-        const scheduler: ReturnType<typeof createRenderScheduler> = createRenderScheduler(() => {
-            renders++;
-            depth++;
-            maxDepth = Math.max(maxDepth, depth);
-            depth--;
-            if (requestAgain) {
-                requestAgain = false;
-                scheduler.request();
-            }
-        }, callback => pending.push(callback));
-
-        scheduler.request();
-        pending.shift()!();
-
-        expect(renders).toBe(2);
-        expect(maxDepth).toBe(1);
-    });
-
-    await test('render scheduler drops a queued render after cancel', () => {
-        let renders = 0;
-        const pending: Array<() => void> = [];
-        const scheduler = createRenderScheduler(() => { renders++; }, callback => pending.push(callback));
-
-        scheduler.request();
-        scheduler.cancel();
-        // 已排队的回调仍可能被宿主触发；代际号应让它失效。
-        pending.shift()?.();
-        expect(renders).toBe(0);
-    });
-
-    await test('section list comparison ignores identical lists but detects changes', () => {
-        expect(isSameSettingsSectionList(['memory', 'knowledge'], ['memory', 'knowledge'])).toBe(true);
-        expect(isSameSettingsSectionList(['memory'], ['knowledge'])).toBe(false);
-        expect(isSameSettingsSectionList(['memory'], ['memory', 'knowledge'])).toBe(false);
-        expect(isSameSettingsSectionList([], [])).toBe(true);
-    });
-
-    await test('typing more characters that match the same sections needs no repaint', () => {
-        const atMemo = getMatchingSettingsSections('memo');
-        const atMemor = getMatchingSettingsSections('memor');
-        expect(atMemo).toEqual(atMemor);
-        expect(atMemo.includes('memory')).toBe(true);
-        // 闸门依赖这个相等判断：命中集合不变时 applySearchRender 直接返回。
-        expect(isSameSettingsSectionList(atMemo, atMemor)).toBe(true);
-    });
 
     await test('model field cache key follows endpoint identity, not the selected model', () => {
         const base = providerConfig();

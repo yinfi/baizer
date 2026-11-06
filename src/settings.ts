@@ -1,20 +1,29 @@
-import { App, PluginSettingTab, Setting, Notice, Modal, debounce, Debouncer, setIcon } from 'obsidian';
-import { BUILTIN_PROVIDER_KEYS, DEFAULT_ASR_MODEL, DEFAULT_PROVIDERS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, PLUGIN_NAME, OpenAIApiFlavor, PluginSettings, ProviderConfig, ProviderType, VaultWriteScope } from './mcp/types';
+import {
+    App,
+    PluginSettingTab,
+    Setting,
+    SettingPage,
+    Notice,
+    Modal,
+    debounce,
+    Debouncer,
+    setIcon,
+} from 'obsidian';
+import type { SettingDefinitionItem, SettingDefinitionPage, SettingGroupItem } from 'obsidian';
+import { BUILTIN_PROVIDER_KEYS, DEFAULT_ASR_MODEL, DEFAULT_PROVIDERS, DEFAULT_SETTINGS, IPlugin, MEMORY_DIR, OpenAIApiFlavor, PluginSettings, ProviderConfig, ProviderType } from './mcp/types';
 import { ModelOption } from './models/interfaces';
 import type { AvailableModelsResult } from './services/model-service';
-import { checkAvailabilityWithStatus } from './services/model-catalog-service';
-import { OntologyUpdateMode } from './knowledge/types';
+import { checkAvailabilityWithStatus, isModelListingUnsupported, listModels } from './services/model-catalog-service';
 import type { MemoryRecord } from './memory/hindsight-types';
 import type { MemoryView } from './memory/types';
 import type {
     DerivedSkillRegenerateBlocker,
     DerivedSkillStatus,
 } from './skills/builtin/plugin-ctrl/plugin-watcher';
-import { t, getLocale, Locale } from './i18n/zh';
-import { createRenderScheduler, type RenderScheduler } from './utils/render-scheduler';
+import { t, Locale } from './i18n/zh';
 import { thrownMessage } from './utils/thrown-message';
 import { logger } from './utils/logger';
-import { detach, voidHandler } from './utils/promise-guard';
+import { detach } from './utils/promise-guard';
 
 export type SettingsSectionId =
     | 'overview'
@@ -43,33 +52,6 @@ export interface ConnectionTestStatus {
     message: string;
 }
 
-export interface ProviderDeletionState {
-    canDelete: boolean;
-    helperText: string;
-    label: string;
-}
-
-export interface ProviderListSummary {
-    total: number;
-    configured: number;
-    missingKey: number;
-    label: string;
-}
-
-export interface ProviderCardMeta {
-    id: string;
-    label: string;
-    protocolLabel: string;
-    endpointSummary: string;
-    modelSummary: string;
-    statusLabel: string;
-    statusTone: SettingsBadgeTone;
-    isActive: boolean;
-    compactMeta: string;
-    protocolGlyph: string;
-    statusGlyph: string;
-}
-
 export interface SettingsOverviewAction {
     label: string;
     sectionId: SettingsSectionId;
@@ -85,44 +67,6 @@ interface SettingsSectionMeta {
 
 export function getSettingsFallbackCss(): string {
     return `
-.baizer-settings-page {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding-bottom: 24px;
-    container-type: inline-size;
-}
-.baizer-settings-hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
-    /* 副标题横跨两列：它是一整句说明文字（约 390px），此前只落在左侧 316px 的列里，
-       配合下面的 nowrap 就被裁掉 74px 且永远读不到。跨列后宽屏一行放得下。 */
-    grid-template-areas: "title search" "subtitle subtitle";
-    column-gap: 12px;
-    row-gap: 4px;
-    align-items: center;
-}
-.baizer-settings-title {
-    grid-area: title;
-    margin: 0;
-    font-size: var(--font-ui-large);
-    font-weight: var(--font-semibold);
-}
-.baizer-settings-subtitle {
-    grid-area: subtitle;
-    min-width: 0;
-    margin: 0;
-    color: var(--text-muted);
-    /* 不设 nowrap/ellipsis：页面正文被省略号吃掉属于「读不到」，不是可接受的截断。
-       与 styles.css 保持一致（此前只有 styles.css 去掉了 nowrap，而本兜底表最后注入、优先级更高，
-       于是宽屏下依旧裁切）。 */
-    white-space: normal;
-    overflow-wrap: anywhere;
-}
-.baizer-settings-search-row {
-    grid-area: search;
-    min-width: 0;
-}
 .baizer-settings-search {
     width: 100%;
     height: 34px;
@@ -133,104 +77,6 @@ export function getSettingsFallbackCss(): string {
     color: var(--text-normal);
     font-size: var(--font-ui-small);
 }
-.baizer-settings-top-status,
-.baizer-settings-actions,
-.baizer-settings-segments,
-.baizer-settings-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-}
-.baizer-settings-top-status {
-    justify-content: flex-end;
-}
-.baizer-settings-accordion {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-.baizer-settings-section-card {
-    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 90%, transparent);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary));
-    overflow: hidden;
-}
-.baizer-settings-section-card[open] {
-    border-color: color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border));
-}
-.baizer-settings-section-summary {
-    min-height: 42px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto 18px;
-    gap: 8px;
-    align-items: center;
-    padding: 7px 10px;
-    cursor: pointer;
-    list-style: none;
-}
-.baizer-settings-section-summary::-webkit-details-marker {
-    display: none;
-}
-.baizer-settings-section-copy {
-    min-width: 0;
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-}
-.baizer-settings-section-title {
-    margin: 0;
-    font-size: var(--font-ui-small);
-    font-weight: var(--font-semibold);
-}
-.baizer-settings-section-description {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: var(--font-smallest);
-    /* 与 styles.css 同步：此前这里是单行 nowrap+ellipsis，而本兜底表最后注入、优先级更高，
-       于是 styles.css 里的两行截断形同虚设，分区描述在真实界面里只显示一行。 */
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-.baizer-settings-section-meta {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 6px;
-}
-.baizer-settings-section-chevron {
-    color: var(--text-muted);
-    transition: transform 120ms ease;
-}
-.baizer-settings-section-card[open] .baizer-settings-section-chevron {
-    transform: rotate(90deg);
-}
-.baizer-settings-section-content {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 8px;
-    border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
-    background: color-mix(in srgb, var(--background-secondary) 35%, transparent);
-}
-.baizer-settings-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 20px;
-    padding: 0 7px;
-    border-radius: 999px;
-    font-size: var(--font-smallest);
-    font-weight: var(--font-medium);
-    white-space: nowrap;
-}
-.baizer-settings-badge.is-warning { color: var(--text-warning); background: color-mix(in srgb, var(--color-yellow) 18%, transparent); }
-.baizer-settings-badge.is-danger { color: var(--text-error); background: color-mix(in srgb, var(--text-error) 12%, transparent); }
-.baizer-settings-badge.is-muted { color: var(--text-muted); background: color-mix(in srgb, var(--background-modifier-border) 65%, transparent); }
-.baizer-settings-badge.is-accent { color: var(--text-accent); background: color-mix(in srgb, var(--interactive-accent) 14%, transparent); }
-.baizer-settings-badge.is-success { color: var(--color-green); background: color-mix(in srgb, var(--color-green) 12%, transparent); }
 .baizer-settings-action {
     min-height: 32px;
     padding: 0 12px;
@@ -244,156 +90,6 @@ export function getSettingsFallbackCss(): string {
 .baizer-settings-action.is-accent { border-style: dashed; }
 .baizer-settings-action.is-danger { border-color: color-mix(in srgb, var(--text-error) 30%, var(--background-modifier-border)); color: var(--text-error); }
 .baizer-settings-action:disabled { cursor: default; opacity: .45; }
-.baizer-settings-panel,
-.baizer-settings-task,
-.baizer-settings-advanced,
-.baizer-settings-provider-shell,
-.baizer-settings-provider-card,
-.baizer-settings-connection-card {
-    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--background-primary-alt) 96%, var(--background-secondary));
-    overflow: hidden;
-}
-.baizer-settings-panel-header,
-.baizer-settings-provider-toolbar,
-.baizer-settings-connection-card-header {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    align-items: center;
-    padding: 8px 10px;
-    border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
-    background: color-mix(in srgb, var(--background-secondary) 74%, transparent);
-}
-/* 连接卡片标题栏左侧是「序号徽章 + 标题」两个子项：
-   - space-between 会把标题顶到最右，必须改回 flex-start；
-   - Setting 不再是 :first-child，Obsidian 默认的 .setting-item 上边框与内边距会冒出来，需清零。 */
-.baizer-settings-connection-card-header { justify-content: flex-start; }
-.baizer-settings-connection-card-header .setting-item {
-    flex: 1 1 auto;
-    min-width: 0;
-    padding: 0;
-    border-top: none;
-}
-.baizer-settings-panel-title,
-.baizer-settings-connection-card-title {
-    margin: 0;
-    font-size: var(--font-ui-small);
-    font-weight: var(--font-semibold);
-}
-.baizer-settings-panel-body { padding: 8px 10px; }
-.baizer-settings-task {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
-    align-items: center;
-    padding: 8px 10px;
-    color: var(--text-muted);
-    font-size: var(--font-ui-small);
-}
-.baizer-settings-task strong { color: var(--text-normal); }
-.baizer-settings-provider-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 8px;
-}
-.baizer-settings-provider-card {
-    width: 100%;
-    padding: 0;
-    color: var(--text-normal);
-}
-.baizer-settings-provider-card.is-active {
-    border-color: color-mix(in srgb, var(--interactive-accent) 46%, var(--background-modifier-border));
-    background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
-}
-.baizer-settings-provider-card-main {
-    width: 100%;
-    display: block;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-}
-.baizer-settings-provider-card-main-inner {
-    width: 100%;
-    display: grid;
-    grid-template-columns: minmax(120px, .8fr) minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-    padding: 8px 10px;
-}
-.baizer-settings-provider-card-title { min-width: 0; font-weight: var(--font-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.baizer-settings-provider-card-meta { min-width: 0; margin: 0; color: var(--text-muted); font-size: var(--font-smallest); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.baizer-settings-provider-detail-inline {
-    border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
-    background: color-mix(in srgb, var(--background-primary) 68%, transparent);
-}
-/* 单列四组流程：身份与协议 → 地址与凭证 → 模型 → 测试结果。
-   此前是 Basic/Credentials 两栏栅格，右栏被长地址/密钥/请求头/帮助文字压成窄条。 */
-.baizer-settings-connection-flow {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 8px;
-}
-.baizer-settings-connection-card-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-.baizer-settings-connection-card-index {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 999px;
-    font-size: var(--font-smallest);
-    font-weight: var(--font-semibold);
-    color: var(--text-accent);
-    background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
-}
-.baizer-settings-connection-card-body {
-    display: flex;
-    flex-direction: column;
-}
-.baizer-settings-detail-row {
-    display: grid;
-    grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
-    gap: 6px 14px;
-    align-items: start;
-    padding: 8px 10px;
-    border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
-}
-.baizer-settings-detail-row:first-child { border-top: 0; }
-.baizer-settings-detail-label {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 6px;
-    padding-top: 6px;
-    font-size: var(--font-ui-small);
-    font-weight: var(--font-semibold);
-}
-.baizer-settings-detail-required {
-    padding: 0 6px;
-    border-radius: 999px;
-    font-size: var(--font-smallest);
-    font-weight: var(--font-medium);
-    color: var(--text-warning);
-    background: color-mix(in srgb, var(--color-yellow) 18%, transparent);
-}
-.baizer-settings-detail-value {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
 .baizer-settings-detail-input {
     display: block;
     width: 100%;
@@ -407,27 +103,6 @@ export function getSettingsFallbackCss(): string {
 /* 长地址/长模型名：输入框本身可编辑全文，悬停另有 title 给完整值。 */
 .baizer-settings-detail-input[type="text"] {
     text-overflow: ellipsis;
-}
-.baizer-settings-detail-textarea {
-    min-height: 88px;
-    padding: 8px 10px;
-    font-family: var(--font-monospace);
-    font-size: var(--font-smallest);
-    resize: vertical;
-    /* pre-wrap + anywhere：多行 header 在窄栏里换行而不是撑出横向滚动条。 */
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    overflow-x: hidden;
-}
-.baizer-settings-secret-input {
-    font-family: var(--font-monospace);
-}
-/* 密钥操作独占一行：不再和输入框挤同一窄栏导致按钮竖向堆叠、撑高整行。 */
-.baizer-settings-field-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
 }
 .baizer-settings-field-hint {
     color: var(--text-muted);
@@ -472,6 +147,18 @@ export function getSettingsFallbackCss(): string {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
+/* 声明式行里的全宽控件（render 回调）：name/desc 在上、控件独占一行，
+   长 Base URL / 多行 header / 模型选择器不再被原生右侧窄列压扁。 */
+.setting-item.baizer-setting-stacked { flex-direction: column; align-items: stretch; gap: 8px; }
+.setting-item.baizer-setting-stacked .setting-item-info { width: 100%; margin-right: 0; }
+.setting-item.baizer-setting-stacked .setting-item-control { width: 100%; justify-content: flex-start; flex-wrap: wrap; text-align: start; }
+.setting-item.baizer-setting-stacked .setting-item-control input[type="text"],
+.setting-item.baizer-setting-stacked .setting-item-control input[type="password"],
+.setting-item.baizer-setting-stacked .setting-item-control textarea,
+.setting-item.baizer-setting-stacked .setting-item-control select { width: 100%; min-width: 0; }
+.setting-item.baizer-setting-stacked .baizer-settings-model-field { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.setting-item.baizer-setting-stacked .baizer-settings-header-example { width: 100%; }
+.setting-item.baizer-setting-stacked .baizer-settings-summary-list { width: 100%; }
 .baizer-settings-summary-list,
 .baizer-settings-skill-list {
     display: flex;
@@ -496,31 +183,14 @@ export function getSettingsFallbackCss(): string {
 .baizer-settings-summary-list strong,
 .baizer-settings-skill-list strong,
 .baizer-settings-sample-line strong { color: var(--text-normal); }
-.baizer-settings-preset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.baizer-settings-preset { padding: 8px 10px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-secondary); color: var(--text-normal); text-align: left; }
-.baizer-settings-preset.is-active { border-color: color-mix(in srgb, var(--interactive-accent) 46%, var(--background-modifier-border)); background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary)); }
-.baizer-settings-advanced summary { padding: 8px 10px; cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-small); font-weight: var(--font-semibold); }
-.baizer-settings-advanced-body { display: flex; flex-direction: column; gap: 8px; padding: 0 10px 10px; }
-/* 只有连接面板里的请求头块需要外边距（它嵌在连接卡片里）。 */
-.baizer-settings-advanced-headers { margin: 0 10px 10px; }
 .baizer-settings-inline-note { padding: 10px 12px; border-radius: 8px; font-size: var(--font-ui-small); }
 .baizer-settings-inline-note.is-warning { color: var(--text-warning); background: color-mix(in srgb, var(--color-yellow) 16%, transparent); }
 .baizer-settings-inline-note.is-success { color: var(--color-green); background: color-mix(in srgb, var(--color-green) 10%, transparent); }
 .baizer-settings-inline-note.is-danger { color: var(--text-error); background: color-mix(in srgb, var(--text-error) 12%, transparent); }
 .baizer-settings-inline-note.is-accent { color: var(--text-accent); background: color-mix(in srgb, var(--interactive-accent) 10%, transparent); }
-.baizer-settings-inline-hint { color: var(--text-muted); font-size: var(--font-smallest); }
-.baizer-full-width-textarea textarea { width: 100%; min-height: 110px; resize: vertical; }
-.baizer-settings-danger-setting { border-left: 3px solid color-mix(in srgb, var(--text-error) 75%, transparent); padding-left: 10px; }
 
 /* ===== 记忆(Hindsight)面板 ===== */
 .baizer-memory-toolbar { display: flex; flex-direction: column; gap: 8px; }
-.baizer-memory-toolbar-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-}
 .baizer-memory-path {
     padding: 3px 10px;
     border-radius: 999px;
@@ -619,52 +289,6 @@ export function getSettingsFallbackCss(): string {
     white-space: pre-wrap;
     word-break: break-word;
 }
-@container (max-width: 840px) {
-    .baizer-settings-detail-row {
-        grid-template-columns: 1fr;
-        gap: 6px;
-    }
-    .baizer-settings-detail-label { padding-top: 0; }
-}
-/* 断点取 640 而非 560：设置浮窗自身声明 minWidth: 600（Setting#getPopoutOptions()），
-   600px 是真实用户能到达的最窄窗口。断点若正好压在 600 上，最窄窗口就会拿到宽屏布局
-   —— 而那是唯一没被量过的一档。抬到 640 让「最窄窗口」稳定落入窄屏处理。 */
-@container (max-width: 640px) {
-    .baizer-settings-hero {
-        grid-template-columns: 1fr;
-        grid-template-areas: "title" "subtitle" "search";
-    }
-    .baizer-settings-section-summary,
-    .baizer-settings-provider-card-main-inner,
-    .baizer-settings-detail-row,
-    .baizer-settings-preset-grid {
-        grid-template-columns: 1fr;
-    }
-    .baizer-settings-detail-label { padding-top: 0; }
-    .baizer-settings-section-copy { flex-direction: column; align-items: flex-start; gap: 2px; }
-    .baizer-settings-top-status,
-    .baizer-settings-section-meta { justify-content: flex-start; }
-    .baizer-settings-section-description,
-    .baizer-settings-subtitle { white-space: normal; }
-}
-@media (max-width: 640px) {
-    .baizer-settings-hero {
-        grid-template-columns: 1fr;
-        grid-template-areas: "title" "subtitle" "search";
-    }
-    .baizer-settings-section-summary,
-    .baizer-settings-provider-card-main-inner,
-    .baizer-settings-detail-row,
-    .baizer-settings-preset-grid {
-        grid-template-columns: 1fr;
-    }
-    .baizer-settings-detail-label { padding-top: 0; }
-    .baizer-settings-section-copy { flex-direction: column; align-items: flex-start; gap: 2px; }
-    .baizer-settings-top-status,
-    .baizer-settings-section-meta { justify-content: flex-start; }
-    .baizer-settings-section-description,
-    .baizer-settings-subtitle { white-space: normal; }
-}
 `;
 }
 let settingsFallbackSheet: CSSStyleSheet | null = null;
@@ -702,88 +326,10 @@ function getSettingsSections(): SettingsSectionMeta[] {
     ];
 }
 
-function normalizeSearchQuery(query: string): string {
-    return query.trim().toLowerCase();
-}
-
-function clampInteger(value: string, min: number, max: number, fallback: number): number {
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed)) return fallback;
-    return Math.min(max, Math.max(min, parsed));
-}
-
 /** 把 ProviderConfig.customHeaders 渲染成每行一条 "Header-Name: value" 的可编辑文本。 */
 function serializeCustomHeaders(headers: Record<string, string> | undefined): string {
     if (!headers) return '';
     return Object.entries(headers).map(([key, value]) => `${key}: ${value}`).join('\n');
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 连接面板的纯决策层。
-//
-// 分组顺序、字段显隐、就地校验、模型列表状态与连接测试文案都在这里定死，
-// DOM 那层只负责把结果放进元素。抽成纯函数的原因和 getDerivedSkillRows 一样：
-// 这些正是 issue 的验收点（显隐正确 / 顺序正确 / 有就地反馈 / 列表不可用仍可手填），
-// 而 renderConnectionSection 依赖 Obsidian 的 Setting 与真实 DOM，单测里跑不起来。
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** 配置流程的四个分组，数组顺序即渲染顺序：身份与协议 → 地址与凭证 → 模型 → 测试结果。 */
-export type ConnectionGroupId = 'identity' | 'credentials' | 'model' | 'test';
-
-export interface ConnectionGroupMeta {
-    id: ConnectionGroupId;
-    title: string;
-}
-
-/**
- * 分组标题惰性求值（t() 依赖当前 locale，模块级常量会把初次结果冻结）。
- * 顺序即用户在面板上看到的配置流程顺序。
- */
-export function getConnectionGroups(): ConnectionGroupMeta[] {
-    return [
-        { id: 'identity', title: t('Provider identity and protocol') },
-        { id: 'credentials', title: t('Connection address and credentials') },
-        { id: 'model', title: t('Model') },
-        { id: 'test', title: t('Test result') },
-    ];
-}
-
-/** 连接面板里的字段标识。渲染顺序由 getConnectionFieldOrder 决定。 */
-export type ConnectionFieldId =
-    | 'providerName'
-    | 'protocol'
-    | 'apiFlavor'
-    | 'baseUrl'
-    | 'apiKey'
-    | 'customHeaders'
-    | 'model'
-    | 'connectionTest';
-
-/** 字段归属的分组，用于断言「字段落在正确的分组、且分组顺序正确」。 */
-export const CONNECTION_FIELD_GROUP: Record<ConnectionFieldId, ConnectionGroupId> = {
-    providerName: 'identity',
-    protocol: 'identity',
-    apiFlavor: 'identity',
-    baseUrl: 'credentials',
-    apiKey: 'credentials',
-    customHeaders: 'credentials',
-    model: 'model',
-    connectionTest: 'test',
-};
-
-/**
- * 按协议给出字段顺序。
- *
- * 显隐规则直接对应 issue 的验收点：'apiFlavor' 只是 OpenAI 兼容协议的端点方言
- * （Chat Completions / Responses），其它协议没有这个概念 —— 不渲染，才不会和
- * 「服务地址（Base URL）」再撞一次名。服务地址则两种协议都需要，故始终渲染。
- */
-export function getConnectionFieldOrder(type: ProviderType): ConnectionFieldId[] {
-    const fields: ConnectionFieldId[] = ['providerName', 'protocol'];
-    if (type === 'openai-compatible') fields.push('apiFlavor');
-    fields.push('baseUrl');
-    fields.push('apiKey', 'customHeaders', 'model', 'connectionTest');
-    return fields;
 }
 
 export interface RequestPathSummary {
@@ -1203,11 +749,6 @@ export function getProtocolLabel(type: ProviderType): string {
 }
 
 /** 服务商卡片上的协议标记（纯装饰，但两种协议各有各的记号）。 */
-export function getProtocolGlyph(type: ProviderType): string {
-    if (type === 'anthropic') return '⬡';
-    return '◎';
-}
-
 /** 协议下拉的唯一来源：详情页与新增模态框共用，避免两处选项各自漂移。 */
 export function getProtocolOptions(): ProtocolOption[] {
     return (['openai-compatible', 'anthropic'] as ProviderType[])
@@ -1417,40 +958,6 @@ function createFieldFeedback(parent: HTMLElement): (validation: FieldValidation)
     };
 }
 
-export function getMatchingSettingsSections(query: string): SettingsSectionId[] {
-    const normalized = normalizeSearchQuery(query);
-    const sections = getSettingsSections();
-    if (!normalized) return sections.map(section => section.id);
-
-    return sections
-        .filter(section => {
-            const haystack = [section.title, section.description, ...section.keywords]
-                .join(' ')
-                .toLowerCase();
-            return haystack.includes(normalized);
-        })
-        .map(section => section.id);
-}
-
-export function getRenderableSettingsSections(
-    visibleSections: SettingsSectionId[],
-    openSectionIds: ReadonlySet<SettingsSectionId>
-): SettingsSectionId[] {
-    return visibleSections.filter(sectionId => openSectionIds.has(sectionId));
-}
-
-/** 两次渲染的分区列表是否一致：一致就不必重绘（搜索框逐键重绘的止损点）。 */
-export function isSameSettingsSectionList(
-    a: readonly SettingsSectionId[],
-    b: readonly SettingsSectionId[],
-): boolean {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-        if (a[i] !== b[i]) return false;
-    }
-    return true;
-}
-
 /**
  * 模型字段结果缓存键：端点的身份（provider / 协议 / 地址 / key 前缀）。
  * 只改模型名或其它无关设置时键不变，重绘可以复用上次列表；
@@ -1466,48 +973,6 @@ export function getModelFieldCacheKey(
 
 /** 模型字段结果缓存有效期：与 ModelService 的 modelListCache TTL 保持一致。 */
 export const MODEL_FIELD_CACHE_TTL_MS = 10 * 60 * 1000;
-
-export function getSettingsSectionStatuses(
-    settings: PluginSettings
-): Partial<Record<SettingsSectionId, SettingsSectionStatus>> {
-    const statuses: Partial<Record<SettingsSectionId, SettingsSectionStatus>> = {};
-    const activeConfig = settings.providers[settings.activeProvider];
-
-    // P1-4: 分区状态徽章统一走 i18n(此前全为裸英文,中文环境与已译标题混排)。
-    if (!activeConfig?.apiKey?.trim()) {
-        statuses.connection = { label: t('Needs key'), tone: 'warning' };
-    } else if (!BUILTIN_PROVIDER_KEYS.includes(settings.activeProvider)) {
-        statuses.connection = { label: t('Custom provider'), tone: 'accent' };
-    }
-
-    if (!settings.enableGuardian) {
-        statuses.guardian = { label: t('Off'), tone: 'muted' };
-    }
-
-    if (settings.privacyMode) {
-        statuses.memory = { label: t('Private'), tone: 'accent' };
-    }
-
-    if (settings.allowPluginControl || !settings.confirmExecutions || settings.vaultWriteScope === 'all-vault') {
-        // 'Risk' 过泛,细化为「权限偏宽」更自解释。
-        statuses.permissions = { label: t('Broad access'), tone: 'danger' };
-    }
-
-    if (!settings.autoGeneratePluginSkills) {
-        statuses['plugin-skills'] = { label: t('Off'), tone: 'muted' };
-    }
-
-    const overviewActions = getSettingsOverviewActions(settings);
-    if (overviewActions.length > 0) {
-        statuses.overview = {
-            // 用占位模板而非拼接英文单复数。
-            label: t('{n} to review').replace('{n}', String(overviewActions.length)),
-            tone: overviewActions.some(action => action.tone === 'danger') ? 'danger' : 'warning',
-        };
-    }
-
-    return statuses;
-}
 
 export function getSettingsOverviewActions(settings: PluginSettings): SettingsOverviewAction[] {
     const actions: SettingsOverviewAction[] = [];
@@ -1620,75 +1085,6 @@ function buildDerivedBadges(status: DerivedSkillStatus): string[] {
     return badges;
 }
 
-export function getProviderDeletionState(settings: PluginSettings): ProviderDeletionState {
-    const activeConfig = settings.providers[settings.activeProvider];
-    if (!activeConfig) {
-        return {
-            canDelete: false,
-            helperText: 'No active provider selected.',
-            label: 'Delete Provider',
-        };
-    }
-
-    if (Object.keys(settings.providers || {}).length <= 1) {
-        return {
-            canDelete: false,
-            helperText: 'At least one provider must remain configured.',
-            label: 'Delete Provider',
-        };
-    }
-
-    return {
-        canDelete: true,
-        helperText: 'Remove the selected provider from this workspace.',
-        label: 'Delete Provider',
-    };
-}
-
-export function getProviderListSummary(settings: PluginSettings): ProviderListSummary {
-    const providers = Object.values(settings.providers || {});
-    const total = providers.length;
-    const configured = providers.filter(provider => !!provider.apiKey?.trim()).length;
-    const missingKey = total - configured;
-
-    return {
-        total,
-        configured,
-        missingKey,
-        label: `${total} providers / ${configured} configured / ${missingKey} missing key`,
-    };
-}
-
-export function getProviderCardMeta(settings: PluginSettings, providerId: string): ProviderCardMeta {
-    const config = settings.providers[providerId];
-    if (!config) {
-        throw new Error(`Unknown provider: ${providerId}`);
-    }
-
-    // P1-4: 服务商卡片文案走 i18n(连接卡片是配置主战场,此前成片英文与已译字段标签混排)。
-    const protocolLabel = getProtocolLabel(config.type);
-    const hasApiKey = !!config.apiKey?.trim();
-    const rawEndpoint = config.baseUrl?.trim() || t('Default provider endpoint');
-    const endpointSummary = rawEndpoint.replace(/^https?:\/\//, '');
-    const modelSummary = config.model?.trim()
-        ? `${t('Model')}: ${config.model.trim()}`
-        : `${t('Model')}: ${t('Not selected')}`;
-
-    return {
-        id: providerId,
-        label: config.label,
-        protocolLabel,
-        endpointSummary,
-        modelSummary,
-        statusLabel: hasApiKey ? t('Key configured') : t('No API key'),
-        statusTone: hasApiKey ? 'success' : 'warning',
-        isActive: settings.activeProvider === providerId,
-        compactMeta: modelSummary,
-        protocolGlyph: getProtocolGlyph(config.type),
-        statusGlyph: hasApiKey ? '●' : '!',
-    };
-}
-
 export function getConnectionTestStatusPresentation(
     status: ConnectionTestStatus
 ): SettingsSectionStatus | undefined {
@@ -1732,33 +1128,66 @@ function renderSettingHeading(
     return heading;
 }
 
+/**
+ * 声明式设置页（Obsidian >= 1.13 的 getSettingDefinitions()）。
+ *
+ * 设计取舍：
+ * - 每个原「分区」变成一个可导航的子页；标量设置用 control 定义，Obsidian 负责渲染、
+ *   保存与全局设置搜索索引。
+ * - 动态/异步内容（模型列表、连接测试、记忆浏览、派生技能、知识库状态）用 render 回调
+ *   或 SettingPage 子类，因为它们依赖运行时状态、没有对应的声明式控件。
+ * - 读取/写入仍走插件自己的 saveSettings()/saveSettingsLight()：getControlValue/
+ *   setControlValue 被覆写，保留既有的「重建 provider/guardian/knowledge」副作用。
+ */
+
+const API_KEY_PLACEHOLDER = 'sk-...';
+
+/** 这些键的落盘走 400ms debounce：逐击键/逐格拖动时重建服务代价高。 */
+const DEBOUNCED_SETTING_KEYS = new Set<string>([
+    'systemPrompt',
+    'ignoredFolders',
+    'contextWindow',
+    'guardianSensitivity',
+    'knowledgeSourceFolders',
+    'knowledgeMaxCompileBatch',
+    'asrBaseUrl',
+    'asrApiKey',
+    'asrModel',
+    'asrLanguage',
+    'wechatInboxPath',
+    'wechatStoragePath',
+    'pluginSkillExcludeList',
+]);
+
+/** 纯 UI 字段：只写 data.json，不重建 provider/guardian/knowledge。 */
+const LIGHT_SETTING_KEYS = new Set<string>([
+    'terminalTheme',
+    'terminalFontSize',
+    'terminalOpacity',
+]);
+
+/** 这些键变化后需要重建定义结构（可选项/说明文字随值变化），而不是只刷新谓词。 */
+const STRUCTURAL_SETTING_KEYS = new Set<string>([
+    'language',
+]);
+
+function providerKey(providerId: string, field: 'label' | 'type' | 'apiFlavor' | 'baseUrl'): string {
+    return `provider.${providerId}.${field}`;
+}
+
+function skillKey(skillName: string): string {
+    return `skill.${skillName}`;
+}
+
+/** FieldValidation → control.validate 的返回值（ok 时返回 undefined）。 */
+function validationMessage(validation: FieldValidation): string | undefined {
+    return validation.state === 'ok' ? undefined : validation.message;
+}
+
 export class SettingTab extends PluginSettingTab {
     plugin: IPlugin;
-    private renderToken = 0;
-    private openSectionIds = new Set<SettingsSectionId>();
-    // 分区内「高级」details 的展开态：与 openSectionIds 同理，避免局部重绘后塌回折叠（P1-3）。
-    private openAdvanced = new Set<string>();
-    // 首次打开面板时默认展开哪些分区一次性种子，避免新用户看到一堆全折叠的标题（P1-2）。
-    private didInitExpand = false;
-    // P0-1 局部刷新：display() 只建一次骨架（hero+搜索），accordionHost 内容由 renderAccordion() 单独重绘。
-    private accordionHost: HTMLElement | null = null;
-    private searchQuery = '';
-    private revealApiKey = false;
-    // 激活 provider 卡片的详情是否折叠。默认展开(false)；再次点击当前激活卡即切换折叠态，
-    // 切换到其它 provider 时重置为展开。此前「激活==展开」耦合导致再点无法折叠(用户反馈)。
-    private activeProviderDetailCollapsed = false;
-    private connectionTestStatus: ConnectionTestStatus = { state: 'idle', message: '' };
-    private memoryView: MemoryView | null = null;
-    private memorySearchQuery = '';
-    private memoryActiveTab: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = 'overview';
-    private memoryLoading = false;
-    private memoryError = '';
-    // #81：知识库分区每次整页/局部重绘都会重新挂载状态行；5s 内直接复用上次渲染好的文案，
-    // 连 getOntologyStatus / 文章 frontmatter 遍历都省掉。计数本身在
-    // KnowledgeStatusService.getGlobalCounts() 还有一层 30s 缓存（含分批与并发合并）。
-    private ontologyStatusCache: { text: string; title: string; timestamp: number } | null = null;
-    private static readonly ONTOLOGY_STATUS_CACHE_TTL_MS = 5000;
-    // textarea 逐击键写盘代价高：包一层 400ms debounce，末尾触发一次落盘。
+
+    // 文本/滑块逐次落盘代价高：debounce 到一次保存。
     // debounce 回调返回的 Promise 会被 debounce 丢弃，落盘失败必须在这里接住：
     // 记日志 + Notice，让用户知道刚才的修改没有保存。
     private debouncedPersist: Debouncer<[], Promise<void>> = debounce(
@@ -1766,8 +1195,7 @@ export class SettingTab extends PluginSettingTab {
         400,
         false,
     );
-    // 纯 UI 字段（外观主题/字号/不透明度）落盘：无需重建 provider/guardian/knowledge，走轻量保存 + debounce，
-    // 避免拖动滑块时每格都重建 LLM 客户端（P0-3）。
+    // 纯 UI 字段（外观主题/字号/不透明度）走轻量保存 + debounce，避免拖动滑块时重建 LLM 客户端。
     private debouncedPersistLight: Debouncer<[], Promise<void>> = debounce(
         () => this.persistSettingsLight().catch(this.reportAsyncFailure),
         400,
@@ -1783,40 +1211,208 @@ export class SettingTab extends PluginSettingTab {
         logger.error('Settings persist failed', error, 'SettingsTab');
         this.notifyFailure(error);
     };
-    // 局部重绘调度：合并同一轮里的多次请求、禁止渲染中嵌套渲染（issue #81 卡死根因之一）。
-    private renderScheduler: RenderScheduler = createRenderScheduler(() => this.renderAccordionNow());
-    // 搜索逐键整页重建是移动端长任务的放大器：150ms 防抖 + 命中集合没变就不重绘。
-    private debouncedSearchRender: Debouncer<[], void> = debounce(
-        () => this.applySearchRender(),
-        150,
-        false,
-    );
-    private lastSearchRenderQuery = '';
-    private lastSearchRenderVisible: SettingsSectionId[] = [];
-    // 模型字段结果缓存：重绘/搜索/展开分区都复用上次列表，只有用户点「Refresh list」才强制重取。
+    private revealedApiKeys = new Set<string>();
+    private connectionTestStatus = new Map<string, ConnectionTestStatus>();
+    // 模型字段结果缓存：重绘/翻页都复用上次列表，只有用户点 Refresh list 才强制重取。
     private modelFieldCache = new Map<string, { result: AvailableModelsResult; timestamp: number }>();
-    // 面板打开期间监听隐藏事件，尽量把 debounce 里未落盘的最后一次编辑刷出去（移动端进程可能被回收）。
+    // 知识库状态行 5s 内复用上次文案，避免每次打开子页都遍历全库。
+    private ontologyStatusCache: { text: string; title: string; timestamp: number } | null = null;
+    private static readonly ONTOLOGY_STATUS_CACHE_TTL_MS = 5000;
+    // 面板打开期间监听「页面被隐藏」：移动端切后台/被回收前尽量把 debounce 里的最后编辑落盘。
     private visibilityFlushInstalled = false;
 
     constructor(app: App, plugin: IPlugin) {
         super(app, plugin);
         this.plugin = plugin;
+        // 设置侧栏里的插件图标（声明式设置页不再自己画标题栏/图标）。
+        this.icon = 'bot';
+        ensureSettingsFallbackStyles();
+        this.installVisibilityFlush();
     }
 
-    private getActiveConfig(): ProviderConfig | undefined {
+    // ────────────────────────────────────────────────────────────────────────
+    // 存储适配：声明式控件按 key 读写插件自己的设置对象。
+    // 不走 PluginSettingTab 默认实现，是为了保留 saveSettings() 的重建副作用。
+    // ────────────────────────────────────────────────────────────────────────
+
+    getSettingDefinitions(): SettingDefinitionItem[] {
+        return [
+            ...this.buildAttentionItems(),
+            this.buildProvidersPage(),
+            this.buildBehaviorPage(),
+            this.buildMemoryPage(),
+            this.buildPermissionsPage(),
+            this.buildSkillsPage(),
+            this.buildCapturePage(),
+            this.buildKnowledgePage(),
+            this.buildGuardianPage(),
+            this.buildAppearancePage(),
+            this.buildPluginSkillsPage(),
+        ];
+    }
+
+    getControlValue(key: string): unknown {
+        if (key.startsWith('provider.')) return this.getProviderControlValue(key);
+        if (key.startsWith('skill.')) {
+            const skillName = key.slice('skill.'.length);
+            return !(this.plugin.settings.disabledSkills ?? []).includes(skillName);
+        }
+
+        const settings = this.plugin.settings as unknown as Record<string, unknown>;
+        switch (key) {
+            case 'knowledgeSourceFolders':
+                return (this.plugin.settings.knowledgeSourceFolders ?? []).join('\n');
+            case 'vaultWriteAllowedFolders':
+                return (this.plugin.settings.vaultWriteAllowedFolders ?? []).join('\n');
+            case 'pluginSkillExcludeList':
+                return (this.plugin.settings.pluginSkillExcludeList ?? []).join(', ');
+            case 'knowledgeOntologyEnabled':
+                return this.plugin.settings.knowledgeOntologyEnabled !== false;
+            default:
+                return settings[key];
+        }
+    }
+
+    async setControlValue(key: string, value: unknown): Promise<void> {
+        if (key.startsWith('provider.')) {
+            await this.setProviderControlValue(key, value);
+            return;
+        }
+        if (key.startsWith('skill.')) {
+            await this.setSkillControlValue(key, value);
+            return;
+        }
+
         const settings = this.plugin.settings;
-        return settings.providers[settings.activeProvider];
+        switch (key) {
+            case 'knowledgeSourceFolders':
+                settings.knowledgeSourceFolders = String(value ?? '')
+                    .split('\n')
+                    .map(entry => entry.trim())
+                    .filter(entry => entry.length > 0);
+                break;
+            case 'vaultWriteAllowedFolders':
+                settings.vaultWriteAllowedFolders = String(value ?? '')
+                    .split(/\r?\n/)
+                    .map(entry => entry.trim())
+                    .filter(entry => entry.length > 0);
+                break;
+            case 'pluginSkillExcludeList':
+                settings.pluginSkillExcludeList = String(value ?? '')
+                    .split(',')
+                    .map(entry => entry.trim())
+                    .filter(entry => entry.length > 0);
+                break;
+            case 'knowledgeWikiFolder':
+                settings.knowledgeWikiFolder = String(value ?? '').trim() || 'Knowledge Wiki';
+                break;
+            case 'asrBaseUrl':
+            case 'asrApiKey':
+            case 'asrModel':
+            case 'asrLanguage':
+                settings[key] = String(value ?? '').trim();
+                break;
+            case 'language': {
+                const locale = value as Locale;
+                if (typeof this.plugin.applyLanguageChange === 'function') {
+                    await this.plugin.applyLanguageChange(locale);
+                } else {
+                    settings.language = locale;
+                    await this.persistSettingsLight();
+                }
+                this.update();
+                return;
+            }
+            default:
+                (settings as unknown as Record<string, unknown>)[key] = value;
+                break;
+        }
+
+        if (LIGHT_SETTING_KEYS.has(key)) {
+            this.debouncedPersistLight();
+        } else if (DEBOUNCED_SETTING_KEYS.has(key)) {
+            this.debouncedPersist();
+        } else {
+            await this.persistSettings();
+        }
+        if (STRUCTURAL_SETTING_KEYS.has(key)) this.update();
+        else this.refreshDomState();
     }
 
-    private getVisibleSections(): SettingsSectionId[] {
-        return getMatchingSettingsSections(this.searchQuery);
+    private getProviderControlValue(key: string): unknown {
+        const parsed = this.parseProviderKey(key);
+        if (!parsed) return undefined;
+        const config = this.plugin.settings.providers[parsed.providerId];
+        if (!config) return undefined;
+        switch (parsed.field) {
+            case 'label': return config.label;
+            case 'type': return config.type;
+            case 'apiFlavor': return config.apiFlavor ?? 'completions';
+            case 'baseUrl': return config.baseUrl;
+        }
+    }
+
+    private async setProviderControlValue(key: string, value: unknown): Promise<void> {
+        const parsed = this.parseProviderKey(key);
+        if (!parsed) return;
+        const settings = this.plugin.settings;
+        const config = settings.providers[parsed.providerId];
+        if (!config) return;
+
+        switch (parsed.field) {
+            case 'label':
+                config.label = String(value ?? '').trim();
+                this.debouncedPersist();
+                return;
+            case 'baseUrl':
+                config.baseUrl = String(value ?? '').trim();
+                this.connectionTestStatus.delete(parsed.providerId);
+                this.debouncedPersist();
+                return;
+            case 'type': {
+                const nextType = value as ProviderType;
+                if (nextType === config.type) return;
+                config.type = nextType;
+                // 地址语义随协议变，按新协议迁移而不是把上个协议的地址原样留着冒充可用。
+                config.baseUrl = resolveBaseUrlOnProtocolChange(nextType, config.baseUrl);
+                // apiFlavor 只对 openai-compatible 有意义，切走时清掉避免残留值日后被误读。
+                if (nextType !== 'openai-compatible') delete config.apiFlavor;
+                this.connectionTestStatus.delete(parsed.providerId);
+                await this.persistSettings();
+                this.update();
+                return;
+            }
+            case 'apiFlavor':
+                config.apiFlavor = value as OpenAIApiFlavor;
+                this.connectionTestStatus.delete(parsed.providerId);
+                await this.persistSettings();
+                this.update();
+                return;
+        }
+    }
+
+    private parseProviderKey(key: string): { providerId: string; field: 'label' | 'type' | 'apiFlavor' | 'baseUrl' } | null {
+        const rest = key.slice('provider.'.length);
+        const dot = rest.lastIndexOf('.');
+        if (dot <= 0) return null;
+        const field = rest.slice(dot + 1);
+        if (field !== 'label' && field !== 'type' && field !== 'apiFlavor' && field !== 'baseUrl') return null;
+        return { providerId: rest.slice(0, dot), field };
+    }
+
+    private async setSkillControlValue(key: string, value: unknown): Promise<void> {
+        const skillName = key.slice('skill.'.length);
+        const next = new Set(this.plugin.settings.disabledSkills ?? []);
+        if (value) next.delete(skillName);
+        else next.add(skillName);
+        this.plugin.settings.disabledSkills = [...next];
+        await this.persistSettings();
     }
 
     private async persistSettings(): Promise<void> {
         await this.plugin.saveSettings();
     }
 
-    // 仅落盘纯 UI 字段：不触发 provider/guardian/knowledge 重建（见 saveSettingsLight）。
     private async persistSettingsLight(): Promise<void> {
         if (typeof this.plugin.saveSettingsLight === 'function') {
             await this.plugin.saveSettingsLight();
@@ -1825,1832 +1421,1161 @@ export class SettingTab extends PluginSettingTab {
         }
     }
 
-    private resetConnectionTestStatus(): void {
-        this.connectionTestStatus = { state: 'idle', message: '' };
+    /** debouncedPersist 的回调已自带 catch（日志 + Notice）；detach 保证 run() 本身也不留悬空 Promise。 */
+    private flushPersistedEdits(): void {
+        detach(this.debouncedPersist.run(), 'SettingsTab');
     }
 
     hide(): void {
-        // 先丢弃还没执行的排队重绘，避免面板关闭后又往已卸载的 DOM 里构建。
-        this.renderScheduler.cancel();
-        this.debouncedSearchRender.cancel();
-        this.removeVisibilityFlush();
         // 面板关闭时立即落盘 debounce 里未触发的最后一次编辑，避免丢改。
         this.flushPersistedEdits();
         detach(this.debouncedPersistLight.run(), 'SettingsTab');
-        this.accordionHost = null;
         super.hide();
     }
 
-    // display() 现在只负责构建「骨架」：hero（标题+搜索）+ 一个持久的 accordion 宿主容器。
-    // 骨架只在面板首次打开时建一次；内容更新一律走 renderAccordion()，因此搜索框与 hero 永不被销毁，
-    // 输入焦点与光标自然保留（P0-1，修复搜索框每敲一字失焦的核心缺陷）。
-    display(): void {
-        const { containerEl } = this;
-        ensureSettingsFallbackStyles();
-        containerEl.empty();
+    // ────────────────────────────────────────────────────────────────────────
+    // 顶部：需要关注的配置项。声明式页面无法在 1.13.0 上给导航项加状态角标
+    // （displayValue/status 是 1.13.1 的 API），因此把「概览」折叠成页首的静态行。
+    // ────────────────────────────────────────────────────────────────────────
 
-        // 首次打开：给新用户默认展开 overview + connection，避免面对一堆全折叠标题（P1-2）。
-        if (!this.didInitExpand) {
-            this.didInitExpand = true;
-            this.openSectionIds.add('overview');
-            this.openSectionIds.add('connection');
+    private buildAttentionItems(): SettingDefinitionItem[] {
+        const actions = getSettingsOverviewActions(this.plugin.settings);
+        if (!actions.length) return [];
+        return [{
+            type: 'group',
+            heading: t('Needs attention'),
+            items: actions.map(action => ({
+                name: action.label,
+                desc: fillPlaceholders(
+                    t('Review this on the {section} page.'),
+                    { section: getSectionMeta(action.sectionId).title },
+                ),
+            })),
+        }];
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 连接：服务商列表 → 每个服务商一个声明式子页。
+    // ────────────────────────────────────────────────────────────────────────
+
+    private buildProvidersPage(): SettingDefinitionPage {
+        const meta = getSectionMeta('connection');
+        const providerIds = Object.keys(this.plugin.settings.providers);
+        return {
+            type: 'page',
+            name: meta.title,
+            desc: meta.description,
+            items: [{
+                type: 'list',
+                emptyState: t('No providers configured. Add one to get started.'),
+                addItem: {
+                    name: t('Add provider'),
+                    action: () => this.openAddProviderModal(),
+                },
+                onDelete: (index: number) => {
+                    const id = Object.keys(this.plugin.settings.providers)[index];
+                    if (id) this.requestDeleteProvider(id);
+                },
+                items: providerIds.map(id => this.buildProviderPage(id)),
+            }],
+        };
+    }
+
+    private buildProviderPage(providerId: string): SettingDefinitionPage {
+        const settings = this.plugin.settings;
+        const config = settings.providers[providerId];
+        const isActive = settings.activeProvider === providerId;
+        const statusBits = [
+            isActive ? t('Active provider') : t('Inactive provider'),
+            getProtocolLabel(config.type),
+            config.model?.trim() ? config.model.trim() : t('No model selected'),
+        ];
+        if (!config.apiKey?.trim()) statusBits.push(t('Needs key'));
+
+        return {
+            type: 'page',
+            name: this.uniqueProviderPageName(providerId),
+            desc: statusBits.join(' · '),
+            items: [
+                {
+                    name: isActive ? t('Active provider') : t('Use this provider'),
+                    desc: isActive
+                        ? t('AI requests use this provider.')
+                        : t('Make this the provider that AI requests use.'),
+                    action: () => { void this.activateProvider(providerId); },
+                    disabled: isActive,
+                },
+                {
+                    name: t('Provider name'),
+                    desc: t('Shown in the provider list. An empty name is rejected instead of silently keeping the old one.'),
+                    control: {
+                        type: 'text',
+                        key: providerKey(providerId, 'label'),
+                        placeholder: t('My Provider'),
+                        validate: (value: string) => validationMessage(validateProviderName(value)),
+                    },
+                },
+                {
+                    name: t('Protocol'),
+                    desc: t('The wire protocol this provider speaks. Switching it only shows the fields that apply.'),
+                    control: {
+                        type: 'dropdown',
+                        key: providerKey(providerId, 'type'),
+                        options: Object.fromEntries(getProtocolOptions().map(option => [option.value, option.label])),
+                    },
+                },
+                {
+                    name: t('API type (Chat Completions / Responses)'),
+                    desc: getRequestPathSummary('openai-compatible', config.apiFlavor).note,
+                    visible: () => config.type === 'openai-compatible',
+                    control: {
+                        type: 'dropdown',
+                        key: providerKey(providerId, 'apiFlavor'),
+                        defaultValue: 'completions',
+                        options: {
+                            completions: t('Chat Completions (/chat/completions)'),
+                            responses: t('Responses (/responses)'),
+                        },
+                    },
+                },
+                {
+                    name: t('Service address (Base URL)'),
+                    render: (setting: Setting) => this.renderProviderBaseUrlRow(setting, providerId),
+                },
+                {
+                    name: t('API key'),
+                    desc: t('Stored locally and hidden by default. Use Reveal to check it; Clear asks for confirmation.'),
+                    render: (setting: Setting) => this.renderProviderApiKeyRow(setting, providerId),
+                },
+                {
+                    name: t('Model'),
+                    desc: t('Pick a model from the list once the endpoint returns it, or type the model ID directly.'),
+                    render: (setting: Setting) => this.renderProviderModelRow(setting, providerId),
+                },
+                {
+                    name: t('Custom headers (advanced)'),
+                    desc: t('One "Header-Name: value" per line. Use {{conversationId}} to send the current conversation ID; it is skipped for one-off calls that have no conversation.'),
+                    render: (setting: Setting) => this.renderProviderHeadersRow(setting, providerId),
+                },
+                {
+                    name: t('Connection test'),
+                    desc: fillPlaceholders(
+                        t('Checks whether the model list is reachable at {url}. It does not run a generation, so a pass means "the endpoint answers", not "the model can generate".'),
+                        { url: getModelListEndpoint(config.type, config.baseUrl) },
+                    ),
+                    render: (setting: Setting) => this.renderProviderTestRow(setting, providerId),
+                },
+            ],
+        };
+    }
+
+    private uniqueProviderPageName(providerId: string): string {
+        const settings = this.plugin.settings;
+        const label = settings.providers[providerId]?.label?.trim() || providerId;
+        const siblings = Object.keys(settings.providers)
+            .filter(otherId => otherId !== providerId)
+            .map(otherId => settings.providers[otherId]?.label?.trim() || otherId);
+        return siblings.includes(label) ? `${label} (${providerId})` : label;
+    }
+
+    private openAddProviderModal(): void {
+        const settings = this.plugin.settings;
+        new AddProviderModal(this.app, (draft) => {
+            const key = `custom-${Date.now()}`;
+            settings.providers[key] = buildNewProviderConfig(draft.type, draft.label, draft.baseUrl);
+            settings.activeProvider = key;
+            detach(this.persistSettings().then(() => this.update()), 'SettingsTab', this.notifyFailure);
+        }).open();
+    }
+
+    private requestDeleteProvider(providerId: string): void {
+        const settings = this.plugin.settings;
+        const config = settings.providers[providerId];
+        if (!config) return;
+        if (Object.keys(settings.providers).length <= 1) {
+            new Notice(t('At least one provider must remain configured.'));
+            this.update();
+            return;
         }
-
-        const root = containerEl.createDiv({ cls: 'baizer-settings-page' });
-        this.renderHeader(root);
-        this.accordionHost = root.createDiv({ cls: 'baizer-settings-accordion-host' });
-        this.installVisibilityFlush();
-        this.renderAccordion();
-    }
-
-    // 面板打开期间监听「页面被隐藏」：移动端切后台/被回收前尽量把 debounce 里的最后编辑落盘。
-    // 诚实边界：进程被强杀时任何回调都不保证执行 —— 这里只能缩小丢改窗口，不能消除。
-    private readonly handleVisibilityChange = (): void => {
-        if (typeof document === 'undefined') return;
-        if (document.visibilityState === 'visible') return;
-        this.flushPersistedEdits();
-        detach(this.debouncedPersistLight.run(), 'SettingsTab');
-    };
-
-    private installVisibilityFlush(): void {
-        if (this.visibilityFlushInstalled || typeof document === 'undefined') return;
-        if (typeof document.addEventListener !== 'function') return;
-        document.addEventListener('visibilitychange', this.handleVisibilityChange);
-        this.visibilityFlushInstalled = true;
-    }
-
-    private removeVisibilityFlush(): void {
-        if (!this.visibilityFlushInstalled || typeof document === 'undefined') return;
-        if (typeof document.removeEventListener === 'function') {
-            document.removeEventListener('visibilitychange', this.handleVisibilityChange);
-        }
-        this.visibilityFlushInstalled = false;
-    }
-
-    private renderHeader(containerEl: HTMLElement): void {
-        const hero = containerEl.createDiv({ cls: 'baizer-settings-hero' });
-        renderSettingHeading(hero, `${PLUGIN_NAME} ${t('Configuration')}`, { nameClass: 'baizer-settings-title' });
-        hero.createEl('p', {
-            text: t('A cleaner control center for provider setup, runtime behavior, and plugin capabilities.'),
-            cls: 'baizer-settings-subtitle',
-        });
-
-        const searchRow = hero.createDiv({ cls: 'baizer-settings-search-row' });
-        const searchInput = searchRow.createEl('input', {
-            cls: 'baizer-settings-search',
-            attr: {
-                type: 'search',
-                placeholder: t('Search settings'),
-                'aria-label': t('Search settings'),
+        new MemoryConfirmModal(
+            this.app,
+            t('Delete Provider'),
+            `${t('Delete provider')} "${config.label || providerId}"? ${t('This removes its configuration from this workspace.')}`,
+            async () => {
+                delete settings.providers[providerId];
+                if (BUILTIN_PROVIDER_KEYS.includes(providerId)) {
+                    settings.deletedProviderIds = Array.from(new Set([...(settings.deletedProviderIds || []), providerId]));
+                }
+                // 仅当删的是当前激活项时才需要改选激活；删其它项保持当前激活不变。
+                if (providerId === settings.activeProvider) {
+                    settings.activeProvider = Object.keys(settings.providers)[0] || DEFAULT_SETTINGS.activeProvider;
+                }
+                this.connectionTestStatus.delete(providerId);
+                this.revealedApiKeys.delete(providerId);
+                await this.persistSettings();
+                new Notice(t('Provider deleted'));
+                this.update();
             },
-        });
-        searchInput.value = this.searchQuery;
-        // 只更新查询；逐键整页重建是移动端长任务的放大器，改为 150ms 防抖后
-        // 再由 applySearchRender() 判断「命中分区是否真的变了」才重绘。
-        // 搜索框本身不重建，焦点与光标不丢。
-        searchInput.addEventListener('input', () => {
-            this.searchQuery = searchInput.value;
-            this.debouncedSearchRender();
-        });
+            // 列表的删除按钮会先删掉 DOM 行；取消时把界面重新同步回真实数据。
+            () => this.update(),
+        ).open();
     }
 
-    // 局部刷新入口：只重绘 accordion 宿主内的内容，不触碰 hero/搜索框。
-    // 所有 section 内的 onChange/click 现在都调用它（而非整页 display()），从而保留焦点与其它分区的展开态。
-    // 真正的 DOM 构建在 renderAccordionNow()；这里只排队：同一轮内合并，渲染中不嵌套（issue #81）。
-    private renderAccordion(): void {
-        this.renderScheduler.request();
+    private async activateProvider(providerId: string): Promise<void> {
+        if (typeof this.plugin.modelService.switchProvider === 'function') {
+            await this.plugin.modelService.switchProvider(providerId, () => this.persistSettings());
+        } else {
+            this.plugin.settings.activeProvider = providerId;
+            await this.persistSettings();
+        }
+        this.update();
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 连接子页里的动态行（API Key / 模型 / 请求头 / 连接测试）。
+    // ────────────────────────────────────────────────────────────────────────
 
     /**
-     * 搜索输入的重绘闸门：只有「查询空/非空状态」或「可见分区集合」真的变了才重绘。
-     * 连续输入 20 个字符时，只要命中分区没变，一次整页重建都不会发生。
+     * 声明式控件的右侧列很窄：多行文本会被压成一条细缝。需要整行宽度的 textarea
+     * 统一走这个 render 行（name/desc 在上、textarea 占满整行），与 Base URL 同一布局。
      */
-    private applySearchRender(): void {
-        const normalized = normalizeSearchQuery(this.searchQuery);
-        const nextVisible = getMatchingSettingsSections(this.searchQuery);
-        const queryModeChanged = (normalized === '') !== (this.lastSearchRenderQuery === '');
-        if (!queryModeChanged && isSameSettingsSectionList(nextVisible, this.lastSearchRenderVisible)) {
-            return;
-        }
-        this.renderAccordion();
-    }
-
-    private renderAccordionNow(): void {
-        const host = this.accordionHost;
-        // 面板已关闭（hide 会 cancel 排队请求）或骨架未建立：不再构建。
-        if (!host) return;
-        this.renderAccordionContents(host);
-    }
-
-    private renderAccordionContents(host: HTMLElement): void {
-        const token = ++this.renderToken;
-        host.empty();
-
-        const visibleSections = this.getVisibleSections();
-        // 记录本次渲染对应的搜索状态，供 applySearchRender() 判断下次是否真的需要重绘。
-        this.lastSearchRenderQuery = normalizeSearchQuery(this.searchQuery);
-        this.lastSearchRenderVisible = visibleSections;
-        if (!visibleSections.length) {
-            const empty = host.createDiv({ cls: 'baizer-settings-empty-state' });
-            renderSettingHeading(empty, t('No matching settings'));
-            empty.createEl('p', { text: t('Try searching by provider, prompt, permissions, or knowledge.') });
-            return;
-        }
-
-        // 搜索命中时自动展开命中的分区，让用户一步看到目标设置（P1-2）。
-        // 仅在有查询时生效，避免污染用户手动折叠的偏好。
-        if (normalizeSearchQuery(this.searchQuery)) {
-            visibleSections.forEach(id => this.openSectionIds.add(id));
-        }
-
-        const accordion = host.createDiv({ cls: 'baizer-settings-accordion' });
-        const statuses = getSettingsSectionStatuses(this.plugin.settings);
-        const renderableSections = new Set(getRenderableSettingsSections(visibleSections, this.openSectionIds));
-
-        visibleSections.forEach(sectionId => {
-            const meta = getSectionMeta(sectionId);
-            const status = statuses[sectionId];
-            // data-section-id 是给工具看的（tools/provider-settings-shots 用它打开指定分区）。
-            // 用属性而不是标题文本：标题随 locale 变，属性不变。
-            const card = accordion.createEl('details', {
-                cls: 'baizer-settings-section-card',
-                attr: { 'data-section-id': sectionId },
-            });
-            card.open = this.openSectionIds.has(sectionId);
-            card.addEventListener('toggle', () => {
-                if (card.open) {
-                    this.openSectionIds.add(sectionId);
-                    // 展开一个尚未渲染的分区：只就地注入这一块内容，不再整页重建。
-                    // （此前在 toggle 派发过程中 empty() 掉派发元素自身，属于渲染可重入。）
-                    if (renderableSections.has(sectionId)) return;
-                    renderableSections.add(sectionId);
-                    const content = card.createDiv({ cls: 'baizer-settings-section-content' });
-                    this.renderSectionContent(sectionId, content, this.renderToken);
-                    return;
-                }
-                this.openSectionIds.delete(sectionId);
-            });
-
-            const summary = card.createEl('summary', { cls: 'baizer-settings-section-summary' });
-            const copy = summary.createDiv({ cls: 'baizer-settings-section-copy' });
-            renderSettingHeading(copy, meta.title, { nameClass: 'baizer-settings-section-title' });
-            copy.createEl('p', { text: meta.description, cls: 'baizer-settings-section-description' });
-            const metaEl = summary.createSpan({ cls: 'baizer-settings-section-meta' });
-            if (status) {
-                metaEl.createSpan({ cls: 'baizer-settings-badge is-' + status.tone, text: status.label });
-            }
-            // chevron 纯装饰：改用图标并 aria-hidden，避免读屏朗读「大于号」（P2）。
-            const chevron = summary.createSpan({ cls: 'baizer-settings-section-chevron', attr: { 'aria-hidden': 'true' } });
-            setIcon(chevron, 'chevron-right');
-
-            if (renderableSections.has(sectionId)) {
-                const content = card.createDiv({ cls: 'baizer-settings-section-content' });
-                this.renderSectionContent(sectionId, content, token);
-            }
+    private renderStackedTextarea(
+        setting: Setting,
+        options: { value: string; rows?: number; placeholder?: string; onChange: (value: string) => void },
+    ): void {
+        setting.settingEl.addClass('baizer-setting-stacked');
+        setting.addTextArea(area => {
+            area.setPlaceholder(options.placeholder ?? '');
+            area.inputEl.rows = options.rows ?? 4;
+            area.inputEl.setAttribute('spellcheck', 'false');
+            area.setValue(options.value);
+            area.onChange(options.onChange);
         });
     }
 
-    private renderSectionContent(sectionId: SettingsSectionId, containerEl: HTMLElement, token: number): void {
-        switch (sectionId) {
-            case 'overview':
-                this.renderOverviewSection(containerEl);
-                return;
-            case 'connection':
-                this.renderConnectionSection(containerEl, token);
-                return;
-            case 'behavior':
-                this.renderRuntimeSection(containerEl);
-                return;
-            case 'memory':
-                this.renderMemorySection(containerEl);
-                return;
-            case 'guardian':
-                this.renderGuardianSection(containerEl);
-                return;
-            case 'permissions':
-                this.renderPermissionsSection(containerEl);
-                return;
-            case 'skills':
-                this.renderSkillsSection(containerEl);
-                return;
-            case 'appearance':
-                this.renderAppearanceSection(containerEl);
-                return;
-            case 'capture':
-                this.renderCaptureSection(containerEl);
-                return;
-            case 'knowledge':
-                this.renderKnowledgeSection(containerEl);
-                return;
-            case 'plugin-skills':
-                this.renderPluginSkillsSection(containerEl);
-                return;
-        }
-    }
-
-    // P1-3: 让分区内嵌套的「高级」details 记住展开态。局部重绘(renderAccordion)会重建这些节点,
-    // 若不持久化,任何 toggle 都会让高级块塌回折叠——最典型的是切换 Vault Write Scope 后,
-    // 新出现的 Writable Folders 必填项反被折叠隐藏。用 openAdvanced 集合按 key 记忆。
-    private trackAdvancedDetails(details: HTMLDetailsElement, key: string): void {
-        details.open = this.openAdvanced.has(key);
-        details.addEventListener('toggle', () => {
-            if (details.open) this.openAdvanced.add(key);
-            else this.openAdvanced.delete(key);
+    /** Base URL 需要整行宽度 + 就地校验 + 动态请求路径说明，故用 render 而非原生 text 控件。 */
+    private renderProviderBaseUrlRow(setting: Setting, providerId: string): void {
+        const config = this.plugin.settings.providers[providerId];
+        if (!config) return;
+        setting.settingEl.addClass('baizer-setting-stacked');
+        const input = setting.controlEl.createEl('input', {
+            cls: 'baizer-settings-detail-input',
+            attr: {
+                type: 'text',
+                placeholder: getDefaultBaseUrlForType(config.type),
+                spellcheck: 'false',
+                autocomplete: 'off',
+                'aria-label': t('Service address (Base URL)'),
+            },
         });
-    }
-
-    private renderOverviewSection(containerEl: HTMLElement): void {
-        const actions = getSettingsOverviewActions(this.plugin.settings);
-        if (!actions.length) {
-            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-success', text: t('No immediate configuration actions.') });
-            return;
-        }
-
-        for (const action of actions) {
-            const row = containerEl.createDiv({ cls: 'baizer-settings-task' });
-            const sectionTitle = getSectionMeta(action.sectionId).title;
-            const copy = row.createSpan({ cls: 'baizer-settings-task-copy' });
-            // 正文只说问题;分区标题交给右侧跳转按钮承载,不再重复渲染两遍(P1-2 引导语义清晰化)。
-            copy.createEl('strong', { text: action.label });
-            // 跳转按钮:用真正的 action 样式(而非静态徽章),带明确动作动词与 aria-label,可供性清晰(P2)。
-            const button = row.createEl('button', {
-                text: `${t('Go to')} ${sectionTitle}`,
-                cls: 'baizer-settings-action is-' + (action.tone === 'danger' ? 'danger' : 'accent'),
-                attr: { type: 'button', 'aria-label': `${t('Go to')} ${sectionTitle}` },
-            });
-            button.addEventListener('click', () => {
-                this.openSectionIds.add(action.sectionId);
-                this.renderAccordion();
-            });
-        }
-    }
-
-    private renderMemorySection(containerEl: HTMLElement): void {
-        // 首次展开记忆分区时自动加载。放在最前面：本次渲染就能直接画出 Loading 态，
-        // 不必「先渲染空列表、再因 loading 置位整页重绘一次」（issue #81 的渲染可重入）。
-        if (!this.memoryView && !this.memoryLoading) {
-            void this.refreshMemoryView(this.memoryActiveTab, { repaintOnStart: false });
-        }
-
-        const toolbar = containerEl.createDiv({ cls: 'baizer-memory-toolbar' });
-        new Setting(toolbar)
-            .setName(t('Privacy Mode'))
-            .setDesc(t('When enabled, new conversation turns are not retained as Hindsight memory.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.privacyMode)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.privacyMode = value;
-                    await this.persistSettings();
-                    if (typeof this.plugin.modelService?.updateSettings === 'function') {
-                        await this.plugin.modelService.updateSettings(this.plugin.settings);
-                    }
-                    await this.refreshMemoryView();
-                }));
-
-        new Setting(toolbar)
-            .setName(t('Semantic query expansion'))
-            .setDesc(t('When enabled, memory recall first uses the AI to expand your query with synonyms and cross-language terms, improving recall for reworded or cross-language queries. Adds one cached AI call per conversation turn; does not affect Guardian completions.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.memoryQueryExpansion)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.memoryQueryExpansion = value;
-                    await this.persistSettings();
-                    if (typeof this.plugin.modelService?.updateSettings === 'function') {
-                        await this.plugin.modelService.updateSettings(this.plugin.settings);
-                    }
-                }));
-
-        new Setting(toolbar)
-            .setName(t('Entity graph recall'))
-            .setDesc(t('When enabled, memory recall also surfaces memories that share entities (people, projects, technologies) with the best matches, providing related context even without keyword overlap. Runs locally with no extra AI calls.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.memoryGraphRecall)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.memoryGraphRecall = value;
-                    await this.persistSettings();
-                    if (typeof this.plugin.modelService?.updateSettings === 'function') {
-                        await this.plugin.modelService.updateSettings(this.plugin.settings);
-                    }
-                }));
-
-        new Setting(toolbar)
-            .setName(t('Conflict-aware updates'))
-            .setDesc(t('When enabled, a new fact on the same topic (e.g. you change a stated preference) retires the outdated one so recall no longer mixes old and new. Retired memories are kept and can be restored.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.memoryConflictUpdate)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.memoryConflictUpdate = value;
-                    await this.persistSettings();
-                    if (typeof this.plugin.modelService?.updateSettings === 'function') {
-                        await this.plugin.modelService.updateSettings(this.plugin.settings);
-                    }
-                }));
-
-        // 工具栏底行:左侧数据目录芯片,右侧「刷新 + 清除全部」操作组。
-        // 清除全部从原本列表最底部上移至此 —— 避免高危操作被埋在长列表里(用户反馈「藏在数据中」)。
-        const toolbarFooter = toolbar.createDiv({ cls: 'baizer-memory-toolbar-footer' });
-        toolbarFooter.createSpan({
-            cls: 'baizer-memory-path',
-            text: `${t('Data folder')}: ${MEMORY_DIR}`,
-        });
-        const toolbarActions = toolbarFooter.createDiv({ cls: 'baizer-memory-toolbar-actions' });
-        this.createActionButton(toolbarActions, this.memoryLoading ? t('Refreshing...') : t('Refresh'), async () => {
-            await this.refreshMemoryView();
-        }, 'default', this.memoryLoading);
-        this.createActionButton(toolbarActions, t('Clear Memory'), async () => {
-            this.confirmClearAllMemory();
-        }, 'danger');
-
-        this.renderMemorySearch(containerEl);
-        this.renderMemoryTabs(containerEl);
-        this.renderMemoryList(containerEl);
-    }
-
-    private async refreshMemoryView(
-        mode: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = this.memoryActiveTab,
-        options: { repaintOnStart?: boolean } = {},
-    ): Promise<void> {
-        if (typeof this.plugin.modelService?.getMemoryView !== 'function') {
-            this.memoryError = t('Memory service is not available.');
-            this.renderAccordion();
-            return;
-        }
-
-        this.memoryLoading = true;
-        this.memoryError = '';
-        // 由 renderMemorySection 首次自动加载时，当前这次渲染已经会画出 Loading，
-        // 不再排队一次多余的整页重绘（repaintOnStart: false）。
-        if (options.repaintOnStart !== false) this.renderAccordion();
-        try {
-            this.memoryView = await this.plugin.modelService.getMemoryView({
-                mode,
-                query: mode === 'search' ? this.memorySearchQuery : undefined,
-                limit: 25,
-            });
-        } catch (error: unknown) {
-            this.memoryError = thrownMessage(error) || t('Failed to load memory.');
-        } finally {
-            this.memoryLoading = false;
-            this.renderAccordion();
-        }
-    }
-
-    private getVisibleMemoryRecords(): MemoryRecord[] {
-        const sections = this.memoryView?.sections;
-        if (!sections) return [];
-        if (this.memoryActiveTab === 'observations') return sections.observations || [];
-        if (this.memoryActiveTab === 'facts') return sections.facts || [];
-        if (this.memoryActiveTab === 'recent') return sections.recent || [];
-        if (this.memoryActiveTab === 'search') return sections.searchResults || [];
-        return [
-            ...(sections.observations || []),
-            ...(sections.facts || []),
-        ].slice(0, 10);
-    }
-
-    private renderMemorySearch(containerEl: HTMLElement): void {
-        const row = containerEl.createDiv({ cls: 'baizer-memory-search' });
-        const input = row.createEl('input', {
-            cls: 'baizer-settings-search',
-            // P1-6: 补 aria-label(此前只有 placeholder,与顶部主搜索不一致)。
-            attr: { type: 'search', placeholder: t('Search memories'), 'aria-label': t('Search memories') },
-        });
-        input.value = this.memorySearchQuery;
-        const runSearch = () => {
-            if (!this.memorySearchQuery.trim()) return;
-            this.memoryActiveTab = 'search';
-            void this.refreshMemoryView('search');
+        input.value = config.baseUrl;
+        // 完整值可悬停查看，输入框本身可编辑全文——不靠截断当唯一手段。
+        input.title = config.baseUrl;
+        const feedback = createFieldFeedback(setting.controlEl);
+        const pathHint = setting.controlEl.createDiv({ cls: 'baizer-settings-field-hint' });
+        const sync = (): void => {
+            feedback(validateBaseUrl(config.type, input.value));
+            pathHint.setText(describeRequestPath(config.type, config.apiFlavor, input.value));
         };
         input.addEventListener('input', () => {
-            this.memorySearchQuery = input.value;
-        });
-        // P1-6: 支持回车提交,不必把手从键盘移到鼠标去点按钮。
-        input.addEventListener('keydown', (e: KeyboardEvent) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                runSearch();
-            }
-        });
-        // 按钮常开(空查询在 runSearch 内部拦截),避免输入后禁用态因不重渲染而无法更新。
-        this.createActionButton(row, t('Search'), async () => runSearch(), 'accent');
-    }
-
-    private renderMemoryTabs(containerEl: HTMLElement): void {
-        // P1-6: 语义化为 tablist / tab,选中态用 aria-selected 表达(不再只靠颜色)。
-        const tabs = containerEl.createDiv({ cls: 'baizer-memory-tabs', attr: { role: 'tablist' } });
-        const entries: Array<[typeof this.memoryActiveTab, string]> = [
-            ['overview', t('Overview')],
-            ['observations', t('Observations')],
-            ['facts', t('Facts')],
-            ['recent', t('Experiences')],
-            ['search', t('Search Results')],
-        ];
-        for (const [id, label] of entries) {
-            const selected = this.memoryActiveTab === id;
-            const button = tabs.createEl('button', {
-                text: label,
-                cls: `baizer-memory-tab${selected ? ' is-active' : ''}`,
-                attr: {
-                    type: 'button',
-                    role: 'tab',
-                    'aria-selected': selected ? 'true' : 'false',
-                },
-            });
-            button.addEventListener('click', () => {
-                this.memoryActiveTab = id;
-                void this.refreshMemoryView(id);
-            });
-        }
-    }
-
-    private renderMemoryList(containerEl: HTMLElement): void {
-        if (this.memoryError) {
-            // P1-5: 错误也是异步结果,用 role=alert 让读屏立即播报。
-            containerEl.createDiv({
-                cls: 'baizer-settings-inline-note is-warning',
-                text: this.memoryError,
-                attr: { role: 'alert', 'aria-live': 'assertive' },
-            });
-            return;
-        }
-
-        // P1-5: 记忆加载/结果是异步变化,标记为 status 区,读屏可感知「加载中/无记忆」。
-        const list = containerEl.createDiv({ cls: 'baizer-memory-list', attr: { role: 'status', 'aria-live': 'polite' } });
-        const records = this.getVisibleMemoryRecords();
-        if (records.length === 0) {
-            list.createDiv({
-                cls: 'baizer-settings-empty-state',
-                text: this.memoryLoading ? t('Loading memory...') : t('No memories to show.'),
-            });
-            return;
-        }
-
-        for (const record of records) {
-            const row = list.createDiv({ cls: 'baizer-memory-row' });
-
-            // 头部:左侧「类型 badge + 标签 chips + 置信度」,右侧「时间 + 删除图标」。
-            // 删除按钮收成右上角的图标按钮 —— 不再是每行一个刺眼的红色文字块,悬停时才凸显。
-            const head = row.createDiv({ cls: 'baizer-memory-row-head' });
-            const headMeta = head.createDiv({ cls: 'baizer-memory-row-meta' });
-            headMeta.createSpan({ cls: `baizer-memory-type is-${record.type}`, text: record.type });
-            for (const tag of record.tags || []) {
-                headMeta.createSpan({ cls: 'baizer-memory-tag', text: tag });
-            }
-            headMeta.createSpan({
-                cls: 'baizer-memory-confidence',
-                text: `${t('confidence')} ${Number(record.confidence || 0).toFixed(2)}`,
-            });
-
-            const headActions = head.createDiv({ cls: 'baizer-memory-row-actions' });
-            headActions.createSpan({
-                cls: 'baizer-memory-time',
-                text: new Date(record.updatedAt || record.mentionedAt).toLocaleString('zh-CN'),
-            });
-            const deleteBtn = headActions.createEl('button', {
-                cls: 'baizer-memory-delete',
-                attr: { type: 'button', title: t('Delete'), 'aria-label': t('Delete') },
-            });
-            setIcon(deleteBtn, 'trash-2');
-            deleteBtn.addEventListener('click', () => this.confirmDeleteMemoryRecord(record.id));
-
-            row.createDiv({ cls: 'baizer-memory-row-text', text: this.truncateSettingMemoryText(record.text || '', 260) });
-        }
-    }
-
-    private truncateSettingMemoryText(text: string, max: number): string {
-        const normalized = text.replace(/\s+/g, ' ').trim();
-        return normalized.length <= max ? normalized : `${normalized.slice(0, max - 3)}...`;
-    }
-
-    private confirmDeleteMemoryRecord(id: string): void {
-        new MemoryConfirmModal(
-            this.app,
-            t('Delete Memory'),
-            t('Delete this remembered Hindsight memory record?'),
-            async () => {
-                await this.deleteMemoryRecord(id);
-            },
-        ).open();
-    }
-
-    private confirmClearAllMemory(): void {
-        new MemoryConfirmModal(
-            this.app,
-            t('Clear Memory'),
-            t('Clear all remembered Hindsight memory and legacy profile fields?'),
-            async () => {
-                await this.clearAllMemory();
-            },
-        ).open();
-    }
-
-    private async deleteMemoryRecord(id: string): Promise<void> {
-        if (typeof this.plugin.modelService?.deleteMemoryById !== 'function') {
-            new Notice(t('Memory deletion is not available.'));
-            return;
-        }
-
-        const result = await this.plugin.modelService.deleteMemoryById(id);
-        new Notice(result?.message || `${t('Deleted memory')}: ${id}`);
-        await this.refreshMemoryView();
-    }
-
-    private async clearAllMemory(): Promise<void> {
-        if (typeof this.plugin.modelService?.forgetMemory !== 'function') {
-            new Notice(t('Memory clearing is not available.'));
-            return;
-        }
-
-        const result = await this.plugin.modelService.forgetMemory('all');
-        new Notice(result?.message || t('Cleared all remembered Hindsight memory.'));
-        await this.refreshMemoryView();
-    }
-
-    private renderConnectionSection(containerEl: HTMLElement, token: number): void {
-        const settings = this.plugin.settings;
-        const activeConfig = this.getActiveConfig();
-
-        if (!activeConfig) {
-            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-warning', text: t('No active provider found.') });
-            return;
-        }
-
-        const shell = containerEl.createDiv({ cls: 'baizer-settings-provider-shell' });
-        const toolbar = shell.createDiv({ cls: 'baizer-settings-provider-toolbar' });
-        toolbar.createDiv({ cls: 'baizer-settings-panel-title', text: t('Providers') });
-        this.createActionButton(toolbar, t('+ Add'), async () => {
-            new AddProviderModal(this.app, voidHandler(async (draft: AddProviderDraft) => {
-                const key = `custom-${Date.now()}`;
-                // 协议由用户在模态框里选（含 Anthropic）；此前硬编码 openai-compatible，
-                // 想加 Anthropic 网关只能先建好再回详情页改协议。
-                settings.providers[key] = buildNewProviderConfig(draft.type, draft.label, draft.baseUrl);
-                settings.activeProvider = key;
-                this.resetConnectionTestStatus();
-                this.openSectionIds.add('connection');
-                await this.persistSettings();
-                this.revealApiKey = false;
-                this.renderAccordion();
-            }, 'SettingsTab', this.notifyFailure)).open();
-        }, 'accent');
-
-        const providerList = shell.createDiv({ cls: 'baizer-settings-provider-list' });
-        Object.keys(settings.providers).forEach(providerId => {
-            const meta = getProviderCardMeta(settings, providerId);
-            const provider = settings.providers[providerId];
-            const hasApiKey = !!provider.apiKey?.trim();
-            const badgeLabel = !hasApiKey ? 'Needs key' : meta.isActive ? 'Active' : 'Ready';
-            const badgeTone: SettingsBadgeTone = !hasApiKey ? 'warning' : 'success';
-
-            const card = providerList.createDiv({
-                cls: `baizer-settings-provider-card${meta.isActive ? ' is-active' : ''}`,
-            });
-            card.setAttribute('data-provider-id', providerId);
-
-            // 切换按钮不能内嵌 button（无效 HTML），故用 header 行把删除图标作为兄弟节点并排。
-            const header = card.createDiv({ cls: 'baizer-settings-provider-card-header' });
-            // 激活卡此时兼作详情展开/折叠开关，补 aria-expanded 让读屏知道点击会展开/收起详情。
-            const detailExpanded = meta.isActive && !this.activeProviderDetailCollapsed;
-            const button = header.createEl('button', {
-                cls: 'baizer-settings-provider-card-main',
-                attr: {
-                    type: 'button',
-                    'aria-pressed': meta.isActive ? 'true' : 'false',
-                    'aria-expanded': detailExpanded ? 'true' : 'false',
-                },
-            });
-            // 栅格下沉到内层 div：移动端 WebView 不允许 <button> 当 grid 容器，
-            // 直接在 button 上 display:grid 会被忽略、子项重叠。
-            const buttonInner = button.createDiv({ cls: 'baizer-settings-provider-card-main-inner' });
-            buttonInner.createDiv({ cls: 'baizer-settings-provider-card-title', text: meta.label });
-            buttonInner.createDiv({ cls: 'baizer-settings-provider-card-meta', text: meta.compactMeta });
-            buttonInner.createSpan({ cls: `baizer-settings-badge is-${badgeTone}`, text: badgeLabel });
-
-            button.addEventListener('click', voidHandler(async () => {
-                // 点当前激活卡：切换详情折叠/展开(可折叠已展开的详情)。
-                if (providerId === settings.activeProvider) {
-                    this.activeProviderDetailCollapsed = !this.activeProviderDetailCollapsed;
-                    this.openSectionIds.add('connection');
-                    this.renderAccordion();
-                    return;
-                }
-                // 点其它卡：切换为激活并展开其详情。
-                this.resetConnectionTestStatus();
-                this.activeProviderDetailCollapsed = false;
-                await this.plugin.modelService.switchProvider(providerId, () => this.persistSettings());
-                this.revealApiKey = false;
-                this.openSectionIds.add('connection');
-                this.renderAccordion();
-            }, 'SettingsTab', this.notifyFailure));
-
-            // 删除移到卡片头部：图标按钮 + tooltip，低调可发现，不再是抢眼的实体红按钮。
-            // 每张卡删自己（点哪张删哪张）；至少保留一个 provider 时禁用。
-            const canDelete = Object.keys(settings.providers || {}).length > 1;
-            const deleteBtn = header.createEl('button', {
-                cls: 'baizer-settings-provider-card-delete',
-                attr: {
-                    type: 'button',
-                    title: t('Delete provider'),
-                    'aria-label': `${t('Delete provider')} ${meta.label}`,
-                },
-            });
-            setIcon(deleteBtn, 'trash-2');
-            deleteBtn.disabled = !canDelete;
-            deleteBtn.addEventListener('click', (evt) => {
-                evt.stopPropagation();
-                if (deleteBtn.disabled) return;
-                // T12: 删除 Provider 前用 MemoryConfirmModal 二次确认，避免误触即毁配置。
-                new MemoryConfirmModal(
-                    this.app,
-                    t('Delete Provider'),
-                    `${t('Delete provider')} "${meta.label}"? ${t('This removes its configuration from this workspace.')}`,
-                    async () => {
-                        delete settings.providers[providerId];
-                        if (BUILTIN_PROVIDER_KEYS.includes(providerId)) {
-                            settings.deletedProviderIds = Array.from(new Set([...(settings.deletedProviderIds || []), providerId]));
-                        }
-                        // 仅当删的是当前激活项时才需要改选激活；删其它项保持当前激活不变。
-                        if (providerId === settings.activeProvider) {
-                            // 第一项兜底；全删光时退回出厂默认，避免 activeProvider 变成 undefined。
-                            settings.activeProvider = Object.keys(settings.providers)[0] || DEFAULT_SETTINGS.activeProvider;
-                            this.revealApiKey = false;
-                            this.resetConnectionTestStatus();
-                        }
-                        this.openSectionIds.add('connection');
-                        await this.persistSettings();
-                        new Notice(t('Provider deleted'));
-                        this.renderAccordion();
-                    },
-                ).open();
-            });
-
-            if (meta.isActive && !this.activeProviderDetailCollapsed) {
-                this.renderActiveProviderDetail(card, activeConfig, token);
-            }
-        });
-    }
-
-    /**
-     * 连接卡片的标题栏。标题仍走 renderSettingHeading（Obsidian 要求标题用 Setting.setHeading），
-     * 序号徽章让「身份与协议 → 地址与凭证 → 模型 → 测试结果」这条流程一眼可读。
-     */
-    private renderConnectionCard(
-        containerEl: HTMLElement,
-        title: string,
-        index: number,
-        group: ConnectionGroupId,
-    ): HTMLElement {
-        const card = containerEl.createDiv({ cls: 'baizer-settings-connection-card' });
-        card.setAttribute('data-connection-group', group);
-        const header = card.createDiv({ cls: 'baizer-settings-connection-card-header' });
-        header.createSpan({
-            cls: 'baizer-settings-connection-card-index',
-            text: String(index),
-            attr: { 'aria-hidden': 'true' },
-        });
-        renderSettingHeading(header, title, { nameClass: 'baizer-settings-connection-card-title' });
-        return card.createDiv({ cls: 'baizer-settings-connection-card-body' });
-    }
-
-    /**
-     * 激活 provider 的详情。
-     *
-     * 布局取舍（对应 issue 的「两栏严重失衡」）：改为**单列四组流程**，而不是 Basic/Credentials 两栏。
-     * 两栏时左栏四个短字段、右栏塞着地址/密钥/请求头/帮助文字/测试区，右栏被压成窄条
-     * ——地址只显示得出 `https://openc…`、Reveal/Clear 竖向堆叠、header 帮助文字挤成多行短句。
-     * 单列后每个控件都拿到整行宽度，长 URL / 模型名 / 多行 header 都不再溢出。
-     */
-    private renderActiveProviderDetail(parent: HTMLElement, activeConfig: ProviderConfig, token: number): void {
-        const detail = parent.createDiv({ cls: 'baizer-settings-provider-detail-inline' });
-        const flow = detail.createDiv({ cls: 'baizer-settings-connection-flow' });
-
-        // 分组、顺序与标题都取自 getConnectionGroups()（纯函数，有单测覆盖），
-        // 而不是在这里再写一遍字面量——两处各写一份，改了一处就会悄悄错位。
-        getConnectionGroups().forEach((group, index) => {
-            const body = this.renderConnectionCard(flow, group.title, index + 1, group.id);
-            this.renderConnectionGroupBody(body, group.id, activeConfig, token);
-        });
-    }
-
-    private renderConnectionGroupBody(
-        body: HTMLElement,
-        groupId: ConnectionGroupId,
-        activeConfig: ProviderConfig,
-        token: number,
-    ): void {
-        switch (groupId) {
-            case 'identity':
-                this.renderIdentityGroup(body, activeConfig);
-                return;
-            case 'credentials':
-                this.renderCredentialsGroup(body, activeConfig);
-                return;
-            case 'model':
-                this.renderModelGroup(body, activeConfig, token);
-                return;
-            case 'test':
-                this.renderTestGroup(body, activeConfig);
-                return;
-        }
-    }
-
-    /** 第 1 组：服务商身份与协议。 */
-    private renderIdentityGroup(group: HTMLElement, activeConfig: ProviderConfig): void {
-        // 字段显隐同样取自纯函数：apiFlavor 只属于 OpenAI 兼容协议。
-        const fields = getConnectionFieldOrder(activeConfig.type);
-
-        this.renderConnectionField(group, t('Provider Name'), (valueEl) => {
-            const input = valueEl.createEl('input', {
-                cls: 'baizer-settings-detail-input',
-                attr: { type: 'text', 'aria-label': t('Provider name') },
-            });
-            input.value = activeConfig.label;
-            input.title = activeConfig.label;
-            const feedback = createFieldFeedback(valueEl);
-
-            input.addEventListener('input', () => {
-                input.title = input.value;
-                const validation = validateProviderName(input.value);
-                feedback(validation);
-                if (validation.state !== 'ok') return;
-                activeConfig.label = input.value.trim();
-                // 逐击键落盘代价高（saveSettings 会重建 provider），走 400ms debounce；
-                // 但不再像此前那样只在 change 时保存——切走或面板重绘都不会丢名字。
-                this.debouncedPersist();
-            });
-            input.addEventListener('change', voidHandler(async () => {
-                // 名称非法时只保留就地报错，不改动已保存的名字（此前是静默回退旧值）。
-                if (validateProviderName(input.value).state !== 'ok') return;
-                activeConfig.label = input.value.trim();
-                this.openSectionIds.add('connection');
-                await this.persistSettings();
-                // 卡片标题要跟着改名走，否则用户看不到改名已生效。
-                this.renderAccordion();
-            }, 'SettingsTab', this.notifyFailure));
-        }, {
-            required: true,
-            // 明确「必填」而不是静默回退旧名：此前清空名字后离开输入框，名字会悄悄变回旧值，
-            // 用户以为改成功了。现在空值就地报错、且不改动已保存的名字。
-            hint: t('Shown in the provider list. An empty name is rejected instead of silently keeping the old one.'),
-        });
-
-        this.renderConnectionField(group, t('Protocol'), (valueEl) => {
-            const select = valueEl.createEl('select', {
-                cls: 'baizer-settings-detail-input',
-                attr: { 'aria-label': t('Provider protocol') },
-            });
-            getProtocolOptions().forEach(option => {
-                select.createEl('option', { value: option.value, text: option.label });
-            });
-            select.value = activeConfig.type;
-            select.addEventListener('change', voidHandler(async () => {
-                const nextType = select.value as ProviderType;
-                activeConfig.type = nextType;
-                // 服务地址的语义随协议变（Anthropic 不带 /v1、OpenAI 兼容通常带 /v1），
-                // 故按新协议迁移，而不是把上一个协议的地址原样留着冒充可用。
-                activeConfig.baseUrl = resolveBaseUrlOnProtocolChange(nextType, activeConfig.baseUrl);
-                // apiFlavor 只对 openai-compatible 有意义，切走时清掉，避免残留值日后被误读。
-                if (nextType !== 'openai-compatible') delete activeConfig.apiFlavor;
-                this.flushPersistedEdits();
-                this.resetConnectionTestStatus();
-                this.openSectionIds.add('connection');
-                await this.plugin.modelService.updateSettings(this.plugin.settings);
-                await this.persistSettings();
-                this.renderAccordion();
-            }, 'SettingsTab', this.notifyFailure));
-        }, {
-            hint: t('The wire protocol this provider speaks. Switching it only shows the fields that apply.'),
-        });
-
-        // 仅 OpenAI 兼容协议下暴露 API 类型（Chat Completions / Responses）。
-        // 命名刻意与「服务地址（Base URL）」区分：此前两侧都叫「API 端点」，同名不同义。
-        if (fields.includes('apiFlavor')) {
-            this.renderConnectionField(group, t('API type (Chat Completions / Responses)'), (valueEl) => {
-                const select = valueEl.createEl('select', {
-                    cls: 'baizer-settings-detail-input',
-                    attr: { 'aria-label': t('API type (Chat Completions / Responses)') },
-                });
-                select.createEl('option', { value: 'completions', text: t('Chat Completions (/chat/completions)') });
-                select.createEl('option', { value: 'responses', text: t('Responses (/responses)') });
-                select.value = activeConfig.apiFlavor ?? 'completions';
-                select.addEventListener('change', voidHandler(async () => {
-                    activeConfig.apiFlavor = select.value as OpenAIApiFlavor;
-                    this.flushPersistedEdits();
-                    this.resetConnectionTestStatus();
-                    this.openSectionIds.add('connection');
-                    await this.plugin.modelService.updateSettings(this.plugin.settings);
-                    await this.persistSettings();
-                    this.renderAccordion();
-                }, 'SettingsTab', this.notifyFailure));
-            }, {
-                // 只说方言与端点的关系，不写死当前地址——地址由下面「服务地址」那一行
-                // 实时给出实际请求路径，这里再抄一份会变成过期信息。
-                hint: getRequestPathSummary('openai-compatible', activeConfig.apiFlavor).note,
-            });
-        }
-    }
-
-    /** 第 2 组：连接地址与凭证。 */
-    private renderCredentialsGroup(group: HTMLElement, activeConfig: ProviderConfig): void {
-        // 服务地址是两种协议都需要的字段（端点路径由各自的 SDK 追加），故这里无条件渲染；
-        // 会随协议隐藏的只有 apiFlavor，见 renderProtocolGroup。
-        this.renderConnectionField(group, t('Service address (Base URL)'), (valueEl) => {
-            const input = valueEl.createEl('input', {
-                cls: 'baizer-settings-detail-input',
-                attr: {
-                    type: 'text',
-                    placeholder: getDefaultBaseUrlForType(activeConfig.type),
-                    'aria-label': t('Service address (Base URL)'),
-                    spellcheck: 'false',
-                    autocomplete: 'off',
-                },
-            });
-            input.value = activeConfig.baseUrl;
-            // 完整值可悬停查看，输入框本身可编辑全文——不靠截断当唯一手段。
-            input.title = activeConfig.baseUrl;
-
-            const feedback = createFieldFeedback(valueEl);
-            const pathHint = valueEl.createDiv({ cls: 'baizer-settings-field-hint' });
-            const sync = (): void => {
-                feedback(validateBaseUrl(activeConfig.type, input.value));
-                pathHint.setText(describeRequestPath(activeConfig.type, activeConfig.apiFlavor, input.value));
-            };
-
-            input.addEventListener('input', () => {
-                input.title = input.value;
-                activeConfig.baseUrl = input.value;
-                sync();
-                this.debouncedPersist();
-            });
-            input.addEventListener('change', () => {
-                activeConfig.baseUrl = input.value;
-                this.resetConnectionTestStatus();
-                this.flushPersistedEdits();
-            });
+            input.title = input.value;
+            config.baseUrl = input.value;
             sync();
-        }, {
-            // 帮助文字由 sync() 实时给出（含当前地址解析出的实际请求路径），
-            // 这里不再加一条静态 hint，否则同一件事会出现两行、且静态那行会过期。
-            required: true,
+            this.debouncedPersist();
         });
+        input.addEventListener('change', () => {
+            config.baseUrl = input.value;
+            this.connectionTestStatus.delete(providerId);
+            this.debouncedPersist();
+        });
+        sync();
+    }
 
-        this.renderConnectionField(group, t('API Key'), (valueEl) => {
-            const input = valueEl.createEl('input', {
-                cls: 'baizer-settings-detail-input baizer-settings-secret-input',
-                attr: {
-                    type: this.revealApiKey ? 'text' : 'password',
-                    placeholder: 'sk-...',
-                    autocomplete: 'off',
-                    spellcheck: 'false',
-                    'aria-label': t('API key'),
-                },
-            });
-            input.value = activeConfig.apiKey;
+    private renderProviderApiKeyRow(setting: Setting, providerId: string): void {
+        const config = this.plugin.settings.providers[providerId];
+        if (!config) return;
+        setting.settingEl.addClass('baizer-setting-stacked');
+        const hasKey = () => !!config.apiKey?.trim();
+        let inputEl: HTMLInputElement | null = null;
+        let revealButton: { setButtonText(text: string): unknown } | null = null;
 
-            // 操作按钮独占一行：此前按钮和输入框挤在同一窄栏里，Reveal/Clear 被挤成竖向堆叠、
-            // 把整行撑高。独占一行后按钮永不与输入框争宽度。
-            const actions = valueEl.createDiv({ cls: 'baizer-settings-field-actions' });
-            this.createActionButton(actions, this.revealApiKey ? t('Hide') : t('Reveal'), async () => {
-                this.flushPersistedEdits();
-                this.revealApiKey = !this.revealApiKey;
-                this.openSectionIds.add('connection');
-                this.renderAccordion();
+        setting.addText(text => {
+            inputEl = text.inputEl;
+            text.inputEl.type = this.revealedApiKeys.has(providerId) ? 'text' : 'password';
+            text.inputEl.autocomplete = 'off';
+            text.inputEl.spellcheck = false;
+            text.setPlaceholder(API_KEY_PLACEHOLDER);
+            text.setValue(config.apiKey);
+            text.onChange((value: string) => {
+                config.apiKey = value;
+                this.debouncedPersist();
             });
-            this.createActionButton(actions, t('Clear'), () => {
-                if (!activeConfig.apiKey.trim()) return;
-                // P1-1: 清空 API Key 不可逆（需重去服务商后台复制），与删除 Provider 等操作一致做二次确认。
+            text.inputEl.addEventListener('change', () => {
+                this.connectionTestStatus.delete(providerId);
+                this.debouncedPersist();
+            });
+        });
+        setting.addButton(button => {
+            revealButton = button;
+            button.setButtonText(this.revealedApiKeys.has(providerId) ? t('Hide') : t('Reveal'));
+            button.onClick(() => {
+                const reveal = !this.revealedApiKeys.has(providerId);
+                if (reveal) this.revealedApiKeys.add(providerId);
+                else this.revealedApiKeys.delete(providerId);
+                if (inputEl) inputEl.type = reveal ? 'text' : 'password';
+                revealButton?.setButtonText(reveal ? t('Hide') : t('Reveal'));
+            });
+        });
+        setting.addButton(button => {
+            button.setButtonText(t('Clear')).setDestructive();
+            button.onClick(() => {
+                if (!hasKey()) return;
+                // 清空 API Key 不可逆（需重去服务商后台复制），与其它破坏性操作一致做二次确认。
                 new MemoryConfirmModal(
                     this.app,
                     t('Clear API Key'),
                     t('Clear the API key for this provider? You will need to paste it again to reconnect.'),
                     async () => {
-                        activeConfig.apiKey = '';
-                        this.revealApiKey = false;
-                        this.resetConnectionTestStatus();
-                        this.openSectionIds.add('connection');
+                        config.apiKey = '';
+                        this.revealedApiKeys.delete(providerId);
+                        this.connectionTestStatus.delete(providerId);
                         await this.persistSettings();
-                        this.renderAccordion();
+                        this.update();
                     },
                 ).open();
-            }, 'danger');
-
-            input.addEventListener('input', () => {
-                activeConfig.apiKey = input.value;
-                // 此前只在 change 时保存：切走 provider 或面板重绘就丢掉刚粘贴的 key。
-                this.debouncedPersist();
             });
-            input.addEventListener('change', () => {
-                activeConfig.apiKey = input.value;
-                this.resetConnectionTestStatus();
-                this.flushPersistedEdits();
-            });
-        }, {
-            hint: t('Stored locally and hidden by default. Use Reveal to check it; Clear asks for confirmation.'),
-        });
-
-        // 高级配置：折叠起来，基础字段优先。
-        const advanced = group.createEl('details', { cls: 'baizer-settings-advanced baizer-settings-advanced-headers' });
-        advanced.createEl('summary', { text: t('Custom headers (advanced)') });
-        this.trackAdvancedDetails(advanced, 'connection-custom-headers');
-        const advancedBody = advanced.createDiv({ cls: 'baizer-settings-advanced-body' });
-
-        const textarea = advancedBody.createEl('textarea', {
-            cls: 'baizer-settings-detail-input baizer-settings-detail-textarea',
-            attr: {
-                rows: '4',
-                spellcheck: 'false',
-                'aria-label': t('Custom headers'),
-            },
-        });
-        textarea.value = serializeCustomHeaders(activeConfig.customHeaders);
-        const feedback = createFieldFeedback(advancedBody);
-
-        const sync = (): void => {
-            const validation = validateCustomHeaders(textarea.value);
-            feedback(validation);
-            // 非法行被跳过，但其余行照常保存——不能因为正在敲的一行把已配好的 header 全清掉。
-            activeConfig.customHeaders = validation.headers;
-        };
-
-        textarea.addEventListener('input', () => {
-            sync();
-            this.debouncedPersist();
-        });
-        textarea.addEventListener('change', () => {
-            sync();
-            this.resetConnectionTestStatus();
-            this.flushPersistedEdits();
-        });
-        sync();
-
-        // 帮助文字与示例放在折叠体里、占满整行宽度：此前挤在窄 value 列里，
-        // 「Header-Name: value」、占位符说明和示例被折成很多短行、一路顶到右边缘。
-        advancedBody.createDiv({
-            cls: 'baizer-settings-field-hint',
-            text: t('One "Header-Name: value" per line. Use {{conversationId}} to send the current conversation ID.'),
-        });
-        advancedBody.createEl('pre', {
-            cls: 'baizer-settings-header-example',
-            text: 'x-opencode-session: {{conversationId}}',
-        });
-        advancedBody.createDiv({
-            cls: 'baizer-settings-field-hint',
-            text: t('Sent with every request to this provider. The {{conversationId}} placeholder is skipped for one-off calls that have no conversation.'),
         });
     }
 
-    /** 第 3 组：模型。 */
-    private renderModelGroup(group: HTMLElement, activeConfig: ProviderConfig, token: number): void {
-        const providerId = this.plugin.settings.activeProvider;
-        const cacheKey = getModelFieldCacheKey(providerId, activeConfig);
+    private renderProviderModelRow(setting: Setting, providerId: string): (() => void) | void {
+        const config = this.plugin.settings.providers[providerId];
+        if (!config) return;
+        setting.settingEl.addClass('baizer-setting-stacked');
+        const isActive = this.plugin.settings.activeProvider === providerId;
+        const container = setting.controlEl.createDiv({ cls: 'baizer-settings-model-field' });
+        const cacheKey = getModelFieldCacheKey(providerId, config);
         const cached = this.modelFieldCache.get(cacheKey);
         const loadedResult = cached && Date.now() - cached.timestamp < MODEL_FIELD_CACHE_TTL_MS
             ? cached.result
             : undefined;
+        let alive = true;
 
-        this.renderConnectionField(group, t('Model'), (valueEl) => {
-            renderModelField(valueEl, {
-                currentModel: activeConfig.model || '',
-                hasApiKey: !!activeConfig.apiKey?.trim(),
-                // 用带状态的版本：靠 listingUnsupported/error 区分能力缺口与真故障，
-                // 不再从数组形状反推「是不是列不出来」。
-                loadModels: (forceRefresh) => this.plugin.modelService.getAvailableModelsWithStatus(forceRefresh),
-                onModelChange: async (modelId) => {
-                    this.resetConnectionTestStatus();
-                    this.openSectionIds.add('connection');
+        renderModelField(container, {
+            currentModel: config.model || '',
+            hasApiKey: !!config.apiKey?.trim(),
+            loadModels: (forceRefresh: boolean) => isActive
+                ? this.plugin.modelService.getAvailableModelsWithStatus(forceRefresh)
+                : this.loadModelsForConfig(config),
+            onModelChange: async (modelId: string) => {
+                this.connectionTestStatus.delete(providerId);
+                if (isActive && typeof this.plugin.modelService.switchModel === 'function') {
                     await this.plugin.modelService.switchModel(modelId, () => this.persistSettings());
-                },
-                isStale: () => token !== this.renderToken,
-                // 复用上次加载结果：重绘/搜索/展开分区不再重发 /models（issue #81）。
-                loadedResult,
-                onLoaded: (result) => {
-                    // 只保留最近若干个端点身份的结果，切换 provider 后缓存不会无限增长。
-                    if (this.modelFieldCache.size >= 8 && !this.modelFieldCache.has(cacheKey)) {
-                        const oldestKey = this.modelFieldCache.keys().next().value;
-                        if (oldestKey !== undefined) this.modelFieldCache.delete(oldestKey);
-                    }
-                    this.modelFieldCache.set(cacheKey, { result, timestamp: Date.now() });
-                },
+                } else {
+                    config.model = modelId;
+                    await this.persistSettings();
+                }
+                this.update();
+            },
+            // 行已被重绘/翻页销毁时，异步回来的结果不再写旧 DOM。
+            isStale: () => !alive,
+            loadedResult,
+            onLoaded: (result) => {
+                if (this.modelFieldCache.size >= 8 && !this.modelFieldCache.has(cacheKey)) {
+                    const oldestKey = this.modelFieldCache.keys().next().value;
+                    if (oldestKey !== undefined) this.modelFieldCache.delete(oldestKey);
+                }
+                this.modelFieldCache.set(cacheKey, { result, timestamp: Date.now() });
+            },
+        });
+        return () => { alive = false; };
+    }
+
+    /** 非激活 provider 也能列模型：直接打该 provider 自己的 /models，而不是问激活的那个。 */
+    private async loadModelsForConfig(config: ProviderConfig): Promise<AvailableModelsResult> {
+        // 没配 key 时不发请求：结果只用于显示「先填 key」的提示，打一次必然失败的请求没有意义。
+        if (!config.apiKey?.trim()) {
+            return { models: [], listed: false, listingUnsupported: false };
+        }
+        try {
+            const models = await listModels(config);
+            return { models, listed: models.length > 0, listingUnsupported: false };
+        } catch (error: unknown) {
+            if (isModelListingUnsupported(error)) {
+                return { models: [], listed: false, listingUnsupported: true };
+            }
+            return {
+                models: [],
+                listed: false,
+                listingUnsupported: false,
+                error: error instanceof Error ? error : new Error(String(error)),
+            };
+        }
+    }
+
+    private renderProviderHeadersRow(setting: Setting, providerId: string): void {
+        const config = this.plugin.settings.providers[providerId];
+        if (!config) return;
+        setting.settingEl.addClass('baizer-setting-stacked');
+        const feedback = createFieldFeedback(setting.controlEl);
+        setting.addTextArea(text => {
+            text.setPlaceholder('x-header-name: value');
+            text.inputEl.setAttribute('spellcheck', 'false');
+            text.inputEl.rows = 4;
+            text.setValue(serializeCustomHeaders(config.customHeaders));
+            const sync = (value: string): void => {
+                const validation = validateCustomHeaders(value);
+                feedback(validation);
+                // 非法行跳过、其余行照常保存：不能因为正在敲的那一行把已配好的 header 全清掉。
+                config.customHeaders = validation.headers;
+            };
+            text.onChange((value: string) => {
+                sync(value);
+                this.debouncedPersist();
             });
-        }, {
-            hint: t('Type the model ID directly, or pick one from the list once the endpoint returns it.'),
+            sync(text.getValue());
+        });
+        setting.controlEl.createEl('pre', {
+            cls: 'baizer-settings-header-example',
+            text: 'x-opencode-session: {{conversationId}}',
         });
     }
 
-    /** 第 4 组：测试结果。 */
-    private renderTestGroup(group: HTMLElement, activeConfig: ProviderConfig): void {
-        const endpoint = getModelListEndpoint(activeConfig.type, activeConfig.baseUrl);
+    private renderProviderTestRow(setting: Setting, providerId: string): void {
+        const config = this.plugin.settings.providers[providerId];
+        if (!config) return;
+        const endpoint = getModelListEndpoint(config.type, config.baseUrl);
+        const statusEl = setting.controlEl.createDiv({
+            cls: 'baizer-settings-inline-note',
+            attr: { role: 'status', 'aria-live': 'polite' },
+        });
+        const paint = (): void => {
+            const status = this.connectionTestStatus.get(providerId);
+            const presentation = status ? getConnectionTestStatusPresentation(status) : undefined;
+            statusEl.className = 'baizer-settings-inline-note';
+            statusEl.dataset.tone = presentation ? presentation.tone : 'muted';
+            if (presentation) statusEl.addClass(`is-${presentation.tone}`);
+            statusEl.textContent = presentation?.label ?? '';
+            statusEl.toggleClass('is-hidden', !presentation);
+        };
+        paint();
 
-        this.renderConnectionField(group, t('Test'), (valueEl) => {
-            const actions = valueEl.createDiv({ cls: 'baizer-settings-actions' });
-            this.createActionButton(actions, this.connectionTestStatus.state === 'testing' ? t('Testing...') : t('Run test'), async () => {
-                const label = activeConfig.label || 'AI provider';
-                if (!activeConfig.apiKey.trim()) {
-                    this.connectionTestStatus = getConnectionTestReport({ label, stage: 'missing-key', endpoint });
-                    this.openSectionIds.add('connection');
-                    this.renderAccordion();
+        setting.addButton(button => {
+            button.setButtonText(
+                this.connectionTestStatus.get(providerId)?.state === 'testing' ? t('Testing...') : t('Run test'),
+            );
+            button.setCta();
+            button.onClick(async () => {
+                const label = config.label || 'AI provider';
+                if (!config.apiKey.trim()) {
+                    this.connectionTestStatus.set(providerId, getConnectionTestReport({ label, stage: 'missing-key', endpoint }));
+                    paint();
                     return;
                 }
-
+                button.setDisabled(true);
+                button.setButtonText(t('Testing...'));
+                this.connectionTestStatus.set(providerId, {
+                    state: 'testing',
+                    message: `${t('Testing connection to')} ${label}...`,
+                });
+                paint();
                 try {
-                    this.connectionTestStatus = { state: 'testing', message: `${t('Testing connection to')} ${label}...` };
-                    this.openSectionIds.add('connection');
-                    this.renderAccordion();
                     await this.plugin.modelService.updateSettings(this.plugin.settings);
-                    // 必须用带状态的探活：checkAvailability() 把「404 不提供模型清单」也当 true，
-                    // 于是 404 的端点会拿到一句绿色的「模型列表可达」，与同一屏模型输入框的
-                    // 「该端点不支持列出模型」自相矛盾。
-                    const availability = await checkAvailabilityWithStatus(activeConfig);
-                    // 测试只探模型列表端点（不烧 token），所以结论只能是「列得出/列不出模型」，
-                    // 不能说成「能不能生成」——这两件事此前被同一句「连接失败」混为一谈。
-                    this.connectionTestStatus = getConnectionTestReport({
+                    const availability = await checkAvailabilityWithStatus(config);
+                    this.connectionTestStatus.set(providerId, getConnectionTestReport({
                         label,
                         stage: getConnectionTestStage(availability),
                         endpoint,
                         reason: availability.error?.message,
-                    });
+                    }));
                 } catch (error: unknown) {
-                    this.connectionTestStatus = getConnectionTestReport({
+                    this.connectionTestStatus.set(providerId, getConnectionTestReport({
                         label,
                         stage: 'unreachable',
                         endpoint,
                         reason: thrownMessage(error) || t('unknown reason'),
-                    });
+                    }));
+                } finally {
+                    button.setDisabled(false);
+                    button.setButtonText(t('Run test'));
+                    paint();
                 }
-
-                this.openSectionIds.add('connection');
-                this.renderAccordion();
-            }, 'primary', this.connectionTestStatus.state === 'testing');
-
-            // 删除 Provider 已上移到卡片头部的图标按钮，此处只保留连接测试结果提示。
-            const status = getConnectionTestStatusPresentation(this.connectionTestStatus);
-            if (status) {
-                // P1-5: 连接测试「测试中→成功/失败」是异步结果,加 aria-live 让读屏播报;失败用 assertive。
-                valueEl.createDiv({
-                    cls: `baizer-settings-inline-note is-${status.tone}`,
-                    text: status.label,
-                    attr: { role: 'status', 'aria-live': status.tone === 'danger' ? 'assertive' : 'polite' },
-                });
-            }
-        }, {
-            hint: fillPlaceholders(
-                t('Checks whether the model list is reachable at {url}. It does not run a generation, so a pass means "the endpoint answers", not "the model can generate".'),
-                { url: endpoint },
-            ),
+            });
         });
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 行为：上下文预算、thinking、系统提示词。
+    // ────────────────────────────────────────────────────────────────────────
+
+    private buildBehaviorPage(): SettingDefinitionPage {
+        const meta = getSectionMeta('behavior');
+        return {
+            type: 'page',
+            name: meta.title,
+            desc: meta.description,
+            items: [
+                {
+                    type: 'group',
+                    heading: t('Runtime'),
+                    items: [
+                        {
+                            name: t('Context Window Limit'),
+                            desc: t('Limit token usage. Higher values allow reading larger files but cost more.'),
+                            control: {
+                                type: 'slider',
+                                key: 'contextWindow',
+                                min: 10000,
+                                max: 1000000,
+                                step: 10000,
+                                defaultValue: DEFAULT_SETTINGS.contextWindow,
+                            },
+                        },
+                        {
+                            name: t('Thinking Level'),
+                            desc: t('Controls how much reasoning the model uses. Lower = fewer tokens; higher = better results on complex tasks.'),
+                            control: {
+                                type: 'dropdown',
+                                key: 'thinkingLevel',
+                                defaultValue: 'medium',
+                                options: {
+                                    off: t('Off (no thinking)'),
+                                    minimal: t('Minimal'),
+                                    low: t('Low'),
+                                    medium: t('Medium (default)'),
+                                    high: t('High'),
+                                    xhigh: t('X-High (select models only)'),
+                                },
+                            },
+                        },
+                    ],
+                },
+                {
+                    type: 'group',
+                    heading: t('System prompt'),
+                    items: [
+                        {
+                            name: t('Customize System Prompt'),
+                            desc: t('Override the default AI personality.'),
+                            control: { type: 'toggle', key: 'customizePrompt' },
+                        },
+                        {
+                            name: t('System prompt'),
+                            desc: t('Sent to the model at the start of every conversation.'),
+                            visible: () => this.plugin.settings.customizePrompt,
+                            render: (setting: Setting) => this.renderStackedTextarea(setting, {
+                                value: this.plugin.settings.systemPrompt,
+                                rows: 8,
+                                placeholder: t('You are a helpful assistant...'),
+                                onChange: (value: string) => {
+                                    this.plugin.settings.systemPrompt = value;
+                                    this.debouncedPersist();
+                                },
+                            }),
+                        },
+                        {
+                            name: t('Restore Default Prompt'),
+                            desc: t('Replace your custom system prompt with the default.'),
+                            visible: () => this.plugin.settings.customizePrompt,
+                            action: () => {
+                                new MemoryConfirmModal(
+                                    this.app,
+                                    t('Restore Default Prompt'),
+                                    t('Replace your custom system prompt with the default? Your current prompt will be lost.'),
+                                    async () => {
+                                        this.plugin.settings.systemPrompt = DEFAULT_SETTINGS.systemPrompt;
+                                        await this.persistSettings();
+                                        this.update();
+                                    },
+                                ).open();
+                            },
+                        },
+                    ],
+                },
+            ],
+        };
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 记忆：开关留在主页面，「浏览/删除记忆」是独立子页（异步列表不适合声明式控件）。
+    // ────────────────────────────────────────────────────────────────────────
+
+    private buildMemoryPage(): SettingDefinitionPage {
+        const meta = getSectionMeta('memory');
+        return {
+            type: 'page',
+            name: meta.title,
+            desc: meta.description,
+            items: [
+                {
+                    name: t('Privacy Mode'),
+                    desc: t('When enabled, new conversation turns are not retained as Hindsight memory.'),
+                    control: { type: 'toggle', key: 'privacyMode' },
+                },
+                {
+                    type: 'group',
+                    heading: t('Recall'),
+                    items: [
+                        {
+                            name: t('Semantic query expansion'),
+                            desc: t('When enabled, memory recall first uses the AI to expand your query with synonyms and cross-language terms, improving recall for reworded or cross-language queries. Adds one cached AI call per conversation turn; does not affect Guardian completions.'),
+                            control: { type: 'toggle', key: 'memoryQueryExpansion' },
+                        },
+                        {
+                            name: t('Entity graph recall'),
+                            desc: t('When enabled, memory recall also surfaces memories that share entities (people, projects, technologies) with the best matches, providing related context even without keyword overlap. Runs locally with no extra AI calls.'),
+                            control: { type: 'toggle', key: 'memoryGraphRecall' },
+                        },
+                        {
+                            name: t('Conflict-aware updates'),
+                            desc: t('When enabled, a new fact on the same topic (e.g. you change a stated preference) retires the outdated one so recall no longer mixes old and new. Retired memories are kept and can be restored.'),
+                            control: { type: 'toggle', key: 'memoryConflictUpdate' },
+                        },
+                    ],
+                },
+                {
+                    type: 'page',
+                    name: t('Browse memory'),
+                    desc: t('Search, review, and delete remembered memories.'),
+                    page: () => new MemoryBrowserPage(this),
+                },
+                {
+                    name: t('Data folder'),
+                    desc: MEMORY_DIR,
+                },
+            ],
+        };
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 权限：预设 → 生效权限摘要 → 高级开关。
+    // ────────────────────────────────────────────────────────────────────────
+
+    private buildPermissionsPage(): SettingDefinitionPage {
+        const meta = getSectionMeta('permissions');
+        const settings = this.plugin.settings;
+        return {
+            type: 'page',
+            name: meta.title,
+            desc: meta.description,
+            items: [
+                {
+                    type: 'group',
+                    heading: t('Permission presets'),
+                    items: [
+                        {
+                            name: t('Read only'),
+                            desc: t('Read and analyze notes without writing to the vault.'),
+                            action: () => this.applyPresetWithConfirm('read-only'),
+                        },
+                        {
+                            name: t('Scoped write'),
+                            desc: t('Write only inside explicitly configured folders.'),
+                            action: () => this.applyPresetWithConfirm('configured-folders'),
+                        },
+                        {
+                            name: t('Automation'),
+                            desc: t('Allow scoped writes with fewer repeated confirmations.'),
+                            action: () => this.applyPresetWithConfirm('automation'),
+                        },
+                        {
+                            name: t('Open access'),
+                            desc: t('Allow full-vault writes and plugin control.'),
+                            action: () => this.applyPresetWithConfirm('open'),
+                        },
+                    ],
+                },
+                {
+                    name: t('Effective permissions'),
+                    desc: t('What the current switches allow.'),
+                    render: (setting: Setting) => this.renderEffectivePermissions(setting),
+                },
+                {
+                    type: 'group',
+                    heading: t('Advanced permission switches'),
+                    items: [
+                        {
+                            name: t('Vault Write Scope'),
+                            desc: t('Choose how broadly AI can write inside your vault.'),
+                            control: {
+                                type: 'dropdown',
+                                key: 'vaultWriteScope',
+                                defaultValue: 'all-vault',
+                                options: {
+                                    'read-only': t('Read Only'),
+                                    'current-note': t('Current Note'),
+                                    'configured-folders': t('Configured Folders'),
+                                    'all-vault': t('All Vault'),
+                                },
+                            },
+                        },
+                        {
+                            name: t('Writable Folders'),
+                            desc: t('One vault folder per line. AI can create or modify files only inside these folders.'),
+                            visible: () => settings.vaultWriteScope === 'configured-folders',
+                            render: (setting: Setting) => this.renderStackedTextarea(setting, {
+                                value: settings.vaultWriteAllowedFolders.join('\n'),
+                                rows: 4,
+                                placeholder: 'Projects/\nInbox/',
+                                onChange: (value: string) => {
+                                    settings.vaultWriteAllowedFolders = value
+                                        .split(/\r?\n/)
+                                        .map(entry => entry.trim())
+                                        .filter(entry => entry.length > 0);
+                                    this.debouncedPersist();
+                                },
+                            }),
+                        },
+                        {
+                            name: t('Allow File Creation'),
+                            desc: t('Allow note and file creation after the selected write scope is satisfied.'),
+                            control: { type: 'toggle', key: 'allowFileCreation' },
+                        },
+                        {
+                            name: t('Allow File Modification'),
+                            desc: t('Allow note and file modification after the selected write scope is satisfied.'),
+                            control: { type: 'toggle', key: 'allowFileModification' },
+                        },
+                        {
+                            name: t('Allow Plugin Control'),
+                            desc: t('Let AI execute commands from other plugins.'),
+                            render: (setting: Setting) => this.renderDangerToggle(setting, {
+                                key: 'allowPluginControl',
+                                dangerWhen: true,
+                                title: t('Allow Plugin Control'),
+                                message: t('Grant AI permission to execute commands from other plugins? This can trigger destructive plugin actions on your behalf.'),
+                                grantedNotice: t('Permission granted: AI can now control your plugins.'),
+                            }),
+                        },
+                        {
+                            name: t('Allow Reading Plugin Config Values'),
+                            desc: t('Let AI read third-party plugin configuration values. When off, only key names and types are returned. API keys, tokens, and secrets are always redacted regardless of this setting.'),
+                            control: { type: 'toggle', key: 'allowPluginConfigValues' },
+                        },
+                        {
+                            name: t('Confirm Executions'),
+                            desc: t('Always ask for confirmation before writing files or running commands.'),
+                            render: (setting: Setting) => this.renderDangerToggle(setting, {
+                                key: 'confirmExecutions',
+                                dangerWhen: false,
+                                title: t('Disable Execution Confirmation'),
+                                message: t('Turn off confirmation? AI will write files and run commands without asking each time.'),
+                            }),
+                        },
+                    ],
+                },
+            ],
+        };
     }
 
     /**
-     * 立即落盘 debounce 里挂着的编辑。
-     * 切换协议/重绘前必须调用：否则刚刚输入的地址或密钥会被随后重建的 DOM 丢回旧值。
+     * 提权/降档开关需要二次确认，且取消后 UI 必须回退到原值 —— 声明式 toggle 无法拦截
+     * 「先写入再确认」，故这两项用 render 自行接管。
      */
-    private flushPersistedEdits(): void {
-        // debouncedPersist 的回调已自带 catch（日志 + Notice）；detach 保证 run() 本身也不留悬空 Promise。
-        detach(this.debouncedPersist.run(), 'SettingsTab');
-    }
-
-    private renderConnectionField(
-        containerEl: HTMLElement,
-        label: string,
-        renderValue: (valueEl: HTMLElement) => void,
-        options: { hint?: string; required?: boolean } = {},
+    private renderDangerToggle(
+        setting: Setting,
+        options: {
+            key: 'allowPluginControl' | 'confirmExecutions';
+            dangerWhen: boolean;
+            title: string;
+            message: string;
+            grantedNotice?: string;
+        },
     ): void {
-        const row = containerEl.createDiv({ cls: 'baizer-settings-detail-row' });
-        const labelEl = row.createDiv({ cls: 'baizer-settings-detail-label' });
-        labelEl.createSpan({ text: label });
-        if (options.required) {
-            labelEl.createSpan({ cls: 'baizer-settings-detail-required', text: t('Required field') });
-        }
-        const value = row.createDiv({ cls: 'baizer-settings-detail-value' });
-        renderValue(value);
-        // 帮助文字排在控件之后、占满整行：可连续阅读，不被窄列折成碎句。
-        if (options.hint) {
-            value.createDiv({ cls: 'baizer-settings-field-hint', text: options.hint });
-        }
-    }
-
-    private renderRuntimeSection(containerEl: HTMLElement): void {
-        new Setting(containerEl)
-            .setName(t('Context Window Limit'))
-            .setDesc(t('Limit token usage. Higher values allow reading larger files but cost more.'))
-            .addSlider(slider => slider
-                .setLimits(10000, 1000000, 10000)
-                .setValue(this.plugin.settings.contextWindow)
-                .setDynamicTooltip()
-                .onChange((value: number) => {
-                    this.plugin.settings.contextWindow = value;
-                    // 滑块拖动逐格触发：debounce 落盘，避免一次拖动几十次写盘 + 重建 provider（P0-3）。
-                    this.debouncedPersist();
-                }));
-
-        new Setting(containerEl)
-            .setName(t('Thinking Level'))
-            .setDesc(t('Controls how much reasoning the model uses. Lower = fewer tokens; higher = better results on complex tasks.'))
-            .addDropdown(drop => drop
-                .addOption('off', t('Off (no thinking)'))
-                .addOption('minimal', t('Minimal'))
-                .addOption('low', t('Low'))
-                .addOption('medium', t('Medium (default)'))
-                .addOption('high', t('High'))
-                .addOption('xhigh', t('X-High (select models only)'))
-                .setValue(this.plugin.settings.thinkingLevel ?? 'medium')
-                .onChange(async (value: PluginSettings['thinkingLevel']) => {
-                    this.plugin.settings.thinkingLevel = value;
-                    await this.persistSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName(t('Customize System Prompt'))
-            .setDesc(t('Override the default AI personality.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.customizePrompt)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.customizePrompt = value;
-                    await this.persistSettings();
-                    this.renderAccordion();
-                }));
-
-        if (this.plugin.settings.customizePrompt) {
-            new Setting(containerEl)
-                .setClass('baizer-full-width-textarea')
-                .addTextArea(text => text
-                    .setPlaceholder(t('You are a helpful assistant...'))
-                    .setValue(this.plugin.settings.systemPrompt)
-                    .onChange((value: string) => {
-                        this.plugin.settings.systemPrompt = value;
-                        this.debouncedPersist();
-                    }));
-
-            const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
-            this.createActionButton(actions, t('Restore Default Prompt'), () => {
-                // P1-1: 恢复默认会覆盖用户自定义的系统提示词且不可撤销，做二次确认。
-                new MemoryConfirmModal(
-                    this.app,
-                    t('Restore Default Prompt'),
-                    t('Replace your custom system prompt with the default? Your current prompt will be lost.'),
-                    async () => {
-                        this.plugin.settings.systemPrompt = DEFAULT_SETTINGS.systemPrompt;
+        const settings = this.plugin.settings;
+        const read = (): boolean => settings[options.key];
+        setting.addToggle(toggle => {
+            toggle.setValue(read());
+            toggle.onChange(async (value: boolean) => {
+                if (value === options.dangerWhen) {
+                    new MemoryConfirmModal(this.app, options.title, options.message, async () => {
+                        settings[options.key] = value;
+                        if (options.grantedNotice) new Notice(options.grantedNotice);
                         await this.persistSettings();
-                        this.renderAccordion();
-                    },
-                ).open();
+                        this.update();
+                    }, () => { toggle.setValue(read()); }).open();
+                    // 取消或未确认前，UI 回退到原值。
+                    toggle.setValue(!options.dangerWhen);
+                    return;
+                }
+                settings[options.key] = value;
+                await this.persistSettings();
+                this.update();
             });
-        }
-    }
-
-    private renderGuardianSection(containerEl: HTMLElement): void {
-        // 选中文字工具条:独立于 Guardian 补全,放在 enableGuardian 短路 return 之前,
-        // 保证即使 Guardian 关闭也能单独控制这个开关。
-        new Setting(containerEl)
-            .setName(t('Selection Toolbar'))
-            .setDesc(t('Show a floating AI toolbar (rewrite, explain, etc.) when you select text in the editor.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableSelectionMenu)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.enableSelectionMenu = value;
-                    await this.persistSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName(t('Enable Guardian'))
-            .setDesc(t('Allow AI to passively analyze text and offer suggestions.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableGuardian)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.enableGuardian = value;
-                    await this.persistSettings();
-                    this.renderAccordion();
-                }));
-
-        if (!this.plugin.settings.enableGuardian) return;
-
-        new Setting(containerEl)
-            .setName(t('Auto Mode'))
-            .setDesc(t('Automatically analyze text after 5 seconds of inactivity.'))
-            .addToggle(toggle => toggle
-                .setValue(!!this.plugin.settings.guardianAutoMode)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.guardianAutoMode = value;
-                    await this.persistSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName(t('Manual Mode Hotkey'))
-            .setDesc(t('Open the Obsidian hotkey settings for Guardian.'))
-            .addButton(btn => btn
-                .setButtonText(t('Configure Hotkey'))
-                .onClick(() => {
-                    this.app.setting.openTabById('hotkeys');
-                    this.app.setting.activeTab.setQuery('Guardian: Manual Trigger');
-                }));
-
-        new Setting(containerEl)
-            .setName(t('Guardian Sensitivity'))
-            .setDesc(t('Low (manual) to high (copilot style).'))
-            .addSlider(slider => slider
-                .setLimits(0, 100, 25)
-                .setValue(this.plugin.settings.guardianSensitivity)
-                .setDynamicTooltip()
-                .onChange((value: number) => {
-                    this.plugin.settings.guardianSensitivity = value;
-                    this.debouncedPersist();
-                }));
-
-        new Setting(containerEl)
-            .setName(t('UI Style'))
-            .setDesc(t('Choose how suggestions appear in the editor.'))
-            .addDropdown(drop => drop
-                .addOption('ghost', t('Ghost Text (Inline)'))
-                .addOption('gutter', t('Gutter Dot (Subtle)'))
-                .addOption('hybrid', t('Hybrid (Both)'))
-                .setValue(this.plugin.settings.guardianUIStyle)
-                .onChange(async (value: 'ghost' | 'gutter' | 'hybrid') => {
-                    this.plugin.settings.guardianUIStyle = value;
-                    await this.persistSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName(t('Auto deep-dive when fast completion is empty or weak'))
-            .setDesc(t('When AI has no immediate suggestion or only a mediocre one while you stay put, it reads related notes and personal memory to attempt a deeper completion. Slower, uses more tokens, on by default.'))
-            .addToggle(toggle => toggle
-                .setValue(!!this.plugin.settings.guardianAutoDeepEscalation)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.guardianAutoDeepEscalation = value;
-                    await this.persistSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName(t('Ignored Folders'))
-            .setDesc(t('Path patterns to ignore, one per line.'))
-            .setClass('baizer-full-width-textarea')
-            .addTextArea(text => text
-                .setPlaceholder('Private/\nSecrets/\nTemplates/')
-                .setValue(this.plugin.settings.ignoredFolders)
-                .onChange((value: string) => {
-                    this.plugin.settings.ignoredFolders = value;
-                    this.debouncedPersist();
-                }));
-    }
-
-    private renderPermissionsSection(containerEl: HTMLElement): void {
-        const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        renderSettingHeading(
-            panel.createDiv({ cls: 'baizer-settings-panel-header' }),
-            t('Permission presets'),
-            { nameClass: 'baizer-settings-panel-title' },
-        );
-        const presetGrid = panel.createDiv({ cls: 'baizer-settings-panel-body' }).createDiv({ cls: 'baizer-settings-preset-grid' });
-        this.renderPermissionPreset(presetGrid, 'read-only', t('Read only'), t('Read and analyze notes without writing to the vault.'));
-        this.renderPermissionPreset(presetGrid, 'configured-folders', t('Scoped write'), t('Write only inside explicitly configured folders.'));
-        this.renderPermissionPreset(presetGrid, 'automation', t('Automation'), t('Allow scoped writes with fewer repeated confirmations.'));
-        this.renderPermissionPreset(presetGrid, 'open', t('Open access'), t('Allow full-vault writes and plugin control.'));
-
-        const summaryPanel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        renderSettingHeading(
-            summaryPanel.createDiv({ cls: 'baizer-settings-panel-header' }),
-            t('Effective permissions'),
-            { nameClass: 'baizer-settings-panel-title' },
-        );
-        this.renderEffectivePermissions(summaryPanel.createDiv({ cls: 'baizer-settings-panel-body' }));
-
-        const advanced = containerEl.createEl('details', { cls: 'baizer-settings-advanced' });
-        advanced.createEl('summary', { text: t('Advanced permission switches') });
-        this.trackAdvancedDetails(advanced, 'permissions-advanced');
-        const advancedBody = advanced.createDiv({ cls: 'baizer-settings-advanced-body' });
-
-        new Setting(advancedBody)
-            .setName(t('Vault Write Scope'))
-            .setDesc(t('Choose how broadly AI can write inside your vault.'))
-            .addDropdown(drop => drop
-                .addOption('read-only', t('Read Only'))
-                .addOption('current-note', t('Current Note'))
-                .addOption('configured-folders', t('Configured Folders'))
-                .addOption('all-vault', t('All Vault'))
-                .setValue(this.plugin.settings.vaultWriteScope)
-                .onChange(async (value: VaultWriteScope) => {
-                    this.plugin.settings.vaultWriteScope = value;
-                    await this.persistSettings();
-                    this.renderAccordion();
-                }));
-
-        if (this.plugin.settings.vaultWriteScope === 'configured-folders') {
-            new Setting(advancedBody)
-                .setName(t('Writable Folders'))
-                .setDesc(t('One vault folder per line. AI can create or modify files only inside these folders.'))
-                .setClass('baizer-full-width-textarea')
-                .addTextArea(text => text
-                    .setPlaceholder('Projects/\nInbox/')
-                    .setValue(this.plugin.settings.vaultWriteAllowedFolders.join('\n'))
-                    .onChange((value: string) => {
-                        this.plugin.settings.vaultWriteAllowedFolders = value
-                            .split(/\r?\n/)
-                            .map(item => item.trim())
-                            .filter(Boolean);
-                        this.debouncedPersist();
-                    }));
-        }
-
-        new Setting(advancedBody)
-            .setName(t('Allow File Creation'))
-            .setDesc(t('Allow note and file creation after the selected write scope is satisfied.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.allowFileCreation)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.allowFileCreation = value;
-                    await this.persistSettings();
-                    this.renderAccordion();
-                }));
-
-        new Setting(advancedBody)
-            .setName(t('Allow File Modification'))
-            .setDesc(t('Allow note and file modification after the selected write scope is satisfied.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.allowFileModification)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.allowFileModification = value;
-                    await this.persistSettings();
-                    this.renderAccordion();
-                }));
-
-        new Setting(advancedBody)
-            .setName(t('Allow Plugin Control'))
-            .setDesc(t('Let AI execute commands from other plugins.'))
-            .setClass('baizer-settings-danger-setting')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.allowPluginControl)
-                .onChange(async (value: boolean) => {
-                    // T12: 开启插件控制会放权 AI 执行其它插件命令，属提权操作，需二次确认。
-                    if (value) {
-                        new MemoryConfirmModal(
-                            this.app,
-                            t('Allow Plugin Control'),
-                            t('Grant AI permission to execute commands from other plugins? This can trigger destructive plugin actions on your behalf.'),
-                            async () => {
-                                this.plugin.settings.allowPluginControl = true;
-                                new Notice(t('Permission granted: AI can now control your plugins.'));
-                                await this.persistSettings();
-                                this.renderAccordion();
-                            },
-                        ).open();
-                        // 取消或未确认前，UI 回退到原值（关闭）。
-                        toggle.setValue(false);
-                        return;
-                    }
-                    this.plugin.settings.allowPluginControl = false;
-                    await this.persistSettings();
-                    this.renderAccordion();
-                }));
-
-        new Setting(advancedBody)
-            .setName(t('Confirm Executions'))
-            .setDesc(t('Always ask for confirmation before writing files or running commands.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.confirmExecutions)
-                .onChange(async (value: boolean) => {
-                    // T12: 关闭执行确认等于让 AI 无阻写盘/跑命令，属降低安全档位，需二次确认。
-                    if (!value) {
-                        new MemoryConfirmModal(
-                            this.app,
-                            t('Disable Execution Confirmation'),
-                            t('Turn off confirmation? AI will write files and run commands without asking each time.'),
-                            async () => {
-                                this.plugin.settings.confirmExecutions = false;
-                                await this.persistSettings();
-                                this.renderAccordion();
-                            },
-                        ).open();
-                        // 取消或未确认前，UI 回退到原值（开启）。
-                        toggle.setValue(true);
-                        return;
-                    }
-                    this.plugin.settings.confirmExecutions = true;
-                    await this.persistSettings();
-                    this.renderAccordion();
-                }));
-
-        new Setting(advancedBody)
-            .setName(t('Allow Reading Plugin Config Values'))
-            .setDesc(t('Let AI read third-party plugin configuration values. When off, only key names and types are returned. API keys, tokens, and secrets are always redacted regardless of this setting.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.allowPluginConfigValues)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.allowPluginConfigValues = value;
-                    await this.persistSettings();
-                    this.renderAccordion();
-                }));
-    }
-
-    private renderSkillsSection(containerEl: HTMLElement): void {
-        containerEl.createDiv({
-            cls: 'baizer-settings-inline-note',
-            text: t('Enable or disable individual skills. This controls availability only — a skill being on does not bypass the read/write permissions above.'),
         });
+    }
 
-        const skills = typeof this.plugin.modelService?.getSkillList === 'function'
-            ? this.plugin.modelService.getSkillList()
-            : [];
-        if (!skills.length) {
-            containerEl.createDiv({ cls: 'baizer-settings-inline-note is-muted', text: t('No skills registered.') });
+    private applyPresetWithConfirm(preset: 'read-only' | 'configured-folders' | 'automation' | 'open'): void {
+        // 提权预设（open=开插件控制+全库写；automation=关执行确认）与单独开关保持一致的二次确认。
+        const escalates = preset === 'open' || preset === 'automation';
+        if (!escalates) {
+            detach(this.applyPermissionPreset(preset).then(() => this.update()), 'SettingsTab', this.notifyFailure);
             return;
         }
-
-        const disabled = new Set(this.plugin.settings.disabledSkills ?? []);
-        for (const skill of skills) {
-            const cmdHint = skill.commands?.length ? ` (${skill.commands.join(', ')})` : '';
-            new Setting(containerEl)
-                .setName(skill.name)
-                .setDesc(`${skill.description}${cmdHint}`)
-                .addToggle(toggle => toggle
-                    .setValue(!disabled.has(skill.name))
-                    .onChange(async (value: boolean) => {
-                        const next = new Set(this.plugin.settings.disabledSkills ?? []);
-                        if (value) next.delete(skill.name);
-                        else next.add(skill.name);
-                        this.plugin.settings.disabledSkills = [...next];
-                        await this.persistSettings();
-                    }));
-        }
+        const title = preset === 'open' ? t('Open access') : t('Automation');
+        const message = preset === 'open'
+            ? t('Open access grants full-vault writes and plugin control. AI can trigger destructive plugin actions on your behalf. Continue?')
+            : t('Automation turns off per-action confirmation. AI will write files without asking each time. Continue?');
+        new MemoryConfirmModal(this.app, title, message, async () => {
+            await this.applyPermissionPreset(preset);
+            this.update();
+        }).open();
     }
 
-    private getPermissionPresetId(): 'read-only' | 'configured-folders' | 'automation' | 'open' | 'custom' {
+    private async applyPermissionPreset(preset: 'read-only' | 'configured-folders' | 'automation' | 'open'): Promise<void> {
         const settings = this.plugin.settings;
-        if (settings.vaultWriteScope === 'read-only' && !settings.allowFileCreation && !settings.allowFileModification && !settings.allowPluginControl && settings.confirmExecutions) {
-            return 'read-only';
-        }
-        if (settings.vaultWriteScope === 'configured-folders' && settings.allowFileCreation && settings.allowFileModification && !settings.allowPluginControl && settings.confirmExecutions) {
-            return 'configured-folders';
-        }
-        if (settings.vaultWriteScope === 'configured-folders' && settings.allowFileCreation && settings.allowFileModification && !settings.allowPluginControl && !settings.confirmExecutions) {
-            return 'automation';
-        }
-        if (settings.vaultWriteScope === 'all-vault' && settings.allowFileCreation && settings.allowFileModification && settings.allowPluginControl && settings.confirmExecutions) {
-            return 'open';
-        }
-        return 'custom';
-    }
-
-    private renderPermissionPreset(parent: HTMLElement, id: 'read-only' | 'configured-folders' | 'automation' | 'open', title: string, desc: string): void {
-        const button = parent.createEl('button', {
-            cls: 'baizer-settings-preset' + (this.getPermissionPresetId() === id ? ' is-active' : ''),
-            attr: { type: 'button' },
-        });
-        button.createEl('strong', { text: title });
-        button.createEl('br');
-        button.createSpan({ text: desc });
-        button.addEventListener('click', voidHandler(async () => {
-            // P1-1: 提权预设(open=开插件控制+全库写; automation=关执行确认)与单独开关保持一致的二次确认,
-            // 避免一键预设静默绕过 allowPluginControl / confirmExecutions 的破坏性警告。
-            const escalates = id === 'open' || id === 'automation';
-            if (escalates) {
-                const message = id === 'open'
-                    ? t('Open access grants full-vault writes and plugin control. AI can trigger destructive plugin actions on your behalf. Continue?')
-                    : t('Automation turns off per-action confirmation. AI will write files without asking each time. Continue?');
-                new MemoryConfirmModal(this.app, title, message, async () => {
-                    await this.applyPermissionPreset(id);
-                    this.renderAccordion();
-                }).open();
-                return;
-            }
-            await this.applyPermissionPreset(id);
-            this.renderAccordion();
-        }, 'SettingsTab', this.notifyFailure));
-    }
-
-    private async applyPermissionPreset(id: 'read-only' | 'configured-folders' | 'automation' | 'open'): Promise<void> {
-        if (id === 'read-only') {
-            this.plugin.settings.vaultWriteScope = 'read-only';
-            this.plugin.settings.allowFileCreation = false;
-            this.plugin.settings.allowFileModification = false;
-            this.plugin.settings.allowPluginControl = false;
-            this.plugin.settings.confirmExecutions = true;
-        } else if (id === 'configured-folders') {
-            this.plugin.settings.vaultWriteScope = 'configured-folders';
-            this.plugin.settings.allowFileCreation = true;
-            this.plugin.settings.allowFileModification = true;
-            this.plugin.settings.allowPluginControl = false;
-            this.plugin.settings.confirmExecutions = true;
-        } else if (id === 'automation') {
-            this.plugin.settings.vaultWriteScope = 'configured-folders';
-            this.plugin.settings.allowFileCreation = true;
-            this.plugin.settings.allowFileModification = true;
-            this.plugin.settings.allowPluginControl = false;
-            this.plugin.settings.confirmExecutions = false;
+        if (preset === 'read-only') {
+            settings.vaultWriteScope = 'read-only';
+            settings.allowFileCreation = false;
+            settings.allowFileModification = false;
+            settings.allowPluginControl = false;
+            settings.confirmExecutions = true;
+        } else if (preset === 'configured-folders') {
+            settings.vaultWriteScope = 'configured-folders';
+            settings.allowFileCreation = true;
+            settings.allowFileModification = true;
+            settings.allowPluginControl = false;
+            settings.confirmExecutions = true;
+        } else if (preset === 'automation') {
+            settings.vaultWriteScope = 'configured-folders';
+            settings.allowFileCreation = true;
+            settings.allowFileModification = true;
+            settings.allowPluginControl = false;
+            settings.confirmExecutions = false;
         } else {
-            this.plugin.settings.vaultWriteScope = 'all-vault';
-            this.plugin.settings.allowFileCreation = true;
-            this.plugin.settings.allowFileModification = true;
-            this.plugin.settings.allowPluginControl = true;
-            this.plugin.settings.confirmExecutions = true;
+            settings.vaultWriteScope = 'all-vault';
+            settings.allowFileCreation = true;
+            settings.allowFileModification = true;
+            settings.allowPluginControl = true;
+            settings.confirmExecutions = true;
         }
         await this.persistSettings();
     }
 
-    private renderEffectivePermissions(parent: HTMLElement): void {
-        const list = parent.createEl('ul', { cls: 'baizer-settings-summary-list' });
+    private renderEffectivePermissions(setting: Setting): void {
+        const settings = this.plugin.settings;
+        setting.settingEl.addClass('baizer-setting-stacked');
+        const list = setting.controlEl.createEl('ul', { cls: 'baizer-settings-summary-list' });
         const rows: Array<[string, string]> = [
-            [t('Write scope'), this.plugin.settings.vaultWriteScope],
-            [t('Writable folders'), this.plugin.settings.vaultWriteScope === 'configured-folders' ? (this.plugin.settings.vaultWriteAllowedFolders.join(', ') || t('Not configured')) : t('Not applicable')],
-            [t('File creation'), this.plugin.settings.allowFileCreation ? t('Allowed') : t('Blocked')],
-            [t('File modification'), this.plugin.settings.allowFileModification ? t('Allowed') : t('Blocked')],
-            [t('Plugin control'), this.plugin.settings.allowPluginControl ? t('Allowed') : t('Blocked')],
-            [t('Execution confirmation'), this.plugin.settings.confirmExecutions ? t('Required') : t('Automatic')],
+            [t('Write scope'), settings.vaultWriteScope],
+            [t('Writable folders'), settings.vaultWriteScope === 'configured-folders'
+                ? (settings.vaultWriteAllowedFolders.join(', ') || t('Not configured'))
+                : t('Not applicable')],
+            [t('File creation'), settings.allowFileCreation ? t('Allowed') : t('Blocked')],
+            [t('File modification'), settings.allowFileModification ? t('Allowed') : t('Blocked')],
+            [t('Plugin control'), settings.allowPluginControl ? t('Allowed') : t('Blocked')],
+            [t('Execution confirmation'), settings.confirmExecutions ? t('Required') : t('Automatic')],
         ];
         for (const [label, value] of rows) {
             const item = list.createEl('li');
             item.createEl('strong', { text: label });
             item.createSpan({ text: value });
         }
-        if (this.plugin.settings.allowPluginControl || !this.plugin.settings.confirmExecutions || this.plugin.settings.vaultWriteScope === 'all-vault') {
-            parent.createDiv({ cls: 'baizer-settings-inline-note is-danger', text: t('Current permissions are broad. Keep this enabled only when automation requires it.') });
+        if (settings.allowPluginControl || !settings.confirmExecutions || settings.vaultWriteScope === 'all-vault') {
+            setting.controlEl.createDiv({
+                cls: 'baizer-settings-inline-note is-danger',
+                text: t('Current permissions are broad. Keep this enabled only when automation requires it.'),
+            });
         }
     }
 
-    private renderAppearanceSection(containerEl: HTMLElement): void {
-        const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        renderSettingHeading(
-            panel.createDiv({ cls: 'baizer-settings-panel-header' }),
-            t('Workbench'),
-            { nameClass: 'baizer-settings-panel-title' },
-        );
-        const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
+    // ────────────────────────────────────────────────────────────────────────
+    // 技能：每个 skill 一个声明式开关（可被全局设置搜索命中）。
+    // ────────────────────────────────────────────────────────────────────────
 
-        // 底部预览行的值 span 引用：外观字段变更时只更新这一行文本，
-        // 不再整页/整区重绘（P0-3：拖动滑块每格重建会中断拖拽手势）。
-        const sample = body.createDiv({ cls: 'baizer-settings-sample-line' });
-        const updatePreview = () => {
-            previewValue.setText(
-                this.plugin.settings.terminalTheme + ' / '
-                + this.plugin.settings.terminalFontSize + 'px / '
-                + Math.round(this.plugin.settings.terminalOpacity * 100) + '%'
-            );
+    private buildSkillsPage(): SettingDefinitionPage {
+        const meta = getSectionMeta('skills');
+        const skills = typeof this.plugin.modelService?.getSkillList === 'function'
+            ? this.plugin.modelService.getSkillList()
+            : [];
+        const items: SettingDefinitionItem[] = skills.length
+            ? skills.map(skill => ({
+                name: skill.name,
+                desc: `${skill.description}${skill.commands?.length ? ` (${skill.commands.join(', ')})` : ''}`,
+                control: { type: 'toggle', key: skillKey(skill.name) },
+            }))
+            : [{ name: t('No skills registered.') }];
+        return {
+            type: 'page',
+            name: meta.title,
+            desc: t('Enable or disable individual skills. This controls availability only — a skill being on does not bypass the read/write permissions above.'),
+            items,
         };
-
-        // 语言选择：切换后即时生效（重绘设置面板 + 所有打开的 ShellView），无需重启。
-        new Setting(body)
-            .setName(t('Language'))
-            .setDesc(t('Interface language. Follow system uses your device language.'))
-            .addDropdown(drop => drop
-                .addOption('auto', t('Follow system'))
-                .addOption('en', 'English')
-                .addOption('zh', '中文')
-                .setValue(getLocale())
-                .onChange(async (value: string) => {
-                    const locale = value as Locale;
-                    if (typeof this.plugin.applyLanguageChange === 'function') {
-                        await this.plugin.applyLanguageChange(locale);
-                    } else {
-                        this.plugin.settings.language = locale;
-                        await this.persistSettingsLight();
-                    }
-                    // 设置面板自身即时重绘：分区标题/描述/各控件文案随新语言刷新。
-                    this.renderAccordion();
-                }));
-
-        new Setting(body)
-            .setName(t('Theme Style'))
-            .setDesc(t('Adjust the terminal look and feel.'))
-            .addDropdown(drop => drop
-                .addOption('hacker-green', t('Hacker Green'))
-                .addOption('cyberpunk', t('Cyberpunk Neon'))
-                .addOption('obsidian-native', t('Obsidian Native'))
-                .setValue(this.plugin.settings.terminalTheme)
-                .onChange((value: 'hacker-green' | 'cyberpunk' | 'obsidian-native') => {
-                    this.plugin.settings.terminalTheme = value;
-                    updatePreview();
-                    // 纯 UI 字段：debounce 轻量落盘，不重建 provider/guardian/knowledge。
-                    this.debouncedPersistLight();
-                }));
-
-        new Setting(body)
-            .setName(t('Font Size'))
-            .setDesc(t('Workbench text size.'))
-            .addSlider(slider => slider
-                .setLimits(12, 24, 1)
-                .setValue(this.plugin.settings.terminalFontSize)
-                .setDynamicTooltip()
-                .onChange((value: number) => {
-                    this.plugin.settings.terminalFontSize = value;
-                    updatePreview();
-                    this.debouncedPersistLight();
-                }));
-
-        new Setting(body)
-            .setName(t('Background Opacity'))
-            .setDesc(t('Workbench panel opacity.'))
-            .addSlider(slider => slider
-                .setLimits(0.5, 1.0, 0.05)
-                .setValue(this.plugin.settings.terminalOpacity)
-                .setDynamicTooltip()
-                .onChange((value: number) => {
-                    this.plugin.settings.terminalOpacity = value;
-                    updatePreview();
-                    this.debouncedPersistLight();
-                }));
-
-        sample.createEl('strong', { text: t('Preview') });
-        const previewValue = sample.createSpan();
-        updatePreview();
     }
 
-    private renderCaptureSection(containerEl: HTMLElement): void {
-        // ── 视频转写（ASR）───────────────────────────────────────────────
-        // 这一组字段是「平台没给字幕时的兜底转写」的端点配置。四项默认全空
-        // （模型除外，默认 whisper-1）= 沿用当前 openai-compatible provider 的地址与 key，
-        // 与改动前完全一致，老用户不需要动任何设置；
-        // 只配了 Anthropic 的用户在这里填一个 OpenAI 方言的转写服务，就能转写了。
-        const asrPanel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        renderSettingHeading(
-            asrPanel.createDiv({ cls: 'baizer-settings-panel-header' }),
-            t('Video transcription'),
-            { nameClass: 'baizer-settings-panel-title' },
-        );
-        // 字段挂在 panel-body 上，与页面里其它每个分区一致：.baizer-settings-panel 带边框且
-        // overflow:hidden，直接挂在卡片上的行会贴着卡片边缘，对不齐 panel-body 的 8px/10px 内边距。
-        const asrBody = asrPanel.createDiv({ cls: 'baizer-settings-panel-body' });
+    // ────────────────────────────────────────────────────────────────────────
+    // 采集：视频转写与微信入库路径。
+    // ────────────────────────────────────────────────────────────────────────
 
-        new Setting(asrBody)
-            .setName(t('Transcription endpoint (Base URL)'))
-            .setDesc(t('Base URL of an OpenAI-compatible /audio/transcriptions service. Leave empty to reuse the active OpenAI-compatible provider. The endpoint path is appended by the plugin, so include /v1 if your service needs it.'))
-            .addText(text => text
-                .setPlaceholder('https://api.openai.com/v1')
-                .setValue(this.plugin.settings.asrBaseUrl)
-                .onChange(async (value: string) => {
-                    this.plugin.settings.asrBaseUrl = value.trim();
-                    await this.persistSettings();
-                }));
-
-        new Setting(asrBody)
-            .setName(t('Transcription API key'))
-            .setDesc(t('Leave empty to reuse the API key of the active provider when it is OpenAI-compatible. Services on localhost usually need no key.'))
-            .addText(text => {
-                text.inputEl.type = 'password';
-                text.setPlaceholder(t('(reuse provider key)'))
-                    .setValue(this.plugin.settings.asrApiKey)
-                    .onChange(async (value: string) => {
-                        this.plugin.settings.asrApiKey = value.trim();
-                        await this.persistSettings();
-                    });
-            });
-
-        new Setting(asrBody)
-            .setName(t('Transcription model'))
-            .setDesc(t('Model name sent to the endpoint. Defaults to whisper-1, which is what earlier versions hardcoded.'))
-            .addText(text => text
-                .setPlaceholder(DEFAULT_ASR_MODEL)
-                .setValue(this.plugin.settings.asrModel)
-                .onChange(async (value: string) => {
-                    this.plugin.settings.asrModel = value.trim();
-                    await this.persistSettings();
-                }));
-
-        new Setting(asrBody)
-            .setName(t('Transcription language'))
-            .setDesc(t('ISO-639-1 code such as zh or en. Leave empty to let the endpoint detect the language.'))
-            .addText(text => text
-                .setPlaceholder('auto')
-                .setValue(this.plugin.settings.asrLanguage)
-                .onChange(async (value: string) => {
-                    this.plugin.settings.asrLanguage = value.trim();
-                    await this.persistSettings();
-                }));
-
-        // 微信这一组同样按「panel + header + body」渲染：本文件里每个分区都是这个形状，
-        // 而它此前是唯一一组直接挂在 containerEl 上的字段，加上标题后会和上面的转写卡片不对称。
-        const wechatPanel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        renderSettingHeading(
-            wechatPanel.createDiv({ cls: 'baizer-settings-panel-header' }),
-            t('WeChat capture'),
-            { nameClass: 'baizer-settings-panel-title' },
-        );
-        const wechatBody = wechatPanel.createDiv({ cls: 'baizer-settings-panel-body' });
-
-        new Setting(wechatBody)
-            .setName(t('WeChat Inbox Path'))
-            .setDesc(t('The file to monitor for new WeChat links.'))
-            .addText(text => text
-                .setPlaceholder('Inbox.md')
-                .setValue(this.plugin.settings.wechatInboxPath)
-                .onChange(async (value: string) => {
-                    this.plugin.settings.wechatInboxPath = value;
-                    await this.persistSettings();
-                }));
-
-        new Setting(wechatBody)
-            .setName(t('WeChat Storage Path'))
-            .setDesc(t('The folder to store saved articles.'))
-            .addText(text => text
-                .setPlaceholder('Clippings')
-                .setValue(this.plugin.settings.wechatStoragePath)
-                .onChange(async (value: string) => {
-                    this.plugin.settings.wechatStoragePath = value;
-                    await this.persistSettings();
-                }));
-        const mobileSchemeTemplate = 'obsidian://baizer-clip?text=<encoded-share-text>';
-        new Setting(wechatBody)
-            .setName(t('Mobile WeChat Capture'))
-            .setDesc(t('Use this URL scheme from iOS Shortcuts or Android automation. Fallback command: Save URL from clipboard.'))
-            .addButton(btn => btn
-                .setButtonText(t('Copy URL Scheme'))
-                .onClick(async () => {
-                    await navigator.clipboard?.writeText?.(mobileSchemeTemplate);
-                    new Notice(t('Baizer mobile capture URL scheme copied.'));
-                }));
+    private buildCapturePage(): SettingDefinitionPage {
+        const meta = getSectionMeta('capture');
+        return {
+            type: 'page',
+            name: meta.title,
+            desc: meta.description,
+            items: [
+                {
+                    type: 'group',
+                    heading: t('Video transcription'),
+                    items: [
+                        {
+                            name: t('Transcription endpoint (Base URL)'),
+                            desc: t('Base URL of an OpenAI-compatible /audio/transcriptions service. Leave empty to reuse the active OpenAI-compatible provider. The endpoint path is appended by the plugin, so include /v1 if your service needs it.'),
+                            control: { type: 'text', key: 'asrBaseUrl', placeholder: 'https://api.openai.com/v1' },
+                        },
+                        {
+                            name: t('Transcription API key'),
+                            desc: t('Leave empty to reuse the API key of the active provider when it is OpenAI-compatible. Services on localhost usually need no key.'),
+                            render: (setting: Setting) => {
+                                setting.settingEl.addClass('baizer-setting-stacked');
+                                setting.addText(text => {
+                                    text.inputEl.type = 'password';
+                                    text.inputEl.autocomplete = 'off';
+                                    text.inputEl.spellcheck = false;
+                                    text.setPlaceholder(t('(reuse provider key)'));
+                                    text.setValue(this.plugin.settings.asrApiKey);
+                                    text.onChange((value: string) => {
+                                        this.plugin.settings.asrApiKey = value.trim();
+                                        this.debouncedPersist();
+                                    });
+                                });
+                            },
+                        },
+                        {
+                            name: t('Transcription model'),
+                            desc: t('Model name sent to the endpoint. Defaults to whisper-1, which is what earlier versions hardcoded.'),
+                            control: { type: 'text', key: 'asrModel', placeholder: DEFAULT_ASR_MODEL },
+                        },
+                        {
+                            name: t('Transcription language'),
+                            desc: t('ISO-639-1 code such as zh or en. Leave empty to let the endpoint detect the language.'),
+                            control: { type: 'text', key: 'asrLanguage', placeholder: 'auto' },
+                        },
+                    ],
+                },
+                {
+                    type: 'group',
+                    heading: t('WeChat capture'),
+                    items: [
+                        {
+                            name: t('WeChat Inbox Path'),
+                            desc: t('The file to monitor for new WeChat links.'),
+                            control: { type: 'text', key: 'wechatInboxPath', placeholder: 'Inbox.md' },
+                        },
+                        {
+                            name: t('WeChat Storage Path'),
+                            desc: t('The folder to store saved articles.'),
+                            control: { type: 'text', key: 'wechatStoragePath', placeholder: 'Clippings' },
+                        },
+                        {
+                            name: t('Mobile WeChat Capture'),
+                            desc: t('Use this URL scheme from iOS Shortcuts or Android automation. Fallback command: Save URL from clipboard.'),
+                            action: () => { void this.copyMobileScheme(); },
+                        },
+                    ],
+                },
+            ],
+        };
     }
 
-    private renderKnowledgeSection(containerEl: HTMLElement): void {
-        const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        renderSettingHeading(
-            panel.createDiv({ cls: 'baizer-settings-panel-header' }),
-            t('Knowledge Compile'),
-            { nameClass: 'baizer-settings-panel-title' },
-        );
-        const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
+    private async copyMobileScheme(): Promise<void> {
+        const scheme = 'obsidian://baizer-clip?text=<encoded-share-text>';
+        await navigator.clipboard?.writeText?.(scheme);
+        new Notice(t('Baizer mobile capture URL scheme copied.'));
+    }
 
-        new Setting(body)
-            .setName(t('Source Folders'))
-            .setDesc(t('Folders to watch, one per line.'))
-            .setClass('baizer-full-width-textarea')
-            .addTextArea(text => text
-                .setPlaceholder('Clippings\nReading Notes')
-                .setValue((this.plugin.settings.knowledgeSourceFolders || []).join('\n'))
-                .onChange((value: string) => {
-                    this.plugin.settings.knowledgeSourceFolders = value
-                        .split('\n')
-                        .map(entry => entry.trim())
-                        .filter(entry => entry.length > 0);
-                    this.debouncedPersist();
-                }));
+    // ────────────────────────────────────────────────────────────────────────
+    // 知识库：编译设置 → ontology 状态与操作 → ontology 高级设置。
+    // ────────────────────────────────────────────────────────────────────────
 
-        new Setting(body)
-            .setName(t('Wiki Output Folder'))
-            .setDesc(t('The folder where compiled wiki pages are stored.'))
-            .addText(text => text
-                .setPlaceholder('Knowledge Wiki')
-                .setValue(this.plugin.settings.knowledgeWikiFolder)
-                .onChange(async (value: string) => {
-                    this.plugin.settings.knowledgeWikiFolder = value || 'Knowledge Wiki';
-                    await this.persistSettings();
-                }));
+    private buildKnowledgePage(): SettingDefinitionPage {
+        const meta = getSectionMeta('knowledge');
+        return {
+            type: 'page',
+            name: meta.title,
+            desc: meta.description,
+            items: [
+                {
+                    type: 'group',
+                    heading: t('Knowledge Compile'),
+                    items: [
+                        {
+                            name: t('Source Folders'),
+                            desc: t('Folders to watch, one per line.'),
+                            render: (setting: Setting) => this.renderStackedTextarea(setting, {
+                                value: (this.plugin.settings.knowledgeSourceFolders ?? []).join('\n'),
+                                rows: 4,
+                                placeholder: 'Clippings\nReading Notes',
+                                onChange: (value: string) => {
+                                    this.plugin.settings.knowledgeSourceFolders = value
+                                        .split('\n')
+                                        .map(entry => entry.trim())
+                                        .filter(entry => entry.length > 0);
+                                    this.debouncedPersist();
+                                },
+                            }),
+                        },
+                        {
+                            name: t('Wiki Output Folder'),
+                            desc: t('The folder where compiled wiki pages are stored.'),
+                            control: { type: 'text', key: 'knowledgeWikiFolder', placeholder: 'Knowledge Wiki' },
+                        },
+                        {
+                            name: t('Auto Compile'),
+                            desc: t('Compile notes automatically when watched folders change.'),
+                            control: { type: 'toggle', key: 'knowledgeAutoCompile' },
+                        },
+                        {
+                            name: t('Max Compile Batch'),
+                            desc: t('Maximum number of notes to compile in a single batch.'),
+                            control: {
+                                type: 'slider',
+                                key: 'knowledgeMaxCompileBatch',
+                                min: 1,
+                                max: 200,
+                                step: 1,
+                                defaultValue: DEFAULT_SETTINGS.knowledgeMaxCompileBatch,
+                            },
+                        },
+                    ],
+                },
+                {
+                    type: 'group',
+                    heading: t('Ontology'),
+                    items: [
+                        {
+                            name: t('Ontology status'),
+                            desc: t('Current ontology schema and stale-article counts.'),
+                            render: (setting: Setting) => this.renderOntologyStatusRow(setting),
+                        },
+                        {
+                            name: t('Open ontology'),
+                            desc: t('Open the ontology schema file to review or edit it.'),
+                            action: () => { void this.runOntologyAction('open'); },
+                        },
+                        {
+                            name: t('Discover'),
+                            desc: t('Create the ontology schema from the compiled wiki when there is enough content.'),
+                            action: () => { void this.runOntologyAction('discover'); },
+                        },
+                        {
+                            name: t('Preview'),
+                            desc: t('Show what discovery would produce without writing the schema.'),
+                            action: () => { void this.runOntologyAction('preview'); },
+                        },
+                        {
+                            name: t('Mark stale pending'),
+                            desc: t('Queue stale notes for recompilation.'),
+                            action: () => { void this.runOntologyAction('mark-stale'); },
+                        },
+                    ],
+                },
+                {
+                    type: 'group',
+                    heading: t('Ontology advanced settings'),
+                    items: [
+                        {
+                            name: t('Enable Ontology Schema'),
+                            desc: t('Use Knowledge Wiki/_ontology.md to add stable categories and entity extraction to future compiles.'),
+                            control: { type: 'toggle', key: 'knowledgeOntologyEnabled' },
+                        },
+                        {
+                            name: t('Ontology Update Mode'),
+                            desc: t('Manual never discovers automatically. Suggest reports readiness without writing. Auto creates a missing schema when thresholds are met.'),
+                            control: {
+                                type: 'dropdown',
+                                key: 'knowledgeOntologyUpdateMode',
+                                defaultValue: 'suggest',
+                                options: {
+                                    manual: t('Manual'),
+                                    suggest: t('Suggest (recommended)'),
+                                    auto: t('Auto create when missing'),
+                                },
+                            },
+                        },
+                        {
+                            name: t('Minimum Articles'),
+                            desc: t('Minimum compiled wiki articles required before ontology discovery can run.'),
+                            control: {
+                                type: 'number',
+                                key: 'knowledgeOntologyMinArticles',
+                                min: 1,
+                                max: 500,
+                                step: 1,
+                                defaultValue: 10,
+                            },
+                        },
+                        {
+                            name: t('Minimum Topic Frequency'),
+                            desc: t('A topic must appear this many times before it can influence ontology discovery.'),
+                            control: {
+                                type: 'number',
+                                key: 'knowledgeOntologyMinTopicFrequency',
+                                min: 1,
+                                max: 100,
+                                step: 1,
+                                defaultValue: 3,
+                            },
+                        },
+                        {
+                            name: t('Minimum Concept Frequency'),
+                            desc: t('A concept must appear this many times before it can influence ontology discovery.'),
+                            control: {
+                                type: 'number',
+                                key: 'knowledgeOntologyMinConceptFrequency',
+                                min: 1,
+                                max: 100,
+                                step: 1,
+                                defaultValue: 2,
+                            },
+                        },
+                        {
+                            name: t('Auto Recompile Stale Articles'),
+                            desc: t('Automatically recompile affected notes after ontology changes. Keep off if you want to review stale notes first.'),
+                            control: { type: 'toggle', key: 'knowledgeOntologyAutoRecompileStale' },
+                        },
+                    ],
+                },
+            ],
+        };
+    }
 
-        new Setting(body)
-            .setName(t('Auto Compile'))
-            .setDesc(t('Compile notes automatically when watched folders change.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.knowledgeAutoCompile)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.knowledgeAutoCompile = value;
-                    await this.persistSettings();
-                }));
-
-        new Setting(body)
-            .setName(t('Max Compile Batch'))
-            .setDesc(t('Maximum number of notes to compile in a single batch.'))
-            .addSlider(slider => slider
-                .setLimits(1, 200, 1)
-                .setValue(this.plugin.settings.knowledgeMaxCompileBatch)
-                .setDynamicTooltip()
-                .onChange((value: number) => {
-                    this.plugin.settings.knowledgeMaxCompileBatch = value;
-                    this.debouncedPersist();
-                }));
-
-        const ontologyStatusEl = containerEl.createDiv({
-            cls: 'baizer-settings-inline-note',
-            text: t('Ontology status: loading...'),
-        });
-        // 默认走缓存：知识库分区每次渲染都重算全库状态正是 issue #81 的第 3 条。
-        // 优先复用 5s 内已渲染的文案（连状态文件读取都省掉）；过期后走
-        // refreshOntologyStatus，其中 getGlobalCounts() 另有服务层 30s 计数缓存。
+    private renderOntologyStatusRow(setting: Setting): void {
+        setting.settingEl.addClass('baizer-setting-stacked');
+        const statusEl = setting.controlEl.createDiv({ cls: 'baizer-settings-inline-note' });
         const cached = this.ontologyStatusCache;
         if (cached && Date.now() - cached.timestamp < SettingTab.ONTOLOGY_STATUS_CACHE_TTL_MS) {
-            ontologyStatusEl.textContent = cached.text;
-            ontologyStatusEl.title = cached.title;
-        } else {
-            void this.refreshOntologyStatus(ontologyStatusEl);
+            statusEl.textContent = cached.text;
+            statusEl.title = cached.title;
+            return;
         }
+        statusEl.textContent = t('Ontology status: loading...');
+        void this.refreshOntologyStatus(statusEl);
+    }
 
-        const actions = containerEl.createDiv({ cls: 'baizer-settings-actions' });
-        this.createActionButton(actions, t('Open ontology'), async () => {
-            const runtime = this.plugin.knowledgeRuntime;
+    private async runOntologyAction(action: 'open' | 'discover' | 'preview' | 'mark-stale'): Promise<void> {
+        const runtime = this.plugin.knowledgeRuntime;
+        if (action === 'open') {
             if (!runtime?.openOntologyFile) {
                 new Notice(t('Knowledge runtime is not available.'));
                 return;
             }
             await runtime.openOntologyFile();
-            await this.refreshOntologyStatus(ontologyStatusEl);
-        });
-        this.createActionButton(actions, t('Discover'), async () => {
-            const runtime = this.plugin.knowledgeRuntime;
+            this.ontologyStatusCache = null;
+            this.update();
+            return;
+        }
+        if (action === 'discover') {
             if (!runtime?.discoverOntology) {
                 new Notice(t('Knowledge runtime is not available.'));
                 return;
             }
             const path = await runtime.discoverOntology();
             new Notice(path ? t('Ontology schema created') + ': ' + path : t('Ontology schema was not created.'));
-            // 显式操作后强制刷新，不必等缓存 TTL。
-            await this.refreshOntologyStatus(ontologyStatusEl, { forceFresh: true });
-        }, 'accent');
-        this.createActionButton(actions, t('Preview'), async () => {
-            const runtime = this.plugin.knowledgeRuntime;
+            this.ontologyStatusCache = null;
+            this.update();
+            return;
+        }
+        if (action === 'preview') {
             if (!runtime?.discoverOntologyPreview) {
                 new Notice(t('Knowledge runtime is not available.'));
                 return;
@@ -3658,227 +2583,275 @@ export class SettingTab extends PluginSettingTab {
             const preview = await runtime.discoverOntologyPreview();
             if (preview.content) console.debug('[Baizer] Ontology preview:\n', preview.content);
             new Notice(preview.message);
-        });
-        this.createActionButton(actions, t('Mark stale pending'), async () => {
-            const runtime = this.plugin.knowledgeRuntime;
-            if (!runtime?.markOntologyStaleFilesPending) {
-                new Notice(t('Knowledge runtime is not available.'));
-                return;
-            }
-            const count = await runtime.markOntologyStaleFilesPending();
-            new Notice(`${t('Marked stale notes pending')}: ${count}`);
-            // 刚把 stale 标成 pending，计数变了，必须绕过缓存。
-            await this.refreshOntologyStatus(ontologyStatusEl, { forceFresh: true });
-        });
-
-        const advanced = containerEl.createEl('details', { cls: 'baizer-settings-advanced' });
-        advanced.createEl('summary', { text: t('Ontology advanced settings') });
-        this.trackAdvancedDetails(advanced, 'ontology-advanced');
-        const advancedBody = advanced.createDiv({ cls: 'baizer-settings-advanced-body' });
-
-        new Setting(advancedBody)
-            .setName(t('Enable Ontology Schema'))
-            .setDesc(t('Use Knowledge Wiki/_ontology.md to add stable categories and entity extraction to future compiles.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.knowledgeOntologyEnabled !== false)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.knowledgeOntologyEnabled = value;
-                    await this.persistSettings();
-                }));
-
-        new Setting(advancedBody)
-            .setName(t('Ontology Update Mode'))
-            .setDesc(t('Manual never discovers automatically. Suggest reports readiness without writing. Auto creates a missing schema when thresholds are met.'))
-            .addDropdown(drop => drop
-                .addOption('manual', t('Manual'))
-                .addOption('suggest', t('Suggest (recommended)'))
-                .addOption('auto', t('Auto create when missing'))
-                .setValue(this.plugin.settings.knowledgeOntologyUpdateMode || 'suggest')
-                .onChange(async (value: OntologyUpdateMode) => {
-                    this.plugin.settings.knowledgeOntologyUpdateMode = value;
-                    await this.persistSettings();
-                }));
-
-        new Setting(advancedBody)
-            .setName(t('Minimum Articles'))
-            .setDesc(t('Minimum compiled wiki articles required before ontology discovery can run.'))
-            .addText(text => text
-                .setPlaceholder('10')
-                .setValue(String(this.plugin.settings.knowledgeOntologyMinArticles ?? 10))
-                .onChange(async (value: string) => {
-                    this.plugin.settings.knowledgeOntologyMinArticles = clampInteger(value, 1, 500, 10);
-                    await this.persistSettings();
-                }));
-
-        new Setting(advancedBody)
-            .setName(t('Minimum Topic Frequency'))
-            .setDesc(t('A topic must appear this many times before it can influence ontology discovery.'))
-            .addText(text => text
-                .setPlaceholder('3')
-                .setValue(String(this.plugin.settings.knowledgeOntologyMinTopicFrequency ?? 3))
-                .onChange(async (value: string) => {
-                    this.plugin.settings.knowledgeOntologyMinTopicFrequency = clampInteger(value, 1, 100, 3);
-                    await this.persistSettings();
-                }));
-
-        new Setting(advancedBody)
-            .setName(t('Minimum Concept Frequency'))
-            .setDesc(t('A concept must appear this many times before it can influence ontology discovery.'))
-            .addText(text => text
-                .setPlaceholder('2')
-                .setValue(String(this.plugin.settings.knowledgeOntologyMinConceptFrequency ?? 2))
-                .onChange(async (value: string) => {
-                    this.plugin.settings.knowledgeOntologyMinConceptFrequency = clampInteger(value, 1, 100, 2);
-                    await this.persistSettings();
-                }));
-
-        new Setting(advancedBody)
-            .setName(t('Auto Recompile Stale Articles'))
-            .setDesc(t('Automatically recompile affected notes after ontology changes. Keep off if you want to review stale notes first.'))
-            .addToggle(toggle => toggle
-                .setValue(!!this.plugin.settings.knowledgeOntologyAutoRecompileStale)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.knowledgeOntologyAutoRecompileStale = value;
-                    await this.persistSettings();
-                }));
+            return;
+        }
+        if (!runtime?.markOntologyStaleFilesPending) {
+            new Notice(t('Knowledge runtime is not available.'));
+            return;
+        }
+        const count = await runtime.markOntologyStaleFilesPending();
+        new Notice(`${t('Marked stale notes pending')}: ${count}`);
+        this.ontologyStatusCache = null;
+        this.update();
     }
 
     /**
-     * 刷新知识库状态行。
-     * 计数默认走 KnowledgeStatusService 的缓存（30s TTL），避免每次整页重建都串行遍历全库；
-     * 只有本页的显式操作（Discover / Mark stale pending）才传 forceFresh 绕过缓存。
+     * 刷新知识库状态行。计数默认走 KnowledgeStatusService 的缓存（30s TTL），
+     * 避免每次打开子页都串行遍历全库。
      */
-    private async refreshOntologyStatus(
-        statusEl: HTMLElement,
-        options: { forceFresh?: boolean } = {},
-    ): Promise<void> {
+    private async refreshOntologyStatus(statusEl: HTMLElement): Promise<void> {
         const runtime = this.plugin.knowledgeRuntime;
         if (!runtime?.getOntologyStatus) {
             statusEl.textContent = t('Ontology status: Knowledge runtime is not available.');
             return;
         }
-
         try {
             const status = await runtime.getOntologyStatus();
             const readiness = runtime.getOntologyDiscoveryReadiness
                 ? await runtime.getOntologyDiscoveryReadiness()
                 : null;
             const counts = runtime.getStatusService
-                ? await runtime.getStatusService().getGlobalCounts({ forceFresh: options.forceFresh })
+                ? await runtime.getStatusService().getGlobalCounts()
                 : null;
-            // P1-4: 状态串走 i18n,枚举值仍保留原值(供进阶用户识别),但前缀/字段名中文化。
-            const parts = [
-                `${t('Ontology')}: ${status.kind}`,
-            ];
+            const parts = [`${t('Ontology')}: ${status.kind}`];
             if (readiness) parts.push(`${t('discovery')}: ${readiness.kind}`);
             if (counts) parts.push(`${t('stale notes')}: ${counts.stale}`);
             const text = parts.join('  ·  ');
             const title = `${t('path')}: ${status.path}`;
-            // #81: 结果进短 TTL 缓存，供分区重挂载时直接复用，不必每次都重新串行遍历全库。
             this.ontologyStatusCache = { text, title, timestamp: Date.now() };
-            // 局部重绘会替换掉旧的 statusEl；异步回来时若该节点已脱离文档,放弃写入,避免向已卸载节点做无效写(P0-2 一致性)。
             if (!statusEl.isConnected) return;
             statusEl.textContent = text;
             statusEl.title = title;
-        } catch (e: unknown) {
+        } catch (error: unknown) {
             if (!statusEl.isConnected) return;
-            statusEl.textContent = `${t('Ontology status unavailable')}: ${thrownMessage(e)}`;
+            statusEl.textContent = `${t('Ontology status unavailable')}: ${thrownMessage(error)}`;
         }
     }
 
-    private renderPluginSkillsSection(containerEl: HTMLElement): void {
-        const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        renderSettingHeading(
-            panel.createDiv({ cls: 'baizer-settings-panel-header' }),
-            t('Generation'),
-            { nameClass: 'baizer-settings-panel-title' },
-        );
-        const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
+    // ────────────────────────────────────────────────────────────────────────
+    // Guardian：选中工具条与补全开关。
+    // ────────────────────────────────────────────────────────────────────────
 
-        new Setting(body)
-            .setName(t('Auto-generate plugin skills'))
-            .setDesc(t('Generate AI skills for installed plugins on startup.'))
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.autoGeneratePluginSkills)
-                .onChange(async (value: boolean) => {
-                    this.plugin.settings.autoGeneratePluginSkills = value;
-                    await this.persistSettings();
-                    this.renderAccordion();
-                }));
-
-        new Setting(body)
-            .setName(t('Excluded plugins'))
-            .setDesc(t('Plugin IDs to exclude from skill generation, comma-separated.'))
-            .addText(text => text
-                .setPlaceholder('plugin-id-1, plugin-id-2')
-                .setValue(this.plugin.settings.pluginSkillExcludeList.join(', '))
-                .onChange(async (value: string) => {
-                    this.plugin.settings.pluginSkillExcludeList = value
-                        .split(',')
-                        .map(entry => entry.trim())
-                        .filter(entry => entry.length > 0);
-                    await this.persistSettings();
-                }));
-
-        const list = body.createEl('ul', { cls: 'baizer-settings-skill-list' });
-        const autoItem = list.createEl('li');
-        autoItem.createEl('strong', { text: t('Startup scan') });
-        autoItem.createSpan({ text: this.plugin.settings.autoGeneratePluginSkills ? t('Enabled') : t('Off') });
-        const excludeItem = list.createEl('li');
-        excludeItem.createEl('strong', { text: t('Excluded plugins') });
-        excludeItem.createSpan({ text: String(this.plugin.settings.pluginSkillExcludeList.length) });
-
-        this.renderDerivedSkillList(containerEl);
+    private buildGuardianPage(): SettingDefinitionPage {
+        const meta = getSectionMeta('guardian');
+        const settings = this.plugin.settings;
+        return {
+            type: 'page',
+            name: meta.title,
+            desc: meta.description,
+            items: [
+                {
+                    name: t('Selection Toolbar'),
+                    desc: t('Show a floating AI toolbar (rewrite, explain, etc.) when you select text in the editor.'),
+                    control: { type: 'toggle', key: 'enableSelectionMenu' },
+                },
+                {
+                    type: 'group',
+                    heading: t('Guardian'),
+                    items: [
+                        {
+                            name: t('Enable Guardian'),
+                            desc: t('Allow AI to passively analyze text and offer suggestions.'),
+                            control: { type: 'toggle', key: 'enableGuardian' },
+                        },
+                        {
+                            name: t('Auto Mode'),
+                            desc: t('Automatically analyze text after 5 seconds of inactivity.'),
+                            visible: () => settings.enableGuardian,
+                            control: { type: 'toggle', key: 'guardianAutoMode' },
+                        },
+                        {
+                            name: t('Guardian Sensitivity'),
+                            desc: t('Low (manual) to high (copilot style).'),
+                            visible: () => settings.enableGuardian,
+                            control: {
+                                type: 'slider',
+                                key: 'guardianSensitivity',
+                                min: 0,
+                                max: 100,
+                                step: 25,
+                                defaultValue: DEFAULT_SETTINGS.guardianSensitivity,
+                            },
+                        },
+                        {
+                            name: t('UI Style'),
+                            desc: t('Choose how suggestions appear in the editor.'),
+                            visible: () => settings.enableGuardian,
+                            control: {
+                                type: 'dropdown',
+                                key: 'guardianUIStyle',
+                                defaultValue: 'hybrid',
+                                options: {
+                                    ghost: t('Ghost Text (Inline)'),
+                                    gutter: t('Gutter Dot (Subtle)'),
+                                    hybrid: t('Hybrid (Both)'),
+                                },
+                            },
+                        },
+                        {
+                            name: t('Auto deep-dive when fast completion is empty or weak'),
+                            desc: t('When AI has no immediate suggestion or only a mediocre one while you stay put, it reads related notes and personal memory to attempt a deeper completion. Slower, uses more tokens, on by default.'),
+                            visible: () => settings.enableGuardian,
+                            control: { type: 'toggle', key: 'guardianAutoDeepEscalation' },
+                        },
+                        {
+                            name: t('Ignored Folders'),
+                            desc: t('Path patterns to ignore, one per line.'),
+                            visible: () => settings.enableGuardian,
+                            render: (setting: Setting) => this.renderStackedTextarea(setting, {
+                                value: settings.ignoredFolders,
+                                rows: 4,
+                                placeholder: 'Private/\nSecrets/\nTemplates/',
+                                onChange: (value: string) => {
+                                    settings.ignoredFolders = value;
+                                    this.debouncedPersist();
+                                },
+                            }),
+                        },
+                        {
+                            name: t('Manual Mode Hotkey'),
+                            desc: t('Open the Obsidian hotkey settings for Guardian.'),
+                            visible: () => settings.enableGuardian,
+                            action: () => {
+                                this.app.setting.openTabById('hotkeys');
+                                this.app.setting.activeTab.setQuery('Guardian: Manual Trigger');
+                            },
+                        },
+                    ],
+                },
+            ],
+        };
     }
 
-    /**
-     * 派生技能的管理入口。文件在 .obsidian 隐藏目录，Obsidian 文件浏览器看不见,
-     * 所以这里是用户唯一能查看与处置它们的地方。
-     */
-    private renderDerivedSkillList(containerEl: HTMLElement): void {
-        const panel = containerEl.createDiv({ cls: 'baizer-settings-panel' });
-        renderSettingHeading(
-            panel.createDiv({ cls: 'baizer-settings-panel-header' }),
-            t('Generated plugin skills'),
-            { nameClass: 'baizer-settings-panel-title' },
-        );
-        const body = panel.createDiv({ cls: 'baizer-settings-panel-body' });
+    // ────────────────────────────────────────────────────────────────────────
+    // 外观：语言与 Workbench 主题。(语言影响所有页面文案，切换后整页重渲染。)
+    // ────────────────────────────────────────────────────────────────────────
 
+    private buildAppearancePage(): SettingDefinitionPage {
+        const meta = getSectionMeta('appearance');
+        return {
+            type: 'page',
+            name: meta.title,
+            desc: meta.description,
+            items: [
+                {
+                    name: t('Language'),
+                    desc: t('Interface language. Follow system uses your device language.'),
+                    control: {
+                        type: 'dropdown',
+                        key: 'language',
+                        defaultValue: 'auto',
+                        options: {
+                            auto: t('Follow system'),
+                            en: 'English',
+                            zh: '中文',
+                        },
+                    },
+                },
+                {
+                    type: 'group',
+                    heading: t('Workbench'),
+                    items: [
+                        {
+                            name: t('Theme Style'),
+                            desc: t('Adjust the terminal look and feel.'),
+                            control: {
+                                type: 'dropdown',
+                                key: 'terminalTheme',
+                                defaultValue: 'hacker-green',
+                                options: {
+                                    'hacker-green': t('Hacker Green'),
+                                    cyberpunk: t('Cyberpunk Neon'),
+                                    'obsidian-native': t('Obsidian Native'),
+                                },
+                            },
+                        },
+                        {
+                            name: t('Font Size'),
+                            desc: t('Workbench text size.'),
+                            control: {
+                                type: 'slider',
+                                key: 'terminalFontSize',
+                                min: 12,
+                                max: 24,
+                                step: 1,
+                                defaultValue: DEFAULT_SETTINGS.terminalFontSize,
+                            },
+                        },
+                        {
+                            name: t('Background Opacity'),
+                            desc: t('Workbench panel opacity, from 50% to 100%.'),
+                            control: {
+                                type: 'slider',
+                                key: 'terminalOpacity',
+                                min: 0.5,
+                                max: 1,
+                                step: 0.05,
+                                defaultValue: DEFAULT_SETTINGS.terminalOpacity,
+                            },
+                        },
+                    ],
+                },
+            ],
+        };
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 插件技能：自动生成开关 + 派生技能管理（文件在隐藏目录，这里是唯一入口）。
+    // ────────────────────────────────────────────────────────────────────────
+
+    private buildPluginSkillsPage(): SettingDefinitionPage {
+        const meta = getSectionMeta('plugin-skills');
         const watcher = this.plugin.pluginWatcher;
         const rows = watcher
-            // 宿主接口为最小结构类型，派生状态数组按设置页消费的窄契约收口（写入方保证形状）。
-            ? getDerivedSkillRows(watcher.getDerivedSkillStatuses() as DerivedSkillStatus[], watcher.getGenerationFailures())
+            ? getDerivedSkillRows(
+                watcher.getDerivedSkillStatuses(),
+                watcher.getGenerationFailures(),
+            )
             : [];
-
-        if (rows.length === 0) {
-            body.createDiv({
-                cls: 'baizer-settings-inline-note is-muted',
-                text: t('No plugin skills have been generated yet.'),
-            });
-            return;
-        }
-
-        for (const row of rows) {
-            this.renderDerivedSkillRow(body, row);
-        }
+        const derivedItems: SettingGroupItem[] = rows.length
+            ? rows.map(row => ({
+                name: row.pluginId,
+                desc: this.buildDerivedSkillDescription(row),
+                render: (setting: Setting) => this.renderDerivedSkillRow(setting, row),
+            }))
+            : [{ name: t('No plugin skills have been generated yet.') }];
+        return {
+            type: 'page',
+            name: meta.title,
+            desc: meta.description,
+            items: [
+                {
+                    name: t('Auto-generate plugin skills'),
+                    desc: t('Generate AI skills for installed plugins on startup.'),
+                    control: { type: 'toggle', key: 'autoGeneratePluginSkills' },
+                },
+                {
+                    name: t('Excluded plugins'),
+                    desc: t('Plugin IDs to exclude from skill generation, comma-separated.'),
+                    control: { type: 'text', key: 'pluginSkillExcludeList', placeholder: 'plugin-id-1, plugin-id-2' },
+                },
+                {
+                    type: 'group',
+                    heading: t('Generated plugin skills'),
+                    items: derivedItems,
+                },
+            ],
+        };
     }
 
-    private renderDerivedSkillRow(body: HTMLElement, row: DerivedSkillRow): void {
-        const descParts = [row.versionLabel, ...row.badges];
-        if (row.failureReason) {
-            descParts.push(`${t('Last generation failed')}: ${row.failureReason}`);
-        }
+    private buildDerivedSkillDescription(row: DerivedSkillRow): string {
+        const parts = [row.versionLabel, ...row.badges];
+        if (row.failureReason) parts.push(`${t('Last generation failed')}: ${row.failureReason}`);
+        return parts.join(' · ');
+    }
 
-        const setting = new Setting(body)
-            .setName(row.pluginId)
-            .setDesc(descParts.join(' · '));
-
+    private renderDerivedSkillRow(setting: Setting, row: DerivedSkillRow): void {
         setting.addButton(button => button
             .setButtonText(t('Regenerate'))
             .onClick(() => { void this.regenerateDerivedSkill(row.pluginId); }));
-
         setting.addButton(button => {
-            button.setButtonText(t('Delete')).setWarning();
+            button.setButtonText(t('Delete')).setDestructive();
             button.onClick(() => {
                 new MemoryConfirmModal(
                     this.app,
@@ -3898,29 +2871,271 @@ export class SettingTab extends PluginSettingTab {
     private async regenerateDerivedSkill(pluginId: string): Promise<void> {
         const watcher = this.plugin.pluginWatcher;
         if (!watcher) return;
-
         const status = await watcher.regenerateDerivedSkill(pluginId);
         new Notice(getRegenerateOutcomeMessage(pluginId, status));
-        this.renderAccordion();
+        this.update();
     }
 
     private async deleteDerivedSkill(pluginId: string): Promise<void> {
         const watcher = this.plugin.pluginWatcher;
         if (!watcher) return;
-
         const deleted = await watcher.deleteDerivedSkill(pluginId);
         new Notice(deleted
             ? t('Deleted the skill for {plugin}.').replace('{plugin}', pluginId)
             : t('Failed to delete the skill for {plugin}.').replace('{plugin}', pluginId));
-        this.renderAccordion();
+        this.update();
     }
 
-    private createActionButton(
+    // ────────────────────────────────────────────────────────────────────────
+    // 移动端：面板打开期间监听「页面被隐藏」，尽量把 debounce 里的最后编辑落盘。
+    // ────────────────────────────────────────────────────────────────────────
+
+    private readonly handleVisibilityChange = (): void => {
+        if (typeof document === 'undefined') return;
+        if (document.visibilityState === 'visible') return;
+        this.flushPersistedEdits();
+        detach(this.debouncedPersistLight.run(), 'SettingsTab');
+    };
+
+    private installVisibilityFlush(): void {
+        if (this.visibilityFlushInstalled || typeof document === 'undefined') return;
+        if (typeof document.addEventListener !== 'function') return;
+        document.addEventListener('visibilitychange', this.handleVisibilityChange);
+        this.visibilityFlushInstalled = true;
+    }
+}
+
+/**
+ * 记忆浏览子页。
+ *
+ * 记忆条目的读取/搜索/删除是异步数据 + 自由列表，没有对应的声明式控件，
+ * 因此这一页是 imperative 的 SettingPage；父页面上的开关仍是声明式定义。
+ */
+class MemoryBrowserPage extends SettingPage {
+    private memoryView: MemoryView | null = null;
+    private memorySearchQuery = '';
+    private memoryActiveTab: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = 'overview';
+    private memoryLoading = false;
+    private memoryError = '';
+
+    constructor(private tab: SettingTab) {
+        super();
+        this.title = t('Browse memory');
+    }
+
+    display(): void {
+        this.containerEl.empty();
+        this.renderToolbar();
+        this.renderSearch();
+        this.renderTabs();
+        this.renderList();
+        // 首次打开自动加载；本次渲染会先画出 Loading。
+        if (!this.memoryView && !this.memoryLoading) {
+            void this.refresh(this.memoryActiveTab, { repaintOnStart: false });
+        }
+    }
+
+    private get plugin(): IPlugin {
+        return this.tab.plugin;
+    }
+
+    private renderToolbar(): void {
+        const toolbar = this.containerEl.createDiv({ cls: 'baizer-memory-toolbar' });
+        toolbar.createSpan({
+            cls: 'baizer-memory-path',
+            text: `${t('Data folder')}: ${MEMORY_DIR}`,
+        });
+        const toolbarActions = toolbar.createDiv({ cls: 'baizer-memory-toolbar-actions' });
+        this.createButton(toolbarActions, this.memoryLoading ? t('Refreshing...') : t('Refresh'), async () => {
+            await this.refresh(this.memoryActiveTab);
+        }, this.memoryLoading);
+        this.createButton(toolbarActions, t('Clear Memory'), async () => {
+            this.confirmClearAll();
+        }, false, 'danger');
+    }
+
+    private renderSearch(): void {
+        const row = this.containerEl.createDiv({ cls: 'baizer-memory-search' });
+        const input = row.createEl('input', {
+            cls: 'baizer-settings-search',
+            attr: { type: 'search', placeholder: t('Search memories'), 'aria-label': t('Search memories') },
+        });
+        input.value = this.memorySearchQuery;
+        const runSearch = (): void => {
+            if (!this.memorySearchQuery.trim()) return;
+            this.memoryActiveTab = 'search';
+            void this.refresh('search');
+        };
+        input.addEventListener('input', () => {
+            this.memorySearchQuery = input.value;
+        });
+        input.addEventListener('keydown', (event: KeyboardEvent) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                runSearch();
+            }
+        });
+        this.createButton(row, t('Search'), async () => runSearch(), false, 'accent');
+    }
+
+    private renderTabs(): void {
+        const tabs = this.containerEl.createDiv({ cls: 'baizer-memory-tabs', attr: { role: 'tablist' } });
+        const entries: Array<[typeof this.memoryActiveTab, string]> = [
+            ['overview', t('Overview')],
+            ['observations', t('Observations')],
+            ['facts', t('Facts')],
+            ['recent', t('Experiences')],
+            ['search', t('Search Results')],
+        ];
+        for (const [id, label] of entries) {
+            const selected = this.memoryActiveTab === id;
+            const button = tabs.createEl('button', {
+                text: label,
+                cls: `baizer-memory-tab${selected ? ' is-active' : ''}`,
+                attr: { type: 'button', role: 'tab', 'aria-selected': selected ? 'true' : 'false' },
+            });
+            button.addEventListener('click', () => {
+                this.memoryActiveTab = id;
+                void this.refresh(id);
+            });
+        }
+    }
+
+    private renderList(): void {
+        if (this.memoryError) {
+            this.containerEl.createDiv({
+                cls: 'baizer-settings-inline-note is-warning',
+                text: this.memoryError,
+                attr: { role: 'alert', 'aria-live': 'assertive' },
+            });
+            return;
+        }
+
+        const list = this.containerEl.createDiv({
+            cls: 'baizer-memory-list',
+            attr: { role: 'status', 'aria-live': 'polite' },
+        });
+        const records = this.getVisibleRecords();
+        if (records.length === 0) {
+            list.createDiv({
+                cls: 'baizer-settings-empty-state',
+                text: this.memoryLoading ? t('Loading memory...') : t('No memories to show.'),
+            });
+            return;
+        }
+
+        for (const record of records) {
+            const row = list.createDiv({ cls: 'baizer-memory-row' });
+
+            const head = row.createDiv({ cls: 'baizer-memory-row-head' });
+            const headMeta = head.createDiv({ cls: 'baizer-memory-row-meta' });
+            headMeta.createSpan({ cls: `baizer-memory-type is-${record.type}`, text: record.type });
+            for (const tag of record.tags || []) {
+                headMeta.createSpan({ cls: 'baizer-memory-tag', text: tag });
+            }
+            headMeta.createSpan({
+                cls: 'baizer-memory-confidence',
+                text: `${t('confidence')} ${Number(record.confidence || 0).toFixed(2)}`,
+            });
+
+            const headActions = head.createDiv({ cls: 'baizer-memory-row-actions' });
+            headActions.createSpan({
+                cls: 'baizer-memory-time',
+                text: new Date(record.updatedAt || record.mentionedAt).toLocaleString(),
+            });
+            const deleteButton = headActions.createEl('button', {
+                cls: 'baizer-memory-delete',
+                attr: { type: 'button', title: t('Delete'), 'aria-label': t('Delete') },
+            });
+            setIcon(deleteButton, 'trash-2');
+            deleteButton.addEventListener('click', () => this.confirmDeleteRecord(record.id));
+
+            row.createDiv({ cls: 'baizer-memory-row-text', text: this.truncateText(record.text || '', 260) });
+        }
+    }
+
+    private getVisibleRecords(): MemoryRecord[] {
+        const sections = this.memoryView?.sections;
+        if (!sections) return [];
+        if (this.memoryActiveTab === 'observations') return sections.observations || [];
+        if (this.memoryActiveTab === 'facts') return sections.facts || [];
+        if (this.memoryActiveTab === 'recent') return sections.recent || [];
+        if (this.memoryActiveTab === 'search') return sections.searchResults || [];
+        return [...(sections.observations || []), ...(sections.facts || [])].slice(0, 10);
+    }
+
+    private truncateText(text: string, max: number): string {
+        const normalized = text.replace(/\s+/g, ' ').trim();
+        return normalized.length <= max ? normalized : `${normalized.slice(0, max - 3)}...`;
+    }
+
+    private async refresh(
+        mode: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = this.memoryActiveTab,
+        options: { repaintOnStart?: boolean } = {},
+    ): Promise<void> {
+        if (typeof this.plugin.modelService?.getMemoryView !== 'function') {
+            this.memoryError = t('Memory service is not available.');
+            this.display();
+            return;
+        }
+
+        this.memoryLoading = true;
+        this.memoryError = '';
+        if (options.repaintOnStart !== false) this.display();
+        try {
+            this.memoryView = await this.plugin.modelService.getMemoryView({
+                mode,
+                query: mode === 'search' ? this.memorySearchQuery : undefined,
+                limit: 25,
+            });
+        } catch (error: unknown) {
+            this.memoryError = thrownMessage(error) || t('Failed to load memory.');
+        } finally {
+            this.memoryLoading = false;
+            this.display();
+        }
+    }
+
+    private confirmDeleteRecord(id: string): void {
+        new MemoryConfirmModal(
+            this.tab.app,
+            t('Delete Memory'),
+            t('Delete this remembered Hindsight memory record?'),
+            async () => {
+                if (typeof this.plugin.modelService?.deleteMemoryById !== 'function') {
+                    new Notice(t('Memory deletion is not available.'));
+                    return;
+                }
+                const result = await this.plugin.modelService.deleteMemoryById(id);
+                new Notice(result?.message || `${t('Deleted memory')}: ${id}`);
+                await this.refresh();
+            },
+        ).open();
+    }
+
+    private confirmClearAll(): void {
+        new MemoryConfirmModal(
+            this.tab.app,
+            t('Clear Memory'),
+            t('Clear all remembered Hindsight memory and legacy profile fields?'),
+            async () => {
+                if (typeof this.plugin.modelService?.forgetMemory !== 'function') {
+                    new Notice(t('Memory clearing is not available.'));
+                    return;
+                }
+                const result = await this.plugin.modelService.forgetMemory('all');
+                new Notice(result?.message || t('Cleared all remembered Hindsight memory.'));
+                await this.refresh();
+            },
+        ).open();
+    }
+
+    private createButton(
         containerEl: HTMLElement,
         label: string,
         onClick: () => void | Promise<void>,
-        variant: 'default' | 'primary' | 'danger' | 'accent' = 'default',
-        disabled: boolean = false
+        disabled: boolean,
+        variant: 'default' | 'danger' | 'accent' = 'default',
     ): HTMLButtonElement {
         const button = containerEl.createEl('button', {
             text: label,
@@ -3930,19 +3145,25 @@ export class SettingTab extends PluginSettingTab {
         button.disabled = disabled;
         button.addEventListener('click', () => {
             if (button.disabled) return;
-            // 所有设置页动作按钮的统一入口：onClick 失败时记日志并提示，而不是静默变成 unhandled rejection。
-            detach(onClick(), 'SettingsTab', this.notifyFailure);
+            // 记忆子页所有动作按钮的统一入口：onClick 失败时记日志并提示，而不是静默变成 unhandled rejection。
+            detach(onClick(), 'SettingsTab', (error) => {
+                new Notice(`${t('Settings action failed')}: ${thrownMessage(error) || t('unknown reason')}`);
+            });
         });
         return button;
     }
 }
 
 class MemoryConfirmModal extends Modal {
+    private confirmed = false;
+
     constructor(
         app: App,
         private titleText: string,
         private message: string,
         private onConfirm: () => Promise<void>,
+        /** 未确认直接关闭时调用：声明式列表的删除按钮会先移除 DOM 行，取消后需要重新同步。 */
+        private onCancel?: () => void,
     ) {
         super(app);
     }
@@ -3967,6 +3188,7 @@ class MemoryConfirmModal extends Modal {
             attr: { type: 'button' },
         });
         confirm.addEventListener('click', () => {
+            this.confirmed = true;
             this.close();
             // 用户已确认的（常为破坏性）操作失败时必须告知，不能只留一个静默的 void。
             detach(this.onConfirm(), 'SettingsTab', (error) => {
@@ -3977,6 +3199,7 @@ class MemoryConfirmModal extends Modal {
 
     onClose(): void {
         this.contentEl.empty();
+        if (!this.confirmed) this.onCancel?.();
     }
 }
 
@@ -4017,8 +3240,6 @@ class AddProviderModal extends Modal {
             .setName(t('Protocol'))
             .setDesc(t('The wire protocol this provider speaks.'))
             .addDropdown(dropdown => {
-                // 块体写法：DropdownComponent 带 then() 方法会被规则当成 thenable，
-                // 箭头函数隐式返回 addOption() 的结果会被误判为「返回 Promise」。
                 getProtocolOptions().forEach(option => { dropdown.addOption(option.value, option.label); });
                 dropdown.setValue(typeValue);
                 dropdown.onChange((value: string) => {

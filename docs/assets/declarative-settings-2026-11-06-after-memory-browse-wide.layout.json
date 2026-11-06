@@ -1,0 +1,135 @@
+{
+  "schema": "baizer-declarative-settings-layout/1",
+  "label": "after-memory-browse-wide",
+  "phase": "after",
+  "revision": "merge-main",
+  "capturedAt": "2026-11-06T02:39:31.030Z",
+  "theme": "dark",
+  "language": "zh",
+  "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+  "viewport": {
+    "requested": {
+      "width": 1353,
+      "height": 1053
+    },
+    "innerWidth": 1353,
+    "innerHeight": 1053,
+    "devicePixelRatio": 1
+  },
+  "page": {
+    "requestedPages": [
+      "记忆"
+    ],
+    "rows": [],
+    "contentText": "浏览记忆\n数据目录: .obsidian/baizer-memory\n刷新\n清除记忆\n搜索\n概览\n观察\n事实\n经验\n搜索结果\n暂无可显示的记忆。"
+  },
+  "image": {
+    "path": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\docs\\assets\\declarative-settings-2026-11-06-after-memory-browse-wide.png",
+    "bytes": 48727,
+    "width": 1353,
+    "height": 1053,
+    "requestedWidth": 1353,
+    "requestedHeight": 1053,
+    "sizeMatchesRequest": true
+  },
+  "harness": {
+    "exe": "C:\\Program Files\\Obsidian\\Obsidian.exe",
+    "pluginDir": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\dist",
+    "vaultDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
+    "vaultKey": "f230a63f4db30aad",
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.6.0",
+      "minAppVersion": "1.13.0",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    },
+    "copiedPluginFiles": [
+      {
+        "file": "main.js",
+        "bytes": 2838620
+      },
+      {
+        "file": "manifest.json",
+        "bytes": 325
+      },
+      {
+        "file": "styles.css",
+        "bytes": 127634
+      }
+    ],
+    "scenarioPath": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
+    "target": {
+      "id": "F0B529175FCD8E4A24AAE98CCC63335C",
+      "url": "app://obsidian.md/index.html",
+      "title": "obsidian - Obsidian 1.15.0"
+    },
+    "settingsPanelLocation": "popout-window",
+    "navigation": [
+      {
+        "text": "记忆",
+        "found": true,
+        "score": 100,
+        "clicked": "记忆 记忆的保留、召回、搜索与删除。",
+        "cls": "setting-item mod-navigable tappable"
+      },
+      {
+        "text": "浏览记忆",
+        "found": true,
+        "score": 100,
+        "clicked": "浏览记忆 搜索、查看与删除已记住的记忆。",
+        "cls": "setting-item mod-navigable tappable"
+      }
+    ],
+    "domDump": null,
+    "pid": 39476,
+    "browser": "Chrome/128.0.6613.186",
+    "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.7.7 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36",
+    "blockingModals": {
+      "trust": {
+        "present": false,
+        "clicked": null
+      },
+      "strayModalsClosed": [],
+      "releaseNotes": {
+        "detached": 0
+      }
+    },
+    "pluginActivation": {
+      "steps": [
+        "plugins.loadManifests()"
+      ],
+      "error": null,
+      "loaded": true
+    },
+    "pluginSettings": {
+      "settingsLoaded": true,
+      "activeProvider": "opencode",
+      "providers": [
+        "cch",
+        "opencode",
+        "anthropic"
+      ],
+      "matched": true
+    },
+    "settings": {
+      "tabId": "baizer",
+      "isOpen": true,
+      "popoutCreated": true,
+      "settingsModalInMainDocument": false
+    },
+    "domStability": {
+      "stable": true,
+      "signature": "1602|72",
+      "settledAfterMs": 1026
+    }
+  },
+  "limitations": [
+    "Colour, contrast, font rendering, iconography and animation are NOT asserted.",
+    "This harness navigates by visible row text; a renamed row breaks navigation instead of silently measuring another row.",
+    "The pre-migration accordion UI has no declarative page entries; use ../provider-settings-shots/capture.mjs for Before evidence."
+  ]
+}

@@ -1,0 +1,190 @@
+{
+  "schema": "baizer-declarative-settings-layout/1",
+  "label": "after-wide",
+  "phase": "after",
+  "revision": "merge-main",
+  "capturedAt": "2026-11-06T02:38:25.636Z",
+  "theme": "dark",
+  "language": "zh",
+  "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
+  "viewport": {
+    "requested": {
+      "width": 1353,
+      "height": 1053
+    },
+    "innerWidth": 1353,
+    "innerHeight": 1053,
+    "devicePixelRatio": 1
+  },
+  "page": {
+    "requestedPages": [
+      "连接"
+    ],
+    "rows": [
+      {
+        "name": "当前服务商",
+        "desc": "AI 请求使用此服务商。",
+        "cls": "setting-item mod-action tappable is-disabled",
+        "clickable": true
+      },
+      {
+        "name": "服务商名称",
+        "desc": "显示在服务商列表中。名称为空会就地报错，而不是悄悄改回旧名称。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "协议",
+        "desc": "该服务商使用的线协议。切换后只显示适用于该协议的字段。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "API 类型（Chat Completions / Responses）",
+        "desc": "服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /chat/completions，不要把完整请求路径粘进来。",
+        "cls": "setting-item",
+        "clickable": true
+      },
+      {
+        "name": "服务地址（Base URL）",
+        "desc": "",
+        "cls": "setting-item baizer-setting-stacked",
+        "clickable": true
+      },
+      {
+        "name": "API Key",
+        "desc": "仅保存在本地，默认隐藏。用「显示」查看，用「清除」清空（会二次确认）。",
+        "cls": "setting-item baizer-setting-stacked",
+        "clickable": true
+      },
+      {
+        "name": "模型",
+        "desc": "端点返回模型列表后可从列表选择，也可以直接输入模型 ID。",
+        "cls": "setting-item baizer-setting-stacked",
+        "clickable": true
+      },
+      {
+        "name": "自定义请求头（高级）",
+        "desc": "每行一条 \"Header-Name: value\"。用 {{conversationId}} 发送当前对话 ID；没有对话的一次性调用会跳过它。",
+        "cls": "setting-item baizer-setting-stacked",
+        "clickable": true
+      },
+      {
+        "name": "连接测试",
+        "desc": "检查 https://opencode.ai/zen/go/v1/models 的模型列表是否可达。它不会真正发起生成，所以通过只说明「端点有响应」，不代表「模型能生成」。",
+        "cls": "setting-item",
+        "clickable": true
+      }
+    ],
+    "contentText": "opencode\n当前服务商\nAI 请求使用此服务商。\n服务商名称\n显示在服务商列表中。名称为空会就地报错，而不是悄悄改回旧名称。\n协议\n该服务商使用的线协议。切换后只显示适用于该协议的字段。\nOpenAI 兼容\nAnthropic Messages API\nAPI 类型（Chat Completions / Responses）\n服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /chat/completions，不要把完整请求路径粘进来。\nChat Completions（/chat/completions）\nResponses（/responses）\n服务地址（Base URL）\n服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /chat/completions，不要把完整请求路径粘进来。 实际请求路径：https://opencode.ai/zen/go/v1/chat/completions\nAPI Key\n仅保存在本地，默认隐藏。用「显示」查看，用「清除」清空（会二次确认）。\n显示\n清除\n模型\n端点返回模型列表后可从列表选择，也可以直接输入模型 ID。\ndeepseek-v4.1-flash (Current)\n刷新列表\n未能获取模型列表：Model list request timed out after 10000ms: https://opencode.ai/zen/go/v1/models。可直接手填模型 ID。\n自定义请求头（高级）\n每行一条 \"Header-Name: value\"。用 {{conversationId}} 发送当前对话 ID；没有对话的一次性调用会跳过它。\nx-opencode-session: {{conversationId}}\n连接测试\n检查 https://opencode.ai/zen/go/v1/models 的模型列表是否可达。它不会真正发起生成，所以通过只说明「端点有响应」，不代表「模型能生成」。\n运行测试"
+  },
+  "image": {
+    "path": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\docs\\assets\\declarative-settings-2026-11-06-after-wide.png",
+    "bytes": 102853,
+    "width": 1353,
+    "height": 1053,
+    "requestedWidth": 1353,
+    "requestedHeight": 1053,
+    "sizeMatchesRequest": true
+  },
+  "harness": {
+    "exe": "C:\\Program Files\\Obsidian\\Obsidian.exe",
+    "pluginDir": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\dist",
+    "vaultDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
+    "vaultKey": "f230a63f4db30aad",
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.6.0",
+      "minAppVersion": "1.13.0",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    },
+    "copiedPluginFiles": [
+      {
+        "file": "main.js",
+        "bytes": 2838620
+      },
+      {
+        "file": "manifest.json",
+        "bytes": 325
+      },
+      {
+        "file": "styles.css",
+        "bytes": 127634
+      }
+    ],
+    "scenarioPath": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
+    "target": {
+      "id": "8934546494987F560D4E8DAB9D682864",
+      "url": "app://obsidian.md/index.html",
+      "title": "obsidian - Obsidian 1.15.0"
+    },
+    "settingsPanelLocation": "popout-window",
+    "navigation": [
+      {
+        "text": "连接",
+        "found": true,
+        "score": 100,
+        "clicked": "连接 服务商、API Key、端点、模型与连接测试。",
+        "cls": "setting-item mod-navigable tappable"
+      },
+      {
+        "text": "opencode",
+        "found": true,
+        "score": 100,
+        "clicked": "opencode 当前服务商 · OpenAI 兼容 · deepseek-v4.1-flash",
+        "cls": "setting-item mod-navigable tappable"
+      }
+    ],
+    "domDump": null,
+    "pid": 45512,
+    "browser": "Chrome/128.0.6613.186",
+    "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.7.7 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36",
+    "blockingModals": {
+      "trust": {
+        "present": false,
+        "clicked": null
+      },
+      "strayModalsClosed": [],
+      "releaseNotes": {
+        "detached": 0
+      }
+    },
+    "pluginActivation": {
+      "steps": [
+        "plugins.loadManifests()"
+      ],
+      "error": null,
+      "loaded": true
+    },
+    "pluginSettings": {
+      "settingsLoaded": true,
+      "activeProvider": "opencode",
+      "providers": [
+        "cch",
+        "opencode",
+        "anthropic"
+      ],
+      "matched": true
+    },
+    "settings": {
+      "tabId": "baizer",
+      "isOpen": true,
+      "popoutCreated": true,
+      "settingsModalInMainDocument": false
+    },
+    "domStability": {
+      "stable": true,
+      "signature": "5256|867",
+      "settledAfterMs": 1023
+    }
+  },
+  "limitations": [
+    "Colour, contrast, font rendering, iconography and animation are NOT asserted.",
+    "This harness navigates by visible row text; a renamed row breaks navigation instead of silently measuring another row.",
+    "The pre-migration accordion UI has no declarative page entries; use ../provider-settings-shots/capture.mjs for Before evidence."
+  ]
+}
