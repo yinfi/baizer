@@ -57,6 +57,16 @@ export class KnowledgeRuntime {
   private autoCompiling = false;
   /** 自动编译运行期间若有新触发被丢弃，置位；本批结束后据此补跑一次 */
   private autoCompileRerunRequested = false;
+  /** cleanup() 后不再接受新的启动/后台工作；主要防止 unload 后仍在跑的 onMetadataReady 写 frontmatter。 */
+  private disposed = false;
+  /**
+   * initialize() 里耗时的那条链（onMetadataReady，详见类头注释）结束时 resolve，从不 reject——
+   * 失败已经在内部记日志，等待方只需要知道"启动扫描这轮结束了没"。
+   * resolveStartupDone 在构造期立刻赋值，cleanup() 若在启动扫描结束前被调用也会调它一次，
+   * 保证等待方不会因为插件提前卸载而永远挂起。
+   */
+  private startupDone!: Promise<void>;
+  private resolveStartupDone!: () => void;
 
   constructor(
     private app: App,
@@ -90,6 +100,10 @@ export class KnowledgeRuntime {
     // 自动编译：watcher 检测到新文件/修改后，debounce 5秒合并批量编译
     const debouncedAutoCompile = debounce(async () => {
       if (!this.settings.knowledgeAutoCompile) return;
+      // 等启动扫描（重置 stuck / 调和 pending / 检测 stale / 注册新文件）先跑完，
+      // 否则自动编译可能在"上次中断的 processing"还没被重置回 pending 之前就动手。
+      await this.whenStartupSettled();
+      if (this.disposed) return;
       if (this.autoCompiling) {
         // 本批运行期间又有新触发：记下来，本批结束后补跑，避免丢更新
         this.autoCompileRerunRequested = true;
@@ -138,28 +152,59 @@ export class KnowledgeRuntime {
 
     this.queryExecutor = new QueryKnowledgeExecutor(this.metadataIndex);
     this.fileBackExecutor = new FileBackExecutor(app, this.indexer, wikiFolder);
+
+    this.startupDone = new Promise<void>((resolve) => { this.resolveStartupDone = resolve; });
   }
 
+  /**
+   * 启动扫描（Reset stuck / Reconcile / Detect stale / Register unregistered，见
+   * onMetadataReady）结束前一直未 resolve。自动编译和手动编译命令在动手之前都等它一下，
+   * 避免跟"重置上次中断的 processing 状态"之类的启动态修正撞车；没有调用过 initialize()
+   * 时直接放行（测试里常见），避免这类调用方永远卡住。
+   */
+  async whenStartupSettled(): Promise<void> {
+    await this.startupDone;
+  }
+
+  /**
+   * 索引重建（元数据内存扫描，便宜）同步完成；启动扫描（onMetadataReady，涉及逐文件
+   * vault.read/frontmatter 写回，是真正的耗时部分）转入后台，不再堵住 onload()——
+   * 调用方（main.ts）不 await 这个方法里耗时的那部分；query/compile 等需要启动扫描
+   * 结果的路径改为先 await whenStartupSettled()。失败只记日志，不向上抛，否则
+   * onload() 的错误处理会把整个插件加载判定为失败。
+   */
   async initialize(): Promise<void> {
-    // 等待 metadataCache 就绪后再构建索引和执行启动逻辑
     if (this.app.metadataCache.initialized) {
       this.metadataIndex.rebuild();
-      await this.onMetadataReady();
+      this.runStartupScanInBackground();
     } else {
-      const ref = this.app.metadataCache.on('resolved', async () => {
+      const ref = this.app.metadataCache.on('resolved', () => {
         this.metadataIndex.rebuild();
         this.app.metadataCache.offref(ref);
         logger.info(`MetadataCache resolved, ${this.metadataIndex.size} articles indexed`, 'KnowledgeRuntime');
-        await this.onMetadataReady();
+        this.runStartupScanInBackground();
       });
     }
 
-    // 迁移旧索引
+    // 迁移旧索引：历史上这部分和 onMetadataReady 一起被 onload() await，但它只在插件
+    // 版本升级后的第一次加载触发一次性迁移，代价与 onMetadataReady 的逐文件扫描不是
+    // 同一类问题，这里保持同步等待，只把 onMetadataReady 挪到后台。
     await this.indexer.migrateLegacyIndex();
     this.indexer.checkBasesPlugin();
     await this.indexer.ensureBaseFile();
 
     logger.info(`Initialized`, 'KnowledgeRuntime');
+  }
+
+  private runStartupScanInBackground(): void {
+    if (this.disposed) { this.resolveStartupDone(); return; }
+    this.onMetadataReady()
+      .catch((error) => {
+        logger.error('Startup scan (onMetadataReady) failed', error, 'KnowledgeRuntime');
+      })
+      .finally(() => {
+        this.resolveStartupDone();
+      });
   }
 
   /** metadataCache 就绪后：扫描未注册文件 + 重置 processing + 触发自动编译 */
@@ -170,35 +215,42 @@ export class KnowledgeRuntime {
     // 重置上次中断的 processing 状态
     const stuckFiles = getFilesByKnowledgeStatus(this.app, 'processing');
     for (const f of stuckFiles) {
+      if (this.disposed) return;
       await setKnowledgeStatus(this.app, f, 'pending');
     }
     if (stuckFiles.length > 0) {
       logger.info(`Reset ${stuckFiles.length} stuck processing files`, 'KnowledgeRuntime');
     }
+    if (this.disposed) return;
 
     // 2. 检测过期文件（schema 或内容变更）
     const reconciledCount = await this.reconcilePendingFiles(wikiFolder, sourceFolders);
     if (reconciledCount > 0) {
       logger.info(`Reconciled ${reconciledCount} pending files with current summaries`, 'KnowledgeRuntime');
     }
+    if (this.disposed) return;
 
     const staleCount = await this.detectStaleFiles(wikiFolder);
     if (staleCount > 0) {
       logger.info(`Detected ${staleCount} stale files for recompilation`, 'KnowledgeRuntime');
     }
+    if (this.disposed) return;
 
     // 2.5 自动发现 ontology（_ontology.md 不存在且文章数足够时）
     await this.discoverOntology();
+    if (this.disposed) return;
 
     // 3. 扫描监听目录，注册未标记的文件
     const unregistered = getUnregisteredFiles(this.app, sourceFolders, wikiFolder);
     for (const file of unregistered) {
+      if (this.disposed) return;
       await ensureSourceId(this.app, file);
       await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'new' });
     }
     if (unregistered.length > 0) {
       logger.info(`Startup scan: registered ${unregistered.length} new files`, 'KnowledgeRuntime');
     }
+    if (this.disposed) return;
 
     // 计算总 pending 数：刚注册的 + 之前 stuck 的 + 已有的 pending
     // 注意：刚写入 frontmatter 的文件 metadataCache 可能还没更新，
@@ -273,6 +325,7 @@ export class KnowledgeRuntime {
         if (!file) { new Notice('Please open a note first.'); return; }
 
         new Notice(`Compiling: ${file.path}...`);
+        await this.whenStartupSettled();
         const status = getKnowledgeStatus(this.app, file);
         if (status === 'done' || status === 'failed') {
           await setKnowledgeStatus(this.app, file, 'pending');
@@ -297,6 +350,7 @@ export class KnowledgeRuntime {
       name: 'Knowledge: Compile all pending',
       callback: async () => {
         new Notice('Compiling all pending notes...');
+        await this.whenStartupSettled();
         const maxBatch = this.settings.knowledgeMaxCompileBatch || 50;
         const ontology = await this.loadOntologySchema();
         const result = await this.compiler.compileAllPending(maxBatch, undefined, ontology?.schema, ontology?.hash);
@@ -656,6 +710,8 @@ export class KnowledgeRuntime {
   }
 
   cleanup(): void {
+    this.disposed = true;
+    this.resolveStartupDone();
     this.watcher.cleanup();
   }
 }

@@ -835,6 +835,8 @@ categories:
 
     await runtime.initialize();
 
+    await runtime.whenStartupSettled();
+
     expect(files.get(sourcePath)!.frontmatter.knowledge_status).toBe('done');
     expect(files.get(sourcePath)!.frontmatter.knowledge_source_id).toBe('ksrc_old');
     expect(files.get(sourcePath)!.frontmatter.knowledge_summary).toBe(summaryPath);
@@ -912,6 +914,8 @@ categories:
 
       await runtime.initialize();
 
+      await runtime.whenStartupSettled();
+
       expect(files.get(sourcePath)!.frontmatter.knowledge_status).toBe('pending');
       expect(scheduledDelays.length).toBe(0);
     } finally {
@@ -980,6 +984,8 @@ categories:
     } as any);
 
     await runtime.initialize();
+
+    await runtime.whenStartupSettled();
 
     expect(touchedPaths.includes(previousRegistryPath)).toBe(false);
   });

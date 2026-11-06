@@ -7,6 +7,8 @@ import { computeContentHash } from './compiler';
 import {
   DEFAULT_WIKI_FOLDER,
 } from './types';
+import { StaleCheckMarker } from './stale-marker';
+import { logger } from '../utils/logger';
 
 export type KnowledgePanelState =
   | 'unregistered'
@@ -221,6 +223,11 @@ export class KnowledgeStatusService {
 
   async getStaleFiles(): Promise<TFile[]> {
     const staleFiles: TFile[] = [];
+    const marker = new StaleCheckMarker(this.app);
+    await marker.load();
+    const confirmed = new Set<string>();
+    const markerSizeBefore = marker.size;
+    let skippedByMarker = 0;
 
     for (const file of this.getTrackedFiles()) {
       const baseStatus = getKnowledgeStatus(this.app, file);
@@ -230,10 +237,35 @@ export class KnowledgeStatusService {
       const summaryPath = typeof cache?.frontmatter?.knowledge_summary === 'string'
         ? cache.frontmatter.knowledge_summary
         : null;
+      if (!summaryPath) continue;
 
-      if (await this.isStaleFile(file, summaryPath)) {
-        staleFiles.push(file);
+      const summaryFile = this.app.vault.getAbstractFileByPath(summaryPath);
+      const summary = summaryFile instanceof TFile ? summaryFile : null;
+
+      if (marker.isUnchanged(file, summary, summaryPath)) {
+        skippedByMarker++;
+        confirmed.add(file.path);
+        continue;
       }
+
+      const result = await this.evaluateStaleness(file, summaryPath);
+      if (result === 'stale') {
+        staleFiles.push(file);
+        continue;
+      }
+      if (result === 'fresh') {
+        marker.recordFresh(file, summary, summaryPath);
+        confirmed.add(file.path);
+      }
+    }
+
+    marker.retainOnly(confirmed);
+    await marker.save();
+    if (markerSizeBefore > 0 || skippedByMarker > 0) {
+      logger.debug(
+        `getStaleFiles: marker skipped ${skippedByMarker} unchanged file(s), ${staleFiles.length} stale found`,
+        'KnowledgeStatusService',
+      );
     }
 
     return staleFiles;
@@ -269,19 +301,21 @@ export class KnowledgeStatusService {
     summaryPath: string | null,
   ): Promise<boolean> {
     if (!summaryPath) return false;
+    return (await this.evaluateStaleness(file, summaryPath)) === 'stale';
+  }
 
+  private async evaluateStaleness(
+    file: TFile,
+    summaryPath: string,
+  ): Promise<'stale' | 'fresh' | 'unknown'> {
     const summaryFrontmatter = await readSummaryFrontmatter(this.app, summaryPath);
-    if (!summaryFrontmatter) return false;
-
-    if (!summaryFrontmatter.content_hash) {
-      return false;
-    }
+    if (!summaryFrontmatter?.content_hash) return 'unknown';
 
     try {
       const content = await this.app.vault.read(file);
-      return computeContentHash(content) !== summaryFrontmatter.content_hash;
+      return computeContentHash(content) === summaryFrontmatter.content_hash ? 'fresh' : 'stale';
     } catch {
-      return false;
+      return 'unknown';
     }
   }
 }
