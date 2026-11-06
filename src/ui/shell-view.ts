@@ -1141,15 +1141,20 @@ export class ShellView extends ItemView {
 
         if (this.streamContent && resolvedText) {
             // 流结束:把回复区切回 polite,让读屏把完成的整段回复播报一次(流式途中是 off)。
-            this.streamContent.setAttribute('aria-live', 'polite');
-            this.streamContent.empty();
-            // 定型渲染失败时回复区会是空的：记日志，至少能从诊断日志里追到原因。
+            const contentEl = this.streamContent;
+            contentEl.setAttribute('aria-live', 'polite');
+            contentEl.empty();
             detach(
                 this.getMessageRenderer().renderAiContent(
-                    this.streamContent,
+                    contentEl,
                     resolvedText,
                 ).then(() => {
                     // 定型渲染不是「新输出」:暂停时不得点亮未读,也不能把读者拉回底部。
+                    this.afterScrollGrowth(growth, false);
+                }).catch((error: unknown) => {
+                    // 定型渲染失败不能让终态区一片空白:记日志 + 纯文本兜底,滚动语义照旧。
+                    logger.error('Final AI content render failed', error, 'ShellView');
+                    contentEl.textContent = resolvedText;
                     this.afterScrollGrowth(growth, false);
                 }),
                 'ShellView',
