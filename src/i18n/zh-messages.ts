@@ -614,6 +614,7 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Cannot regenerate: the source plugin is on the exclude list.': '无法重新生成:来源插件在排除名单中。',
     'Could not regenerate the skill for {plugin}: {reason}': '{plugin} 的技能重新生成失败:{reason}',
     'unknown reason': '原因未知',
+    'Settings action failed': '设置操作失败',
     'Deleted the skill for {plugin}.': '已删除 {plugin} 的技能。',
     'Failed to delete the skill for {plugin}.': '删除 {plugin} 的技能失败。',
 
