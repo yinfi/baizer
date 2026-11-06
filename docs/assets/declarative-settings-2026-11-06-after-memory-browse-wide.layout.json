@@ -3,7 +3,7 @@
   "label": "after-memory-browse-wide",
   "phase": "after",
   "revision": "merge-main",
-  "capturedAt": "2026-11-06T02:31:51.984Z",
+  "capturedAt": "2026-11-06T02:39:31.030Z",
   "theme": "dark",
   "language": "zh",
   "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
@@ -58,12 +58,12 @@
       },
       {
         "file": "styles.css",
-        "bytes": 109932
+        "bytes": 127634
       }
     ],
     "scenarioPath": "C:\\Users\\Admin\\.dsh\\state\\superagent\\work\\declarative-settings-38760ab0ca1b\\tools\\provider-settings-shots\\scenarios\\cch-opencode.json",
     "target": {
-      "id": "66D508EFE056C8516E77D50B357F1E77",
+      "id": "F0B529175FCD8E4A24AAE98CCC63335C",
       "url": "app://obsidian.md/index.html",
       "title": "obsidian - Obsidian 1.15.0"
     },
@@ -85,7 +85,7 @@
       }
     ],
     "domDump": null,
-    "pid": 44508,
+    "pid": 39476,
     "browser": "Chrome/128.0.6613.186",
     "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.7.7 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36",
     "blockingModals": {
@@ -124,7 +124,7 @@
     "domStability": {
       "stable": true,
       "signature": "1602|72",
-      "settledAfterMs": 1041
+      "settledAfterMs": 1026
     }
   },
   "limitations": [

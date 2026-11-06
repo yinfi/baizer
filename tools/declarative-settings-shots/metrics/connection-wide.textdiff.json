@@ -8,14 +8,14 @@
     "candidate": {
       "path": "docs/assets/declarative-settings-2026-11-06-after-wide.png",
       "size": "1353x1053",
-      "lineCount": 44
+      "lineCount": 43
     },
     "sameImageSize": true,
     "tolerancePx": 4,
-    "matchedLines": 22,
-    "matchedWithinTolerance": 16,
+    "matchedLines": 21,
+    "matchedWithinTolerance": 15,
     "matchedOutsideTolerance": 6,
-    "onlyInBaseline": 20,
+    "onlyInBaseline": 21,
     "onlyInCandidate": 22,
     "verdict": {
       "sameImageSize": true,
@@ -115,6 +115,13 @@
       "at": {
         "x": 21,
         "y": 49
+      }
+    },
+    {
+      "text": "第 三 方 插 件",
+      "at": {
+        "x": 44,
+        "y": 337
       }
     },
     {
@@ -295,6 +302,13 @@
       }
     },
     {
+      "text": "第 三 方 牛",
+      "at": {
+        "x": 44,
+        "y": 337
+      }
+    },
+    {
       "text": "务 址 帛 以 /vl 结 尾 _ 一 OpenAl SDK 会 行 加",
       "at": {
         "x": 478,
@@ -358,20 +372,6 @@
       }
     },
     {
-      "text": "耒 茌 取 椏 型 列 表 ： Request failed, status401. 可 直 接 手 垣 型 ID.",
-      "at": {
-        "x": 466,
-        "y": 841
-      }
-    },
-    {
-      "text": "自 定 义 请 求 头 （ 高 级 〕",
-      "at": {
-        "x": 467,
-        "y": 899
-      }
-    },
-    {
       "text": "思 新 列 表",
       "at": {
         "x": 886,
@@ -379,31 +379,38 @@
       }
     },
     {
+      "text": "耒 茌 取 椏 型 列 表 ： Model list request timed out after 1 佣 佣 ms ： https://opencode.ai/zen/go/vl/models. 可 直 接 手",
+      "at": {
+        "x": 466,
+        "y": 841
+      }
+    },
+    {
+      "text": "埴 型 ID.",
+      "at": {
+        "x": 466,
+        "y": 860
+      }
+    },
+    {
+      "text": "自 定 义 请 求 头 （ 高 级 〕",
+      "at": {
+        "x": 467,
+        "y": 917
+      }
+    },
+    {
       "text": "每 行 一 \"Header-Name ： value\". 用 {{conversationld}} 发 送 兰 前 对 话 旧 ； 沿 有 刘 话 的 一 次 性 甲 会 它 。",
       "at": {
         "x": 466,
-        "y": 920
+        "y": 938
       }
     },
     {
       "text": "x-opencode-session: {{conversationld})",
       "at": {
         "x": 474,
-        "y": 950
-      }
-    },
-    {
-      "text": "X¯OpenCOde¯session ：",
-      "at": {
-        "x": 476,
-        "y": 1035
-      }
-    },
-    {
-      "text": "{{conversationld}}",
-      "at": {
-        "x": 617,
-        "y": 1034
+        "y": 968
       }
     }
   ]

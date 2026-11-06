@@ -2939,6 +2939,15 @@ textarea.shell-input {
     font-size: var(--font-ui-small);
 }
 
+.diff-container.baizer-diff-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+    max-height: 60dvh;
+    padding: 14px;
+    background: var(--background-primary);
+    border: none;
+}
 
 .baizer-diff-pane {
     min-width: 0;
@@ -2985,6 +2994,17 @@ textarea.shell-input {
     border-top: none;
 }
 
+@media (max-width: 700px) {
+    .diff-container.baizer-diff-split {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* DiffModal.onOpen 给外层 .modal 加 baizer-diff-modal-window,直接命中弹窗外壳,不再用父选择器反查。 */
+.modal.baizer-diff-modal-window {
+    width: min(760px, calc(100vw - 56px));
+    max-width: min(760px, calc(100vw - 56px));
+}
 
 /* 叠加 .modal-content 类名,特异性高于 Obsidian 自带的 .modal-content 尺寸规则。 */
 .modal-content.baizer-diff-modal {
@@ -3128,6 +3148,51 @@ textarea.shell-input {
    Baizer - Settings
    ========================================================================== */
 
+/* P0-4: 单一真相源 —— 合并原先分处两段、相互覆盖的 page/hero/title/subtitle 定义。
+   取最终生效值(compact accordion 版),不再依赖样式表插入顺序。 */
+.baizer-settings-page {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 24px;
+    container-type: inline-size;
+}
+
+.baizer-settings-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+    /* 副标题横跨两列：它是一整句说明文字（约 390px），此前只落在左侧 316px 的列里，
+       配合 nowrap 就被裁掉 74px 且永远读不到。跨列后宽屏一行放得下。 */
+    grid-template-areas: "title search" "subtitle subtitle";
+    column-gap: 12px;
+    row-gap: 4px;
+    align-items: center;
+}
+
+.baizer-settings-title {
+    grid-area: title;
+    margin: 0;
+    font-size: var(--font-ui-large);
+    font-weight: var(--font-semibold);
+}
+
+.baizer-settings-subtitle {
+    grid-area: subtitle;
+    min-width: 0;
+    margin: 0;
+    color: var(--text-muted);
+    /* P2: 去掉单行 nowrap+ellipsis —— 此前副标题在常规宽度下被截断到不可读。
+       允许换行，且任何宽度下都不许再出现裁切。 */
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.baizer-settings-search-row {
+    grid-area: search;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
 
 .baizer-settings-search {
     width: min(420px, 100%);
@@ -3147,6 +3212,72 @@ textarea.shell-input {
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 40%, transparent);
 }
 
+/* P0-4: 删除旧「左侧 nav 导航 + main 双栏」设计的死选择器(当前 DOM 为 accordion,src 中 0 引用)。 */
+
+.baizer-settings-section-card {
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 90%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary));
+    overflow: hidden;
+}
+
+.baizer-settings-section-copy {
+    min-width: 0;
+}
+
+.baizer-settings-section-title {
+    margin: 0;
+    font-size: var(--font-ui-large);
+}
+
+.baizer-settings-section-content {
+    min-width: 0;
+    padding: 16px 18px 18px;
+}
+
+.baizer-settings-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    font-weight: var(--font-medium);
+    white-space: nowrap;
+}
+
+.baizer-settings-badge.is-warning {
+    color: color-mix(in srgb, var(--color-yellow) 62%, var(--text-normal));
+    background: color-mix(in srgb, var(--color-yellow) 18%, transparent);
+}
+
+.baizer-settings-badge.is-danger {
+    color: var(--text-error);
+    background: color-mix(in srgb, var(--text-error) 12%, transparent);
+}
+
+.baizer-settings-badge.is-muted {
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--background-modifier-border) 65%, transparent);
+}
+
+.baizer-settings-badge.is-accent {
+    color: var(--text-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+
+.baizer-settings-badge.is-success {
+    color: var(--color-green);
+    background: color-mix(in srgb, var(--color-green) 12%, transparent);
+}
+
+.baizer-settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
 
 .baizer-settings-action {
     min-height: 32px;
@@ -3199,6 +3330,9 @@ textarea.shell-input {
     font-size: var(--font-ui-small);
 }
 
+.baizer-settings-inline-note-compact {
+    margin: 0;
+}
 
 .baizer-settings-inline-note.is-warning {
     color: color-mix(in srgb, var(--color-yellow) 62%, var(--text-normal));
@@ -3220,6 +3354,138 @@ textarea.shell-input {
     background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
 }
 
+.baizer-settings-inline-hint {
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+}
+
+.baizer-settings-inline-hint-strong {
+    color: var(--text-faint);
+}
+
+/* 折叠的「高级」块（自定义请求头等）。基础字段优先，高级配置默认收起。
+   注：此前的样式只存在于内联兜底 CSS，styles.css 缺失；两处需保持一致
+   （兜底 CSS 把 .baizer-settings-advanced 归入卡片组，故这里同样给卡片外观）。 */
+.baizer-settings-advanced {
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--background-secondary) 45%, transparent);
+    overflow: hidden;
+}
+
+/* 只有连接面板里的请求头块需要外边距（它嵌在连接卡片里）；其它分区的
+   advanced 块是分区直属子元素，加 margin 会改动它们的既有布局。 */
+.baizer-settings-advanced-headers {
+    margin: 0 10px 10px;
+}
+
+.baizer-settings-advanced summary {
+    padding: 10px 14px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-semibold);
+}
+
+.baizer-settings-advanced-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 14px 12px;
+}
+
+/* P0-4: 删除旧「双栏 workspace」设计的死选择器(当前 DOM 为 accordion,src 中 0 引用)。 */
+
+.baizer-settings-provider-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+}
+
+.baizer-settings-provider-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary));
+    color: var(--text-normal);
+    cursor: pointer;
+    transition: border-color var(--baizer-transition-fast, 120ms ease), background-color var(--baizer-transition-fast, 120ms ease);
+}
+
+.baizer-settings-provider-card:hover {
+    border-color: var(--background-modifier-border-hover);
+    background: color-mix(in srgb, var(--background-modifier-hover) 40%, var(--background-primary));
+}
+
+.baizer-settings-provider-card.is-active {
+    border-color: color-mix(in srgb, var(--interactive-accent) 46%, var(--background-modifier-border));
+    background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+}
+
+.baizer-settings-provider-card-title {
+    font-size: 1.05em;
+    font-weight: var(--font-semibold);
+    line-height: 1.2;
+}
+
+.baizer-settings-provider-card-meta {
+    display: block;
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 字段行：标签列宽一点，控件列拿到剩余整行宽度。
+   此前标签 130px 且控件被挤在双栏的窄栏里，长 URL 只能显示 `https://openc…`。
+   分隔线用 border-top + :first-child（与内联兜底 CSS 一致），首行不会多出一条线。 */
+.baizer-settings-detail-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
+    gap: 6px 14px;
+    align-items: start;
+    padding: 10px 14px;
+    border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+}
+
+.baizer-settings-detail-row:first-child {
+    border-top: none;
+}
+
+.baizer-settings-detail-label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    padding-top: 6px;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-semibold);
+}
+
+.baizer-settings-detail-required {
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    font-weight: var(--font-medium);
+    color: var(--text-warning);
+    background: color-mix(in srgb, var(--color-yellow) 18%, transparent);
+}
+
+.baizer-settings-detail-value {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
 
 .baizer-settings-detail-input {
     display: block;
@@ -3249,6 +3515,29 @@ textarea.shell-input {
     opacity: 0.75;
 }
 
+.baizer-settings-detail-textarea {
+    min-height: 88px;
+    padding: 8px 10px;
+    font-family: var(--font-monospace);
+    font-size: var(--font-smallest);
+    resize: vertical;
+    /* pre-wrap + anywhere：多行 header 换行显示，不再撑出横向滚动条。 */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-x: hidden;
+}
+
+.baizer-settings-secret-input {
+    font-family: var(--font-monospace);
+}
+
+/* 密钥操作独占一行：不再和输入框挤同一窄栏导致按钮竖向堆叠、撑高整行。 */
+.baizer-settings-field-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
 
 .baizer-settings-field-hint {
     color: var(--text-muted);
@@ -3342,6 +3631,27 @@ textarea.shell-input {
     margin: 0;
 }
 
+.baizer-full-width-textarea textarea {
+    width: 100%;
+    min-height: 120px;
+    resize: vertical;
+}
+
+.baizer-settings-danger-setting {
+    border-left: 3px solid color-mix(in srgb, var(--text-error) 75%, transparent);
+    padding-left: 10px;
+}
+
+@container (max-width: 840px) {
+    .baizer-settings-detail-row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+
+    .baizer-settings-detail-label {
+        padding-top: 0;
+    }
+}
 
 /* 注:上方 @container(1280/840) 已覆盖设置页响应式。原 @media 兜底版为逐字重复,
    Obsidian(Chromium 105+)支持容器查询,故删除冗余 media 版。 */
@@ -3796,11 +4106,256 @@ textarea.shell-input {
     width: 100%;
 }
 
+.baizer-settings-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.baizer-settings-section-card {
+    border-radius: 8px;
+}
+
+.baizer-settings-section-summary {
+    min-height: 42px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 18px;
+    gap: 8px;
+    align-items: center;
+    padding: 7px 10px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.baizer-settings-section-summary::-webkit-details-marker {
+    display: none;
+}
+
+.baizer-settings-section-copy {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.baizer-settings-section-title {
+    margin: 0;
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-semibold);
+}
+
+.baizer-settings-section-description {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    /* P2: 此前单行 nowrap+ellipsis 在常规宽度下把分区描述截成几个字。改为最多 2 行,超出才省略。 */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.baizer-settings-section-meta {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.baizer-settings-section-content {
+    padding: 8px;
+}
+
+.baizer-settings-provider-list {
+    gap: 6px;
+    padding: 8px;
+}
+
+.baizer-settings-provider-card {
+    gap: 0;
+    border-radius: 8px;
+}
 
 /* 注:按钮本体不再承载 grid。移动端 WebView(旧 Android System WebView / iOS WKWebView)
    长期不允许 <button> 作为 grid/flex 容器,会忽略 display:grid,导致子项退回行内堆叠而重叠。
    故把栅格下沉到内层 <div>(任何引擎都能当容器),按钮只做普通块级点击区。 */
+/* 卡片头部：切换按钮占满 + 删除图标靠右（切换按钮不能内嵌 button，故并排为兄弟）。 */
+.baizer-settings-provider-card-header {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+}
 
+.baizer-settings-provider-card-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: block;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+/* 删除图标：低调可发现——默认 muted，hover/focus 才亮出危险红。 */
+.baizer-settings-provider-card-delete {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    align-self: center;
+    margin-right: 6px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+    opacity: 0;
+    transition: color var(--baizer-transition-fast, 0.12s ease), background var(--baizer-transition-fast, 0.12s ease), opacity var(--baizer-transition-fast, 0.12s ease);
+}
+
+.baizer-settings-provider-card-delete svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* 平时隐形，卡片 hover 或图标聚焦时才浮现，避免抢焦点。 */
+.baizer-settings-provider-card:hover .baizer-settings-provider-card-delete,
+.baizer-settings-provider-card-delete:focus-visible {
+    opacity: 1;
+}
+
+.baizer-settings-provider-card-delete:hover:not(:disabled),
+.baizer-settings-provider-card-delete:focus-visible {
+    color: var(--text-error);
+    background: color-mix(in srgb, var(--text-error) 12%, transparent);
+}
+
+.baizer-settings-provider-card-delete:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--background-modifier-border-focus, var(--interactive-accent));
+}
+
+.baizer-settings-provider-card-delete:disabled {
+    opacity: 0;
+    cursor: default;
+    pointer-events: none;
+}
+
+.baizer-settings-provider-card-main-inner {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(120px, .8fr) minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+}
+
+.baizer-settings-provider-card-title {
+    min-width: 0;
+    font-weight: var(--font-semibold);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.baizer-settings-provider-card-meta {
+    min-width: 0;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.baizer-settings-provider-detail-inline {
+    border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+}
+
+/* 单列四组流程：身份与协议 → 地址与凭证 → 模型 → 测试结果。
+   此前是 Basic/Credentials 两栏栅格：左栏四个短字段留大片空白，右栏塞着地址/密钥/
+   请求头/帮助文字/测试区被压成窄条（地址只显示得出 https://openc…、Reveal/Clear 竖向堆叠）。 */
+.baizer-settings-connection-flow {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+}
+
+/* 连接卡片标题栏左侧是「序号徽章 + 标题」两个子项：
+   - 不能用 space-between（会把标题顶到最右），故这里改回 flex-start；
+   - Setting 不再是 :first-child，Obsidian 默认的 .setting-item 上边框与内边距会冒出来，需清零。 */
+.baizer-settings-connection-card-header {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 8px;
+}
+
+.baizer-settings-connection-card-header .setting-item {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0;
+    border-top: none;
+}
+
+.baizer-settings-connection-card-index {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    font-size: var(--font-smallest);
+    font-weight: var(--font-semibold);
+    color: var(--text-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+
+.baizer-settings-connection-card-body {
+    display: flex;
+    flex-direction: column;
+}
+
+/* 断点取 640 而非 560：设置浮窗自身声明 minWidth: 600（Setting#getPopoutOptions()），
+   600px 是真实用户能到达的最窄窗口。断点若正好压在 600 上，最窄窗口就会拿到宽屏布局
+   —— 而那是唯一没被量过的一档。抬到 640 让「最窄窗口」稳定落入窄屏处理。 */
+@container (max-width: 640px) {
+    .baizer-settings-hero {
+        grid-template-columns: 1fr;
+        grid-template-areas: "title" "subtitle" "search";
+    }
+
+    .baizer-settings-section-summary,
+    .baizer-settings-provider-card-main-inner,
+    .baizer-settings-detail-row,
+    .baizer-settings-preset-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .baizer-settings-detail-label {
+        padding-top: 0;
+    }
+
+    .baizer-settings-section-copy {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+
+    .baizer-settings-section-meta {
+        justify-content: flex-start;
+    }
+
+    .baizer-settings-section-description,
+    .baizer-settings-subtitle {
+        white-space: normal;
+    }
+}
 
 /* 注:上方 @container(640) 已覆盖此断点的设置页栅格塌陷。原 @media 版逐字重复,已删。 */
 
@@ -3952,6 +4507,34 @@ textarea.shell-input {
     }
 }
 
+/* ==================== Selection AI 动作条 ==================== */
+.baizer-action-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary-alt);
+}
+.baizer-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-s);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    cursor: pointer;
+    transition: background var(--baizer-transition-fast, 120ms ease), color var(--baizer-transition-fast, 120ms ease);
+}
+.baizer-action-btn:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+.baizer-action-btn .svg-icon { width: 15px; height: 15px; }
+.baizer-action-label { line-height: 1; }
 
 /* ==================== Selection AI 补全下拉 ==================== */
 .baizer-suggest-container {
@@ -3969,6 +4552,36 @@ textarea.shell-input {
 }
 .guardian-input-wrapper { position: relative; }
 
+/* ==================== Selection AI 内联 diff ==================== */
+.baizer-inline-diff-old {
+    background: var(--background-modifier-error);
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+.baizer-inline-diff {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 4px;
+    padding: 1px 6px;
+    border-radius: var(--radius-s);
+    background: var(--background-modifier-success);
+    vertical-align: baseline;
+}
+.baizer-inline-diff.is-error { background: var(--background-modifier-error); }
+.baizer-inline-diff-new { color: var(--text-normal); white-space: pre-wrap; }
+.baizer-inline-diff-hint { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.baizer-inline-diff-actions { display: inline-flex; gap: 2px; }
+.baizer-inline-diff-btn {
+    display: inline-flex;
+    padding: 2px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-s);
+}
+.baizer-inline-diff-btn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
 
 /* ===== 选中横向工具条 ===== */
 .baizer-selection-toolbar {
