@@ -118,12 +118,17 @@ URLs, multi-line custom headers and the model picker need the full row width, so
 those `render` callbacks add `baizer-setting-stacked` to the row. The rules live
 in **both** `styles.css` and the fallback sheet in `src/settings.ts`:
 
-- `styles.css` is the normal path;
-- the fallback sheet is injected by `ensureSettingsFallbackStyles()` and covers
-  the settings tab when it renders in Obsidian's separate popout settings
-  window, where the plugin stylesheet has historically not been applied.
+- `styles.css` is the normal path, including when Obsidian renders the settings
+  tab in its separate popout settings window;
+- the fallback sheet is injected by `ensureSettingsFallbackStyles()` as a
+  belt-and-braces copy for the main-window settings modal (and for any host where
+  the plugin stylesheet has not been applied yet). It is also why the permission
+  summary and memory-browser rules are duplicated: the browser page is imperative
+  and its classes must keep working in both presentations.
 
-Keep the two copies in sync when touching settings CSS.
+Keep the two copies in sync when touching settings CSS. `styles.css` itself is
+built on `main` and must stay free of `!important` and `:has()` (asserted by
+tests, matching the repository-wide cleanup in #103).
 
 ## Visual evidence
 
