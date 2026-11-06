@@ -146,7 +146,7 @@ Passed 只是页面报告，不是本次独立安全审计结论；Disclosures �
 |---|---|---|
 | B0 证据基线 | 完整分类清单、扫描版本、规则映射、本地复现器、进度跟踪 | ✅ 本 PR |
 | B1 内部契约（`no-unsafe-member-access` 的「内部契约」根因） | 冗余 `as any`/`any` 标注 → 具名类型（UI 元素 helper、已声明的服务方法、插件公开字段、Obsidian 公开 API 类型） | ✅ 本 PR（全仓 1188 → 543；`main.ts` + `src/ui/**` 436 → 0；剩 543 属 B2 外部输入） |
-| B2 `no-unsafe-member-access` 的外部输入部分 | `JSON.parse`、磁盘设置/记忆记录、vault adapter、旧数据迁移、任意事件 payload：`unknown` + 明确窄化。涉及 `src/settings.ts`、`src/memory/hindsight-migration.ts`、`src/memory/memory-manager.ts`、`src/knowledge/{compiler,metadata-index,ontology,frontmatter}.ts`、`src/services/{model-catalog-service,video-transcription,operation-audit-log}.ts`、`src/utils/{request-url-fetch,video_utils}.ts`、`src/skills/builtin/{json-canvas,obsidian-bases,web-clipper}/executor.ts` 等 | ⏳ 待排期 |
+| B2 外部输入（`no-unsafe-member-access` 与五条 type-aware 规则） | `JSON.parse`、磁盘设置/记忆记录、vault adapter、旧数据迁移、工具参数/返回、任意事件 payload：`unknown` + 明确窄化（`src/utils/narrow.ts`）。涉及 `src/settings.ts`、`src/memory/*`、`src/knowledge/*`、`src/services/*`、`src/runtime/pi/*`、`src/skills/**`、`src/utils/*`、`src/ui/*` 等 | ✅ 已拆三批完成：**#97** 清零 `no-unsafe-member-access`（560 → 0）；**#101** 清零 `no-explicit-any` + 四条 `no-unsafe-*`（issue 基线累计 726 → 0），本 PR 补齐收口与回归测试，见 §6.5 |
 | B3 Obsidian API 偏好规则 | `prefer-window-timers` 36、`prefer-create-el` 10、`no-global-this` 9、`hardcoded-config-path` 8、`prefer-file-manager-trash-file` 4、`no-console` 2、`fetch` 1、`prefer-setting-definitions` 1 | ⏳ 待排期（部分会改变行为语义，需单独说明与回归） |
 | B4 CSS（stylelint 类别） | `!important` 24、`:has` 4、浏览器特性 4、重复属性 1 | ⏳ 待排期（视觉变更，需 Before/After 截图） |
 | B5 Info / 杂项类别 | unused vars 20、deprecated 字段 6（其中 `sessionRef`/`timeoutMs` 是有意保留的兼容字段，修前需确认策略）、empty block 4、case declarations 2、unbound-method 2、无必要转义 8、irregular whitespace 1 | ⏳ 待排期 |
@@ -238,6 +238,54 @@ node scripts/review-scan/reproduce-eslint.mjs --out review-eslint-report.json   
 node scripts/review-scan/scorecard-inventory.mjs --out /tmp/new-snapshot.json    # 展页分类快照
 npm run build && npx eslint . && npx tsc --noEmit && npm test
 ```
+
+### 6.5 B2 收尾（issue #90）验证记录：五条 type-aware 规则清零
+
+本次清理分三批合入：**#97** 先清零 `no-unsafe-member-access`（560 → 0），**#101** 清零 `no-explicit-any`
+与四条 `no-unsafe-*` 的主体，本 PR（issue #90）补齐剩余的少量收口与窄化回归测试。下表「本 PR 分支」
+为合入 #101 后的同口径复现结果。命令：`node scripts/review-scan/reproduce-eslint.mjs`（同 §6.1 口径）。
+
+| 规则 | 941b1a2（issue 基线） | 当前 main（#97/#98 后） | 合入 #101 及本 PR 后 |
+|---|---|---|---|
+| `@typescript-eslint/no-explicit-any` | 224 | 64 | **0** |
+| `@typescript-eslint/no-unsafe-assignment` | 266 | 55 | **0** |
+| `@typescript-eslint/no-unsafe-call` | 99 | 0 | **0** |
+| `@typescript-eslint/no-unsafe-argument` | 91 | 20 | **0** |
+| `@typescript-eslint/no-unsafe-return` | 46 | 12 | **0** |
+| `@typescript-eslint/no-unsafe-member-access`（#97 已完成） | 560 | 0 | 0 |
+| 全部规则消息合计 | 1489 | 347 | 194 |
+
+逐规则核对：**没有任何规则计数上升**（`no-empty` 4 → 2，其余持平或下降）。剩余 194 条属 B3/B4/B5 批次
+（窗口计时器 41、unused vars 19 等）。
+
+范围：issue #90 的 5 条规则在合入 #101 后的 main 上全部为 0；本 PR 在此基础上补充：pi 工具边界对
+数组参数按「无参数」处理、反链键仅接受字符串、`getDerivedSkillStatuses()` 在设置页按窄契约收口，
+以及 `stream-controller` 去掉冗余断言，并为这些分支补齐回归测试。
+
+实现边界：外部弱类型输入（frontmatter/YAML/JSON、旧记忆数据、工具参数与返回、pi/ASR/HTTP/插件实例）
+一律 `unknown` + 类型谓词/字段守卫；异常值沿用 `thrownMessage()` 口径；解析抛错语义保持不变。
+未新增 `any`/`as any`/`eslint-disable`/`@ts-ignore`，未改动扫描器配置、忽略清单或规则开关。
+
+行为保持与例外（均为畸形输入分支；合法数据行为不变）：
+
+1. vault 工具缺参/错类型此前会在下游抛 `TypeError`，现在返回结构化错误（`Missing path parameter` 等）；
+   审批预览的生成时机、文案与 permission 判定不变。
+2. 旧记忆迁移/存储文件根节点类型错误（`{}`/`null`/非数组）此前抛 `TypeError`，现在按「无数据/只读」处理；
+   旧字段缺失/类型不符回退原默认值，去重、排序、脱敏与迁移 state 时机不变。
+3. 插件控制 / 网页剪藏 / 知识回填等工具对缺失或错类型参数返回明确错误，不再写半成品文件。
+4. 非 `Error` 抛出值的错误文案从 `undefined` 变为空串或调用方回退文案（与 B1 的异常窄化口径一致）。
+
+验证记录：
+
+| 检查 | 结果 |
+|---|---|
+| `npm run build` | ✅ |
+| `npx eslint .`（仓库自带 lint） | ✅ 0 error；warning 39 |
+| `npx tsc --noEmit` | ✅ 0 error |
+| `npm test` | ✅ 全部 PASS（含新增） |
+| 同口径复现扫描 | ✅ 见上表；5 条规则归零，逐规则无上升 |
+
+展页计数仍以发布后重新提交审核复扫为准；本 PR 不含 UI/视觉变化，故不附 Before/After 截图。
 
 ## 7. 维护约定
 

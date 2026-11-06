@@ -265,6 +265,35 @@ async function runTests() {
     expect(result.success).toBe(false);
     expect(result.error).toContain('File already exists');
   });
+  await test('non-string path arguments are rejected without recording a workspace edit', async () => {
+    const { app, contents, opened } = createMockApp();
+    const service = createService(app);
+
+    // 工具参数来自模型，可能是错类型：resolveExpectedPath 只认字符串，
+    // 工具本身也会拒绝，故不应产生编辑记录、打开文件或改动内容。
+    const result = await service.executeWorkspaceTool('update_file', { path: 42, content: 'x' });
+
+    expect(result.success).toBe(false);
+    expect(result.workspaceEdit).toBe(undefined);
+    expect(opened).toEqual([]);
+    expect(contents.get('Notes/source.md')).toBe('before');
+  });
+
+  await test('create_note falls back to a string path when filename is the wrong type', async () => {
+    const { app, files } = createMockApp();
+    const service = createService(app);
+
+    // filename 是数字（错类型）时不参与路径归一，回落 path 字段——不会拼出 "42.md"。
+    const result = await service.executeWorkspaceTool('create_note', {
+      filename: 42,
+      path: 'Notes/typed.md',
+      content: 'content',
+    });
+
+    expect(result.status).toBe('success');
+    expect(files.has('Notes/typed.md')).toBe(true);
+    expect(Array.from(files.keys()).some((path) => path.includes('42'))).toBe(false);
+  });
 
   await test('narrows malformed tool results instead of inventing a workspace edit', async () => {
     const { app } = createMockApp();

@@ -210,6 +210,29 @@ async function runTests() {
     expect((result as any).settings.capital).toEqual('Beijing');
     expect((result as any).settings.rapidMode).toEqual(true);
   });
+
+  // ---- 窄化回归：缺失/非字符串 pluginId / commandId ----
+
+  await test('plugin control tools reject missing or non-string ids', async () => {
+    executeCalls.length = 0;
+    const registry = new ToolRegistry(mockApp, {
+      ...DEFAULT_SETTINGS,
+      allowPluginControl: true,
+      confirmExecutions: false,
+    });
+    registerTools(registry);
+
+    for (const args of [null, undefined, {}, { pluginId: 5 }, { pluginId: null }]) {
+      expect(await registry.execute('get_plugin_commands', args)).toEqual({ error: 'Missing pluginId parameter' });
+      expect(await registry.execute('get_plugin_settings', args)).toEqual({ error: 'Missing pluginId parameter' });
+    }
+    for (const args of [null, undefined, {}, { commandId: 5 }, { commandId: null }]) {
+      expect(await registry.execute('execute_plugin_command', args)).toEqual({
+        error: 'Missing commandId parameter',
+      });
+    }
+    expect(executeCalls.length).toBe(0);
+  });
 }
 
 runTests().catch(console.error);

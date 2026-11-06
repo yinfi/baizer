@@ -80,6 +80,17 @@ async function run() {
     expect(memories[0].createdAt).toBe(77);
   });
 
+  await test('corrupt memories.json (valid JSON but not an array) enters read-only mode without overwriting', async () => {
+    const memoryPath = '.obsidian/baizer-memory/memories.json';
+    const raw = '{"not":"an array"}';
+    const { app, files } = createApp({ [memoryPath]: raw });
+    const store = new HindsightStore(app);
+    await store.ready();
+    expect(await store.listMemories()).toEqual([]);
+    await store.flush();
+    expect(files[memoryPath]).toBe(raw);
+  });
+
   await test('imported memories fall back per field and are re-sanitized', async () => {
     const { app } = createApp({
       [`${PREV_DIR}/memories.json`]: JSON.stringify([

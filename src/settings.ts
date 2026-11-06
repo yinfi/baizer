@@ -3831,7 +3831,8 @@ export class SettingTab extends PluginSettingTab {
 
         const watcher = this.plugin.pluginWatcher;
         const rows = watcher
-            ? getDerivedSkillRows(watcher.getDerivedSkillStatuses(), watcher.getGenerationFailures())
+            // 宿主接口为最小结构类型，派生状态数组按设置页消费的窄契约收口（写入方保证形状）。
+            ? getDerivedSkillRows(watcher.getDerivedSkillStatuses() as DerivedSkillStatus[], watcher.getGenerationFailures())
             : [];
 
         if (rows.length === 0) {

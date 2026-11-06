@@ -186,6 +186,32 @@ async function runTests() {
     expect(backlinksItem.content).toContain('product workflow migration');
   });
 
+  await test('non-string backlink keys are filtered out before touching the vault', async () => {
+    const active = createFile('active.md');
+    const reads: string[] = [];
+    const app = {
+      workspace: { getActiveFile: () => active },
+      vault: {
+        // 反链键来自宿主（外部数据）：错类型键必须在进入 vault API 前被丢弃。
+        getAbstractFileByPath: (path: unknown) => {
+          if (typeof path !== 'string') throw new TypeError('vault path must be a string');
+          return createFile(path);
+        },
+        read: async (file: any) => { reads.push(file.path); return ''; },
+      },
+      metadataCache: {
+        getBacklinksForFile: () => ({
+          data: new Map<unknown, unknown>([[42, {}], [null, {}], [active, {}], ['note.md', {}]]),
+        }),
+      },
+    } as any;
+
+    const result = await new ObsidianContextService(app).collect({ includeCurrent: false, includeBacklinks: true });
+
+    expect(result.backlinks).toEqual([{ path: 'note.md', summary: '' }]);
+    expect(reads).toEqual(['note.md']);
+  });
+
   await test('collect returns safe defaults when there is no active note', async () => {
     const app = {
       workspace: {

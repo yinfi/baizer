@@ -281,6 +281,32 @@ test('extractFrontmatter returns null for no frontmatter', () => {
   expect(extractFrontmatter('Just body text')).toBeNull();
 });
 
+test('extractFrontmatter narrows scalar text into string/boolean/number', () => {
+  const content = '---\nknowledge_artifact_type: ontology_schema\nversion: 1\nenabled: true\ndisabled: false\nyear: 2026\nlabel: v2\n---\nBody';
+  const fm = extractFrontmatter(content);
+  expect(fm).toBeDefined();
+  expect(fm!.version).toBe(1);
+  expect(fm!.enabled).toBe(true);
+  expect(fm!.disabled).toBe(false);
+  expect(fm!.year).toBe(2026);
+  expect(fm!.label).toBe('v2');
+});
+
+test('parseOntologySchema skips wrong-typed fields and defaults version', () => {
+  const schema = parseOntologySchema({
+    knowledge_artifact_type: 'ontology_schema',
+    version: '3',
+    categories: [{ name: 7, description: 'x' }, { name: ' ok ', description: 5 }, null, 'junk'],
+    entity_types: 'not-an-array',
+  });
+  expect(schema).toBeDefined();
+  expect(schema!.version).toBe(1);
+  expect(schema!.categories).toHaveLength(1);
+  expect(schema!.categories[0].name).toBe('ok');
+  expect(schema!.categories[0].description).toBe('');
+  expect(schema!.entity_types).toHaveLength(0);
+});
+
 // --- Roundtrip: buildOntologyFile → extractFrontmatter → parseOntologySchema ---
 
 test('roundtrip: buildOntologyFile output can be parsed back to schema', () => {

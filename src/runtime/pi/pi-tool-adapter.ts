@@ -30,7 +30,7 @@ export function inferToolExecutionMode(name: string, tool?: Partial<Tool>): PiTo
 
 /** pi 传入的 params 类型上是 unknown;非对象(null/undefined/原始值)按「无参数」处理。 */
 function toToolArgs(params: unknown): ToolArgs {
-  return typeof params === 'object' && params !== null ? (params as ToolArgs) : {};
+  return typeof params === 'object' && params !== null && !Array.isArray(params) ? (params as ToolArgs) : {};
 }
 
 export function adaptToolDefinitionsToPi(input: AdaptToolDefinitionsInput): AgentTool<ToolParameters>[] {
