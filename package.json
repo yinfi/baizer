@@ -1,6 +1,6 @@
 {
   "name": "baizer",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
   "main": "main.js",
   "scripts": {

@@ -1,7 +1,7 @@
 {
     "id": "baizer",
     "name": "Baizer",
-    "version": "1.7.1",
+    "version": "1.7.2",
     "minAppVersion": "1.13.0",
     "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
     "author": "yinfie",
