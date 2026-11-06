@@ -351,7 +351,7 @@ export class HindsightStore {
   }
 
   private adapter(): VaultAdapter {
-    return this.app.vault.adapter as unknown as VaultAdapter;
+    return this.app.vault.adapter;
   }
 
   private cloneMemory(memory: MemoryRecord): MemoryRecord {

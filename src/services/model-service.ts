@@ -187,7 +187,7 @@ export class ModelService {
             this.harnessEnv = createHarnessExecutionEnv(vaultAdapter, `${configDir}/${PLUGIN_ID}-tmp`);
             // 用户自定义命令服务与 harnessEnv 同源;懒加载模板(首次列命令/执行时读盘)。
             this.promptTemplateService = new PromptTemplateService(this.harnessEnv, `${configDir}/${PLUGIN_ID}-commands`);
-        } catch (error) {
+        } catch {
             logger.warn('Failed to initialize HarnessSessionManager; falling back to in-memory sessions.', 'ModelService');
             this.sessionManager = null;
             this.harnessEnv = null;
@@ -703,7 +703,7 @@ export class ModelService {
         try {
             // timeoutMs 不再单独消费：pi 的无状态生成走原生 signal 硬中断，
             // 旧的 requestUrl 超时语义由调用方用 AbortSignal 表达（见下）。
-            const { skipGenerationPlan, signal, timeoutMs, ...providerOptions } = options ?? {};
+            const { skipGenerationPlan, signal, ...providerOptions } = options ?? {};
             if (signal?.aborted) {
                 throw new DOMException('Generation aborted', 'AbortError');
             }
@@ -754,7 +754,7 @@ export class ModelService {
         if (this.sessionManager && conversationId) {
             try {
                 await this.sessionManager.clear(conversationId);
-            } catch (error) {
+            } catch {
                 logger.warn('Failed to start a fresh persistent session on clear.', 'ModelService.clearSession');
             }
         }
@@ -786,7 +786,7 @@ export class ModelService {
             const { branch, all } = await this.sessionManager.getBranchEntries(conversationId);
             if (branch.length === 0) return null;
             return projectBranchToMessages(branch, all);
-        } catch (e) {
+        } catch {
             logger.warn('Failed to project session branch.', 'ModelService.getBranchProjection');
             return null;
         }
@@ -802,7 +802,7 @@ export class ModelService {
             const ok = await this.sessionManager.moveToBranch(conversationId, targetLeafEntryId);
             if (!ok) return null;
             return this.getBranchProjection(conversationId);
-        } catch (e) {
+        } catch {
             logger.warn('Failed to switch session branch.', 'ModelService.switchBranch');
             return null;
         }
@@ -827,7 +827,7 @@ export class ModelService {
                 await this.sessionManager.supersedeUserEntry(conversationId, userEntryId);
             }
             return await this.sessionManager.prepareForkAtUser(conversationId, userEntryId);
-        } catch (e) {
+        } catch {
             logger.warn('Failed to prepare retry/fork position.', 'ModelService.prepareRetryFromUser');
             return false;
         }

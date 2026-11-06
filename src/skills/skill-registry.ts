@@ -120,7 +120,7 @@ export class SkillRegistry {
           entry.loaded.skill.filePath = path;
           console.warn(`[SkillRegistry] Ignoring invalid materialized builtin skill "${name}".`);
         }
-      } catch (e) {
+      } catch {
         // 物化失败：回退到确定性路径，read_skill 仍可尝试读；记录告警不阻断。
         entry.loaded.skill.filePath = builtinSkillFilePath(name, skillsDir);
         console.warn(`[SkillRegistry] Failed to materialize builtin skill "${name}"`);
@@ -191,7 +191,7 @@ export class SkillRegistry {
       try {
         const content = await adapter.read(filePath);
         if (this.registerUserFromMd(content, filePath)) count++;
-      } catch (e) {
+      } catch {
         console.warn(`[SkillRegistry] Failed to load user skill: ${filePath}`);
       }
     }

@@ -528,7 +528,7 @@ export default class BaizerPlugin extends Plugin {
         if (rawUrlMatches.length === 0) return;
 
         // We process in reverse order so indices remain valid
-        rawUrlMatches.sort((a, b) => b.index! - a.index!);
+        rawUrlMatches.sort((a, b) => b.index - a.index);
 
         for (const m of rawUrlMatches) {
             new Notice(`📥 Auto-saving: ${m.url}`);
@@ -539,7 +539,7 @@ export default class BaizerPlugin extends Plugin {
                 const linkText = `[[${finalPath}|Saved: ${finalPath.split('/').pop()?.replace('.md', '')}]]`;
 
                 // Apply replacement at specific index
-                newContent = newContent.substring(0, m.index) + linkText + newContent.substring(m.index! + m.length);
+                newContent = newContent.substring(0, m.index) + linkText + newContent.substring(m.index + m.length);
                 modified = true;
             } else {
                 new Notice(`❌ Failed to save ${m.url}: ${result.error}`);

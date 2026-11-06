@@ -68,7 +68,7 @@ export class HistoryMenu {
         placeholder: t('Search conversations or notes'),
         'aria-label': t('Search conversations'),
       },
-    }) as HTMLInputElement;
+    });
     searchInput.addEventListener('input', (event: Event) => {
       const target = event.target as HTMLInputElement | null;
       this.filterQuery = target?.value || '';

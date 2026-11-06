@@ -5,7 +5,6 @@ import {
   pickCompactionCutoff,
   shouldCompact,
   type CompactionSettings,
-  type EstimableMessage,
 } from './session-store/compaction';
 import {
   ConversationSession,
@@ -435,7 +434,7 @@ export class HarnessSessionManager {
         return notCompacted;
       }
 
-      const cutoff = pickCompactionCutoff(messages as EstimableMessage[], settings.keepRecentTokens);
+      const cutoff = pickCompactionCutoff(messages, settings.keepRecentTokens);
       const toHide = entries.slice(0, cutoff);
       if (toHide.length === 0) {
         // 整段都在 keepRecentTokens 预算内(如单条巨型消息):没有可折叠的旧内容。

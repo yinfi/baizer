@@ -20,7 +20,7 @@ export function isPlainRecord(value: unknown): value is Record<string, unknown> 
 export function asRecord(value: unknown): Record<string, unknown> {
     return isRecord(value) ? value : EMPTY_RECORD;
 }
-const EMPTY_RECORD: Record<string, unknown> = Object.freeze({}) as Record<string, unknown>;
+const EMPTY_RECORD: Record<string, unknown> = Object.freeze({});
 
 /** 读取对象上的某个属性;value 不是对象时返回 undefined。 */
 export function prop(value: unknown, key: string): unknown {

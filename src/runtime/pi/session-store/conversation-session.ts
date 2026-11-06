@@ -188,7 +188,7 @@ export class ConversationSession {
             : { content: entry.payload };
           if (payload.role === role) {
             // 落盘的 payload 就是 pi 消息对象本身 → 原样透传（保留 api/provider/model/timestamp 等字段）。
-            messages.push({ ...payload, role, content: normalizeContent(role, payload.content) } as ModelMessage);
+            messages.push({ ...payload, role, content: normalizeContent(role, payload.content) });
           } else {
             // 迁移来的旧 payload 只有 {role, content}（tool_result 连 toolCallId 都没有）→ 按最小字段补齐。
             const content = 'result' in payload ? payload.result : payload.content;
@@ -197,7 +197,7 @@ export class ConversationSession {
               content: normalizeContent(role, content),
               ...(typeof payload.name === 'string' ? { toolName: payload.name } : {}),
               ...(typeof payload.toolCallId === 'string' ? { toolCallId: payload.toolCallId } : {}),
-            } as ModelMessage);
+            });
           }
           entries.push(entry);
           break;

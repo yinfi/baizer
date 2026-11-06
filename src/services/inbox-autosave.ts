@@ -14,7 +14,7 @@ export interface InboxAutosaveOptions {
 }
 
 export function extractRawUrlMatches(content: string): RawUrlMatch[] {
-  const regex = /(\[\[.*?\]\])|(\[.*?\]\(.*?\))|(https?:\/\/[^\s\)]+)/g;
+  const regex = /(\[\[.*?\]\])|(\[.*?\]\(.*?\))|(https?:\/\/[^\s)]+)/g;
   const matches: RawUrlMatch[] = [];
 
   for (const match of content.matchAll(regex)) {

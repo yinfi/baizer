@@ -23,7 +23,7 @@ export class StreamController {
         this.deps.onThinking(event.content);
         break;
       case 'tool_call':
-        this.deps.onToolCall(event.name, event.args as Record<string, unknown>);
+        this.deps.onToolCall(event.name, event.args);
         break;
       case 'tool_result':
         this.deps.onToolResult(event.name, event.result, event.error);
