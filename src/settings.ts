@@ -2917,6 +2917,13 @@ class MemoryBrowserPage extends SettingPage {
     private memoryActiveTab: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = 'overview';
     private memoryLoading = false;
     private memoryError = '';
+    // getMemoryView() resolving null (no memoryManager: active provider has no API key) or
+    // rejecting every time used to make display() <-> refresh() recurse without bound (no
+    // scheduler/reentrancy guard survived the #106 declarative-settings rewrite - see the
+    // startup/memory perf diagnosis). memoryUnavailable makes "no memoryManager" terminal
+    // instead of retriable; refreshInFlight is the reentrancy guard for both paths.
+    private memoryUnavailable = false;
+    private refreshInFlight = false;
 
     constructor(private tab: SettingTab) {
         super();
@@ -2930,7 +2937,10 @@ class MemoryBrowserPage extends SettingPage {
         this.renderTabs();
         this.renderList();
         // 首次打开自动加载；本次渲染会先画出 Loading。
-        if (!this.memoryView && !this.memoryLoading) {
+        // 终止态（memoryUnavailable / memoryError）和已有请求在途（refreshInFlight）都不再
+        // 自动重试 —— 这正是 #106 去掉 render-scheduler 后缺失的重入保护；没有它，
+        // getMemoryView() 持续返回 null 或持续 reject 会让 display()/refresh() 无限互相递归。
+        if (!this.memoryView && !this.memoryLoading && !this.memoryUnavailable && !this.memoryError && !this.refreshInFlight) {
             void this.refresh(this.memoryActiveTab, { repaintOnStart: false });
         }
     }
@@ -3002,6 +3012,14 @@ class MemoryBrowserPage extends SettingPage {
     }
 
     private renderList(): void {
+        if (this.memoryUnavailable) {
+            this.containerEl.createDiv({
+                cls: 'baizer-settings-inline-note is-warning',
+                text: t('Memory is unavailable until the active provider has an API key. Add one on the Connection page, then press Refresh.'),
+                attr: { role: 'status', 'aria-live': 'polite' },
+            });
+            return;
+        }
         if (this.memoryError) {
             this.containerEl.createDiv({
                 cls: 'baizer-settings-inline-note is-warning',
@@ -3073,25 +3091,38 @@ class MemoryBrowserPage extends SettingPage {
         mode: 'overview' | 'observations' | 'facts' | 'recent' | 'search' = this.memoryActiveTab,
         options: { repaintOnStart?: boolean } = {},
     ): Promise<void> {
+        // 重入保护：display() 的自动加载和用户点击 Refresh/Tab/Search 都会调用这里；
+        // 已有一次调用在途时直接返回，避免并发请求互相覆盖 memoryView，
+        // 也避免（配合 display() 的检查）在首个 await 之前就被同步再次触发。
+        if (this.refreshInFlight) return;
+
         if (typeof this.plugin.modelService?.getMemoryView !== 'function') {
             this.memoryError = t('Memory service is not available.');
             this.display();
             return;
         }
 
+        this.refreshInFlight = true;
         this.memoryLoading = true;
         this.memoryError = '';
+        this.memoryUnavailable = false;
         if (options.repaintOnStart !== false) this.display();
         try {
-            this.memoryView = await this.plugin.modelService.getMemoryView({
+            const view = await this.plugin.modelService.getMemoryView({
                 mode,
                 query: mode === 'search' ? this.memorySearchQuery : undefined,
                 limit: 25,
             });
+            this.memoryView = view;
+            // getMemoryView() 返回 null 时 modelService 没有 memoryManager（当前服务商未配置
+            // API Key，或正在切换服务商）。这不是"还没加载完"，是结构性的"当前不可用"——
+            // 终止态，不再自动重试；用户换服务商/补 API Key 后点 Refresh 才会清掉。
+            this.memoryUnavailable = !view;
         } catch (error: unknown) {
             this.memoryError = thrownMessage(error) || t('Failed to load memory.');
         } finally {
             this.memoryLoading = false;
+            this.refreshInFlight = false;
             this.display();
         }
     }
