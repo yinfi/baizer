@@ -369,6 +369,7 @@ async function runTests() {
     const menuActions = container.querySelectorAll('.shell-knowledge-status-icon-action');
     expect(menuActions.map(action => action.attributes.title)).toEqual([
       'Compile note',
+      'Rescan knowledge status',
       'Add backlinks',
       'Open wiki summary',
       'Run knowledge lint',
@@ -382,13 +383,16 @@ async function runTests() {
       '',
       '',
       '',
+      '',
     ]);
 
+    // 索引与上面的 title 列表一一对应；跳过 'Rescan knowledge status'（它触发一次重扫，
+    // 与这里要断言的命令/回调无关）和 'Copy note path'（写剪贴板）。
     menuActions[0].click();
-    menuActions[1].click();
     menuActions[2].click();
     menuActions[3].click();
-    menuActions[5].click();
+    menuActions[4].click();
+    menuActions[6].click();
 
     expect(commandCalls).toEqual([
       'baizer:knowledge-open-index',
