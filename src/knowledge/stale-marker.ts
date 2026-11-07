@@ -14,7 +14,15 @@ import type { App, TFile } from 'obsidian';
 import { PLUGIN_ID } from '../mcp/types';
 import { logger } from '../utils/logger';
 
-const MARKER_VERSION = 1;
+// v2: added per-entry verifiedAt (see MAX_VERIFY_AGE_MS).
+const MARKER_VERSION = 2;
+
+/**
+ * 指纹只比 (mtime, size)：保留时间戳的同步/还原、或 1 秒精度文件系统上的同秒改写，
+ * 都可能"看起来没变"。所以每条记录带一个 verifiedAt，超过这个时长就强制走一次全量哈希，
+ * 把最坏情况的漏检窗口限制在这个天数内。
+ */
+const MAX_VERIFY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface FileFingerprint {
   mtime: number;
@@ -25,6 +33,8 @@ interface MarkerEntry {
   summaryPath: string;
   source: FileFingerprint;
   summary: FileFingerprint;
+  /** 上次全量哈希确认同步的时刻（epoch ms）。 */
+  verifiedAt: number;
 }
 
 interface MarkerFile {
@@ -52,7 +62,8 @@ function isFingerprint(value: unknown): value is FileFingerprint {
 
 function isEntry(value: unknown): value is MarkerEntry {
   const v = value as MarkerEntry | null;
-  return !!v && typeof v.summaryPath === 'string' && isFingerprint(v.source) && isFingerprint(v.summary);
+  return !!v && typeof v.summaryPath === 'string' && isFingerprint(v.source) && isFingerprint(v.summary)
+    && typeof v.verifiedAt === 'number' && Number.isFinite(v.verifiedAt);
 }
 
 export class StaleCheckMarker {
@@ -102,6 +113,8 @@ export class StaleCheckMarker {
   isUnchanged(source: TFile, summary: TFile | null, summaryPath: string): boolean {
     const entry = this.entries.get(source.path);
     if (!entry || entry.summaryPath !== summaryPath) return false;
+    // 超过 MAX_VERIFY_AGE_MS 没做过全量比对就重新比一次，别让指纹碰撞无限期存活。
+    if (Date.now() - entry.verifiedAt > MAX_VERIFY_AGE_MS) return false;
     const sourcePrint = fingerprintOf(source);
     const summaryPrint = fingerprintOf(summary);
     if (!sourcePrint || !summaryPrint) return false;
@@ -119,9 +132,10 @@ export class StaleCheckMarker {
     const previous = this.entries.get(source.path);
     if (previous && previous.summaryPath === summaryPath
       && sameFingerprint(previous.source, sourcePrint) && sameFingerprint(previous.summary, summaryPrint)) {
-      return;
+      // 指纹没变，但 verifiedAt 要刷新：这次全量比对刚刚确认过它是同步的。
+      if (Date.now() - previous.verifiedAt <= MAX_VERIFY_AGE_MS) return;
     }
-    this.entries.set(source.path, { summaryPath, source: sourcePrint, summary: summaryPrint });
+    this.entries.set(source.path, { summaryPath, source: sourcePrint, summary: summaryPrint, verifiedAt: Date.now() });
     this.dirty = true;
   }
 

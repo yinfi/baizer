@@ -67,6 +67,10 @@ export class KnowledgeRuntime {
    */
   private startupDone!: Promise<void>;
   private resolveStartupDone!: () => void;
+  /** initialize() 是否跑过。没跑过时 whenStartupSettled() 直接放行，不会永远挂住调用方。 */
+  private startupStarted = false;
+  /** 在途的启动扫描：单飞，避免 initialize() 与其它入口并发跑两遍。 */
+  private startupScan: Promise<void> | null = null;
 
   constructor(
     private app: App,
@@ -163,6 +167,9 @@ export class KnowledgeRuntime {
    * 时直接放行（测试里常见），避免这类调用方永远卡住。
    */
   async whenStartupSettled(): Promise<void> {
+    // 没调用过 initialize() 时 startupDone 永远不会 resolve，直接放行——
+    // 否则"先建 runtime 再手动调 compile"的调用方会永久挂起。
+    if (!this.startupStarted) return;
     await this.startupDone;
   }
 
@@ -174,6 +181,7 @@ export class KnowledgeRuntime {
    * onload() 的错误处理会把整个插件加载判定为失败。
    */
   async initialize(): Promise<void> {
+    this.startupStarted = true;
     if (this.app.metadataCache.initialized) {
       this.metadataIndex.rebuild();
       this.runStartupScanInBackground();
@@ -198,13 +206,18 @@ export class KnowledgeRuntime {
 
   private runStartupScanInBackground(): void {
     if (this.disposed) { this.resolveStartupDone(); return; }
-    this.onMetadataReady()
-      .catch((error) => {
+    // 单飞：initialize() 只会调一次，但保留这个判断让"重复 initialize / 将来新增入口"
+    // 都不会跑出第二条并发扫描。
+    if (this.startupScan) return;
+    // 用 then(onFulfilled, onRejected) 而不是 catch().finally()：既保证失败被记日志、
+    // 等待者一定放行，又不会因为 finally 派生出的 promise 再次 reject 而变成 unhandled。
+    this.startupScan = this.onMetadataReady().then(
+      () => { this.resolveStartupDone(); },
+      (error) => {
         logger.error('Startup scan (onMetadataReady) failed', error, 'KnowledgeRuntime');
-      })
-      .finally(() => {
         this.resolveStartupDone();
-      });
+      },
+    );
   }
 
   /** metadataCache 就绪后：扫描未注册文件 + 重置 processing + 触发自动编译 */
@@ -294,6 +307,7 @@ export class KnowledgeRuntime {
 
     let reconciled = 0;
     for (const file of unique.values()) {
+      if (this.disposed) break;
       const currentSummary = await findCurrentCompiledSummary(this.app, file, wikiFolder);
       if (!currentSummary) continue;
 
@@ -311,6 +325,7 @@ export class KnowledgeRuntime {
   private async detectStaleFiles(wikiFolder: string): Promise<number> {
     const staleFiles = await this.statusService.getStaleFiles();
     for (const file of staleFiles) {
+      if (this.disposed) break;
       await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'content_changed' });
     }
     return staleFiles.length;
@@ -622,8 +637,12 @@ export class KnowledgeRuntime {
   }
 
   async markOntologyStaleFilesPending(): Promise<number> {
+    // 等启动扫描跑完：它正在做"重置 stuck / pending→done"，两边并发会互相覆盖。
+    await this.whenStartupSettled();
+    if (this.disposed) return 0;
     const staleFiles = await this.statusService.getStaleFiles();
     for (const file of staleFiles) {
+      if (this.disposed) return staleFiles.length;
       await setKnowledgeStatus(this.app, file, 'pending', { pending_reason: 'content_changed' });
     }
     return staleFiles.length;
@@ -646,6 +665,7 @@ export class KnowledgeRuntime {
       }
 
       const candidate = await this.ontologyService.generateDiscoveryCandidate((prompt) => this.modelService.generate(prompt));
+      if (this.disposed) return null;
       if (!candidate.content) {
         logger.info(`Ontology discovery skipped: ${candidate.readiness.kind}${candidate.error ? ` (${candidate.error})` : ''}`, 'KnowledgeRuntime');
         return null;
@@ -661,6 +681,9 @@ export class KnowledgeRuntime {
   }
 
   async compileByPath(path: string): Promise<{ registered: number; success: number; failed: number }> {
+    // 用户可在启动扫描窗口内手动编译（状态面板 "Compile note"、命令、shell-view 都会走这里）；
+    // 不等它跑完就写 frontmatter，会和扫描的"重置 stuck / pending→done"互相覆盖。
+    await this.whenStartupSettled();
     const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
     const abstractFile = this.app.vault.getAbstractFileByPath(path);
     if (!abstractFile) throw new Error(`路径不存在: ${path}`);

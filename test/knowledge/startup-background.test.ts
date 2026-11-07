@@ -60,6 +60,7 @@ function mkVault(n: number) {
       modify: async (f: TFile, content: string) => { const r = files.get(f.path); if (r) r.content = content; },
       getAbstractFileByPath: (p: string) => files.get(p)?.file ?? null,
       read: async (f: TFile) => { reads.push(f.path); return files.get(f.path)?.content ?? ''; },
+      cachedRead: async (f: TFile) => { reads.push(f.path); return files.get(f.path)?.content ?? ''; },
     },
     metadataCache: {
       initialized: true,
@@ -208,6 +209,79 @@ async function main() {
     rt.cleanup();
     await waiter;
     assert(settled, 'cleanup() must release waiters');
+  });
+
+  await test('two concurrent getStaleFiles() calls share one pass and one marker load', async () => {
+    const N = 8;
+    const v = mkVault(N);
+    let markerWrites = 0;
+    const realWrite = v.app.vault.adapter.write;
+    v.app.vault.adapter.write = async (p: string, c: string) => { if (p === MARKER) markerWrites++; return realWrite(p, c); };
+    const svc = v.svc();
+    const [a, b] = await Promise.all([svc.getStaleFiles(), svc.getStaleFiles()]);
+    assert(a.length === 0 && b.length === 0, 'nothing stale expected');
+    // 单飞：两次并发调用只应产生一次全库遍历、一次标记落盘（不是 2N 次读取 / 2 次写）。
+    assert(v.reads.length === N, `expected a single ${N}-file pass, got ${v.reads.length} reads`);
+    assert(markerWrites === 1, `marker should be written once, wrote ${markerWrites} times`);
+  });
+
+  await test('an expired marker entry forces a full re-check (same fingerprints, stale verifiedAt)', async () => {
+    const N = 5;
+    const v = mkVault(N);
+    await v.svc().getStaleFiles();          // cold: builds the marker
+    const parsed = JSON.parse(v.disk.get(MARKER)!);
+    assert(parsed.version === 2, `expected marker version 2, got ${parsed.version}`);
+    for (const key of Object.keys(parsed.entries)) {
+      parsed.entries[key].verifiedAt = Date.now() - 8 * 24 * 60 * 60 * 1000;   // 8 days old
+    }
+    v.disk.set(MARKER, JSON.stringify(parsed));
+    v.reads.length = 0;
+    const stale = await v.svc().getStaleFiles();
+    assert(stale.length === 0, 'still in sync, so nothing stale');
+    assert(v.reads.length === N, `expired marker must re-hash all ${N} files, read ${v.reads.length}`);
+    // ...and the recheck refreshes verifiedAt so the next pass is a shortcut again
+    v.reads.length = 0;
+    await v.svc().getStaleFiles();
+    assert(v.reads.length === 0, `expected shortcut after refresh, read ${v.reads.length}`);
+  });
+
+  await test('a deleted note is pruned from the marker', async () => {
+    const v = mkVault(4);
+    await v.svc().getStaleFiles();
+    assert(Object.keys(JSON.parse(v.disk.get(MARKER)!).entries).includes('Projects/n1.md'), 'n1 should be tracked');
+    v.files.delete('Projects/n1.md');
+    await v.svc().getStaleFiles();
+    const entries = Object.keys(JSON.parse(v.disk.get(MARKER)!).entries);
+    assert(!entries.includes('Projects/n1.md'), `deleted note still tracked: ${entries.join()}`);
+    assert(entries.length === 3, `expected 3 remaining entries, got ${entries.length}`);
+  });
+
+  await test('calling initialize() twice runs the startup scan only once', async () => {
+    const v = mkVault(0);
+    const rec: Rec = { file: mkFile('Projects/stuck.md', 5, 1), content: 'x',
+      frontmatter: { knowledge_status: 'processing' } };
+    v.files.set('Projects/stuck.md', rec);
+    let frontmatterWrites = 0;
+    v.app.fileManager = { processFrontMatter: async (_f: TFile, cb: (fm: any) => void) => { frontmatterWrites++; cb(rec.frontmatter); } };
+    v.app.internalPlugins = { plugins: { bases: { enabled: true } } };
+    const rt = new KnowledgeRuntime(v.app, { knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'], knowledgeAutoCompile: false } as any, { generate: async () => '' } as any);
+    await rt.initialize();
+    await rt.initialize();
+    await rt.whenStartupSettled();
+    assert(frontmatterWrites === 1, `startup scan should run once, wrote frontmatter ${frontmatterWrites} times`);
+  });
+
+  await test('whenStartupSettled() returns immediately when initialize() was never called', async () => {
+    const v = mkVault(0);
+    const rt = new KnowledgeRuntime(v.app, { knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'] } as any, { generate: async () => '' } as any);
+    let settled = false;
+    await Promise.race([
+      rt.whenStartupSettled().then(() => { settled = true; }),
+      new Promise(resolve => setTimeout(resolve, 100)),
+    ]);
+    assert(settled, 'whenStartupSettled() must not hang before initialize()');
   });
 
   console.log('Knowledge startup tests: all passed');
