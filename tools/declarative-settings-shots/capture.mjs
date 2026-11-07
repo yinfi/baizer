@@ -61,6 +61,76 @@ function pngSize(buffer) {
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 
+// A host path is not always the whole value: it can sit inside a DOM text node, an error message
+// or a `--eval` result. Match the path wherever it appears, not only at the start of the string.
+// The trailing character class keeps a match from swallowing the prose or markup around it.
+const HOST_PATH_PATTERNS = [
+  // \\?\C:\dir (extended-length form)
+  /\\\\\?\\[A-Za-z]:[\\/][^\s"'`;,)\]}>，。；：、（）【】]*/g,
+  // file:///C:/dir and file:///home/user
+  /file:\/\/\/[^\s"'`;,)\]}>，。；：、（）【】]+/g,
+  // \\server\share
+  /\\\\[^\s"'`;,)\]}>，。；：、（）【】]+/g,
+  // C:\dir and C:/dir; the lookbehind stops "https://" matching "s://"
+  /(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s"'`;,)\]}>，。；：、（）【】]*/g,
+  // C:dir (drive-relative), which Node error messages can also contain
+  /(?<![A-Za-z0-9])[A-Za-z]:[A-Za-z0-9_.-]+\\[^\s"'`;,)\]}>，。；：、（）【】]*/g,
+  // POSIX paths under a root that names a user, a mount or a system directory - not every "/".
+  /\/(?:home|Users|mnt|media|opt|srv|var|tmp|private|Volumes)\/[^\s"'`;,)\]}>，。；：、（）【】]*/g,
+];
+
+/** Turn one matched capture-machine path into a repo-relative path or a neutral placeholder. */
+function redactHostPath(match) {
+  // Only an absolute match can be repo-relative: a drive-relative match ("C:dir") resolves against
+  // the current directory, so path.relative() would turn it into a path that only looks in-repo.
+  if (path.isAbsolute(match)) {
+    const relative = path.relative(process.cwd(), match);
+    if (relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+      return relative.split(path.sep).join('/');
+    }
+  }
+  return `<local-path>/${path.basename(match)}`;
+}
+
+/**
+ * Turn a capture-machine absolute path into a repo-relative path or a neutral
+ * placeholder. Committed layout reports must not leak the local environment, so
+ * the default is to redact rather than keep the real path.
+ */
+function sanitizeHostPath(value) {
+  if (typeof value !== 'string' || !value) return value;
+  return HOST_PATH_PATTERNS.reduce((text, pattern) => text.replace(pattern, redactHostPath), value);
+}
+
+/** Redact host paths anywhere in a plain-JSON value, including inside longer strings. */
+function scrubHostPaths(value) {
+  if (typeof value === 'string') return sanitizeHostPath(value);
+  if (Array.isArray(value)) return value.map(scrubHostPaths);
+  if (value && typeof value === 'object') {
+    for (const key of Object.keys(value)) value[key] = scrubHostPaths(value[key]);
+  }
+  return value;
+}
+
+/**
+ * The layout report is committed as evidence, so strip the capture machine's
+ * host paths and identifiers (see README: "Committed layout reports"). The PNG
+ * and the measurements do not depend on these fields.
+ */
+function sanitizeLayoutReport(report) {
+  const clean = JSON.parse(JSON.stringify(report));
+  if (clean.image) clean.image.path = sanitizeHostPath(clean.image.path);
+  const harness = clean.harness || {};
+  if (harness.exe) harness.exe = path.basename(harness.exe);
+  if (harness.pluginDir) harness.pluginDir = '<plugin-dir>';
+  if (harness.vaultDir) harness.vaultDir = '<vault-dir>';
+  if (harness.vaultKey !== undefined) harness.vaultKey = '<vault-key>';
+  if (harness.scenarioPath) harness.scenarioPath = sanitizeHostPath(harness.scenarioPath);
+  delete harness.pid;
+  if (harness.target) delete harness.target.id;
+  return scrubHostPaths(clean);
+}
+
 function launchObsidian(exe, port) {
   return spawn(exe, [`--remote-debugging-port=${port}`, '--remote-allow-origins=*'], {
     stdio: 'ignore',
@@ -602,12 +672,12 @@ async function main() {
       );
     }
 
-    const report = buildLayoutReport({
+    const report = sanitizeLayoutReport(buildLayoutReport({
       sessionFacts: { ...facts, viewport: { ...facts.viewport, innerWidth: width, innerHeight: height } },
       harness,
       image: { bytes: buffer.length, width: size.width, height: size.height },
       options,
-    });
+    }));
     await fsp.writeFile(layoutPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 
     console.log(`image      ${outPath}  (${size.width}x${size.height}, ${buffer.length} bytes)`);

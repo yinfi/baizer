@@ -78,6 +78,7 @@ const tests = [
   'test/settings-provider-layout.test.ts',
   'test/settings-performance.test.ts',
   'test/settings-connection-validation.test.ts',
+  'test/memory-browser-refresh-loop.test.ts',
   'test/model-catalog-timeout.test.ts',
   'test/anthropic-protocol.test.ts',
   'test/memory-manager.test.ts',

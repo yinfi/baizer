@@ -109,6 +109,10 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Cleared all remembered Hindsight memory.': '已清除所有 Hindsight 记忆。',
     'Memory service is not available.': '记忆服务不可用。',
     'Failed to load memory.': '加载记忆失败。',
+    'Memory request timed out. Please try again.':
+        '记忆加载超时，请重试。',
+    'Memory is unavailable until the active provider has an API key. Add one on the Connection page, then press Refresh.':
+        '记忆功能暂不可用：当前服务商尚未配置 API Key。请到连接页添加后，再点击刷新。',
 
     // ── 连接 ──
     'No active provider found.': '未找到激活的服务商。',
