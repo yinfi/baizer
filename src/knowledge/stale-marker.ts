@@ -9,6 +9,11 @@
 // anything that changed, is missing from the marker, or has no readable fingerprint goes through
 // the full check exactly as before. A missing or corrupt marker file is just an empty marker, so
 // the worst case is the old behaviour (one full pass), never a missed stale note.
+//
+// The age bound (MAX_VERIFY_AGE_MS) is enforced wherever isUnchanged() is consulted, which is
+// getStaleFiles(). That runs on every plugin load AND periodically while the plugin stays open
+// (see KnowledgeRuntime's STALE_MARKER_RECHECK_INTERVAL_MS), so a long-running session does not
+// keep a fingerprint shortcut alive indefinitely.
 
 import type { App, TFile } from 'obsidian';
 import { PLUGIN_ID } from '../mcp/types';
@@ -23,6 +28,15 @@ const MARKER_VERSION = 2;
  * 把最坏情况的漏检窗口限制在这个天数内。
  */
 const MAX_VERIFY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * verifiedAt 是否已过期。时钟回拨时 age 会是负数（时间戳落在"未来"），这里也一律按过期处理：
+ * 宁可多查一次，也不要让快路径在时间异常时无限期生效。
+ */
+function isVerificationExpired(verifiedAt: number, now: number): boolean {
+  const age = now - verifiedAt;
+  return age < 0 || age > MAX_VERIFY_AGE_MS;
+}
 
 export interface FileFingerprint {
   mtime: number;
@@ -114,7 +128,7 @@ export class StaleCheckMarker {
     const entry = this.entries.get(source.path);
     if (!entry || entry.summaryPath !== summaryPath) return false;
     // 超过 MAX_VERIFY_AGE_MS 没做过全量比对就重新比一次，别让指纹碰撞无限期存活。
-    if (Date.now() - entry.verifiedAt > MAX_VERIFY_AGE_MS) return false;
+    if (isVerificationExpired(entry.verifiedAt, Date.now())) return false;
     const sourcePrint = fingerprintOf(source);
     const summaryPrint = fingerprintOf(summary);
     if (!sourcePrint || !summaryPrint) return false;
@@ -133,7 +147,7 @@ export class StaleCheckMarker {
     if (previous && previous.summaryPath === summaryPath
       && sameFingerprint(previous.source, sourcePrint) && sameFingerprint(previous.summary, summaryPrint)) {
       // 指纹没变，但 verifiedAt 要刷新：这次全量比对刚刚确认过它是同步的。
-      if (Date.now() - previous.verifiedAt <= MAX_VERIFY_AGE_MS) return;
+      if (!isVerificationExpired(previous.verifiedAt, Date.now())) return;
     }
     this.entries.set(source.path, { summaryPath, source: sourcePrint, summary: summaryPrint, verifiedAt: Date.now() });
     this.dirty = true;

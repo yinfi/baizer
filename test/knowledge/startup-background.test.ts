@@ -4,14 +4,19 @@
  */
 import { TFile } from 'obsidian';
 import { computeContentHash } from '../../src/knowledge/compiler';
-import { KnowledgeRuntime } from '../../src/knowledge/runtime';
+import {
+  KnowledgeRuntime,
+  STALE_MARKER_RECHECK_INTERVAL_MS,
+  STARTUP_SCAN_FAILURE_NOTICE,
+} from '../../src/knowledge/runtime';
 import { KnowledgeStatusService } from '../../src/knowledge/status-service';
 import { logger } from '../../src/utils/logger';
 
-(global as any).window = (global as any).window ?? {
-  setTimeout: (cb: () => void, ms?: number) => setTimeout(cb, ms),
-  clearTimeout: (h: any) => clearTimeout(h),
-};
+const win: any = (global as any).window ?? ((global as any).window = {});
+win.setTimeout = win.setTimeout ?? ((cb: () => void, ms?: number) => setTimeout(cb, ms));
+win.clearTimeout = win.clearTimeout ?? ((h: any) => clearTimeout(h));
+win.setInterval = win.setInterval ?? ((cb: () => void, ms?: number) => setInterval(cb, ms) as unknown as number);
+win.clearInterval = win.clearInterval ?? ((h: any) => clearInterval(h));
 
 function assert(cond: boolean, msg: string): void { if (!cond) throw new Error(msg); }
 async function test(name: string, fn: () => Promise<void>) {
@@ -52,6 +57,7 @@ function mkVault(n: number) {
         write: async (p: string, c: string) => { disk.set(p, c); },
         mkdir: async () => {},
       },
+      on: () => ({}),
       getMarkdownFiles: () => Array.from(files.values()).map(r => r.file),
       getFiles: () => Array.from(files.values()).map(r => r.file),
       trash: async () => {},
@@ -64,6 +70,8 @@ function mkVault(n: number) {
     },
     metadataCache: {
       initialized: true,
+      on: () => ({}),
+      offref: () => {},
       getFileCache: (f: TFile) => { const r = files.get(f.path); return r ? { frontmatter: r.frontmatter } : null; },
     },
   };
@@ -184,13 +192,20 @@ async function main() {
     const errors: string[] = [];
     const orig = logger.error.bind(logger);
     (logger as any).error = (msg: string, err?: unknown, ctx?: string) => { errors.push(`${ctx}: ${msg}: ${String((err as Error)?.message)}`); };
+    // obsidian 的 Notice 在测试环境里是冻结的 mock（模块对象只读），所以观察运行时里
+    // 负责"发一次失败提示"的那个接缝是否被调用。
+    let notified = false;
     try {
       const rt = new KnowledgeRuntime(v.app, settings, { generate: async () => '' } as any);
+      (rt as any).notifyStartupScanFailure = () => { notified = true; };
       armed = true;
       await rt.initialize();             // must not reject
       await rt.whenStartupSettled();     // must resolve
     } finally { (logger as any).error = orig; }
     assert(errors.some(e => e.includes('Startup scan') && e.includes('boom')), `failure not logged; got ${JSON.stringify(errors)}`);
+    assert(notified, 'the startup-scan failure must be user-visible, not only logged');
+    assert(STARTUP_SCAN_FAILURE_NOTICE.includes('Rescan knowledge status'),
+      `the failure notice must point at the retry entry; got: ${STARTUP_SCAN_FAILURE_NOTICE}`);
   });
 
   await test('cleanup() before the scan starts releases whenStartupSettled()', async () => {
@@ -266,10 +281,18 @@ async function main() {
     v.app.internalPlugins = { plugins: { bases: { enabled: true } } };
     const rt = new KnowledgeRuntime(v.app, { knowledgeWikiFolder: 'Knowledge Wiki',
       knowledgeSourceFolders: ['Projects'], knowledgeAutoCompile: false } as any, { generate: async () => '' } as any);
+    // frontmatter 写次数钉不住单飞：第一个文件被重置成 pending 之后，第二次扫描即使真的
+    // 跑了也不会再写它（同理，未注册文件第一次扫描后就有了 source_id）。getStaleFiles()
+    // 是每次扫描都必经的一步，用它计数才能真正区分"扫描跑了几遍"。
+    const svc = (rt as any).statusService;
+    const realGetStale = svc.getStaleFiles.bind(svc);
+    let scanPasses = 0;
+    svc.getStaleFiles = async () => { scanPasses++; return realGetStale(); };
     await rt.initialize();
     await rt.initialize();
     await rt.whenStartupSettled();
-    assert(frontmatterWrites === 1, `startup scan should run once, wrote frontmatter ${frontmatterWrites} times`);
+    assert(scanPasses === 1, `startup scan should run exactly once, ran ${scanPasses} time(s)`);
+    assert(frontmatterWrites === 1, `stuck file should be reset once, wrote ${frontmatterWrites} times`);
   });
 
   await test('whenStartupSettled() returns immediately when initialize() was never called', async () => {
@@ -282,6 +305,150 @@ async function main() {
       new Promise(resolve => setTimeout(resolve, 100)),
     ]);
     assert(settled, 'whenStartupSettled() must not hang before initialize()');
+  });
+
+  await test('compileByPath() waits for the startup scan instead of racing it', async () => {
+    const v = mkVault(0);
+    const rec: Rec = { file: mkFile('Projects/stuck.md', 5, 1), content: 'x',
+      frontmatter: { knowledge_status: 'processing' } };
+    v.files.set('Projects/stuck.md', rec);
+    let release!: () => void;
+    const gate = new Promise<void>(r => { release = r; });
+    v.app.fileManager = { processFrontMatter: async (_f: TFile, cb: (fm: any) => void) => { await gate; cb(rec.frontmatter); } };
+    v.app.internalPlugins = { plugins: { bases: { enabled: true } } };
+    let generateCalls = 0;
+    const rt = new KnowledgeRuntime(v.app, { knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'], knowledgeAutoCompile: false,
+      knowledgeOntologyUpdateMode: 'suggest' } as any,
+      { generate: async () => { generateCalls++; return ''; } } as any);
+    await rt.initialize();                       // scan starts, blocked on the gate
+    // compileByPath() 在等待门控期间不应该做任何编译侧的工作。用 loadOntologySchema()
+    // 当探针：它在 compileByPath() 里早于任何 frontmatter 写入发生，所以"扫描结束后才被
+    // 调用"能干净地区分"确实在等"和"被 processFrontMatter 门一起挡住"。
+    let released = false;
+    let earlyOntologyLoads = 0;
+    const realLoad = rt.loadOntologySchema.bind(rt);
+    rt.loadOntologySchema = async () => { if (!released) earlyOntologyLoads++; return realLoad(); };
+    let compileSettled = false;
+    const compile = rt.compileByPath('Projects/stuck.md').then(() => { compileSettled = true; });
+    await tick(); await tick(); await tick();
+    assert(earlyOntologyLoads === 0, `compileByPath() must wait for the startup scan (proceeded ${earlyOntologyLoads} time(s) early)`);
+    assert(!compileSettled, 'compileByPath() must not settle before the scan finishes');
+    assert(generateCalls === 0, `compile must not run before the scan finishes (generate calls: ${generateCalls})`);
+    released = true;
+    release();
+    await compile;
+    assert(generateCalls >= 1, `compile should run once the scan finished (generate calls: ${generateCalls})`);
+  });
+
+  await test('markOntologyStaleFilesPending() waits for the startup scan too', async () => {
+    const v = mkVault(0);
+    const rec: Rec = { file: mkFile('Projects/stuck.md', 5, 1), content: 'x',
+      frontmatter: { knowledge_status: 'processing' } };
+    v.files.set('Projects/stuck.md', rec);
+    let release!: () => void;
+    const gate = new Promise<void>(r => { release = r; });
+    v.app.fileManager = { processFrontMatter: async (_f: TFile, cb: (fm: any) => void) => { await gate; cb(rec.frontmatter); } };
+    v.app.internalPlugins = { plugins: { bases: { enabled: true } } };
+    const rt = new KnowledgeRuntime(v.app, { knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'], knowledgeAutoCompile: false,
+      knowledgeOntologyUpdateMode: 'suggest' } as any, { generate: async () => '' } as any);
+    await rt.initialize();
+    const svc = (rt as any).statusService;
+    const realGetStale = svc.getStaleFiles.bind(svc);
+    let scanPasses = 0;
+    svc.getStaleFiles = async () => { scanPasses++; return realGetStale(); };
+    let pendingSettled = false;
+    const pending = rt.markOntologyStaleFilesPending().then(() => { pendingSettled = true; });
+    await tick(); await tick();
+    // 启动扫描此刻正卡在"重置 stuck 文件"的 processFrontMatter 上，还没走到 detectStaleFiles；
+    // 所以只要 markOntologyStaleFilesPending() 真的在等，这里就该是 0 次。没门控的话它会在
+    // 第一个 await 之前就冲进去，这里会变成 1。
+    assert(scanPasses === 0, `markOntologyStaleFilesPending() must wait for the startup scan (passes so far: ${scanPasses})`);
+    assert(!pendingSettled, 'markOntologyStaleFilesPending() must not settle before the scan finishes');
+    release();
+    await pending;
+    assert(scanPasses === 2, `expected the startup scan plus one own pass, got ${scanPasses}`);
+  });
+
+  await test('the periodic re-check applies the marker TTL while the plugin stays open', async () => {
+    const N = 6;
+    const v = mkVault(N);
+    await v.svc().getStaleFiles();               // build the marker
+    v.app.internalPlugins = { plugins: { bases: { enabled: true } } };
+    const rt = new KnowledgeRuntime(v.app, { knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'], knowledgeAutoCompile: false,
+      knowledgeOntologyUpdateMode: 'suggest' } as any, { generate: async () => '' } as any);
+    await rt.initialize();
+    await rt.whenStartupSettled();
+    v.reads.length = 0;
+    await rt.recheckStaleMarkers();
+    assert(v.reads.length === 0, `a fresh marker must be a cheap no-op, read ${v.reads.length}`);
+    // 模拟"7 天后插件仍然开着"：把 verifiedAt 推老，再走同一个周期入口
+    const parsed = JSON.parse(v.disk.get(MARKER)!);
+    for (const key of Object.keys(parsed.entries)) {
+      parsed.entries[key].verifiedAt = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    }
+    v.disk.set(MARKER, JSON.stringify(parsed));
+    v.reads.length = 0;
+    const marked = await rt.recheckStaleMarkers();
+    assert(v.reads.length === N, `the periodic entry must re-hash expired entries, read ${v.reads.length}`);
+    assert(marked === 0, 'files are still in sync, so nothing should be marked stale');
+  });
+
+  await test('registerEvents() wires the periodic stale re-check interval and cleanup() clears it', async () => {
+    const v = mkVault(0);
+    const rt = new KnowledgeRuntime(v.app, { knowledgeWikiFolder: 'Knowledge Wiki',
+      knowledgeSourceFolders: ['Projects'] } as any, { generate: async () => '' } as any);
+    let intervalMs: number | null = null;
+    let fired: (() => void) | null = null;
+    let cleared: number | null = null;
+    const origSet = win.setInterval;
+    const origClear = win.clearInterval;
+    win.setInterval = ((cb: () => void, ms?: number) => { fired = cb; intervalMs = ms ?? 0; return 4242; }) as any;
+    win.clearInterval = ((h: number) => { cleared = h; }) as any;
+    try {
+      const registered: unknown[] = [];
+      rt.registerEvents({ registerEvent: (r: unknown) => { registered.push(r); } } as any);
+      assert(intervalMs === STALE_MARKER_RECHECK_INTERVAL_MS,
+        `expected the ${STALE_MARKER_RECHECK_INTERVAL_MS}ms recheck interval, got ${intervalMs}`);
+      assert(!!fired, 'interval callback was not registered');
+      assert(registered.length === 4, `expected the 4 vault/cache events to still be registered, got ${registered.length}`);
+      rt.cleanup();
+      assert(cleared === 4242, `cleanup() must clear the recheck interval, cleared ${cleared}`);
+    } finally {
+      win.setInterval = origSet;
+      win.clearInterval = origClear;
+    }
+  });
+
+  await test('rescanKnowledgeStatus() retries the work a failed startup scan skipped', async () => {
+    const v = mkVault(0);
+    const rec: Rec = { file: mkFile('Projects/stuck.md', 5, 1), content: 'x',
+      frontmatter: { knowledge_status: 'processing' } };
+    v.files.set('Projects/stuck.md', rec);
+    v.app.fileManager = { processFrontMatter: async (_f: TFile, cb: (fm: any) => void) => { cb(rec.frontmatter); } };
+    v.app.internalPlugins = { plugins: { bases: { enabled: true } } };
+    let armed = false;
+    const settings: any = { knowledgeWikiFolder: 'Knowledge Wiki', knowledgeAutoCompile: false };
+    Object.defineProperty(settings, 'knowledgeSourceFolders', {
+      get() { if (armed) throw new Error('boom: settings unreadable'); return []; },
+    });
+    const orig = logger.error.bind(logger);
+    (logger as any).error = () => { /* expected during the armed failure */ };
+    try {
+      const rt = new KnowledgeRuntime(v.app, settings, { generate: async () => '' } as any);
+      armed = true;
+      await rt.initialize();
+      await rt.whenStartupSettled();
+      assert(rec.frontmatter.knowledge_status === 'processing',
+        'the failed scan should have skipped the stuck-file reset');
+      armed = false;
+      const result = await rt.rescanKnowledgeStatus();
+      assert(result.ok, `rescan should succeed, got: ${result.message}`);
+      assert(rec.frontmatter.knowledge_status === 'pending',
+        'rescan should have reset the stuck processing file');
+    } finally { (logger as any).error = orig; }
   });
 
   console.log('Knowledge startup tests: all passed');

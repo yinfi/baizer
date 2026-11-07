@@ -34,6 +34,22 @@ import { errorMessage } from './ontology';
 const AUTO_COMPILE_PENDING_REASONS: KnowledgePendingReason[] = ['new', 'content_changed'];
 
 /**
+ * 过期标记的周期复检间隔。StaleCheckMarker 的 7 天 TTL 如果只在 getStaleFiles() 被调用时
+ * 才生效，而 getStaleFiles() 又只由启动扫描和 markOntologyStaleFilesPending() 触发，那么
+ * 插件长开不重启时 TTL 永远不会兑现。这里按固定间隔走一次复检（标记新鲜时只是一次内存
+ * 指纹比对，不读文件、不写标记），让"最坏漏检窗口"真正有时间上界。
+ */
+export const STALE_MARKER_RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * 启动扫描失败时的一次性用户提示。失败后后面的步骤整段不执行，只写日志对用户是静默的，
+ * 所以给一次可见提示并指向重试入口。导出是为了让测试能断言文案确实指向了重试入口
+ * （obsidian 的 Notice 在测试里是冻结的 mock，无法从外部捕获）。
+ */
+export const STARTUP_SCAN_FAILURE_NOTICE =
+  'Knowledge startup scan failed. Use "Rescan knowledge status" to retry.';
+
+/**
  * Knowledge Wiki 生命周期管理器
  */
 export class KnowledgeRuntime {
@@ -71,6 +87,8 @@ export class KnowledgeRuntime {
   private startupStarted = false;
   /** 在途的启动扫描：单飞，避免 initialize() 与其它入口并发跑两遍。 */
   private startupScan: Promise<void> | null = null;
+  /** 周期复检定时器（见 STALE_MARKER_RECHECK_INTERVAL_MS），cleanup() 里清掉。 */
+  private staleRecheckTimer: number | null = null;
 
   constructor(
     private app: App,
@@ -174,6 +192,39 @@ export class KnowledgeRuntime {
   }
 
   /**
+   * 启动扫描失败后的手动重试入口（状态面板的「Rescan knowledge status」）。
+   * 重新跑一遍 onMetadataReady()：它会重置 stuck、调和 pending、检测过期、注册新文件，
+   * 并在有 pending 时重新调度自动编译——即把失败时整段跳过的工作补上。
+   */
+  async rescanKnowledgeStatus(): Promise<{ ok: boolean; message: string }> {
+    await this.whenStartupSettled();
+    if (this.disposed) return { ok: false, message: 'Plugin is unloading.' };
+    try {
+      await this.onMetadataReady();
+      return { ok: true, message: 'Knowledge rescan finished.' };
+    } catch (error) {
+      logger.error('Manual knowledge rescan failed', error, 'KnowledgeRuntime');
+      return { ok: false, message: errorMessage(error) || 'Knowledge rescan failed.' };
+    }
+  }
+
+  /**
+   * 过期标记的周期复检（也用于手动触发）。标记里的 verifiedAt 超过 TTL 时，getStaleFiles()
+   * 会对这些文件重做全量哈希；标记都新鲜时只是一次内存指纹比对，不读盘、不写标记。
+   */
+  async recheckStaleMarkers(): Promise<number> {
+    await this.whenStartupSettled();
+    if (this.disposed) return 0;
+    const wikiFolder = this.settings.knowledgeWikiFolder || DEFAULT_WIKI_FOLDER;
+    const staleCount = await this.detectStaleFiles(wikiFolder);
+    if (staleCount > 0) {
+      logger.info(`Periodic stale re-check marked ${staleCount} file(s) for recompilation`, 'KnowledgeRuntime');
+      if (this.settings.knowledgeAutoCompile) this.watcher.triggerCompile();
+    }
+    return staleCount;
+  }
+
+  /**
    * 索引重建（元数据内存扫描，便宜）同步完成；启动扫描（onMetadataReady，涉及逐文件
    * vault.read/frontmatter 写回，是真正的耗时部分）转入后台，不再堵住 onload()——
    * 调用方（main.ts）不 await 这个方法里耗时的那部分；query/compile 等需要启动扫描
@@ -215,9 +266,19 @@ export class KnowledgeRuntime {
       () => { this.resolveStartupDone(); },
       (error) => {
         logger.error('Startup scan (onMetadataReady) failed', error, 'KnowledgeRuntime');
+        this.notifyStartupScanFailure();
         this.resolveStartupDone();
       },
     );
+  }
+
+  /**
+   * 失败后后面的步骤（调和 / 检测过期 / 发现本体 / 注册新文件 / 调度自动编译）整段都不会
+   * 执行，只写日志对用户是完全静默的。这里给一次可见提示，并指向重试入口。
+   * 单独成方法便于测试观察（Notice 在测试环境里是冻结的 mock）。
+   */
+  private notifyStartupScanFailure(): void {
+    new Notice(STARTUP_SCAN_FAILURE_NOTICE);
   }
 
   /** metadataCache 就绪后：扫描未注册文件 + 重置 processing + 触发自动编译 */
@@ -482,6 +543,14 @@ export class KnowledgeRuntime {
         }
       })
     );
+
+    // 过期标记的周期复检：长开不重启时也要让 TTL 兑现（见 STALE_MARKER_RECHECK_INTERVAL_MS）。
+    // 用 detach 接住 rejection（与仓库的 promise 治理约定一致），cleanup() 负责清定时器。
+    if (this.staleRecheckTimer === null) {
+      this.staleRecheckTimer = window.setInterval(() => {
+        detach(this.recheckStaleMarkers(), 'KnowledgeRuntime');
+      }, STALE_MARKER_RECHECK_INTERVAL_MS);
+    }
   }
 
   /** Guardian 知识上下文 */
@@ -735,6 +804,10 @@ export class KnowledgeRuntime {
   cleanup(): void {
     this.disposed = true;
     this.resolveStartupDone();
+    if (this.staleRecheckTimer !== null) {
+      window.clearInterval(this.staleRecheckTimer);
+      this.staleRecheckTimer = null;
+    }
     this.watcher.cleanup();
   }
 }
