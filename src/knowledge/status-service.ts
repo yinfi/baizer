@@ -7,6 +7,8 @@ import { computeContentHash } from './compiler';
 import {
   DEFAULT_WIKI_FOLDER,
 } from './types';
+import { StaleCheckMarker } from './stale-marker';
+import { logger } from '../utils/logger';
 
 export type KnowledgePanelState =
   | 'unregistered'
@@ -59,6 +61,13 @@ export class KnowledgeStatusService {
   private globalCountsInFlight: Promise<KnowledgeGlobalCounts> | null = null;
   /** 每次启动新遍历时自增，旧遍历回来时据此判断结果是否已被更新的遍历取代。 */
   private globalCountsGeneration = 0;
+  /**
+   * 单实例标记：getStaleFiles() 有多个入口（启动扫描、markOntologyStaleFilesPending），
+   * 若各自 new 一个就会各自 load→save，后写覆盖前写。
+   */
+  private staleMarker: StaleCheckMarker | null = null;
+  /** 在途的 getStaleFiles：并发调用复用同一次遍历，避免两次全库扫描互相覆盖标记。 */
+  private staleFilesInFlight: Promise<TFile[]> | null = null;
 
   constructor(
     private app: App,
@@ -70,6 +79,7 @@ export class KnowledgeStatusService {
     };
   }
 
+  /** 标记文件只跟 app 有关，与扫描范围无关，所以跨 updateConfig 复用同一个实例。 */
   updateConfig(config: Partial<KnowledgeStatusServiceConfig>): void {
     const next: KnowledgeStatusServiceConfig = {
       watchedFolders: config.watchedFolders || this.config.watchedFolders,
@@ -220,7 +230,25 @@ export class KnowledgeStatusService {
   }
 
   async getStaleFiles(): Promise<TFile[]> {
+    // 单飞：启动扫描与 markOntologyStaleFilesPending() 可能同时到达；并发跑两遍既浪费，
+    // 也会让两个 marker 各自 load→save 互相覆盖。后来者复用同一次结果。
+    if (this.staleFilesInFlight) return this.staleFilesInFlight;
+    const run = this.collectStaleFiles();
+    this.staleFilesInFlight = run;
+    try {
+      return await run;
+    } finally {
+      this.staleFilesInFlight = null;
+    }
+  }
+
+  private async collectStaleFiles(): Promise<TFile[]> {
     const staleFiles: TFile[] = [];
+    const marker = this.staleMarker ?? (this.staleMarker = new StaleCheckMarker(this.app));
+    await marker.load();
+    const confirmed = new Set<string>();
+    const markerSizeBefore = marker.size;
+    let skippedByMarker = 0;
 
     for (const file of this.getTrackedFiles()) {
       const baseStatus = getKnowledgeStatus(this.app, file);
@@ -230,10 +258,35 @@ export class KnowledgeStatusService {
       const summaryPath = typeof cache?.frontmatter?.knowledge_summary === 'string'
         ? cache.frontmatter.knowledge_summary
         : null;
+      if (!summaryPath) continue;
 
-      if (await this.isStaleFile(file, summaryPath)) {
-        staleFiles.push(file);
+      const summaryFile = this.app.vault.getAbstractFileByPath(summaryPath);
+      const summary = summaryFile instanceof TFile ? summaryFile : null;
+
+      if (marker.isUnchanged(file, summary, summaryPath)) {
+        skippedByMarker++;
+        confirmed.add(file.path);
+        continue;
       }
+
+      const result = await this.evaluateStaleness(file, summaryPath);
+      if (result === 'stale') {
+        staleFiles.push(file);
+        continue;
+      }
+      if (result === 'fresh') {
+        marker.recordFresh(file, summary, summaryPath);
+        confirmed.add(file.path);
+      }
+    }
+
+    marker.retainOnly(confirmed);
+    await marker.save();
+    if (markerSizeBefore > 0 || skippedByMarker > 0) {
+      logger.debug(
+        `getStaleFiles: marker skipped ${skippedByMarker} unchanged file(s), ${staleFiles.length} stale found`,
+        'KnowledgeStatusService',
+      );
     }
 
     return staleFiles;
@@ -269,19 +322,21 @@ export class KnowledgeStatusService {
     summaryPath: string | null,
   ): Promise<boolean> {
     if (!summaryPath) return false;
+    return (await this.evaluateStaleness(file, summaryPath)) === 'stale';
+  }
 
+  private async evaluateStaleness(
+    file: TFile,
+    summaryPath: string,
+  ): Promise<'stale' | 'fresh' | 'unknown'> {
     const summaryFrontmatter = await readSummaryFrontmatter(this.app, summaryPath);
-    if (!summaryFrontmatter) return false;
-
-    if (!summaryFrontmatter.content_hash) {
-      return false;
-    }
+    if (!summaryFrontmatter?.content_hash) return 'unknown';
 
     try {
       const content = await this.app.vault.read(file);
-      return computeContentHash(content) !== summaryFrontmatter.content_hash;
+      return computeContentHash(content) === summaryFrontmatter.content_hash ? 'fresh' : 'stale';
     } catch {
-      return false;
+      return 'unknown';
     }
   }
 }

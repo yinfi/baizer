@@ -167,6 +167,10 @@ export default class BaizerPlugin extends Plugin {
             this.settings,
             this.modelService,
         );
+        // initialize() 本身只做便宜的同步工作加一次性旧索引迁移；真正逐文件扫描的
+        // onMetadataReady() 在它内部转入后台（不阻塞这里的 await），用
+        // knowledgeRuntime.whenStartupSettled() 等它结束——compile 相关命令和
+        // debounce 自动编译已经这样做了。见 src/knowledge/runtime.ts 的类头注释。
         await this.knowledgeRuntime.initialize();
         this.guardianCompletionService = this.createGuardianCompletionService();
         this.knowledgeRuntime.registerCommands(this);
