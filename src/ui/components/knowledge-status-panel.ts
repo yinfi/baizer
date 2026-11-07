@@ -124,6 +124,16 @@ export class KnowledgeStatusPanel {
       }
       await this.refresh();
     });
+    this.createMenuItem(menu, 'Rescan knowledge status', 'rotate-cw', async () => {
+      const runtime = this.options.plugin?.knowledgeRuntime ?? null;
+      if (typeof runtime?.rescanKnowledgeStatus !== 'function') {
+        new Notice('Knowledge rescan is not available.');
+        return;
+      }
+      const result = await runtime.rescanKnowledgeStatus();
+      new Notice(result.message);
+      await this.refresh();
+    });
     this.createMenuItem(menu, 'Add backlinks', 'network', () => {
       this.options.onAddRelatedContext?.(activeFile.path);
     });
