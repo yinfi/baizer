@@ -234,6 +234,41 @@ async function main() {
     assert(rig.calls() === 1, `expected 1 call, got ${rig.calls()}`);
   });
 
+  await test('a getMemoryView() that never resolves times out into the retryable error state', async () => {
+    const rig = makeRig(() => new Promise(() => { /* never settles */ }));
+    rig.page.memoryRequestTimeoutMs = 40;
+    rig.page.display();
+    await new Promise(resolve => setTimeout(resolve, 150));   // wait past the timeout
+    const text = rig.root.allText();
+    assert(text.includes(t('Memory request timed out. Please try again.')), `timeout message missing; got:\n${text}`);
+    assert(!text.includes(t('Loading memory...')), 'still stuck showing Loading after the timeout');
+    // still retryable: the explicit Refresh button must work, not be swallowed
+    const before = rig.calls();
+    rig.root.findButton(t('Refresh'))!.click();
+    await macrotask();
+    await macrotask();
+    assert(rig.calls() === before + 1, `Refresh must retry after a timeout, got ${rig.calls()} vs ${before + 1}`);
+  });
+
+  await test('a tab switch during an in-flight load is honoured, not silently dropped', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const rig = makeRig(async () => { await gate; return viewWithOneObservation(); });
+    rig.page.display();                       // starts the in-flight load
+    await macrotask();
+    const factsTab = rig.root.children
+      .flatMap((c: FakeEl) => c.children)
+      .find((c: FakeEl) => c.tag === 'button' && c.text === t('Facts'));
+    assert(!!factsTab, 'Facts tab not rendered');
+    factsTab!.click();                        // user switches tab while the load is in flight
+    release();
+    await macrotask();
+    await macrotask();
+    await macrotask();
+    assert(rig.calls() === 2, `tab switch during flight must trigger a second load, got ${rig.calls()}`);
+    assert((rig.page as any).memoryActiveTab === 'facts', 'active tab should stay on Facts');
+  });
+
   await test('the new message has a Chinese translation', async () => {
     setLocaleForTesting(true);
     try {
