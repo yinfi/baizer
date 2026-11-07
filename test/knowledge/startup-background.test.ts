@@ -260,6 +260,23 @@ async function main() {
     assert(v.reads.length === 0, `expected shortcut after refresh, read ${v.reads.length}`);
   });
 
+  await test('a future verifiedAt (clock rollback) is treated as expired, not as fresh', async () => {
+    const N = 4;
+    const v = mkVault(N);
+    await v.svc().getStaleFiles();          // cold: builds the marker
+    const parsed = JSON.parse(v.disk.get(MARKER)!);
+    for (const key of Object.keys(parsed.entries)) {
+      // 系统时钟回拨会让 now - verifiedAt 变成负数；没有守卫的话这会被当成"未过期"，
+      // 快路径就能无限期生效。
+      parsed.entries[key].verifiedAt = Date.now() + 8 * 24 * 60 * 60 * 1000;
+    }
+    v.disk.set(MARKER, JSON.stringify(parsed));
+    v.reads.length = 0;
+    const stale = await v.svc().getStaleFiles();
+    assert(stale.length === 0, 'still in sync, so nothing stale');
+    assert(v.reads.length === N, `a future verifiedAt must not take the shortcut, read ${v.reads.length}`);
+  });
+
   await test('a deleted note is pruned from the marker', async () => {
     const v = mkVault(4);
     await v.svc().getStaleFiles();
