@@ -61,6 +61,51 @@ function pngSize(buffer) {
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 
+const WINDOWS_ABSOLUTE_PATH = /^[A-Za-z]:[\\/]/;
+const UNC_ABSOLUTE_PATH = /^\\\\/;
+
+/**
+ * Turn a capture-machine absolute path into a repo-relative path or a neutral
+ * placeholder. Committed layout reports must not leak the local environment, so
+ * the default is to redact rather than keep the real path.
+ */
+function sanitizeHostPath(value) {
+  if (typeof value !== 'string' || !value) return value;
+  if (!WINDOWS_ABSOLUTE_PATH.test(value) && !UNC_ABSOLUTE_PATH.test(value)) return value;
+  const relative = path.relative(process.cwd(), value);
+  const insideRepo = relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+  return insideRepo ? relative.split(path.sep).join('/') : `<local-path>/${path.basename(value)}`;
+}
+
+/** Redact absolute host paths anywhere in a plain-JSON value (e.g. --eval output). */
+function scrubHostPaths(value) {
+  if (typeof value === 'string') return sanitizeHostPath(value);
+  if (Array.isArray(value)) return value.map(scrubHostPaths);
+  if (value && typeof value === 'object') {
+    for (const key of Object.keys(value)) value[key] = scrubHostPaths(value[key]);
+  }
+  return value;
+}
+
+/**
+ * The layout report is committed as evidence, so strip the capture machine's
+ * host paths and identifiers (see README: "Committed layout reports"). The PNG
+ * and the measurements do not depend on these fields.
+ */
+function sanitizeLayoutReport(report) {
+  const clean = JSON.parse(JSON.stringify(report));
+  if (clean.image) clean.image.path = sanitizeHostPath(clean.image.path);
+  const harness = clean.harness || {};
+  if (harness.exe) harness.exe = path.basename(harness.exe);
+  if (harness.pluginDir) harness.pluginDir = '<plugin-dir>';
+  if (harness.vaultDir) harness.vaultDir = '<vault-dir>';
+  if (harness.vaultKey !== undefined) harness.vaultKey = '<vault-key>';
+  if (harness.scenarioPath) harness.scenarioPath = sanitizeHostPath(harness.scenarioPath);
+  delete harness.pid;
+  if (harness.target) delete harness.target.id;
+  return scrubHostPaths(clean);
+}
+
 function launchObsidian(exe, port) {
   return spawn(exe, [`--remote-debugging-port=${port}`, '--remote-allow-origins=*'], {
     stdio: 'ignore',
@@ -602,12 +647,12 @@ async function main() {
       );
     }
 
-    const report = buildLayoutReport({
+    const report = sanitizeLayoutReport(buildLayoutReport({
       sessionFacts: { ...facts, viewport: { ...facts.viewport, innerWidth: width, innerHeight: height } },
       harness,
       image: { bytes: buffer.length, width: size.width, height: size.height },
       options,
-    });
+    }));
     await fsp.writeFile(layoutPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 
     console.log(`image      ${outPath}  (${size.width}x${size.height}, ${buffer.length} bytes)`);

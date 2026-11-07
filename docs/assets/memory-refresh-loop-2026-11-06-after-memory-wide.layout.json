@@ -24,7 +24,7 @@
     "contentText": "浏览记忆\n数据目录: .obsidian/baizer-memory\n刷新\n清除记忆\n搜索\n概览\n观察\n事实\n经验\n搜索结果\n记忆功能暂不可用：当前服务商尚未配置 API Key。请到连接页添加后，再点击刷新。"
   },
   "image": {
-    "path": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\memory-refresh-loop\\docs\\assets\\memory-refresh-loop-2026-11-06-after-memory-wide.png",
+    "path": "docs/assets/memory-refresh-loop-2026-11-06-after-memory-wide.png",
     "bytes": 52239,
     "width": 1353,
     "height": 1053,
@@ -33,10 +33,10 @@
     "sizeMatchesRequest": true
   },
   "harness": {
-    "exe": "C:\\Users\\Administrator\\AppData\\Local\\Obsidian\\Obsidian.exe",
-    "pluginDir": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\memory-refresh-loop\\dist",
-    "vaultDir": "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
-    "vaultKey": "0a1e15b13b143b33",
+    "exe": "Obsidian.exe",
+    "pluginDir": "<plugin-dir>",
+    "vaultDir": "<vault-dir>",
+    "vaultKey": "<vault-key>",
     "pluginManifest": {
       "id": "baizer",
       "name": "Baizer",
@@ -61,9 +61,8 @@
         "bytes": 127634
       }
     ],
-    "scenarioPath": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\memory-refresh-loop\\tools\\provider-settings-shots\\scenarios\\memory-freeze-no-apikey.json",
+    "scenarioPath": "tools/provider-settings-shots/scenarios/memory-freeze-no-apikey.json",
     "target": {
-      "id": "92451D62A105E7F7B7147AD91529E0A2",
       "url": "app://obsidian.md/index.html",
       "title": "新标签页 - obsidian - Obsidian 1.15.0"
     },
@@ -85,7 +84,6 @@
       }
     ],
     "domDump": null,
-    "pid": 21804,
     "browser": "Chrome/150.0.7871.250",
     "browserUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) obsidian/1.15.0 Chrome/150.0.7871.250 Electron/43.8.4 Safari/537.36",
     "blockingModals": {

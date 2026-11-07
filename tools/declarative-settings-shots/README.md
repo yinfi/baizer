@@ -105,6 +105,14 @@ then read `plugin.settings` from the main window.
 - `harness.settingsPanelLocation` — `popout-window` or `main-window`;
 - optional `harness.domDump`, `harness.eval`, `harness.evalMain`.
 
+The script redacts the capture machine's environment before writing the report,
+because these reports are committed as evidence: absolute host paths become
+repo-relative paths when inside the repository (otherwise
+`<local-path>/<basename>`), `harness.exe` is reduced to its basename,
+`pluginDir` / `vaultDir` / `vaultKey` become placeholders, and `harness.pid` /
+`harness.target.id` are dropped. The PNG and measurements are not affected; the
+console output still prints the real paths for local debugging.
+
 ## Before/After pairing
 
 The committed evidence pairs these files (same scenario, viewport, theme, locale):
