@@ -2,8 +2,8 @@
   "schema": "baizer-declarative-settings-layout/1",
   "label": "after-memory-wide",
   "phase": "after",
-  "revision": "0379bff",
-  "capturedAt": "2026-11-07T11:51:01.477Z",
+  "revision": "5b90747",
+  "capturedAt": "2026-11-07T12:04:10.662Z",
   "theme": "dark",
   "language": "zh",
   "windowTitle": "设置 - obsidian - Obsidian 1.15.0",
@@ -64,7 +64,7 @@
     "scenarioPath": "tools/provider-settings-shots/scenarios/memory-freeze-no-apikey.json",
     "target": {
       "url": "app://obsidian.md/index.html",
-      "title": "新标签页 - obsidian - Obsidian 1.15.0"
+      "title": "obsidian - Obsidian 1.15.0"
     },
     "settingsPanelLocation": "popout-window",
     "navigation": [
@@ -121,7 +121,7 @@
     "domStability": {
       "stable": true,
       "signature": "1608|105",
-      "settledAfterMs": 1059
+      "settledAfterMs": 929
     }
   },
   "limitations": [
