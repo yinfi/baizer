@@ -2947,7 +2947,8 @@ class MemoryBrowserPage extends SettingPage {
         this.renderSearch();
         this.renderTabs();
         this.renderList();
-        // 首次打开自动加载；本次渲染会先画出 Loading。
+        // 首次打开自动加载。这一次渲染还没进 Loading（refresh 传了 repaintOnStart:false），
+        // 所以首帧画的是空列表；加载结束后的 display() 才会画出结果或终态提示。
         // 终止态（memoryUnavailable / memoryError）和已有请求在途（refreshInFlight）都不再
         // 自动重试 —— 这正是 #106 去掉 render-scheduler 后缺失的重入保护；没有它，
         // getMemoryView() 持续返回 null 或持续 reject 会让 display()/refresh() 无限互相递归。
