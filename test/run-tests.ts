@@ -70,6 +70,7 @@ const tests = [
   'test/provider-capabilities.test.ts',
   'test/context-budget.test.ts',
   'test/request-url-fetch.test.ts',
+  'test/autocomplete-cors-safe-fetch.test.ts',
   'test/context-manager.test.ts',
   'test/settings-state.test.ts',
   'test/settings-declarative.test.ts',

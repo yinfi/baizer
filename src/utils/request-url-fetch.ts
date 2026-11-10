@@ -22,6 +22,10 @@
  *   3. requestUrl 兜底 —— Node 传输不可用（移动端）/失败时，用 Obsidian
  *      requestUrl 重放（绕过 CORS 但整体缓冲，功能完整、无流式）。
  *
+ * 两种使用方式（共用同一实现与同一份「被拦 origin」记忆）：
+ *   - installRequestUrlFetchFallback()：替换 window.fetch，兜住流式聊天等经 SDK 默认 fetch 的调用；
+ *   - getCorsSafeFetch()：显式传给 pi（无状态生成 / Guardian 补全），不依赖全局是否被替换。
+ *
  * 为什么能兜住 pi-ai 的 provider 实现：
  *   - openai SDK 每次 new OpenAI(...) 时通过 `options.fetch ?? getDefaultFetch()`
  *     捕获全局 fetch（pi-ai 的 createClient 每次调用都新建 client），垫片在
@@ -39,23 +43,68 @@ const DEFAULT_DEPS: RequestUrlFetchDeps = { requestUrl: obsidianRequestUrl };
 
 let installed = false;
 
+/** install 时捕获的「真正的」原生 fetch；未安装时回落到 window.fetch。 */
+let capturedNativeFetch: typeof fetch | undefined;
+
 /**
- * 安装全局 fetch 垫片（幂等）。必须在任何 LLM / HTTP 请求发起前调用——
- * main.ts onload 的最早处。
+ * 原生 fetch 被判定为 CORS/网络不可用的 origin → 过期时间戳。
  *
- * @param deps - 测试注入点；缺省使用 obsidian 的真实 requestUrl。
+ * 为什么要记：CORS 预检失败是**按 origin 稳定复现**的（如 opencode.ai 不返回
+ * Access-Control-Allow-Origin）。不记的话，Guardian 每次补全都先发一次注定失败的
+ * 原生请求（控制台刷一条 CORS 报错，并多一次往返），再走回退链。
+ * 记下后同一 origin 直接走回退链；过期后重新探测原生，端点日后补了 CORS 头也能恢复。
  */
-export function installRequestUrlFetchFallback(deps?: RequestUrlFetchDeps): void {
-  if (installed) return;
-  const g = window as unknown as { fetch?: typeof fetch };
-  const nativeFetch = g.fetch;
-  if (typeof nativeFetch !== 'function') return;
-  installed = true;
-  const fallback = deps ?? DEFAULT_DEPS;
-  g.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+const BLOCKED_ORIGIN_TTL_MS = 10 * 60 * 1000;
+const blockedOrigins = new Map<string, number>();
+
+export interface CorsSafeFetchOptions {
+  /** 取原生 fetch（惰性：每次请求时取，便于测试替换）。 */
+  getNativeFetch: () => typeof fetch;
+  /** 测试注入点；缺省使用 obsidian 的真实 requestUrl。 */
+  deps?: RequestUrlFetchDeps;
+  /** 测试注入点；缺省探测 Node http/https（移动端为 null → 直接走 requestUrl）。 */
+  getNodeTransport?: () => NodeTransport | null;
+  now?: () => number;
+}
+
+/**
+ * 构造「原生优先、CORS 安全」的 fetch：原生 → Node http(s) → requestUrl。
+ * 全局垫片（installRequestUrlFetchFallback）与显式使用方（无状态生成）共用同一实现与同一份
+ * 「被拦 origin」记忆，行为不会分叉。
+ */
+export function createCorsSafeFetch(options: CorsSafeFetchOptions): typeof fetch {
+  const deps = options.deps ?? DEFAULT_DEPS;
+  const nodeTransport = options.getNodeTransport ?? getNodeTransport;
+  const now = options.now ?? Date.now;
+
+  // 2) Node http/https：桌面端可用，无 CORS 且真流式；3) requestUrl 兜底：整体缓冲
+  const viaFallback = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const transport = nodeTransport();
+    if (transport) {
+      try {
+        return await nodeHttpFetch(transport, input, init);
+      } catch (nodeErr) {
+        logger.warn('Node http(s) fetch failed; falling back to requestUrl', 'fetch-fallback', {
+          url: resolveUrl(input),
+          error: nodeErr instanceof Error ? nodeErr.message : String(nodeErr),
+        });
+      }
+    }
+    return requestUrlFetch(input, init, deps);
+  };
+
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const origin = originOf(input);
+    if (origin) {
+      const blockedUntil = blockedOrigins.get(origin);
+      if (blockedUntil !== undefined) {
+        if (blockedUntil > now()) return viaFallback(input, init);
+        blockedOrigins.delete(origin);
+      }
+    }
     try {
-      // 1) 浏览器原生 fetch：CORS 友好的端点保持原生流式与中断语义
-      return await nativeFetch(input, init);
+      // 1) 浏览器原生 fetch：CORS 友好的端点保持原生流式、系统代理与中断语义
+      return await options.getNativeFetch()(input, init);
     } catch (err) {
       // CORS 拦截 / mixed content / 网络层失败都表现为 TypeError；其它错误
       // （编程错误、主动 abort 的 AbortError 等）保持原样上抛。
@@ -68,22 +117,61 @@ export function installRequestUrlFetchFallback(deps?: RequestUrlFetchDeps): void
           error: err instanceof Error ? err.message : String(err),
         },
       );
-      // 2) Node http/https：桌面端可用，无 CORS 且真流式
-      const transport = getNodeTransport();
-      if (transport) {
-        try {
-          return await nodeHttpFetch(transport, input, init);
-        } catch (nodeErr) {
-          logger.warn('Node http(s) fetch failed; falling back to requestUrl', 'fetch-fallback', {
-            url: resolveUrl(input),
-            error: nodeErr instanceof Error ? nodeErr.message : String(nodeErr),
-          });
-        }
-      }
-      // 3) requestUrl 兜底：绕过 CORS，但整体缓冲（无流式）
-      return requestUrlFetch(input, init, fallback);
+      const response = await viaFallback(input, init);
+      // 回退链成功才说明「原生不可用」是端点/CORS 问题；断网时回退链同样失败，不会误记。
+      if (origin) blockedOrigins.set(origin, now() + BLOCKED_ORIGIN_TTL_MS);
+      return response;
     }
   };
+}
+
+let sharedCorsSafeFetch: typeof fetch | undefined;
+
+/**
+ * 供不经全局 fetch 的调用方显式使用（无状态生成 / Guardian 补全）。
+ * 不依赖 window.fetch 是否已被垫片替换：即使别的插件之后又覆盖了 window.fetch，
+ * 这条路径仍然是 CORS 安全的。
+ */
+export function getCorsSafeFetch(): typeof fetch {
+  sharedCorsSafeFetch ??= createCorsSafeFetch({ getNativeFetch: resolveNativeFetch });
+  return sharedCorsSafeFetch;
+}
+
+function resolveNativeFetch(): typeof fetch {
+  const impl = capturedNativeFetch ?? (window as unknown as { fetch?: typeof fetch }).fetch;
+  // 没有任何原生 fetch 时抛 TypeError，让调用直接进入回退链。
+  if (typeof impl !== 'function') throw new TypeError('fetch is not available in this environment');
+  return impl;
+}
+
+/** 仅供测试：清空「被拦 origin」记忆与共享实例。 */
+export function resetCorsSafeFetchStateForTesting(): void {
+  blockedOrigins.clear();
+  sharedCorsSafeFetch = undefined;
+}
+
+/**
+ * 安装全局 fetch 垫片（幂等）。必须在任何 LLM / HTTP 请求发起前调用——
+ * main.ts onload 的最早处。
+ *
+ * @param deps - 测试注入点；缺省使用 obsidian 的真实 requestUrl。
+ */
+export function installRequestUrlFetchFallback(deps?: RequestUrlFetchDeps): void {
+  if (installed) return;
+  const g = window as unknown as { fetch?: typeof fetch };
+  const nativeFetch = g.fetch;
+  if (typeof nativeFetch !== 'function') return;
+  installed = true;
+  capturedNativeFetch = nativeFetch;
+  g.fetch = createCorsSafeFetch({ getNativeFetch: () => nativeFetch, deps });
+}
+
+function originOf(input: RequestInfo | URL): string | null {
+  try {
+    return new URL(resolveUrl(input)).origin;
+  } catch {
+    return null;
+  }
 }
 
 function resolveUrl(input: RequestInfo | URL): string {
