@@ -16,6 +16,7 @@ import type { StreamFn } from '@earendil-works/pi-agent-core';
 // 避免 ESM-only pi-ai 在 CJS 测试环境（tsconfig.test.json module=commonjs）下
 // 因 "No exports main defined" 错误而无法加载。
 import type { ProviderConfig } from '../../mcp/types';
+import { getCorsSafeFetch } from '../../utils/request-url-fetch';
 
 // 与 settings.contextWindow 默认值对齐（src/mcp/types.ts DEFAULT_SETTINGS），
 // 也与 pi-provider-bridge.ts 的同名常量保持一致。
@@ -312,6 +313,10 @@ export function createNativeCompleteFn(model: Model<Api>, apiKey: string): Nativ
       ...(typeof options?.temperature === 'number' ? { temperature: options.temperature } : {}),
       ...(typeof options?.maxTokens === 'number' ? { maxTokens: options.maxTokens } : {}),
       ...(options?.signal ? { signal: options.signal } : {}),
+      // 显式传入 CORS 安全的 fetch，而不是让 pi/OpenAI SDK 去捡全局 window.fetch：
+      // 无状态生成（Guardian 补全、选区动作、知识编译…）部署在 app://obsidian.md 源下，
+      // opencode.ai 等端点不返回 CORS 头，裸原生 fetch 必被预检拦截。
+      fetch: getCorsSafeFetch(),
     });
     return extractAssistantText(result);
   };
