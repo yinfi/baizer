@@ -71,6 +71,7 @@ body:
         - DeepSeek
         - Qwen / DashScope
         - Other OpenAI-compatible endpoint
+        - Anthropic
         - Not relevant to this bug
     validations:
       required: true
