@@ -174,6 +174,7 @@ async function runTests() {
       'Guardian',
       'Appearance',
       'Plugin Skills',
+      'Feedback',
     ]);
     assert(items.every(item => item.type === 'page' || item.type === 'group'), 'top level must be pages + the attention group only');
 
