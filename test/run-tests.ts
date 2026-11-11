@@ -54,6 +54,7 @@ const tests = [
   'test/scroll-follow.test.ts',
   'test/stream-block-splitter.test.ts',
   'test/thinking-renderer.test.ts',
+  'test/thinking-timeline-style.test.ts',
   'test/tool-renderer.test.ts',
   'test/tool-call-renderer.workbench.test.ts',
   'test/approval-flow.test.ts',

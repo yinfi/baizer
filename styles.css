@@ -1496,14 +1496,60 @@ textarea.shell-input::placeholder {
     display: none;
 }
 
+/* 思考段落 = 标题行 + 正文两行。用 grid 行高 0fr↔1fr 做展开/收起的高度过渡,
+   取代 display:none 的瞬切;折叠时用 visibility 把正文移出无障碍树,
+   收起动画期间保持可见,动画结束才真正隐藏。
+   列宽用 minmax(0, 1fr) 钉在容器宽度上:否则列会按最长一行的 max-content 撑开
+   (标题胶囊 + 正文一起超宽),把时间线顶出横向滚动条。 */
+.baizer-thinking-block {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 0fr;
+    transition: grid-template-rows var(--baizer-transition-base, 200ms ease);
+}
+
+.baizer-thinking-block:not(.is-collapsed) {
+    grid-template-rows: auto 1fr;
+}
+
+.baizer-thinking-content {
+    overflow: hidden;
+    min-height: 0;
+    visibility: hidden;
+    /* 思考正文是多行纯文本:保留模型输出的换行,长串不撑破容器。 */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: 1.55;
+    transition:
+        margin-top var(--baizer-transition-base, 200ms ease),
+        padding-top var(--baizer-transition-base, 200ms ease),
+        padding-bottom var(--baizer-transition-base, 200ms ease),
+        border-top-width var(--baizer-transition-base, 200ms ease),
+        border-bottom-width var(--baizer-transition-base, 200ms ease),
+        visibility var(--baizer-transition-base, 200ms ease);
+}
+
+/* 折叠时内边距与上下描边也要一并收掉:它们算进网格项的最小高度,
+   不收的话 0fr 行会被顶开十几像素,「收起」就只剩个名字。 */
 .baizer-thinking-block.is-collapsed .baizer-thinking-content {
-    display: none;
+    margin-top: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-top-width: 0;
+    border-bottom-width: 0;
+}
+
+.baizer-thinking-block:not(.is-collapsed) .baizer-thinking-content {
+    margin-top: 6px;
+    visibility: visible;
 }
 
 .baizer-thinking-header {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    /* grid 行会默认拉伸子项;保持标题胶囊按内容收缩,悬停区不横贯整行。 */
+    justify-self: start;
     cursor: pointer;
     user-select: none;
 }
@@ -1516,11 +1562,28 @@ textarea.shell-input::placeholder {
 
 .baizer-thinking-caret {
     display: inline-block;
-    transition: transform var(--baizer-transition-fast);
+    transition: transform var(--baizer-transition-fast, 120ms ease);
+}
+
+/* 展开朝下、收起朝右:与折叠语义一致(> 顺时针 90° 即朝下)。 */
+.baizer-thinking-block:not(.is-collapsed) .baizer-thinking-caret {
+    transform: rotate(90deg);
 }
 
 .baizer-thinking-block.is-collapsed .baizer-thinking-caret {
-    transform: rotate(-90deg);
+    transform: rotate(0deg);
+}
+
+/* 活动段落正文尾部的流式光标:正文还在增长时始终闪烁,收尾即随 is-thinking 一起消失。 */
+.baizer-thinking-block.is-thinking .baizer-thinking-content::after {
+    content: '';
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    background: var(--text-accent);
+    animation: cursor-blink 0.8s step-end infinite;
 }
 
 .shell-think-summary {
@@ -1534,6 +1597,19 @@ textarea.shell-input::placeholder {
 
 .shell-think-summary:hover {
     color: var(--text-normal);
+}
+
+/* 流式进行中:摘要行左端的呼吸圆点。is-thinking-active 由 ThinkingRenderer 在
+   会话开始时挂上、finalize/dispose 时摘掉——不能只靠「未折叠」判断,
+   否则用户手动展开已结束的时间线会误亮成进行中。 */
+.shell-think-timeline.is-thinking-active .shell-think-summary::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-accent);
+    animation: think-pulse 1.5s ease-in-out infinite;
 }
 
 .shell-think-summary .think-toggle {
@@ -3887,12 +3963,33 @@ textarea.shell-input {
 }
 
 .baizer-shell-view .think-node-detail,
-.baizer-shell-view .baizer-thinking-content,
 .baizer-shell-view .baizer-tool-detail {
     margin-top: 6px;
     border: 1px solid var(--baizer-border);
     border-radius: var(--baizer-radius-s);
     background: var(--baizer-surface-muted);
+}
+
+/* 思考正文同样是边框卡片。上间距不在这里给:它随展开/收起一起过渡(见
+   .baizer-thinking-block 那组规则),这里只补内边距,别让文字贴着描边。 */
+.baizer-shell-view .baizer-thinking-content {
+    padding: 8px 10px;
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface-muted);
+}
+
+/* 活动段落(还在生成的这一段)用主题强调色挑出来:标题胶囊描边加亮,正文卡片带底色。 */
+.baizer-shell-view .baizer-thinking-block.is-thinking .baizer-thinking-header {
+    border-color: color-mix(in srgb, var(--interactive-accent) 42%, transparent);
+    background: color-mix(in srgb, var(--interactive-accent) 8%, var(--baizer-surface-muted));
+    color: var(--text-normal);
+}
+
+.baizer-shell-view .baizer-thinking-block.is-thinking .baizer-thinking-content {
+    border-color: color-mix(in srgb, var(--interactive-accent) 30%, var(--baizer-border));
+    background: color-mix(in srgb, var(--interactive-accent) 5%, var(--baizer-surface-muted));
+    color: var(--text-normal);
 }
 
 .baizer-shell-view .shell-stream-container {
@@ -4489,6 +4586,7 @@ textarea.shell-input {
     .baizer-shell-view,
     .baizer-settings-page,
     .baizer-attachment-modal,
+    .baizer-floating-panel,
     .guardian-selection-tooltip {
         --baizer-transition-fast: 0.001ms linear;
         --baizer-transition-base: 0.001ms linear;
@@ -4501,6 +4599,8 @@ textarea.shell-input {
     /* 持续动画逐条关闭(流式光标、思考/知识脉冲、审批转圈);选择器与原规则同特异性,靠位置靠后生效。 */
     .shell-stream-cursor,
     .think-node.is-thinking::before,
+    .baizer-thinking-block.is-thinking .baizer-thinking-content::after,
+    .shell-think-timeline.is-thinking-active .shell-think-summary::before,
     .shell-knowledge-status-strip.is-processing,
     .shell-approval-processing::before {
         animation: none;

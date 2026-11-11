@@ -53,6 +53,7 @@ export class ThinkingRenderer {
     this.sessionActive = false;
     this.activeSegment = null;
     this.pendingText = '';
+    this.removeClass(this.timeline, 'is-thinking-active');
   }
 
   getNodeCount() {
@@ -68,6 +69,7 @@ export class ThinkingRenderer {
     this.sessionActive = false;
     this.activeSegment = null;
     this.pendingText = '';
+    this.removeClass(this.timeline, 'is-thinking-active');
   }
 
   /** 开启一次思考会话(整段连续思考共享同一计时起点)。 */
@@ -77,6 +79,8 @@ export class ThinkingRenderer {
     this.sessionStartedAt = this.now();
     this.pendingText = '';
     this.activeSegment = null;
+    // 时间线级的「思考中」标记:驱动外层摘要行的呼吸指示,与单个段落的活动态解耦。
+    this.addClass(this.timeline, 'is-thinking-active');
     this.startTimer();
   }
 
