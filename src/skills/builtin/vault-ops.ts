@@ -6,6 +6,7 @@ import { missingParam, strArg } from '../tool-args';
 import { ToolRegistry } from '../tool-registry';
 import { logger } from '../../utils/logger';
 import { ChangePreview } from '../../ui/diff/change-preview';
+import { PLUGIN_ID } from '../../mcp/types';
 import {
   checkWriteScope,
   checkFileCapability,
@@ -13,6 +14,10 @@ import {
   canWriteToVaultTarget as canWriteToVaultTargetImpl,
   type VaultWriteTargetCheck,
 } from '../../permissions/permission-service';
+import {
+  isReadDeniedPath,
+  readDeniedError,
+} from '../../permissions/read-guard';
 
 // ==================== 工具定义 ====================
 
@@ -27,6 +32,22 @@ export type { VaultWriteTargetCheck };
 function getWriteScopeError(ctx: ToolContext, target: string): string | null {
   const activeNote = ctx.app.workspace.getActiveFile?.()?.path || null;
   return checkWriteScope(target, ctx.settings, activeNote);
+}
+
+/**
+ * 读侧的点目录守卫（BR6.4）：显式拒绝 configDir 前缀路径。
+ *
+ * 与写侧的 isObsidianConfigPath 对称。返回明确的拒绝错误，**不返回「文件不存在」**——
+ * 那会让用户以为路径写错了，而实际是这个路径根本不该被读。
+ */
+function getReadDeniedError(ctx: ToolContext, target: string): string | null {
+  const configDir = ctx.app.vault.configDir;
+  return isReadDeniedPath(configDir, PLUGIN_ID, target) ? readDeniedError(target) : null;
+}
+
+/** 列举 / 搜索路径上的排除：vault 里落在 configDir 之下的条目一律不返回。 */
+function isListableVaultPath(ctx: ToolContext, path: string): boolean {
+  return !isReadDeniedPath(ctx.app.vault.configDir, PLUGIN_ID, path);
 }
 
 const readNote: Tool = {
@@ -44,6 +65,8 @@ const readNote: Tool = {
   async execute(args, ctx) {
     const notePath = strArg(args, 'path');
     if (notePath === undefined) return { success: false, error: 'File not found' };
+    const denied = getReadDeniedError(ctx, notePath);
+    if (denied) return { success: false, error: denied };
     const file = ctx.app.metadataCache.getFirstLinkpathDest(notePath, '');
     if (!file) return { success: false, error: 'File not found' };
     const content = await ctx.app.vault.read(file);
@@ -312,7 +335,7 @@ const listNotes: Tool = {
   async execute(args, ctx) {
     const folderPath = strArg(args, 'folder') || '/';
     const limit = limitArg(args.limit, 20);
-    let files = ctx.app.vault.getMarkdownFiles();
+    let files = ctx.app.vault.getMarkdownFiles().filter(f => isListableVaultPath(ctx, f.path));
     if (folderPath !== '/') {
       files = files.filter(f => f.path.startsWith(folderPath));
     }
@@ -342,6 +365,7 @@ const searchVault: Tool = {
     const query = strArg(args, 'query');
     if (query === undefined) return { matches: [] };
     const matches = ctx.app.vault.getFiles()
+      .filter(f => isListableVaultPath(ctx, f.path))
       .filter(f => f.basename.toLowerCase().includes(query.toLowerCase()))
       .map(f => f.path)
       .slice(0, 5);
@@ -364,7 +388,9 @@ const openFile: Tool = {
   async execute(args, ctx) {
     const wanted = strArg(args, 'path');
     if (wanted === undefined) return { success: false, error: 'File not found' };
-    const allFiles = ctx.app.vault.getFiles();
+    const denied = getReadDeniedError(ctx, wanted);
+    if (denied) return { success: false, error: denied };
+    const allFiles = ctx.app.vault.getFiles().filter(f => isListableVaultPath(ctx, f.path));
     let target = allFiles.find(f => f.path === wanted);
     if (!target) {
       target = allFiles.find(f =>
@@ -405,6 +431,8 @@ const readFile: Tool = {
   async execute(args, ctx) {
     const pathResult = normalizeVaultPath(args.path);
     if (pathResult.error) return { success: false, error: pathResult.error };
+    const denied = getReadDeniedError(ctx, pathResult.path);
+    if (denied) return { success: false, error: denied };
 
     const file = ctx.app.vault.getAbstractFileByPath(pathResult.path);
     if (!isReadableVaultFile(file)) {
