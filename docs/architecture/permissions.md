@@ -58,6 +58,23 @@ so they fall back to the approval flow below.
 > without a confirmation card. That is the intended trade-off (undo replaces the
 > prompt), not a gap. See `isDirectApplyWorkspaceTool` in `workspace-edit-service.ts`.
 
+## Publication Is Not A Vault Write
+
+`create_github_issue` and `add_issue_comment` always return `approval_required` on
+their first call, and they do **not** call `needsApproval()`. Turning
+`confirmExecutions` off therefore does not silence them, and that is deliberate:
+that setting authorises changes to your own vault, which undo can reverse. These
+two tools leave a public record in someone else's repository that nobody can
+withdraw, so the user's existing preference is not consent for them. `needsApproval`
+itself is unchanged, so every other tool behaves exactly as before.
+
+The approval card for these two renders the exact title and body that will be
+published, both editable in place. The single source of truth is the approval
+request's `args`: the card renders from it, edits write back into it, and execution
+submits it. `ChangePreview` deliberately carries only non-editable metadata for this
+kind — it is persisted too, and a second copy of the bytes is how "what you approved"
+stops being "what was posted".
+
 ## Approval Flow (Pre-approval tier)
 
 When a pre-approval tool is called under `confirmExecutions`:

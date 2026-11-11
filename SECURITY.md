@@ -46,6 +46,16 @@ its trust boundaries:
   settings. `.obsidian` writes are always blocked. When enabling broad write
   scope or disabling confirmations, you accept the risk of AI-initiated vault
   mutations.
+- **The feedback feature carries a built-in credential, and it is public.** So
+  that reporting a problem needs no setup, the plugin ships with a GitHub token
+  compiled into the bundle by the release pipeline. It is not encrypted and not
+  obfuscated — anyone who downloads the plugin can read it, and that is the
+  accepted trade-off, not a defect. It is a fine-grained token scoped to
+  `yinfi/baizer` with only `Issues: write`, so the worst it allows is creating
+  issues and comments in that one public repository. It is never sent anywhere
+  except `api.github.com`, and the plugin never asks you for a credential of
+  your own. If you find it being abused, report it through the private channel
+  above.
 
 When reporting, please treat any credentials or private vault content as
 sensitive and avoid pasting real API keys or personal notes into reports.
@@ -93,6 +103,12 @@ Baizer 完全运行在你的 Obsidian 客户端内。请理解其信任边界:
   功能前,请先了解你的服务商的数据使用政策。
 - **AI 发起的文件写入**受权限与确认设置约束。对 `.obsidian` 的写入始终被阻止。
   当你启用宽泛写入范围或关闭确认时,即表示你接受 AI 发起库变更的风险。
+- **反馈功能内置了一个凭据,而它是公开的。** 为了让报障不需要任何配置,发布流水线
+  会把一个 GitHub token 编译进插件包。它**没有加密、也没有做混淆**——任何下载插件
+  的人都能读到它,这是被接受的取舍,不是缺陷。它是一枚 fine-grained token,只授权
+  `yinfi/baizer` 仓库、只有 `Issues: write`,所以最坏情况仅限于在那一个公开仓库里
+  建 issue、发评论。除了 `api.github.com`,它不会被发往任何地方;插件也不会向你索取
+  你自己的任何凭据。若发现它被滥用,请通过上面的私密渠道报告。
 
 报告时,请将任何凭据或私密库内容视为敏感信息,避免在报告中粘贴真实的 API
 密钥或个人笔记。
