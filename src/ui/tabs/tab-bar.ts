@@ -48,17 +48,25 @@ export class TabBar {
                     : 'baizer-tab-badge-idle';
 
         const badge = this.containerEl.createDiv({
-            cls: `baizer-tab-badge ${stateClass}`,
+            cls: `baizer-tab-badge ${stateClass}${item.kind === 'feedback' ? ' is-feedback' : ''}`,
             text: String(item.index),
         });
         badge.setAttribute('role', 'tab');
         badge.setAttribute('aria-selected', item.isActive ? 'true' : 'false');
-        badge.setAttribute('aria-label', item.title);
-        badge.setAttribute('title', item.title);
+        // 反馈 tab 的 aria-label 带上种类与终态：只靠图标区分等于对读屏用户不可见。
+        badge.setAttribute('aria-label', this.describe(item));
+        badge.setAttribute('title', this.describe(item));
         // 漫游 tabindex:仅活跃 tab 可被 Tab 键聚焦(0),其余 -1,组内用左右方向键移动焦点。
         badge.setAttribute('tabindex', item.isActive ? '0' : '-1');
         if (item.providerId) {
             badge.setAttribute('data-provider', item.providerId);
+        }
+        if (item.kind === 'feedback') {
+            badge.setAttribute('data-tab-kind', 'feedback');
+        }
+        // 终态标识是纯投影（派生自草稿存储），不是第二处真相。
+        if (item.feedbackOutcome) {
+            badge.setAttribute('data-feedback-submitted', String(item.feedbackOutcome.issueNumber));
         }
 
         badge.addEventListener('click', () => this.callbacks.onTabClick(item.id));
@@ -70,8 +78,8 @@ export class TabBar {
                 text: item.title,
             });
             title.setAttribute('role', 'button');
-            title.setAttribute('aria-label', item.title);
-            title.setAttribute('title', item.title);
+            title.setAttribute('aria-label', this.describe(item));
+            title.setAttribute('title', this.describe(item));
             title.addEventListener('click', () => this.callbacks.onTabClick(item.id));
         }
 
@@ -81,6 +89,13 @@ export class TabBar {
                 this.callbacks.onTabClose(item.id);
             });
         }
+    }
+
+    private describe(item: TabBarItem): string {
+        const parts = [item.title];
+        if (item.kind === 'feedback') parts.push(t('Feedback'));
+        if (item.feedbackOutcome) parts.push(`${t('Submitted')} #${item.feedbackOutcome.issueNumber}`);
+        return parts.join(' · ');
     }
 
     private handleBadgeKeyDown(event: KeyboardEvent, item: TabBarItem, badge: HTMLElement): void {
