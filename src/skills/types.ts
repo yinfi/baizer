@@ -19,6 +19,14 @@ export interface ToolContext {
    * 本地 vault 操作通常毫秒级完成,可忽略此信号(维持原签名不变)。
    */
   signal?: AbortSignal;
+  /**
+   * 本次工具调用所属的会话 id(= UI tab id)。
+   *
+   * 写入类反馈工具用它给草稿打 sourceConversationId,并在它与既有同 dedupKey 草稿
+   * 不一致时拒绝执行(重放/串台防护)。缺失时工具返回明确错误而不创建草稿——
+   * 不猜、不回退到「未知会话」。
+   */
+  conversationId?: string;
 }
 
 /**
@@ -41,6 +49,32 @@ export interface ParameterDef {
 export type ToolExecutionMode = 'parallel' | 'sequential';
 export type ToolRisk = 'read' | 'write' | 'plugin-control' | 'network' | 'unknown';
 
+/**
+ * 工具对模型的可见范围。
+ *
+ * `'feedback-session'` 的工具**只在反馈会话的工具集里出现**——非反馈会话里模型
+ * 根本看不到它们（不是「看得到但被拒」：工具描述仍会进入每一轮提示词，且被拒与
+ * 不存在对模型的诱导效果完全不同）。缺省 `'always'`，因此漏写声明是 fail-open，
+ * 由测试断言反馈工具确实带了这条声明。
+ */
+export type ToolVisibility = 'always' | 'feedback-session';
+
+/**
+ * 反馈会话的技能名与工具名。
+ *
+ * 这三个概念必须同源：`feedback` 技能声明的 tools 子集、四个工具注册时的
+ * visibility 声明、以及反馈会话拿不到技能时的 fail-closed 工具集，都引用这里。
+ * 分散成三份字符串，一次改名就会让隔离静默失效。
+ */
+export const FEEDBACK_SKILL_NAME = 'feedback';
+
+export const FEEDBACK_TOOL_NAMES: readonly string[] = [
+  'search_github_issues',
+  'get_plugin_diagnostics',
+  'create_github_issue',
+  'add_issue_comment',
+];
+
 /** 模型给出的工具参数:来自外部,字段类型未知,工具内部必须逐项窄化。 */
 export type ToolArgs = Record<string, unknown>;
 /** 工具返回的结构化结果。success/path/error 是各工具共有的约定字段,其余字段因工具而异。 */
@@ -62,6 +96,8 @@ export interface Tool {
   executionMode?: ToolExecutionMode;
   timeoutMs?: number;
   risk?: ToolRisk;
+  /** 见 ToolVisibility。缺省 'always'。 */
+  visibility?: ToolVisibility;
   execute(args: ToolArgs, ctx: ToolContext): Promise<ToolResult>;
 }
 

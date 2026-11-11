@@ -239,10 +239,15 @@ export class SkillRegistry {
   /**
    * B 方案：系统提示的 skill 清单由本地 `formatSkillsForSystemPrompt` 生成，
    * location 指向物化后的真实文件（模型经 read_skill 读取完整正文）。
+   *
+   * `exclude` 用于把某些 skill 从**发现清单**里摘掉。反馈技能靠它：它只在专用
+   * 反馈 tab 里经 forcedSkillName 强制激活，列进普通对话的清单只会诱导模型去读它、
+   * 然后在一轮里既没有澄清策略也没有那四个工具，走进死路。
    */
-  getSkillSummaryText(): string {
+  getSkillSummaryText(options?: { exclude?: readonly string[] }): string {
+    const excluded = new Set(options?.exclude ?? []);
     const skills = [...this.entries.values()]
-      .filter(e => this.isEnabled(e))
+      .filter(e => this.isEnabled(e) && !excluded.has(e.loaded.skill.name))
       .map(e => e.loaded.skill);
     return formatSkillsForSystemPrompt(skills);
   }

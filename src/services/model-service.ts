@@ -8,6 +8,7 @@ import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
 import { SkillCommandEntry, SkillSummary, ToolArgs, ToolResult } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
+import type { ChatTurnOptions } from '../runtime/runtime-types';
 import { buildAnthropicModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn, resolveCustomHeaders } from '../runtime/pi/pi-native-model';
 // 仅类型导入（编译期擦除），不把 ESM-only 的 pi-ai 主入口拉进 CJS 测试环境。
 import type { Api, Model } from '@earendil-works/pi-ai';
@@ -613,6 +614,7 @@ export class ModelService {
         userProfile?: UserProfile | null,
         systemPromptOverride?: string,
         conversationId?: string,
+        turnOptions?: ChatTurnOptions,
     ): Promise<string> {
         logger.info(`Processing chat message: ${userMessage.substring(0, 50)}...`, 'ModelService.chat');
 
@@ -635,6 +637,8 @@ export class ModelService {
                 userProfile: userProfile ?? null,
                 systemPromptOverride,
                 conversationId,
+                forcedSkillName: turnOptions?.forcedSkillName,
+                isolatedContext: turnOptions?.isolatedContext,
                 // hasPriorContext 不再由此注入:runtime 自己向 sessionManager 查。
             });
             return await runtime.query(preparedTurn);
@@ -653,6 +657,7 @@ export class ModelService {
         userProfile?: UserProfile | null,
         signal?: AbortSignal,
         conversationId?: string,
+        turnOptions?: ChatTurnOptions,
     ): AsyncGenerator<StreamEvent, void, unknown> {
         logger.info(`Processing streaming chat: ${userMessage.substring(0, 50)}...`, 'ModelService.chatStream');
 
@@ -674,6 +679,8 @@ export class ModelService {
                 obsidianContext,
                 userProfile: userProfile ?? null,
                 conversationId,
+                forcedSkillName: turnOptions?.forcedSkillName,
+                isolatedContext: turnOptions?.isolatedContext,
                 // hasPriorContext 不再由此注入:runtime 自己向 sessionManager 查。
             });
             for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
@@ -1138,7 +1145,7 @@ export class ModelService {
             result = await this.toolRegistry.execute(action, {
                 ...args,
                 approved: true,
-            });
+            }, undefined, { conversationId });
         } catch (error) {
             // 工具抛错时无法判断副作用是否发生：留一条失败尝试记录，返回 unknown 要求先核实。
             await this.recordApprovedActionAudit({
