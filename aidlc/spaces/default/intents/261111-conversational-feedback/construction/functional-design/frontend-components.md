@@ -63,7 +63,8 @@ interface FeedbackEntryButtonProps {
 `openFeedbackTab()` 的职责（供按钮与命令共用，避免两处各写一遍）：
 1. 确保 Workbench 打开（既有 `activateView` 语义）
 2. `tabManager.createTab()` 建一个新 tab
-3. 把该 tab 标记为反馈会话（供 `turnOptions` 使用）
+3. 把该 tab 的 `kind` 置为 `'feedback'`（BR1.6）——它随会话快照持久化，是重启后仍被认作
+   反馈会话的唯一依据；`turnOptions.isolatedContext` 与工具可见范围（决策表 6）都从它派生
 4. 激活该 tab 并聚焦输入框
 
 ## 3. 反馈 tab 的标识
@@ -72,76 +73,130 @@ interface FeedbackEntryButtonProps {
 |---|---|
 | 标题 | `t('Feedback')`（而非默认的 `Chat N`） |
 | 图标 | 与入口按钮同源的 `message-square-plus`，让用户一眼分辨它不是普通对话（FR1.3） |
-| 终态徽标 | 会话记录含 `feedbackOutcome` 时，标签上显示已提交标记（`check` 图标 + issue 编号） |
-| 数据来源 | `ConversationSnapshot.feedbackOutcome`（可选字段，见 `functional-spec.md` 状态机 2） |
+| 反馈标记 | `TabData.kind = 'feedback'`（BR1.6）。这是「是否反馈会话」的**唯一事实来源**——工具的可见范围（决策表 6）与 `isolatedContext` 都从它派生。写入点 `ConversationController.saveActiveTab`，恢复点 `createTabData(snapshot)`；不用内存集合，否则重启后恢复的 tab 不再是反馈会话 |
+| 终态徽标 | 由**草稿存储派生**：该 tab 有 `status = submitted` 的草稿时显示已提交标记（`check` 图标 + issue 编号） |
+| 徽标的承载点 | `TabBarItem` 上一个**派生的**可选字段 `feedbackOutcome?: { issueNumber: number }`，由 shell 在构建 tab bar items 时从草稿存储读一次填入。`TabBarItem` 不是持久化结构，因此不构成第二处真相 |
+| 明确不做 | **不**在 `ConversationSnapshot` 上加 `feedbackOutcome` 字段。`ConversationSnapshot`（`src/ui/types.ts:66-77`）与 `TabData`（`src/ui/tabs/types.ts`）是闭合接口，`saveActiveTab`（`conversation-controller.ts:32-43`）与 `createTabData`（`tabs/tab.ts:22-33`）逐字段枚举——新增字段既不写盘也不恢复，徽标重启必丢；而且它与 `FeedbackDraft.submittedIssueNumber/Url` 重复 |
 
 **Props / State**
 
 ```
 interface FeedbackTabMarkerProps {
-  outcome?: { issueNumber: number; issueUrl: string; submittedAt: number };
+  kind: 'chat' | 'feedback';
+  outcome?: { issueNumber: number };   // 派生自草稿存储，不持久化在快照上
   active: boolean;
 }
 ```
-标记是**纯投影**：它读会话快照，不持有状态，也不参与草稿生命周期。
+标记是**纯投影**：它读会话的 `kind` 与草稿存储，不持有状态，也不参与草稿生命周期。
 
 ## 4. ChangePreviewCard 的 `external-publish` 分支（可编辑的提交预览）
 
 这是本次唯一改动既有共享组件的部分，因此约束最严。
 
+### 唯一权威：`request.args`
+
+**卡片渲染标题与正文的来源，与执行提交的来源，必须是同一个对象——`request.args`。**
+这不是实现细节，而是本功能对「不可撤销的公开写入」的核心不变量（BR4.2）：
+用户批准的必须正是他看到的。
+
+```
+渲染：  title ← request.args.title     body ← request.args.body
+编辑：  onEdit(patch) → 写回 request.args.title / request.args.body
+执行：  executeApprovedAction(action, request.args, ...)
+```
+
+`request.args` 随消息快照持久化（`ApprovalRequest` 挂在消息上，`chat-controller.ts:206` 的
+`adoptMessages` 只浅拷贝消息对象、`approval` 引用不变；`runApproval` 读同一对象，见
+`chat-controller.ts:816`）。因此**重挂载 / 切 tab / 重启后，卡片重新渲染出来的字节与将要
+提交的字节逐字节相同**。
+
+> **早期版本在这里犯过错**：卡片按 `ChangePreview.newContent` + `ExternalPublishMeta.title`
+> 渲染，而编辑只写回 `request.args`。`preview` 既不随编辑更新、本身也被持久化，于是重挂载后
+> 卡片重新从 `preview` 渲染出**编辑前的旧正文**，而提交走 `request.args` 里的**新正文**——
+> 稳定复现「用户批准的 ≠ 他看到的」。这正是本设计要排除的东西，产物自身违反过它。
+> 现在的口径：**`preview` 不再承载任何可编辑字节**。
+
 ### 契约扩展
 
-`ChangePreviewKind` 新增 `'external-publish'`；`ChangePreview` 新增一个可选字段承载对外发布的元信息：
+`ChangePreviewKind` 新增 `'external-publish'`；`ChangePreview` 新增一个可选字段，**只承载
+不可编辑的元信息**：
 
 ```
 interface ExternalPublishMeta {
   repo: string;                        // "yinfi/baizer"
   kind: 'new_issue' | 'issue_comment';
-  title?: string;                      // kind = new_issue 时
   issueNumber?: number;                // kind = issue_comment 时
   labels: string[];
 }
 ```
 
-正文沿用既有的 `newContent` 字段（渲染后的正文全文）。**不新增第二套预览渲染器**：`renderChangePreviewCard` 内按 `preview.kind` 分派，`external-publish` 走新分支，其余 kind 走原有 diff 分支，一行不动。
+**`ExternalPublishMeta` 里没有 `title`，正文也不放 `preview.newContent`。** 可编辑的字节一律
+只存在于 `request.args`。`preview` 里保留的是 `target` / `summary` / `risk` 等既有字段，
+它们不参与提交。
+
+**不新增第二套预览渲染器**：`renderChangePreviewCard` 内按 `preview.kind` 分派，
+`external-publish` 走新分支，其余 kind 走原有 diff 分支，一行不动。
 
 ### 渲染与交互
 
-| 区域 | 内容 | 可编辑 |
+| 区域 | 内容来源 | 可编辑 |
 |---|---|---|
-| 摘要行 | `t('New issue in {repo}')` 或 `t('Comment on #{n}')` | — |
-| 标题 | `new_issue` 时渲染为单行输入控件；`issue_comment` 时不渲染 | ✅ |
-| 正文 | 多行文本控件，展示 `newContent` 全文，**不做 diff 渲染**（对外发布没有「旧内容」） | ✅ |
-| 类型 / 标签 | 只读展示 | — |
+| 摘要行 | `preview.summary`：`t('New issue in {repo}')` 或 `t('Comment on #{n}')` | — |
+| 标题 | `request.args.title`，单行输入控件；`issue_comment` 时不渲染 | ✅ |
+| 正文 | `request.args.body`，多行文本控件，展示全文，**不做 diff 渲染**（对外发布没有「旧内容」） | ✅ |
+| 类型 / 标签 | `preview.externalPublish.labels`，只读 | — |
 | 三条警告 | 公开可见 / 以发布方账号发出且留下联系方式即公开它 / 创建后无法由插件撤回；另加一句解释「即使你已关闭执行确认，本操作仍需确认」 | — |
 
-**编辑值的归属**：编辑在 `input` 事件上（带防抖）写回 `request.args.title` / `request.args.body`。`request.args` 随消息快照持久化，因此重挂载、切 tab、重启后编辑不丢；执行时 `executeApprovedAction(action, request.args, ...)` 天然以编辑后的值为准（BR4.2）。
+**编辑的写回时机**：`input` 事件（带防抖）即写回 `request.args`。不做「本地 DOM 状态 + 批准时
+读取」——那样一旦重挂载就丢编辑，用户可能批准一份他并没有看过的内容。
 
-**为什么不做「本地 DOM 状态 + 批准时读取」**：那样一旦重挂载就会丢编辑，用户可能批准一份他并没有看过的内容——对一个不可撤销的公开写操作，这是不可接受的偏差。
+### 与既有审批卡的分支隔离（Minor 修复）
+
+新增 kind 会改变共享组件里两处既有分支的行为，必须显式处理：
+
+| 既有分支 | 位置 | 决定 |
+|---|---|---|
+| `previewSupportsEditorPreview` | `src/ui/approval-card.ts:35-40` | 该函数目前只排除 `note-rename` / `note-delete` / `plugin-command`。**把 `external-publish` 一并加入排除集合**：反馈正文没有「编辑器里的对应位置」可聚焦，🎯 按钮点了只会弹「无预览」 |
+| `showApprovalPreviewInEditor` | `src/ui/shell-view.ts:1334-1335` | 它取 `preview.newContent` 当编辑器预览内容。上一条排除后这条路径不会再被 external-publish 触发；同时因为正文不再放 `preview.newContent`，即便被触发也拿不到正文（双保险） |
+
+补一条测试：断言 `previewSupportsEditorPreview({ kind: 'external-publish', ... }) === false`，
+并断言其余 kind 的返回值不变。
 
 ### Props / State
 
 ```
 interface ExternalPublishPreviewProps {
-  meta: ExternalPublishMeta;
-  body: string;
-  editable: boolean;                                   // pending 时 true，running/终态时 false
-  onEdit: (patch: { title?: string; body?: string }) => void;  // 写回 request.args
-  warnings: string[];                                  // 三条警告 + confirmExecutions 说明
+  meta: ExternalPublishMeta;                            // 只读元信息
+  title: string;                                        // = request.args.title
+  body: string;                                         // = request.args.body
+  editable: boolean;                                    // pending 时 true，running/终态时 false
+  onEdit: (patch: { title?: string; body?: string }) => void;   // 写回 request.args
+  warnings: string[];                                   // 三条警告 + confirmExecutions 说明
 }
 ```
 
-**状态约束**：仅在审批状态为 `pending` 时可编辑；`running` 与所有终态下渲染为只读（避免用户在提交过程中改动正在传输的字节）。
+**状态约束**：仅在审批状态为 `pending` 时可编辑；`running` 与所有终态下渲染为只读（避免用户
+在提交过程中改动正在传输的字节）。
 
 ### 与既有审批机制的关系
 
 | 既有机制 | 是否复用 | 说明 |
 |---|---|---|
 | `approval_required` 响应检测（`pi-approval-policy.ts`） | ✅ 复用 | 工具返回该响应即触发，无条件（BR4.1） |
-| `ApprovalRequest` / `ApprovalState` | ✅ 复用 | 不新增审批实体 |
+| `ApprovalRequest` / `ApprovalState` | ✅ 复用 | 不新增审批实体；`request.args` 既是渲染源也是提交源 |
 | `ApprovalExecutionRegistry` 的 `requestId` 去重 | ✅ 复用 | 幂等第一层（BR4.4） |
 | `renderApprovalCard` 的整体结构（标题、risk、动作按钮、终态） | ✅ 复用 | 只加预览分支 |
+| `previewSupportsEditorPreview` | ⚠️ **扩展排除集** | 加入 `external-publish`，见上 |
 | `needsApproval()` | ❌ **不改** | 确认由工具内部判定，见 BR4.1 与决策表 5 |
+
+### 必须补的测试
+
+1. **「编辑 → 重挂载 → 卡片显示 == 提交字节」**：编辑标题与正文 → 用同一份 `ApprovalRequest`
+   重新渲染卡片 → 断言输入控件的值与 `request.args.title` / `request.args.body` 逐字符相同，
+   且与 `executeApprovedAction` 收到的 args 相同。
+2. **分支隔离**：`previewSupportsEditorPreview` 对 `external-publish` 返回 false，其余 kind
+   返回值不变。
+3. **只读态**：`running` 与终态下不出现任何可编辑控件。
 
 ## 5. FeedbackDraftList（待提交草稿列表）
 

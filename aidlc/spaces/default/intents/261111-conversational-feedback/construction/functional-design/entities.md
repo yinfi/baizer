@@ -43,14 +43,14 @@ entities:
         constraints: [
           "kind = new_issue 时必填、非空、单行（不含换行符）",
           "kind = issue_comment 时必须为 null",
-          "用户可在审批卡片上就地编辑（FR6.1），编辑后即成为提交字节的一部分"
+          "审批卡片上的编辑写回 IssuePayload（即 request.args），**不改本字段**；提交成功后草稿的 title/body 同步为已提交的字节，使队列记录与实际发布的内容一致"
         ]
       - name: body
         type: string
         required: true
         constraints: [
           "非空",
-          "渲染一次后即为权威载荷：后续重试、重放、卡片编辑都以本字段为准，不再重新渲染",
+          "渲染一次后即为权威载荷：后续重试、重放不再重新渲染；卡片编辑落在 IssuePayload 上，提交成功后回写本字段",
           "逐字节保真——不做 Markdown 转义、不折叠换行、不因特殊字符截断（FR6.6）"
         ]
       - name: type
@@ -71,7 +71,8 @@ entities:
         required: true
         constraints: [
           "内容派生的稳定键：由 kind + targetIssueNumber + 归一化后的 title + 归一化后的 body 计算",
-          "同一份内容无论经几次渲染、几个审批请求、几个会话，键相同（FR3.8 的第二层去重）",
+          "在渲染时派生一次，**不随审批卡片上的编辑变化**——它是「这一次反馈」的身份，不是内容校验和（FR3.8 要防的是同一份草稿被重复提交，不是同一段文字被有意提交两次）",
+          "同一份内容无论经几次渲染、几个审批请求、几个会话，键相同（BR4.4 的第 ② 层：同内容的第二次渲染复用既有草稿，因此不会出现两张内容相同的卡片）",
           "归一化只做空白与行尾统一，不做语义改写——避免把「实质不同」的两份内容判为同一份"
         ]
       - name: sourceConversationId
@@ -119,7 +120,7 @@ entities:
     entity_level_constraints:
       - "kind = new_issue  ⇒ title、type、labels 非空，targetIssueNumber 为 null"
       - "kind = issue_comment ⇒ targetIssueNumber 非空，title、type、labels 为 null"
-      - "status ∈ {draft, awaiting_confirmation, submitting, submitted} 的草稿集合内 dedupKey 唯一（已 failed 的允许重复，否则重试会被自己挡住）"
+      - "status ∈ {draft, awaiting_confirmation, submitting, submitted} 的草稿集合内 dedupKey 唯一（已 failed 的允许重复，否则重试会被自己挡住）——口径与 rules.md 的 BR4.4 逐字一致，两处不得各写一套"
       - "未提交草稿（status ∈ {draft, awaiting_confirmation, failed}）总数上限 20；达上限时拒绝创建新草稿（FR5.6 / Q11）"
       - "草稿内容含用户输入，删除即整条移除，不得留残影（FR5.6）"
     relationships:
@@ -166,7 +167,8 @@ entities:
     entity_level_constraints:
       - "渲染是确定性的：同一组结构化澄清字段 + 同一份诊断信息 ⇒ 逐字节相同的 body"
       - "渲染只发生一次：审批通过后的执行路径不得重新渲染，否则会覆盖用户在卡片上的编辑"
-      - "body 与 title 是提交的唯一来源；卡片展示的必须是同一份字节（无二次加工）"
+      - "**本对象就是审批请求的 args**——卡片从它渲染、编辑写回它、执行提交它。三者同源是本设计对不可撤销公开写入的核心不变量（BR4.2 / FR6.1），任何一处另存副本都会重新引入「展示 ≠ 提交」"
+      - "preview 只承载不可编辑的元信息（仓库 / 类型 / label / 目标 issue 号），**不得承载 title 或 body**——preview 也被持久化，一旦它持有字节就会出现第二份可编辑真相"
 
   - name: DiagnosticsSnapshot
     description: >
@@ -184,10 +186,15 @@ entities:
       - name: platform
         type: enum["Windows", "macOS", "Linux", "iOS", "Android"]
         required: true
-      - name: providerType
-        type: enum["openai-compatible", "anthropic", "none"]
+      - name: provider
+        type: enum["Google Gemini", "OpenAI", "DeepSeek", "Qwen / DashScope", "Other OpenAI-compatible endpoint", "Anthropic", "Not relevant to this bug"]
         required: true
-        constraints: ["只给类型，不给 provider label、baseUrl、model id、apiKey（FR6.3）"]
+        constraints: [
+          "已在工具内部按 functional-spec.md 决策表 3b 的确定性映射解析完毕——快照携带的是**已落到模板域的取值**，不是原始的 providerType + label",
+          "之所以不带原始 label：label 可能是用户自建的端点名，把它写进公开 issue 属于超范围暴露；映射是穷尽的，不需要 label 也能得到确定结果",
+          "取值域与 .github/ISSUE_TEMPLATE/bug_report.yml 的 provider dropdown 同源（多出 Anthropic 一项——模板侧缺口的如实标注），由测试锁定",
+          "不给 baseUrl、model id、apiKey（FR6.3）"
+        ]
       - name: lastErrorDigest
         type: string
         required: false
@@ -204,6 +211,7 @@ entities:
     entity_level_constraints:
       - "字段集合封闭：不接受任何调用方传入的字段名或查询参数（FR3.2a）"
       - "不含笔记内容、文件路径、vault 名称、API Key、内置 token、对话历史、环境上下文（FR6.3）"
+      - "provider 只给已映射到模板域的取值，不携带用户的 provider label / baseUrl / model id"
       - "privacyMode 开启时默认不附带，改由用户在预览中逐项勾选（FR6.4）"
 
   - name: IssueCandidate

@@ -2,73 +2,350 @@
   "stage": "functional-design",
   "unit": "(single-unit feature; no units-generation in this intent — artifacts under construction/functional-design/)",
   "upstream_ids": [
-    "FR1.1", "FR1.2", "FR1.3", "FR1.4", "FR1.5",
-    "FR2.1", "FR2.2", "FR2.3", "FR2.4", "FR2.5", "FR2.6", "FR2.7", "FR2.8",
-    "FR3.1", "FR3.2", "FR3.2a", "FR3.2b", "FR3.3", "FR3.4", "FR3.5", "FR3.6", "FR3.7", "FR3.8", "FR3.9", "FR3.10", "FR3.11",
-    "FR4.1", "FR4.2", "FR4.3", "FR4.4", "FR4.5", "FR4.6", "FR4.7",
-    "FR5.1", "FR5.2", "FR5.3", "FR5.4", "FR5.5", "FR5.6", "FR5.7",
-    "FR6.1", "FR6.2", "FR6.3", "FR6.4", "FR6.5", "FR6.6", "FR6.7", "FR6.8",
-    "NFR1", "NFR2", "NFR3", "NFR4", "NFR5", "NFR6", "NFR7", "NFR8"
+    "FR1.1",
+    "FR1.2",
+    "FR1.3",
+    "FR1.4",
+    "FR1.5",
+    "FR2.1",
+    "FR2.2",
+    "FR2.3",
+    "FR2.4",
+    "FR2.5",
+    "FR2.6",
+    "FR2.7",
+    "FR2.8",
+    "FR3.1",
+    "FR3.2",
+    "FR3.2a",
+    "FR3.2b",
+    "FR3.3",
+    "FR3.4",
+    "FR3.5",
+    "FR3.6",
+    "FR3.7",
+    "FR3.8",
+    "FR3.9",
+    "FR3.10",
+    "FR3.11",
+    "FR4.1",
+    "FR4.2",
+    "FR4.3",
+    "FR4.4",
+    "FR4.5",
+    "FR4.6",
+    "FR4.7",
+    "FR5.1",
+    "FR5.2",
+    "FR5.3",
+    "FR5.4",
+    "FR5.5",
+    "FR5.6",
+    "FR5.7",
+    "FR6.1",
+    "FR6.2",
+    "FR6.3",
+    "FR6.4",
+    "FR6.5",
+    "FR6.6",
+    "FR6.7",
+    "FR6.8",
+    "NFR1",
+    "NFR2",
+    "NFR3",
+    "NFR4",
+    "NFR5",
+    "NFR6",
+    "NFR7",
+    "NFR8"
   ],
   "coverage": [
-    { "id": "FR1.1", "status": "N/A", "target": "UI 结构（头部按钮复用 createHeaderActionButton），见 frontend-components.md §1；无判定逻辑" },
-    { "id": "FR1.2", "status": "N/A", "target": "UI 结构（命令面板命令 baizer:feedback），见 frontend-components.md §2；无判定逻辑" },
-    { "id": "FR1.3", "status": "N/A", "target": "UI 结构（反馈 tab 的标题/图标/终态徽标），见 frontend-components.md §3；无判定逻辑" },
-    { "id": "FR1.4", "status": "N/A", "target": "复用既有会话链路与渲染能力（functional-spec.md 工作流 1）；本阶段不新增业务规则" },
-    { "id": "FR1.5", "status": "OK", "target": "BR1.4" },
-    { "id": "FR2.1", "status": "N/A", "target": "技术选型（复用会话型 chatStream），形态由 functional-spec.md 工作流 1 固定；非业务规则" },
-    { "id": "FR2.2", "status": "OK", "target": "BR1.1" },
-    { "id": "FR2.3", "status": "OK", "target": "BR1.1" },
-    { "id": "FR2.4", "status": "OK", "target": "BR2.1" },
-    { "id": "FR2.5", "status": "OK", "target": "BR2.2" },
-    { "id": "FR2.6", "status": "OK", "target": "BR1.1" },
-    { "id": "FR2.7", "status": "OK", "target": "BR1.2, BR1.3" },
-    { "id": "FR2.8", "status": "OK", "target": "BR1.4, BR4.5" },
-    { "id": "FR3.1", "status": "OK", "target": "BR2.2" },
-    { "id": "FR3.2", "status": "OK", "target": "BR4.1, BR4.4" },
-    { "id": "FR3.2a", "status": "OK", "target": "BR7.1" },
-    { "id": "FR3.2b", "status": "OK", "target": "BR4.1, BR4.4" },
-    { "id": "FR3.3", "status": "N/A", "target": "硬编码常量，无判定逻辑；由 entities.md 的 FeedbackDraft.targetRepo 约束与 frontend-components.md §6 的只读展示承接" },
-    { "id": "FR3.4", "status": "OK", "target": "BR3.1" },
-    { "id": "FR3.5", "status": "OK", "target": "BR3.2" },
-    { "id": "FR3.6", "status": "OK", "target": "BR2.2, BR4.4" },
-    { "id": "FR3.7", "status": "OK", "target": "BR4.1, BR4.3" },
-    { "id": "FR3.8", "status": "OK", "target": "BR4.4" },
-    { "id": "FR3.9", "status": "OK", "target": "BR4.5" },
-    { "id": "FR3.10", "status": "OK", "target": "BR3.2, BR3.4" },
-    { "id": "FR3.11", "status": "OK", "target": "BR2.3" },
-    { "id": "FR4.1", "status": "OK", "target": "BR8.1" },
-    { "id": "FR4.2", "status": "OK", "target": "BR6.1, BR6.2, BR5.5" },
-    { "id": "FR4.3", "status": "OK", "target": "BR8.3" },
-    { "id": "FR4.4", "status": "OK", "target": "BR8.2" },
-    { "id": "FR4.5", "status": "OK", "target": "BR6.1" },
-    { "id": "FR4.6", "status": "OK", "target": "BR9.1, BR6.2" },
-    { "id": "FR4.7", "status": "OK", "target": "BR6.7" },
-    { "id": "FR5.1", "status": "N/A", "target": "降级路径总览表，本身无判定逻辑；逐条由 functional-spec.md 决策表 1 与 BR5.1–BR5.5 承接" },
-    { "id": "FR5.2", "status": "OK", "target": "BR1.5" },
-    { "id": "FR5.3", "status": "OK", "target": "BR5.3" },
-    { "id": "FR5.4", "status": "OK", "target": "BR5.2" },
-    { "id": "FR5.5", "status": "OK", "target": "BR5.1" },
-    { "id": "FR5.6", "status": "OK", "target": "BR5.4" },
-    { "id": "FR5.7", "status": "OK", "target": "BR1.4" },
-    { "id": "FR6.1", "status": "OK", "target": "BR4.2" },
-    { "id": "FR6.2", "status": "OK", "target": "BR4.3" },
-    { "id": "FR6.3", "status": "OK", "target": "BR7.1, BR7.2" },
-    { "id": "FR6.4", "status": "OK", "target": "BR7.3" },
-    { "id": "FR6.5", "status": "OK", "target": "BR7.4" },
-    { "id": "FR6.6", "status": "OK", "target": "BR3.3" },
-    { "id": "FR6.7", "status": "OK", "target": "BR6.4, BR6.5, BR6.6" },
-    { "id": "FR6.8", "status": "OK", "target": "BR6.3" },
-    { "id": "NFR1", "status": "N/A", "target": "运行环境约束（移动端兼容、禁 child_process），在 Code Generation 阶段的实现选型中落实，不是业务规则" },
-    { "id": "NFR2", "status": "N/A", "target": "构建产物守卫（< 5 MB），由既有 test/bundle-size.test.ts 在 Build and Test 阶段验证" },
-    { "id": "NFR3", "status": "N/A", "target": "测试策略与 deps 注入模式，在 Code Generation / Build and Test 阶段落实；本阶段已把需覆盖的判定写成 BR" },
-    { "id": "NFR4", "status": "N/A", "target": "国际化清单见 frontend-components.md §10；无判定逻辑" },
-    { "id": "NFR5", "status": "N/A", "target": "可访问性要求见 frontend-components.md §9；无判定逻辑" },
-    { "id": "NFR6", "status": "N/A", "target": "性能约束（不增加常规对话每轮提示词体积），由 Build and Test 阶段验证；本阶段在 BR1.1 中以「工具集收窄」承接了不注入新工具的部分" },
-    { "id": "NFR7", "status": "OK", "target": "BR6.1, BR6.2" },
-    { "id": "NFR8", "status": "OK", "target": "BR6.6" }
+    {
+      "id": "FR1.1",
+      "status": "N/A",
+      "target": "UI 结构（头部按钮复用 createHeaderActionButton），见 frontend-components.md §1；无判定逻辑"
+    },
+    {
+      "id": "FR1.2",
+      "status": "N/A",
+      "target": "UI 结构（命令面板命令 baizer:feedback），见 frontend-components.md §2；无判定逻辑"
+    },
+    {
+      "id": "FR1.3",
+      "status": "OK",
+      "target": "BR1.6"
+    },
+    {
+      "id": "FR1.4",
+      "status": "N/A",
+      "target": "复用既有会话链路与渲染能力（functional-spec.md 工作流 1）；本阶段不新增业务规则"
+    },
+    {
+      "id": "FR1.5",
+      "status": "OK",
+      "target": "BR1.4"
+    },
+    {
+      "id": "FR2.1",
+      "status": "N/A",
+      "target": "技术选型（复用会话型 chatStream），形态由 functional-spec.md 工作流 1 固定；非业务规则"
+    },
+    {
+      "id": "FR2.2",
+      "status": "OK",
+      "target": "BR1.1"
+    },
+    {
+      "id": "FR2.3",
+      "status": "OK",
+      "target": "BR1.1"
+    },
+    {
+      "id": "FR2.4",
+      "status": "OK",
+      "target": "BR2.1"
+    },
+    {
+      "id": "FR2.5",
+      "status": "OK",
+      "target": "BR2.2"
+    },
+    {
+      "id": "FR2.6",
+      "status": "OK",
+      "target": "BR1.1"
+    },
+    {
+      "id": "FR2.7",
+      "status": "OK",
+      "target": "BR1.2, BR1.3"
+    },
+    {
+      "id": "FR2.8",
+      "status": "OK",
+      "target": "BR1.4, BR4.5, BR1.6"
+    },
+    {
+      "id": "FR3.1",
+      "status": "OK",
+      "target": "BR2.2"
+    },
+    {
+      "id": "FR3.2",
+      "status": "OK",
+      "target": "BR4.1, BR4.4"
+    },
+    {
+      "id": "FR3.2a",
+      "status": "OK",
+      "target": "BR7.1"
+    },
+    {
+      "id": "FR3.2b",
+      "status": "OK",
+      "target": "BR4.1, BR4.4"
+    },
+    {
+      "id": "FR3.3",
+      "status": "N/A",
+      "target": "硬编码常量，无判定逻辑；由 entities.md 的 FeedbackDraft.targetRepo 约束与 frontend-components.md §6 的只读展示承接"
+    },
+    {
+      "id": "FR3.4",
+      "status": "OK",
+      "target": "BR3.1"
+    },
+    {
+      "id": "FR3.5",
+      "status": "OK",
+      "target": "BR3.2"
+    },
+    {
+      "id": "FR3.6",
+      "status": "OK",
+      "target": "BR2.2, BR4.4"
+    },
+    {
+      "id": "FR3.7",
+      "status": "OK",
+      "target": "BR4.1, BR4.3"
+    },
+    {
+      "id": "FR3.8",
+      "status": "OK",
+      "target": "BR4.4"
+    },
+    {
+      "id": "FR3.9",
+      "status": "OK",
+      "target": "BR4.5"
+    },
+    {
+      "id": "FR3.10",
+      "status": "OK",
+      "target": "BR3.2, BR3.4"
+    },
+    {
+      "id": "FR3.11",
+      "status": "OK",
+      "target": "BR2.3"
+    },
+    {
+      "id": "FR4.1",
+      "status": "OK",
+      "target": "BR8.1"
+    },
+    {
+      "id": "FR4.2",
+      "status": "OK",
+      "target": "BR6.1, BR6.2, BR5.5"
+    },
+    {
+      "id": "FR4.3",
+      "status": "OK",
+      "target": "BR8.3"
+    },
+    {
+      "id": "FR4.4",
+      "status": "OK",
+      "target": "BR8.2"
+    },
+    {
+      "id": "FR4.5",
+      "status": "OK",
+      "target": "BR6.1"
+    },
+    {
+      "id": "FR4.6",
+      "status": "OK",
+      "target": "BR9.1, BR6.2"
+    },
+    {
+      "id": "FR4.7",
+      "status": "OK",
+      "target": "BR6.7"
+    },
+    {
+      "id": "FR5.1",
+      "status": "N/A",
+      "target": "降级路径总览表，本身无判定逻辑；逐条由 functional-spec.md 决策表 1 与 BR5.1–BR5.5 承接"
+    },
+    {
+      "id": "FR5.2",
+      "status": "OK",
+      "target": "BR1.5"
+    },
+    {
+      "id": "FR5.3",
+      "status": "OK",
+      "target": "BR5.3"
+    },
+    {
+      "id": "FR5.4",
+      "status": "OK",
+      "target": "BR5.2"
+    },
+    {
+      "id": "FR5.5",
+      "status": "OK",
+      "target": "BR5.1"
+    },
+    {
+      "id": "FR5.6",
+      "status": "OK",
+      "target": "BR5.4"
+    },
+    {
+      "id": "FR5.7",
+      "status": "OK",
+      "target": "BR1.4, BR1.6"
+    },
+    {
+      "id": "FR6.1",
+      "status": "OK",
+      "target": "BR4.2"
+    },
+    {
+      "id": "FR6.2",
+      "status": "OK",
+      "target": "BR4.3"
+    },
+    {
+      "id": "FR6.3",
+      "status": "OK",
+      "target": "BR7.1, BR7.2"
+    },
+    {
+      "id": "FR6.4",
+      "status": "OK",
+      "target": "BR7.3"
+    },
+    {
+      "id": "FR6.5",
+      "status": "OK",
+      "target": "BR7.4"
+    },
+    {
+      "id": "FR6.6",
+      "status": "OK",
+      "target": "BR3.3"
+    },
+    {
+      "id": "FR6.7",
+      "status": "OK",
+      "target": "BR6.4, BR6.5, BR6.6"
+    },
+    {
+      "id": "FR6.8",
+      "status": "OK",
+      "target": "BR6.3"
+    },
+    {
+      "id": "NFR1",
+      "status": "N/A",
+      "target": "运行环境约束（移动端兼容、禁 child_process），在 Code Generation 阶段的实现选型中落实，不是业务规则"
+    },
+    {
+      "id": "NFR2",
+      "status": "N/A",
+      "target": "构建产物守卫（< 5 MB），由既有 test/bundle-size.test.ts 在 Build and Test 阶段验证"
+    },
+    {
+      "id": "NFR3",
+      "status": "N/A",
+      "target": "测试策略与 deps 注入模式，在 Code Generation / Build and Test 阶段落实；本阶段已把需覆盖的判定写成 BR"
+    },
+    {
+      "id": "NFR4",
+      "status": "N/A",
+      "target": "国际化清单见 frontend-components.md §10；无判定逻辑"
+    },
+    {
+      "id": "NFR5",
+      "status": "N/A",
+      "target": "可访问性要求见 frontend-components.md §9；无判定逻辑"
+    },
+    {
+      "id": "NFR6",
+      "status": "N/A",
+      "target": "性能约束（不增加常规对话每轮提示词体积），由 Build and Test 阶段验证；本阶段在 BR1.1 中以「工具集收窄」承接了不注入新工具的部分"
+    },
+    {
+      "id": "NFR7",
+      "status": "OK",
+      "target": "BR6.1, BR6.2"
+    },
+    {
+      "id": "NFR8",
+      "status": "OK",
+      "target": "BR6.6"
+    }
   ],
   "reverse": [
-    { "id": "BR9.2", "status": "N/A", "target": "设计新增的发布前凭据探活，源自 requirements.md 的 [FR4.6 衍生] 开放问题与 functional-design-questions.md 的 Q9；需求侧没有对应的 FR（FR4.2 只要求非空校验、FR4.6 只要求 runbook）。已在 rules.md 中标注「可否决」。" }
+    {
+      "id": "BR9.2",
+      "status": "N/A",
+      "target": "设计新增的发布前凭据探活，源自 requirements.md 的 [FR4.6 衍生] 开放问题与 functional-design-questions.md 的 Q9；需求侧没有对应的 FR（FR4.2 只要求非空校验、FR4.6 只要求 runbook）。已在 rules.md 中标注「可否决」。"
+    }
   ]
 }

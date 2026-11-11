@@ -11,18 +11,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      # fetch-depth: 0 —— 发布前扫全量历史，浅克隆没有历史可扫。
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
-      # 凭据守卫（与 ci.yml 同一步，此处是发布前的最后一道）：tag 可以直接推送，
-      # 未必经过 CI。发布是本仓库唯一会把内置 token 送到所有用户手上的动作，
-      # 在它之前再确认一次「token 没有进任何被追踪的文件」。
+      # 凭据守卫（与 ci.yml 同一个脚本，此处扫全量历史而非本次范围）：tag 可以直接
+      # 推送、未必经过 CI，而发布是本仓库唯一会把内置 token 送到所有用户手上的动作。
+      # 全量扫描是这里唯一能挡住「token 曾经进过历史、后来被删掉」的形态——
+      # 那种情况下工作树干净，但 token 已被 secret scanning 标记。
       - name: Guard against committed credentials
-        run: |
-          if git grep -nEI 'github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}' -- . ; then
-            echo "::error::A GitHub credential pattern was found in a tracked file. Tokens must never enter git."
-            exit 1
-          fi
-          echo "No credential patterns in tracked files."
+        run: ./scripts/guard-credentials.sh --history
 
       - name: Setup Node.js
         uses: actions/setup-node@v7

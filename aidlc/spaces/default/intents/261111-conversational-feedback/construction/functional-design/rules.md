@@ -10,19 +10,25 @@
 rules:
   - id: BR1.1
     statement: >
-      反馈会话的每一轮都以 feedback 技能为强制激活技能，且工具集收窄为该技能
-      声明的子集（search_github_issues / get_plugin_diagnostics /
-      create_github_issue / add_issue_comment）加上元能力 read_skill。该子集
-      刻意不含任何 vault 读工具——反馈会话从能力上就没有读取用户笔记的路径。
+      四个反馈工具（search_github_issues / get_plugin_diagnostics /
+      create_github_issue / add_issue_comment）声明
+      visibility = 'feedback-session'，**只在反馈会话的工具集里出现**；反馈会话
+      内部再以 feedback 技能声明的子集收窄（子集 = 这四个 + 元能力 read_skill），
+      该子集刻意不含任何 vault 读工具——反馈会话从能力上就没有读取用户笔记的路径。
+      「反馈会话工具收窄」与「工具全局可见」是两件事，不可互相替代：前者约束
+      反馈会话内给什么，后者约束非反馈会话里能不能看到。
     category: constraint
-    applies_to: 反馈会话（conversationId 被标记为反馈的会话）
-    trigger: 反馈会话的每一轮开始（prepareTurn）
+    applies_to: 反馈会话（kind = feedback 的会话）, ToolRegistry
+    trigger: 每一轮组装工具集时（prepareTurn / getTools）
     logic: >
-      IF 本轮属于反馈会话
-      THEN 以 forcedSkillName = "feedback" 解析激活技能，
+      IF 本轮的会话不是反馈会话
+      THEN 工具集**不含**这四个工具（模型看不到它们，而不是「看得到但被拒」）；
+           检索类 search_github_issues 的免批边界即由此确定——它只可能在反馈
+           会话内被调用
+      ELSE 以 forcedSkillName = "feedback" 解析激活技能，
            工具集 = 该技能声明的 tools ∪ {read_skill}
       ELSE 走既有技能解析路径，行为不变
-    violation_behaviour: 若反馈会话拿到全量工具集，则 FR2.6 的能力隔离失效——模型可以读用户笔记，而这些内容会被写进一条公开发布的 issue
+    violation_behaviour: 若四个工具对每个会话可见，它们会在普通对话、Guardian、选区菜单、知识编译等路径上被调用，而工作流 3 依赖的澄清字段、诊断快照、去重选择在这些上下文里都不存在，FeedbackDraft.sourceConversationId 也会指向一个非反馈会话
     source: FR2.2, FR2.6
 
   - id: BR1.2
@@ -30,6 +36,10 @@ rules:
       反馈会话是干净会话：既不注入长期记忆召回与 Mental Model 块，也不注入
       当前笔记/反链等环境上下文。该隔离由会话级的显式开关驱动，只对声明为
       反馈会话的会话生效，普通对话的上下文与记忆行为一字不改。
+      「哪些会话是反馈会话」由 BR1.6 的 kind 标记唯一决定，不靠 UI 调用点自觉。
+      开关必须在 `ChatTurnRequest` 与 `PreparedChatTurn` **两处**都存在——
+      BR1.3 的 retain 短路发生在 `HarnessChatRuntime` 里，它拿到的是
+      `PreparedChatTurn`；只在请求侧加字段会在透传链上断掉一环。
     category: policy
     applies_to: 反馈会话
     trigger: 反馈会话的每一轮准备（prepareTurn）
@@ -86,6 +96,27 @@ rules:
            AND 不展示任何替代表单
     violation_behaviour: 呈现卡住不动的输入框或静默失败，使用户无法区分「我的问题没被接受」与「功能当前不可用」
     source: FR5.2, Q3=A
+
+  - id: BR1.6
+    statement: >
+      「这个会话是反馈会话」这一个事实由会话记录上的 kind 字段承载
+      （TabData / ConversationSnapshot 的 kind: 'chat' | 'feedback'，缺失即
+      'chat'）。它随会话快照一起持久化与恢复，不另建登记表；BR1.1 的工具可见
+      范围、BR1.2 的隔离开关、tab 上的反馈标识都从这一个事实派生。此外工具
+      执行期有一道兜底：ToolContext 携带 conversationId，写入工具在草稿的
+      sourceConversationId 与它不一致（或它缺失）时拒绝执行。
+    category: constraint
+    applies_to: TabData, ConversationSnapshot, TabBarItem, ToolContext
+    trigger: 创建 / 保存 / 恢复反馈 tab；工具执行时
+    logic: >
+      写入点：ConversationController.saveActiveTab 把 tab.kind 写进 snapshot
+      恢复点：createTabData(snapshot) 把 snapshot.kind 还原到 TabData；
+              TabBarItem 由 shell 在构建时填入该字段
+      执行期兜底：IF ctx.conversationId 缺失，或同 dedupKey 的草稿其
+              sourceConversationId ≠ ctx.conversationId
+              THEN 拒绝，不发起网络请求
+    violation_behaviour: 若只靠内存里的 tab 集合，重启后恢复的反馈会话不再是反馈会话——工具集变回全量（BR1.2 的隔离随之失效），用户也无法继续未完成的反馈
+    source: FR2.8, FR5.7
 
   - id: BR2.1
     statement: >
@@ -158,16 +189,22 @@ rules:
 
   - id: BR3.2
     statement: >
-      插件侧的字段清单与 label 取值必须与 .github/ISSUE_TEMPLATE/*.yml 同源，
-      并由自动化测试锁定：仓库模板增删字段或改标签时，该测试必须失败。
+      插件侧的字段清单、dropdown 选项取值与 label 取值必须与
+      .github/ISSUE_TEMPLATE/*.yml 同源，并由自动化测试锁定：仓库模板增删字段、
+      增删 dropdown 选项或改标签时，该测试必须失败。**只比对字段 id 不比对选项
+      取值等于没锁**——dropdown 的合法取值就是模板的全部信息量，写错一个选项
+      不会被 id 比对发现。
     category: constraint
-    applies_to: 正文渲染实现, label 映射
+    applies_to: 正文渲染实现, label 映射, provider 映射表
     trigger: 运行测试套件
     logic: >
       FOR EACH 模板文件
-        IF 模板字段集合 ≠ 插件字段清单，或模板 labels ≠ 插件 label 映射
+        IF 模板可填字段的 id 集合 ≠ 插件字段清单
+           或 模板 dropdown 的选项取值集合 ≠ 插件映射表的值域
+           或 模板 labels ≠ 插件 label 映射
         THEN 测试失败
-    violation_behaviour: 模板改了、插件没跟上，issue 结构静默漂移且无人察觉
+      另断言映射表对 providerType 的每个枚举值有且仅有一条规则（穷尽性）
+    violation_behaviour: 模板改了、插件没跟上，issue 结构静默漂移且无人察觉；只比 id 时连选项写错都发现不了
     source: FR3.5, FR3.10
 
   - id: BR3.3
@@ -248,34 +285,46 @@ rules:
 
   - id: BR4.4
     statement: >
-      提交幂等有两层：审批请求的 requestId 登记表（覆盖 in-flight 重复点击与
-      重试），以及草稿的 dedupKey（覆盖跨会话、跨重启重放）。dedupKey 已存在
-      于 status ∈ {draft, awaiting_confirmation, submitting, submitted} 的草稿
-      集合中时，不得再产生第二条 issue 或第二条评论。
+      提交幂等分三层，全部落在**真实提交路径**上（`performApprovedAction` →
+      `toolRegistry.execute`，该路径不读 risk / executionMode，所以保护必须在
+      工具内部实现）：
+      ① requestId 层——同一张审批卡重复点击由 ApprovalExecutionRegistry 去重；
+      ② dedupKey 跨卡片层——同内容的第二次渲染不新建草稿，而是复用 dedupKey
+      匹配到的既有草稿并返回同一份载荷，因此不存在两张内容相同的卡片；
+      ③ 提交前的同步原子认领——在发出任何 await 之前把草稿从非 submitting 置为
+      submitting，已有 submitting / submitted 则立即拒绝。
     category: constraint
-    applies_to: FeedbackDraft, 提交执行
-    trigger: 提交执行前
+    applies_to: FeedbackDraft, 提交执行, 渲染
+    trigger: 渲染草稿时 / 提交执行前
     logic: >
-      IF 同 dedupKey 且 status = submitted 的草稿已存在
-      THEN 拒绝执行，回显既有结果（编号与链接），不发起新的写入请求
-      ELSE IF 同 dedupKey 且 status = submitting 的草稿存在
-      THEN 拒绝执行（并发提交），提示该草稿正在提交
-      ELSE 执行写入
-    violation_behaviour: 用户连点、网络重试或队列重放产生重复 issue，污染仓库且无法批量撤回
-    source: FR3.8
+      渲染时（工作流 3 步骤 2d）：按 dedupKey 匹配已有草稿
+        IF 命中且 status = submitted
+        THEN 直接回显既有结果，不进入确认流程、不新建
+        IF 命中且 status ∈ {draft, awaiting_confirmation, submitting}
+        THEN 复用该草稿（更新其载荷），不新建
+        ELSE 新建草稿
+      提交时（工作流 4 步骤 3a）：
+        IF 同 dedupKey 且 status = submitted THEN 拒绝，回显既有结果
+        IF 同 dedupKey 且 status = submitting THEN 拒绝（并发提交）
+        ELSE 同步置 submitting（原子认领）后才发起网络请求
+    violation_behaviour: 用户连点、网络重试或队列重放产生重复 issue，污染仓库且无法批量撤回；若把保护寄望于「write ⇒ 串行执行」，那条链路根本不在提交路径上，等于没有保护
+    source: FR3.8, FR3.6
 
   - id: BR4.5
     statement: >
       只有拿到 GitHub API 的成功响应（HTTP 2xx 且返回编号）才允许声称提交成功、
       回显编号与链接，并把该反馈会话置为终态。插件不得在任何其他情况下声称
-      「已提交」。
+      「已提交」。**终态标识从草稿派生**（sourceConversationId = 该 tab id 且
+      status = submitted），不在会话快照上另存一份编号/链接——两处真相会在
+      「提交成功但快照未落盘」时不一致，而其中一处正是给用户看的那个。
     category: constraint
     applies_to: FeedbackDraft, 反馈会话
-    trigger: 提交执行返回时
+    trigger: 提交执行返回时 / 渲染 tab 栏时
     logic: >
       IF 响应为 2xx 且含 issue number
-      THEN status = submitted，记录编号与链接，会话置终态，回显可点击链接
-      ELSE 走 BR5.1 的错误分类，不得回显任何编号
+      THEN status = submitted，记录编号与链接，回显可点击链接
+           AND tab 栏的终态标识由草稿派生（只读投影，不写快照）
+      ELSE 走 BR5.1 的错误分类，不得回显任何编号，也不得置终态
     violation_behaviour: 声称成功而实际没有提交，用户以为问题已上报而不再跟进——这是本功能最坏的失败模式
     source: FR3.9, FR2.8
 
@@ -365,21 +414,25 @@ rules:
   - id: BR6.1
     statement: >
       token 只能经构建期环境变量（BAIZER_FEEDBACK_TOKEN）注入 bundle。仓库的
-      任何被 git 追踪的文件中都不得出现 token 字面量；CI 与发布流水线都必须在
-      追踪文件中命中 GitHub 凭据模式（github_pat_ / ghp_ / gho_ / ghs_ / ghu_
-      前缀）时阻断，并明确提示凭据不得入库。.gitignore 必须覆盖 .env 及其变体。
-      该守卫**不设白名单**：需要 token 字面量的测试 fixture 必须使用低于真实
-      长度的合成串（真实 token 远超 20 字符，合成串取 10–19 字符既能被既有
-      脱敏正则命中、又不触发本守卫）。
+      **任何提交**中都不得出现 token 字面量；CI 与发布流水线必须扫**提交范围**
+      而不是工作树——「先提交 token、再在同一 PR 里删掉」终态是干净的，但 token
+      已进历史，GitHub 的 secret scanning 一样会撤销它。CI 扫本次变更范围
+      （base..HEAD），发布扫全量历史；两份 workflow 调用**同一个脚本**
+      （`scripts/guard-credentials.sh`），不各抄一份。正则以真实凭据格式的长度
+      为准（`github_pat_` / `gh[pousr]_` 前缀后 ≥30 字符），因此低于真实长度的
+      合成 fixture 永不误报，守卫不需要白名单。.gitignore 必须覆盖 .env 及其变体。
     category: constraint
     applies_to: 构建与 CI
-    trigger: 每次 CI 运行、每次发布、每次提交
+    trigger: 每次 CI 运行、每次发布
     logic: >
-      IF git grep 在追踪文件中命中凭据模式
-      THEN 该流水线失败并阻断合并/发布
-      ELSE 继续
+      IF 本次变更范围的 diff 文本中命中凭据模式（**含被删除的行**——被删掉的
+         token 说明它进过历史）
+      THEN CI 失败并阻断合并
+      IF 全量历史的 diff 文本中命中 THEN 发布失败
+      base 不可解析（新分支的 push 事件 / 浅克隆）时退回全量历史——宁可多扫，
+        不可漏扫；扫描本身出错时同样失败，不得把「读不到历史」当成「干净」
     violation_behaviour: token 一旦进入 git，GitHub 的 secret scanning 会自动撤销它，且现象是「所有用户静默 401」——无人干预也会挂，极难定位
-    source: FR4.2, NFR7；编排层要求
+    source: FR4.2, NFR7；编排层要求（返工后口径）
 
   - id: BR6.2
     statement: >
@@ -611,29 +664,30 @@ rules:
 
 | 规则 ID | 类别 | 一句话 |
 |---|---|---|
-| BR1.1 | constraint | 反馈会话每轮强制激活 feedback 技能，工具集收窄且不含任何 vault 读工具 |
+| BR1.1 | constraint | 四个反馈工具只在反馈会话可见；会话内再强制激活 feedback 技能并收窄工具集（不含任何 vault 读工具） |
 | BR1.2 | policy | 反馈会话是干净会话：不注入记忆召回，也剔除环境上下文；普通对话不变 |
 | BR1.3 | policy | 反馈会话不写入长期记忆（对称隔离，可否决） |
 | BR1.4 | policy | 关闭带未提交草稿的 tab 不丢内容，会话与草稿都可恢复 |
 | BR1.5 | policy | LLM 不可用时给明确可区分的提示，不做表单兜底，不丢用户输入 |
+| BR1.6 | constraint | 会话 kind 标记是「是否反馈会话」的唯一事实来源；写入点/恢复点/执行期兜底写死 |
 | BR2.1 | policy | 最少轮次澄清；能推断的不追问；用户说「直接提交」即停止追问 |
 | BR2.2 | policy | 生成草稿前必须先检索去重；候选由用户选择，智能体不替用户判定同一性 |
 | BR2.3 | policy | 识别为安全漏洞则改走私密上报，不得走本通道 |
 | BR3.1 | calculation | 正文由插件按模板字段确定性渲染，覆盖模板全部字段 |
-| BR3.2 | constraint | 插件字段清单与 label 取值必须与模板同源，测试锁定漂移 |
+| BR3.2 | constraint | 字段清单、dropdown 选项取值与 label 取值都必须与模板同源，测试锁定漂移 |
 | BR3.3 | validation | 标题单行化；正文逐字节保真，不转义、不折叠、不截断 |
 | BR3.4 | policy | 类型只用 labels 表达，不用标题前缀 |
 | BR4.1 | authorization | 两个写入工具无条件走审批，不受 confirmExecutions 影响；needsApproval 语义不变 |
 | BR4.2 | constraint | 卡片展示完整字节且可编辑，编辑值写回 args，展示与提交同源 |
 | BR4.3 | policy | 卡片必须讲清公开可见、以发布方账号发出、不可撤回，并解释为何此处仍需确认 |
-| BR4.4 | constraint | 双层幂等：requestId（in-flight）+ dedupKey（跨会话重放） |
+| BR4.4 | constraint | 三层幂等且全部落在真实提交路径上：requestId + dedupKey 跨卡片复用 + 提交前同步原子认领 |
 | BR4.5 | constraint | 只有拿到 2xx 才允许声称成功、回显编号、置终态 |
 | BR5.1 | policy | 401/403/404/422/网络层各有不同的可操作提示 |
 | BR5.2 | policy | Retry-After 退避有上限含抖动；检索侧不退避，直接跳过去重 |
 | BR5.3 | policy | 失败落暂存并给重试入口，重启后可读，重试受 dedupKey 约束 |
 | BR5.4 | constraint | 未提交草稿上限 20，达上限拒绝新建并提示清理，不静默丢弃 |
 | BR5.5 | policy | 凭据缺失时给「未配置」提示，不呈现必然失败的流程 |
-| BR6.1 | constraint | token 只经构建期 env 注入；追踪文件命中凭据模式即阻断 CI 与发布；.gitignore 覆盖 .env |
+| BR6.1 | constraint | token 只经构建期 env 注入；CI 扫本次提交范围、发布扫全量历史（同一脚本）；正则按真实格式长度校准 |
 | BR6.2 | policy | 发布路径缺 token 即失败 + 探活；本地构建警告；运行时提示未配置 |
 | BR6.3 | constraint | token 不得出现在日志/错误/诊断/正文/UI/测试快照中 |
 | BR6.4 | constraint | vault 读工具显式拒绝 configDir 前缀；插件 bundle 目录在读取/列举/搜索三路排除 |
