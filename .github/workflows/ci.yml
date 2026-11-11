@@ -12,6 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 凭据守卫：反馈功能的内置 token 只能来自构建期 secret，绝不能进任何被追踪
+      # 的文件。一旦进 git，GitHub 的 secret scanning 会自动撤销它，而现象是
+      # 「昨天还好，今天所有用户静默 401」——无人干预也会挂，极难定位。
+      # 放在最前面：命中即快速失败，不必等 npm ci / build。
+      - name: Guard against committed credentials
+        run: |
+          if git grep -nEI 'github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}' -- . ; then
+            echo "::error::A GitHub credential pattern was found in a tracked file. Tokens must never enter git."
+            exit 1
+          fi
+          echo "No credential patterns in tracked files."
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
