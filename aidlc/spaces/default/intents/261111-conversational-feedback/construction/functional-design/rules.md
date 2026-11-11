@@ -17,18 +17,36 @@ rules:
       该子集刻意不含任何 vault 读工具——反馈会话从能力上就没有读取用户笔记的路径。
       「反馈会话工具收窄」与「工具全局可见」是两件事，不可互相替代：前者约束
       反馈会话内给什么，后者约束非反馈会话里能不能看到。
+      **技能解析不到（不存在或被用户禁用）是一条独立的、fail-closed 的分支**：
+      此时工具集**不得**退回全量，只能是四个反馈工具 ∪ {read_skill}，且本轮不
+      发起模型调用。
     category: constraint
     applies_to: 反馈会话（kind = feedback 的会话）, ToolRegistry
     trigger: 每一轮组装工具集时（prepareTurn / getTools）
     logic: >
       IF 本轮的会话不是反馈会话
-      THEN 工具集**不含**这四个工具（模型看不到它们，而不是「看得到但被拒」）；
+      THEN 工具集不含这四个工具（模型看不到它们，而不是「看得到但被拒」）；
            检索类 search_github_issues 的免批边界即由此确定——它只可能在反馈
            会话内被调用
-      ELSE 以 forcedSkillName = "feedback" 解析激活技能，
-           工具集 = 该技能声明的 tools ∪ {read_skill}
-      ELSE 走既有技能解析路径，行为不变
-    violation_behaviour: 若四个工具对每个会话可见，它们会在普通对话、Guardian、选区菜单、知识编译等路径上被调用，而工作流 3 依赖的澄清字段、诊断快照、去重选择在这些上下文里都不存在，FeedbackDraft.sourceConversationId 也会指向一个非反馈会话
+           AND 走既有技能解析路径，行为不变
+      ELSE IF 会话是反馈会话 且 activateSkill("feedback") 解析成功
+      THEN 工具集 = 该技能声明的 tools ∪ {read_skill}
+      ELSE （会话是反馈会话 但 activateSkill("feedback") 返回 null：技能不存在，
+            或被用户在设置里禁用——内置技能在设置页有逐项开关，写的是
+            settings.disabledSkills）
+      THEN 工具集 = 四个反馈工具 ∪ {read_skill}，**绝不退回全量工具集**
+           AND 本轮不发起模型调用，在反馈 tab 内给出明确提示
+               「反馈功能当前不可用：feedback 技能已被禁用」并指向设置页的启用入口
+           （不发起调用的理由：SKILL.md 承载着若干提示词层的安全规则——不主动
+             索要联系方式、安全漏洞改道、不把笔记内容写进正文。带着工具却没有
+             这些指令跑一轮，等于把安全规则换成了「模型自己看着办」。）
+    violation_behaviour: >
+      两条通路都会打穿 FR2.7 的隔离承诺：其一，若四个工具对每个会话可见，它们会在
+      普通对话、Guardian、选区菜单、知识编译等路径上被调用，而工作流 3 依赖的澄清
+      字段、诊断快照、去重选择在这些上下文里都不存在，FeedbackDraft.sourceConversationId
+      也会指向一个非反馈会话；其二，若技能解析不到时退回全量工具集，反馈会话会拿到
+      全部 vault 读工具，模型可读用户笔记并把这些内容写进一条公开发布的 issue——
+      而触发条件只是用户在设置页点一下禁用开关，且**完全静默**
     source: FR2.2, FR2.6
 
   - id: BR1.2
@@ -293,11 +311,19 @@ rules:
       匹配到的既有草稿并返回同一份载荷，因此不存在两张内容相同的卡片；
       ③ 提交前的同步原子认领——在发出任何 await 之前把草稿从非 submitting 置为
       submitting，已有 submitting / submitted 则立即拒绝。
+      **③ 的成立前提必须写死，否则它形同虚设**：草稿集合必须是**进程内共享的
+      同一份内存对象**（插件单实例，草稿存储以模块级/插件级单例持有，不是每次
+      执行都重新读盘），且「读 status → 判 → 写 status」必须在**同一个同步块**内
+      完成——一旦中间插入任何 `await`（例如先 `await loadDrafts()`），两次并发
+      批准就又都能通过，窗口原样打开。
+      **③ 是冗余层，不是主保障**：② 已保证同 dedupKey 至多存在一张卡片，③ 只是
+      再挡一次「同一张草稿被同时批准两次」的极端交错。不得把 ③ 当作主要并发保护
+      来陈述——它的作用面严格小于 ②。
     category: constraint
     applies_to: FeedbackDraft, 提交执行, 渲染
     trigger: 渲染草稿时 / 提交执行前
     logic: >
-      渲染时（工作流 3 步骤 2d）：按 dedupKey 匹配已有草稿
+      渲染时（工作流 3 步骤 2c）：按 dedupKey 匹配已有草稿
         IF 命中且 status = submitted
         THEN 直接回显既有结果，不进入确认流程、不新建
         IF 命中且 status ∈ {draft, awaiting_confirmation, submitting}
@@ -306,8 +332,9 @@ rules:
       提交时（工作流 4 步骤 3a）：
         IF 同 dedupKey 且 status = submitted THEN 拒绝，回显既有结果
         IF 同 dedupKey 且 status = submitting THEN 拒绝（并发提交）
-        ELSE 同步置 submitting（原子认领）后才发起网络请求
-    violation_behaviour: 用户连点、网络重试或队列重放产生重复 issue，污染仓库且无法批量撤回；若把保护寄望于「write ⇒ 串行执行」，那条链路根本不在提交路径上，等于没有保护
+        ELSE 在同一个同步块内（此前不得有任何 await）把 status 置为 submitting，
+             之后才允许发起网络请求
+    violation_behaviour: 用户连点、网络重试或队列重放产生重复 issue，污染仓库且无法批量撤回；若把保护寄望于「write ⇒ 串行执行」，那条链路根本不在提交路径上，等于没有保护；若 ③ 的读—判—写之间插入了 await，它挡不住任何东西，却会让人以为并发已被处理
     source: FR3.8, FR3.6
 
   - id: BR4.5
@@ -664,7 +691,7 @@ rules:
 
 | 规则 ID | 类别 | 一句话 |
 |---|---|---|
-| BR1.1 | constraint | 四个反馈工具只在反馈会话可见；会话内再强制激活 feedback 技能并收窄工具集（不含任何 vault 读工具） |
+| BR1.1 | constraint | 四个反馈工具只在反馈会话可见；会话内按技能子集收窄；**技能被禁用时 fail-closed**（只给四个工具 ∪ read_skill，绝不退回全量，且本轮不调模型） |
 | BR1.2 | policy | 反馈会话是干净会话：不注入记忆召回，也剔除环境上下文；普通对话不变 |
 | BR1.3 | policy | 反馈会话不写入长期记忆（对称隔离，可否决） |
 | BR1.4 | policy | 关闭带未提交草稿的 tab 不丢内容，会话与草稿都可恢复 |
@@ -680,7 +707,7 @@ rules:
 | BR4.1 | authorization | 两个写入工具无条件走审批，不受 confirmExecutions 影响；needsApproval 语义不变 |
 | BR4.2 | constraint | 卡片展示完整字节且可编辑，编辑值写回 args，展示与提交同源 |
 | BR4.3 | policy | 卡片必须讲清公开可见、以发布方账号发出、不可撤回，并解释为何此处仍需确认 |
-| BR4.4 | constraint | 三层幂等且全部落在真实提交路径上：requestId + dedupKey 跨卡片复用 + 提交前同步原子认领 |
+| BR4.4 | constraint | 三层幂等且都在真实提交路径上：requestId + dedupKey 跨卡片复用（主保障）+ 同步原子认领（冗余层，前提须满足） |
 | BR4.5 | constraint | 只有拿到 2xx 才允许声称成功、回显编号、置终态 |
 | BR5.1 | policy | 401/403/404/422/网络层各有不同的可操作提示 |
 | BR5.2 | policy | Retry-After 退避有上限含抖动；检索侧不退避，直接跳过去重 |

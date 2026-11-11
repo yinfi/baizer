@@ -78,20 +78,32 @@ else
   set -- "$range"
 fi
 
-# grep 退出码 0=命中、1=无命中、>1=出错。pipefail 下 git log 的失败会以非 1 传出，
-# 被第二个分支拦下——不能把「读不到历史」当成「干净」。
-matches=""
-rc=0
-matches="$(scan_range "$@" | grep -EI "$PATTERN")" && rc=0 || rc=$?
+# git 与 grep 的退出码必须**分开取**。合成一条管道再读 $? 是不行的：
+# `set -o pipefail` 取的是管道里**最右**的非零码，所以 `git log` 失败(128) 而 grep
+# 无命中(1) 时管道退出码是 1，与「扫过了、干净」无法区分——守卫会把「读不到历史」
+# 报成 CLEAN，正是它自己要防的那类静默失败。先让 git 落盘并单独判它的码，再判 grep。
+tmp_log="$(mktemp)"
+tmp_hit="$(mktemp)"
+trap 'rm -f "$tmp_log" "$tmp_hit"' EXIT
 
-if [ "$rc" -eq 0 ]; then
-  printf '%s\n' "$matches" | head -20
+rc_git=0
+if scan_range "$@" > "$tmp_log"; then rc_git=0; else rc_git=$?; fi
+if [ "$rc_git" -ne 0 ]; then
+  echo "::error::Credential scan failed: git could not read the commit range (exit ${rc_git}). Refusing to report a clean result."
+  exit 1
+fi
+
+rc_grep=0
+grep -EI "$PATTERN" "$tmp_log" > "$tmp_hit" && rc_grep=0 || rc_grep=$?
+
+if [ "$rc_grep" -eq 0 ]; then
+  head -20 "$tmp_hit"
   echo "::error::A GitHub credential pattern was found in the scanned commit range. Tokens must never enter git: secret scanning revokes them automatically and the failure is silent."
   exit 1
 fi
 
-if [ "$rc" -ne 1 ]; then
-  echo "::error::Credential scan failed (grep exit ${rc}); refusing to report a clean result."
+if [ "$rc_grep" -ne 1 ]; then
+  echo "::error::Credential scan failed (grep exit ${rc_grep}); refusing to report a clean result."
   exit 1
 fi
 

@@ -19,7 +19,13 @@
 4. 该会话的每一轮都以 turnOptions = { isolatedContext: true, forcedSkillName: 'feedback' }
    发起 chatStream
 5. 首轮若检测到内置凭据为空 → 走工作流 7（凭据缺失），不进入澄清
-6. 否则进入工作流 2（澄清对话）
+6. 每轮组装工具集前先解析 feedback 技能：
+   6a. 解析成功 → 工具集 = 技能声明的子集 ∪ {read_skill}，进入工作流 2
+   6b. 解析不到（技能不存在，或被用户在设置里禁用）→ **工具集 = 四个反馈工具
+       ∪ {read_skill}，绝不退回全量**；本轮不发起模型调用，在 tab 内给出明确提示
+       「反馈功能当前不可用：feedback 技能已被禁用」并指向设置页的启用入口
+       （BR1.1）。这是 fail-closed 分支：退回全量会让反馈会话拿到全部 vault
+       读工具，而触发条件只是设置页点一下开关
 7. 结束：用户看到一条可多轮继续的对话，与普通对话的交互体验一致（流式渲染、
    工具时间线、审批卡片、跨重启恢复全部复用）
 ```
@@ -100,8 +106,13 @@
    3a. 幂等第二层与第三层（BR4.4）：
        - 同 dedupKey 且 status = submitted → 直接回显既有编号与链接，不发起新请求
        - 同 dedupKey 且 status = submitting → 拒绝（并发提交）
-       - **同步原子认领**：在发出任何 await 之前把 status 置为 submitting。
-         两次真正并发的批准只有一个能通过这一步，另一个看到 submitting 即被拒
+       - **同步原子认领**：读 status → 判 → 写 status 三步必须在**同一个同步块**内
+         完成，此前不得有任何 await（尤其不能先 `await loadDrafts()` 再判）。
+         前提：草稿集合是**进程内共享的同一份内存对象**（插件单实例持有，不是
+         每次执行重新读盘）。两个条件缺一，两次并发批准就都能通过。
+         **这一层是冗余层**：② 已保证同 dedupKey 至多一张卡片，③ 只再挡一次
+         「同一张草稿被同时批准两次」的极端交错，作用面严格小于 ②，不得当作
+         主要并发保护来陈述
    3b. attempts 自增
    3c. 经 Obsidian requestUrl 发出写入请求（不引入新 HTTP 依赖）
        - new_issue    → POST /repos/yinfi/baizer/issues      （title, body, labels）
@@ -118,8 +129,12 @@
 `this.toolRegistry.execute(action, {...args, approved: true})`，全程不读 `risk` 与
 `executionMode`；`inferToolExecutionMode` 只作用于 pi agent loop 内的工具调用。首次
 `create_github_issue` 调用确实发生在 agent loop 内，但它以 `approval_required` 终止本轮、
-且**没有任何副作用**（只渲染 + 返回审批），所以串行化在那里没有并发意义。真正的三层保护
-是 BR4.4 的 requestId、dedupKey 跨卡片复用与同步原子认领。
+且**没有任何副作用**（只渲染 + 返回审批），所以串行化在那里没有并发意义。
+
+真实的三层保护是 BR4.4 的 ① requestId、② dedupKey 跨卡片复用、③ 同步原子认领。三者的
+作用面递减：① 管同一张卡的重复点击，② 管同内容的多张卡（它是**主保障**），③ 只再挡一次
+「同一张草稿被同时批准两次」的极端交错，**是冗余层**。③ 的两个前提（草稿集合为进程内
+单例、读—判—写在同一同步块内）必须满足，否则它挡不住任何东西——却会让人以为并发已被处理。
 
 ## 5. 工作流：失败、退避与暂存队列
 
@@ -385,14 +400,22 @@ provider dropdown 补一个 Anthropic 选项，之后这一行即回归直接映
 
 | 项 | 决定 |
 |---|---|
-| 声明 | 四个工具带 `visibility: 'feedback-session'`；既有工具不带（缺省 `'always'`） |
+| 声明 | 四个工具带 `visibility: 'feedback-session'`；既有工具不带（缺省 `'always'`）。**缺省的 fail-open 必须由测试补上**：断言这四个工具的 `visibility` 确实等于 `'feedback-session'`——漏写声明不会触发任何既有断言 |
 | 注册表 | `ToolRegistry.getAllDefinitions(options?: { includeFeedbackTools?: boolean })`——**缺省不含** `feedback-session` 的工具（fail-closed：将来新增的这类工具不会因为忘记改调用点而泄漏） |
-| 组装点 | `BaseChatRuntime.buildSkillModeTools(activeSkill, request)` 按 `request.isolatedContext` 决定 `includeFeedbackTools`；`getTools(options?)` 同样透出该可选参数 |
+| 组装点 | `BaseChatRuntime.buildSkillModeTools(activeSkill, request)`：非反馈会话按既有路径；反馈会话分两支——**技能解析成功**时用技能声明的子集，**技能解析不到**（`activateSkill` 返回 `null`：技能不存在或被 `settings.disabledSkills` 禁用）时用 `四个反馈工具 ∪ {read_skill}`，且本轮不发起模型调用、给出明确提示。两支都**不会**落到「返回全量工具集」那个分支（BR1.1）。`getTools(options?)` 同样透出该可选参数 |
+| 技能被禁用时**不得**发生的事 | 不得 `return [...getAllDefinitions()]`——那是本设计里唯一会把全部 vault 读工具交到反馈会话手里的通路，而触发条件只是设置页点一下开关，且静默 |
 | 非反馈会话的效果 | 四个工具**不在发给模型的工具列表里**（不是「看得到但被拒」）。普通对话、Guardian、选区菜单、知识编译路径上模型根本看不到它们 |
 | 与 BR1.1 收窄的关系 | **两件事，互不替代**：`visibility` 管「非反馈会话里能不能看到」，`feedback` 技能的 `tools:` 子集管「反馈会话内只给这四个 + read_skill」 |
 | 执行期兜底 | `ToolContext` 新增 `conversationId`（`pi-tool-adapter` 从 `PreparedChatTurn.conversationId` 传入、`performApprovedAction` 从自己的 `conversationId` 参数传入）。写入工具在 `ctx.conversationId` 缺失、或同 dedupKey 草稿的 `sourceConversationId` 与它不一致时拒绝。**这道兜底识别不了「首次调用」**（此时还没有草稿），所以它的定位是重放/串台防护，可见性由上面几行负责 |
 | `sourceConversationId` 的来源 | `ctx.conversationId`。缺失时工具返回明确错误而不创建草稿——不猜、不回退到「未知会话」 |
 | `/tools` | 走 `getTools()`，在非反馈会话里同样不列出这四个（与模型看到的一致）；反馈会话内 `/tools` 是否列出它们留给 Code Generation 决定，不作为契约 |
+
+**必须补的三条测试**（本条与 BR1.1 的验收依据）：
+
+1. 把 `feedback` 加进 `settings.disabledSkills` 后发起反馈会话 → 断言模型拿到的工具集里
+   **没有任何 vault 读工具**，且不含四个反馈工具之外的其它工具。
+2. 断言四个工具注册时的 `visibility` 确实等于 `'feedback-session'`（缺省值 fail-open，漏写无人守）。
+3. 非反馈会话 → 断言工具集不含这四个工具。
 
 ## 派生视图：实体关系图（源自 `entities.md`）
 
@@ -454,7 +477,7 @@ erDiagram
 
 | 规则 ID | 类别 | 一句话 |
 |---|---|---|
-| BR1.1 | constraint | 四个反馈工具只在反馈会话可见；会话内强制激活 feedback 技能并收窄工具集 |
+| BR1.1 | constraint | 四个反馈工具只在反馈会话可见；会话内按技能子集收窄；技能被禁用时 fail-closed |
 | BR1.2 | policy | 反馈会话是干净会话（不注入记忆、剔除环境上下文），普通对话不变 |
 | BR1.3 | policy | 反馈会话不写入长期记忆（可否决） |
 | BR1.4 | policy | 关闭带未提交草稿的 tab 不丢内容 |
@@ -470,7 +493,7 @@ erDiagram
 | BR4.1 | authorization | 两个写入工具无条件走审批，不受 confirmExecutions 影响 |
 | BR4.2 | constraint | 卡片展示完整字节且可编辑，展示与提交同源 |
 | BR4.3 | policy | 卡片必须讲清三条警告并解释为何此处仍需确认 |
-| BR4.4 | constraint | 三层幂等且都落在真实提交路径：requestId + dedupKey 跨卡片复用 + 同步原子认领 |
+| BR4.4 | constraint | 三层幂等且都在真实提交路径：requestId + dedupKey 跨卡片复用（主保障）+ 同步原子认领（冗余层） |
 | BR4.5 | constraint | 只有 2xx 才允许声称成功、回显编号、置终态；终态标识从草稿派生 |
 | BR5.1 | policy | 错误按 401/403/404/422/网络层分类给可操作提示 |
 | BR5.2 | policy | Retry-After 退避有上限含抖动；检索侧不退避 |

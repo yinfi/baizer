@@ -263,3 +263,44 @@ Does this all look correct before I generate the artifact?
 ## 数字更正
 
 编排层指出的汇总数字错误成立：此前回报的「54 项 FR / OK 38 / N/A 16」与产物不符。**产物本身没有问题**，是我汇总时数错了。当前实际值（返工后）：**56 行 = 48 项 FR（OK 42 / N/A 6）+ 8 项 NFR（OK 2 / N/A 6）= OK 44 / N/A 12**；`rules.md` 定义 **39** 条 BR，全部被引用，无断链、无孤儿。后续引用一律以产物为准。
+
+---
+
+# 收口（review-02）
+
+`reviews/review-02.md` 给出 **READY**（0 Critical、1 Major、4 Minor），其中 1 Major 与 1 Minor 由编排层独立实测复现。两条都成立，逐条收口如下。
+
+## R10（Major）反馈会话的 fail-open 通路
+
+**问题**：`SkillRegistry.activateSkill` 在技能不存在或**被禁用**时返回 `null`（`skill-registry.ts:283-288`，`isEnabled` 读 `settings.disabledSkills`），而 `BR1.1` 的反馈分支没写「解析不到」的行为 → 落到 `buildSkillModeTools(null, request)` 的「返回全量工具集」分支，而决策表 6 又因 `isolatedContext === true` 置 `includeFeedbackTools` 真 → 反馈会话拿到**全量工具集（含所有 vault 读工具）+ 四个反馈工具**。内置技能在设置页有逐项开关，点一下即可触发，且静默。此外该 logic 块里有两条 `ELSE`，规则本身读不出确定语义。
+
+**返工**：
+- `BR1.1` 补上第三条分支：`activateSkill("feedback")` 返回 null 时，工具集 = **四个反馈工具 ∪ {read_skill}，绝不退回全量**；
+- **并且本轮不发起模型调用**，在反馈 tab 内给出「反馈功能当前不可用：feedback 技能已被禁用」+ 指向设置页启用入口。理由：`SKILL.md` 承载着若干**提示词层的安全规则**（不主动索要联系方式、安全漏洞改道、不把笔记内容写进正文）。带着工具却没有这些指令跑一轮，等于把安全规则换成了「模型自己看着办」——那会把一个能力隔离问题变成一个行为约束问题；
+- 合并掉重复的 `ELSE`（原来「走既有技能解析路径」出现了两次）；
+- 决策表 6 新增「技能被禁用时**不得**发生的事」一行与三条测试：① 禁用 `feedback` → 断言反馈会话的工具集里没有任何 vault 读工具；② 断言四个工具注册时的 `visibility` 确实等于 `'feedback-session'`（缺省值 fail-open，漏写无人守）；③ 非反馈会话断言不含这四个工具；
+- `frontend-components.md` §7 补「会话前置条件不满足时的提示」表（凭据为空 / 技能被禁用 / LLM 不可用三条各自的可区分提示）。
+
+**为什么选「拒绝该轮」而不是「只给四个工具继续跑」**：编排层给了两个选项。只给工具不拒绝，模型会在一轮没有任何澄清策略与安全规则的情况下直接调 `create_github_issue`——渲染仍由工具确定性完成、审批闸门仍在，所以不会产生「未确认就公开」，但 issue 质量与那几条提示词层的安全规则会一起消失。既然触发条件是一个用户可见的设置开关，给出可操作的提示比静默降级诚实。
+
+## R11（Minor）守卫「扫描出错即失败」不成立
+
+**问题**：`matches="$(scan_range "$@" | grep -EI "$PATTERN")"` 在 `set -o pipefail` 下取的是管道里**最右**的非零码——`git log` 失败（128）而 `grep` 无命中（1）时 `rc=1`，脚本判定 CLEAN 并 `exit 0`，那条错误分支永远走不到。脚本里那句「pipefail 下 git log 的失败会以非 1 传出」的注释**是错的**。
+
+**返工**：把两个退出码分开取——先 `scan_range "$@" > "$tmp_log"` 并单独判 `rc_git`（非 0 即 `exit 1`），再单独判 `rc_grep`（0=命中、1=干净、其它=出错）。删掉那句错误注释，换成正确的说明。临时文件用 `mktemp` + `trap ... EXIT` 清理。
+
+**验证**：`--range <可解析的 sha>..refs/heads/does-not-exist` → `exit 1`（此前是 0）；干净仓库 `exit 0`；「先提交 token 再删掉」在 `--range` 与 `--history` 下仍 `exit 1`；用法错误 `exit 2`。
+
+## R12（Minor）③ 同步原子认领的成立前提
+
+**返工**：在 `BR4.4` 与工作流 4 步骤 3a 写明两个前提——草稿集合必须是**进程内共享的同一份内存对象**（插件单实例持有，不是每次执行重新读盘），且「读 status → 判 → 写 status」必须在**同一个同步块**内完成（此前不得有任何 `await`，尤其不能先 `await loadDrafts()` 再判）。同时写明 **③ 是冗余层**：② 已保证同 dedupKey 至多一张卡片，③ 只再挡一次「同一张草稿被同时批准两次」的极端交错，作用面严格小于 ②，不得当作主要并发保护来陈述。补测试「同一 dedupKey 同时发起两次批准 → 只发出一次写入请求」。
+
+## R13（Minor）dedupKey 措辞与算法不符
+
+**返工**：`entities.md` 的措辞改为「**渲染时的内容派生键，一经派生不再随卡片编辑变化**」（卡片编辑写的是 `IssuePayload`，不改该字段），并补一句：它仍是内容派生，所以**对话里改写内容会派生新键**——匹配不到旧草稿就新建一份，旧草稿留在 `draft` 并占用未提交上限 20，由用户按 `BR5.4` 清理。并写明按「身份」字面理解会写出「会话内只派生一次」的实现，那会破坏 BR4.4 的第 ② 层。
+
+## 一并纳入
+
+`reviews/review-02.md` 已提交到本分支（此前只在评审方工作目录，与 review-01 同况）。
+
+**按编排层决定留到实现阶段、本阶段不动**：① CI 的触发条件（`pull_request.branches: [main]` 导致 stacked PR 不跑 CI）；② 给 `bug_report.yml` 的 provider dropdown 补 Anthropic 选项（补后决策表 3b 的例外集可清空）。
