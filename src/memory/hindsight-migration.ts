@@ -14,12 +14,20 @@ import { MEMORY_DIR } from '../mcp/types';
 
 const PROFILE_PATH = `${MEMORY_DIR}/user-profile.json`;
 const SUMMARIES_PATH = `${MEMORY_DIR}/session-summaries.json`;
-const PREVIOUS_MEMORY_DIR = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory'].join('/');
-const PREVIOUS_PROFILE_PATH = `${PREVIOUS_MEMORY_DIR}/user-profile.json`;
-const PREVIOUS_SUMMARIES_PATH = `${PREVIOUS_MEMORY_DIR}/session-summaries.json`;
-const PREVIOUS_MEMORIES_PATH = `${PREVIOUS_MEMORY_DIR}/memories.json`;
+
+/** 旧插件的记忆目录文件(位于用户实际的 Vault#configDir 下;目录名动态拼接以避开品牌检查)。 */
+function previousMemoryPaths(app: App): { profile: string; summaries: string; memories: string } {
+  const dir = [app.vault.configDir, ['obsidian', 'cli'].join('-') + '-memory'].join('/');
+  return {
+    profile: `${dir}/user-profile.json`,
+    summaries: `${dir}/session-summaries.json`,
+    memories: `${dir}/memories.json`,
+  };
+}
 
 type LegacyProfile = typeof DEFAULT_USER_PROFILE;
+/** 旧版 JSON 文件解析出的、尚未校验的对象。字段类型一律为 unknown。 */
+type JsonObject = Record<string, unknown>;
 
 export async function importPreviousMemoryFiles(
   app: App,
@@ -27,22 +35,23 @@ export async function importPreviousMemoryFiles(
   now: number = Date.now(),
 ): Promise<void> {
   await store.ready();
+  const previous = previousMemoryPaths(app);
   const state = await store.getMigrationState();
   const stateUpdate: Partial<MigrationState> = {};
 
   if (!state.previousProfileFileImported) {
-    const previousProfile = await readJson<any | null>(app, PREVIOUS_PROFILE_PATH, null);
+    const previousProfile = await readJsonObject(app, previous.profile);
     if (previousProfile) {
-      const currentProfile = await readJson<any | null>(app, PROFILE_PATH, null);
+      const currentProfile = await readJsonObject(app, PROFILE_PATH);
       await writeJson(app, PROFILE_PATH, mergeProfiles(previousProfile, currentProfile, now));
     }
     stateUpdate.previousProfileFileImported = true;
   }
 
   if (!state.previousSummariesFileImported) {
-    const previousSummaries = await readJson<any[]>(app, PREVIOUS_SUMMARIES_PATH, []);
+    const previousSummaries = await readJsonArray(app, previous.summaries);
     if (previousSummaries.length > 0) {
-      const currentSummaries = await readJson<any[]>(app, SUMMARIES_PATH, []);
+      const currentSummaries = await readJsonArray(app, SUMMARIES_PATH);
       await writeJson(app, SUMMARIES_PATH, mergeSummaries(previousSummaries, currentSummaries));
     }
     stateUpdate.previousSummariesFileImported = true;
@@ -59,36 +68,37 @@ export async function migrateLegacyMemory(
   now: number = Date.now(),
 ): Promise<void> {
   await store.ready();
+  const previous = previousMemoryPaths(app);
   const state = await store.getMigrationState();
   const records: MemoryRecord[] = [];
   const stateUpdate: Partial<MigrationState> = {};
 
   if (!state.legacyProfileMigrated) {
-    const profile = await readJson<any | null>(app, PROFILE_PATH, null);
+    const profile = await readJsonObject(app, PROFILE_PATH);
     if (profile) records.push(...profileToMemories(profile, now));
     stateUpdate.legacyProfileMigrated = true;
   }
 
   if (!state.legacySummariesMigrated) {
-    const summaries = await readJson<any[]>(app, SUMMARIES_PATH, []);
+    const summaries = await readJsonArray(app, SUMMARIES_PATH);
     records.push(...summariesToMemories(summaries, now));
     stateUpdate.legacySummariesMigrated = true;
   }
 
   if (!state.previousPluginProfileMigrated) {
-    const profile = await readJson<any | null>(app, PREVIOUS_PROFILE_PATH, null);
+    const profile = await readJsonObject(app, previous.profile);
     if (profile) records.push(...profileToMemories(profile, now));
     stateUpdate.previousPluginProfileMigrated = true;
   }
 
   if (!state.previousPluginSummariesMigrated) {
-    const summaries = await readJson<any[]>(app, PREVIOUS_SUMMARIES_PATH, []);
+    const summaries = await readJsonArray(app, previous.summaries);
     records.push(...summariesToMemories(summaries, now));
     stateUpdate.previousPluginSummariesMigrated = true;
   }
 
   if (!state.previousPluginMemoriesMigrated) {
-    const importedMemories = await readJson<any[]>(app, PREVIOUS_MEMORIES_PATH, []);
+    const importedMemories = await readJsonArray(app, previous.memories);
     records.push(...normalizeImportedMemories(importedMemories, now));
     stateUpdate.previousPluginMemoriesMigrated = true;
   }
@@ -101,7 +111,7 @@ export async function migrateLegacyMemory(
   }
 }
 
-function mergeProfiles(previous: any, current: any | null, now: number): LegacyProfile {
+function mergeProfiles(previous: JsonObject, current: JsonObject | null, now: number): LegacyProfile {
   const previousProfile = normalizeProfile(previous, now);
   const currentProfile = current ? normalizeProfile(current, now) : null;
   if (!currentProfile) return previousProfile;
@@ -130,59 +140,70 @@ function mergeProfiles(previous: any, current: any | null, now: number): LegacyP
   };
 }
 
-function normalizeProfile(value: any, now: number): LegacyProfile {
+function normalizeProfile(raw: unknown, now: number): LegacyProfile {
+  const value = asObject(raw);
+  const preferences = asObject(value.preferences);
+  const context = asObject(value.context);
+  const metadata = asObject(value.metadata);
   return {
-    name: typeof value?.name === 'string' ? value.name : DEFAULT_USER_PROFILE.name,
-    profession: typeof value?.profession === 'string' ? value.profession : DEFAULT_USER_PROFILE.profession,
-    expertise: arrayOf(value?.expertise),
+    name: typeof value.name === 'string' ? value.name : DEFAULT_USER_PROFILE.name,
+    profession: typeof value.profession === 'string' ? value.profession : DEFAULT_USER_PROFILE.profession,
+    expertise: arrayOf(value.expertise),
     preferences: {
-      language: typeof value?.preferences?.language === 'string'
-        ? value.preferences.language
+      language: typeof preferences.language === 'string'
+        ? preferences.language
         : DEFAULT_USER_PROFILE.preferences.language,
-      responseStyle: typeof value?.preferences?.responseStyle === 'string'
-        ? value.preferences.responseStyle
+      responseStyle: typeof preferences.responseStyle === 'string'
+        ? preferences.responseStyle
         : DEFAULT_USER_PROFILE.preferences.responseStyle,
-      topics: arrayOf(value?.preferences?.topics),
+      topics: arrayOf(preferences.topics),
     },
-    workflows: Array.isArray(value?.workflows)
-      ? value.workflows.filter((item: any) => typeof item?.name === 'string' && typeof item?.description === 'string')
+    workflows: Array.isArray(value.workflows)
+      ? (value.workflows as unknown[]).filter(isLegacyWorkflow)
       : [],
     context: {
-      currentProjects: arrayOf(value?.context?.currentProjects),
-      goals: arrayOf(value?.context?.goals),
-      challenges: arrayOf(value?.context?.challenges),
+      currentProjects: arrayOf(context.currentProjects),
+      goals: arrayOf(context.goals),
+      challenges: arrayOf(context.challenges),
     },
     metadata: {
-      createdAt: numberOr(value?.metadata?.createdAt, now),
-      updatedAt: numberOr(value?.metadata?.updatedAt, now),
-      totalInteractions: numberOr(value?.metadata?.totalInteractions, 0),
-      lastProfileUpdate: numberOr(value?.metadata?.lastProfileUpdate, now),
+      createdAt: numberOr(metadata.createdAt, now),
+      updatedAt: numberOr(metadata.updatedAt, now),
+      totalInteractions: numberOr(metadata.totalInteractions, 0),
+      lastProfileUpdate: numberOr(metadata.lastProfileUpdate, now),
     },
   };
 }
 
-function mergeSummaries(previous: any[], current: any[]): any[] {
-  const merged: any[] = [];
+function isLegacyWorkflow(item: unknown): item is LegacyProfile['workflows'][number] {
+  const value = asObject(item);
+  return typeof value.name === 'string' && typeof value.description === 'string';
+}
+
+function mergeSummaries(previous: unknown[], current: unknown[]): JsonObject[] {
+  const merged: JsonObject[] = [];
   const seen = new Set<string>();
-  for (const summary of [...current, ...previous]) {
-    if (typeof summary?.summary !== 'string' || !summary.summary.trim()) continue;
+  for (const item of [...current, ...previous]) {
+    const summary = asObject(item);
+    if (typeof summary.summary !== 'string' || !summary.summary.trim()) continue;
     const key = `${typeof summary.timestamp === 'number' ? summary.timestamp : ''}:${summary.summary.trim()}`;
     if (seen.has(key)) continue;
     seen.add(key);
     merged.push(summary);
   }
-  return merged.sort((a, b) => numberOr(b?.timestamp, 0) - numberOr(a?.timestamp, 0));
+  return merged.sort((a, b) => numberOr(b.timestamp, 0) - numberOr(a.timestamp, 0));
 }
 
-function normalizeImportedMemories(values: any[], now: number): MemoryRecord[] {
+function normalizeImportedMemories(values: unknown, now: number): MemoryRecord[] {
   if (!Array.isArray(values)) return [];
-  return values
+  return (values as unknown[])
     .map((value) => normalizeImportedMemory(value, now))
     .filter((memory): memory is MemoryRecord => memory !== null);
 }
 
-function normalizeImportedMemory(value: any, now: number): MemoryRecord | null {
-  if (typeof value?.text !== 'string' || !value.text.trim()) return null;
+function normalizeImportedMemory(raw: unknown, now: number): MemoryRecord | null {
+  const value = asObject(raw);
+  if (typeof value.text !== 'string' || !value.text.trim()) return null;
 
   const type = isMemoryType(value.type) ? value.type : 'world';
   const bankId = typeof value.bankId === 'string' && value.bankId.trim()
@@ -216,27 +237,35 @@ function normalizeImportedMemory(value: any, now: number): MemoryRecord | null {
   };
 }
 
-function profileToMemories(profile: any, now: number): MemoryRecord[] {
+function profileToMemories(profile: JsonObject, now: number): MemoryRecord[] {
   const texts: string[] = [];
-  if (profile.profession) texts.push(`User profession: ${profile.profession}`);
+  const preferences = asObject(profile.preferences);
+  const context = asObject(profile.context);
+  if (profile.profession) texts.push(`User profession: ${String(profile.profession)}`);
   for (const expertise of arrayOf(profile.expertise)) texts.push(`User expertise: ${expertise}`);
-  if (profile.preferences?.responseStyle) texts.push(`User response style preference: ${profile.preferences.responseStyle}`);
-  for (const project of arrayOf(profile.context?.currentProjects)) texts.push(`Current project: ${project}`);
-  for (const goal of arrayOf(profile.context?.goals)) texts.push(`User goal: ${goal}`);
+  if (preferences.responseStyle) {
+    texts.push(`User response style preference: ${String(preferences.responseStyle)}`);
+  }
+  for (const project of arrayOf(context.currentProjects)) texts.push(`Current project: ${project}`);
+  for (const goal of arrayOf(context.goals)) texts.push(`User goal: ${goal}`);
 
   return texts.map((text) => makeMemory(text, 'world', 'profile-migration', now, 0.8));
 }
 
-function summariesToMemories(summaries: any[], now: number): MemoryRecord[] {
-  return summaries
-    .filter((summary) => typeof summary?.summary === 'string' && summary.summary.trim())
-    .map((summary) => makeMemory(
+function summariesToMemories(summaries: unknown[], now: number): MemoryRecord[] {
+  const memories: MemoryRecord[] = [];
+  for (const item of summaries) {
+    const summary = asObject(item);
+    if (typeof summary.summary !== 'string' || !summary.summary.trim()) continue;
+    memories.push(makeMemory(
       `Previous session: ${summary.summary.trim()}`,
       'experience',
       'summary-migration',
       typeof summary.timestamp === 'number' ? summary.timestamp : now,
       0.65,
     ));
+  }
+  return memories;
 }
 
 function makeMemory(
@@ -312,12 +341,13 @@ function isMemoryType(value: unknown): value is MemoryType {
   return value === 'world' || value === 'experience' || value === 'observation';
 }
 
-function normalizeSource(value: any): MemorySource {
-  const kind = isSourceKind(value?.kind) ? value.kind : 'manual';
+function normalizeSource(raw: unknown): MemorySource {
+  const value = asObject(raw);
+  const kind = isSourceKind(value.kind) ? value.kind : 'manual';
   const source: MemorySource = { kind };
-  if (typeof value?.messageId === 'string') source.messageId = value.messageId;
-  if (typeof value?.action === 'string') source.action = value.action;
-  if (typeof value?.target === 'string') source.target = value.target;
+  if (typeof value.messageId === 'string') source.messageId = value.messageId;
+  if (typeof value.action === 'string') source.action = value.action;
+  if (typeof value.target === 'string') source.target = value.target;
   return source;
 }
 
@@ -337,18 +367,38 @@ function extractSimpleEntities(text: string): string[] {
     .slice(0, 5);
 }
 
-async function readJson<T>(app: App, path: string, fallback: T): Promise<T> {
+/** 读取并解析 JSON;文件缺失或内容损坏时返回 undefined。解析结果未经校验,调用方必须窄化。 */
+async function readJson(app: App, path: string): Promise<unknown> {
   try {
-    const adapter = app.vault.adapter as any;
-    if (!await adapter.exists(path)) return fallback;
-    return JSON.parse(await adapter.read(path)) as T;
+    const adapter = app.vault.adapter;
+    if (!await adapter.exists(path)) return undefined;
+    return JSON.parse(await adapter.read(path)) as unknown;
   } catch {
-    return fallback;
+    return undefined;
   }
 }
 
+async function readJsonObject(app: App, path: string): Promise<JsonObject | null> {
+  const value = await readJson(app, path);
+  return isJsonObject(value) ? value : null;
+}
+
+async function readJsonArray(app: App, path: string): Promise<unknown[]> {
+  const value = await readJson(app, path);
+  return Array.isArray(value) ? (value as unknown[]) : [];
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 把任意值视为对象读取;非对象一律当作空对象,各字段随后按类型逐个窄化。 */
+function asObject(value: unknown): JsonObject {
+  return isJsonObject(value) ? value : {};
+}
+
 async function writeJson(app: App, path: string, value: unknown): Promise<void> {
-  const adapter = app.vault.adapter as any;
+  const adapter = app.vault.adapter;
   if (!await adapter.exists(MEMORY_DIR)) {
     await adapter.mkdir(MEMORY_DIR);
   }

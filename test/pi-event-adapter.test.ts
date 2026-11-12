@@ -193,6 +193,33 @@ async function runTests() {
       partialResult: 'partial',
     } as any)).toBeUndefined();
   });
+
+  await test('leaves malformed tool results untouched instead of crashing', () => {
+    // 非对象结果原样返回（旧实现靠 ?. 逐层兜底）。
+    expect(unwrapPiToolResult(null)).toEqual(null);
+    expect(unwrapPiToolResult('raw text')).toEqual('raw text');
+    expect(unwrapPiToolResult(42)).toEqual(42);
+    // details 不是对象 / content 不是数组：都不该被当成 Baizer 包装结果。
+    const weird = { details: 'not-an-object', content: 'not-an-array' };
+    expect(unwrapPiToolResult(weird)).toEqual(weird);
+    // 空文本 content：JSON.parse 失败后仍包成 message（与旧行为一致）。
+    expect(unwrapPiToolResult({ content: [{ type: 'text', text: '' }] }))
+      .toEqual({ message: '' });
+  });
+
+  await test('reports no tool error for malformed error results', () => {
+    // details 不是对象、content 不是数组时读不出错误文本，于是不附加 error 字段。
+    expect(mapPiEventToStreamEvent({
+      type: 'tool_execution_end',
+      toolName: 'read_note',
+      result: { details: 'oops', content: 'oops' },
+      isError: true,
+    } as any)).toEqual({
+      type: 'tool_result',
+      name: 'read_note',
+      result: { details: 'oops', content: 'oops' },
+    });
+  });
 }
 
 runTests().catch((e) => {

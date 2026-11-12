@@ -1,14 +1,16 @@
 import { App, Notice } from 'obsidian';
-import { PluginSettings, ProviderConfig } from '../mcp/types';
+import { PLUGIN_ID, PluginSettings, ProviderConfig } from '../mcp/types';
 import { MemoryManager } from '../memory/memory-manager';
 import { MemoryMutationResult, MemoryView, MemoryViewRequest, UserProfile } from '../memory/types';
 import { logger } from '../utils/logger';
-import { GenerationOptions, ModelOption, StreamEvent } from '../models/interfaces';
+import { ChatContextItem, GenerationOptions, ModelOption, StreamEvent } from '../models/interfaces';
 import { SkillRegistry } from '../skills/skill-registry';
 import { ToolRegistry } from '../skills/tool-registry';
-import { SkillCommandEntry, SkillSummary } from '../skills/types';
+import { SkillCommandEntry, SkillSummary, ToolArgs, ToolResult } from '../skills/types';
 import { createChatRuntime } from '../runtime/runtime-factory';
-import { buildGeminiModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn, resolveCustomHeaders } from '../runtime/pi/pi-native-model';
+import { buildAnthropicModel, buildOpenAICompatModel, createNativeCompleteFn, NativeCompleteFn, resolveCustomHeaders } from '../runtime/pi/pi-native-model';
+// 仅类型导入（编译期擦除），不把 ESM-only 的 pi-ai 主入口拉进 CJS 测试环境。
+import type { Api, Model } from '@earendil-works/pi-ai';
 import { createHarnessExecutionEnv } from '../runtime/pi/harness-env';
 import { ProviderCapabilities } from '../runtime/provider-capabilities';
 import * as modelCatalog from './model-catalog-service';
@@ -26,19 +28,82 @@ import {
     GenerationStrategyService,
 } from './generation-strategy-service';
 import { ObsidianContextSnapshot } from './obsidian-context-service';
-import { OperationAuditLog } from './operation-audit-log';
+import { ApprovalRequestState, OperationAuditLog, OperationOutcome } from './operation-audit-log';
+import { ApprovalExecutionOutcome, ApprovalExecutionRegistry } from './approval-execution';
+import { t } from '../i18n/zh';
 import { WorkspaceEditService } from './workspace-edit-service';
+
+/**
+ * 「模型列表 + 它为什么是这个列表」。
+ *
+ * 存在的理由：`getAvailableModels()` 在抓取失败时会静默回落到 `getFallbackModels()`，
+ * 于是调用方无法区分「端点真的列出了模型」与「列不出来、给了一份兜底」——
+ * settings 面板只能靠数组形状去猜（例如「只有一项且恰好是当前模型」），
+ * 而那会误伤「端点确实只暴露一个模型」的合法情况。
+ *
+ * 字段含义：
+ *  - `listed === true`：**仅当**端点真的回了一份非空模型清单。这是「这份 models
+ *    到底是不是端点说的」的唯一权威信号 —— 空清单、body 解析不出 `{data:[...]}`、
+ *    未配置 key、任何失败，以及被换成 `getFallbackModels()` 的内置猜测，都必须是 false。
+ *    只看 `listingUnsupported === false && !error` 是不够的：端点回 `200 {"data":[]}`
+ *    时两者都是默认值，但 models 其实是内置兜底 —— 那会让 UI 报「已列出 N 个模型」
+ *    并把一个端点从未宣称过的模型名写进 config.model。
+ *  - `listingUnsupported === true`：**仅当** `listModels()` 抛出
+ *    `ModelListingUnsupportedError`（列模型端点返回 404 / 405 / 501）。
+ *    这是能力缺口而非故障 —— 端点可能照样能生成，UI 应提示「手动输入模型名」
+ *    而不是报「配置错误」。此时 `error` 不设置。
+ *  - `error`：没拿到真实列表的其他原因（未配置 apiKey、401、网络错误…）。
+ *  - `models` 通常在失败后回落到内置列表，所以大多非空 —— 但**并不保证非空**：
+ *    用户自建的 provider（`custom-*`）没有内置兜底列表，此时就是 `[]`。
+ *    调用方可以直接渲染；但只有 `listed === true` 时才可以把它们当作端点宣称的模型。
+ *
+ * 缓存语义（重要）：整个判定结果（含 `listed` / `listingUnsupported` / `error`）一起缓存
+ * 10 分钟，非 `forceRefresh` 的调用会**原样重放**上一次的判定 —— 失败也重放。
+ * 否则「失败一次之后，每次重渲染都退回 listed」这种谎报就落在最常见路径上
+ * （重渲染从不传 forceRefresh）。需要真正重试请传 `forceRefresh: true`（UI 的 Refresh 即如此）。
+ */
+export interface AvailableModelsResult {
+    models: ModelOption[];
+    listed: boolean;
+    listingUnsupported: boolean;
+    error?: Error;
+}
+
+/** 取 unknown 异常的 message 字符串；不是带字符串 message 的对象时返回 undefined。 */
+function thrownMessage(error: unknown): string | undefined {
+    if (typeof error !== 'object' || error === null) return undefined;
+    const message = (error as { message?: unknown }).message;
+    return typeof message === 'string' ? message : undefined;
+}
+
+/** 依次返回第一个非空字符串；都不是时返回空串。用于从未知工具参数/结果里取路径与文案。 */
+function firstString(...candidates: unknown[]): string {
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate) return candidate;
+    }
+    return '';
+}
 
 export class ModelService {
     private memoryManager: MemoryManager | null = null;
-    private readonly modelListCache = new Map<string, { timestamp: number; models: ModelOption[] }>();
+    private readonly modelListCache = new Map<string, { timestamp: number; models: ModelOption[]; listed: boolean; listingUnsupported: boolean; error?: Error }>();
     private readonly modelListCacheTtlMs = 10 * 60 * 1000;
+    /**
+     * 进行中的模型列表请求，键与 modelListCache 相同。
+     *
+     * 设置页每次重渲染都会重新问一遍 /models；移动端慢网络下并发渲染会叠出多条
+     * 重复请求（issue #81）。这里让并发的非 forceRefresh 调用共享同一个 Promise，
+     * 落定后（无论成功还是失败）立刻删除，避免把一次失败永久粘在表里。
+     */
+    private readonly modelListInFlight = new Map<string, Promise<AvailableModelsResult>>();
     private readonly generationStrategyService = new GenerationStrategyService();
     private providerChangedCallbacks: Array<() => void> = [];
     private suppressProviderChangedNotification = false;
     private skillRegistry: SkillRegistry;
     private toolRegistry: ToolRegistry;
     private operationAuditLog: OperationAuditLog;
+    /** 审批执行登记表：以 request id 为键，跨控制器/视图重挂载保证最多执行一次。 */
+    private readonly approvalExecutionRegistry = new ApprovalExecutionRegistry();
     private workspaceEditService: WorkspaceEditService;
     /**
      * Harness 会话生命周期管理器。仅当 vault.adapter 可用时启用(桌面与移动端均有,测试 mock 可能缺失)。
@@ -99,7 +164,7 @@ export class ModelService {
      * 摘要不再自己生成——pi 的 compact() 复用 Harness 的 provider(getApiKeyAndHeaders)。
      */
     private initializeSessionManager() {
-        const adapter = (this.app?.vault as any)?.adapter;
+        const adapter = this.app?.vault?.adapter;
         if (!adapter || typeof adapter.read !== 'function' || typeof adapter.append !== 'function') {
             this.sessionManager = null;
             this.harnessEnv = null;
@@ -108,7 +173,10 @@ export class ModelService {
         }
         try {
             const vaultAdapter = createVaultFileAdapter(adapter);
+            // 插件私有目录一律挂在用户实际的配置目录下(Vault#configDir 可被用户改名)。
+            const configDir = this.app.vault.configDir;
             this.sessionManager = new HarnessSessionManager(vaultAdapter, {
+                sessionsRoot: `${configDir}/${PLUGIN_ID}-sessions`,
                 loadRef: (conversationId) => this.loadSessionRef(conversationId),
                 saveRef: (conversationId, ref) => this.saveSessionRef(conversationId, ref),
                 contextWindow: () => this.settings.contextWindow ?? 0,
@@ -116,10 +184,10 @@ export class ModelService {
                 // skipGenerationPlan:摘要是纯文本任务,不需要写作策略装饰(同 buildMemoryOptions 的用法)。
                 summarize: (prompt) => this.generate(prompt, undefined, 'shell', undefined, null, { skipGenerationPlan: true }),
             });
-            this.harnessEnv = createHarnessExecutionEnv(vaultAdapter);
+            this.harnessEnv = createHarnessExecutionEnv(vaultAdapter, `${configDir}/${PLUGIN_ID}-tmp`);
             // 用户自定义命令服务与 harnessEnv 同源;懒加载模板(首次列命令/执行时读盘)。
-            this.promptTemplateService = new PromptTemplateService(this.harnessEnv);
-        } catch (error) {
+            this.promptTemplateService = new PromptTemplateService(this.harnessEnv, `${configDir}/${PLUGIN_ID}-commands`);
+        } catch {
             logger.warn('Failed to initialize HarnessSessionManager; falling back to in-memory sessions.', 'ModelService');
             this.sessionManager = null;
             this.harnessEnv = null;
@@ -234,12 +302,48 @@ export class ModelService {
 
     public async updateSettings(settings: PluginSettings) {
         await this.flushMemorySession();
+        const previousProviders = this.settings.providers;
         this.settings = settings;
         this.cleanup();
         this.initializeProvider();
-        this.modelListCache.clear();
+        // #81：此前无条件 clear() 整个模型清单缓存，哪怕这次改的是记忆/权限等与 provider
+        // 连接完全无关的字段。设置页几乎每个开关都走 updateSettings()，而 renderModelField
+        // 在分区重绘时无条件重新拉一次清单（没有 forceRefresh 概念），于是「改一个不相关字段 →
+        // 缓存被清空 → 下一次重绘立刻真发一次 /models 请求」。缓存 key 本身已经编码了
+        // providerId:baseUrl:apiKey 前缀，这里只按 key 精确失效真正变了连接参数的 provider，
+        // 没碰 baseUrl/apiKey 的 provider 保留其缓存，相当于「改一个字段」不再牵连模型列表请求。
+        this.invalidateChangedProviderCaches(previousProviders, settings.providers);
         if (!this.suppressProviderChangedNotification) {
             this.notifyProviderChanged();
+        }
+    }
+
+    /** 只失效 baseUrl/apiKey 真的变了（或被删除）的 provider 的模型清单缓存。 */
+    private invalidateChangedProviderCaches(
+        previous: Record<string, ProviderConfig> | undefined,
+        next: Record<string, ProviderConfig> | undefined,
+    ): void {
+        const connectionKey = (config?: ProviderConfig): string =>
+            `${config?.baseUrl ?? ''}:${(config?.apiKey || '').slice(0, 8)}`;
+
+        const providerIds = new Set([
+            ...Object.keys(previous || {}),
+            ...Object.keys(next || {}),
+        ]);
+
+        for (const providerId of providerIds) {
+            const before = previous?.[providerId];
+            const after = next?.[providerId];
+            if (before && after && connectionKey(before) === connectionKey(after)) {
+                continue; // 连接参数未变，缓存仍然有效，保留。
+            }
+            // provider 被删除，或 baseUrl/apiKey 变了：旧缓存键不再对应当前配置，清掉。
+            // 缓存键里还带了 apiKey 前缀，直接按 providerId 前缀扫描删除最省事也最不会漏。
+            for (const cacheKey of Array.from(this.modelListCache.keys())) {
+                if (cacheKey.startsWith(`${providerId}:`)) {
+                    this.modelListCache.delete(cacheKey);
+                }
+            }
         }
     }
 
@@ -276,13 +380,51 @@ export class ModelService {
         return await modelCatalog.checkAvailability(config);
     }
 
-    async getAvailableModels(forceRefresh: boolean = false): Promise<ModelOption[]> {
+    /**
+     * 与 `checkAvailability` 同源，但把「端点活着」与「端点会列模型」拆开返回。
+     * settings 的连接测试据此区分三态：能列模型 / 活着但不提供模型清单（生成未验证）/ 失败。
+     * 否则 404 会被渲染成绿色的「model list reachable at <url>」，而同一屏的模型输入框
+     * 同时说列不了模型 —— 自相矛盾。保留 `checkAvailability` 作为薄包装。
+     *
+     * @param deps - 可选注入，与 `modelCatalog.checkAvailabilityWithStatus(config, deps?)` 同一个缝
+     *               （换掉 requestUrl 以便测试/复用），生产调用不传。
+     */
+    async checkAvailabilityWithStatus(
+        deps?: modelCatalog.ModelCatalogDeps,
+    ): Promise<modelCatalog.AvailabilityStatus> {
+        const config = this.getActiveProviderConfig();
+        if (!config) {
+            return { reachable: false, listingUnsupported: false, error: new Error('No active provider configured') };
+        }
+        return await modelCatalog.checkAvailabilityWithStatus(config, deps);
+    }
+
+    /**
+     * 与 `getAvailableModels` 同源，但把「列表是不是真的来自端点」一并返回。
+     * settings 面板据此决定是否提示「手动输入模型名」，不再靠数组形状猜。
+     * 保留 `getAvailableModels` 作为薄包装，既有调用方无需改动。
+     *
+     * @param forceRefresh - 跳过 10 分钟缓存
+     * @param deps         - 可选注入，与 `modelCatalog.checkAvailability(config, deps?)` 同一个缝
+     *                       （换掉 requestUrl 以便测试/复用），生产调用不传。
+     */
+    async getAvailableModelsWithStatus(
+        forceRefresh: boolean = false,
+        deps?: modelCatalog.ModelCatalogDeps,
+    ): Promise<AvailableModelsResult> {
         const providerId = this.settings.activeProvider;
         const config = this.getActiveProviderConfig();
-        if (!config) return [];
+        if (!config) return { models: [], listed: false, listingUnsupported: false };
 
-        const models = await this.fetchModelsForProvider(providerId, config, forceRefresh);
-        return this.ensureModelInList(models, config.model || '');
+        const fetched = await this.fetchModelsForProvider(providerId, config, forceRefresh, deps);
+        return {
+            ...fetched,
+            models: this.ensureModelInList(fetched.models, config.model || ''),
+        };
+    }
+
+    async getAvailableModels(forceRefresh: boolean = false): Promise<ModelOption[]> {
+        return (await this.getAvailableModelsWithStatus(forceRefresh)).models;
     }
 
     /**
@@ -297,7 +439,7 @@ export class ModelService {
 
         const groups = await Promise.all(
             entries.map(async ([providerId, config]) => {
-                let models = await this.fetchModelsForProvider(providerId, config, forceRefresh);
+                let models = (await this.fetchModelsForProvider(providerId, config, forceRefresh)).models;
                 // 当前选中的模型置顶保证一定可选中(即便该 provider 抓取失败只剩 fallback)。
                 if (providerId === this.settings.activeProvider) {
                     models = this.ensureModelInList(models, config.model || '');
@@ -309,50 +451,109 @@ export class ModelService {
         return groups.filter(group => group.models.length > 0);
     }
 
-    /** 抓取单个 provider 的模型列表(带缓存 + fallback 兜底),不做「当前模型置顶」——由调用方按需处理。 */
+    /**
+     * 抓取单个 provider 的模型列表(带缓存 + fallback 兜底),不做「当前模型置顶」——由调用方按需处理。
+     * 返回值额外带上「列表是否真的来自端点」(见 AvailableModelsResult)，供 UI 使用。
+     */
     private async fetchModelsForProvider(
         providerId: string,
         config: ProviderConfig,
         forceRefresh: boolean,
-    ): Promise<ModelOption[]> {
+        deps?: modelCatalog.ModelCatalogDeps,
+    ): Promise<AvailableModelsResult> {
         const cacheKey = `${providerId}:${config.baseUrl}:${(config.apiKey || '').slice(0, 8)}`;
         const now = Date.now();
 
         if (!forceRefresh) {
             const cached = this.modelListCache.get(cacheKey);
             if (cached && now - cached.timestamp < this.modelListCacheTtlMs) {
-                return cached.models;
+                // 失败也原样重放：缓存若只存 models 而丢掉 error，
+                // 一次 401 之后所有非 forceRefresh 的调用都会谎报成「已列出」。
+                return {
+                    models: cached.models,
+                    listed: cached.listed,
+                    listingUnsupported: cached.listingUnsupported,
+                    error: cached.error,
+                };
             }
+
+            // 并发合并:两次重渲染同时进来时只打一次 /models。forceRefresh 是用户显式
+            // 要求重打端点,不并入已有请求,也不登记进表(否则会掩盖「刷新」的动作)。
+            const inFlight = this.modelListInFlight.get(cacheKey);
+            if (inFlight) return inFlight;
+
+            const request = this.loadModelsForProvider(cacheKey, providerId, config, deps, now).finally(() => {
+                // 成功和失败都要删:失败若留在表里,后续调用会永远共享那次失败结果。
+                this.modelListInFlight.delete(cacheKey);
+            });
+            this.modelListInFlight.set(cacheKey, request);
+            return request;
         }
 
+        return this.loadModelsForProvider(cacheKey, providerId, config, deps, now);
+    }
+
+    /** 真正打 /models 的那一段(缓存命中与并发合并都在 fetchModelsForProvider 处理)。 */
+    private async loadModelsForProvider(
+        cacheKey: string,
+        providerId: string,
+        config: ProviderConfig,
+        deps: modelCatalog.ModelCatalogDeps | undefined,
+        now: number,
+    ): Promise<AvailableModelsResult> {
         let models: ModelOption[] = [];
+        let listed = false;
+        let listingUnsupported = false;
+        let error: Error | undefined;
+
         if (config.apiKey?.trim()) {
             try {
-                models = await modelCatalog.listModels(config);
-            } catch (error: any) {
+                models = await modelCatalog.listModels(config, deps);
+                // 「端点真的给了非空清单」的唯一判定点：必须在这里取，一旦下面换成
+                // getFallbackModels() 就再也分不出「端点的清单」与「我们的猜测」了。
+                // 空清单（200 {"data":[]}）与解析不出 data 的 body 都留在 false。
+                listed = models.length > 0;
+            } catch (caught) {
+                // 「端点不支持列模型」是能力缺口而非故障：它同样回落到内置列表，
+                // 但必须把真实原因透出去，UI 才能提示手输模型名，
+                // 而不是让用户以为 apiKey/网络出了问题。
+                if (modelCatalog.isModelListingUnsupported(caught)) {
+                    listingUnsupported = true;
+                } else {
+                    error = caught instanceof Error ? caught : new Error(String(caught));
+                }
                 logger.warn(
-                    `Failed to fetch model list for provider ${providerId}: ${error?.message || 'Unknown error'}`,
+                    `Failed to fetch model list for provider ${providerId}: ${thrownMessage(caught) || 'Unknown error'}`,
                     'ModelService.getAvailableModels'
                 );
             }
+        } else {
+            // 未配置 key 时根本不发请求：这属于「没拿到真实列表」，不是「端点不支持列模型」。
+            error = new Error(`${config.label || providerId} API Key not configured`);
         }
 
         if (!models.length) {
+            // 内置兜底：`listed` 保持 false，调用方据此知道这批模型不是端点宣称的。
             models = this.getFallbackModels(providerId);
         }
 
         const normalized = this.normalizeModelOptions(models);
-        this.modelListCache.set(cacheKey, { timestamp: now, models: normalized });
-        return normalized;
+        // 判定结果整体缓存：10 分钟内重复问同一个端点不必再打一次 404 / 401。
+        // listed / error 必须一起存 —— 缓存命中路径要靠它们复现真实判定
+        //（见 AvailableModelsResult 的缓存语义），否则失败或兜底都会被谎报成「已列出」。
+        this.modelListCache.set(cacheKey, { timestamp: now, models: normalized, listed, listingUnsupported, error });
+        return { models: normalized, listed, listingUnsupported, error };
     }
 
     private getFallbackModels(providerId: string): ModelOption[] {
         const fallbacks: Record<string, ModelOption[]> = {
-            gemini: [
-                { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-                { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-                { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-                { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+            // Anthropic 官方端点能列模型，但很多兼容网关没有实现 GET /v1/models。
+            // 那条路径下 listModels 会抛「列表不可用」，这里给一份手选兜底，
+            // 免得下拉框空掉、用户无法把已保存的 model 选回来（WP-B 还允许直接手输）。
+            anthropic: [
+                { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
+                { value: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
+                { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
             ],
             openai: [
                 { value: 'gpt-4o', label: 'GPT-4o' },
@@ -405,7 +606,7 @@ export class ModelService {
 
     async chat(
         userMessage: string,
-        contextItems: any[],
+        contextItems: ChatContextItem[],
         selection: string = '',
         source: GenerationSource = 'shell',
         obsidianContext?: ObsidianContextSnapshot,
@@ -437,15 +638,15 @@ export class ModelService {
                 // hasPriorContext 不再由此注入:runtime 自己向 sessionManager 查。
             });
             return await runtime.query(preparedTurn);
-        } catch (e: any) {
+        } catch (e) {
             logger.error('Chat processing failed', e, 'ModelService.chat');
-            return `Error: ${e.message}`;
+            return `Error: ${thrownMessage(e)}`;
         }
     }
 
     async *chatStream(
         userMessage: string,
-        contextItems: any[],
+        contextItems: ChatContextItem[],
         selection: string = '',
         source: GenerationSource | AbortSignal = 'shell',
         obsidianContext?: ObsidianContextSnapshot,
@@ -457,7 +658,7 @@ export class ModelService {
 
         if (!this.hasValidConfig()) {
             const providerLabel = this.getActiveProviderConfig()?.label || 'AI';
-            yield { type: 'error' as const, message: `${providerLabel} API Key not configured!` };
+            yield { type: 'error' as const, message: `${providerLabel} API Key not configured!`, outcome: 'failed' as const };
             return;
         }
 
@@ -478,12 +679,12 @@ export class ModelService {
             for await (const event of runtime.queryStream(preparedTurn, resolvedSignal)) {
                 yield event;
             }
-        } catch (e: any) {
+        } catch (e) {
             if (this.isAbortError(e)) {
                 throw e;
             }
             logger.error('Stream chat failed', e, 'ModelService.chatStream');
-            yield { type: 'error' as const, message: e.message };
+            yield { type: 'error' as const, message: thrownMessage(e) ?? String(e), outcome: 'failed' as const };
         }
     }
 
@@ -502,7 +703,7 @@ export class ModelService {
         try {
             // timeoutMs 不再单独消费：pi 的无状态生成走原生 signal 硬中断，
             // 旧的 requestUrl 超时语义由调用方用 AbortSignal 表达（见下）。
-            const { skipGenerationPlan, signal, timeoutMs, ...providerOptions } = options ?? {};
+            const { skipGenerationPlan, signal, ...providerOptions } = options ?? {};
             if (signal?.aborted) {
                 throw new DOMException('Generation aborted', 'AbortError');
             }
@@ -536,9 +737,9 @@ export class ModelService {
                 });
             }
             return text;
-        } catch (e: any) {
+        } catch (e) {
             // 软取消是正常流程，不当错误记录，避免日志噪音。
-            if (e?.name === 'AbortError') throw e;
+            if (this.isAbortError(e)) throw e;
             logger.error('Stateless generation failed', e, 'ModelService.generate');
             throw e;
         }
@@ -553,7 +754,7 @@ export class ModelService {
         if (this.sessionManager && conversationId) {
             try {
                 await this.sessionManager.clear(conversationId);
-            } catch (error) {
+            } catch {
                 logger.warn('Failed to start a fresh persistent session on clear.', 'ModelService.clearSession');
             }
         }
@@ -584,8 +785,8 @@ export class ModelService {
         try {
             const { branch, all } = await this.sessionManager.getBranchEntries(conversationId);
             if (branch.length === 0) return null;
-            return projectBranchToMessages(branch as any, all as any);
-        } catch (e) {
+            return projectBranchToMessages(branch, all);
+        } catch {
             logger.warn('Failed to project session branch.', 'ModelService.getBranchProjection');
             return null;
         }
@@ -601,7 +802,7 @@ export class ModelService {
             const ok = await this.sessionManager.moveToBranch(conversationId, targetLeafEntryId);
             if (!ok) return null;
             return this.getBranchProjection(conversationId);
-        } catch (e) {
+        } catch {
             logger.warn('Failed to switch session branch.', 'ModelService.switchBranch');
             return null;
         }
@@ -626,7 +827,7 @@ export class ModelService {
                 await this.sessionManager.supersedeUserEntry(conversationId, userEntryId);
             }
             return await this.sessionManager.prepareForkAtUser(conversationId, userEntryId);
-        } catch (e) {
+        } catch {
             logger.warn('Failed to prepare retry/fork position.', 'ModelService.prepareRetryFromUser');
             return false;
         }
@@ -667,9 +868,8 @@ export class ModelService {
         source?: 'shell' | 'guardian' | 'selection-menu' | 'slash-edit';
     }): Promise<string | null> {
         if (!this.memoryManager) return null;
-        const retainLesson = (this.memoryManager as any).retainLesson;
-        if (typeof retainLesson !== 'function') return null;
-        return await retainLesson.call(this.memoryManager, input);
+        if (typeof this.memoryManager.retainLesson !== 'function') return null;
+        return await this.memoryManager.retainLesson(input);
     }
 
     getAvailableTools() {
@@ -720,7 +920,7 @@ export class ModelService {
         return modelCatalog.getProviderCapabilities(this.getActiveProviderConfig());
     }
 
-    async executeSlashSkillCommand(command: string, input: string, conversationId?: string): Promise<any> {
+    async executeSlashSkillCommand(command: string, input: string, conversationId?: string): Promise<ToolResult> {
         const skill = this.skillRegistry.resolveByCommand(command);
         if (!skill) {
             return { success: false, error: `Unknown command: ${command}` };
@@ -751,31 +951,324 @@ export class ModelService {
         });
     }
 
+    /**
+     * 执行一次已批准的写入。
+     *
+     * `options.requestId` 是审批请求身份：同一 id 的重复调用复用登记表里的
+     * in-flight Promise / 已完成结果，成功结果永不重放。`retry` 只对失败结果生效。
+     */
     async executeApprovedAction(
         action: string,
-        args: Record<string, any>,
+        args: ToolArgs,
         conversationId?: string,
-    ): Promise<any> {
-        const result = await this.toolRegistry.execute(action, {
-            ...args,
-            approved: true,
-        });
-        await this.recordOperationAudit({
+        options: { requestId?: string; retry?: boolean } = {},
+    ): Promise<ApprovalExecutionOutcome> {
+        const run = () => this.performApprovedAction(action, args, conversationId, options.requestId);
+        if (!options.requestId) return run();
+        return this.approvalExecutionRegistry.run(options.requestId, run, { retry: options.retry });
+    }
+
+    /**
+     * 核实一次「结果未知」的审批，不执行任何写入。
+     *
+     * 顺序：登记表里的成功结果是终态，直接复用；其余情况一律查持久化状态。
+     * 登记表里的 `unknown` 只说明「上次尝试没有落终态」，本身不提供任何新信息——
+     * 必须先核实，才能决定它是「确实执行过」还是「可以安全重试」（#76 P1）。
+     * 核实确认「没有成功落盘」后解锁登记表，用户点重试才会真正再执行一次。
+     */
+    async reconcileApprovedAction(
+        requestId: string,
+        action: string,
+        args: ToolArgs,
+        conversationId?: string,
+        options: { requestedAt?: number } = {},
+    ): Promise<ApprovalExecutionOutcome> {
+        const inflight = this.approvalExecutionRegistry.peek(requestId);
+        if (inflight?.state === 'running') {
+            const settled = await (inflight.promise as Promise<ApprovalExecutionOutcome>);
+            // 执行期间点了「检查结果」：落定结果足够明确就直接用，不再重复核实。
+            if (settled.status === 'succeeded' || settled.retryable !== false) return settled;
+        }
+
+        const cached = this.approvalExecutionRegistry.peek(requestId);
+        if (cached?.state === 'done' && cached.outcome) {
+            if (cached.outcome.status === 'succeeded') return cached.outcome;
+            if (cached.outcome.retryable !== false) return cached.outcome;
+        }
+
+        const verification = await this.verifyApprovalExecution(requestId, options.requestedAt);
+        const target = getFileWriteResultPath(action, {}, args) || action;
+
+        switch (verification) {
+            case 'executed':
+                return {
+                    kind: 'approval-execution',
+                    status: 'unknown',
+                    target,
+                    detail: t('The action ran but its result was not recorded. Check the target manually.'),
+                    completedAt: Date.now(),
+                    retryable: false,
+                };
+            case 'attempting':
+                return {
+                    kind: 'approval-execution',
+                    status: 'unknown',
+                    target,
+                    detail: t('The action started but never reported a result. Check the target before retrying.'),
+                    completedAt: Date.now(),
+                    retryable: false,
+                };
+            case 'expired':
+                return {
+                    kind: 'approval-execution',
+                    status: 'unknown',
+                    target,
+                    detail: t('The execution record has expired, so the result cannot be verified. Check the target manually.'),
+                    completedAt: Date.now(),
+                    retryable: false,
+                };
+            case 'unverified':
+                return {
+                    kind: 'approval-execution',
+                    status: 'unknown',
+                    target,
+                    detail: t('Could not verify the result. Check the target manually.'),
+                    completedAt: Date.now(),
+                    retryable: false,
+                };
+            default:
+                // 明确失败过，或从未执行：「结果未知」可以解除，重试才是安全的。
+                this.approvalExecutionRegistry.unlock(requestId);
+                return {
+                    kind: 'approval-execution',
+                    status: 'failed',
+                    target,
+                    detail: t('No successful execution record was found. Verify the target, then retry.'),
+                    completedAt: Date.now(),
+                    retryable: true,
+                };
+        }
+    }
+
+    /**
+     * 读持久化的请求执行状态，判断「是否真的执行过」。
+     *
+     * - `executed`：成功记录在案 → 不能重放；
+     * - `attempting`：开始执行后没有落终态（进程中断）→ 可能已经写成，不能直接重试；
+     * - `failed`：明确失败过 → 可安全重试；
+     * - `expired`：请求状态已被条数上限淘汰 → 无法确认，不能放行重试；
+     * - `none`：从未执行过；
+     * - `unverified`：审计读不出来 → 同样不放行。
+     */
+    private async verifyApprovalExecution(
+        requestId: string,
+        requestedAt?: number,
+    ): Promise<'executed' | 'attempting' | 'failed' | 'expired' | 'none' | 'unverified'> {
+        try {
+            const request = await this.operationAuditLog.getRequestState(requestId);
+            if (request) {
+                if (request.state === 'succeeded') return 'executed';
+                if (request.state === 'attempting') return 'attempting';
+                return 'failed';
+            }
+
+            // 旧版本文件没有请求状态：退回操作记录判断（旧记录只在成功时写出，故缺省按成功看）。
+            const related = (await this.operationAuditLog.list())
+                .filter(record => record.id === requestId);
+            if (related.some(record => (record.outcome ?? 'succeeded') === 'succeeded')) return 'executed';
+            if (related.some(record => record.outcome === 'attempt-failed')) return 'failed';
+
+            // 请求状态可能已被条数上限淘汰：无法确认「没执行过」时不能放行重试。
+            const prunedBefore = await this.operationAuditLog.getPrunedRequestBefore();
+            if (prunedBefore > 0 && (requestedAt === undefined || requestedAt < prunedBefore)) {
+                return 'expired';
+            }
+            return 'none';
+        } catch (error) {
+            logger.warn(
+                `Failed to verify the approval execution state for ${requestId}`,
+                'ModelService.verifyApprovalExecution',
+                error,
+            );
+            return 'unverified';
+        }
+    }
+
+    private async readApprovalRequestState(requestId: string): Promise<ApprovalRequestState | undefined> {
+        try {
+            return (await this.operationAuditLog.getRequestState(requestId))?.state;
+        } catch (error) {
+            logger.warn(
+                `Failed to read the approval request state for ${requestId}`,
+                'ModelService.readApprovalRequestState',
+                error,
+            );
+            return undefined;
+        }
+    }
+
+    private async performApprovedAction(
+        action: string,
+        args: ToolArgs,
+        conversationId: string | undefined,
+        requestId: string | undefined,
+    ): Promise<ApprovalExecutionOutcome> {
+        const target = getFileWriteResultPath(action, {}, args)
+            || firstString(args?.path, args?.filename, args?.oldPath) || action;
+
+        if (requestId) {
+            // 登记表按上限淘汰后，同一请求可能再进来一次：持久化状态里的「已成功」是最后一道闸。
+            const prior = await this.readApprovalRequestState(requestId);
+            if (prior === 'succeeded') {
+                return {
+                    kind: 'approval-execution',
+                    status: 'unknown',
+                    target,
+                    detail: t('This action already completed, so it was not run again. Check the target to review the result.'),
+                    completedAt: Date.now(),
+                    retryable: false,
+                };
+            }
+            // 执行前先留「开始执行」的凭据：进程被杀时，这是唯一能说明「可能已经写成」的证据。
+            await this.beginApprovalRequest(requestId, action, target);
+        }
+
+        let result: ToolResult;
+        try {
+            result = await this.toolRegistry.execute(action, {
+                ...args,
+                approved: true,
+            });
+        } catch (error) {
+            // 工具抛错时无法判断副作用是否发生：留一条失败尝试记录，返回 unknown 要求先核实。
+            await this.recordApprovedActionAudit({
+                id: requestId,
+                action,
+                target,
+                outcome: 'attempt-failed',
+            });
+            return {
+                kind: 'approval-execution',
+                status: 'unknown',
+                target,
+                error: thrownMessage(error) || String(error),
+                detail: t('The action was interrupted before its result was recorded. Check the target before retrying.'),
+                completedAt: Date.now(),
+                retryable: false,
+            };
+        }
+
+        const resolvedTarget = getFileWriteResultPath(action, result, args) || target;
+        const succeeded = result?.success === true || result?.status === 'success';
+
+        // 审计写盘失败不能让「已经写成功」的动作看起来失败（#76 P2-A）。
+        const auditRecorded = await this.recordApprovedActionAudit({
+            id: requestId,
             action,
-            target: getFileWriteResultPath(action, result, args) || action,
-            approvalSource: 'user-click',
-            undoable: this.isUndoableApprovedAction(action),
+            target: resolvedTarget,
+            outcome: succeeded ? 'succeeded' : 'attempt-failed',
         });
+
         // 把真实执行结果回灌进该会话的 pi session,使下一轮模型看到「用户批准了、动作已执行」
         // 而非停留在审批占位上失忆。session 是跨轮上下文唯一真相源(UI 历史不回灌)。
         // 失败静默——回灌是增强,不能让已成功执行的动作看起来失败。
-        if (this.sessionManager) {
-            await this.sessionManager.appendApprovalOutcome(
-                conversationId,
-                this.buildApprovalOutcomeText(action, args, result),
+        try {
+            if (this.sessionManager) {
+                await this.sessionManager.appendApprovalOutcome(
+                    conversationId,
+                    this.buildApprovalOutcomeText(action, args, result),
+                );
+            }
+        } catch (error) {
+            logger.warn(
+                `Failed to append the approval outcome for "${action}" to the session`,
+                'ModelService.performApprovedAction',
+                error,
             );
         }
-        return result;
+
+        return {
+            kind: 'approval-execution',
+            status: succeeded ? 'succeeded' : 'failed',
+            target: resolvedTarget,
+            detail: this.buildExecutionDetail(result, succeeded, auditRecorded),
+            error: succeeded ? undefined : (firstString(result?.error, result?.message) || t('The action failed.')),
+            completedAt: Date.now(),
+            retryable: !succeeded,
+            result: this.summarizeExecutionResult(result),
+        };
+    }
+
+    /**
+     * 结果摘要。detail 只放「成功/失败」的主文案，具体错误走 error；
+     * 审计一旦没写成，主文案后追加可见提示，避免用户以为审计链正常（#76 P2-A）。
+     */
+    private buildExecutionDetail(result: ToolResult, succeeded: boolean, auditRecorded: boolean): string {
+        const base = succeeded
+            ? (typeof result?.message === 'string' ? result.message : t('The action completed successfully.'))
+            : t('The action failed.');
+        return auditRecorded ? base : `${base} ${t('The audit log entry was not written.')}`;
+    }
+
+    /**
+     * 只保留宿主打开落盘文件所需的字段，不把整个工具返回留在登记表里（#76 P3）。
+     */
+    private summarizeExecutionResult(result: ToolResult): unknown {
+        if (!result || typeof result !== 'object') return undefined;
+        const summary: Record<string, unknown> = {};
+        for (const key of ['success', 'status', 'path', 'target'] as const) {
+            if (result[key] !== undefined) summary[key] = result[key];
+        }
+        return summary;
+    }
+
+    private async beginApprovalRequest(requestId: string, action: string, target: string): Promise<void> {
+        try {
+            await this.operationAuditLog.beginRequest({ id: requestId, action, target });
+        } catch (error) {
+            // 登记失败只是少了「可能执行过」的证据，不阻断用户已批准的动作。
+            logger.warn(
+                `Failed to record the start of approval "${requestId}"`,
+                'ModelService.beginApprovalRequest',
+                error,
+            );
+        }
+    }
+
+    /**
+     * 写一条审批执行记录（同时更新请求状态），失败只 warn 并返回 false。
+     * 写盘动作本身已经发生，审计失败绝不能把它降级成 unknown/失败。
+     */
+    private async recordApprovedActionAudit(input: {
+        id?: string;
+        action: string;
+        target: string;
+        outcome: OperationOutcome;
+    }): Promise<boolean> {
+        try {
+            const entry = {
+                action: input.action,
+                target: input.target,
+                provider: this.settings?.activeProvider,
+                model: this.getActiveProviderConfig()?.model,
+                approvalSource: 'user-click' as const,
+                undoable: this.isUndoableApprovedAction(input.action),
+                outcome: input.outcome,
+            };
+            if (input.id) {
+                await this.operationAuditLog.finishRequest({ ...entry, id: input.id });
+            } else {
+                await this.operationAuditLog.record(entry);
+            }
+            return true;
+        } catch (error) {
+            logger.warn(
+                `Failed to write the operation audit for "${input.action}"`,
+                'ModelService.recordApprovedActionAudit',
+                error,
+            );
+            return false;
+        }
     }
 
     /**
@@ -784,21 +1277,21 @@ export class ModelService {
      */
     private buildApprovalOutcomeText(
         action: string,
-        args: Record<string, any>,
-        result: any,
+        args: ToolArgs,
+        result: ToolResult,
     ): string {
         const target = getFileWriteResultPath(action, result, args)
-            || args?.path || args?.filename || args?.target || '';
+            || firstString(args?.path, args?.filename, args?.target);
         const targetSuffix = target ? ` (${target})` : '';
         const succeeded = result?.success === true || result?.status === 'success';
         if (succeeded) {
             return `[Approved action executed] The user approved "${action}"${targetSuffix} and it completed successfully. You may continue from here.`;
         }
-        const error = result?.error || result?.message || 'unknown error';
+        const error = firstString(result?.error, result?.message) || 'unknown error';
         return `[Approved action failed] The user approved "${action}"${targetSuffix} but it failed: ${error}`;
     }
 
-    async executeWorkspaceTool(action: string, args: Record<string, any>): Promise<any> {
+    async executeWorkspaceTool(action: string, args: ToolArgs): Promise<ToolResult> {
         return this.workspaceEditService.executeWorkspaceTool(action, args);
     }
 
@@ -858,9 +1351,7 @@ export class ModelService {
         if (!config) {
             throw new Error(`Unknown provider: ${this.settings.activeProvider}`);
         }
-        const model = config.type === 'gemini'
-            ? buildGeminiModel(config, this.settings.contextWindow, this.settings.thinkingLevel)
-            : buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
+        const model = this.buildModelForConfig(config);
         return {
             model,
             // AgentHarness 通过 getApiKeyAndHeaders 按需取 key;取当前 provider 的最新 apiKey。
@@ -868,6 +1359,37 @@ export class ModelService {
             getApiKey: () => this.getActiveProviderConfig()?.apiKey ?? '',
             getHeaders: () => resolveCustomHeaders(this.getActiveProviderConfig()?.customHeaders, conversationId),
         };
+    }
+
+    /**
+     * 依 ProviderConfig.type 选择 pi Model 构造器。
+     *
+     * 分支必须显式：早先写成 `type === 'gemini' ? gemini : openai` 这种二选一，
+     * 于是后来新增的 'anthropic' 静默落到 OpenAI-compatible 分支 —— 用户以为在打
+     * Messages 协议，实际发的是 /chat/completions，报错完全指错方向。
+     * 类型层面的穷尽性由 `ProviderType` 联合类型保证：新增一个 type 会让这里出现未覆盖分支。
+     *
+     * `default:` 因此**不是**穷尽性兜底，而是运行期安全网：配置是从磁盘读的，
+     * 可能残留旧版本（如已移除的 'gemini'）或被手改出未知 type，那种情况下宁可退化成
+     * OpenAI-compatible，也不要让整个插件炸掉 —— 但必须 warn 出声，否则就和改动前那个
+     * 静默 fallthrough 犯了同一个毛病（用户看不出自己配错了）。
+     * 注意 loadSettings 已经用 pruneUnsupportedProviders 丢掉不受支持的 type，
+     * 所以正常路径走不到这里。
+     */
+    private buildModelForConfig(config: ProviderConfig): Model<Api> {
+        switch (config.type) {
+            case 'anthropic':
+                return buildAnthropicModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
+            case 'openai-compatible':
+                return buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
+            default:
+                // 只有持久化数据里出现未知 type 才会走到这里（类型系统已排除其余情况）。
+                logger.warn(
+                    `Unknown provider type "${String((config as { type?: unknown }).type)}" for ${config.label || config.baseUrl}; falling back to OpenAI-compatible`,
+                    'ModelService.buildModelForConfig',
+                );
+                return buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
+        }
     }
 
     /**
@@ -880,10 +1402,7 @@ export class ModelService {
         if (!config) {
             throw new Error(`Unknown provider: ${this.settings.activeProvider}`);
         }
-        const model = config.type === 'gemini'
-            ? buildGeminiModel(config, this.settings.contextWindow, this.settings.thinkingLevel)
-            : buildOpenAICompatModel(config, this.settings.contextWindow, this.settings.thinkingLevel);
-        return createNativeCompleteFn(model, config.apiKey);
+        return createNativeCompleteFn(this.buildModelForConfig(config), config.apiKey);
     }
 
     /**
@@ -908,8 +1427,8 @@ export class ModelService {
         return this.activeRunController.isActive();
     }
 
-    private isAbortError(error: any): boolean {
-        return error?.name === 'AbortError';
+    private isAbortError(error: unknown): boolean {
+        return typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'AbortError';
     }
 
     private isAbortSignalValue(value: unknown): value is AbortSignal {
@@ -920,16 +1439,25 @@ export class ModelService {
     }
 
     private async recordOperationAudit(input: {
+        id?: string;
         action: string;
         target: string;
         approvalSource: 'user-click' | 'direct-write';
         previousContent?: string;
         undoable: boolean;
     }): Promise<void> {
-        if (!input.target) return;
+        if (!input.target) {
+            // 目标为空时跳过审计，但必须留下可见痕迹：静默跳过等于审计链无声断裂。
+            logger.warn(
+                `Skipped the operation audit for "${input.action}": no target was resolved`,
+                'ModelService.recordOperationAudit',
+            );
+            return;
+        }
 
         const config = this.getActiveProviderConfig();
         await this.operationAuditLog.record({
+            id: input.id,
             action: input.action,
             target: input.target,
             provider: this.settings?.activeProvider,

@@ -2,7 +2,13 @@
 // 验证 setKnowledgeStatus 幂等：字段已是目标值时不写盘，避免无谓 touch mtime
 
 import { TFile } from 'obsidian';
-import { setKnowledgeStatus } from '../../src/knowledge/frontmatter';
+import {
+  setKnowledgeStatus,
+  getKnowledgeStatus,
+  getSourceId,
+  getPendingReason,
+  getSummaryFrontmatter,
+} from '../../src/knowledge/frontmatter';
 
 function expect(actual: any) {
   return {
@@ -131,6 +137,34 @@ async function runTests() {
     } as any;
     await setKnowledgeStatus(app, file, 'pending', { pending_reason: 'new' });
     expect(writeCount).toBe(1);
+  });
+
+  await test('cache readers narrow wrong-typed fields to null', async () => {
+    const file = createFile('Clippings/a.md');
+    const app = {
+      metadataCache: {
+        getFileCache: () => ({
+          frontmatter: { knowledge_status: 5, knowledge_source_id: {}, knowledge_pending_reason: 'bogus' },
+        }),
+      },
+    } as any;
+    expect(getKnowledgeStatus(app, file)).toBe(null);
+    expect(getSourceId(app, file)).toBe(null);
+    expect(getPendingReason(app, file)).toBe(null);
+  });
+
+  await test('getSummaryFrontmatter ignores wrong-typed hash fields', async () => {
+    const file = createFile('Wiki/Articles/a.md');
+    const app = {
+      vault: { getAbstractFileByPath: () => file },
+      metadataCache: {
+        getFileCache: () => ({ frontmatter: { schema_hash: 5, content_hash: 'h1', compiled_at: null } }),
+      },
+    } as any;
+    const fm = getSummaryFrontmatter(app, file.path);
+    expect(fm?.schema_hash).toBe(undefined);
+    expect(fm?.content_hash).toBe('h1');
+    expect(fm?.compiled_at).toBe(undefined);
   });
 
   console.log('All frontmatter idempotency tests passed!');

@@ -23,6 +23,7 @@ async function runTests() {
   const {
     buildFileWriteFailureMessage,
     FILE_OPERATION_CONTRACT_TEXT,
+    getFileWriteError,
     getFileWriteResultPath,
     isFileWriteRequest,
     isFileWriteToolName,
@@ -88,6 +89,31 @@ async function runTests() {
     expect(buildFileWriteFailureMessage(true, 'Unsafe vault path')).toBe(
       'No file was created or modified because no vault write tool completed successfully. Last tool error: Unsafe vault path. Please try again; file requests must be completed through workspace tools, not copy-paste output.'
     );
+  });
+
+  await test('narrows malformed tool results instead of trusting their shape', () => {
+    // 非对象结果：既不能算成功，也不能读出路径/错误（旧实现靠 ?. 兜底，结果一致）。
+    expect(isSuccessfulWriteToolResult(null)).toBe(false);
+    expect(isSuccessfulWriteToolResult('success')).toBe(false);
+    expect(isSuccessfulWriteToolResult({ success: 'true' })).toBe(false);
+    expect(getFileWriteResultPath('create_file', 'ok', {})).toBe('');
+    expect(getFileWriteResultPath('create_file', null, {})).toBe('');
+    expect(getFileWriteResultPath('create_note', {}, { filename: 42 })).toBe('');
+    expect(getFileWriteError(null)).toBe('');
+    expect(getFileWriteError('boom')).toBe('');
+  });
+
+  await test('reads write errors only from results that actually failed', () => {
+    expect(getFileWriteError({ error: '  Unsafe vault path  ' })).toBe('Unsafe vault path');
+    // 只有成功标记为 false / status 为 error 时，message 才被当成失败原因。
+    expect(getFileWriteError({ message: 'just a note' })).toBe('');
+    expect(getFileWriteError({ success: false, message: ' write failed ' })).toBe('write failed');
+    expect(getFileWriteError({ status: 'error', message: 'status failed' })).toBe('status failed');
+  });
+
+  await test('prefers the result path over the args fallback, as before', () => {
+    expect(getFileWriteResultPath('create_note', { target: 'A.md' }, { filename: 'B.md' })).toBe('A.md');
+    expect(getFileWriteResultPath('create_note', { path: 42 }, { filename: 'B.md' })).toBe('B.md');
   });
 }
 

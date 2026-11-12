@@ -10,7 +10,17 @@ export class TFile {
 export class TFolder {}
 export class TAbstractFile {}
 export class Plugin {}
-export class PluginSettingTab {}
+export class PluginSettingTab {
+  app: any;
+  containerEl: any = { empty() {}, createDiv: () => ({ createEl: () => ({}) }), createEl: () => ({}) };
+  constructor(app?: any, _plugin?: any) { this.app = app; }
+  update(): void { /* no-op in tests */ }
+  refreshDomState(): void { /* no-op in tests */ }
+  hide(): void { /* no-op in tests */ }
+}
+export class SettingPage {
+  containerEl: any = { empty() {}, createDiv: () => ({}) };
+}
 export class Setting {}
 export class Notice {}
 export class Modal {}

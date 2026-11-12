@@ -15,12 +15,13 @@ Regenerate with `npm run licenses`.
 | License | Packages |
 |---------|----------|
 | 0BSD | 1 |
-| Apache-2.0 | 45 |
-| BSD-3-Clause | 12 |
-| ISC | 2 |
-| MIT | 41 |
+| Apache-2.0 | 34 |
+| BSD-3-Clause | 11 |
+| ISC | 1 |
+| MIT | 42 |
+| Unlicense | 1 |
 
-Total: 101 bundled packages.
+Total: 90 bundled packages.
 
 ## Apache License 2.0
 
@@ -28,51 +29,40 @@ The following packages are licensed under the Apache License, Version 2.0. You
 may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0.
 Each retains its own copyright notices; see the package sources for details.
 
-- @aws-crypto/crc32 5.2.0
-- @aws-crypto/sha256-browser 5.2.0
-- @aws-crypto/sha256-js 5.2.0
-- @aws-crypto/supports-web-crypto 5.2.0
-- @aws-crypto/util 5.2.0
-- @aws-sdk/client-bedrock-runtime 3.1048.0
-- @aws-sdk/core 3.974.13
-- @aws-sdk/credential-provider-env 3.972.39
-- @aws-sdk/credential-provider-http 3.972.41
-- @aws-sdk/credential-provider-ini 3.972.43
-- @aws-sdk/credential-provider-login 3.972.43
-- @aws-sdk/credential-provider-node 3.972.44
-- @aws-sdk/credential-provider-process 3.972.39
-- @aws-sdk/credential-provider-sso 3.972.43
-- @aws-sdk/credential-provider-web-identity 3.972.43
-- @aws-sdk/eventstream-handler-node 3.972.17
-- @aws-sdk/middleware-eventstream 3.972.13
-- @aws-sdk/middleware-websocket 3.972.21
-- @aws-sdk/nested-clients 3.997.11
-- @aws-sdk/signature-v4-multi-region 3.996.28
-- @aws-sdk/token-providers 3.1048.0
-- @aws-sdk/types 3.973.9
-- @aws-sdk/util-locate-window 3.965.5
-- @aws-sdk/xml-builder 3.972.25
-- @aws/lambda-invoke-store 0.2.4
-- @google/genai 1.52.0
-- @google/generative-ai 0.21.0
-- @mistralai/mistralai 2.2.1
+- @aws-sdk/client-bedrock-runtime 3.1127.0
+- @aws-sdk/core 3.978.5
+- @aws-sdk/credential-provider-env 3.972.76
+- @aws-sdk/credential-provider-http 3.972.78
+- @aws-sdk/credential-provider-ini 3.973.21
+- @aws-sdk/credential-provider-login 3.972.83
+- @aws-sdk/credential-provider-node 3.972.88
+- @aws-sdk/credential-provider-process 3.972.76
+- @aws-sdk/credential-provider-sso 3.973.20
+- @aws-sdk/credential-provider-web-identity 3.972.82
+- @aws-sdk/eventstream-handler-node 3.972.38
+- @aws-sdk/middleware-eventstream 3.972.33
+- @aws-sdk/middleware-websocket 3.972.58
+- @aws-sdk/nested-clients 3.997.50
+- @aws-sdk/signature-v4-multi-region 3.996.49
+- @aws-sdk/token-providers 3.1127.0
+- @aws-sdk/types 3.975.0
+- @aws-sdk/xml-builder 3.972.41
+- @aws/lambda-invoke-store 0.3.0
+- @google/genai 2.21.0
 - @mozilla/readability 0.6.0
-- @smithy/core 3.24.4
-- @smithy/credential-provider-imds 4.3.4
-- @smithy/fetch-http-handler 5.4.4
-- @smithy/is-array-buffer 2.2.0
-- @smithy/node-http-handler 4.7.3
-- @smithy/signature-v4 5.4.4
-- @smithy/types 4.14.2
-- @smithy/util-buffer-from 2.2.0
-- @smithy/util-utf8 2.3.0
+- @smithy/core 3.36.2
+- @smithy/credential-provider-imds 4.5.2
+- @smithy/fetch-http-handler 5.8.0
+- @smithy/node-http-handler 4.12.1
+- @smithy/signature-v4 5.7.4
+- @smithy/types 4.19.0
 - ecdsa-sig-formatter 1.0.11
-- gaxios 7.1.4
+- gaxios 7.3.1
 - gcp-metadata 8.1.2
-- google-auth-library 10.6.2
+- google-auth-library 10.9.1
 - google-logging-utils 1.1.3
 - long 5.3.2
-- openai 6.26.0
+- openai 7.19.0
 
 ## 0BSD
 
@@ -86,41 +76,41 @@ Each retains its own copyright notices; see the package sources for details.
 - @protobufjs/eventemitter 1.1.1
 - @protobufjs/fetch 1.1.1
 - @protobufjs/float 1.0.2
-- @protobufjs/inquire 1.1.2
 - @protobufjs/path 1.1.2
 - @protobufjs/pool 1.1.0
-- @protobufjs/utf8 1.1.1
+- @protobufjs/utf8 1.1.2
 - buffer-equal-constant-time 1.0.1
-- protobufjs 7.6.1
+- protobufjs 7.6.6
 
 ## ISC
 
 - yaml 2.8.3
-- zod-to-json-schema 3.25.2
 
 ## MIT
 
-- @anthropic-ai/sdk 0.91.1
-- @babel/runtime 7.29.2
-- @earendil-works/pi-agent-core 0.75.5
-- @earendil-works/pi-ai 0.75.5
-- @nodable/entities 2.1.0
+- @anthropic-ai/sdk 0.129.0
+- @babel/runtime 7.29.10
+- @codemirror/state 6.5.0
+- @codemirror/view 6.38.6
+- @earendil-works/pi-agent-core 1.3.0
+- @earendil-works/pi-ai 1.3.0
+- @earendil-works/pi-telemetry 1.3.0
+- @marijn/find-cluster-break 1.0.2
+- @stablelib/base64 1.0.1
 - @types/node 16.18.126
 - @types/retry 0.12.0
-- agent-base 7.1.4
+- agent-base 9.0.0
 - base64-js 1.5.1
 - bignumber.js 9.3.1
 - bowser 2.14.1
+- crelt 1.0.6
 - data-uri-to-buffer 4.0.1
 - debug 4.4.3
 - extend 3.0.2
-- fast-xml-builder 1.2.0
-- fast-xml-parser 5.7.3
 - fetch-blob 3.2.0
 - formdata-polyfill 4.0.10
-- http-proxy-agent 7.0.2
-- https-proxy-agent 7.0.6
-- ignore 7.0.5
+- http-proxy-agent 9.1.0
+- https-proxy-agent 9.1.0
 - json-bigint 1.0.0
 - json-schema-to-ts 3.1.1
 - jwa 2.0.1
@@ -130,17 +120,20 @@ Each retains its own copyright notices; see the package sources for details.
 - node-fetch 3.3.2
 - p-retry 4.6.2
 - partial-json 0.1.7
-- path-expression-matcher 1.5.0
+- proxy-agent-negotiate 1.1.0
 - retry 0.13.1
 - safe-buffer 5.2.1
-- strnum 2.3.0
+- standardwebhooks 1.1.1
+- style-mod 4.1.3
 - ts-algebra 2.0.0
-- typebox 1.1.38
+- typebox 1.3.27
+- w3c-keyname 2.2.8
 - web-streams-polyfill 3.3.3
-- ws 8.21.0
-- xml-naming 0.1.0
-- youtube-transcript 1.2.1
-- zod 4.4.3
+- ws 8.22.0
+
+## Unlicense
+
+- fast-sha256 1.3.0
 
 ## Note on the pi runtime
 

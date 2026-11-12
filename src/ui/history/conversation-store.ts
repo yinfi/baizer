@@ -23,6 +23,22 @@ interface VaultAdapter {
     mkdir(path: string): Promise<void>;
 }
 
+/** 磁盘 JSON 的未校验形态:字段类型未知,由 isConversationFile 逐项判断。 */
+interface RawConversationFile {
+    version?: unknown;
+    conversations?: unknown;
+}
+
+interface RawConversationSnapshot {
+    id?: unknown;
+    title?: unknown;
+    createdAt?: unknown;
+    updatedAt?: unknown;
+    providerId?: unknown;
+    modelId?: unknown;
+    messages?: unknown;
+}
+
 export class ConversationStore {
     private readonly maxConversations: number;
     private readonly path: string;
@@ -69,7 +85,7 @@ export class ConversationStore {
             }
 
             const raw = await adapter.read(this.path);
-            const parsed = JSON.parse(raw);
+            const parsed: unknown = JSON.parse(raw);
             if (!this.isConversationFile(parsed)) {
                 return this.emptyFile();
             }
@@ -104,18 +120,19 @@ export class ConversationStore {
     }
 
     private getAdapter(): VaultAdapter {
-        return this.app.vault.adapter as unknown as VaultAdapter;
+        return this.app.vault.adapter;
     }
 
     private emptyFile(): ConversationFile {
         return { version: 1, conversations: [] };
     }
 
-    private isConversationFile(value: any): value is ConversationFile {
-        return value
-            && value.version === 1
-            && Array.isArray(value.conversations)
-            && value.conversations.every((conversation: any) => (
+    private isConversationFile(value: unknown): value is ConversationFile {
+        const candidate = value as RawConversationFile | null;
+        return !!candidate
+            && candidate.version === 1
+            && Array.isArray(candidate.conversations)
+            && candidate.conversations.every((conversation: RawConversationSnapshot | null) => (
                 typeof conversation?.id === 'string'
                 && typeof conversation.title === 'string'
                 && typeof conversation.createdAt === 'number'
@@ -142,6 +159,14 @@ export class ConversationStore {
                         ...message.approval,
                         args: { ...message.approval.args },
                         preview: cloneChangePreview(message.approval.preview),
+                    }
+                    : undefined,
+                approvalState: message.approvalState
+                    ? {
+                        ...message.approvalState,
+                        outcome: message.approvalState.outcome
+                            ? { ...message.approvalState.outcome }
+                            : undefined,
                     }
                     : undefined,
                 metadata: message.metadata

@@ -1,12 +1,13 @@
-import { ItemView, WorkspaceLeaf, Notice, MarkdownView, setIcon } from 'obsidian';
+import { App, Editor, ItemView, TFile, WorkspaceLeaf, Notice, MarkdownView, setIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from '../services/model-service';
 import { logger } from '../utils/logger';
-import { ChatController, MessageAddedOptions } from './chat-controller';
-import { ContextManager } from '../services/context-manager';
+import { detach, voidHandler } from '../utils/promise-guard';
+import { ChatController, ChatTurnRequest, MessageAddedOptions } from './chat-controller';
+import { ContextItem, ContextManager } from '../services/context-manager';
 import { DiffModal } from './diff-modal';
-import { IPlugin, PLUGIN_ID, PLUGIN_NAME, VIEW_TYPE_SHELL } from '../mcp/types';
-import { StreamEvent } from '../models/interfaces';
+import { DEFAULT_SETTINGS, IPlugin, PLUGIN_ID, PLUGIN_NAME, VIEW_TYPE_SHELL } from '../mcp/types';
+import { ChatTurnOutcome, StreamEvent } from '../models/interfaces';
 import { buildCommandSuggestions, CommandSuggestion } from './command-suggestions';
 import { t } from '../i18n/zh';
 import { ContextController } from './controllers/context-controller';
@@ -30,7 +31,27 @@ import { TabData, TabId } from './tabs/types';
 import { ConversationController } from './history/conversation-controller';
 import { ConversationStore } from './history/conversation-store';
 import { showGhostText } from './ghost-text';
+import { GrowthToken, ScrollFollowController } from './scroll/scroll-follow-controller';
 import { debounce } from '../utils/throttle';
+import { thrownMessage } from '../utils/thrown-message';
+
+/** Obsidian App 上未在公开 d.ts 暴露的内部命令 API。 */
+type AppWithCommands = App & {
+    commands?: { executeCommandById?(commandId: string): boolean };
+};
+
+/** Obsidian App 上未在公开 d.ts 暴露的设置页 API。 */
+type AppWithSetting = App & {
+    setting: { open(): void; openTabById(id: string): void };
+};
+
+/** Obsidian App 上未在公开 d.ts 暴露的插件注册表。 */
+type AppWithPluginRegistry = App & {
+    plugins: { plugins: Record<string, IPlugin> };
+};
+
+/** Obsidian Editor 上未在公开 d.ts 暴露的 CodeMirror 6 视图。 */
+type EditorWithCm = Editor & { cm?: EditorView };
 
 export { VIEW_TYPE_SHELL };
 
@@ -68,6 +89,14 @@ export class ShellView extends ItemView {
     private timelineDelegationBound = false;
     // 后台(非活动)tab 收到新消息/流事件时标脏,切回时强制重建以补齐 DOM。
     private dirtyTabs = new Set<TabId>();
+    // 滚动跟随策略:每会话的跟随/未读/阅读位置,以及延迟滚动回调的会话身份校验。
+    private scrollFollow: ScrollFollowController | null = null;
+    // 流式渲染代次:切换 tab / 开新回合时自增,异步渲染回调用旧代次 token 一律丢弃,
+    // 避免一次迟到的 Markdown 完成回调滚动另一个会话或另一个回合的视口。
+    private renderGeneration = 0;
+    // 「有新输出 · 回到最新」入口:仅当活动会话暂停跟随后确有新输出时显示。
+    private unreadBarEl: HTMLElement | null = null;
+    private unreadButtonEl: HTMLButtonElement | null = null;
     // T14 消息 DOM 虚拟化:监听每条消息 entry,滚出视口+缓冲区即脱水为等高占位,滚入再挂回。
     private messageObserver: IntersectionObserver | null = null;
     // 脱水态 entry → 其被摘下的子树(等高占位期间寄存于此,滚入时挂回)。WeakMap 随节点回收自动清理。
@@ -99,7 +128,6 @@ export class ShellView extends ItemView {
     /** 流式增量渲染:尾部未闭合内容的纯文本节点。块一旦闭合(遇到围栏外空行)即晋升进 streamStableEl。 */
     private streamTailEl: HTMLElement | null = null;
     /** 流式增量渲染:闪烁光标,始终位于尾部之后。 */
-    private streamCursorEl: HTMLElement | null = null;
     /** 已晋升为稳定块的文本前缀长度(streamAccumulatedText 的字符数),尾部从此处开始。 */
     private streamRenderedLen = 0;
     private streamAccumulatedText: string = '';
@@ -110,6 +138,16 @@ export class ShellView extends ItemView {
      * 挂到上一轮的回复上,👍/👎/重试全部作用在错误的消息。
      */
     private streamPriorLastAiId: string | null = null;
+    /**
+     * 进行中轮次的请求现场(原文 + 附件上下文),按 tab 暂存。
+     * 失败/取消时据此恢复输入区与上下文;成功则丢弃。
+     */
+    private pendingDrafts = new Map<TabId, ChatTurnRequest>();
+    /**
+     * 失败/取消轮次的原请求现场,按落下的 AI 消息 id 索引。
+     * 失败卡片的「恢复草稿」用它;刷新后内存丢失,按钮自然不出现(不提供死入口)。
+     */
+    private draftRequests = new Map<string, ChatTurnRequest>();
     private streamNodeCount = 0;
     /** 智能体工具循环回合数(step_boundary 计数),用于时间线「Step N」分组标签。 */
     private streamStepCount = 0;
@@ -144,7 +182,9 @@ export class ShellView extends ItemView {
         this.handleInput();
     };
 
-    private handleKeyDownBound = async (e: KeyboardEvent) => {
+    // addEventListener 期望同步 void：voidHandler 让 preventDefault 等同步部分照常先跑，
+    // submitInput 之后的 reject 记日志，而不是变成 unhandled rejection。
+    private handleKeyDownBound = voidHandler(async (e: KeyboardEvent) => {
         if (this.suggestList.handleKeyDown(e)) {
             return;
         }
@@ -162,7 +202,7 @@ export class ShellView extends ItemView {
             this.adjustHeight(); // Reset height
             await this.submitInput(query);
         }
-    };
+    }, 'ShellView');
 
     private handleContainerClickBound = (e: MouseEvent) => {
         if (window.getSelection()?.toString()) return;
@@ -181,8 +221,28 @@ export class ShellView extends ItemView {
         this.inputEl.focus();
     };
 
-    private handlePasteBound = (e: ClipboardEvent) => this.handlePaste(e);
+    private handlePasteBound = voidHandler((e: ClipboardEvent) => this.handlePaste(e), 'ShellView');
     private handleDropBound = (e: DragEvent) => this.handleDrop(e);
+    // 停止无条件贴底后,scroll 事件负责「上翻暂停 / 回到底部恢复」。
+    private handleOutputScrollBound = () => this.scrollFollow?.handleScroll();
+    // 真实输入:恢复位置还没执行时取消它。布局/切 tab 产生的 scroll 不经过这里。
+    private handleOutputScrollIntentBound = () => this.scrollFollow?.handleUserScrollIntent();
+    // 真实输入结束:普通点击/选文本没有移动视口时,把被取消的恢复重新排上。
+    private handleOutputScrollIntentEndBound = () => this.scrollFollow?.handleUserScrollIntentEnd();
+    // 滚轮向上是明确的阅读意图:立即暂停,不等 scroll 事件或下一次 token。
+    private handleOutputWheelBound = (e: WheelEvent) => {
+        if (e.deltaY < 0) this.scrollFollow?.handleUserScrollIntentUp();
+        else this.scrollFollow?.handleUserScrollIntent();
+    };
+    // 键盘滚动键同样是真实输入(ArrowUp/Down、PageUp/Down、Home/End、空格)。
+    private handleOutputKeyDownBound = (e: KeyboardEvent) => {
+        // 焦点在按钮/链接/输入框上时，空格与方向键是控件操作，不是滚动视口。
+        const target = e.target as HTMLElement | null;
+        if (target?.closest('button, a, input, textarea, select, [role="button"]')) return;
+        if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) {
+            this.scrollFollow?.handleUserScrollIntent();
+        }
+    };
 
     constructor(leaf: WorkspaceLeaf, modelService: ModelService, private plugin?: IPlugin) {
         super(leaf);
@@ -204,12 +264,15 @@ export class ShellView extends ItemView {
         });
         this.streamController = new StreamController({
             onThinking: (content) => {
+                const growth = this.captureScrollGrowth();
                 this.ensureStreamContainer();
                 this.flushPendingStepDivider();
                 this.thinkingRenderer?.appendThinking(content);
                 this.streamNodeCount = this.getStreamNodeCount();
+                this.afterScrollGrowth(growth, true);
             },
             onToolCall: (name, args) => {
+                const growth = this.captureScrollGrowth();
                 this.ensureStreamContainer();
                 // 工具调用出现 = 此前回复区的正文是「这一步的过程叙述」,
                 // 把它毕业进时间线作为思路节点,并清空回复区为下一轮腾空。
@@ -217,9 +280,13 @@ export class ShellView extends ItemView {
                 this.thinkingRenderer?.finalizeCurrentThinking();
                 this.toolRenderer?.addToolCall(name, args);
                 this.streamNodeCount = this.getStreamNodeCount();
+                this.afterScrollGrowth(growth, true);
             },
             onToolResult: (name, result, error) => {
+                const growth = this.captureScrollGrowth();
                 this.toolRenderer?.updateToolResult(name, result, error);
+                // 工具结果也是新输出；暂停中的读者应看到返回入口。
+                this.afterScrollGrowth(growth, true);
             },
             onTextDelta: (content) => {
                 this.ensureStreamContainer();
@@ -232,9 +299,8 @@ export class ShellView extends ItemView {
                 // 末轮(只出答案、无工具/思考)不产生时间线内容 → 不会留下空分隔。
                 this.pendingStepDivider = true;
             },
-            onDone: (finalText) => this.finalizeStream(finalText),
-            onError: () => this.finalizeStream(),
-            onScrollRequest: () => this.scrollToEnd(),
+            onDone: (finalText, outcome) => this.finalizeStream(outcome ?? 'completed', finalText),
+            onError: (message) => this.finalizeStream('failed', undefined, message),
         });
     }
 
@@ -287,6 +353,9 @@ export class ShellView extends ItemView {
         // think-summary 折叠交互采用事件委托(避免每轮流式在 summary 上累积监听器)。
         // 抽成幂等方法,onOpen 与流式入口都会确保绑定,不依赖初始化路径是否完整走过。
         this.ensureTimelineDelegation();
+        this.bindScrollFollowListeners();
+        this.createUnreadBar(container);
+        this.createScrollFollowController();
 
         this.tabBar = new TabBar(this.tabBarContainerEl, {
             onTabClick: (id) => {
@@ -310,6 +379,8 @@ export class ShellView extends ItemView {
         }
         this.updateTabBar();
         this.renderActiveTabMessages();
+        // 首次打开:新会话定位到最新(与「切回已有会话恢复阅读位置」明确区分)。
+        if (activeTab) this.scrollFollow?.activateSession(activeTab.id, 'new');
 
         // 3. Input Area (Fixed at bottom)
         const inputContainer = this.createShellScaffold(container);
@@ -414,9 +485,9 @@ export class ShellView extends ItemView {
                 description: command.description,
             }));
             // 用户自定义命令(.obsidian/baizer-commands/*.md)并入 skill 通道一起展示。
-            const userCommands = (typeof (this.modelService as any).getUserCommandsSync === 'function'
-                ? (this.modelService as any).getUserCommandsSync()
-                : []).map((command: any) => ({
+            const userCommands = (typeof this.modelService.getUserCommandsSync === 'function'
+                ? this.modelService.getUserCommandsSync()
+                : []).map((command) => ({
                     command: command.command,
                     description: command.description,
                 }));
@@ -553,37 +624,120 @@ export class ShellView extends ItemView {
     }
 
     async processCommand(query: string) {
+        const session = this.ensureActiveTabSession();
+        const tabId = this.tabManager.getActiveTab()?.id;
+        let request: ChatTurnRequest | null = null;
         try {
-            this.ensureActiveTabSession();
             const { contextItems, selection } = await this.contextController.collectCommandContext({
                 includeCurrent: this.shouldIncludeCurrentNoteContext(),
             });
             this.currentSelection = selection;
+            // 发送前留一份现场:失败/取消时按它恢复草稿与附件,重试也按它还原原请求。
+            request = {
+                query,
+                context: contextItems.map(item => ({ ...item })),
+                selection,
+                source: 'shell',
+            };
+            if (tabId != null) this.pendingDrafts.set(tabId, request);
 
             this.updateActivity();
-            await this.chatController.processCommand(query, contextItems, this.currentSelection);
+            const outcome = await session.chatController.processCommand(query, contextItems, this.currentSelection);
 
-            // Clear context after sending (optional, maybe keep for multi-turn?)
-            // Smart Composer clears context after send usually, unless pinned.
-            // Let's clear for now.
-            this.contextManager.clearContexts();
-            this.renderContextChips(this.outputContainer.parentElement?.querySelector('.shell-context-chips') as HTMLElement);
-            await this.refreshKnowledgeStatusPanel();
+            const stillActive = this.tabManager.getActiveTab()?.id === tabId;
+            if (outcome === 'failed' || outcome === 'cancelled') {
+                // 失败/取消:上下文保留在 chips 里,输入区按现场恢复;等待期间的新输入不覆盖。
+                if (stillActive && request) this.restoreDraft(request);
+            } else if (stillActive) {
+                // 成功才清空上下文(现有行为)。
+                session.contextManager.clearContexts();
+                const chipsContainer = this.getContextChipsContainer();
+                if (chipsContainer) this.renderContextChips(chipsContainer);
+                await this.refreshKnowledgeStatusPanel();
+            }
         } catch (error) {
             logger.error('Command processing failed', error, 'ShellView.processCommand');
+            if (request) this.restoreDraft(request);
             this.appendMessage({
                 id: 'error-' + Date.now(),
                 role: 'system',
                 content: `Error processing command: ${error.message}`,
                 timestamp: Date.now()
             });
+        } finally {
+            if (tabId != null) this.pendingDrafts.delete(tabId);
         }
     }
 
-    appendMessage(msg: ChatMessage) {
+    /**
+     * 恢复失败/取消轮次的原草稿。
+     * 输入区已有新内容时绝不覆盖(只保留现场,由失败卡片的「恢复草稿」显式取回);
+     * 上下文附件按 id 合并,避免把等待期间新加的 chip 冲掉。
+     */
+    private restoreDraft(request: ChatTurnRequest, force = false) {
+        if (!this.inputEl) return;
+        if (force || !this.inputEl.value.trim()) {
+            this.inputEl.value = request.query;
+            this.adjustHeight();
+        }
+
+        // 只在活动 tab 上恢复;contextManager 就是活动 tab 的实例。
+        const existing = new Set(this.contextManager.getContexts().map(item => item.id));
+        for (const item of request.context) {
+            if (!item?.id || existing.has(item.id)) continue;
+            this.contextManager.addContext(item as ContextItem);
+            existing.add(item.id);
+        }
+        const chipsContainer = this.getContextChipsContainer();
+        if (chipsContainer) this.renderContextChips(chipsContainer);
+        this.updateInputToolbarCapabilities();
+    }
+
+    /** 失败卡片「恢复草稿」:显式用户动作,允许覆盖当前输入。 */
+    private handleRestoreDraft(message: ChatMessage) {
+        const request = this.draftRequests.get(message.id);
+        if (!request) return;
+        this.restoreDraft(request, true);
+        this.inputEl?.focus();
+    }
+
+    /** 失败卡片「重试」:按原请求与上下文重跑;处理中拒绝重复触发。 */
+    private async handleRetryTurn(message: ChatMessage) {
+        if (!this.chatController || this.chatController.isRunActive()) return;
+        const request = this.chatController.getRetryRequest(message.id) ?? this.deriveRetryRequest(message);
+        if (!request) {
+            new Notice(t('Cannot locate the question to retry.'));
+            return;
+        }
+        this.draftRequests.delete(message.id);
+        await this.chatController.retryTurn(request);
+        await this.persistActiveTab();
+    }
+
+    /** 刷新/重开视图后内存现场已丢:从相邻 user 消息还原原文,至少原文可重试。 */
+    private deriveRetryRequest(message: ChatMessage): ChatTurnRequest | null {
+        const userMessage = this.findPrecedingUserMessage(message);
+        if (!userMessage?.content.trim()) return null;
+        return {
+            query: userMessage.content,
+            context: [],
+            selection: '',
+            source: 'shell',
+        };
+    }
+
+    /**
+     * @param markUnread 该消息是否算「新输出」。全量重建旧消息时传 false,
+     *   否则切回暂停中的会话会凭空点亮「有新输出」。
+     */
+    appendMessage(msg: ChatMessage, markUnread = true) {
+        const growth = this.captureScrollGrowth();
         void this.getMessageRenderer()
             .renderMessage(this.getActiveMessageContainer(), msg)
-            .then((entry) => this.observeMessageEntry(entry));
+            .then((entry) => {
+                this.observeMessageEntry(entry);
+                this.afterScrollGrowth(growth, markUnread);
+            });
         this.updateActivity();
     }
 
@@ -619,11 +773,62 @@ export class ShellView extends ItemView {
         }
     }
 
-    private scrollToEnd() {
-        // Use setTimeout to ensure DOM is ready
-        window.setTimeout(() => {
-            this.outputContainer.scrollTop = this.outputContainer.scrollHeight;
-        }, 50);
+    // ==================== 滚动跟随（issue #64） ====================
+
+    private createScrollFollowController() {
+        this.scrollFollow?.dispose();
+        this.scrollFollow = new ScrollFollowController({
+            getContainer: () => this.outputContainer ?? null,
+            getRenderGeneration: () => this.renderGeneration,
+            onUnreadChange: (sessionId, unread) => {
+                if (this.tabManager.getActiveTab()?.id !== sessionId) return;
+                this.updateUnreadBar(unread);
+            },
+        });
+    }
+
+    private bindScrollFollowListeners() {
+        this.outputContainer.addEventListener('scroll', this.handleOutputScrollBound, { passive: true });
+        this.outputContainer.addEventListener('wheel', this.handleOutputWheelBound, { passive: true });
+        // 恢复位置期间只有真实输入能取消它;pointerdown/touchstart 覆盖拖滚动条与触摸滑动。
+        this.outputContainer.addEventListener('pointerdown', this.handleOutputScrollIntentBound, { passive: true });
+        this.outputContainer.addEventListener('touchstart', this.handleOutputScrollIntentBound, { passive: true });
+        this.outputContainer.addEventListener('keydown', this.handleOutputKeyDownBound);
+        // 普通点击/选文本结束时若视口没动,恢复原阅读锚点(见 handleUserScrollIntentEnd)。
+        this.outputContainer.addEventListener('pointerup', this.handleOutputScrollIntentEndBound, { passive: true });
+        this.outputContainer.addEventListener('touchend', this.handleOutputScrollIntentEndBound, { passive: true });
+    }
+
+    /**
+     * 「有新输出 · 回到最新」入口。放在消息区与输入区之间、不覆盖任何一侧：
+     * 隐藏时不占布局，显示时是独立一行，窄侧栏下也不会横向溢出。
+     */
+    private createUnreadBar(container: HTMLElement) {
+        const bar = container.createDiv({ cls: 'shell-unread-bar baizer-hidden' });
+        bar.setAttribute('aria-live', 'polite');
+        const button = bar.createEl('button', {
+            cls: 'shell-unread-button',
+            text: t('New output · Back to latest'),
+        });
+        button.setAttr('type', 'button');
+        button.addEventListener('click', () => this.scrollFollow?.scrollToLatest());
+        this.unreadBarEl = bar;
+        this.unreadButtonEl = button;
+    }
+
+    private updateUnreadBar(unread: boolean = this.scrollFollow?.hasUnread() ?? false) {
+        if (!this.unreadBarEl) return;
+        this.unreadBarEl.toggleClass('baizer-hidden', !unread);
+        this.unreadButtonEl?.setAttr('aria-hidden', String(!unread));
+    }
+
+    /** 内容增长前捕获会话身份、近底/跟随快照与渲染代次,增长后交给策略决定是否贴底/点亮未读。 */
+    private captureScrollGrowth(): GrowthToken | null {
+        return this.scrollFollow?.captureGrowth() ?? null;
+    }
+
+    private afterScrollGrowth(token: GrowthToken | null, markUnread: boolean) {
+        this.scrollFollow?.afterGrowth(token, { markUnread });
     }
 
     // ==================== T14: 消息 DOM 虚拟化 ====================
@@ -673,7 +878,7 @@ export class ShellView extends ItemView {
         if (this.dehydratedEntries.has(el)) return;
         const height = el.offsetHeight;
         if (height <= 0) return; // 不可见(display:none 的后台 tab 或尚未布局)——不处理
-        const fragment = document.createDocumentFragment();
+        const fragment = createFragment();
         while (el.firstChild) fragment.appendChild(el.firstChild);
         el.setCssStyles({ minHeight: `${height}px` });
         el.classList.add('shell-entry-dehydrated');
@@ -706,6 +911,7 @@ export class ShellView extends ItemView {
         this.updateInputToolbarCapabilities();
         if (isResponding) {
             // Show loading indicator (instance-scoped to avoid cross-view collisions)
+            const growth = this.captureScrollGrowth();
             if (!this.loadingIndicatorEl) {
                 const loadingDiv = this.getActiveMessageContainer().createDiv({ cls: 'shell-entry system' });
                 loadingDiv.setAttribute('role', 'status');
@@ -714,7 +920,8 @@ export class ShellView extends ItemView {
                 loadingDiv.createSpan({ text: 'Thinking...' });
                 this.loadingIndicatorEl = loadingDiv;
             }
-            this.scrollToEnd();
+            // 加载指示不是新输出,不点亮未读;跟随中仍贴底。
+            this.afterScrollGrowth(growth, false);
         } else {
             // Remove loading indicator
             this.loadingIndicatorEl?.remove();
@@ -735,14 +942,14 @@ export class ShellView extends ItemView {
         this.outputContainer.addEventListener('click', (event) => {
             const summary = (event.target as HTMLElement | null)?.closest('.shell-think-summary') as HTMLElement | null;
             if (!summary) return;
-            const timeline = summary.closest('.shell-think-timeline') as HTMLElement | null;
+            const timeline = summary.closest<HTMLElement>('.shell-think-timeline');
             if (timeline) this.toggleStreamTimeline(timeline);
         });
         this.outputContainer.addEventListener('keydown', (event: KeyboardEvent) => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             const summary = (event.target as HTMLElement | null)?.closest('.shell-think-summary') as HTMLElement | null;
             if (!summary) return;
-            const timeline = summary.closest('.shell-think-timeline') as HTMLElement | null;
+            const timeline = summary.closest<HTMLElement>('.shell-think-timeline');
             if (!timeline) return;
             event.preventDefault();
             this.toggleStreamTimeline(timeline);
@@ -760,6 +967,8 @@ export class ShellView extends ItemView {
         this.loadingIndicatorEl?.remove();
         this.loadingIndicatorEl = null;
 
+        // 新回合换了一棵流式 DOM 树:旧回合还在 await 的渲染回调从此过期。
+        this.renderGeneration += 1;
         this.streamContainer = this.getActiveMessageContainer().createDiv({ cls: 'shell-entry ai shell-stream-container' });
         this.streamTimeline = this.streamContainer.createDiv({ cls: 'shell-think-timeline' });
         const streamTimeline = this.streamTimeline;
@@ -823,7 +1032,6 @@ export class ShellView extends ItemView {
         // 让下一轮正文从头开始块级渲染,不残留上一轮的稳定块。
         this.streamStableEl = null;
         this.streamTailEl = null;
-        this.streamCursorEl = null;
         this.streamRenderedLen = 0;
     }
 
@@ -835,8 +1043,8 @@ export class ShellView extends ItemView {
     private flushPendingStepDivider() {
         if (!this.pendingStepDivider || !this.streamTimeline) return;
         this.pendingStepDivider = false;
-        const divider = (this.streamTimeline as any).createDiv({ cls: 'shell-think-step-divider think-node' }) as HTMLElement;
-        (divider as any).createSpan({ cls: 'shell-think-step-label', text: `Step ${this.streamStepCount}` });
+        const divider = this.streamTimeline.createDiv({ cls: 'shell-think-step-divider think-node' });
+        divider.createSpan({ cls: 'shell-think-step-label', text: `Step ${this.streamStepCount}` });
     }
 
     /**
@@ -851,15 +1059,15 @@ export class ShellView extends ItemView {
      */
     private renderStreamContent() {
         if (!this.streamContent) return;
+        // 增长前捕获:是否跟随只由此刻的跟随状态决定,不能用增长后的新高度重新判断。
+        const growth = this.captureScrollGrowth();
 
         // 首帧:建立稳定块容器 + 尾部纯文本 + 光标三段结构。
         if (!this.streamTailEl) {
             this.streamContent.empty();
             this.streamStableEl = this.streamContent.createDiv({ cls: 'shell-stream-stable' });
             this.streamTailEl = this.streamContent.createDiv({ cls: 'shell-stream-plaintext' });
-            this.streamCursorEl = document.createElement('span');
-            this.streamCursorEl.className = 'shell-stream-cursor';
-            this.streamContent.appendChild(this.streamCursorEl);
+            this.streamContent.createSpan({ cls: 'shell-stream-cursor' });
             this.streamRenderedLen = 0;
         }
 
@@ -875,21 +1083,43 @@ export class ShellView extends ItemView {
 
         // 尾部只做纯文本更新(浏览器只 diff 这一个文本节点),开销与尾部长度线性。
         this.streamTailEl.textContent = this.streamAccumulatedText.slice(this.streamRenderedLen);
-        this.scrollToEnd();
+        this.afterScrollGrowth(growth, true);
     }
 
     /** 把一段已闭合的 Markdown 文本渲染进一个新的稳定块节点并追加,冻结不再重渲。 */
     private async appendStableBlock(markdown: string) {
         if (!this.streamStableEl) return;
+        // 入队时捕获 token:await 之后活动会话可能已经切走、渲染代次也可能已前进,
+        // 完成回调只能滚动发起时的会话,过期即丢弃。
+        const growth = this.captureScrollGrowth();
         const blockEl = this.streamStableEl.createDiv({ cls: 'shell-stream-block' });
         await this.getMessageRenderer().renderAiContent(blockEl, markdown);
+        // Markdown 渲染完成可能再改变高度:仍属同一会话/同一代次且增长前跟随并近底时补一次贴底。
+        this.afterScrollGrowth(growth, false);
     }
 
 
-    private finalizeStream(finalText?: string) {
+    /**
+     * 收尾一轮流。outcome 是本轮唯一终态来源(completed / failed / cancelled):
+     * - 成功才自动折叠过程;
+     * - 失败/取消保留过程展开,就地渲染「原因 + 已保留内容 + 重试/恢复草稿」;
+     * - 无论有没有正文都清掉流式状态,不留永久 Thinking。
+     */
+    private finalizeStream(
+        outcome: ChatTurnOutcome = 'completed',
+        finalText?: string,
+        error?: string,
+    ) {
+        const growth = this.captureScrollGrowth();
         this.debouncedRenderStream.flush();
 
         this.thinkingRenderer?.finalizeCurrentThinking();
+
+        // 首 token 前就失败/取消时还没有流容器;终态卡片仍需要一个落点。
+        const createdLate = !this.streamContainer;
+        if (createdLate && outcome !== 'completed') {
+            this.ensureStreamContainer();
+        }
 
         // runtime 可能在结束前替换正文(如 generation quality failure):done.text 才是
         // 入库/重建所见。有非空 finalText 时用它定型 DOM,使屏幕与保存一致;
@@ -898,53 +1128,95 @@ export class ShellView extends ItemView {
             ? finalText
             : this.streamAccumulatedText;
 
+        // ChatController 在发出终态事件之前就把本轮消息记进了投影(ADR 0002),
+        // 这里按同一 id 找回它,操作栏/失败卡片/重试才能作用在真实消息上。
+        const activeMessages = this.tabManager.getActiveTab()?.state.getMessages() ?? [];
+        const candidate = [...activeMessages].reverse().find(m => m.role === 'ai');
+        const terminalMessage = candidate && candidate.metadata?.outcome === outcome
+            ? candidate
+            : undefined;
+        const lastAiMessage = candidate && (createdLate || candidate.id !== this.streamPriorLastAiId)
+            ? candidate
+            : undefined;
+
         if (this.streamContent && resolvedText) {
             // 流结束:把回复区切回 polite,让读屏把完成的整段回复播报一次(流式途中是 off)。
-            this.streamContent.setAttribute('aria-live', 'polite');
-            this.streamContent.empty();
-            this.getMessageRenderer().renderAiContent(
-                this.streamContent,
-                resolvedText,
-            ).then(() => {
-                this.scrollToEnd();
-            });
+            const contentEl = this.streamContent;
+            contentEl.setAttribute('aria-live', 'polite');
+            contentEl.empty();
+            detach(
+                this.getMessageRenderer().renderAiContent(
+                    contentEl,
+                    resolvedText,
+                ).then(() => {
+                    // 定型渲染不是「新输出」:暂停时不得点亮未读,也不能把读者拉回底部。
+                    this.afterScrollGrowth(growth, false);
+                }).catch((error: unknown) => {
+                    // 定型渲染失败不能让终态区一片空白:记日志 + 纯文本兜底,滚动语义照旧。
+                    logger.error('Final AI content render failed', error, 'ShellView');
+                    contentEl.textContent = resolvedText;
+                    this.afterScrollGrowth(growth, false);
+                }),
+                'ShellView',
+            );
         }
 
         if (this.streamTimeline && this.streamNodeCount > 0) {
             const summaryText = this.streamTimeline.querySelector('.think-summary-text') as HTMLElement;
-            if (summaryText) summaryText.textContent = `Thought through ${this.streamNodeCount} steps`;
-            this.streamTimeline.addClass('is-collapsed');
             const summary = this.streamTimeline.querySelector('.shell-think-summary') as HTMLElement;
-            summary?.setAttribute('aria-expanded', 'false');
+            if (outcome === 'completed') {
+                if (summaryText) summaryText.textContent = `Thought through ${this.streamNodeCount} steps`;
+                this.streamTimeline.addClass('is-collapsed');
+                summary?.setAttribute('aria-expanded', 'false');
+            } else {
+                // 失败/取消:保留过程默认展开,用户仍可点击/键盘折叠。
+                if (summaryText) {
+                    summaryText.textContent = outcome === 'cancelled'
+                        ? `Stopped after ${this.streamNodeCount} steps`
+                        : `Failed after ${this.streamNodeCount} steps`;
+                }
+                this.streamTimeline.removeClass('is-collapsed');
+                this.streamTimeline.addClass(outcome === 'cancelled' ? 'is-cancelled' : 'is-failed');
+                summary?.setAttribute('aria-expanded', 'true');
+            }
         } else if (this.streamTimeline && this.streamNodeCount === 0) {
             this.streamTimeline.addClass('baizer-hidden');
         }
 
         if (this.streamContainer) {
+            // 失败/取消卡片:原因 + 已保留内容(正文在卡片之上)+ 重试/恢复草稿。
+            // 用同一份渲染逻辑服务实时收尾与回放(renderMessage 也调用它)。
+            if (outcome !== 'completed') {
+                const outcomeMessage: ChatMessage = terminalMessage ?? {
+                    id: `stream-outcome-${Date.now()}`,
+                    role: 'ai',
+                    content: resolvedText,
+                    timestamp: Date.now(),
+                    metadata: { outcome, failureReason: error },
+                };
+                const tabId = this.tabManager.getActiveTab()?.id;
+                const draft = (tabId != null ? this.pendingDrafts.get(tabId) : undefined)
+                    ?? this.chatController?.getRetryRequest(outcomeMessage.id)
+                    ?? undefined;
+                if (draft) this.draftRequests.set(outcomeMessage.id, draft);
+                this.getMessageRenderer().renderTurnOutcome(this.streamContainer, outcomeMessage);
+            }
+
             // 阶段C:用投影里刚落下的真实 ai 消息(已带 assistantEntryId)渲染操作栏,
             // 而非临时空壳——否则 sessionEntryId 缺失,重试按钮的显示条件永不满足。
-            // ChatController 在发出 done 之前就把该消息记进了投影(ADR 0002),
-            // 它的 id 与 ChatController 列表里的同一条一致,故 👍/👎 能回查到。
             // 但「最后一条 ai」未必属于本轮:纯工具轮次没有最终正文、不落消息,
             // 那时它是上一轮的残留。与开流前记下的 id 比对,不同才是本轮新落的。
-            const activeMessages = this.tabManager.getActiveTab()?.state.getMessages() ?? [];
-            const candidate = [...activeMessages].reverse().find(m => m.role === 'ai');
-            const lastAiMessage = candidate && candidate.id !== this.streamPriorLastAiId
-                ? candidate
-                : undefined;
-            // 就近填充分叉源问题文本:该 ai 回复紧邻其前的 user 消息原文,供底部「分叉」输入预填。
-            // 兜底空壳仅在无持久会话时出现(投影里没有本轮消息);它的 id 与任何列表都对不上,
-            // 只有复制可用——与本轮无正文可言时(纯工具轮次)一并不渲染操作栏。
-            const toolbarMessage: ChatMessage | null = lastAiMessage
-                ? { ...lastAiMessage, forkSourceText: this.findPrecedingUserMessage(lastAiMessage)?.content }
-                : resolvedText
-                    ? {
-                        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            // 失败且无正文时只显示失败卡(不渲染空操作栏/空气泡)。
+            const toolbarMessage: ChatMessage | null = resolvedText.trim()
+                ? (lastAiMessage
+                    ? { ...lastAiMessage, forkSourceText: this.findPrecedingUserMessage(lastAiMessage)?.content }
+                    : {
+                        id: Date.now().toString() + Math.random().toString(36).slice(2, 11),
                         role: 'ai',
                         content: resolvedText,
                         timestamp: Date.now(),
-                    }
-                    : null;
+                    })
+                : null;
             if (toolbarMessage) {
                 this.getMessageRenderer().addActionToolbar(this.streamContainer, toolbarMessage);
             }
@@ -959,7 +1231,6 @@ export class ShellView extends ItemView {
         this.streamContent = null;
         this.streamStableEl = null;
         this.streamTailEl = null;
-        this.streamCursorEl = null;
         this.streamRenderedLen = 0;
         this.streamAccumulatedText = '';
         this.streamPriorLastAiId = null;
@@ -979,14 +1250,16 @@ export class ShellView extends ItemView {
                 app: this.app,
                 component: this,
                 onApprove: async (message) => {
-                    if (message.approval) {
-                        await this.chatController.approveApproval(message.approval);
-                    }
+                    await this.chatController.approveApproval(message.id);
                 },
-                onCancel: (message) => {
-                    if (message.approval) {
-                        this.chatController.cancelApproval(message.approval);
-                    }
+                onReject: (message) => {
+                    this.chatController.rejectApproval(message.id);
+                },
+                onApprovalRetry: async (message) => {
+                    await this.chatController.retryApproval(message.id);
+                },
+                onApprovalRecheck: async (message) => {
+                    await this.chatController.recheckApproval(message.id);
                 },
                 onFocusApprovalPreview: async (message) => {
                     if (message.approval) {
@@ -1001,15 +1274,17 @@ export class ShellView extends ItemView {
                     await this.chatController.recordNegativeFeedback(message.id, reason);
                 },
                 onRetry: (message) => this.handleRetryMessage(message),
+                onRetryTurn: (message) => this.handleRetryTurn(message),
+                canRestoreDraft: (message) => this.draftRequests.has(message.id),
+                onRestoreDraft: (message) => this.handleRestoreDraft(message),
                 onEdit: (message, newText) => this.handleEditMessage(message, newText),
                 onFork: (message, newText) => this.handleForkFromAi(message, newText),
                 onSwitchBranch: (message, targetLeafId) => this.handleSwitchBranch(message, targetLeafId),
                 onReviewCodeBlock: (content) => this.reviewCodeBlock(content),
-                onUndoWorkspaceEdit: (editId) => this.chatController.undoWorkspaceEdit(editId),
+                onUndoWorkspaceEdit: (editId) => { void this.chatController.undoWorkspaceEdit(editId); },
                 onInternalLinkClick: (href) => {
                     void this.app.workspace.openLinkText(href, '', false);
                 },
-                onScrollRequest: () => this.scrollToEnd(),
                 onRenderError: (error) => {
                     logger.error('Markdown rendering failed', error, 'ShellView');
                 },
@@ -1027,7 +1302,8 @@ export class ShellView extends ItemView {
         }
 
         const originalContent = await this.app.vault.read(activeFile);
-        new DiffModal(this.app, originalContent, newContent, async () => {
+        // 用户点「应用」触发：失败必须让用户看到，否则会以为改动已写入。
+        new DiffModal(this.app, originalContent, newContent, voidHandler(async () => {
             await this.chatController.applyPreviewedChange({
                 action: 'review_code_block',
                 target: activeFile.path,
@@ -1037,7 +1313,9 @@ export class ShellView extends ItemView {
                     new Notice('Changes applied.');
                 },
             });
-        }).open();
+        }, 'ShellView', (error) => {
+            new Notice(`Failed to apply changes: ${thrownMessage(error) || 'Unknown error'}`);
+        })).open();
     }
 
     private async refreshKnowledgeStatusPanel() {
@@ -1060,30 +1338,35 @@ export class ShellView extends ItemView {
             return;
         }
 
-        const target = approval.target || approval.args?.path || approval.args?.filename;
+        const argPath = approval.args?.path;
+        const argFilename = approval.args?.filename;
+        const target = approval.target
+            || (typeof argPath === 'string' ? argPath : '')
+            || (typeof argFilename === 'string' ? argFilename : '');
         if (target) {
             await this.openApprovalTarget(target);
         }
 
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        const editor = activeView?.editor as any;
-        const cmView = editor?.cm as EditorView | undefined;
+        const editor: EditorWithCm | undefined = activeView?.editor;
+        const cmView = editor?.cm;
         if (!cmView) {
             new Notice('Open the target note in source mode to show the preview.');
             return;
         }
 
-        const line = Math.max(1, editor?.getCursor?.()?.line + 1 || 1);
+        const line = Math.max(1, (editor?.getCursor?.()?.line ?? NaN) + 1 || 1);
         const ch = Math.max(0, editor?.getCursor?.()?.ch || 0);
         showGhostText(cmView, this.buildApprovalGhostPreview(previewText), line, ch);
-        new Notice('Preview shown in the editor. Hover approval icons for actions.');
+        new Notice('Preview shown in the editor. Use the approval card buttons to approve or reject.');
     }
 
     private async openApprovalTarget(path: string) {
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!file) return;
+        if (!(file instanceof TFile)) return;
         const leaf = this.app.workspace.getLeaf(false);
-        await leaf?.openFile?.(file as any);
+        await leaf?.openFile?.(file);
     }
 
     private buildApprovalGhostPreview(content: string) {
@@ -1115,6 +1398,20 @@ export class ShellView extends ItemView {
         // 断开消息虚拟化观察,避免视图关闭后 observer 泄漏。
         this.messageObserver?.disconnect();
         this.messageObserver = null;
+        // 视图关闭后不能再有任何延迟滚动回调影响会话。
+        this.scrollFollow?.dispose();
+        this.scrollFollow = null;
+        if (this.outputContainer) {
+            this.outputContainer.removeEventListener('scroll', this.handleOutputScrollBound);
+            this.outputContainer.removeEventListener('wheel', this.handleOutputWheelBound as EventListener);
+            this.outputContainer.removeEventListener('pointerdown', this.handleOutputScrollIntentBound);
+            this.outputContainer.removeEventListener('touchstart', this.handleOutputScrollIntentBound);
+            this.outputContainer.removeEventListener('keydown', this.handleOutputKeyDownBound);
+            this.outputContainer.removeEventListener('pointerup', this.handleOutputScrollIntentEndBound);
+            this.outputContainer.removeEventListener('touchend', this.handleOutputScrollIntentEndBound);
+        }
+        this.unreadBarEl = null;
+        this.unreadButtonEl = null;
         if (this.inputEl) {
             this.inputEl.removeEventListener('input', this.handleInputBound);
             this.inputEl.removeEventListener('keydown', this.handleKeyDownBound);
@@ -1149,7 +1446,7 @@ export class ShellView extends ItemView {
 
     private stopHeartbeat() {
         if (this.heartbeatInterval) {
-            clearInterval(this.heartbeatInterval);
+            window.clearInterval(this.heartbeatInterval);
             this.heartbeatInterval = null;
         }
     }
@@ -1222,10 +1519,10 @@ export class ShellView extends ItemView {
                 void this.openKnowledgeSummaryForPath(path);
             },
             onRunLint: () => {
-                (this.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
+                (this.app as AppWithCommands).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-lint`);
             },
             onCopyPath: (path) => {
-                void globalThis.navigator?.clipboard?.writeText?.(path);
+                void window.navigator?.clipboard?.writeText?.(path);
                 new Notice('Copied note path.');
             },
             onOpenSettings: () => this.openPluginSettings(),
@@ -1305,11 +1602,11 @@ export class ShellView extends ItemView {
     private async openKnowledgeSummaryForPath(path: string) {
         const status = await this.plugin?.knowledgeRuntime?.getStatusService?.()?.getNoteStatus?.(path);
         const summaryPath = status?.summaryPath;
-        if (summaryPath && typeof (this.app.workspace as any)?.openLinkText === 'function') {
-            await (this.app.workspace as any).openLinkText(summaryPath, '', false);
+        if (summaryPath && typeof this.app.workspace?.openLinkText === 'function') {
+            await this.app.workspace.openLinkText(summaryPath, '', false);
             return;
         }
-        (this.app as any).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
+        (this.app as AppWithCommands).commands?.executeCommandById?.(`${PLUGIN_ID}:knowledge-open-index`);
     }
 
     private excludeCurrentNoteContext(path: string) {
@@ -1329,7 +1626,7 @@ export class ShellView extends ItemView {
         const activePath = this.app.workspace?.getActiveFile?.()?.path ?? null;
         const scoped = !!activePath && activePath !== this.excludedCurrentNotePath;
         if (scoped) {
-            const base = activePath!.split('/').pop() ?? activePath!;
+            const base = activePath.split('/').pop() ?? activePath;
             const name = base.replace(/\.md$/i, '');
             this.scopePillNameEl.setText(name);
             this.scopePillEl.setAttribute('title', `当前作用于:${activePath}`);
@@ -1341,10 +1638,9 @@ export class ShellView extends ItemView {
     }
 
     private openPluginSettings() {
-        // @ts-ignore - app setting tab activation
-        this.app.setting.open();
-        // @ts-ignore - activate plugin settings tab
-        this.app.setting.openTabById(PLUGIN_ID);
+        const app = this.app as AppWithSetting;
+        app.setting.open();
+        app.setting.openTabById(PLUGIN_ID);
     }
 
     /**
@@ -1453,7 +1749,7 @@ export class ShellView extends ItemView {
         try {
             new URL(str);
             return true;
-        } catch (_) {
+        } catch {
             return false;
         }
     }
@@ -1462,7 +1758,7 @@ export class ShellView extends ItemView {
         const settings = this.getPluginInstance()?.settings;
         if (!settings?.providers || !this.inputToolbar) return;
 
-        const activeProviderId = settings.activeProvider || 'gemini';
+        const activeProviderId = settings.activeProvider || DEFAULT_SETTINGS.activeProvider;
         const activeModelId = settings.providers[activeProviderId]?.model || '';
 
         const requestId = ++this.modelLoadRequestId;
@@ -1483,10 +1779,10 @@ export class ShellView extends ItemView {
                 activeProviderId,
                 activeModelId,
             });
-        } catch (error: any) {
+        } catch (error: unknown) {
             if (requestId !== this.modelLoadRequestId) return;
             logger.warn(
-                `Failed to load model list: ${error?.message || 'Unknown error'}`,
+                `Failed to load model list: ${thrownMessage(error) || 'Unknown error'}`,
                 'ShellView.refreshInputToolbarModels'
             );
             this.inputToolbar.updateModels({
@@ -1543,10 +1839,9 @@ export class ShellView extends ItemView {
         const plugin = this.getPluginInstance();
         const config = plugin?.settings?.providers?.[id];
         new Notice(`${config?.label || id} API Key is not configured. Please configure it in settings.`);
-        // @ts-ignore - app setting tab activation
-        this.app.setting.open();
-        // @ts-ignore - activate plugin settings tab
-        this.app.setting.openTabById(PLUGIN_ID);
+        const app = this.app as AppWithSetting;
+        app.setting.open();
+        app.setting.openTabById(PLUGIN_ID);
         void this.refreshInputToolbarModels();
     }
 
@@ -1560,7 +1855,7 @@ export class ShellView extends ItemView {
     private refreshInputToolbarThinking() {
         const settings = this.getPluginInstance()?.settings;
         if (!settings || !this.inputToolbar) return;
-        this.inputToolbar.updateThinking((settings.thinkingLevel ?? 'medium') as ThinkingLevel);
+        this.inputToolbar.updateThinking(settings.thinkingLevel ?? 'medium');
     }
 
     private updatePlaceholder() {
@@ -1576,12 +1871,15 @@ export class ShellView extends ItemView {
     }
 
     private async createAndShowTab() {
+        this.scrollFollow?.prepareForSessionSwitch();
         await this.persistActiveTab();
         const tab = this.tabManager.createTab();
         this.activateTabSession(tab.id);
         this.applyTabMetadata(tab);
         this.resetStreamState();
         this.renderActiveTabMessages();
+        // 新会话:定位到最新并开始跟随。
+        this.scrollFollow?.activateSession(tab.id, 'new');
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
@@ -1592,6 +1890,8 @@ export class ShellView extends ItemView {
             return;
         }
 
+        // 先记下离开会话的阅读位置,再切身份;延迟回调带会话校验,不会滚到目标 tab。
+        this.scrollFollow?.prepareForSessionSwitch();
         await this.persistActiveTab();
         if (!this.tabManager.switchTab(id)) return;
 
@@ -1609,15 +1909,19 @@ export class ShellView extends ItemView {
         } else {
             this.renderActiveTabMessages();
         }
+        // 恢复该会话自己的跟随/未读/阅读位置(新会话已在创建时定位)。
+        this.scrollFollow?.activateSession(id, 'restore');
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
 
     private async closeTab(id: TabId) {
+        this.scrollFollow?.prepareForSessionSwitch();
         const tabToClose = this.tabManager.getAllTabs().find(item => item.id === id) ?? null;
         await this.persistTab(tabToClose);
         const wasActive = this.tabManager.getActiveTab()?.id === id;
         if (!this.tabManager.closeTab(id)) return;
+        this.scrollFollow?.removeSession(id);
 
         const session = this.tabSessions.get(id);
         session?.chatController.cleanup();
@@ -1641,12 +1945,13 @@ export class ShellView extends ItemView {
                 await this.syncProviderStateForTab(activeTab);
                 this.resetStreamState();
                 this.renderActiveTabMessages();
+                this.scrollFollow?.activateSession(activeTab.id, 'restore');
             }
         }
     }
 
     private getPluginInstance(): IPlugin | undefined {
-        return this.plugin ?? (this.app as any).plugins.plugins[PLUGIN_ID];
+        return this.plugin ?? (this.app as AppWithPluginRegistry).plugins.plugins[PLUGIN_ID];
     }
 
     private ensureActiveTabSession(): ShellTabSession {
@@ -1681,6 +1986,8 @@ export class ShellView extends ItemView {
             api: this.modelService,
             conversationId: id,
             onMessageAdded: (msg, options) => this.handleTabMessageAdded(id, msg, options),
+            onMessageRemoved: (messageId) => this.handleTabMessageRemoved(id, messageId),
+            onMessageUpdated: (msg) => this.handleTabMessageUpdated(id, msg),
             onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
             onStreamEvent: (event) => this.handleTabStreamEvent(id, event),
             onClear: () => this.handleTabClear(id),
@@ -1690,6 +1997,12 @@ export class ShellView extends ItemView {
         });
 
         const session = { chatController, contextManager, contextController };
+        // 从历史菜单恢复的 tab 在创建时就带着快照消息(只写进了投影,没经过 onMessageAdded)。
+        // 让唯一作者接管它们,否则恢复后的 👍/👎 按 id 回查会落空。
+        const tab = this.tabManager.getAllTabs().find(item => item.id === id);
+        if (tab) {
+            chatController.adoptMessages(tab.state.getMessages());
+        }
         this.tabSessions.set(id, session);
         return session;
     }
@@ -1713,7 +2026,73 @@ export class ShellView extends ItemView {
             this.tabManager.markAttention(tabId, true);
             // 后台 tab 有新消息:标脏,切回时强制重建以补齐 DOM。
             this.dirtyTabs.add(tabId);
+            // 该会话若已暂停跟随,后台到达的输出点亮它自己的未读;跟随中的会话切回自然贴底。
+            this.scrollFollow?.noteOutputInSession(tabId);
         }
+    }
+
+    /** 重试替换失败消息:同步删投影并重渲(活动 tab)或标脏(后台 tab)。 */
+    private handleTabMessageRemoved(tabId: TabId, messageId: string) {
+        const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
+        tab?.state.removeMessage(messageId);
+        if (this.tabManager.getActiveTab()?.id === tabId) {
+            this.renderActiveTabMessages();
+        } else {
+            this.dirtyTabs.add(tabId);
+        }
+    }
+
+    /**
+     * 审批状态变化：更新只读投影，并只重画这一张卡片。
+     *
+     * 不重排整条消息流，既避免长对话在点击后跳到最底部，也保住键盘焦点上下文。
+     * 卡片元素按 `data-message-id` 定位；视图重挂载后由 renderActiveTabMessages
+     * 从投影里的 approvalState 重建，不依赖旧 DOM 是否存在。
+     */
+    private handleTabMessageUpdated(tabId: TabId, msg: ChatMessage) {
+        const tab = this.tabManager.getAllTabs().find(item => item.id === tabId);
+        tab?.state.updateMessage(msg.id, msg);
+        // 审批结果要能跨视图关闭/应用重启回看：状态一变就落一次快照。
+        if (tab) void this.persistTab(tab);
+
+        if (this.tabManager.getActiveTab()?.id !== tabId) {
+            this.dirtyTabs.add(tabId);
+            return;
+        }
+
+        const container = this.getActiveMessageContainer();
+        const entry = container.querySelector<HTMLElement>(`.shell-entry[data-message-id="${msg.id}"]`);
+        const body = entry?.querySelector('.shell-approval-message-body') as HTMLElement | null;
+        if (!body) return;
+
+        // 只有焦点原本就在这张卡片里时才把焦点移到新状态区：
+        // 后台 reconcile 完成时用户可能在输入框里打字，不能抢焦点。
+        const active = document.activeElement as HTMLElement | null;
+        const hadFocus = !!active && !!entry && entry.contains(active);
+
+        // 就地重画会改变卡片高度（按钮区消失/详情行数变化）。与内容增长同样处理：
+        // 跟随且近底才贴底，暂停时保持锚点；不是新输出，不点亮未读。
+        const growth = this.captureScrollGrowth();
+        body.empty();
+        this.getMessageRenderer().renderApproval(body, msg);
+        if (hadFocus) this.focusApprovalState(entry, msg);
+        this.afterScrollGrowth(growth, false);
+    }
+
+    /**
+     * 状态流转后把焦点留在卡片内：处理中/终态聚焦状态区（读屏会播报），
+     * 失败/未知聚焦重试或核实按钮，键盘用户可以继续操作。
+     */
+    private focusApprovalState(entry: HTMLElement | null, msg: ChatMessage) {
+        if (!entry) return;
+        const status = msg.approvalState?.status;
+        const selector = status === 'failed'
+            ? '.shell-approval-retry'
+            : status === 'unknown'
+                ? '.shell-approval-recheck'
+                : '.shell-approval-processing, .shell-approval-outcome';
+        const target = entry.querySelector<HTMLElement>(selector);
+        target?.focus?.();
     }
 
     /** /clear:清空该 tab 的可见历史(tab.state)并重渲(修 /clear 不清屏)。 */
@@ -1723,6 +2102,8 @@ export class ShellView extends ItemView {
         if (this.tabManager.getActiveTab()?.id === tabId) {
             this.resetStreamState();
             this.renderActiveTabMessages();
+            // /clear 是显式重置:回到最新并恢复跟随。
+            this.scrollFollow?.activateSession(tabId, 'new');
         }
     }
 
@@ -1761,6 +2142,7 @@ export class ShellView extends ItemView {
             // 这也是流式 ai 回复在后台 tab 的标脏来源——它在 handleTabMessageAdded
             // 里带 alreadyRendered 早退,不走那边的标脏分支。
             this.dirtyTabs.add(tabId);
+            this.scrollFollow?.noteOutputInSession(tabId);
         }
     }
 
@@ -1787,6 +2169,7 @@ export class ShellView extends ItemView {
             this.tabManager.markAttention(tabId, true);
             // 后台 tab 的工作区编辑消息:标脏,切回时重建。
             this.dirtyTabs.add(tabId);
+            this.scrollFollow?.noteOutputInSession(tabId);
         }
     }
 
@@ -1862,12 +2245,15 @@ export class ShellView extends ItemView {
             return;
         }
 
+        this.scrollFollow?.prepareForSessionSwitch();
         await this.persistActiveTab();
         const restoredTab = this.conversationController.restoreConversation(snapshot, this.tabManager);
         this.activateTabSession(restoredTab.id);
         await this.syncProviderStateForTab(restoredTab);
         this.resetStreamState();
         this.renderActiveTabMessages();
+        // 已有会话:恢复其阅读位置;首次恢复（无记录）落在最新输出。
+        this.scrollFollow?.activateSession(restoredTab.id, 'restore');
         this.hideHistoryMenu();
         this.inputEl?.focus();
     }
@@ -1988,7 +2374,7 @@ export class ShellView extends ItemView {
     }
 
     private getActiveProviderId(): string {
-        return this.getPluginInstance()?.settings?.activeProvider || 'gemini';
+        return this.getPluginInstance()?.settings?.activeProvider || DEFAULT_SETTINGS.activeProvider;
     }
 
     private getActiveModelId(): string {
@@ -2015,6 +2401,9 @@ export class ShellView extends ItemView {
         for (const message of windowed) {
             tab.state.addMessage(message);
         }
+        // 同一批消息换表后也要让 owner 跟上:分支切换/重跑后从投影重建时,
+        // 旧 id 已不在屏幕上,owner 若不同步,操作栏上的 👍/👎 会再次查不到。
+        this.tabSessions.get(tab.id)?.chatController.adoptMessages(windowed);
         this.renderActiveTabMessages();
     }
 
@@ -2152,7 +2541,8 @@ export class ShellView extends ItemView {
                 role: 'system',
                 content: 'Kernel initialized.',
                 timestamp: Date.now(),
-            });
+            }, false);
+            if (activeId != null) this.scrollFollow?.activateSession(activeId, 'restore');
             return;
         }
 
@@ -2166,11 +2556,14 @@ export class ShellView extends ItemView {
                     ...message,
                     branch: message.branch ?? prevUser?.branch,
                     forkSourceText: message.forkSourceText ?? prevUser?.content,
-                });
+                }, false);
             } else {
-                this.appendMessage(message);
+                this.appendMessage(message, false);
             }
         }
+        // 全量重建会把滚动位置清零。停在原会话的阅读位置(跟随中则回到底部),
+        // 避免分支切换、撤销工作区编辑等纯重画把读者弹出阅读锚点。
+        if (activeId != null) this.scrollFollow?.activateSession(activeId, 'restore');
     }
 
     /** 在给定消息数组中,找到 index 之前紧邻的一条 user 消息。 */
@@ -2183,6 +2576,8 @@ export class ShellView extends ItemView {
 
     private resetStreamState() {
         this.debouncedRenderStream.cancel();
+        // 流式 DOM 被丢弃:此前排队的异步渲染回调(稳定块、定型渲染)一律过期。
+        this.renderGeneration += 1;
         // 丢弃流时主动释放思考计时器,避免 interval 泄漏(切换/关闭标签页会走到这里)。
         this.thinkingRenderer?.dispose();
         this.streamContainer = null;
@@ -2190,7 +2585,6 @@ export class ShellView extends ItemView {
         this.streamContent = null;
         this.streamStableEl = null;
         this.streamTailEl = null;
-        this.streamCursorEl = null;
         this.streamRenderedLen = 0;
         this.streamAccumulatedText = '';
         this.streamPriorLastAiId = null;

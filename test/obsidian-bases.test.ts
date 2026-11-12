@@ -121,6 +121,60 @@ async function runTests() {
     expect(referenceResult.success === false, `undefined formula should fail: ${JSON.stringify(referenceResult)}`);
     expectIncludes(referenceResult.errors, 'formula.missing_total', 'should report undefined formula references');
   });
+
+  // 工具 args 是模型给的 JSON（外部输入）：缺参 / 错类型不能把工具体打崩。
+  await test('validate_base_yaml folds malformed args into the standard content error', async () => {
+    const toolRegistry = new ToolRegistry({} as any, DEFAULT_SETTINGS);
+    registerObsidianBasesTools(toolRegistry);
+
+    for (const args of [null, { content: 42 }, {}]) {
+      const result = await toolRegistry.execute('validate_base_yaml', args);
+      expect(
+        JSON.stringify(result) === JSON.stringify({
+          success: false,
+          errors: ['content must be a YAML string'],
+        }),
+        `unexpected result for ${JSON.stringify(args)}: ${JSON.stringify(result)}`,
+      );
+    }
+  });
+
+  // .base 文件可能被手改：views 里出现标量、order 不是数组时必须逐条报错，不能抛异常。
+  await test('validate_base_yaml reports malformed views and keeps the non-object-root error', async () => {
+    const toolRegistry = new ToolRegistry({} as any, DEFAULT_SETTINGS);
+    registerObsidianBasesTools(toolRegistry);
+
+    const malformedViews = await toolRegistry.execute('validate_base_yaml', {
+      content: [
+        'views:',
+        '  - just-a-string',
+        '  - type: table',
+        '    order: not-an-array',
+        '    groupBy: not-an-object',
+      ].join('\n'),
+    });
+    expect(malformedViews.success === false, `malformed views should fail: ${JSON.stringify(malformedViews)}`);
+    expectIncludes(malformedViews.errors, 'views[0] must be an object', 'scalar view should be reported');
+    expectIncludes(malformedViews.errors, 'views[1].order', 'non-array order should be reported');
+    expectIncludes(malformedViews.errors, 'views[1].groupBy', 'non-object groupBy should be reported');
+
+    const scalarRoot = await toolRegistry.execute('validate_base_yaml', { content: '- a\n- b\n' });
+    expect(scalarRoot.success === false, `array root should fail: ${JSON.stringify(scalarRoot)}`);
+    expectIncludes(scalarRoot.errors, 'Base root must be a YAML object', 'non-object root should be rejected');
+
+    const badFormulas = await toolRegistry.execute('validate_base_yaml', {
+      content: [
+        'formulas: not-an-object',
+        'views:',
+        '  - type: table',
+        '    order:',
+        '      - formula.missing',
+      ].join('\n'),
+    });
+    expect(badFormulas.success === false, `bad formulas should fail: ${JSON.stringify(badFormulas)}`);
+    expectIncludes(badFormulas.errors, 'formulas must be an object', 'non-object formulas should be reported');
+    expectIncludes(badFormulas.errors, 'formula.missing', 'undefined formula reference should be reported');
+  });
 }
 
 runTests().catch((e) => {

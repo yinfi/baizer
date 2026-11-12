@@ -1,0 +1,291 @@
+{
+  "summary": {
+    "baseline": {
+      "path": "docs/assets/declarative-settings-2026-11-06-before-knowledge-narrow.png",
+      "size": "600x900",
+      "lineCount": 35
+    },
+    "candidate": {
+      "path": "docs/assets/declarative-settings-2026-11-06-after-knowledge-narrow.png",
+      "size": "600x900",
+      "lineCount": 32
+    },
+    "sameImageSize": true,
+    "tolerancePx": 4,
+    "matchedLines": 25,
+    "matchedWithinTolerance": 15,
+    "matchedOutsideTolerance": 10,
+    "onlyInBaseline": 10,
+    "onlyInCandidate": 7,
+    "verdict": {
+      "sameImageSize": true,
+      "everyMatchedLineWithinTolerance": false,
+      "identicalTextSets": false
+    }
+  },
+  "matchedOutsideTolerance": [
+    {
+      "text": "0",
+      "baseline": {
+        "x": 21,
+        "y": 550
+      },
+      "candidate": {
+        "x": 257,
+        "y": 544
+      },
+      "dx": 236,
+      "dy": -6,
+      "withinTolerance": false
+    },
+    {
+      "text": "知 识 编 译",
+      "baseline": {
+        "x": 257,
+        "y": 35
+      },
+      "candidate": {
+        "x": 248,
+        "y": 81
+      },
+      "dx": -9,
+      "dy": 46,
+      "withinTolerance": false
+    },
+    {
+      "text": "Readi ng Notes",
+      "baseline": {
+        "x": 267,
+        "y": 157
+      },
+      "candidate": {
+        "x": 262,
+        "y": 203
+      },
+      "dx": -5,
+      "dy": 46,
+      "withinTolerance": false
+    },
+    {
+      "text": "Wiki 输 出 文 件 荚",
+      "baseline": {
+        "x": 257,
+        "y": 294
+      },
+      "candidate": {
+        "x": 252,
+        "y": 298
+      },
+      "dx": -5,
+      "dy": 4,
+      "withinTolerance": false
+    },
+    {
+      "text": "存 放 已 编 译 wiki 页 直 的 文 件 夹 。",
+      "baseline": {
+        "x": 257,
+        "y": 315
+      },
+      "candidate": {
+        "x": 252,
+        "y": 318
+      },
+      "dx": -5,
+      "dy": 3,
+      "withinTolerance": false
+    },
+    {
+      "text": "Knowledge Wiki",
+      "baseline": {
+        "x": 267,
+        "y": 351
+      },
+      "candidate": {
+        "x": 262,
+        "y": 354
+      },
+      "dx": -5,
+      "dy": 3,
+      "withinTolerance": false
+    },
+    {
+      "text": "自 动 编 译",
+      "baseline": {
+        "x": 258,
+        "y": 413
+      },
+      "candidate": {
+        "x": 253,
+        "y": 416
+      },
+      "dx": -5,
+      "dy": 3,
+      "withinTolerance": false
+    },
+    {
+      "text": "被 监 视 的 文 件 夹 变 《 扌 巨 动 编 译 笔 记 。",
+      "baseline": {
+        "x": 257,
+        "y": 434
+      },
+      "candidate": {
+        "x": 252,
+        "y": 437
+      },
+      "dx": -5,
+      "dy": 3,
+      "withinTolerance": false
+    },
+    {
+      "text": "单 枇 最 大 编 译 数",
+      "baseline": {
+        "x": 257,
+        "y": 489
+      },
+      "candidate": {
+        "x": 252,
+        "y": 493
+      },
+      "dx": -5,
+      "dy": 4,
+      "withinTolerance": false
+    },
+    {
+      "text": "望 个 批 次 内 可 编 译 的 《 笔 记 。",
+      "baseline": {
+        "x": 257,
+        "y": 509
+      },
+      "candidate": {
+        "x": 252,
+        "y": 512
+      },
+      "dx": -5,
+      "dy": 3,
+      "withinTolerance": false
+    }
+  ],
+  "onlyInBaseline": [
+    {
+      "text": "Q 索 ．",
+      "at": {
+        "x": 21,
+        "y": 50
+      }
+    },
+    {
+      "text": "要 监 视 的 文 件 夹 ， 每 行 一 一 个 。",
+      "at": {
+        "x": 257,
+        "y": 107
+      }
+    },
+    {
+      "text": "本 体 ： missing 发 止 insufficient articles 。 待",
+      "at": {
+        "x": 253,
+        "y": 589
+      }
+    },
+    {
+      "text": "编 译 笔 记 ： 0",
+      "at": {
+        "x": 253,
+        "y": 606
+      }
+    },
+    {
+      "text": "打 开 本 体",
+      "at": {
+        "x": 254,
+        "y": 640
+      }
+    },
+    {
+      "text": "发 现",
+      "at": {
+        "x": 342,
+        "y": 640
+      }
+    },
+    {
+      "text": "预 览",
+      "at": {
+        "x": 404,
+        "y": 640
+      }
+    },
+    {
+      "text": "本 体 级 设 罟",
+      "at": {
+        "x": 270,
+        "y": 717
+      }
+    },
+    {
+      "text": "Guardian",
+      "at": {
+        "x": 259,
+        "y": 769
+      }
+    },
+    {
+      "text": "行 内 写 作 蒴 ． 发 式 与 忽 略 的 文 件 夹 。",
+      "at": {
+        "x": 243,
+        "y": 806
+      }
+    }
+  ],
+  "onlyInCandidate": [
+    {
+      "text": "0",
+      "at": {
+        "x": 21,
+        "y": 550
+      }
+    },
+    {
+      "text": "Q 搜 索 设 “",
+      "at": {
+        "x": 21,
+        "y": 50
+      }
+    },
+    {
+      "text": "要 监 视 的 文 件 夹 ， 每 行 一 个 。",
+      "at": {
+        "x": 252,
+        "y": 156
+      }
+    },
+    {
+      "text": "本 体 ： missing 发 止 insufficient articles",
+      "at": {
+        "x": 264,
+        "y": 719
+      }
+    },
+    {
+      "text": "待 编 译 笔 记 ： 0",
+      "at": {
+        "x": 264,
+        "y": 736
+      }
+    },
+    {
+      "text": "打 开 本",
+      "at": {
+        "x": 252,
+        "y": 803
+      }
+    },
+    {
+      "text": "打 开 本 亻 《 结 櫛 文 偉 迸 行 苷 或 编 。",
+      "at": {
+        "x": 252,
+        "y": 823
+      }
+    }
+  ]
+}

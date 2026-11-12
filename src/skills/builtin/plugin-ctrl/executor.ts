@@ -1,6 +1,7 @@
 // src/skills/builtin/plugin-ctrl/executor.ts
 
-import { Tool, ToolContext } from '../../types';
+import { Tool, ToolArgs, ToolContext } from '../../types';
+import { strArg } from '../../tool-args';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
 import { pluginSkillFilePath } from '../../skill-files';
@@ -21,9 +22,9 @@ const listPlugins: Tool = {
   parameters: { type: 'object', properties: {} },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const manifests = (ctx.app as any).plugins.manifests;
-    const enabled = (ctx.app as any).plugins.enabledPlugins;
-    const list = await Promise.all(Object.values(manifests).map(async (m: any) => ({
+    const manifests = ctx.app.plugins.manifests;
+    const enabled = ctx.app.plugins.enabledPlugins;
+    const list = await Promise.all(Object.values(manifests).map(async (m) => ({
       id: m.id, name: m.name, version: m.version,
       enabled: enabled.has(m.id), description: m.description,
       hasSkill: await ctx.app.vault.adapter.exists(pluginSkillFilePath(m.id)),
@@ -46,10 +47,12 @@ const getPluginCommands: Tool = {
   },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const cmds = (ctx.app as any).commands.listCommands()
-      .filter((c: any) => c.id.startsWith(args.pluginId + ':'))
-      .map((c: any) => ({ id: c.id, name: c.name }));
-    return { pluginId: args.pluginId, commands: cmds, count: cmds.length };
+    const pluginId = strArg(args, 'pluginId');
+    if (pluginId === undefined) return { error: 'Missing pluginId parameter' };
+    const cmds = ctx.app.commands.listCommands()
+      .filter((c) => c.id.startsWith(pluginId + ':'))
+      .map((c) => ({ id: c.id, name: c.name }));
+    return { pluginId, commands: cmds, count: cmds.length };
   },
 };
 
@@ -67,12 +70,14 @@ const getPluginSettings: Tool = {
   },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
-    const plugin = (ctx.app as any).plugins.getPlugin(args.pluginId);
+    const pluginId = strArg(args, 'pluginId');
+    if (pluginId === undefined) return { error: 'Missing pluginId parameter' };
+    const plugin = ctx.app.plugins.getPlugin(pluginId);
     if (!plugin) return { error: 'Plugin not found or not enabled' };
     const raw = plugin.settings || plugin.data || {};
     const allowValues = ctx.settings.allowPluginConfigValues === true;
     return {
-      pluginId: args.pluginId,
+      pluginId,
       settings: redactPluginSettings(raw, { allowValues, depth: 0 }),
       redactionNote: allowValues
         ? 'Values returned per user setting; sensitive keys still redacted.'
@@ -173,20 +178,22 @@ const executePluginCommand: Tool = {
   },
   async execute(args, ctx) {
     const pcErr = checkPluginControl(ctx.settings); if (pcErr) return { error: pcErr };
+    const commandId = strArg(args, 'commandId');
+    if (commandId === undefined) return { error: 'Missing commandId parameter' };
     if (needsApproval('plugin-control', ctx.settings) && !args.approved) {
       return {
         approval_required: true,
         action: 'execute_plugin_command',
-        target: args.commandId,
+        target: commandId,
         args: {
-          commandId: args.commandId,
+          commandId,
         },
-        message: `Approval required to execute plugin command: ${args.commandId}`,
+        message: `Approval required to execute plugin command: ${commandId}`,
         preview: {
           kind: 'plugin-command',
-          target: args.commandId,
+          target: commandId,
           summary: 'Execute plugin command',
-          commandId: args.commandId,
+          commandId,
           preconditions: getPluginCommandPreconditions(),
           risk: 'medium',
           supportsPartialApply: false,
@@ -195,15 +202,15 @@ const executePluginCommand: Tool = {
       };
     }
 
-    const success = (ctx.app as any).commands.executeCommandById(args.commandId);
+    const success = ctx.app.commands.executeCommandById(commandId);
     return success
-      ? { success: true, message: `✅ Executed: ${args.commandId}` }
-      : { success: false, error: `Command not found: ${args.commandId}` };
+      ? { success: true, message: `✅ Executed: ${commandId}` }
+      : { success: false, error: `Command not found: ${commandId}` };
   },
 };
 
 export const executor: BuiltinExecutor = {
-  async execute(args: any, ctx: ToolContext) {
+  async execute(_args: ToolArgs, _ctx: ToolContext) {
     return { message: 'Plugin control: use args.action (list/commands/settings/execute) with pluginId.' };
   },
 };

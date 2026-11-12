@@ -34,7 +34,6 @@ async function runTests() {
       onStepBoundary: () => calls.push('step'),
       onDone: () => calls.push('done'),
       onError: (message) => calls.push(`error:${message}`),
-      onScrollRequest: () => calls.push('scroll'),
     });
 
     controller.handleEvent({ type: 'step_boundary' });
@@ -44,13 +43,15 @@ async function runTests() {
     controller.handleEvent({ type: 'text_delta', content: 'hello' });
     controller.handleEvent({ type: 'done', text: 'hello' });
 
+    // 滚动不再由「每个事件之后」无条件触发:每个内容增长点自己捕获增长前 token,
+    // 由 ScrollFollowController 校验会话身份/渲染代次后决定是否贴底。
     expect(calls).toEqual([
-      'step', 'scroll',
-      'thinking:plan', 'scroll',
-      'tool_call:search_vault', 'scroll',
-      'tool_result:search_vault', 'scroll',
-      'text:hello', 'scroll',
-      'done', 'scroll',
+      'step',
+      'thinking:plan',
+      'tool_call:search_vault',
+      'tool_result:search_vault',
+      'text:hello',
+      'done',
     ]);
   });
 

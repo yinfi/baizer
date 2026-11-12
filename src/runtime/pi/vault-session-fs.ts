@@ -39,7 +39,7 @@ function makeFileError(code: FileErrorCode, message: string, path?: string, caus
   error.code = code;
   error.path = path;
   error.cause = cause;
-  return error as unknown as FileError;
+  return error;
 }
 
 /**

@@ -84,14 +84,14 @@ export class InputToolbar {
     this.modelSelectEl = modelSelectContainer.createEl('select', {
       cls: 'shell-model-select shell-main-model-select',
       attr: { title: 'Select AI Model', 'aria-label': 'Select AI Model' },
-    }) as HTMLSelectElement;
+    });
     this.thinkingSelectEl = modelSelectContainer.createEl('select', {
       cls: 'shell-model-select shell-thinking-select',
       attr: {
         title: 'Thinking level — lower uses fewer tokens, higher reasons more deeply',
         'aria-label': 'Thinking level',
       },
-    }) as HTMLSelectElement;
+    });
     THINKING_OPTIONS.forEach(({ value, label }) => {
       this.thinkingSelectEl.createEl('option', { value, text: label });
     });
@@ -101,12 +101,12 @@ export class InputToolbar {
     this.attachButtonEl = actions.createEl('button', {
       cls: 'clickable-icon shell-action-btn shell-attach-btn',
       attr: { 'aria-label': 'Add file attachment', title: 'Add file attachment' },
-    }) as HTMLButtonElement;
+    });
     setIcon(this.attachButtonEl, 'paperclip');
     this.runButtonEl = actions.createEl('button', {
       cls: 'clickable-icon shell-action-btn shell-run-btn',
       attr: { 'aria-label': 'Send message', title: 'Send message' },
-    }) as HTMLButtonElement;
+    });
     setIcon(this.runButtonEl, 'send-horizontal');
 
     this.modelSelectEl.addEventListener('change', () => this.handleModelChange());
@@ -131,7 +131,7 @@ export class InputToolbar {
       const loadingOption = this.modelSelectEl.createEl('option', {
         value: '',
         text: 'Loading models...',
-      }) as HTMLOptionElement;
+      });
       loadingOption.selected = true;
       this.modelSelectEl.value = '';
       this.modelSelectEl.disabled = true;
@@ -143,7 +143,7 @@ export class InputToolbar {
       const emptyOption = this.modelSelectEl.createEl('option', {
         value: '',
         text: 'No models available',
-      }) as HTMLOptionElement;
+      });
       emptyOption.selected = true;
       emptyOption.disabled = true;
       this.modelSelectEl.value = '';
@@ -156,13 +156,13 @@ export class InputToolbar {
       if (!group.models.length) continue;
       const optgroup = this.modelSelectEl.createEl('optgroup', {
         attr: { label: group.providerLabel },
-      }) as HTMLOptGroupElement;
+      });
       for (const model of group.models) {
         const value = encodeModelValue(group.providerId, model.value);
         const option = optgroup.createEl('option', {
           value,
           text: model.label,
-        }) as HTMLOptionElement;
+        });
         option.selected = value === activeValue;
       }
     }
@@ -184,8 +184,8 @@ export class InputToolbar {
     this.runButtonEl.setAttribute('aria-label', label);
     this.runButtonEl.setAttribute('title', label);
     setIcon(this.runButtonEl, isResponding ? 'square' : 'send-horizontal');
-    (this.runButtonEl as any).toggleClass?.('is-stop', isResponding);
-    (this.runButtonEl as any).toggleClass?.('is-send', !isResponding);
+    this.runButtonEl.toggleClass?.('is-stop', isResponding);
+    this.runButtonEl.toggleClass?.('is-send', !isResponding);
   }
 
   /** 同步当前 thinking 档位到下拉框（由 ShellView 在 settings 变更/初始化时调用）。 */

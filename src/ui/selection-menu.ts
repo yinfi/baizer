@@ -6,7 +6,7 @@ import { ChatController } from './chat-controller';
 import { ChatMessage } from './types';
 import { SuggestList } from './components/suggest-list';
 import { SuggestionItem, SuggestionType } from './controllers/input-controller';
-import { SELECTION_ACTIONS, getAction, buildActionPrompt } from './selection-ai/action-registry';
+import { SELECTION_ACTIONS, SelectionActionContext, getAction, buildActionPrompt } from './selection-ai/action-registry';
 import { SelectionContextBuilder } from './selection-ai/selection-context-builder';
 import { FloatingPanel } from './selection-ai/floating-panel';
 import {
@@ -19,6 +19,8 @@ import {
     stampTooltipOwner,
 } from './selection-ai/selection-menu-state';
 import { PluginSettings } from '../mcp/types';
+import { ObsidianContextService } from '../services/obsidian-context-service';
+import { StreamEvent } from '../models/interfaces';
 import { t } from '../i18n/zh';
 
 // 浮窗单例:同一时刻只允许一个选区 AI 浮窗,开新窗前销毁旧窗,避免多开堆叠。
@@ -54,7 +56,7 @@ export function selectionMenuExtension(
     app: App,
     modelService: ModelService,
     knowledgeRuntime: { getGuardianDeepKnowledgeContext(q: string): Promise<string> } | null,
-    contextService: { collect(): Promise<any> } | null,
+    contextService: ObsidianContextService | null,
     settings: PluginSettings,
 ): Extension {
     const contextBuilder = new SelectionContextBuilder({
@@ -81,8 +83,7 @@ export function selectionMenuExtension(
 
 function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
     const context = pluginContextMap.get(view);
-    const dom = document.createElement('div');
-    dom.className = `guardian-selection-tooltip is-${state.type}`;
+    const dom = createDiv({ cls: `guardian-selection-tooltip is-${state.type}` });
     if (state.type === 'hidden' || !context) return { dom };
 
     // 防重("同一文档多个 CM 实例各弹一条")的判定已上移到状态层:
@@ -128,9 +129,7 @@ function createSelectionTooltip(view: EditorView, state: SelectionMenuState) {
 
     // trigger 场景(@ 行内插入):保留旧的迷你对话框。
     if (state.type === 'button') {
-        const btn = document.createElement('button');
-        btn.className = 'guardian-selection-btn';
-        btn.type = 'button';
+        const btn = createEl('button', { cls: 'guardian-selection-btn', type: 'button' });
         setIcon(btn, 'sparkles');
         btn.createSpan({ cls: 'guardian-selection-btn-label', text: 'AI' });
         btn.setAttribute('aria-label', 'Ask AI to insert here');
@@ -196,7 +195,7 @@ function openPanel(
     view: EditorView,
     context: PluginContext,
     state: Extract<SelectionMenuState, { type: 'toolbar' }>,
-    action: { id: string; label: string; context: any },
+    action: { id: string; label: string; context: SelectionActionContext },
     selection: string,
 ) {
     // 单例:开新浮窗前销毁上一个,避免多开堆叠。
@@ -222,7 +221,7 @@ function openPanel(
         },
     });
     // ChatController 的流事件转发进浮窗渲染(thinking 折叠 + 流式正文)。
-    (controller as any).onStreamEvent = (event: any) => panel.handleStreamEvent(event);
+    controller.setStreamEventHook((event: StreamEvent) => panel.handleStreamEvent(event));
     activeExplainPanel = panel;
 
     // 首轮:动作模板 + 装配上下文 = 真实 prompt(发模型);displayText=intent(不进消息流,仅占位)。
@@ -239,8 +238,7 @@ function createChatPanel(
     context: { app: App; modelService: ModelService },
     markdownComponent: Component,
 ) {
-    const container = document.createElement('div');
-    container.className = `guardian-chat-view is-${state.mode}`;
+    const container = createDiv({ cls: `guardian-chat-view is-${state.mode}` });
 
     const header = container.createDiv({ cls: 'guardian-chat-header' });
     header.createSpan({ text: t('Inline AI') });
@@ -274,14 +272,14 @@ function createChatPanel(
     };
 
     renderMessages();
-    (state.controller as any).onMessageAdded = () => renderMessages();
+    state.controller.setMessageAddedHook(() => renderMessages());
 
     const statusContainer = container.createDiv({ cls: 'guardian-status-bar baizer-hidden' });
     statusContainer.setText(t('Thinking...'));
-    (state.controller as any).onStatusChanged = (isResponding: boolean) => {
+    state.controller.setStatusChangedHook((isResponding: boolean) => {
         if (isResponding) statusContainer.removeClass('baizer-hidden');
         else statusContainer.addClass('baizer-hidden');
-    };
+    });
 
     const inputWrapper = container.createDiv({ cls: 'guardian-input-wrapper' });
     const textarea = inputWrapper.createEl('textarea', {

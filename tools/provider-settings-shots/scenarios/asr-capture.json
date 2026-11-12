@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "Fixture for the video-transcription (ASR) evidence pair: a vault whose ONLY provider is",
+    "Anthropic, plus the four ASR settings fields this change adds to Settings -> Capture.",
+    "The active provider is deliberately 'anthropic'. Before this change, transcription was",
+    "gated on activeProvider.type === 'openai-compatible', so a vault like this one could not",
+    "transcribe at all -- that gate is what the change removes. The asr* keys below are read",
+    "by the After revision and simply ignored by the Before revision, so both phases run on",
+    "byte-identical data.json and the pair differs only by the feature under test.",
+    "asrApiKey is deliberately empty so the After capture shows the '(reuse provider key)'",
+    "placeholder, i.e. the zero-migration default, while the other three show configured values.",
+    "Keys a bitmap cannot reveal (the provider API key) are marked _unverified."
+  ],
+  "language": "zh",
+  "activeProvider": "anthropic",
+  "deletedProviderIds": ["gemini", "openai", "deepseek", "qwen"],
+  "providers": {
+    "anthropic": {
+      "type": "anthropic",
+      "label": "Anthropic",
+      "apiKey": "sk-ant-fixture-not-a-real-key",
+      "baseUrl": "https://api.anthropic.com",
+      "model": "claude-sonnet-4-5",
+      "_unverified": {
+        "apiKey": "only its presence is inferable from the card badge; the value is a fixture"
+      }
+    }
+  },
+  "asrBaseUrl": "http://127.0.0.1:8080/v1",
+  "asrApiKey": "",
+  "asrModel": "whisper-large-v3",
+  "asrLanguage": "zh"
+}

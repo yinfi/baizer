@@ -161,8 +161,8 @@ export class CommandDropdown {
   }
 
   private setAttribute(el: HTMLElement, name: string, value: string) {
-    if (typeof (el as any).setAttribute === 'function') {
-      (el as any).setAttribute(name, value);
+    if (typeof el.setAttribute === 'function') {
+      el.setAttribute(name, value);
     }
   }
 }

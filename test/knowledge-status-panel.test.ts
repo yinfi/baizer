@@ -187,7 +187,7 @@ async function runTests() {
               state: 'failed',
               summaryPath: 'Knowledge Wiki/Windows.md',
               compiledAt: '2026-05-13T10:00:00Z',
-              error: '[GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent: [429 ] You exceeded your current quota. * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests',
+              error: '[OpenAI API Error]: 429 You exceeded your current quota. Please check your plan and billing details. Request URL: https://api.openai.com/v1/chat/completions',
             }),
             getGlobalCounts: async () => ({
               pending: 2,
@@ -207,7 +207,7 @@ async function runTests() {
     expect(strip?.hasClass('is-failed')).toBe(true);
     expect(strip?.attributes.title).toBe(undefined);
     expect(strip?.attributes['aria-label']).toContain('Failed: quota exceeded');
-    expect(text.includes('https://generativelanguage.googleapis.com')).toBe(false);
+    expect(text.includes('https://api.openai.com')).toBe(false);
     expect(text.includes('Backlinks')).toBe(false);
     expect(text.includes('Pending 2')).toBe(false);
     expect(text.includes('Knowledge Wiki/Windows.md')).toBe(false);
@@ -369,6 +369,7 @@ async function runTests() {
     const menuActions = container.querySelectorAll('.shell-knowledge-status-icon-action');
     expect(menuActions.map(action => action.attributes.title)).toEqual([
       'Compile note',
+      'Rescan knowledge status',
       'Add backlinks',
       'Open wiki summary',
       'Run knowledge lint',
@@ -382,13 +383,16 @@ async function runTests() {
       '',
       '',
       '',
+      '',
     ]);
 
+    // 索引与上面的 title 列表一一对应；跳过 'Rescan knowledge status'（它触发一次重扫，
+    // 与这里要断言的命令/回调无关）和 'Copy note path'（写剪贴板）。
     menuActions[0].click();
-    menuActions[1].click();
     menuActions[2].click();
     menuActions[3].click();
-    menuActions[5].click();
+    menuActions[4].click();
+    menuActions[6].click();
 
     expect(commandCalls).toEqual([
       'baizer:knowledge-open-index',

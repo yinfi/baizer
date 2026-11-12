@@ -61,7 +61,7 @@ function createApp(adapterOverrides: Record<string, any> = {}) {
 
   return {
     app: {
-      vault: { adapter },
+      vault: { adapter, configDir: '.obsidian' },
     } as unknown as App,
     writes,
     files,
@@ -501,6 +501,51 @@ async function runTests() {
     expect(rec.entities.includes('TypeScript')).toBe(true);
   });
 
+  await test('distill tolerates malformed LLM elements (null, numbers, wrong-typed text/entities)', async () => {
+    const { app } = createApp();
+    // 混入 null / 数字 / text 非字符串 / entities 非数组 / entities 含非字符串:只有合法项入库。
+    const generate = async () => JSON.stringify([
+      null,
+      42,
+      { text: 7, entities: ['ignored'] },
+      { text: '用户偏好简洁回答', entities: 'not-an-array' },
+      { text: '用户在做知了项目', entities: ['知了', 5, null] },
+    ]);
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: '我偏好简洁回答,也在做知了项目', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    const raw = view.sections.raw as Array<{ text: string; entities: string[] }>;
+    const texts = raw.map((r) => r.text);
+    expect(texts.includes('用户偏好简洁回答')).toBe(true);
+    expect(texts.includes('用户在做知了项目')).toBe(true);
+    expect(raw.length).toBe(2);
+    // entities 非数组 → 回退正则抽取(不抛错);数组中的非字符串元素被 String() 转换后按长度清洗。
+    const project = raw.find((r) => r.text === '用户在做知了项目')!;
+    expect(project.entities.includes('知了')).toBe(true);
+    expect(project.entities.includes('null')).toBe(true);
+  });
+
+  await test('distill falls back to the rule path when LLM returns a non-array JSON value', async () => {
+    const { app } = createApp();
+    const generate = async () => JSON.stringify({ text: '用户偏好简洁回答' });
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: '我偏好简洁回答', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    // 非数组 JSON → 无可提炼项 → 回退纯规则路径,仍沉淀用户原话。
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    const texts = (view.sections.raw as Array<{ text: string }>).map((r) => r.text);
+    expect(texts.some((t) => t.includes('我偏好简洁回答'))).toBe(true);
+  });
+
   // ---- #4 矛盾更新:同主题替换 ----
 
   await test('conflict update retires an outdated same-topic preference from recall', async () => {
@@ -688,6 +733,68 @@ async function runTests() {
     // 超时→空串→null→规则回退,durable 事实仍入库。
     const view = await (memory as any).getMemoryView({ mode: 'raw' });
     expect(view.sections.raw.filter((r: any) => r.type === 'world').length).toBe(1);
+  });
+
+  // ---- LLM 输出窄化:坏条目丢弃、非数组回退 ----
+
+  await test('distill narrows malformed LLM JSON entries and keeps valid ones', async () => {
+    const { app } = createApp();
+    // LLM 输出形状不可信:null/数字/无 text 的对象应被丢弃,合法条目保留。
+    const generate = async () => JSON.stringify([
+      null,
+      42,
+      { text: 123 },
+      { text: 'Valid fact about Baizer', entities: ['Baizer', 7, null] },
+      'Plain line fact',
+    ]);
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer local-first memory',
+      assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    const all = await (memory as any).hindsightStore.listMemoriesRaw('default');
+    const texts = all.map((m: any) => m.text);
+    expect(texts.some((t: string) => t.includes('Valid fact about Baizer'))).toBe(true);
+    expect(texts.some((t: string) => t.includes('Plain line fact'))).toBe(true);
+    expect(texts.some((t: string) => t.includes('123'))).toBe(false);
+
+    const valid = all.find((m: any) => m.text.includes('Valid fact about Baizer'));
+    // 实体数组里的数字被 String 化后长度不足 2 → 丢弃;字符串实体保留。
+    expect(valid.entities.includes('Baizer')).toBe(true);
+    expect(valid.entities.includes('7')).toBe(false);
+  });
+
+  await test('distill falls back to rule path when LLM returns non-array JSON', async () => {
+    const { app } = createApp();
+    const generate = async () => '{"text":"not-an-array"}';
+    const memory = new MemoryManager(app, { generate } as any);
+    await memory.ready();
+
+    await (memory as any).retainTurn({
+      userMessage: 'I prefer local-first memory', assistantMessage: 'ok', source: 'shell', now: 1000,
+    });
+
+    // 非数组 JSON 解析不出任何条目 → 回退规则路径,durable 用户事实仍入库。
+    const view = await (memory as any).getMemoryView({ mode: 'raw' });
+    const world = view.sections.raw.filter((r: any) => r.type === 'world');
+    expect(world.length).toBe(1);
+    expect(world[0].text).toContain('local-first memory');
+  });
+
+  await test('query expansion tolerates non-array LLM output', async () => {
+    const { app } = createApp();
+    let calls = 0;
+    const generate = async () => { calls += 1; return '{"terms":["deploy"]}'; };
+    const memory = new MemoryManager(app, { generate, queryExpansion: true } as any);
+    await memory.ready();
+
+    const block = await (memory as any).recallForPrompt({ query: '部署', source: 'shell', now: 2000 });
+
+    expect(block).toBe('');
+    expect(calls).toBe(1);
   });
 }
 

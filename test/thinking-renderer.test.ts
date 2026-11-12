@@ -312,6 +312,46 @@ async function runTests() {
     ticks.forEach(tick => tick());
     expect(timer.textContent).toBe('2s');
   });
+
+  await test('the timeline carries is-thinking-active only while a session is live', () => {
+    const timeline = new FakeElement();
+    const renderer = new ThinkingRenderer(timeline as any, {
+      now: () => 1000,
+      setInterval: () => 0,
+      clearInterval: () => { /* no-op */ },
+    });
+
+    // 会话前没有标记:外层摘要行不应显示「思考中」的呼吸指示。
+    expect(timeline.hasClass('is-thinking-active')).toBe(false);
+
+    renderer.appendThinking('first paragraph');
+    expect(timeline.hasClass('is-thinking-active')).toBe(true);
+
+    renderer.finalizeCurrentThinking();
+    expect(timeline.hasClass('is-thinking-active')).toBe(false);
+
+    // 同一渲染器再次开流:标记要重新挂上(而不是一次性)。
+    renderer.appendThinking('second turn');
+    expect(timeline.hasClass('is-thinking-active')).toBe(true);
+    renderer.finalizeCurrentThinking();
+    expect(timeline.hasClass('is-thinking-active')).toBe(false);
+  });
+
+  await test('dispose clears is-thinking-active so an abandoned stream cannot stay lit', () => {
+    const timeline = new FakeElement();
+    const renderer = new ThinkingRenderer(timeline as any, {
+      now: () => 1000,
+      setInterval: () => 0,
+      clearInterval: () => { /* no-op */ },
+    });
+
+    renderer.appendThinking('streaming');
+    expect(timeline.hasClass('is-thinking-active')).toBe(true);
+
+    // 切换/关闭标签页走 dispose,不走 finalize:标记同样要摘掉。
+    renderer.dispose();
+    expect(timeline.hasClass('is-thinking-active')).toBe(false);
+  });
 }
 
 runTests().catch((e) => {

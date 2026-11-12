@@ -18,20 +18,19 @@ export function clampRect(rect: PanelRect, viewport: { width: number; height: nu
   return { left, top, width, height };
 }
 
-/** 从 localStorage 读上次矩形;无/损坏返回 null。 */
-export function loadPanelRect(storage: Pick<Storage, 'getItem'> = localStorage): PanelRect | null {
+/** 从库级本地存储(App#loadLocalStorage)读上次矩形;无/损坏返回 null。 */
+export function loadPanelRect(app: Pick<App, 'loadLocalStorage'>): PanelRect | null {
   try {
-    const raw = storage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const p = JSON.parse(raw);
-    if (typeof p?.left === 'number' && typeof p?.top === 'number' && typeof p?.width === 'number' && typeof p?.height === 'number') return p;
+    const p = app.loadLocalStorage(STORAGE_KEY) as Partial<PanelRect> | null;
+    if (!p) return null;
+    if (typeof p?.left === 'number' && typeof p?.top === 'number' && typeof p?.width === 'number' && typeof p?.height === 'number') return p as PanelRect;
     return null;
   } catch { return null; }
 }
 
-/** 写入 localStorage(失败静默)。 */
-export function savePanelRect(rect: PanelRect, storage: Pick<Storage, 'setItem'> = localStorage): void {
-  try { storage.setItem(STORAGE_KEY, JSON.stringify(rect)); } catch { /* ignore */ }
+/** 写入库级本地存储(App#saveLocalStorage,失败静默)。 */
+export function savePanelRect(rect: PanelRect, app: Pick<App, 'saveLocalStorage'>): void {
+  try { app.saveLocalStorage(STORAGE_KEY, rect); } catch { /* ignore */ }
 }
 
 export interface FloatingPanelOptions {
@@ -120,7 +119,7 @@ export class FloatingPanel {
 
   private resolveInitialRect(): PanelRect {
     const vw = window.innerWidth, vh = window.innerHeight;
-    const saved = loadPanelRect();
+    const saved = loadPanelRect(this.opts.app);
     if (saved) return clampRect(saved, { width: vw, height: vh });
     const r = { ...DEFAULT_PANEL_RECT, left: this.opts.anchor.x, top: this.opts.anchor.y + 8 };
     return clampRect(r, { width: vw, height: vh });
@@ -161,7 +160,7 @@ export class FloatingPanel {
       );
       this.applyRect(r);
     };
-    this.onDragUp = () => { if (dragging) { dragging = false; savePanelRect(this.currentRect()); } };
+    this.onDragUp = () => { if (dragging) { dragging = false; savePanelRect(this.currentRect(), this.opts.app); } };
     window.addEventListener('mousemove', this.onDragMove);
     window.addEventListener('mouseup', this.onDragUp);
   }
@@ -183,7 +182,7 @@ export class FloatingPanel {
       );
       this.applyRect(r);
     };
-    this.onResizeUp = () => { if (resizing) { resizing = false; savePanelRect(this.currentRect()); } };
+    this.onResizeUp = () => { if (resizing) { resizing = false; savePanelRect(this.currentRect(), this.opts.app); } };
     window.addEventListener('mousemove', this.onResizeMove);
     window.addEventListener('mouseup', this.onResizeUp);
   }

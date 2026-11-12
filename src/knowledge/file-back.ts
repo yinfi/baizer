@@ -3,6 +3,7 @@
 import { App } from 'obsidian';
 import { DEFAULT_WIKI_FOLDER, WIKI_ARTICLES_SUBFOLDER } from './types';
 import { WikiIndexer } from './indexer';
+import { errorMessage } from './ontology';
 
 /**
  * 生成 file-back ID
@@ -102,15 +103,15 @@ export class FileBackExecutor {
 
       const articlesDir = `${this.wikiFolder}/${WIKI_ARTICLES_SUBFOLDER}`;
       if (!this.app.vault.getAbstractFileByPath(articlesDir)) {
-        try { await this.app.vault.createFolder(articlesDir); } catch {}
+        try { await this.app.vault.createFolder(articlesDir); } catch { /* folder may already exist (concurrent create) */ }
       }
 
       await this.app.vault.create(filePath, markdown);
       await this.indexer.rebuildIndex();
 
       return { success: true, path: filePath };
-    } catch (e: any) {
-      return { success: false, error: e.message };
+    } catch (e) {
+      return { success: false, error: errorMessage(e) };
     }
   }
 }

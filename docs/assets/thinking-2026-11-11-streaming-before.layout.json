@@ -1,0 +1,278 @@
+{
+  "label": "streaming-before",
+  "phase": "before",
+  "revision": "d045947",
+  "capturedAt": "2026-11-11T04:32:35.520Z",
+  "out": "C:\\Users\\Administrator\\multica_workspaces_desktop-api.multica.ai\\kfb-dd945a36a2e9\\kfb-178-beee52784ed0\\workdir\\baizer\\docs\\assets\\thinking-2026-11-11-streaming-before.png",
+  "scenario": {
+    "name": "streaming",
+    "paragraphs": 3,
+    "viewport": {
+      "width": 1440,
+      "height": 960
+    },
+    "viewWidth": 520,
+    "theme": "dark"
+  },
+  "host": {
+    "platform": "win32",
+    "node": "v26.8.1",
+    "exe": "C:\\obs-1.14.5-installed\\Obsidian\\Obsidian.exe",
+    "exeFileVersion": "1.14.5"
+  },
+  "steps": [
+    {
+      "modals": {
+        "trust": {
+          "present": true,
+          "clicked": "信任仓库作者并启用插件"
+        },
+        "closed": []
+      }
+    },
+    {
+      "plugin": {
+        "steps": [
+          "loadManifests"
+        ],
+        "error": null,
+        "loaded": true
+      }
+    },
+    {
+      "pluginLoaded": true
+    },
+    {
+      "openView": {
+        "viewType": "baizer-shell-view"
+      }
+    },
+    {
+      "fitViewWidth": {
+        "splitWidth": 544,
+        "viewWidth": 520
+      }
+    }
+  ],
+  "limitations": [
+    "failed assertions: contentKeepsLineBreaks, expandedBodiesHavePadding, collapsedCaretPointsRight, expandedCaretPointsDown, activeSegmentHasBlinkingCursor, activeHeaderAccentDiffersFromSettled, timelineMarkedLive, summaryShowsLiveDot"
+  ],
+  "vault": {
+    "dir": "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\multica-task-3231427419\\baizer-shots\\obsidian",
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.7.2",
+      "minAppVersion": "1.13.0",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    },
+    "profile": {
+      "userDataDir": "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\multica-task-3231427419\\baizer-shots\\thinking-streaming-profile",
+      "configPath": "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\multica-task-3231427419\\baizer-shots\\thinking-streaming-profile\\obsidian.json",
+      "vaultKey": "d54a274f43e23428"
+    }
+  },
+  "pid": 15740,
+  "target": {
+    "id": "DCD1E68928FC43DDBDBF2FED889679E6",
+    "url": "app://obsidian.md/index.html",
+    "title": "新标签页 - obsidian - Obsidian 1.14.5"
+  },
+  "measure": {
+    "appVersion": null,
+    "pluginVersion": "1.7.2",
+    "theme": "dark",
+    "timelinePresent": true,
+    "timelineIsThinkingActive": false,
+    "timelineIsCollapsed": false,
+    "summaryText": "Thinking in progress...",
+    "summaryAriaExpanded": "true",
+    "summaryRect": {
+      "x": 923,
+      "y": 209,
+      "width": 159,
+      "height": 24
+    },
+    "summaryDot": {
+      "content": "none",
+      "animationName": "none",
+      "animationDuration": "0s",
+      "backgroundColor": "rgba(0, 0, 0, 0)",
+      "width": null,
+      "height": null
+    },
+    "viewRect": {
+      "x": 908,
+      "y": 82,
+      "width": 520,
+      "height": 846
+    },
+    "timelineRect": {
+      "x": 923,
+      "y": 209,
+      "width": 490,
+      "height": 143
+    },
+    "segments": [
+      {
+        "index": 0,
+        "isThinking": false,
+        "isComplete": true,
+        "isCollapsed": true,
+        "label": "先看清现状：这条时间线把思考正文原样铺出来，文字贴着描边，换行也被吞掉了。",
+        "timer": null,
+        "caretTransform": "matrix(0, -1, 1, 0, 0, 0)",
+        "headerRect": {
+          "x": 923,
+          "y": 241,
+          "width": 476,
+          "height": 24
+        },
+        "headerBorderColor": "color(srgb 0.2 0.2 0.2 / 0.4644)",
+        "headerBackground": "color(srgb 0.148392 0.148392 0.148392 / 0.42)",
+        "headerColor": "rgb(179, 179, 179)",
+        "gridTemplateRows": "none",
+        "contentRect": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "contentVisibility": "visible",
+        "contentDisplay": "none",
+        "contentWhiteSpace": "normal",
+        "contentOverflowWrap": "break-word",
+        "contentLineHeight": 15.6,
+        "contentFontSize": 12,
+        "labelFontSize": 12,
+        "contentPaddingTop": 0,
+        "contentPaddingLeft": 0,
+        "contentText": "先看清现状：这条时间线把思考正文原样铺出来，文字贴着描边，换行也被吞掉了。",
+        "cursor": {
+          "content": "none",
+          "animationName": "none",
+          "animationDuration": "0s",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "width": null,
+          "height": null
+        }
+      },
+      {
+        "index": 1,
+        "isThinking": false,
+        "isComplete": true,
+        "isCollapsed": true,
+        "label": "再定改法：正文补内边距与行高、保留模型输出的换行，活动段落用主题强调色挑出来。",
+        "timer": null,
+        "caretTransform": "matrix(0, -1, 1, 0, 0, 0)",
+        "headerRect": {
+          "x": 923,
+          "y": 273,
+          "width": 490,
+          "height": 24
+        },
+        "headerBorderColor": "color(srgb 0.2 0.2 0.2 / 0.4644)",
+        "headerBackground": "color(srgb 0.148392 0.148392 0.148392 / 0.42)",
+        "headerColor": "rgb(179, 179, 179)",
+        "gridTemplateRows": "none",
+        "contentRect": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "contentVisibility": "visible",
+        "contentDisplay": "none",
+        "contentWhiteSpace": "normal",
+        "contentOverflowWrap": "break-word",
+        "contentLineHeight": 15.6,
+        "contentFontSize": 12,
+        "labelFontSize": 12,
+        "contentPaddingTop": 0,
+        "contentPaddingLeft": 0,
+        "contentText": "再定改法：正文补内边距与行高、保留模型输出的换行，活动段落用主题强调色挑出来。",
+        "cursor": {
+          "content": "none",
+          "animationName": "none",
+          "animationDuration": "0s",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "width": null,
+          "height": null
+        }
+      },
+      {
+        "index": 2,
+        "isThinking": true,
+        "isComplete": false,
+        "isCollapsed": false,
+        "label": "最后补动效：活动段落尾部挂闪烁光标，摘要行加呼吸圆点，段落展开/收起走高度过渡。",
+        "timer": "0s",
+        "caretTransform": "none",
+        "headerRect": {
+          "x": 923,
+          "y": 305,
+          "width": 490,
+          "height": 24
+        },
+        "headerBorderColor": "color(srgb 0.2 0.2 0.2 / 0.4644)",
+        "headerBackground": "color(srgb 0.148392 0.148392 0.148392 / 0.42)",
+        "headerColor": "rgb(179, 179, 179)",
+        "gridTemplateRows": "none",
+        "contentRect": {
+          "x": 923,
+          "y": 335,
+          "width": 490,
+          "height": 17
+        },
+        "contentVisibility": "visible",
+        "contentDisplay": "block",
+        "contentWhiteSpace": "normal",
+        "contentOverflowWrap": "break-word",
+        "contentLineHeight": 15.6,
+        "contentFontSize": 12,
+        "labelFontSize": 12,
+        "contentPaddingTop": 0,
+        "contentPaddingLeft": 0,
+        "contentText": "最后补动效：活动段落尾部挂闪烁光标，摘要行加呼吸圆点，段落展开/收起走高度过渡。",
+        "cursor": {
+          "content": "none",
+          "animationName": "none",
+          "animationDuration": "0s",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "width": null,
+          "height": null
+        }
+      }
+    ],
+    "horizontalOverflow": false,
+    "outputHorizontalOverflow": false
+  },
+  "assertions": {
+    "segmentCount": 3,
+    "liveSegments": 1,
+    "collapsedSegments": 2,
+    "contentKeepsLineBreaks": false,
+    "expandedBodiesHavePadding": false,
+    "collapsedBodiesAreZeroHeight": true,
+    "collapsedBodiesLeaveA11yTree": true,
+    "expandedBodiesAreVisible": true,
+    "collapsedCaretPointsRight": false,
+    "expandedCaretPointsDown": false,
+    "activeSegmentHasBlinkingCursor": false,
+    "activeHeaderAccentDiffersFromSettled": false,
+    "noHorizontalOverflow": true,
+    "noOutputHorizontalOverflow": true,
+    "timelineMarkedLive": false,
+    "summaryShowsLiveDot": false,
+    "timelineStillExpanded": true
+  },
+  "screenshot": {
+    "path": "C:\\Users\\Administrator\\multica_workspaces_desktop-api.multica.ai\\kfb-dd945a36a2e9\\kfb-178-beee52784ed0\\workdir\\baizer\\docs\\assets\\thinking-2026-11-11-streaming-before.png",
+    "bytes": 47306,
+    "width": 520,
+    "height": 846
+  }
+}

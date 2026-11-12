@@ -1,3 +1,4 @@
+import type { ToolParameters } from '../skills/types';
 
 export interface ModelOption {
     value: string;
@@ -30,19 +31,19 @@ export interface ChatContextItem {
 export interface ToolDefinition {
     name: string;
     description: string;
-    parameters: any;
+    parameters: ToolParameters;
 }
 
 export interface ToolCall {
     id?: string;
     name: string;
-    args: any;
+    args: Record<string, unknown>;
 }
 
 export interface ToolResult {
     id?: string;
     name: string;
-    response: any;
+    response: unknown;
 }
 
 export interface GenerationOptions {
@@ -62,11 +63,17 @@ export interface GenerationOptions {
     signal?: AbortSignal;
 }
 
+/**
+ * 一轮对话的终态。成功 / 失败 / 取消必须是同一个显式来源，供 UI、会话状态、
+ * 持久化与回放共同消费——不能靠「有没有正文」「有没有 interrupted 标记」各自推断。
+ */
+export type ChatTurnOutcome = 'completed' | 'failed' | 'cancelled';
+
 export type StreamEvent =
     | { type: 'thinking'; content: string }
     | { type: 'text_delta'; content: string }
-    | { type: 'tool_call'; name: string; args: any; id?: string }
-    | { type: 'tool_result'; name: string; result: any; error?: string }
+    | { type: 'tool_call'; name: string; args: Record<string, unknown>; id?: string }
+    | { type: 'tool_result'; name: string; result: unknown; error?: string }
     // 智能体一个工具循环回合的开始,用于把过程按「回合」分组展示(Step N)。
     | { type: 'step_boundary' }
     // 本轮结束后触发了自动压缩(functional-spec.md §4 决策表):pi 1.3.0 本身不发压缩事件,
@@ -76,6 +83,12 @@ export type StreamEvent =
     | {
         type: 'done';
         text: string;
+        /**
+         * 本轮终态。生产者必须显式给出:正常收尾 completed,用户中止 cancelled。
+         * failed 只经 error 事件表达(失败没有「完成文本」语义)。
+         * interrupted 为兼容旧消费方保留,语义等同于 outcome === 'cancelled'。
+         */
+        outcome: ChatTurnOutcome;
         interrupted?: boolean;
         /**
          * 本轮落盘进 pi session 的 entry 标识(阶段B:entryId 锚定)。
@@ -85,5 +98,5 @@ export type StreamEvent =
          */
         entryIds?: { userEntryId?: string; assistantEntryId?: string };
       }
-    | { type: 'error'; message: string };
+    | { type: 'error'; message: string; outcome: ChatTurnOutcome };
 

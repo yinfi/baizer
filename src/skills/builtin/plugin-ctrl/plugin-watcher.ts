@@ -13,11 +13,23 @@ import {
 import { SkillRegistry } from '../../skill-registry';
 import { PluginSkillGenerator } from './skill-generator';
 import { logger } from '../../../utils/logger';
+import { voidHandler } from '../../../utils/promise-guard';
 import { t } from '../../../i18n/zh';
 
 const POLL_INTERVAL_MS = 10_000;
 const GENERATE_DELAY_MS = 1_000;
 const MAX_RETRIES = 3;
+
+/** 抛出值 → 文本。等价于旧的 `String(e?.message ?? e)`，但不假定 e 的形状。 */
+function errorText(e: unknown): string {
+  const message = typeof e === 'object' && e !== null ? (e as { message?: unknown }).message : undefined;
+  return String(message ?? e);
+}
+
+/** 从磁盘 JSON（manifest / 跳过标记）取 version；不是字符串一律视为空串。 */
+function jsonVersion(parsed: { version?: unknown } | null): string {
+  return typeof parsed?.version === 'string' ? parsed.version : '';
+}
 
 /** 派生 skill 的命名前缀：plugin-<pluginId>。 */
 const DERIVED_SKILL_PREFIX = 'plugin-';
@@ -277,8 +289,8 @@ export class PluginWatcher {
       if (await this.app.vault.adapter.exists(filePath)) {
         await adapter.remove(filePath);
       }
-    } catch (e: any) {
-      console.error(`[PluginWatcher] Failed to delete skill file for ${pluginId}:`, e?.message ?? e);
+    } catch (e: unknown) {
+      console.error(`[PluginWatcher] Failed to delete skill file for ${pluginId}:`, errorText(e));
       return false;
     }
 
@@ -364,7 +376,7 @@ export class PluginWatcher {
    */
   private withdrawalReason(pluginId: string): DerivedSkillWithdrawal | null {
     if (this.settings.allowPluginControl !== true) return 'withdrawn-plugin-control';
-    const enabled = (this.app as any).plugins?.enabledPlugins as Set<string> | undefined;
+    const enabled = this.app.plugins?.enabledPlugins;
     if (!enabled?.has(pluginId)) return 'withdrawn-missing';
     if (this.settings.pluginSkillExcludeList.includes(pluginId)) return 'withdrawn-excluded';
     return null;
@@ -433,8 +445,8 @@ export class PluginWatcher {
       const info = await this.generator.collectPluginInfo(facts.pluginId);
       const content = await this.generator.generateSkillMd(info);
       await this.generator.writeSkillFile(facts.pluginId, content, 'replace');
-    } catch (e: any) {
-      const reason = String(e?.message ?? e);
+    } catch (e: unknown) {
+      const reason = errorText(e);
       // 原因不能只进 console：设置页要能回答「哪个插件失败、为什么」，
       // 这条路径与启动扫描一样是生成，失败的留痕口径必须一致。
       this.generationFailures.set(facts.pluginId, reason);
@@ -472,7 +484,7 @@ export class PluginWatcher {
   }
 
   getEnabledPluginIds(): string[] {
-    const enabled = (this.app as any).plugins.enabledPlugins as Set<string>;
+    const enabled = this.app.plugins.enabledPlugins;
     return [...enabled].filter(id =>
       id !== PLUGIN_ID
       && !this.settings.pluginSkillExcludeList.includes(id)
@@ -495,10 +507,12 @@ export class PluginWatcher {
     const path = `.obsidian/plugins/${pluginId}/manifest.json`;
     try {
       const raw = await this.app.vault.adapter.read(path);
-      const manifest = JSON.parse(raw);
-      return manifest.version || '';
+      const manifest = JSON.parse(raw) as { version?: unknown } | null;
+      // JSON 为 null 时旧实现读 .version 会抛错并落入下方回退分支,这里显式保持
+      if (manifest === null) throw new TypeError('manifest is null');
+      return jsonVersion(manifest);
     } catch {
-      const fallback = (this.app as any).plugins?.manifests?.[pluginId];
+      const fallback = this.app.plugins?.manifests?.[pluginId];
       return fallback?.version || '';
     }
   }
@@ -510,8 +524,8 @@ export class PluginWatcher {
     );
     if (marker === null) return '';
     try {
-      const parsed = JSON.parse(marker);
-      return parsed.version || '';
+      const parsed = JSON.parse(marker) as { version?: unknown } | null;
+      return jsonVersion(parsed);
     } catch {
       return '';
     }
@@ -549,8 +563,10 @@ export class PluginWatcher {
     // initialScan/checkChanges 内部只在 canGenerate() 通过时执行生成工作。
     logger.info('Starting...', 'PluginWatcher');
     await this.initialScan();
+    // checkChanges 只有 try/finally：读取/生成抛错会 reject。定时器回调不能 await，
+    // 失败记日志，下一轮轮询照常继续（pollingInFlight 已在 finally 里复位）。
     this.intervalId = window.setInterval(
-      () => this.checkChanges(),
+      voidHandler(() => this.checkChanges(), 'PluginWatcher'),
       POLL_INTERVAL_MS,
     );
   }
@@ -736,13 +752,14 @@ export class PluginWatcher {
       this.generationFailures.delete(pluginId);
       logger.info(`Generated skill for: ${pluginId}`, 'PluginWatcher');
       return true;
-    } catch (e: any) {
+    } catch (e: unknown) {
       this.failedRetries.set(pluginId, retries + 1);
       // 原因不能只进 console：设置页要能回答「哪个插件失败、为什么」。
-      this.generationFailures.set(pluginId, String(e?.message ?? e));
+      const reason = errorText(e);
+      this.generationFailures.set(pluginId, reason);
       console.error(
         `[PluginWatcher] Failed to generate skill for ${pluginId} `
-        + `(attempt ${retries + 1}/${MAX_RETRIES}):`, e.message,
+        + `(attempt ${retries + 1}/${MAX_RETRIES}):`, reason,
       );
       return false;
     }
@@ -762,6 +779,6 @@ export class PluginWatcher {
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise(resolve => window.setTimeout(resolve, ms));
   }
 }

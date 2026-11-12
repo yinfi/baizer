@@ -63,11 +63,12 @@ export function parseBuiltinSkill(md: string, filePath: string): LoadedSkill | n
   const normalized = md.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const match = normalized.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
 
-  let fm: Record<string, any> = {};
+  let fm: Record<string, unknown> = {};
   let body = normalized.trim();
   if (match) {
     try {
-      fm = parse(match[1]) ?? {};
+      const parsedFm: unknown = parse(match[1]);
+      fm = typeof parsedFm === 'object' && parsedFm !== null ? (parsedFm as Record<string, unknown>) : {};
     } catch {
       // frontmatter YAML 解析失败：视为无 frontmatter，全文作 body。
       fm = {};
@@ -95,18 +96,26 @@ export function parseBuiltinSkill(md: string, filePath: string): LoadedSkill | n
       disableModelInvocation: fm['disable-model-invocation'] === true,
     },
     sidecar: {
-      tools: Array.isArray(fm.tools) ? fm.tools : [],
+      tools: stringItems(fm.tools) ?? [],
       triggers: normalizeTriggers(fm.triggers),
       executionMode: fm.mode === 'simple' ? 'direct' : 'instructions',
     },
   };
 }
 
+/** 数组则只保留其中的字符串元素;不是数组返回 undefined。 */
+function stringItems(value: unknown): string[] | undefined {
+  return Array.isArray(value)
+    ? (value as unknown[]).filter((item): item is string => typeof item === 'string')
+    : undefined;
+}
+
 /** 归一化 triggers：只保留 commands / keywords 的字符串数组，其余丢弃。 */
-function normalizeTriggers(raw: any): SkillSidecar['triggers'] {
+function normalizeTriggers(raw: unknown): SkillSidecar['triggers'] {
   if (!raw || typeof raw !== 'object') return undefined;
-  const commands = Array.isArray(raw.commands) ? raw.commands.filter((c: any) => typeof c === 'string') : undefined;
-  const keywords = Array.isArray(raw.keywords) ? raw.keywords.filter((k: any) => typeof k === 'string') : undefined;
+  const triggers = raw as { commands?: unknown; keywords?: unknown };
+  const commands = stringItems(triggers.commands);
+  const keywords = stringItems(triggers.keywords);
   if (!commands?.length && !keywords?.length) return undefined;
   return { commands, keywords };
 }

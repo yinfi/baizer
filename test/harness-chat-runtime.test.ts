@@ -95,6 +95,11 @@ function eventsToPiStream(model: any, events: StreamEvent[]): any {
       out.push({ type: 'error', reason: 'error', error: finalMessage });
       errored = true;
       break;
+    } else if ((event as any).type === 'aborted') {
+      // 模拟 pi 的取消收尾:prompt 正常 resolve,但 message_end 带 stopReason:'aborted'。
+      finalMessage = { ...partial, stopReason: 'aborted' };
+      out.push({ type: 'done', reason: 'aborted', message: finalMessage });
+      break;
     } else if (event.type === 'done') {
       if (textIndex !== undefined) {
         out.push({ type: 'text_end', contentIndex: textIndex, content: textContent, partial });
@@ -507,6 +512,99 @@ async function runTests() {
     const firstInput = deps.sessionInputs[0];
     expect(typeof firstInput === 'string' && firstInput.includes('clean user request')).toBe(true);
     expect(typeof firstInput === 'string' && firstInput.includes('decoration that must not enter')).toBe(false);
+  });
+
+  await test('provider error is an explicit failed outcome and does not persist the broken turn', async () => {
+    const appended: any[] = [];
+    const session = {
+      availability: 'ready',
+      buildModelMessages: async () => [],
+      getActiveLeafEntryId: () => null,
+      append: async (entry: any) => {
+        appended.push(entry);
+        return { id: `entry-${appended.length}` };
+      },
+      getBranch: async () => [],
+    };
+    const deps = createDeps({
+      streamFactory: () => [
+        { type: 'text_delta', content: 'partial' },
+        { type: 'error', message: 'provider failed' },
+      ],
+    });
+    (deps as any).sessionManager = {
+      getSession: async () => session,
+      maybeCompact: async () => ({ compacted: false }),
+    };
+
+    const runtime = await makeRuntime(deps);
+    const events = await collect(runtime.queryStream(createTurn({ conversationId: 'conv-fail' } as any)));
+    const errorEvent = events.find(event => event.type === 'error') as any;
+
+    expect(errorEvent.outcome).toBe('failed');
+    // 失败轮次不落会话树:否则重试会在 transcript 里重复同一条 user 消息。
+    expect(appended).toEqual([]);
+  });
+
+  await test('aborted stopReason yields cancelled and does not persist the turn', async () => {
+    const appended: any[] = [];
+    const session = {
+      availability: 'ready',
+      buildModelMessages: async () => [],
+      getActiveLeafEntryId: () => null,
+      append: async (entry: any) => {
+        appended.push(entry);
+        return { id: `entry-${appended.length}` };
+      },
+      getBranch: async () => [],
+    };
+    const deps = createDeps({
+      streamFactory: () => [
+        { type: 'text_delta', content: 'partial' },
+        { type: 'aborted' } as any,
+      ],
+    });
+    (deps as any).sessionManager = {
+      getSession: async () => session,
+      maybeCompact: async () => ({ compacted: false }),
+    };
+
+    const runtime = await makeRuntime(deps);
+    const events = await collect(runtime.queryStream(createTurn({ conversationId: 'conv-abort' } as any)));
+    const doneEvent = events.find(event => event.type === 'done') as any;
+
+    expect(doneEvent.outcome).toBe('cancelled');
+    expect(doneEvent.interrupted).toBe(true);
+    expect(doneEvent.text).toBe('partial');
+    // 取消的残缺轮次不落会话树,避免重试时 transcript 出现重复 user 消息。
+    expect(appended).toEqual([]);
+  });
+
+  await test('completed turn keeps the explicit completed outcome', async () => {
+    const deps = createDeps({
+      streamFactory: () => [{ type: 'text_delta', content: 'ok' }, { type: 'done', text: 'ok' }],
+    });
+    const runtime = await makeRuntime(deps);
+    const events = await collect(runtime.queryStream(createTurn()));
+    const doneEvent = events.find(event => event.type === 'done') as any;
+
+    expect(doneEvent.outcome).toBe('completed');
+    expect(doneEvent.text).toBe('ok');
+  });
+
+  await test('a rejected prompt with a non-Error value reports a readable failure message', async () => {
+    const deps = createDeps({
+      // streamFactory 是 provider 的唯一注入点；抛错会被 agent.prompt 拒绝，走 catch 分支。
+      streamFactory: () => {
+        throw new Error('provider exploded');
+      },
+    });
+    const runtime = await makeRuntime(deps);
+    const events = await collect(runtime.queryStream(createTurn()));
+    const errorEvent = events.find(event => event.type === 'error') as any;
+
+    expect(errorEvent.outcome).toBe('failed');
+    expect(String(errorEvent.message)).toContain('provider exploded');
   });
 }
 

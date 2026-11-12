@@ -10,6 +10,11 @@ import { DEFAULT_SETTINGS } from '../src/mcp/types';
 
 function expect(actual: any) {
   return {
+    toBe: (expected: any) => {
+      if (actual !== expected) {
+        throw new Error(`Expected ${expected} but got ${actual}`);
+      }
+    },
     toEqual: (expected: any) => {
       const actualStr = JSON.stringify(actual);
       const expectedStr = JSON.stringify(expected);
@@ -28,6 +33,58 @@ async function test(name: string, fn: () => Promise<void>) {
     console.error(`  FAIL ${name}: ${e.message}`);
     process.exit(1);
   }
+}
+
+/**
+ * 审计日志的最小内存替身：与真实 OperationAuditLog 同形状，
+ * 让「重启」= 换一个新的审批执行登记表、审计数据保留。
+ */
+function createInMemoryAuditLog() {
+  const operations: any[] = [];
+  const requests = new Map<string, any>();
+  return {
+    operations,
+    requests,
+    record: async (input: any) => {
+      operations.unshift({ ...input, timestamp: Date.now() });
+    },
+    list: async () => operations.slice(),
+    beginRequest: async (input: { id: string; action: string; target: string }) => {
+      const now = Date.now();
+      requests.set(input.id, {
+        id: input.id,
+        action: input.action,
+        target: input.target,
+        state: 'attempting',
+        timestamp: now,
+        updatedAt: now,
+      });
+    },
+    finishRequest: async (input: any) => {
+      operations.unshift({ ...input, timestamp: Date.now() });
+      const previous = requests.get(input.id);
+      requests.set(input.id, {
+        id: input.id,
+        action: input.action,
+        target: input.target,
+        state: input.outcome,
+        timestamp: previous?.timestamp ?? Date.now(),
+        updatedAt: Date.now(),
+      });
+    },
+    getRequestState: async (id: string) => requests.get(id),
+    getPrunedRequestBefore: async () => 0,
+  };
+}
+
+function createApprovalService(ModelService: any, auditLog: any, registry: any) {
+  const service: any = Object.create(ModelService.prototype);
+  service.approvalExecutionRegistry = registry;
+  service.operationAuditLog = auditLog;
+  service.settings = { activeProvider: 'openai' };
+  service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
+  service.sessionManager = null;
+  return service;
 }
 
 async function runTests() {
@@ -150,6 +207,89 @@ async function runTests() {
       'initializeProvider',
       'providerChanged',
     ]);
+  });
+
+  // ---- #81：updateSettings() 此前无条件 clear() 整个模型清单缓存，哪怕这次改的
+  // 字段与 provider 连接完全无关（记忆/权限等开关）。设置页几乎每个开关都走
+  // updateSettings()，而模型下拉在分区重绘时无条件重新拉一次清单，于是「改一个不
+  // 相关字段 → 缓存被清空 → 下一次重绘立刻真发一次 /models 请求」，弱网下即卡死。 ----
+
+  await test('updateSettings preserves a provider\'s cached model list when its connection fields did not change', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const providers = {
+      openai: {
+        type: 'openai-compatible',
+        label: 'OpenAI',
+        apiKey: 'sk-aaaaaaaa',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4o',
+      },
+    };
+    service.settings = { activeProvider: 'openai', providers, privacyMode: false };
+    service.memoryManager = null;
+    service.cleanup = () => {};
+    service.initializeProvider = () => {};
+    service.providerChangedCallbacks = [];
+
+    const cachedEntry = { timestamp: Date.now(), models: [{ value: 'gpt-4o', label: 'gpt-4o' }], listed: true, listingUnsupported: false };
+    service.modelListCache = new Map([['openai:https://api.openai.com/v1:sk-aaaaa', cachedEntry]]);
+
+    // 只改一个与 provider 连接无关的字段（记忆开关），baseUrl/apiKey 原样未动。
+    const nextSettings = {
+      activeProvider: 'openai',
+      providers: JSON.parse(JSON.stringify(providers)),
+      privacyMode: true,
+    };
+
+    await service.updateSettings(nextSettings);
+
+    // 缓存必须原样保留：下一次挂载模型字段不该真的再发一次网络请求。
+    expect(service.modelListCache.get('openai:https://api.openai.com/v1:sk-aaaaa')).toEqual(cachedEntry);
+  });
+
+  await test('updateSettings invalidates only the providers whose baseUrl/apiKey actually changed', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const providers = {
+      openai: {
+        type: 'openai-compatible',
+        label: 'OpenAI',
+        apiKey: 'sk-aaaaaaaa',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4o',
+      },
+      other: {
+        type: 'openai-compatible',
+        label: 'Other',
+        apiKey: 'sk-bbbbbbbb',
+        baseUrl: 'https://other.example.com/v1',
+        model: 'm',
+      },
+    };
+    service.settings = { activeProvider: 'openai', providers, privacyMode: false };
+    service.memoryManager = null;
+    service.cleanup = () => {};
+    service.initializeProvider = () => {};
+    service.providerChangedCallbacks = [];
+
+    service.modelListCache = new Map([
+      ['openai:https://api.openai.com/v1:sk-aaaaa', { timestamp: Date.now(), models: [], listed: true, listingUnsupported: false }],
+      ['other:https://other.example.com/v1:sk-bbbbb', { timestamp: Date.now(), models: [], listed: true, listingUnsupported: false }],
+    ]);
+
+    // 用户在连接分区改了 openai 的 apiKey；other 原样未动。
+    const nextSettings = {
+      activeProvider: 'openai',
+      providers: {
+        openai: { ...providers.openai, apiKey: 'sk-cccccccc' },
+        other: JSON.parse(JSON.stringify(providers.other)),
+      },
+      privacyMode: false,
+    };
+
+    await service.updateSettings(nextSettings);
+
+    expect(service.modelListCache.has('openai:https://api.openai.com/v1:sk-aaaaa')).toEqual(false);
+    expect(service.modelListCache.has('other:https://other.example.com/v1:sk-bbbbb')).toEqual(true);
   });
 
   await test('ModelService exposes memory view and memory deletion facade methods', async () => {
@@ -360,7 +500,22 @@ async function runTests() {
       content: '# Approved',
     }, 'tab-1');
 
-    expect(result).toEqual({ success: true, message: 'approved execution' });
+    expect({
+      kind: result.kind,
+      status: result.status,
+      detail: result.detail,
+      target: result.target,
+      retryable: result.retryable,
+      result: result.result,
+    }).toEqual({
+      kind: 'approval-execution',
+      status: 'succeeded',
+      detail: 'approved execution',
+      target: 'approved.md',
+      retryable: false,
+      // 只保留打开落盘文件所需的投影，不再把整个工具返回挂在结果上（#76 P3）。
+      result: { success: true },
+    });
     expect(calls).toEqual([{
       name: 'create_note',
       args: {
@@ -376,6 +531,7 @@ async function runTests() {
       model: 'gpt-4o',
       approvalSource: 'user-click',
       undoable: true,
+      outcome: 'succeeded',
     }]);
     // 论断2:批准后的真实结果回灌进该会话 session,下一轮模型可见「已批准执行」。
     expect(outcomeCalls.length).toEqual(1);
@@ -383,6 +539,31 @@ async function runTests() {
     expect(outcomeCalls[0].text.includes('create_note')).toEqual(true);
     expect(outcomeCalls[0].text.includes('approved.md')).toEqual(true);
     expect(outcomeCalls[0].text.includes('successfully')).toEqual(true);
+  });
+
+  await test('executeApprovedAction narrows non-string target fields instead of leaking them into audit data', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    const auditCalls: any[] = [];
+
+    service.toolRegistry = {
+      execute: async () => ({ success: false, error: 'File not found' }),
+    };
+    service.operationAuditLog = {
+      record: async (entry: any) => {
+        auditCalls.push(entry);
+      },
+    };
+    service.settings = { activeProvider: 'openai' };
+    service.getActiveProviderConfig = () => ({ model: 'gpt-4o' });
+    service.sessionManager = null;
+
+    // args 来自模型/持久化的外部数据：path / filename 可能是数字、null 等错类型，
+    // 只接受字符串，取不到时回落到 action 名（与旧的真值链行为一致）。
+    const result = await service.executeApprovedAction('delete_note', { path: 42, filename: null }, 'tab-1');
+
+    expect(result.target).toBe('delete_note');
+    expect(auditCalls.length).toBe(1);
+    expect(auditCalls[0].target).toBe('delete_note');
   });
 
   await test('executeApprovedAction feeds a failure outcome back into the session', async () => {
@@ -427,7 +608,178 @@ async function runTests() {
       content: 'y',
     });
 
-    expect(result).toEqual({ success: true, message: 'ok' });
+    expect({ kind: result.kind, status: result.status, detail: result.detail }).toEqual({
+      kind: 'approval-execution',
+      status: 'succeeded',
+      detail: 'ok',
+    });
+  });
+
+  await test('executeApprovedAction deduplicates by request id and only retries after failure', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const service = createApprovalService(ModelService, createInMemoryAuditLog(), new ApprovalExecutionRegistry());
+    let calls = 0;
+    service.toolRegistry = {
+      execute: async () => {
+        calls += 1;
+        if (calls === 1) return { success: false, error: 'locked' };
+        return { success: true, message: 'done' };
+      },
+    };
+
+    const first = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-dedupe' });
+    expect(first.status).toBe('failed');
+    expect(calls).toBe(1);
+
+    // 失败未显式 retry：复用失败结果，不重复执行。
+    const again = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-dedupe' });
+    expect(again.status).toBe('failed');
+    expect(calls).toBe(1);
+
+    const retried = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-dedupe', retry: true });
+    expect(retried.status).toBe('succeeded');
+    expect(calls).toBe(2);
+
+    // 成功后再 retry 也不能重放写入。
+    const replay = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-dedupe', retry: true });
+    expect(replay.status).toBe('succeeded');
+    expect(calls).toBe(2);
+  });
+
+  await test('unknown outcome is unlocked only by reconciliation, then the retry really executes again', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const auditLog = createInMemoryAuditLog();
+    const service = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    let calls = 0;
+    service.toolRegistry = {
+      execute: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('vault adapter crashed');
+        return { success: true, path: 'a.md', message: 'done' };
+      },
+    };
+
+    const first = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-unknown' });
+    expect({ status: first.status, retryable: first.retryable }).toEqual({ status: 'unknown', retryable: false });
+
+    // 重试按钮自己不能解锁：未核实前再点仍是缓存的 unknown，且不执行。
+    const blind = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-unknown', retry: true });
+    expect({ status: blind.status, calls }).toEqual({ status: 'unknown', calls: 1 });
+
+    // 核实路径确认「上次尝试明确失败」→ 允许重试。
+    const verified = await service.reconcileApprovedAction('req-unknown', 'delete_note', { path: 'a.md' }, 'tab-1');
+    expect({ status: verified.status, retryable: verified.retryable }).toEqual({ status: 'failed', retryable: true });
+
+    const retried = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-unknown', retry: true });
+    expect({ status: retried.status, calls }).toEqual({ status: 'succeeded', calls: 2 });
+
+    // 成功后仍然是终态，不会回弹、不会重放。
+    const replay = await service.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-unknown', retry: true });
+    expect({ status: replay.status, calls }).toEqual({ status: 'succeeded', calls: 2 });
+  });
+
+  await test('a failing audit write does not downgrade a successful action', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const { setLocaleForTesting } = await import('../src/i18n/zh');
+    const auditLog = createInMemoryAuditLog();
+    auditLog.finishRequest = async () => {
+      throw new Error('disk is full');
+    };
+    const service = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    let calls = 0;
+    service.toolRegistry = {
+      execute: async () => {
+        calls += 1;
+        return { success: true, path: 'a.md', message: 'done' };
+      },
+    };
+
+    setLocaleForTesting(true);
+    try {
+      const result = await service.executeApprovedAction('update_note', { path: 'a.md', content: 'x' }, 'tab-1', { requestId: 'req-audit-fail' });
+
+      expect({
+        status: result.status,
+        retryable: result.retryable,
+        calls,
+      }).toEqual({ status: 'succeeded', retryable: false, calls: 1 });
+      // 审计失败要可见，但不能把已成功的写盘改写成失败；中文界面不得残留英文（#76 P2-A / P3）。
+      expect(String(result.detail).includes('审计日志未写入')).toBe(true);
+      expect(String(result.detail).includes('audit')).toBe(false);
+    } finally {
+      setLocaleForTesting(false);
+    }
+
+    // 底层写入只发生一次，不会被审计失败触发重放。
+    const again = await service.executeApprovedAction('update_note', { path: 'a.md', content: 'x' }, 'tab-1', { requestId: 'req-audit-fail', retry: true });
+    expect({ status: again.status, calls }).toEqual({ status: 'succeeded', calls: 1 });
+  });
+
+  await test('restart reconciliation tells a failed attempt from a successful execution', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const auditLog = createInMemoryAuditLog();
+
+    // 失败尝试：工具明确返回失败后进程重启。
+    const failing = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    failing.toolRegistry = { execute: async () => ({ success: false, error: 'locked' }) };
+    const failed = await failing.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-failed-restart' });
+    expect(failed.status).toBe('failed');
+
+    const restartedAfterFailure = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    const reconciledFailure = await restartedAfterFailure.reconcileApprovedAction(
+      'req-failed-restart', 'delete_note', { path: 'a.md' }, 'tab-1',
+    );
+    expect({ status: reconciledFailure.status, retryable: reconciledFailure.retryable })
+      .toEqual({ status: 'failed', retryable: true });
+
+    // 成功写入：进程重启后必须读成「已执行、结果未记录」，不允许重放。
+    const succeeding = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    succeeding.toolRegistry = { execute: async () => ({ success: true, path: 'a.md', message: 'done' }) };
+    const succeeded = await succeeding.executeApprovedAction('delete_note', { path: 'a.md' }, 'tab-1', { requestId: 'req-succeeded-restart' });
+    expect(succeeded.status).toBe('succeeded');
+
+    const restartedAfterSuccess = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+    const reconciledSuccess = await restartedAfterSuccess.reconcileApprovedAction(
+      'req-succeeded-restart', 'delete_note', { path: 'a.md' }, 'tab-1',
+    );
+    expect({ status: reconciledSuccess.status, retryable: reconciledSuccess.retryable })
+      .toEqual({ status: 'unknown', retryable: false });
+  });
+
+  await test('an expired request record is not treated as never executed', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const auditLog = createInMemoryAuditLog();
+    auditLog.getPrunedRequestBefore = async () => 5000;
+    const service = createApprovalService(ModelService, auditLog, new ApprovalExecutionRegistry());
+
+    const expired = await service.reconcileApprovedAction('req-old', 'delete_note', { path: 'a.md' }, 'tab-1', { requestedAt: 100 });
+    expect({ status: expired.status, retryable: expired.retryable }).toEqual({ status: 'unknown', retryable: false });
+
+    // 请求比淘汰水位新 → 没有记录就说明确实没执行过，可以重试。
+    const fresh = await service.reconcileApprovedAction('req-fresh', 'delete_note', { path: 'a.md' }, 'tab-1', { requestedAt: 9000 });
+    expect({ status: fresh.status, retryable: fresh.retryable }).toEqual({ status: 'failed', retryable: true });
+  });
+
+  await test('reconcileApprovedAction distinguishes executed-but-unrecorded from never-executed', async () => {
+    const { ApprovalExecutionRegistry } = await import('../src/services/approval-execution');
+    const service = createApprovalService(ModelService, createInMemoryAuditLog(), new ApprovalExecutionRegistry());
+
+    // 旧文件只有操作记录（没有请求状态）：命中 id 的成功记录按「已执行」处理。
+    service.operationAuditLog = {
+      list: async () => [{ id: 'req-executed', action: 'delete_note', target: 'a.md', timestamp: 1, approvalSource: 'user-click', undoable: false }],
+      getRequestState: async () => undefined,
+      getPrunedRequestBefore: async () => 0,
+    };
+    const executed = await service.reconcileApprovedAction('req-executed', 'delete_note', { path: 'a.md' }, 'tab-1');
+    expect({ status: executed.status, retryable: executed.retryable }).toEqual({ status: 'unknown', retryable: false });
+
+    service.operationAuditLog = {
+      list: async () => [],
+      getRequestState: async () => undefined,
+      getPrunedRequestBefore: async () => 0,
+    };
+    const neverExecuted = await service.reconcileApprovedAction('req-never', 'delete_note', { path: 'a.md' }, 'tab-1');
+    expect({ status: neverExecuted.status, retryable: neverExecuted.retryable }).toEqual({ status: 'failed', retryable: true });
   });
 
   await test('chat delegates prepared turn execution to ChatRuntime', async () => {
@@ -751,6 +1103,430 @@ async function runTests() {
 
     expect(listModelsCalled).toEqual(false);
     expect(models.some((model: any) => model.value === 'gpt-4o')).toEqual(true);
+  });
+
+  // ---- 协议分派接线 ----
+  // 这几条合起来锁住 issue #58 part 2 的核心回归：'anthropic' 绝不能静默落到
+  // OpenAI-compatible 分支（那会发 /chat/completions 而不是 /v1/messages）。
+
+  await test('buildModelForConfig dispatches anthropic / openai-compatible explicitly', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.settings = { contextWindow: 100000, thinkingLevel: 'medium' };
+
+    const anthropic = service.buildModelForConfig({
+      type: 'anthropic', label: 'Anthropic', apiKey: 'k',
+      baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-5',
+    });
+    expect(anthropic.api).toEqual('anthropic-messages');
+    expect(anthropic.provider).toEqual('anthropic');
+    expect(anthropic.baseUrl).toEqual('https://api.anthropic.com');
+    expect(anthropic.id).toEqual('claude-sonnet-4-5');
+    // Anthropic Messages 协议要求 max_tokens 必填
+    expect(anthropic.maxTokens).toEqual(8192);
+
+    const openai = service.buildModelForConfig({
+      type: 'openai-compatible', label: 'OpenAI', apiKey: 'k',
+      baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o',
+    });
+    expect(openai.api).toEqual('openai-completions');
+    expect(openai.provider).toEqual('openai');
+  });
+
+  // 'gemini' 协议移除后，磁盘上残留的旧 type（如历史 data.json 里的 'gemini'）
+  // 会落到 default 分支。那条安全网是刻意的：宁可降级成 OpenAI-compatible 并
+  // warn，也不要让整个插件炸掉。注意 loadSettings 的 pruneUnsupportedProviders
+  // 已在正常路径上丢弃这些条目，故这里是「配置读不出来」时的最后一道防线。
+  await test('buildModelForConfig degrades an unknown/removed type to OpenAI-compatible instead of throwing', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.settings = { contextWindow: 100000, thinkingLevel: 'medium' };
+
+    const legacyGemini = service.buildModelForConfig({
+      type: 'gemini', label: 'Gemini', apiKey: 'k', baseUrl: '', model: 'gemini-2.5-flash',
+    });
+    // 不再有任何 google api：降级后走 OpenAI-compatible，端点回落到 OpenAI 官方地址。
+    expect(legacyGemini.api).toEqual('openai-completions');
+    expect(legacyGemini.provider).toEqual('openai');
+    expect(legacyGemini.baseUrl).toEqual('https://api.openai.com');
+    expect(legacyGemini.id).toEqual('gemini-2.5-flash');
+
+    const unknown = service.buildModelForConfig({
+      type: 'not-a-protocol', label: 'Mystery', apiKey: 'k',
+      baseUrl: 'https://gw.example.com/v1', model: 'm-1',
+    });
+    expect(unknown.api).toEqual('openai-completions');
+    expect(unknown.baseUrl).toEqual('https://gw.example.com/v1');
+  });
+
+  await test('buildModelForConfig threads settings.contextWindow/thinkingLevel into the anthropic model', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.settings = { contextWindow: 200000, thinkingLevel: 'off' };
+
+    const model = service.buildModelForConfig({
+      type: 'anthropic', label: 'Anthropic', apiKey: 'k',
+      baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-5',
+    });
+    expect(model.contextWindow).toEqual(200000);
+    // thinkingLevel='off' → 不发 thinking 字段
+    expect(model.reasoning).toEqual(false);
+  });
+
+  await test('getAvailableModels falls back to Claude models for anthropic without an api key', async () => {
+    const service: any = Object.create(ModelService.prototype);
+
+    service.settings = {
+      activeProvider: 'anthropic',
+      providers: {
+        anthropic: {
+          type: 'anthropic',
+          label: 'Anthropic',
+          apiKey: '',
+          baseUrl: 'https://api.anthropic.com',
+          model: 'claude-sonnet-4-5',
+        },
+      },
+    };
+    service.modelListCache = new Map();
+    service.modelListCacheTtlMs = 10 * 60 * 1000;
+    service.getActiveProviderConfig = () => service.settings.providers.anthropic;
+
+    // apiKey 为空 → 不走网络列模型，回落到内置 Claude 列表，
+    // 保证下拉框非空（兼容网关常常没有 GET /v1/models）。
+    const models = await service.getAvailableModels(true);
+
+    expect(models.some((model: any) => model.value === 'claude-sonnet-4-5')).toEqual(true);
+    expect(models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+    expect(models.some((model: any) => model.value === 'claude-haiku-4-5')).toEqual(true);
+  });
+
+  // ---- 模型列表状态：让 settings 面板不必再靠数组形状猜 ----
+  // 契约：listingUnsupported 为 true **仅当** listModels 抛 ModelListingUnsupportedError
+  // （列模型端点 404/405/501）；其他失败进 error；两者都空 = models 是端点真实清单。
+
+  function serviceWithListingEndpoint(requestUrlImpl: (opts: any) => any) {
+    const service: any = Object.create(ModelService.prototype);
+    service.settings = {
+      activeProvider: 'anthropic',
+      providers: {
+        anthropic: {
+          type: 'anthropic',
+          label: 'Anthropic',
+          apiKey: 'sk-ant-test',
+          baseUrl: 'https://api.anthropic.com',
+          model: 'claude-sonnet-4-5',
+        },
+      },
+    };
+    service.modelListCache = new Map();
+    service.modelListCacheTtlMs = 10 * 60 * 1000;
+    service.getActiveProviderConfig = () => service.settings.providers.anthropic;
+    return { service, deps: { requestUrl: requestUrlImpl } as any };
+  }
+
+  await test('getAvailableModelsWithStatus: 404 列表端点 → listingUnsupported=true 且不带 error', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({ status: 404, text: 'not found' }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listingUnsupported).toEqual(true);
+    expect(result.error).toEqual(undefined);
+    // 仍然给出可渲染的兜底列表（UI 不能空着）
+    expect(result.models.some((model: any) => model.value === 'claude-sonnet-4-5')).toEqual(true);
+  });
+
+  await test('getAvailableModelsWithStatus: 405 / 501 也算 listingUnsupported', async () => {
+    for (const status of [405, 501]) {
+      const { service, deps } = serviceWithListingEndpoint(() => ({ status, text: '' }));
+      const result = await service.getAvailableModelsWithStatus(true, deps);
+      expect(result.listingUnsupported).toEqual(true);
+    }
+  });
+
+  await test('getAvailableModelsWithStatus: 401 是故障而不是能力缺口 → error 有值、listingUnsupported=false', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({ status: 401, text: '{"error":{"message":"bad key"}}' }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error instanceof Error).toEqual(true);
+    expect(result.error.message.includes('401')).toEqual(true);
+    expect(result.models.some((model: any) => model.value === 'claude-sonnet-4-5')).toEqual(true);
+  });
+
+  await test('getAvailableModelsWithStatus: 未配置 apiKey → error 有值、listingUnsupported=false、不发请求', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 200, text: '{"data":[]}' };
+    });
+    service.settings.providers.anthropic.apiKey = '';
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(requests).toEqual(0);
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error.message.includes('API Key')).toEqual(true);
+    expect(result.models.some((model: any) => model.value === 'claude-sonnet-4-5')).toEqual(true);
+  });
+
+  await test('getAvailableModelsWithStatus: 端点正常列模型 → 两者都空，models 来自端点', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({
+      status: 200,
+      text: JSON.stringify({ data: [{ id: 'claude-opus-4-5', display_name: 'Claude Opus 4.5' }] }),
+    }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error).toEqual(undefined);
+    expect(result.models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
+
+  await test('getAvailableModelsWithStatus: listingUnsupported 走缓存，第二次不再打端点', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 404, text: 'not found' };
+    });
+
+    const first = await service.getAvailableModelsWithStatus(true, deps);
+    const second = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(1);
+    expect(first.listingUnsupported).toEqual(true);
+    expect(second.listingUnsupported).toEqual(true);
+  });
+
+  await test('getAvailableModels stays a thin wrapper over getAvailableModelsWithStatus', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({
+      status: 200,
+      text: JSON.stringify({ data: [{ id: 'claude-opus-4-5' }] }),
+    }));
+
+    // 先用注入的 deps 把「端点真实清单」灌进缓存（缓存键与调用方无关）
+    const withStatus = await service.getAvailableModelsWithStatus(true, deps);
+    // 薄包装只接受 forceRefresh，此处命中同一份缓存，必须给出同一个列表
+    const plain = await service.getAvailableModels(false);
+
+    expect(plain).toEqual(withStatus.models);
+    expect(plain.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
+
+  // ---- 缓存命中路径必须复现「失败」状态（WP-B 集成时抓到的 bug）----
+  // 症状：失败结果进缓存时只存了 models，丢掉 error；于是第一次（forceRefresh）报错，
+  // 之后每次非 forceRefresh 的调用都既无 error 也无 listingUnsupported → UI 谎报 listed。
+  // 非 forceRefresh 正是每次重渲染走的路，所以这几条必须直接盯住缓存命中路径。
+
+  await test('cached failure replays error on a non-forced call (401 must not become "listed")', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 401, text: '{"error":{"message":"bad key"}}' };
+    });
+
+    const forced = await service.getAvailableModelsWithStatus(true, deps);
+    // 关键：不传 forceRefresh，模拟「重渲染」
+    const cached = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(1);
+    expect(forced.error instanceof Error).toEqual(true);
+    expect(forced.listingUnsupported).toEqual(false);
+    // 缓存命中必须给出同样的判定，而不是「两者皆空 = 已列出」
+    expect(cached.error instanceof Error).toEqual(true);
+    expect(cached.error.message.includes('401')).toEqual(true);
+    expect(cached.listingUnsupported).toEqual(false);
+    expect(cached.models).toEqual(forced.models);
+  });
+
+  await test('cached listingUnsupported replays as true with no error on a non-forced call', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 404, text: 'not found' };
+    });
+
+    await service.getAvailableModelsWithStatus(true, deps);
+    const cached = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(1);
+    expect(cached.listingUnsupported).toEqual(true);
+    expect(cached.error).toEqual(undefined);
+  });
+
+  await test('cached success replays as neither error nor listingUnsupported', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 200, text: JSON.stringify({ data: [{ id: 'claude-opus-4-5' }] }) };
+    });
+
+    await service.getAvailableModelsWithStatus(true, deps);
+    const cached = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(1);
+    expect(cached.error).toEqual(undefined);
+    expect(cached.listingUnsupported).toEqual(false);
+    expect(cached.models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
+
+  await test('cached "missing api key" failure also replays on a non-forced call', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 200, text: '{"data":[]}' };
+    });
+    service.settings.providers.anthropic.apiKey = '';
+
+    await service.getAvailableModelsWithStatus(true, deps);
+    const cached = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(0);
+    expect(cached.error instanceof Error).toEqual(true);
+    expect(cached.error.message.includes('API Key')).toEqual(true);
+    expect(cached.listingUnsupported).toEqual(false);
+  });
+
+  await test('forceRefresh escapes a cached failure and retries the endpoint', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      // 第一次失败，之后恢复：证明缓存不是「失败粘住 10 分钟」的死结
+      return requests === 1
+        ? { status: 401, text: '{"error":{"message":"bad key"}}' }
+        : { status: 200, text: JSON.stringify({ data: [{ id: 'claude-opus-4-5' }] }) };
+    });
+
+    const failed = await service.getAvailableModelsWithStatus(true, deps);
+    const retried = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(requests).toEqual(2);
+    expect(failed.error instanceof Error).toEqual(true);
+    expect(retried.error).toEqual(undefined);
+    expect(retried.listingUnsupported).toEqual(false);
+    expect(retried.models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
+
+  // ---- F1：内置兜底列表必须不能被当成「端点列出的清单」 ----
+  // 症状：端点回 200 但清单为空（或 body 不是 {data:[...]}）时，listed 三兄弟全为默认值，
+  // UI 报「已列出 N 个模型」，settings 还会把一个端点从未宣称过的模型名写进 config.model。
+  // listed 是唯一能把「端点的清单」和「我们的猜测」分开的信号，所以这几条盯的是它。
+
+  await test('F1: 200 with an EMPTY list (key set) → listed=false, not "listed"', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({ status: 200, text: '{"data":[]}' }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    // 端点应答正常、没有错误、也不缺列模型能力 —— 旧实现到这里就说「已列出」了
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error).toEqual(undefined);
+    // 但模型其实全是内置兜底：必须 listed=false
+    expect(result.listed).toEqual(false);
+    // 具体证据：端点一个模型都没给，列表里却出现了 opus
+    expect(result.models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
+
+  await test('F1: 200 whose body has no data array → listed=false', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({ status: 200, text: '{"foo":1}' }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listed).toEqual(false);
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error).toEqual(undefined);
+  });
+
+  await test('F1: 200 with an unparseable body → listed=false (and it is an error, not a listing)', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({ status: 200, text: 'not json at all' }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listed).toEqual(false);
+    expect(result.error instanceof Error).toEqual(true);
+  });
+
+  await test('F1: a real non-empty listing → listed=true', async () => {
+    const { service, deps } = serviceWithListingEndpoint(() => ({
+      status: 200,
+      text: JSON.stringify({ data: [{ id: 'claude-opus-4-5', display_name: 'Opus 4.5' }] }),
+    }));
+
+    const result = await service.getAvailableModelsWithStatus(true, deps);
+
+    expect(result.listed).toEqual(true);
+    expect(result.listingUnsupported).toEqual(false);
+    expect(result.error).toEqual(undefined);
+    expect(result.models.some((model: any) => model.value === 'claude-opus-4-5')).toEqual(true);
+  });
+
+  await test('F1: 404 / 401 / missing key are all listed=false', async () => {
+    const notFound = serviceWithListingEndpoint(() => ({ status: 404, text: '' }));
+    expect((await notFound.service.getAvailableModelsWithStatus(true, notFound.deps)).listed).toEqual(false);
+
+    const unauthorized = serviceWithListingEndpoint(() => ({ status: 401, text: '{"error":{}}' }));
+    expect((await unauthorized.service.getAvailableModelsWithStatus(true, unauthorized.deps)).listed).toEqual(false);
+
+    const noKey = serviceWithListingEndpoint(() => ({ status: 200, text: '{"data":[]}' }));
+    noKey.service.settings.providers.anthropic.apiKey = '';
+    expect((await noKey.service.getAvailableModelsWithStatus(true, noKey.deps)).listed).toEqual(false);
+  });
+
+  await test('F1: cached empty listing replays listed=false on a non-forced call', async () => {
+    let requests = 0;
+    const { service, deps } = serviceWithListingEndpoint(() => {
+      requests += 1;
+      return { status: 200, text: '{"data":[]}' };
+    });
+
+    await service.getAvailableModelsWithStatus(true, deps);
+    const cached = await service.getAvailableModelsWithStatus(false, deps);
+
+    expect(requests).toEqual(1);
+    expect(cached.listed).toEqual(false);
+    expect(cached.listingUnsupported).toEqual(false);
+    expect(cached.error).toEqual(undefined);
+  });
+
+  // ---- F2：探活必须区分「端点活着」与「端点会列模型」 ----
+
+  await test('F2: checkAvailabilityWithStatus separates reachable from listing-capable', async () => {
+    const notFound = serviceWithListingEndpoint(() => ({ status: 404, text: '' }));
+    const unsupported = await notFound.service.checkAvailabilityWithStatus(notFound.deps);
+    // 端点应答了（所以不是「连不上」），但明确不会列模型
+    expect(unsupported.reachable).toEqual(true);
+    expect(unsupported.listingUnsupported).toEqual(true);
+    expect(unsupported.error).toEqual(undefined);
+    // 注意：ModelService.checkAvailability() 不接受 deps，无法在这里用注入的 requestUrl 驱动，
+    // 故「薄包装仍返回 true」在 test/anthropic-protocol.test.ts 里用 catalog 层的注入验证。
+
+    const unauthorized = serviceWithListingEndpoint(() => ({ status: 401, text: '{"error":{}}' }));
+    const failed = await unauthorized.service.checkAvailabilityWithStatus(unauthorized.deps);
+    expect(failed.reachable).toEqual(false);
+    expect(failed.listingUnsupported).toEqual(false);
+    expect(failed.error instanceof Error).toEqual(true);
+
+    const ok = serviceWithListingEndpoint(() => ({
+      status: 200,
+      text: JSON.stringify({ data: [{ id: 'claude-opus-4-5' }] }),
+    }));
+    const healthy = await ok.service.checkAvailabilityWithStatus(ok.deps);
+    expect(healthy.reachable).toEqual(true);
+    expect(healthy.listingUnsupported).toEqual(false);
+    expect(healthy.error).toEqual(undefined);
+  });
+
+  // ---- F4：未知 provider type 是运行期安全网，不是静默 fallthrough ----
+
+  await test('F4: an unknown persisted provider type falls back to OpenAI-compatible', async () => {
+    const service: any = Object.create(ModelService.prototype);
+    service.settings = { contextWindow: 100000, thinkingLevel: 'medium' };
+
+    // 类型系统已排除，只有磁盘上残留/手改的 settings.json 能造出这种值
+    const model = service.buildModelForConfig({
+      type: 'legacy-openai', label: 'Legacy', apiKey: 'k',
+      baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o',
+    });
+
+    expect(model.api).toEqual('openai-completions');
+    expect(model.provider).toEqual('openai');
   });
 }
 

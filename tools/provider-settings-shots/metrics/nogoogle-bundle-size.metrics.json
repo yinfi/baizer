@@ -1,0 +1,1289 @@
+{
+  "schema": "baizer-bundle-size-evidence/1",
+  "generatedAt": "2026-11-03T06:11:36.160Z",
+  "artifact": "dist/main.js",
+  "before": {
+    "revision": "caf9703",
+    "label": "tree-identical to main @ 1f4c695 (git diff caf9703 origin/main is empty; both trees d05a9be6); artifact built in the pristine caf9703 worktree",
+    "mainJs": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\provider-settings-anthropic-29c5dba52d61\\dist\\main.js",
+    "bytes": 4137811,
+    "sha256": "C622438F7B33AC975E07BAE5F822D8AE24BD0CCE96E9F261E77DC170EB13C5C2",
+    "metafile": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\provider-settings-anthropic-29c5dba52d61\\dist\\esbuild-meta.json",
+    "metafileOutputBytes": 4137811,
+    "metafileMatchesArtifact": true,
+    "inputCount": 1234,
+    "inputsWithBytesInOutput": 1234
+  },
+  "after": {
+    "revision": "c6b99e7",
+    "label": "final rebased head; tree fa4d502, byte-identical to pre-rebase 1f29a77",
+    "mainJs": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\dist\\main.js",
+    "bytes": 3162611,
+    "sha256": "87D4B012FC0DDDFAE2FFCE642E04B59EEBAC73A140F9A1A82E3642C635F2A42A",
+    "metafile": "C:\\Users\\Administrator\\.dsh\\state\\superagent\\work\\remove-google-provider-10af41c391ff\\dist\\esbuild-meta.json",
+    "metafileOutputBytes": 3162611,
+    "metafileMatchesArtifact": true,
+    "inputCount": 1225,
+    "inputsWithBytesInOutput": 1225
+  },
+  "delta": {
+    "bytes": -975200,
+    "kib": -952.34,
+    "mib": -0.93,
+    "percent": -23.568,
+    "attributedByInputsBytes": -972988,
+    "unattributedBytes": -2212
+  },
+  "removedModules": [
+    {
+      "input": "node_modules/@google/genai/dist/web/index.mjs",
+      "before": 876277,
+      "after": 0,
+      "delta": -876277
+    },
+    {
+      "input": "node_modules/@google/generative-ai/dist/index.mjs",
+      "before": 40209,
+      "after": 0,
+      "delta": -40209
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/providers/data/google.json",
+      "before": 14828,
+      "after": 0,
+      "delta": -14828
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/api/google-generative-ai.js",
+      "before": 14258,
+      "after": 0,
+      "delta": -14258
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/api/google-shared.js",
+      "before": 11894,
+      "after": 0,
+      "delta": -11894
+    },
+    {
+      "input": "node_modules/retry/lib/retry_operation.js",
+      "before": 4237,
+      "after": 0,
+      "delta": -4237
+    },
+    {
+      "input": "node_modules/retry/lib/retry.js",
+      "before": 2666,
+      "after": 0,
+      "delta": -2666
+    },
+    {
+      "input": "node_modules/p-retry/index.js",
+      "before": 2489,
+      "after": 0,
+      "delta": -2489
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/providers/google.js",
+      "before": 522,
+      "after": 0,
+      "delta": -522
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/providers/google.models.js",
+      "before": 464,
+      "after": 0,
+      "delta": -464
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/api/google-generative-ai.lazy.js",
+      "before": 318,
+      "after": 0,
+      "delta": -318
+    },
+    {
+      "input": "node_modules/retry/index.js",
+      "before": 133,
+      "after": 0,
+      "delta": -133
+    }
+  ],
+  "addedModules": [
+    {
+      "input": "pi-model-catalog-stub:pi-model-catalog-stub:google.models.js",
+      "before": 0,
+      "after": 226,
+      "delta": 226
+    },
+    {
+      "input": "pi-api-stub:pi-api-stub:google-generative-ai",
+      "before": 0,
+      "after": 530,
+      "delta": 530
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:google.js",
+      "before": 0,
+      "after": 573,
+      "delta": 573
+    }
+  ],
+  "shrunkModules": [
+    {
+      "input": "src/services/model-catalog-service.ts",
+      "before": 6508,
+      "after": 5216,
+      "delta": -1292
+    },
+    {
+      "input": "src/runtime/pi/pi-native-model.ts",
+      "before": 7836,
+      "after": 6563,
+      "delta": -1273
+    },
+    {
+      "input": "src/services/video-transcription.ts",
+      "before": 4991,
+      "after": 3828,
+      "delta": -1163
+    },
+    {
+      "input": "src/settings.ts",
+      "before": 127716,
+      "after": 126579,
+      "delta": -1137
+    },
+    {
+      "input": "src/i18n/zh-messages.ts",
+      "before": 49314,
+      "after": 48990,
+      "delta": -324
+    },
+    {
+      "input": "src/services/model-service.ts",
+      "before": 36250,
+      "after": 36021,
+      "delta": -229
+    },
+    {
+      "input": "main.ts",
+      "before": 36000,
+      "after": 35895,
+      "delta": -105
+    },
+    {
+      "input": "src/runtime/pi/harness-chat-runtime.ts",
+      "before": 10550,
+      "after": 10484,
+      "delta": -66
+    },
+    {
+      "input": "node_modules/typebox/build/type/script/parser.mjs",
+      "before": 39264,
+      "after": 39224,
+      "delta": -40
+    },
+    {
+      "input": "node_modules/openai/client.mjs",
+      "before": 62662,
+      "after": 62624,
+      "delta": -38
+    },
+    {
+      "input": "node_modules/openai/core/error.mjs",
+      "before": 5137,
+      "after": 5105,
+      "delta": -32
+    },
+    {
+      "input": "node_modules/openai/core/streaming.mjs",
+      "before": 19334,
+      "after": 19308,
+      "delta": -26
+    },
+    {
+      "input": "node_modules/openai/internal/auth/x509-workload-identity-auth.mjs",
+      "before": 44760,
+      "after": 44735,
+      "delta": -25
+    },
+    {
+      "input": "node_modules/yaml/browser/dist/stringify/stringifyString.js",
+      "before": 9430,
+      "after": 9410,
+      "delta": -20
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/env-api-keys.js",
+      "before": 5514,
+      "after": 5495,
+      "delta": -19
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js",
+      "before": 46898,
+      "after": 46880,
+      "delta": -18
+    },
+    {
+      "input": "src/services/inbox-autosave.ts",
+      "before": 2952,
+      "after": 2936,
+      "delta": -16
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/utils/json-parse.js",
+      "before": 3082,
+      "after": 3069,
+      "delta": -13
+    },
+    {
+      "input": "node_modules/openai/lib/EventStream.mjs",
+      "before": 59696,
+      "after": 59683,
+      "delta": -13
+    },
+    {
+      "input": "src/skills/builtin/plugin-ctrl/skill-generator.ts",
+      "before": 22918,
+      "after": 22905,
+      "delta": -13
+    },
+    {
+      "input": "node_modules/openai/internal/responses/response-accumulator.mjs",
+      "before": 35411,
+      "after": 35399,
+      "delta": -12
+    },
+    {
+      "input": "node_modules/yaml/browser/dist/stringify/stringify.js",
+      "before": 3613,
+      "after": 3603,
+      "delta": -10
+    },
+    {
+      "input": "node_modules/openai/lib/AssistantStream.mjs",
+      "before": 41465,
+      "after": 41456,
+      "delta": -9
+    },
+    {
+      "input": "src/runtime/pi/prompt-template-service.ts",
+      "before": 5784,
+      "after": 5775,
+      "delta": -9
+    },
+    {
+      "input": "pi-api-stub:pi-api-stub:azure-openai-responses",
+      "before": 544,
+      "after": 536,
+      "delta": -8
+    },
+    {
+      "input": "pi-api-stub:pi-api-stub:bedrock-converse-stream",
+      "before": 553,
+      "after": 545,
+      "delta": -8
+    },
+    {
+      "input": "pi-api-stub:pi-api-stub:google-vertex",
+      "before": 505,
+      "after": 497,
+      "delta": -8
+    },
+    {
+      "input": "pi-api-stub:pi-api-stub:mistral-conversations",
+      "before": 545,
+      "after": 537,
+      "delta": -8
+    },
+    {
+      "input": "pi-api-stub:pi-api-stub:openai-codex-responses",
+      "before": 548,
+      "after": 540,
+      "delta": -8
+    },
+    {
+      "input": "pi-api-stub:pi-api-stub:pi-messages",
+      "before": 495,
+      "after": 487,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:amazon-bedrock.js",
+      "before": 624,
+      "after": 616,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:ant-ling.js",
+      "before": 588,
+      "after": 580,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:azure.js",
+      "before": 575,
+      "after": 567,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:baseten.js",
+      "before": 587,
+      "after": 579,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:cerebras.js",
+      "before": 593,
+      "after": 585,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:cloudflare-ai-gateway.js",
+      "before": 669,
+      "after": 661,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:cloudflare-workers-ai.js",
+      "before": 669,
+      "after": 661,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:deepseek.js",
+      "before": 593,
+      "after": 585,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:fireworks.js",
+      "before": 599,
+      "after": 591,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:github-copilot.js",
+      "before": 628,
+      "after": 620,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:google-vertex.js",
+      "before": 622,
+      "after": 614,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:groq.js",
+      "before": 569,
+      "after": 561,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:huggingface.js",
+      "before": 611,
+      "after": 603,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:kimi-coding.js",
+      "before": 610,
+      "after": 602,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:meta.js",
+      "before": 569,
+      "after": 561,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:minimax.js",
+      "before": 587,
+      "after": 579,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:minimax-cn.js",
+      "before": 604,
+      "after": 596,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:mistral.js",
+      "before": 587,
+      "after": 579,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:moonshotai.js",
+      "before": 605,
+      "after": 597,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:moonshotai-cn.js",
+      "before": 622,
+      "after": 614,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:nvidia.js",
+      "before": 581,
+      "after": 573,
+      "delta": -8
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/api/classifier-shared.js",
+      "before": 3254,
+      "after": 3246,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:openai-codex.js",
+      "before": 616,
+      "after": 608,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:opencode.js",
+      "before": 593,
+      "after": 585,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:opencode-go.js",
+      "before": 610,
+      "after": 602,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:openrouter.js",
+      "before": 605,
+      "after": 597,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:qwen-token-plan.js",
+      "before": 633,
+      "after": 625,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:qwen-token-plan-cn.js",
+      "before": 650,
+      "after": 642,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:qwen-token-plan-individual.js",
+      "before": 698,
+      "after": 690,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:radius.js",
+      "before": 581,
+      "after": 573,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:together.js",
+      "before": 593,
+      "after": 585,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:typesafe.js",
+      "before": 593,
+      "after": 585,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:vercel-ai-gateway.js",
+      "before": 645,
+      "after": 637,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:xai.js",
+      "before": 563,
+      "after": 555,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:xiaomi.js",
+      "before": 581,
+      "after": 573,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:xiaomi-token-plan-ams.js",
+      "before": 668,
+      "after": 660,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:xiaomi-token-plan-cn.js",
+      "before": 662,
+      "after": 654,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:xiaomi-token-plan-sgp.js",
+      "before": 668,
+      "after": 660,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:zai.js",
+      "before": 563,
+      "after": 555,
+      "delta": -8
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:zai-coding-cn.js",
+      "before": 621,
+      "after": 613,
+      "delta": -8
+    },
+    {
+      "input": "node_modules/yaml/browser/dist/doc/Document.js",
+      "before": 10146,
+      "after": 10138,
+      "delta": -8
+    },
+    {
+      "input": "node_modules/yaml/browser/dist/compose/resolve-flow-scalar.js",
+      "before": 5671,
+      "after": 5663,
+      "delta": -8
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/models.js",
+      "before": 28219,
+      "after": 28212,
+      "delta": -7
+    },
+    {
+      "input": "node_modules/openai/lib/agents/agent-session-stream.mjs",
+      "before": 13827,
+      "after": 13820,
+      "delta": -7
+    },
+    {
+      "input": "node_modules/openai/resources/beta/agents/agents.mjs",
+      "before": 3694,
+      "after": 3687,
+      "delta": -7
+    },
+    {
+      "input": "node_modules/openai/lib/ChatCompletionStream.mjs",
+      "before": 77168,
+      "after": 77162,
+      "delta": -6
+    },
+    {
+      "input": "node_modules/openai/resources/beta/agents/environments/environments.mjs",
+      "before": 1291,
+      "after": 1285,
+      "delta": -6
+    },
+    {
+      "input": "node_modules/typebox/build/schema/resolve/resolve.mjs",
+      "before": 9901,
+      "after": 9895,
+      "delta": -6
+    },
+    {
+      "input": "node_modules/yaml/browser/dist/schema/yaml-1.1/timestamp.js",
+      "before": 2865,
+      "after": 2859,
+      "delta": -6
+    },
+    {
+      "input": "node_modules/openai/internal/detect-platform.mjs",
+      "before": 4896,
+      "after": 4891,
+      "delta": -5
+    },
+    {
+      "input": "node_modules/openai/internal/utils/path.mjs",
+      "before": 2862,
+      "after": 2857,
+      "delta": -5
+    },
+    {
+      "input": "node_modules/openai/resources/live/live.mjs",
+      "before": 1112,
+      "after": 1107,
+      "delta": -5
+    },
+    {
+      "input": "src/skills/builtin/web-search/executor.ts",
+      "before": 2458,
+      "after": 2453,
+      "delta": -5
+    },
+    {
+      "input": "node_modules/openai/internal/parse.mjs",
+      "before": 2697,
+      "after": 2693,
+      "delta": -4
+    },
+    {
+      "input": "node_modules/openai/internal/auth/x509-credential-options.mjs",
+      "before": 4109,
+      "after": 4105,
+      "delta": -4
+    },
+    {
+      "input": "node_modules/openai/internal/assistant-stream-delta.mjs",
+      "before": 12138,
+      "after": 12134,
+      "delta": -4
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:anthropic.js",
+      "before": 595,
+      "after": 591,
+      "delta": -4
+    },
+    {
+      "input": "src/ui/controllers/input-controller.ts",
+      "before": 4152,
+      "after": 4148,
+      "delta": -4
+    },
+    {
+      "input": "src/ui/guardian-completion.ts",
+      "before": 29252,
+      "after": 29248,
+      "delta": -4
+    },
+    {
+      "input": "src/skills/pi-skill-source.ts",
+      "before": 2064,
+      "after": 2060,
+      "delta": -4
+    },
+    {
+      "input": "src/skills/skill-files.ts",
+      "before": 6663,
+      "after": 6659,
+      "delta": -4
+    },
+    {
+      "input": "src/utils/request-url-fetch.ts",
+      "before": 11688,
+      "after": 11684,
+      "delta": -4
+    },
+    {
+      "input": "node_modules/openai/core/api-promise.mjs",
+      "before": 2711,
+      "after": 2708,
+      "delta": -3
+    },
+    {
+      "input": "node_modules/openai/resources/chat/chat.mjs",
+      "before": 365,
+      "after": 362,
+      "delta": -3
+    },
+    {
+      "input": "node_modules/openai/internal/utils/env.mjs",
+      "before": 475,
+      "after": 472,
+      "delta": -3
+    },
+    {
+      "input": "node_modules/openai/resources/webhooks/webhooks.mjs",
+      "before": 6951,
+      "after": 6948,
+      "delta": -3
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/utils/retry.js",
+      "before": 7097,
+      "after": 7094,
+      "delta": -3
+    },
+    {
+      "input": "node_modules/yaml/browser/dist/doc/createNode.js",
+      "before": 2203,
+      "after": 2200,
+      "delta": -3
+    },
+    {
+      "input": "src/services/obsidian-context-service.ts",
+      "before": 6767,
+      "after": 6764,
+      "delta": -3
+    },
+    {
+      "input": "src/services/clip-input.ts",
+      "before": 615,
+      "after": 612,
+      "delta": -3
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/utils/provider-env.js",
+      "before": 953,
+      "after": 951,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/auth/resolve.js",
+      "before": 4667,
+      "after": 4665,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/openai/internal/utils/sleep.mjs",
+      "before": 1357,
+      "after": 1355,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/openai/resources/batches.mjs",
+      "before": 1340,
+      "after": 1338,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/openai/resources/beta/agents/environments/files.mjs",
+      "before": 2010,
+      "after": 2008,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/openai/lib/polling.mjs",
+      "before": 2959,
+      "after": 2957,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/openai/resources/beta/beta.mjs",
+      "before": 964,
+      "after": 962,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/openai/lib/file-processing.mjs",
+      "before": 739,
+      "after": 737,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/openai/resources/models.mjs",
+      "before": 1080,
+      "after": 1078,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js",
+      "before": 50161,
+      "after": 50159,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js",
+      "before": 13451,
+      "after": 13449,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/typebox/build/system/arguments/arguments.mjs",
+      "before": 317,
+      "after": 315,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/typebox/build/type/script/token/internal/match.mjs",
+      "before": 287,
+      "after": 285,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/@mozilla/readability/Readability.js",
+      "before": 79361,
+      "after": 79359,
+      "delta": -2
+    },
+    {
+      "input": "node_modules/openai/internal/errors.mjs",
+      "before": 1202,
+      "after": 1201,
+      "delta": -1
+    },
+    {
+      "input": "node_modules/openai/internal/utils/values.mjs",
+      "before": 1260,
+      "after": 1259,
+      "delta": -1
+    },
+    {
+      "input": "node_modules/openai/internal/utils/log.mjs",
+      "before": 4345,
+      "after": 4344,
+      "delta": -1
+    },
+    {
+      "input": "node_modules/openai/internal/data-residency.mjs",
+      "before": 864,
+      "after": 863,
+      "delta": -1
+    },
+    {
+      "input": "node_modules/openai/core/pagination.mjs",
+      "before": 5797,
+      "after": 5796,
+      "delta": -1
+    },
+    {
+      "input": "node_modules/openai/lib/ChatCompletionStreamingRunner.mjs",
+      "before": 2447,
+      "after": 2446,
+      "delta": -1
+    },
+    {
+      "input": "node_modules/openai/lib/responses/ResponseStream.mjs",
+      "before": 9335,
+      "after": 9334,
+      "delta": -1
+    }
+  ],
+  "grownModules": [
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/legacy-api-aliases.js",
+      "before": 2537,
+      "after": 2544,
+      "delta": 7
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/compat.js",
+      "before": 13154,
+      "after": 13168,
+      "delta": 14
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/providers/all.js",
+      "before": 3415,
+      "after": 3431,
+      "delta": 16
+    },
+    {
+      "input": "node_modules/@earendil-works/pi-ai/dist/models.generated.js",
+      "before": 6044,
+      "after": 6066,
+      "delta": 22
+    },
+    {
+      "input": "src/ui/shell-view.ts",
+      "before": 73831,
+      "after": 73877,
+      "delta": 46
+    },
+    {
+      "input": "pi-model-catalog-stub:pi-model-catalog-stub:google.models.js",
+      "before": 0,
+      "after": 226,
+      "delta": 226
+    },
+    {
+      "input": "src/mcp/types.ts",
+      "before": 4302,
+      "after": 4621,
+      "delta": 319
+    },
+    {
+      "input": "pi-api-stub:pi-api-stub:google-generative-ai",
+      "before": 0,
+      "after": 530,
+      "delta": 530
+    },
+    {
+      "input": "pi-stub:pi-provider-stub:google.js",
+      "before": 0,
+      "after": 573,
+      "delta": 573
+    }
+  ],
+  "owners": [
+    {
+      "owner": "@google/genai",
+      "before": 876277,
+      "after": 0,
+      "delta": -876277,
+      "inputs": 1
+    },
+    {
+      "owner": "@earendil-works/pi-ai",
+      "before": 230730,
+      "after": 188429,
+      "delta": -42301,
+      "inputs": 20
+    },
+    {
+      "owner": "@google/generative-ai",
+      "before": 40209,
+      "after": 0,
+      "delta": -40209,
+      "inputs": 1
+    },
+    {
+      "owner": "retry",
+      "before": 7036,
+      "after": 0,
+      "delta": -7036,
+      "inputs": 3
+    },
+    {
+      "owner": "plugin source",
+      "before": 452611,
+      "after": 447318,
+      "delta": -5293,
+      "inputs": 21
+    },
+    {
+      "owner": "p-retry",
+      "before": 2489,
+      "after": 0,
+      "delta": -2489,
+      "inputs": 1
+    },
+    {
+      "owner": "openai",
+      "before": 438460,
+      "after": 438219,
+      "delta": -241,
+      "inputs": 35
+    },
+    {
+      "owner": "yaml",
+      "before": 33928,
+      "after": 33873,
+      "delta": -55,
+      "inputs": 6
+    },
+    {
+      "owner": "typebox",
+      "before": 49769,
+      "after": 49719,
+      "delta": -50,
+      "inputs": 4
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:amazon-bedrock.js",
+      "before": 624,
+      "after": 616,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:ant-ling.js",
+      "before": 588,
+      "after": 580,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:azure.js",
+      "before": 575,
+      "after": 567,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:baseten.js",
+      "before": 587,
+      "after": 579,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:cerebras.js",
+      "before": 593,
+      "after": 585,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:cloudflare-ai-gateway.js",
+      "before": 669,
+      "after": 661,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:cloudflare-workers-ai.js",
+      "before": 669,
+      "after": 661,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:deepseek.js",
+      "before": 593,
+      "after": 585,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:fireworks.js",
+      "before": 599,
+      "after": 591,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:github-copilot.js",
+      "before": 628,
+      "after": 620,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:google-vertex.js",
+      "before": 622,
+      "after": 614,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:groq.js",
+      "before": 569,
+      "after": 561,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:huggingface.js",
+      "before": 611,
+      "after": 603,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:kimi-coding.js",
+      "before": 610,
+      "after": 602,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:meta.js",
+      "before": 569,
+      "after": 561,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:minimax.js",
+      "before": 587,
+      "after": 579,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:minimax-cn.js",
+      "before": 604,
+      "after": 596,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:mistral.js",
+      "before": 587,
+      "after": 579,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:moonshotai.js",
+      "before": 605,
+      "after": 597,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:moonshotai-cn.js",
+      "before": 622,
+      "after": 614,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:nvidia.js",
+      "before": 581,
+      "after": 573,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:openai-codex.js",
+      "before": 616,
+      "after": 608,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:opencode.js",
+      "before": 593,
+      "after": 585,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:opencode-go.js",
+      "before": 610,
+      "after": 602,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:openrouter.js",
+      "before": 605,
+      "after": 597,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:qwen-token-plan.js",
+      "before": 633,
+      "after": 625,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:qwen-token-plan-cn.js",
+      "before": 650,
+      "after": 642,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:qwen-token-plan-individual.js",
+      "before": 698,
+      "after": 690,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:radius.js",
+      "before": 581,
+      "after": 573,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:together.js",
+      "before": 593,
+      "after": 585,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:typesafe.js",
+      "before": 593,
+      "after": 585,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:vercel-ai-gateway.js",
+      "before": 645,
+      "after": 637,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:xai.js",
+      "before": 563,
+      "after": 555,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:xiaomi.js",
+      "before": 581,
+      "after": 573,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:xiaomi-token-plan-ams.js",
+      "before": 668,
+      "after": 660,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:xiaomi-token-plan-cn.js",
+      "before": 662,
+      "after": 654,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:xiaomi-token-plan-sgp.js",
+      "before": 668,
+      "after": 660,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:zai.js",
+      "before": 563,
+      "after": 555,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:zai-coding-cn.js",
+      "before": 621,
+      "after": 613,
+      "delta": -8,
+      "inputs": 1
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:anthropic.js",
+      "before": 595,
+      "after": 591,
+      "delta": -4,
+      "inputs": 1
+    },
+    {
+      "owner": "@mozilla/readability",
+      "before": 79361,
+      "after": 79359,
+      "delta": -2,
+      "inputs": 1
+    },
+    {
+      "owner": "esbuild-plugin stub (pi-model-catalog-stub)",
+      "before": 0,
+      "after": 226,
+      "delta": 226,
+      "inputs": 1
+    },
+    {
+      "owner": "esbuild-plugin stub (pi-api-stub)",
+      "before": 3190,
+      "after": 3672,
+      "delta": 482,
+      "inputs": 7
+    },
+    {
+      "owner": "pi-stub:pi-provider-stub:google.js",
+      "before": 0,
+      "after": 573,
+      "delta": 573,
+      "inputs": 1
+    }
+  ],
+  "problems": []
+}

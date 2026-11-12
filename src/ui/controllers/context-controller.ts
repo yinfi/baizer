@@ -2,6 +2,7 @@ import { App } from 'obsidian';
 import { ContextManager, ContextItem } from '../../services/context-manager';
 import { ObsidianContextService } from '../../services/obsidian-context-service';
 import { ContextChips } from '../components/context-chips';
+import { voidHandler } from '../../utils/promise-guard';
 
 interface ContextControllerDeps {
   app: App;
@@ -45,7 +46,11 @@ export class ContextController {
   renderContextChips(container: HTMLElement, onRemove: (id: string) => void) {
     new ContextChips(container, {
       onRemove,
-      onOpenFile: (path) => this.deps.app.workspace.openLinkText(path, '', false),
+      // 点击 chip 打开文件：打开失败（文件被删/路径无效）只记日志，不留 unhandled rejection。
+      onOpenFile: voidHandler(
+        (path: string) => this.deps.app.workspace.openLinkText(path, '', false),
+        'ContextController',
+      ),
     }).update(this.deps.contextManager.getContexts());
   }
 

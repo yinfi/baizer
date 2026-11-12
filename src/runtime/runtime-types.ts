@@ -1,4 +1,4 @@
-import type { Model } from '@earendil-works/pi-ai';
+import type { Api, Model } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import type { ChatContextItem, StreamEvent, ToolDefinition } from '../models/interfaces';
 import type { MemoryManager } from '../memory/memory-manager';
@@ -18,14 +18,14 @@ import type { ActiveRunController } from './active-run-controller';
  * 不再经由旧的 IChatSession 桥接路径调用 LLM。
  * 本句柄把「该用哪个 Model」与「如何发起 stream」
  * 这两件事打包在一起：
- *   - model:    pi-ai 的 Model 配置对象（由 buildGeminiModel / buildOpenAICompatModel 构造）
+ *   - model:    pi-ai 的 Model 配置对象（由 buildOpenAICompatModel / buildAnthropicModel 构造）
  *   - streamFn: 注入了 apiKey 的 StreamFn（生产由 createNativeStreamFn 提供，也可由本句柄直接给出；测试注入 mock）
  *
  * 两者必须同源构造（同一 provider 类型、同一 apiKey），故合并为一个句柄一次性给出，
  * 避免 runtime 自己拼装 provider 细节。
  */
 export interface NativeChatHandle {
-  model: Model<any>;
+  model: Model<Api>;
   /**
    * pi 1.3.0 的 `AgentOptions.streamFn` 是必填字段，`Agent` 不再自己按 model.api
    * 路由到 api-registry。提供时优先使用（测试注入「假 LLM 响应」的入口）；
@@ -60,8 +60,8 @@ export type NativeChatFactory = (conversationId?: string) => NativeChatHandle;
 export interface ChatRuntimeDeps {
   /**
    * 原生 LLM 直连句柄工厂（Phase 2 接入点）。
-   * 生产由 model-service 依据当前 ProviderConfig 构造（gemini→buildGeminiModel，
-   * openai-compatible→buildOpenAICompatModel，streamFn=createNativeStreamFn(apiKey)）。
+   * 生产由 model-service 依据当前 ProviderConfig 构造（openai-compatible→buildOpenAICompatModel，
+   * anthropic→buildAnthropicModel，streamFn=createNativeStreamFn(apiKey)）。
    * 测试注入 mock streamFn 以驱动工具循环。
    * 缺省时 PiChatRuntime.queryStream 会抛出明确错误（生产必须提供）。
    */

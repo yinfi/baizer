@@ -1,6 +1,11 @@
-import { App, TFile } from 'obsidian';
+import { App, TFile, Editor, View, MetadataCache, CachedMetadata } from 'obsidian';
 import { ContextItem } from './context-manager';
 import { budgetTextBlock } from './context-budget';
+
+// Obsidian exposes backlinks at runtime but omits this method from its public typings.
+interface MetadataCacheWithBacklinks extends MetadataCache {
+  getBacklinksForFile?(file: TFile): { data: Map<string, unknown> } | Map<string, unknown> | Record<string, unknown>;
+}
 
 export interface ObsidianContextCollectOptions {
   includeBacklinks?: boolean;
@@ -18,6 +23,7 @@ export interface ObsidianContextSnapshot {
   backlinks: Array<{ path: string; summary: string }>;
   recentNotes: Array<{ path: string; title: string }>;
   explicitScopes: string[];
+  /** 本服务内部构造的窄契约（必填 id + 封闭 type 联合）；跨层调用方按 ChatContextItem 消费。 */
   contextItems: ContextItem[];
 }
 
@@ -71,7 +77,7 @@ export class ObsidianContextService {
     const tags = this.extractTags(cache);
     const outgoingLinks = this.extractOutgoingLinks(cache);
     const content = includeCurrent ? await this.app.vault.read(activeFile) : '';
-    const editor = includeCurrent ? (this.app.workspace.getMostRecentLeaf?.()?.view as any)?.editor : null;
+    const editor = includeCurrent ? (this.app.workspace.getMostRecentLeaf?.()?.view as (View & { editor?: Editor }) | undefined)?.editor : null;
     const selectionText = includeCurrent ? this.normalizeSelection(editor?.getSelection?.()) : null;
     const selectionLine = includeCurrent ? this.normalizeLine(editor?.getCursor?.('from')?.line) : null;
     const activeHeading = includeCurrent ? this.findActiveHeading(content, selectionLine) : null;
@@ -147,17 +153,17 @@ export class ObsidianContextService {
     return typeof value === 'number' && value >= 0 ? value : null;
   }
 
-  private extractTags(cache: any): string[] {
+  private extractTags(cache: CachedMetadata): string[] {
     if (!Array.isArray(cache?.tags)) return [];
     return cache.tags
-      .map((tag: any) => (typeof tag?.tag === 'string' ? tag.tag : null))
+      .map((tag) => (typeof tag?.tag === 'string' ? tag.tag : null))
       .filter((tag: string | null): tag is string => !!tag);
   }
 
-  private extractOutgoingLinks(cache: any): string[] {
+  private extractOutgoingLinks(cache: CachedMetadata): string[] {
     if (!Array.isArray(cache?.links)) return [];
     return cache.links
-      .map((link: any) => (typeof link?.link === 'string' ? link.link : null))
+      .map((link) => (typeof link?.link === 'string' ? link.link : null))
       .filter((link: string | null): link is string => !!link);
   }
 
@@ -207,10 +213,15 @@ export class ObsidianContextService {
 
   private async collectBacklinks(activeFile: TFile, includeBacklinks: boolean): Promise<Array<{ path: string; summary: string }>> {
     if (!includeBacklinks) return [];
-    const backlinkMap = (this.app.metadataCache as any).getBacklinksForFile?.(activeFile);
+    const backlinkMap = (this.app.metadataCache as MetadataCacheWithBacklinks).getBacklinksForFile?.(activeFile);
     if (!backlinkMap) return [];
 
-    const entries = Array.from(backlinkMap instanceof Map ? backlinkMap.keys() : Object.keys(backlinkMap));
+    // Current Obsidian wraps the map in `data`; retain direct-map compatibility.
+    const paths: Map<string, unknown> | Record<string, unknown> = backlinkMap instanceof Map ? backlinkMap
+      : backlinkMap.data instanceof Map ? backlinkMap.data : backlinkMap;
+    // 反链键由宿主给出：只接受字符串（Map 键 / 对象键），非字符串条目原本也打不开文件。
+    const rawEntries: unknown[] = Array.from(paths instanceof Map ? paths.keys() : Object.keys(paths));
+    const entries = rawEntries.filter((entry): entry is string => typeof entry === 'string');
     const results: Array<{ path: string; summary: string }> = [];
 
     for (const path of entries.slice(0, this.options.maxBacklinks)) {
@@ -245,7 +256,7 @@ export class ObsidianContextService {
     return budgetTextBlock(normalized, this.options.maxSummaryChars);
   }
 
-  private toTitle(file: any): string {
+  private toTitle(file: TFile): string {
     return typeof file?.basename === 'string' && file.basename.length > 0
       ? file.basename
       : this.basename(file?.path || '');

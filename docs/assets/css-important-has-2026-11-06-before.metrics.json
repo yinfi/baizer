@@ -1,0 +1,242 @@
+{
+  "shell-light": {
+    "leaf": {
+      "display": "flex",
+      "flex-direction": "column"
+    },
+    "viewContent": {
+      "display": "flex",
+      "flex-direction": "column",
+      "flex-grow": "1"
+    },
+    "shellView": {
+      "display": "flex",
+      "flex-direction": "column",
+      "height": "612px",
+      "width": "420px"
+    },
+    "shellViewRect": {
+      "w": 448,
+      "h": 640
+    },
+    "historyMenu": {
+      "display": "none"
+    },
+    "tabHidden": {
+      "display": "none"
+    },
+    "tabVisible": {
+      "display": "block"
+    },
+    "timeline": {
+      "display": "none"
+    },
+    "suggestions": {
+      "display": "none"
+    },
+    "unreadHidden": {
+      "display": "none"
+    },
+    "unreadShown": {
+      "display": "flex"
+    },
+    "textareaFocusShadow": {
+      "box-shadow": "none"
+    }
+  },
+  "diff-wide-light": {
+    "modal": {
+      "w": 802,
+      "h": 240
+    },
+    "modalCss": {
+      "width": "760px",
+      "max-width": "760px"
+    },
+    "content": {
+      "width": "720px",
+      "height": "198px"
+    },
+    "contentRect": {
+      "w": 720,
+      "h": 198
+    },
+    "paneCode": {
+      "min-height": "84px",
+      "max-height": "124.8px"
+    }
+  },
+  "diff-narrow-light": {
+    "modal": {
+      "w": 490,
+      "h": 388
+    },
+    "modalCss": {
+      "width": "448px",
+      "max-width": "448px"
+    },
+    "content": {
+      "width": "448px",
+      "height": "346px"
+    },
+    "contentRect": {
+      "w": 448,
+      "h": 346
+    },
+    "paneCode": {
+      "min-height": "84px",
+      "max-height": "124.8px"
+    }
+  },
+  "editor-light": {
+    "ghost": {
+      "color": "rgb(42, 157, 74)",
+      "background-color": "color(srgb 0.164706 0.615686 0.290196 / 0.15)",
+      "font-style": "italic"
+    },
+    "activeGutter": {
+      "background-color": "rgba(0, 0, 0, 0)"
+    },
+    "gutter": {
+      "background-color": "rgba(0, 0, 0, 0)"
+    }
+  },
+  "shell-dark": {
+    "leaf": {
+      "display": "flex",
+      "flex-direction": "column"
+    },
+    "viewContent": {
+      "display": "flex",
+      "flex-direction": "column",
+      "flex-grow": "1"
+    },
+    "shellView": {
+      "display": "flex",
+      "flex-direction": "column",
+      "height": "612px",
+      "width": "420px"
+    },
+    "shellViewRect": {
+      "w": 448,
+      "h": 640
+    },
+    "historyMenu": {
+      "display": "none"
+    },
+    "tabHidden": {
+      "display": "none"
+    },
+    "tabVisible": {
+      "display": "block"
+    },
+    "timeline": {
+      "display": "none"
+    },
+    "suggestions": {
+      "display": "none"
+    },
+    "unreadHidden": {
+      "display": "none"
+    },
+    "unreadShown": {
+      "display": "flex"
+    },
+    "textareaFocusShadow": {
+      "box-shadow": "none"
+    }
+  },
+  "diff-wide-dark": {
+    "modal": {
+      "w": 802,
+      "h": 240
+    },
+    "modalCss": {
+      "width": "760px",
+      "max-width": "760px"
+    },
+    "content": {
+      "width": "720px",
+      "height": "198px"
+    },
+    "contentRect": {
+      "w": 720,
+      "h": 198
+    },
+    "paneCode": {
+      "min-height": "84px",
+      "max-height": "124.8px"
+    }
+  },
+  "diff-narrow-dark": {
+    "modal": {
+      "w": 490,
+      "h": 388
+    },
+    "modalCss": {
+      "width": "448px",
+      "max-width": "448px"
+    },
+    "content": {
+      "width": "448px",
+      "height": "346px"
+    },
+    "contentRect": {
+      "w": 448,
+      "h": 346
+    },
+    "paneCode": {
+      "min-height": "84px",
+      "max-height": "124.8px"
+    }
+  },
+  "editor-dark": {
+    "ghost": {
+      "color": "rgb(68, 207, 110)",
+      "background-color": "color(srgb 0.266667 0.811765 0.431373 / 0.15)",
+      "font-style": "italic"
+    },
+    "activeGutter": {
+      "background-color": "rgba(0, 0, 0, 0)"
+    },
+    "gutter": {
+      "background-color": "rgba(0, 0, 0, 0)"
+    }
+  },
+  "motion-normal": {
+    "cursor": {
+      "animation-name": "cursor-blink",
+      "animation-duration": "0.8s"
+    },
+    "strip": {
+      "animation-name": "shell-knowledge-pulse",
+      "animation-duration": "1.5s"
+    },
+    "output": {
+      "scroll-behavior": "smooth"
+    },
+    "shellVars": {
+      "--baizer-transition-fast": "120ms ease",
+      "--baizer-transition-base": "200ms ease"
+    },
+    "applyBtnTransition": null
+  },
+  "motion-reduce": {
+    "cursor": {
+      "animation-name": "none",
+      "animation-duration": "0s"
+    },
+    "strip": {
+      "animation-name": "shell-knowledge-pulse",
+      "animation-duration": "1e-06s"
+    },
+    "output": {
+      "scroll-behavior": "auto"
+    },
+    "shellVars": {
+      "--baizer-transition-fast": "120ms ease",
+      "--baizer-transition-base": "200ms ease"
+    },
+    "applyBtnTransition": null
+  }
+}

@@ -1,0 +1,207 @@
+{
+  "label": "before-wide",
+  "phase": "before",
+  "revision": "cdcccb6",
+  "capturedAt": "2026-11-04T09:38:59.143Z",
+  "out": "\\\\wsl.localhost\\Ubuntu\\home\\yinfei\\.dsh\\state\\superagent\\work\\scroll-follow-7cf6055b4e7d\\docs\\assets\\chat-scroll-2026-11-04-before-wide.png",
+  "scenario": {
+    "seedCount": 12,
+    "streamChunks": 3,
+    "scrollAnchorFraction": 0.35,
+    "viewport": {
+      "width": 1440,
+      "height": 960
+    },
+    "viewWidth": 520,
+    "sidebarHeight": 900,
+    "theme": "dark",
+    "locale": "zh"
+  },
+  "host": {
+    "platform": "win32",
+    "node": "v24.16.0",
+    "exe": "C:\\Program Files\\Obsidian\\Obsidian.exe",
+    "exeFileVersion": "1.7.7"
+  },
+  "steps": [
+    {
+      "locale": {
+        "changed": true,
+        "previous": null
+      }
+    },
+    {
+      "modals": {
+        "trust": {
+          "present": true,
+          "clicked": "信任仓库作者并启用插件"
+        },
+        "closed": [],
+        "releaseNotes": 0
+      }
+    },
+    {
+      "plugin": {
+        "steps": [
+          "loadManifests"
+        ],
+        "error": null,
+        "loaded": true
+      }
+    },
+    {
+      "pluginLoaded": true
+    },
+    {
+      "openView": {
+        "viewType": "baizer-shell-view"
+      }
+    },
+    {
+      "fitViewWidth": {
+        "splitWidth": 544,
+        "viewWidth": 520
+      }
+    },
+    {
+      "seed": {
+        "messagesSeen": 13,
+        "scrollHeight": 3018,
+        "clientHeight": 580
+      }
+    },
+    {
+      "scrollUp": {
+        "anchor": 853,
+        "max": 2438,
+        "scrollTop": 853
+      }
+    }
+  ],
+  "limitations": [
+    "baseline phase has no scroll-follow controller or return entry, so follow/unread fields are null and the entry is absent by design",
+    "the viewport did not stay at the requested reading anchor; see scrollTop fields"
+  ],
+  "vault": {
+    "dir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\obsidian",
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.5.0",
+      "minAppVersion": "1.7.2",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    },
+    "profile": {
+      "userDataDir": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\chat-profile-9367",
+      "configPath": "C:\\Users\\Admin\\AppData\\Local\\Temp\\baizer-shots\\chat-profile-9367\\obsidian.json",
+      "vaultKey": "f230a63f4db30aad"
+    }
+  },
+  "pid": 257556,
+  "target": {
+    "id": "69BAB1DE58F46CCB7EB8FFB8F5F16AE6",
+    "url": "app://obsidian.md/index.html",
+    "title": "New tab - obsidian - Obsidian v1.7.7"
+  },
+  "beforeStream": {
+    "appVersion": null,
+    "pluginVersion": "1.5.0",
+    "locale": "zh",
+    "viewRect": {
+      "x": 908,
+      "y": 82,
+      "width": 520,
+      "height": 846
+    },
+    "splitRect": {
+      "x": 896,
+      "y": 30,
+      "width": 544,
+      "height": 930
+    },
+    "outputRect": {
+      "x": 922,
+      "y": 183,
+      "width": 492,
+      "height": 580
+    },
+    "scrollTop": 853,
+    "maxScrollTop": 2436,
+    "distanceFromBottom": 1583,
+    "scrollHeight": 3016,
+    "clientHeight": 580,
+    "unreadBar": {
+      "present": false,
+      "visible": false,
+      "text": null,
+      "rect": null,
+      "buttonRect": null,
+      "withinViewport": null
+    },
+    "follow": null,
+    "horizontalOverflow": false,
+    "documentOverflow": false
+  },
+  "afterStream": {
+    "appVersion": null,
+    "pluginVersion": "1.5.0",
+    "locale": "zh",
+    "viewRect": {
+      "x": 908,
+      "y": 82,
+      "width": 520,
+      "height": 846
+    },
+    "splitRect": {
+      "x": 896,
+      "y": 30,
+      "width": 544,
+      "height": 930
+    },
+    "outputRect": {
+      "x": 922,
+      "y": 183,
+      "width": 492,
+      "height": 580
+    },
+    "scrollTop": 2747,
+    "maxScrollTop": 2748,
+    "distanceFromBottom": 1,
+    "scrollHeight": 3328,
+    "clientHeight": 580,
+    "unreadBar": {
+      "present": false,
+      "visible": false,
+      "text": null,
+      "rect": null,
+      "buttonRect": null,
+      "withinViewport": null
+    },
+    "follow": null,
+    "horizontalOverflow": false,
+    "documentOverflow": false
+  },
+  "assertions": {
+    "viewportStayedAtReadingAnchor": false,
+    "unreadEntryVisible": false,
+    "unreadEntryText": null,
+    "unreadEntryWithinViewport": true,
+    "noHorizontalOverflow": true,
+    "viewWidthMatchesRequested": true
+  },
+  "screenshot": {
+    "path": "\\\\wsl.localhost\\Ubuntu\\home\\yinfei\\.dsh\\state\\superagent\\work\\scroll-follow-7cf6055b4e7d\\docs\\assets\\chat-scroll-2026-11-04-before-wide.png",
+    "bytes": 40597,
+    "width": 520,
+    "height": 846,
+    "clip": {
+      "x": 936,
+      "y": 82,
+      "width": 520,
+      "height": 846
+    }
+  }
+}

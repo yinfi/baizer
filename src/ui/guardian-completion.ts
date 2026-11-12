@@ -217,17 +217,43 @@ export class GuardianCompletionService {
     return { ...base, prompt };
   }
 
+  /** Explicit instructions bypass auto triggers and continuation quality filters. */
+  async completeManual(input: GuardianCompletionRequest & { instruction: string }): Promise<GuardianCompletionResult> {
+    if (!this.deps.settings.enableGuardian) return { type: 'none', reason: 'disabled' };
+    if (this.deps.modelService.isGenerationConfigured?.() === false) {
+      return { type: 'none', reason: 'model-not-configured' };
+    }
+    const context = await this.buildContext(input);
+    if (input.isStale?.()) return { type: 'none', reason: 'stale' };
+    const response = await this.deps.modelService.generate(
+      `User Instruction: ${JSON.stringify(input.instruction)}\nContext:\n${context.recentContext}\n`
+        + 'Execute the instruction. Return JSON: {"type":"edit"|"answer","suggestion":"MARKDOWN_TEXT"}, or {"type":"none"}.',
+      'You are a helpful writing assistant. Return ONLY JSON.',
+      'guardian', input.obsidianContext, input.userProfile,
+      { ...GUARDIAN_GENERATION_OPTIONS, signal: input.signal },
+    );
+    if (input.isStale?.()) return { type: 'none', reason: 'stale' };
+    const parsed = parseGuardianJson(response);
+    if (!parsed) return { type: 'none', reason: 'invalid-json' };
+    if (parsed.type === 'none') return { type: 'none', reason: 'explicit-none' };
+    if (typeof parsed.suggestion !== 'string' || !parsed.suggestion.trim()) {
+      return { type: 'none', reason: 'empty' };
+    }
+    return { type: 'completion', suggestion: parsed.suggestion, line: context.line, ch: context.ch,
+      quality: { ok: true, reasons: [] } };
+  }
+
   async completeAuto(input: GuardianCompletionRequest): Promise<GuardianCompletionResult> {
     const mode: GuardianCompletionMode = input.mode || 'fast';
     const timeoutMs = mode === 'deep'
       ? (this.deps.deepCompletionTimeoutMs ?? 20000)
       : (this.deps.completionTimeoutMs ?? 9000);
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let timeoutHandle: number | null = null;
     try {
       return await Promise.race([
         this.completeAutoInner(input),
         new Promise<GuardianCompletionResult>((resolve) => {
-          timeoutHandle = setTimeout(() => {
+          timeoutHandle = window.setTimeout(() => {
             this.emitDiagnostic({
               stage: 'completion-timeout',
               requestId: input.requestId,
@@ -240,7 +266,7 @@ export class GuardianCompletionService {
       ]);
     } finally {
       if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
+        window.clearTimeout(timeoutHandle);
       }
     }
   }
@@ -526,8 +552,8 @@ export class GuardianCompletionService {
     const runtime = this.deps.knowledgeRuntime;
     const deep = input.mode === 'deep';
     const fetcher = deep
-      ? runtime?.getGuardianDeepKnowledgeContext
-      : runtime?.getGuardianKnowledgeContext;
+      ? runtime?.getGuardianDeepKnowledgeContext?.bind(runtime)
+      : runtime?.getGuardianKnowledgeContext?.bind(runtime);
     if (!fetcher) return '';
 
     const startedAt = Date.now();
@@ -545,12 +571,12 @@ export class GuardianCompletionService {
       contextLength: query.length,
     });
 
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let timeoutHandle: number | null = null;
     let timedOut = false;
     const raw = await Promise.race([
-      fetcher.call(runtime, query),
+      fetcher(query),
       new Promise<string>((resolve) => {
-        timeoutHandle = setTimeout(() => {
+        timeoutHandle = window.setTimeout(() => {
           timedOut = true;
           this.emitDiagnostic({
             stage: 'knowledge-timeout',
@@ -563,7 +589,7 @@ export class GuardianCompletionService {
       }),
     ]);
     if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
+      window.clearTimeout(timeoutHandle);
     }
     if (raw) {
       this.emitDiagnostic({
@@ -605,14 +631,14 @@ export class GuardianCompletionService {
       contextLength: query.length,
     });
 
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let timeoutHandle: number | null = null;
     const raw = await Promise.race([
       recall.call(this.deps.modelService, query, 500).catch(() => ''),
       new Promise<string>((resolve) => {
-        timeoutHandle = setTimeout(() => resolve(''), timeoutMs);
+        timeoutHandle = window.setTimeout(() => resolve(''), timeoutMs);
       }),
     ]);
-    if (timeoutHandle) clearTimeout(timeoutHandle);
+    if (timeoutHandle) window.clearTimeout(timeoutHandle);
 
     this.emitDiagnostic({
       stage: 'deep-memory-finished',
@@ -760,12 +786,18 @@ export class GuardianCompletionService {
   }
 }
 
-function parseGuardianJson(response: string): any | null {
+/** Guardian 模型返回的 JSON 形态。字段可能缺失,由调用方逐项校验后才消费。 */
+interface GuardianJsonResponse {
+  type?: string;
+  suggestion?: unknown;
+}
+
+function parseGuardianJson(response: string): GuardianJsonResponse | null {
   for (let start = response.indexOf('{'); start >= 0; start = response.indexOf('{', start + 1)) {
     const candidate = extractJsonObjectAt(response, start);
     if (!candidate) continue;
     try {
-      return JSON.parse(candidate);
+      return JSON.parse(candidate) as GuardianJsonResponse;
     } catch {
       continue;
     }

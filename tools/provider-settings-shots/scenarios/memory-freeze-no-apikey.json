@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "Memory freeze repro: MemoryBrowserPage.display() <-> refresh() recursing without bound",
+    "when getMemoryView() resolves null because the active provider has no API key.",
+    "activeProvider has an EMPTY apiKey so ModelService never constructs memoryManager",
+    "(hasValidConfig() -> false), matching the diagnosed trigger exactly."
+  ],
+  "language": "zh",
+  "activeProvider": "opencode",
+  "deletedProviderIds": [
+    "gemini",
+    "openai",
+    "deepseek",
+    "qwen"
+  ],
+  "providers": {
+    "opencode": {
+      "type": "openai-compatible",
+      "label": "opencode",
+      "apiKey": "",
+      "baseUrl": "http://127.0.0.1:9/v1",
+      "model": "deepseek-v4.1-flash"
+    }
+  }
+}

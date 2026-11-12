@@ -5,11 +5,9 @@ import {
   pickCompactionCutoff,
   shouldCompact,
   type CompactionSettings,
-  type EstimableMessage,
 } from './session-store/compaction';
 import {
   ConversationSession,
-  DEFAULT_SESSIONS_ROOT,
   createInMemoryConversationSession,
   resolveBranch,
 } from './session-store/conversation-session';
@@ -38,8 +36,8 @@ export interface MaybeCompactResult {
 }
 
 export interface HarnessSessionManagerOptions {
-  /** 会话文件根目录(vault 相对,隐藏目录)。 */
-  sessionsRoot?: string;
+  /** 会话文件根目录(vault 相对,位于 Vault#configDir 下)。 */
+  sessionsRoot: string;
   /** cwd 标识(仅随 ref 记录;会话文件路径由 conversationId 直接派生)。 */
   cwd?: string;
   /**
@@ -105,10 +103,10 @@ export class HarnessSessionManager {
 
   constructor(
     adapter: VaultFileAdapter,
-    private readonly options: HarnessSessionManagerOptions = {},
+    private readonly options: HarnessSessionManagerOptions,
   ) {
     this.adapter = adapter;
-    this.sessionsRoot = options.sessionsRoot ?? DEFAULT_SESSIONS_ROOT;
+    this.sessionsRoot = options.sessionsRoot;
     this.cwd = options.cwd ?? DEFAULT_CWD;
     this.store = new SessionStore(adapter, this.sessionsRoot);
   }
@@ -436,7 +434,7 @@ export class HarnessSessionManager {
         return notCompacted;
       }
 
-      const cutoff = pickCompactionCutoff(messages as EstimableMessage[], settings.keepRecentTokens);
+      const cutoff = pickCompactionCutoff(messages, settings.keepRecentTokens);
       const toHide = entries.slice(0, cutoff);
       if (toHide.length === 0) {
         // 整段都在 keepRecentTokens 预算内(如单条巨型消息):没有可折叠的旧内容。

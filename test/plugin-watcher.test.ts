@@ -1,7 +1,11 @@
 import { readFileSync } from 'fs';
 import { App } from 'obsidian';
 import { DEFAULT_SETTINGS } from '../src/mcp/types';
-import { computeSkillBodyHash, pluginSkillFilePath } from '../src/skills/skill-files';
+import {
+  computeSkillBodyHash,
+  pluginSkillFilePath,
+  pluginSkillSkipMarkerPath,
+} from '../src/skills/skill-files';
 
 function mockFn(impl?: Function) {
   const fn: any = impl ? (...args: any[]) => impl(...args) : () => {};
@@ -1342,6 +1346,76 @@ async function runTests() {
 
     expect(status?.regenerated).toBe(true);
     expect(status?.failureReason).toBe(null);
+  });
+
+  // manifest / skip marker 都是盘上 JSON（外部输入）：坏文件 / 非字符串版本不能把版本判定打崩。
+  await test('readPluginVersion ignores non-string versions and falls back to loaded manifests', async () => {
+    const adapter = new FakeAdapter();
+    const manifestPath = '.obsidian/plugins/numeric/manifest.json';
+    const app = {
+      ...mockApp,
+      plugins: {
+        manifests: {
+          numeric: { id: 'numeric', name: 'Numeric', version: '9.9', description: '' },
+        },
+        enabledPlugins: new Set(['baizer']),
+        getPlugin: () => null,
+      },
+      vault: { adapter },
+    } as unknown as App;
+    const localWatcher = new PluginWatcher(
+      app, mockSkillRegistry as any, mockGenerator as any, settings, () => true,
+    );
+
+    adapter.files.set(manifestPath, JSON.stringify({ version: 2 }));
+    expect(await (localWatcher as any).readPluginVersion('numeric')).toBe('');
+
+    adapter.files.set(manifestPath, 'not json');
+    expect(await (localWatcher as any).readPluginVersion('numeric')).toBe('9.9');
+
+    adapter.files.set(manifestPath, JSON.stringify({ version: '2.0.0' }));
+    expect(await (localWatcher as any).readPluginVersion('numeric')).toBe('2.0.0');
+  });
+
+  await test('readSkipMarkerVersion tolerates malformed marker JSON and non-string versions', async () => {
+    const adapter = new FakeAdapter();
+    const app = {
+      ...mockApp,
+      plugins: {
+        manifests: {},
+        enabledPlugins: new Set(['baizer']),
+        getPlugin: () => null,
+      },
+      vault: { adapter },
+    } as unknown as App;
+    const localWatcher = new PluginWatcher(
+      app, mockSkillRegistry as any, mockGenerator as any, settings, () => true,
+    );
+    const markerPath = pluginSkillSkipMarkerPath('skip');
+    const readMarker = () => (localWatcher as any).readSkipMarkerVersion('skip');
+
+    expect(await readMarker()).toBe('');
+
+    adapter.files.set(markerPath, '"not-an-object"');
+    expect(await readMarker()).toBe('');
+
+    adapter.files.set(markerPath, JSON.stringify({ version: 3 }));
+    expect(await readMarker()).toBe('');
+
+    adapter.files.set(markerPath, JSON.stringify({ version: '2.0.0' }));
+    expect(await readMarker()).toBe('2.0.0');
+  });
+
+  // 删除失败必须如实返回 false（catch 里的错误文本不能再解引用 any）。
+  await test('deleting a derived skill reports false when the file cannot be removed', async () => {
+    const s = createReconcileSetup({
+      skills: [{ pluginId: 'stuck', recordedVersion: '1.0' }],
+      enabled: ['stuck'],
+    });
+    s.adapter.remove = async () => { throw new Error('EACCES'); };
+
+    expect(await s.localWatcher.deleteDerivedSkill('stuck')).toBe(false);
+    expect(s.adapter.files.has(pluginSkillFilePath('stuck'))).toBe(true);
   });
 }
 

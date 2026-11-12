@@ -129,8 +129,9 @@ async function readBuiltinSourceHash(
 ): Promise<string | null> {
   if (!await adapter.exists(sourcePath)) return null;
   try {
-    const parsed = JSON.parse(await adapter.read(sourcePath));
-    return typeof parsed.bundleHash === 'string' ? parsed.bundleHash : null;
+    const parsed = JSON.parse(await adapter.read(sourcePath)) as { bundleHash?: unknown } | null;
+    // JSON 为 null 时旧实现读 .bundleHash 会抛错并落入 catch → null,这里显式等价
+    return typeof parsed?.bundleHash === 'string' ? parsed.bundleHash : null;
   } catch {
     return null;
   }
@@ -251,15 +252,16 @@ export function readSkillProvenanceFromText(raw: string): SkillProvenanceReport 
 
 /** frontmatter YAML 里的 source 嵌套映射；缺 plugin 或 body_hash 视为无溯源。 */
 function parseProvenance(frontmatter: string): SkillProvenance | null {
-  let fm: any;
+  let fm: unknown;
   try {
     fm = parse(frontmatter);
   } catch {
     return null;
   }
 
-  const source = fm?.source;
-  if (!source || typeof source !== 'object') return null;
+  const rawSource = typeof fm === 'object' && fm !== null ? (fm as { source?: unknown }).source : undefined;
+  if (!rawSource || typeof rawSource !== 'object') return null;
+  const source = rawSource as { plugin?: unknown; body_hash?: unknown; version?: unknown };
 
   const plugin = typeof source.plugin === 'string' ? source.plugin.trim() : '';
   const bodyHash = typeof source.body_hash === 'string' ? source.body_hash.trim() : '';
@@ -283,8 +285,9 @@ export async function readSkillProvenanceFromFile(
   let raw: string | null;
   try {
     raw = await readTextIfExists(adapter, filePath);
-  } catch (e: any) {
-    console.warn(`[skill-files] Failed to read provenance from ${filePath}:`, e?.message ?? e);
+  } catch (e: unknown) {
+    const message = typeof e === 'object' && e !== null ? (e as { message?: unknown }).message : undefined;
+    console.warn(`[skill-files] Failed to read provenance from ${filePath}:`, message ?? e);
     return absentProvenance();
   }
   if (raw === null) return absentProvenance();

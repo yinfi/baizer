@@ -1,14 +1,38 @@
 import type { StreamEvent } from '../../models/interfaces';
+import type { AgentEvent } from '@earendil-works/pi-agent-core';
 
-export function unwrapPiToolResult(result: any): any {
-  if (result?.details && Object.prototype.hasOwnProperty.call(result.details, 'baizerResponse')) {
-    return result.details.baizerResponse;
+/** pi 工具结果的宽松读取形状:details / content[0].text 都可能缺失。 */
+interface LoosePiToolResult {
+  details?: unknown;
+  content?: unknown;
+}
+
+function asLooseResult(result: unknown): LoosePiToolResult | undefined {
+  return typeof result === 'object' && result !== null ? result : undefined;
+}
+
+/** 取 content[0].text;不是字符串则返回 undefined。 */
+function firstContentText(result: LoosePiToolResult | undefined): string | undefined {
+  const content = result?.content;
+  if (!Array.isArray(content)) return undefined;
+  const first: unknown = content[0];
+  if (typeof first !== 'object' || first === null) return undefined;
+  const text = (first as { text?: unknown }).text;
+  return typeof text === 'string' ? text : undefined;
+}
+
+export function unwrapPiToolResult(result: unknown): unknown {
+  const loose = asLooseResult(result);
+  const details = loose?.details;
+  if (details && Object.prototype.hasOwnProperty.call(details, 'baizerResponse')) {
+    return (details as { baizerResponse: unknown }).baizerResponse;
   }
-  if (typeof result?.content?.[0]?.text === 'string') {
+  const text = firstContentText(loose);
+  if (text !== undefined) {
     try {
-      return JSON.parse(result.content[0].text);
+      return JSON.parse(text) as unknown;
     } catch {
-      return { message: result.content[0].text };
+      return { message: text };
     }
   }
   return result;
@@ -41,7 +65,7 @@ export function unwrapPiToolResult(result: any): any {
  * 经核对均不产出新的可观察 `StreamEvent`（`message_end` 的 provider 错误分支已被上游单独拦截，
  * 其余三类没有决策表要求的映射目标），函数对它们返回 `undefined`，与"不认识的事件类型"同处理。
  */
-export function mapPiEventToStreamEvent(event: any): StreamEvent | undefined {
+export function mapPiEventToStreamEvent(event: AgentEvent): StreamEvent | undefined {
   // turn_start: 智能体一个工具循环回合开始。透传为 step_boundary,
   // 让 UI 把「过程叙述 + 工具调用」按回合分组展示(Step N)。
   if (event.type === 'turn_start') {
@@ -60,22 +84,24 @@ export function mapPiEventToStreamEvent(event: any): StreamEvent | undefined {
   }
 
   if (event.type === 'tool_execution_start') {
+    const args: unknown = event.args;
     return {
       type: 'tool_call',
       id: event.toolCallId,
       name: event.toolName,
-      args: event.args || {},
+      args: typeof args === 'object' && args !== null ? (args as Record<string, unknown>) : {},
     };
   }
 
   if (event.type === 'tool_execution_end') {
+    const rawResult: unknown = event.result;
     const streamEvent: StreamEvent = {
       type: 'tool_result',
       name: event.toolName,
-      result: unwrapPiToolResult(event.result),
+      result: unwrapPiToolResult(rawResult),
     };
     if (event.isError) {
-      streamEvent.error = getToolErrorMessage(event.result);
+      streamEvent.error = getToolErrorMessage(rawResult);
     }
     return streamEvent;
   }
@@ -85,8 +111,12 @@ export function mapPiEventToStreamEvent(event: any): StreamEvent | undefined {
   return undefined;
 }
 
-function getToolErrorMessage(result: any): string | undefined {
-  if (typeof result?.details?.error === 'string') return result.details.error;
-  if (typeof result?.content?.[0]?.text === 'string') return result.content[0].text;
-  return undefined;
+function getToolErrorMessage(result: unknown): string | undefined {
+  const loose = asLooseResult(result);
+  const details = loose?.details;
+  if (typeof details === 'object' && details !== null) {
+    const error = (details as { error?: unknown }).error;
+    if (typeof error === 'string') return error;
+  }
+  return firstContentText(loose);
 }

@@ -149,8 +149,8 @@ async function buildStack(opts: {
     summarize: async () => 'SUMMARY_OF_OLD_MESSAGES',
     ...(opts.compactionSettings ? { compactionSettings: opts.compactionSettings } : {}),
   });
-  const harnessEnv = createHarnessExecutionEnv(vaultAdapter);
-  const promptTemplateService = new PromptTemplateService(harnessEnv);
+  const harnessEnv = createHarnessExecutionEnv(vaultAdapter, '.obsidian/baizer-tmp');
+  const promptTemplateService = new PromptTemplateService(harnessEnv, '.obsidian/baizer-commands');
   const activeRunController = new ActiveRunController();
 
   const deps: ChatRuntimeDeps = {

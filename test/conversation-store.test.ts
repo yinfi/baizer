@@ -63,8 +63,8 @@ function snapshot(id: string, updatedAt: number): ConversationSnapshot {
     title: `Conversation ${id}`,
     createdAt: updatedAt - 10,
     updatedAt,
-    providerId: 'gemini',
-    modelId: 'gemini-2.5-flash',
+    providerId: 'deepseek',
+    modelId: 'deepseek-chat',
     messages: [{ id: `m-${id}`, role: 'user', content: id, timestamp: updatedAt }],
   };
 }
@@ -159,6 +159,41 @@ async function runTests() {
     }]);
   });
 
+  await test('persists terminal outcome and failure reason for replay', async () => {
+    const { adapter, store } = createStore(ConversationStore);
+    const terminalSnapshot = {
+      ...snapshot('outcome', 45),
+      messages: [
+        { id: 'm-user', role: 'user', content: 'question', timestamp: 44 },
+        {
+          id: 'm-failed',
+          role: 'ai',
+          content: 'partial answer',
+          timestamp: 45,
+          metadata: { outcome: 'failed', failureReason: 'network down' },
+        },
+        {
+          id: 'm-cancelled',
+          role: 'ai',
+          content: '',
+          timestamp: 46,
+          metadata: { outcome: 'cancelled', interrupted: true },
+        },
+      ],
+    } as any;
+
+    await store.save(terminalSnapshot);
+
+    const saved = JSON.parse(adapter.files.get(CONVERSATION_STORE_PATH) || '{}');
+    expect(saved.conversations[0].messages[1].metadata.outcome).toBe('failed');
+    expect(saved.conversations[0].messages[1].metadata.failureReason).toBe('network down');
+
+    const restored = await store.list();
+    expect(restored[0].messages[1].metadata?.outcome).toBe('failed');
+    expect(restored[0].messages[1].metadata?.failureReason).toBe('network down');
+    expect(restored[0].messages[2].metadata?.outcome).toBe('cancelled');
+  });
+
   await test('persists approval previews in stored conversations', async () => {
     const { adapter, store } = createStore(ConversationStore);
     const previewSnapshot = {
@@ -192,6 +227,45 @@ async function runTests() {
 
     expect(saved.conversations[0].messages[0].approval.preview.kind).toBe('note-create');
     expect(restored[0].messages[0].approval.preview.target).toBe('Plans/Native-AI.md');
+  });
+
+  await test('persists approval lifecycle state so remount can restore it', async () => {
+    const { adapter, store } = createStore(ConversationStore);
+    await store.save({
+      ...snapshot('approval-state', 55),
+      messages: [{
+        id: 'm-approval-state',
+        role: 'system',
+        content: 'Approval required',
+        timestamp: 55,
+        approval: {
+          id: 'req-persisted',
+          conversationId: 'approval-state',
+          action: 'delete_note',
+          target: 'Docs/a.md',
+          args: { path: 'Docs/a.md' },
+          message: 'Approval required',
+        },
+        approvalState: {
+          status: 'succeeded',
+          outcome: {
+            status: 'succeeded',
+            detail: 'Deleted',
+            target: 'Docs/a.md',
+            completedAt: 56,
+            retryable: false,
+          },
+        },
+      }],
+    } as any);
+
+    const saved = JSON.parse(adapter.files.get(CONVERSATION_STORE_PATH) || '{}');
+    expect(saved.conversations[0].messages[0].approval.id).toBe('req-persisted');
+    expect(saved.conversations[0].messages[0].approvalState.status).toBe('succeeded');
+
+    const restored = await store.list();
+    expect(restored[0].messages[0].approvalState.outcome.detail).toBe('Deleted');
+    expect(restored[0].messages[0].approvalState.outcome.retryable).toBe(false);
   });
 
   await test('returns defensive copies for approval previews in listed conversations', async () => {

@@ -1,7 +1,7 @@
 import { ChangePreview } from '../diff/change-preview';
 
 export function renderChangePreviewCard(
-  container: any,
+  container: HTMLElement,
   preview: ChangePreview,
 ) {
   const card = container.createDiv({ cls: 'shell-change-preview-card' });
@@ -17,7 +17,7 @@ export function renderChangePreviewCard(
 
 type DiffRow = { type: 'added' | 'removed' | 'context'; text: string };
 
-function renderCompactDiff(card: any, oldContent: string, newContent: string) {
+function renderCompactDiff(card: HTMLElement, oldContent: string, newContent: string) {
   const diff = buildCompactDiff(oldContent, newContent);
   const diffEl = card.createDiv({ cls: 'shell-change-preview-diff' });
   const header = diffEl.createDiv({ cls: 'shell-change-preview-diff-header' });

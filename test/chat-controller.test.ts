@@ -3,7 +3,7 @@
   clearInterval,
 };
 
-import { TFile } from 'obsidian';
+import { TFile, TFolder } from 'obsidian';
 
 (global as any).localStorage = {
   getItem: () => null,
@@ -81,6 +81,20 @@ function createWorkspaceApp() {
 async function runTests() {
   console.log('=== ChatController Tests ===');
   const { ChatController } = await import('../src/ui/chat-controller');
+
+  await test('write results pointing to folders never open them as files', async () => {
+    let opened = false;
+    const folder = new TFolder();
+    folder.path = 'folder';
+    const controller = new ChatController({
+      app: { vault: { getAbstractFileByPath: () => folder },
+        workspace: { getLeaf: () => ({ openFile: async () => { opened = true; } }) } } as any,
+      api: {} as any,
+    });
+    await (controller as any).openFileFromToolResult('create_file', { success: true, path: 'folder' }, { path: 'folder' });
+    expect(opened).toBe(false);
+    controller.cleanup();
+  });
 
   await test('processCommand routes matching slash commands through executeSlashSkillCommand first', async () => {
     const messages: any[] = [];
@@ -663,15 +677,16 @@ async function runTests() {
     expect(abortSignalSeen).toBe(true);
     expect(streamEvents).toEqual([
       { type: 'text_delta', content: 'partial' },
-      { type: 'done', text: 'partial', interrupted: true },
+      { type: 'done', text: 'partial', outcome: 'cancelled', interrupted: true },
     ]);
     expect(messages[0].content).toBe('Stream something');
-    expect(messages[messages.length - 1]).toEqual({
-      id: messages[messages.length - 1].id,
-      role: 'system',
-      content: 'Response stopped.',
-      timestamp: messages[messages.length - 1].timestamp,
-    });
+    // 取消不再另落一条 system 提示:终态卡片就是「已停止,答案不完整」的载体,
+    // 且同一条 ai 消息带着 cancelled 终态持久化,回放不会把它画成成功。
+    expect(messages.map(message => message.role)).toEqual(['user', 'ai']);
+    const cancelled = messages[messages.length - 1];
+    expect(cancelled.content).toBe('partial');
+    expect(cancelled.metadata?.outcome).toBe('cancelled');
+    expect(cancelled.metadata?.interrupted).toBe(true);
 
     controller.cleanup();
   });

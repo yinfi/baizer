@@ -23,7 +23,7 @@ export interface ThrottleOptions {
     trailing?: boolean;
 }
 
-export interface ThrottledFn<T extends (...args: any[]) => any> {
+export interface ThrottledFn<T extends (...args: never[]) => unknown> {
     (...args: Parameters<T>): void;
     /** 立即执行已挂起的 trailing 调用并重置节流状态 */
     flush(): void;
@@ -42,7 +42,7 @@ export interface ThrottledFn<T extends (...args: any[]) => any> {
  * save('a'); // 立即执行
  * save('b'); // 500ms 后执行（trailing）
  */
-export function throttle<T extends (...args: any[]) => any>(
+export function throttle<T extends (...args: never[]) => unknown>(
     fn: T,
     options: ThrottleOptions = {}
 ): ThrottledFn<T> {
@@ -50,7 +50,7 @@ export function throttle<T extends (...args: any[]) => any>(
     const leading = options.leading ?? true;
     const trailing = options.trailing ?? true;
 
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timer: number | null = null;
     let lastCallTime: number | null = null;
     let pendingArgs: Parameters<T> | null = null;
 
@@ -60,7 +60,7 @@ export function throttle<T extends (...args: any[]) => any>(
     }
 
     function scheduleTrailing(args: Parameters<T>, remaining: number): void {
-        timer = setTimeout(() => {
+        timer = window.setTimeout(() => {
             timer = null;
             if (trailing && pendingArgs !== null) {
                 invoke(pendingArgs);
@@ -79,7 +79,7 @@ export function throttle<T extends (...args: any[]) => any>(
         if (remaining <= 0 || remaining > wait) {
             // 窗口已过期
             if (timer !== null) {
-                clearTimeout(timer);
+                window.clearTimeout(timer);
                 timer = null;
             }
             if (leading) {
@@ -101,7 +101,7 @@ export function throttle<T extends (...args: any[]) => any>(
 
     throttled.flush = function (): void {
         if (timer !== null) {
-            clearTimeout(timer);
+            window.clearTimeout(timer);
             timer = null;
         }
         if (pendingArgs !== null) {
@@ -113,7 +113,7 @@ export function throttle<T extends (...args: any[]) => any>(
 
     throttled.cancel = function (): void {
         if (timer !== null) {
-            clearTimeout(timer);
+            window.clearTimeout(timer);
             timer = null;
         }
         pendingArgs = null;
@@ -137,7 +137,7 @@ export interface DebounceOptions {
     leading?: boolean;
 }
 
-export interface DebouncedFn<T extends (...args: any[]) => any> {
+export interface DebouncedFn<T extends (...args: never[]) => unknown> {
     (...args: Parameters<T>): void;
     /** 立即执行挂起的 trailing 调用并重置状态 */
     flush(): void;
@@ -160,14 +160,14 @@ export interface DebouncedFn<T extends (...args: any[]) => any> {
  * // leading：立即响应，窗口内忽略重复（类似 Obsidian debounce 第三参数 false）
  * const log = debounce(handleEvent, { wait: 1000, leading: true });
  */
-export function debounce<T extends (...args: any[]) => any>(
+export function debounce<T extends (...args: never[]) => unknown>(
     fn: T,
     options: DebounceOptions = {}
 ): DebouncedFn<T> {
     const wait = options.wait ?? 300;
     const leading = options.leading ?? false;
 
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timer: number | null = null;
     let pendingArgs: Parameters<T> | null = null;
     let leadingFired = false;
 
@@ -179,7 +179,7 @@ export function debounce<T extends (...args: any[]) => any>(
                 leadingFired = true;
                 fn(...args);
                 // 计时器只设一次，窗口结束后重置状态
-                timer = setTimeout(() => {
+                timer = window.setTimeout(() => {
                     timer = null;
                     leadingFired = false;
                 }, wait);
@@ -188,8 +188,8 @@ export function debounce<T extends (...args: any[]) => any>(
         } else {
             // trailing 模式：每次调用都重置等待计时器，记录最新参数
             pendingArgs = args;
-            if (timer !== null) clearTimeout(timer);
-            timer = setTimeout(() => {
+            if (timer !== null) window.clearTimeout(timer);
+            timer = window.setTimeout(() => {
                 timer = null;
                 const args = pendingArgs!;
                 pendingArgs = null;
@@ -200,7 +200,7 @@ export function debounce<T extends (...args: any[]) => any>(
 
     debounced.flush = function (): void {
         if (timer !== null) {
-            clearTimeout(timer);
+            window.clearTimeout(timer);
             timer = null;
         }
         if (leading) {
@@ -219,7 +219,7 @@ export function debounce<T extends (...args: any[]) => any>(
 
     debounced.cancel = function (): void {
         if (timer !== null) {
-            clearTimeout(timer);
+            window.clearTimeout(timer);
             timer = null;
         }
         pendingArgs = null;
@@ -242,7 +242,7 @@ export function debounce<T extends (...args: any[]) => any>(
  * saveMap.call('notes/a.md', 'hello');
  * saveMap.call('notes/b.md', 'world'); // b 独立于 a 的节流窗口
  */
-export class ThrottleMap<TKey, TArgs extends any[]> {
+export class ThrottleMap<TKey, TArgs extends unknown[]> {
     private readonly fn: (...args: [TKey, ...TArgs]) => void;
     private readonly options: ThrottleOptions;
     private readonly map = new Map<TKey, ThrottledFn<(...args: [TKey, ...TArgs]) => void>>();

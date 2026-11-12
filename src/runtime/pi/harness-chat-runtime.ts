@@ -1,7 +1,7 @@
-import type { Agent as PiAgent, AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core';
+import type { Agent as PiAgent, AgentEvent, AgentMessage, ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { StreamEvent } from '../../models/interfaces';
 import { BaseChatRuntime } from '../base-chat-runtime';
-import { ChatRuntime, PreparedChatTurn } from '../runtime-types';
+import { ChatRuntime, NativeChatHandle, PreparedChatTurn } from '../runtime-types';
 import {
   createPiFileWriteState,
   formatPiApprovalMessage,
@@ -17,6 +17,7 @@ import {
   type ConversationSession,
 } from './session-store/conversation-session';
 import type { EntryKind } from './session-store/types';
+import { thrownMessage } from '../../utils/thrown-message';
 
 /**
  * 基于 pi `Agent` 的聊天运行时。
@@ -82,6 +83,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       yield {
         type: 'error',
         message: '该会话的历史记录无法迁移（文件格式无法识别或已损坏），已降级为只读：只能查看历史，不能继续对话。',
+        outcome: 'failed',
       };
       return;
     }
@@ -131,7 +133,7 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     const activeRunController = this.deps.activeRunController ?? null;
     const steerable = {
       steer: async (text: string) => {
-        agent.steer({ role: 'user', content: text, timestamp: Date.now() } as AgentMessage);
+        agent.steer({ role: 'user', content: text, timestamp: Date.now() });
       },
       setActiveTools: async (toolNames: string[]) => {
         const allowed = new Set(toolNames);
@@ -152,21 +154,33 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     // 提炼只用 user+assistant 文本(assistant 文本已是动作的自然摘要)。
     const turnToolResults: Array<{ name: string; result: unknown }> = [];
 
-    const unsubscribe = agent.subscribe((event: any) => {
+    const unsubscribe = agent.subscribe((event: AgentEvent) => {
       // Provider 错误不会让 prompt() reject,而是以 message_end(stopReason:'error') 出现。
-      // 中断(aborted)由 runError 分支处理,这里只转 error。
-      if (event?.type === 'message_end' && event.message?.stopReason === 'error') {
-        if (!approvalMessage) {
-          if (!runErrorBox.value) runErrorBox.value = { message: event.message?.errorMessage || 'Provider error', aborted: false };
+      // 用户中断同样以 message_end(stopReason:'aborted') 出现:pi 会把这次 run 正常收尾
+      // (prompt 不 reject),若只看 signal.aborted 或 catch,取消会被当成正常完成——
+      // 这正是「手动停止后仍显示成功」的根因。故这里显式转成 aborted runError。
+      if (event.type === 'message_end') {
+        const endMessage = event.message as { stopReason?: unknown; errorMessage?: unknown } | null | undefined;
+        if (endMessage?.stopReason === 'aborted') {
+          if (!runErrorBox.value) runErrorBox.value = { message: 'Request aborted', aborted: true };
+          return;
         }
-        return;
+        if (endMessage?.stopReason === 'error') {
+          if (!approvalMessage) {
+            const providerMessage = typeof endMessage.errorMessage === 'string' ? endMessage.errorMessage : '';
+            if (!runErrorBox.value) runErrorBox.value = { message: providerMessage || 'Provider error', aborted: false };
+          }
+          return;
+        }
       }
 
       const mapped = mapHarnessEvent(event);
       if (!mapped) return;
 
       if (mapped.type === 'tool_result') {
-        const raw = unwrapPiToolResult((event as any).result);
+        // mapped 为 tool_result 时 event 必为 tool_execution_end
+        const rawEventResult: unknown = event.type === 'tool_execution_end' ? event.result : undefined;
+        const raw = unwrapPiToolResult(rawEventResult);
         recordPiFileWriteResult(fileWriteState, mapped.name, raw);
         if (isPiApprovalResponse(raw)) {
           approvalMessage = formatPiApprovalMessage(raw);
@@ -217,9 +231,10 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     const runPromise = (async () => {
       try {
         await agent.prompt(turn.prompt);
-      } catch (error: any) {
-        const aborted = error?.name === 'AbortError' || signal?.aborted === true;
-        if (!runErrorBox.value) runErrorBox.value = { message: error?.message || 'Agent run failed', aborted };
+      } catch (error: unknown) {
+        const errorName = typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
+        const aborted = errorName === 'AbortError' || signal?.aborted === true;
+        if (!runErrorBox.value) runErrorBox.value = { message: thrownMessage(error) || 'Agent run failed', aborted };
       } finally {
         queue.close();
       }
@@ -231,15 +246,6 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
         yield event;
       }
       await runPromise;
-      // 本轮消息落盘(pi 1.3.0 的 Agent 不写持久层,故由本 runtime 负责)。
-      // 失败不静默:并入既有的错误通道,由下方 runError 分支产出 error 事件。
-      try {
-        await persistTurnMessages(session, agent.state.messages.slice(transcriptBaseline));
-      } catch (error: any) {
-        if (!runErrorBox.value) {
-          runErrorBox.value = { message: `Failed to persist turn: ${error?.message || 'unknown error'}`, aborted: false };
-        }
-      }
     } finally {
       unsubscribe();
       signal?.removeEventListener('abort', onAbort);
@@ -250,19 +256,35 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
     const runError = runErrorBox.value;
     if (runError) {
       if (runError.aborted) {
-        yield { type: 'done', text: fullResponseText, interrupted: true };
+        // 取消:显式终态,且不落盘——残缺轮次不属于「真正完成的一轮」。
+        yield { type: 'done', text: fullResponseText, outcome: 'cancelled', interrupted: true };
         return;
       }
       if (!approvalMessage) {
-        yield { type: 'error', message: runError.message };
+        yield { type: 'error', message: runError.message, outcome: 'failed' };
         return;
       }
+    }
+
+    // 本轮消息落盘(pi 1.3.0 的 Agent 不写持久层,故由本 runtime 负责)。
+    // 只落「真正完成」的轮次(成功或审批终止):失败/取消的残缺轮次不写进会话树,
+    // 否则重试会在 transcript 里重复同一条 user 消息,历史里也会留下一条假答案。
+    // 落盘失败不静默:并入错误通道,由 UI 以失败终态呈现。
+    let persistFailure = '';
+    try {
+      await persistTurnMessages(session, agent.state.messages.slice(transcriptBaseline));
+    } catch (error: unknown) {
+      persistFailure = `Failed to persist turn: ${thrownMessage(error) || 'unknown error'}`;
+    }
+    if (persistFailure && !approvalMessage) {
+      yield { type: 'error', message: persistFailure, outcome: 'failed' };
+      return;
     }
 
     if (approvalMessage) {
       await this.retainCompletedTurn(turn, approvalMessage, turnToolResults);
       if (!approvalToolResultYielded) fullResponseText = '';
-      yield { type: 'done', text: '' };
+      yield { type: 'done', text: '', outcome: 'completed' };
       return;
     }
 
@@ -282,7 +304,9 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
         yield { type: 'compaction', foldedEntryCount: compactionResult.foldedEntryCount ?? 0 };
       }
     }
-    yield entryIds ? { type: 'done', text: fullResponseText, entryIds } : { type: 'done', text: fullResponseText };
+    yield entryIds
+      ? { type: 'done', text: fullResponseText, outcome: 'completed', entryIds }
+      : { type: 'done', text: fullResponseText, outcome: 'completed' };
   }
 }
 
@@ -326,6 +350,17 @@ async function extractTurnEntryIds(
 }
 
 /**
+ * resolveModelHandle 接受的句柄形态：生产实现是 NativeChatHandle；
+ * 另兼容旧/测试句柄直接给 apiKey 字符串的形态。
+ */
+interface ModelHandleLike {
+  model: NativeChatHandle['model'];
+  getApiKey?: () => string | Promise<string>;
+  getHeaders?: () => Record<string, string> | undefined;
+  apiKey?: string;
+}
+
+/**
  * 从 NativeChatHandle 解析出 model、apiKey 取值器与自定义 header 取值器。
  * 兼容两种句柄形态:
  *  - 旧形态 { model, streamFn } —— streamFn 已被 Harness 弃用,仅从其闭包无法取 key;
@@ -333,17 +368,19 @@ async function extractTurnEntryIds(
  *  - 新形态 { model, getApiKey } 或 { model, apiKey }。
  * getHeaders 缺省(句柄未提供)时返回 undefined,等价于不发任何自定义 header。
  */
-function resolveModelHandle(handle: any): {
-  model: any;
+function resolveModelHandle(handle: ModelHandleLike): {
+  model: NativeChatHandle['model'];
   getApiKey: () => Promise<string>;
   getHeaders: () => Record<string, string> | undefined;
 } {
   const model = handle.model;
-  const getHeaders = typeof handle.getHeaders === 'function'
-    ? () => handle.getHeaders()
+  const headerGetter = handle.getHeaders;
+  const getHeaders = typeof headerGetter === 'function'
+    ? () => headerGetter.call(handle)
     : () => undefined;
-  if (typeof handle.getApiKey === 'function') {
-    return { model, getApiKey: async () => (await handle.getApiKey()) ?? '', getHeaders };
+  const apiKeyGetter = handle.getApiKey;
+  if (typeof apiKeyGetter === 'function') {
+    return { model, getApiKey: async () => (await apiKeyGetter.call(handle)) ?? '', getHeaders };
   }
   if (typeof handle.apiKey === 'string') {
     const key = handle.apiKey;
@@ -389,7 +426,7 @@ async function persistTurnMessages(session: ConversationSession, messages: Agent
  * 复用既有 pi-event-adapter(它按 turn_start/message_update/tool_execution_* 分派),
  * Harness 事件形状与底层 agentLoop 事件一致,故可直接复用。
  */
-function mapHarnessEvent(event: any): StreamEvent | undefined {
+function mapHarnessEvent(event: AgentEvent): StreamEvent | undefined {
   return mapPiEventToStreamEvent(event);
 }
 

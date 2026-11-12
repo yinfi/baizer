@@ -1,5 +1,6 @@
 import { App, TFile } from 'obsidian';
 import { ToolRegistry } from '../skills/tool-registry';
+import type { ToolArgs, ToolResult } from '../skills/types';
 import { getFileWriteResultPath } from '../utils/file-operation-contract';
 
 export type WorkspaceEditKind = 'create' | 'update';
@@ -61,7 +62,7 @@ export class WorkspaceEditService {
     private readonly options: WorkspaceEditServiceOptions = {},
   ) {}
 
-  async executeWorkspaceTool(action: string, args: Record<string, any>): Promise<any> {
+  async executeWorkspaceTool(action: string, args: ToolArgs): Promise<ToolResult> {
     if (!isDirectApplyWorkspaceTool(action)) {
       return this.toolRegistry.execute(action, args);
     }
@@ -137,7 +138,7 @@ export class WorkspaceEditService {
       await this.app.vault.modify(file, record.beforeContent);
       await this.openFile(record.summary.path);
     } else {
-      await this.app.vault.trash(file, true);
+      await this.app.fileManager.trashFile(file);
     }
 
     record.summary = { ...record.summary, status: 'undone' };
@@ -179,9 +180,9 @@ export class WorkspaceEditService {
     };
   }
 
-  private resolveExpectedPath(action: string, args: Record<string, any>): string {
+  private resolveExpectedPath(action: string, args: ToolArgs): string {
     if (action === 'create_note') {
-      const filename = args.filename || args.path || args.name || '';
+      const filename: unknown = args.filename || args.path || args.name || '';
       if (!filename || typeof filename !== 'string') return '';
       return filename.endsWith('.md') ? filename : `${filename}.md`;
     }
@@ -192,8 +193,8 @@ export class WorkspaceEditService {
 
   private resolveResultPath(
     action: string,
-    result: any,
-    args: Record<string, any>,
+    result: ToolResult,
+    args: ToolArgs,
     fallbackPath: string,
   ): string {
     if (action === 'create_note') {
@@ -228,7 +229,7 @@ export class WorkspaceEditService {
     }
   }
 
-  private isSuccessfulToolResult(result: any): boolean {
+  private isSuccessfulToolResult(result: ToolResult): boolean {
     return result?.success === true || result?.status === 'success';
   }
 

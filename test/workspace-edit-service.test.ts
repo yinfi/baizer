@@ -74,13 +74,16 @@ function createMockApp() {
         }
         return contents.get(file.path) || '';
       },
-      trash: async (file: any) => {
+      configDir: '.obsidian',
+      getFiles: () => Array.from(files.values()),
+      getMarkdownFiles: () => Array.from(files.values()).filter(file => file.extension === 'md'),
+    },
+    fileManager: {
+      trashFile: async (file: any) => {
         trashed.push(file.path);
         files.delete(file.path);
         contents.delete(file.path);
       },
-      getFiles: () => Array.from(files.values()),
-      getMarkdownFiles: () => Array.from(files.values()).filter(file => file.extension === 'md'),
     },
     metadataCache: {
       getFirstLinkpathDest: (path: string) => files.get(path) || null,
@@ -261,6 +264,64 @@ async function runTests() {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('File already exists');
+  });
+  await test('non-string path arguments are rejected without recording a workspace edit', async () => {
+    const { app, contents, opened } = createMockApp();
+    const service = createService(app);
+
+    // 工具参数来自模型，可能是错类型：resolveExpectedPath 只认字符串，
+    // 工具本身也会拒绝，故不应产生编辑记录、打开文件或改动内容。
+    const result = await service.executeWorkspaceTool('update_file', { path: 42, content: 'x' });
+
+    expect(result.success).toBe(false);
+    expect(result.workspaceEdit).toBe(undefined);
+    expect(opened).toEqual([]);
+    expect(contents.get('Notes/source.md')).toBe('before');
+  });
+
+  await test('create_note falls back to a string path when filename is the wrong type', async () => {
+    const { app, files } = createMockApp();
+    const service = createService(app);
+
+    // filename 是数字（错类型）时不参与路径归一，回落 path 字段——不会拼出 "42.md"。
+    const result = await service.executeWorkspaceTool('create_note', {
+      filename: 42,
+      path: 'Notes/typed.md',
+      content: 'content',
+    });
+
+    expect(result.status).toBe('success');
+    expect(files.has('Notes/typed.md')).toBe(true);
+    expect(Array.from(files.keys()).some((path) => path.includes('42'))).toBe(false);
+  });
+
+  await test('narrows malformed tool results instead of inventing a workspace edit', async () => {
+    const { app } = createMockApp();
+    const registry = new ToolRegistry(app, {
+      ...DEFAULT_SETTINGS,
+      allowFileCreation: true,
+      allowFileModification: true,
+      confirmExecutions: true,
+    });
+    registerVaultTools(registry);
+    const service = new WorkspaceEditService(app, registry);
+
+    // 非对象结果：既不能算成功（原值透传、不登记编辑），也不会被当成 {path}/{target} 读取。
+    (registry as any).execute = async () => 'not-an-object';
+    const malformed = await service.executeWorkspaceTool('update_file', {
+      path: 'Notes/source.md',
+      content: 'x',
+    });
+    expect(malformed).toBe('not-an-object');
+    expect(service.listWorkspaceEdits().length).toBe(0);
+
+    // 成功但没有 path/target：回退到按 args 推出的预期路径（旧代码的 fallbackPath 分支）。
+    (registry as any).execute = async () => ({ success: true });
+    const fallback = await service.executeWorkspaceTool('create_note', {
+      filename: 'Notes/fallback.md',
+      content: 'x',
+    });
+    expect(fallback.workspaceEdit.path).toBe('Notes/fallback.md');
   });
 }
 

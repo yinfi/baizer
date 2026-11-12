@@ -23,8 +23,8 @@ import {
 } from './types';
 import type { EstimableMessage } from './compaction';
 
-/** 会话文件默认根目录(vault 相对,隐藏目录)。 */
-export const DEFAULT_SESSIONS_ROOT = '.obsidian/baizer-sessions';
+/** 内存会话在未指定根目录时使用的虚拟根(不落盘,仅作 SessionStore 路径前缀)。 */
+export const IN_MEMORY_SESSIONS_ROOT = 'baizer-sessions';
 
 /** 临时会话(无 conversationId)的内存 store 内部使用的会话键,只在一份内存 adapter 内有效。 */
 const EPHEMERAL_CONVERSATION_ID = '__ephemeral__';
@@ -188,7 +188,7 @@ export class ConversationSession {
             : { content: entry.payload };
           if (payload.role === role) {
             // 落盘的 payload 就是 pi 消息对象本身 → 原样透传（保留 api/provider/model/timestamp 等字段）。
-            messages.push({ ...payload, role, content: normalizeContent(role, payload.content) } as ModelMessage);
+            messages.push({ ...payload, role, content: normalizeContent(role, payload.content) });
           } else {
             // 迁移来的旧 payload 只有 {role, content}（tool_result 连 toolCallId 都没有）→ 按最小字段补齐。
             const content = 'result' in payload ? payload.result : payload.content;
@@ -197,7 +197,7 @@ export class ConversationSession {
               content: normalizeContent(role, content),
               ...(typeof payload.name === 'string' ? { toolName: payload.name } : {}),
               ...(typeof payload.toolCallId === 'string' ? { toolCallId: payload.toolCallId } : {}),
-            } as ModelMessage);
+            });
           }
           entries.push(entry);
           break;
@@ -251,7 +251,7 @@ export class ConversationSession {
  * 供 conversationId 缺省的一次性调用（file-back、/edit 等）与无 sessionManager 的纯单测使用。
  */
 export async function createInMemoryConversationSession(
-  sessionsRoot: string = DEFAULT_SESSIONS_ROOT,
+  sessionsRoot: string = IN_MEMORY_SESSIONS_ROOT,
 ): Promise<ConversationSession> {
   const store = new SessionStore(createInMemoryVaultAdapter(), sessionsRoot);
   const session = await store.create(EPHEMERAL_CONVERSATION_ID);

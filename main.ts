@@ -1,14 +1,13 @@
-import { Plugin, Notice, MarkdownView, TFile, addIcon } from 'obsidian';
+import { Plugin, Notice, Editor, MarkdownView, MarkdownFileInfo, TFile, addIcon } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
-import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, mergeProviderDefaults } from './src/mcp/types';
+import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, mergeProviderDefaults, pruneUnsupportedProviders, legacyFlatString } from './src/mcp/types';
 import { setLocale, Locale } from './src/i18n/zh';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
 import { guardianGutterExtension, updateGuardianState, GuardianState, guardianModeField } from './src/ui/guardian-gutter';
 import { ghostTextExtension, showGhostText, storeGhostText, hideGhostText, showThinkingGhostText, disposeGhostLiveRegion } from './src/ui/ghost-text';
 import { GuardianModal } from './src/ui/guardian-modal';
-import { requestGuardianResponse } from './src/ui/guardian-request';
 import { GuardianCompletionService, getGuardianAutoDelayMs, shouldScheduleDeepEscalation, GUARDIAN_WEAK_COMPLETION_REASON } from './src/ui/guardian-completion';
 import { selectionMenuExtension } from './src/ui/selection-menu';
 import { KnowledgeRuntime } from './src/knowledge/runtime';
@@ -39,6 +38,54 @@ import { ObsidianContextService } from './src/services/obsidian-context-service'
 import { USER_SKILLS_DIR } from './src/skills/skill-files';
 import { logger } from './src/utils/logger';
 import { installRequestUrlFetchFallback } from './src/utils/request-url-fetch';
+import { thrownMessage } from './src/utils/thrown-message';
+import { detach } from './src/utils/promise-guard';
+
+/** Obsidian Editor 上未在公开 d.ts 暴露的 CodeMirror 6 视图。 */
+type EditorWithCm = Editor & { cm?: EditorView };
+
+/** save_webpage 等 vault 写工具的返回形态(工具契约未导出统一类型)。 */
+/** 调用 save_webpage 工具,并把松散的工具结果窄化为 { success, path?, error? }。 */
+async function saveWebpage(
+    registry: ToolRegistry,
+    url: string,
+): Promise<{ success: boolean; path?: string; error?: string }> {
+    const result = await registry.execute('save_webpage', { url });
+    return {
+        success: Boolean(result.success),
+        path: typeof result.path === 'string' ? result.path : undefined,
+        error: typeof result.error === 'string' ? result.error : undefined,
+    };
+}
+
+/**
+ * 判断抛出值是否为 AbortError(跨 realm 的异常对象同样按 name 识别,与旧行为一致)。
+ */
+function isAbortThrown(error: unknown): boolean {
+    return (typeof error === 'object' && error !== null || typeof error === 'function')
+        && 'name' in error && typeof error.name === 'string' && error.name === 'AbortError';
+}
+
+/**
+ * 旧版扁平设置：data.json 里没有 providers、只有 provider + 各家 xxxApiKey 的历史格式。
+ *
+ * 只声明 loadSettings 真正读取的字段，且一律按 unknown 收口——持久化数据是不可信输入，
+ * 既不能断言成一份完整的 PluginSettings，也不能假定某个字段真的是字符串。
+ * （旧格式里另有 apiKey / primaryModel 等 Google 凭证字段，随 gemini 协议移除后已不再迁移，
+ * 故这里不声明它们。）
+ */
+type LegacyFlatSettings = {
+    provider?: unknown;
+    openaiApiKey?: unknown;
+    openaiBaseUrl?: unknown;
+    openaiModel?: unknown;
+    deepseekApiKey?: unknown;
+    deepseekBaseUrl?: unknown;
+    deepseekModel?: unknown;
+    qwenApiKey?: unknown;
+    qwenBaseUrl?: unknown;
+    qwenModel?: unknown;
+};
 
 export default class BaizerPlugin extends Plugin {
     settings: PluginSettings;
@@ -66,12 +113,15 @@ export default class BaizerPlugin extends Plugin {
     private guardianEscalationTimer: number | null = null;
     private guardianEscalatedAnchors: Set<string> = new Set();
 
-    private onEditorChange = (editor: any, info: any) => {
+    // 参数类型照抄 obsidian.d.ts 里 workspace.on('editor-change', ...) 的声明：
+    // (editor: Editor, info: MarkdownView | MarkdownFileInfo) => any。
+    // queueGuardianCheck 与下游 runGuardianCheck 沿用同一份契约。
+    private onEditorChange = (editor: Editor, info: MarkdownView | MarkdownFileInfo) => {
         void this.queueGuardianCheck(editor, info);
     };
 
     async onload() {
-        // 必须在任何 LLM/HTTP 请求前安装：pi-ai 与 @google/generative-ai 都走全局
+        // 必须在任何 LLM/HTTP 请求前安装：pi-ai 的 provider/api 实现都走全局
         // fetch。部分 OpenAI-compatible 端点（如 opencode.ai）不返回 CORS 头，
         // 原生 fetch 失败后依次回退 Node http/https（无 CORS、真流式）与
         // requestUrl（Electron 主进程、绕过 CORS 但缓冲）。
@@ -86,7 +136,7 @@ export default class BaizerPlugin extends Plugin {
         this.inboxAutosave = new InboxAutosaveCoordinator({
             app: this.app,
             getInboxPath: () => this.settings.wechatInboxPath,
-            saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+            saveUrl: (url: string) => saveWebpage(this.toolRegistry, url),
             notify: (message: string) => new Notice(message),
         });
 
@@ -117,6 +167,10 @@ export default class BaizerPlugin extends Plugin {
             this.settings,
             this.modelService,
         );
+        // initialize() 本身只做便宜的同步工作加一次性旧索引迁移；真正逐文件扫描的
+        // onMetadataReady() 在它内部转入后台（不阻塞这里的 await），用
+        // knowledgeRuntime.whenStartupSettled() 等它结束——compile 相关命令和
+        // debounce 自动编译已经这样做了。见 src/knowledge/runtime.ts 的类头注释。
         await this.knowledgeRuntime.initialize();
         this.guardianCompletionService = this.createGuardianCompletionService();
         this.knowledgeRuntime.registerCommands(this);
@@ -167,7 +221,7 @@ export default class BaizerPlugin extends Plugin {
                 VIEW_TYPE_SHELL,
                 (leaf) => new ShellView(leaf, this.modelService, this)
             );
-        } catch (e) {
+        } catch {
             // hot reload 时 view type 可能已注册，忽略
             logger.info('View type already registered, skipping.', 'Baizer');
         }
@@ -176,7 +230,7 @@ export default class BaizerPlugin extends Plugin {
         // 用自定义 BZ 字标(描边圆角方 + 填充字),避免复用系统 'terminal'(>_) 与命令面板撞脸;
         // 18px 下双描边字母易糊,故字母用填充、外框用描边,复刻头部品牌块观感。
         addIcon('baizer-bz', `<g fill="none" stroke="currentColor" stroke-width="8" stroke-linejoin="round"><rect x="8" y="8" width="84" height="84" rx="20"/></g><text x="50" y="50" fill="currentColor" font-family="-apple-system,'Segoe UI',sans-serif" font-size="46" font-weight="800" text-anchor="middle" dominant-baseline="central" letter-spacing="-2">BZ</text>`);
-        this.addRibbonIcon('baizer-bz', `Open ${PLUGIN_NAME}`, (evt: MouseEvent) => {
+        this.addRibbonIcon('baizer-bz', `Open ${PLUGIN_NAME}`, (_evt: MouseEvent) => {
             void this.activateView();
         });
 
@@ -193,7 +247,7 @@ export default class BaizerPlugin extends Plugin {
                     const text = await navigator.clipboard?.readText?.();
                     const result = await saveClipText({
                         text: text || '',
-                        saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+                        saveUrl: (url: string) => saveWebpage(this.toolRegistry, url),
                     });
 
                     if (result.success && result.path) {
@@ -201,8 +255,8 @@ export default class BaizerPlugin extends Plugin {
                     } else {
                         new Notice(`Failed to save URL: ${result.error || 'unknown error'}`);
                     }
-                } catch (e: any) {
-                    new Notice(`Failed to read clipboard: ${e?.message || 'unknown error'}`);
+                } catch (error: unknown) {
+                    new Notice(`Failed to read clipboard: ${thrownMessage(error) || 'unknown error'}`);
                 }
             },
         });
@@ -255,13 +309,14 @@ export default class BaizerPlugin extends Plugin {
         // Register direct clip protocol:
         // obsidian://baizer-clip?url=<encoded-http-url>
         registerBaizerClipProtocolHandler(this, {
-            saveUrl: async (url: string) => this.toolRegistry.execute('save_webpage', { url }),
+            saveUrl: (url: string) => saveWebpage(this.toolRegistry, url),
             notify: (message: string) => new Notice(message),
             warn: (message: string) => console.warn(`[Baizer] ${message}`),
         });
 
         // 启动插件 Skill 自动生成（后台异步，不阻塞）。watcher 已在 skill 加载后构造。
-        this.pluginWatcher?.start();
+        // start() 内部的初始扫描失败会 reject：记日志，不让它变成 unhandled rejection。
+        if (this.pluginWatcher) detach(this.pluginWatcher.start(), 'PluginWatcher');
     }
 
     onunload() {
@@ -317,46 +372,55 @@ export default class BaizerPlugin extends Plugin {
         }
 
         new GuardianModal(this.app, (instruction: string) => {
-            this.runGuardianCheck(view.editor, null, instruction);
+            // runGuardianCheck 内部已 try/catch 并更新 Guardian 状态；这里的 detach 兜底
+            // 其 catch 之外的失败（例如 collect 之前的同步逻辑），保证不成为 unhandled rejection。
+            detach(this.runGuardianCheck(view.editor, null, instruction), 'Guardian');
         }).open();
     }
 
     async loadSettings() {
-        const raw = await this.loadData() || {};
+        // 持久化数据是不可信输入：按 Record<string, unknown> 收口，不断言成 PluginSettings。
+        // `|| {}` 保留原语义（loadData 返回假值时兜底成空对象）；变量名沿用 raw——
+        // test/settings-provider-migration.test.ts 用它作为定位迁移分支的源码锚点。
+        const loaded: unknown = await this.loadData();
+        const raw: Record<string, unknown> = typeof loaded === 'object' && loaded !== null
+            ? (loaded as Record<string, unknown>)
+            : {};
         this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
 
         // 数据迁移：旧扁平格式 → 新 providers map
-        if (!raw.providers && (raw as any).provider) {
-            const old = raw as any;
-            this.settings.activeProvider = old.provider || 'gemini';
+        if (!raw.providers && raw.provider) {
+            // 旧格式的字段一律经 legacyFlatString 收口：字符串照旧（含空串，仍走 `|| 默认值`），
+            // 非字符串（手工改坏的 data.json）按「未设置」回落到默认值。这是本次类型清理
+            // 唯一的行为收口，见 issue #67 风险一节与 test/main-ts-lint-cleanup.test.ts。
+            const old: LegacyFlatSettings = raw;
+            // 旧格式的 provider 可能是已移除的 'gemini'：原样记下来即可，
+            // 下面的 activeProvider 修复步骤会把它挪到仍然存在的 provider 上。
+            this.settings.activeProvider = legacyFlatString(old.provider) || 'openai';
+            // 旧格式里的 Google 凭证（old.apiKey / old.primaryModel）不再迁移：
+            // 'gemini' 协议已移除，把 Google 的 key 塞进一个 openai-compatible 条目
+            // 只会得到一个看着配好了、实际必然失败的 provider。
             this.settings.providers = {
-                'gemini': {
-                    type: 'gemini' as const,
-                    label: 'Google Gemini',
-                    apiKey: old.apiKey || '',
-                    baseUrl: '',
-                    model: old.primaryModel || 'gemini-2.5-flash'
-                },
                 'openai': {
                     type: 'openai-compatible' as const,
                     label: 'OpenAI',
-                    apiKey: old.openaiApiKey || '',
-                    baseUrl: old.openaiBaseUrl || 'https://api.openai.com/v1',
-                    model: old.openaiModel || 'gpt-4o'
+                    apiKey: legacyFlatString(old.openaiApiKey) || '',
+                    baseUrl: legacyFlatString(old.openaiBaseUrl) || 'https://api.openai.com/v1',
+                    model: legacyFlatString(old.openaiModel) || 'gpt-4o'
                 },
                 'deepseek': {
                     type: 'openai-compatible' as const,
                     label: 'DeepSeek',
-                    apiKey: old.deepseekApiKey || '',
-                    baseUrl: old.deepseekBaseUrl || 'https://api.deepseek.com',
-                    model: old.deepseekModel || 'deepseek-chat'
+                    apiKey: legacyFlatString(old.deepseekApiKey) || '',
+                    baseUrl: legacyFlatString(old.deepseekBaseUrl) || 'https://api.deepseek.com',
+                    model: legacyFlatString(old.deepseekModel) || 'deepseek-chat'
                 },
                 'qwen': {
                     type: 'openai-compatible' as const,
                     label: 'Qwen',
-                    apiKey: old.qwenApiKey || '',
-                    baseUrl: old.qwenBaseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-                    model: old.qwenModel || 'qwen-turbo'
+                    apiKey: legacyFlatString(old.qwenApiKey) || '',
+                    baseUrl: legacyFlatString(old.qwenBaseUrl) || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                    model: legacyFlatString(old.qwenModel) || 'qwen-turbo'
                 }
             };
             // 持久化迁移结果
@@ -377,8 +441,15 @@ export default class BaizerPlugin extends Plugin {
             this.settings.deletedProviderIds
         );
 
+        // 丢弃协议已不支持的 provider（历史 data.json 里的 type:'gemini'）。
+        // 必须排在修复 activeProvider 之前：否则 activeProvider 可能被修到一个
+        // 紧接着就要被删掉的 provider 上，用户看到的是「选中项不存在」。
+        // 这里只改内存，不落盘：条目要等用户下次保存设置时才从 data.json 里消失，
+        // 使降级回旧版本的用户不至于丢掉自己的配置。
+        this.settings.providers = pruneUnsupportedProviders(this.settings.providers);
+
         if (!this.settings.providers[this.settings.activeProvider]) {
-            this.settings.activeProvider = Object.keys(this.settings.providers)[0] || 'gemini';
+            this.settings.activeProvider = Object.keys(this.settings.providers)[0] || DEFAULT_SETTINGS.activeProvider;
         }
 
         // 应用用户设定的界面语言（默认 'auto' 跟随系统），供 t() 全局生效。
@@ -446,7 +517,7 @@ export default class BaizerPlugin extends Plugin {
         // Group 1: Wikilink [[...]]
         // Group 2: Markdown Link [text](url)
         // Group 3: Raw URL http...
-        const regex = /(\[\[.*?\]\])|(\[.*?\]\(.*?\))|(https?:\/\/[^\s\)]+)/g;
+        const regex = /(\[\[.*?\]\])|(\[.*?\]\(.*?\))|(https?:\/\/[^\s)]+)/g;
 
         let newContent = content;
         let modified = false;
@@ -465,18 +536,18 @@ export default class BaizerPlugin extends Plugin {
         if (rawUrlMatches.length === 0) return;
 
         // We process in reverse order so indices remain valid
-        rawUrlMatches.sort((a, b) => b.index! - a.index!);
+        rawUrlMatches.sort((a, b) => b.index - a.index);
 
         for (const m of rawUrlMatches) {
             new Notice(`📥 Auto-saving: ${m.url}`);
-            const result = await this.toolRegistry.execute('save_webpage', { url: m.url });
+            const result = await saveWebpage(this.toolRegistry, m.url);
 
-            if (result.success) {
+            if (result.success && result.path) {
                 const finalPath = result.path;
                 const linkText = `[[${finalPath}|Saved: ${finalPath.split('/').pop()?.replace('.md', '')}]]`;
 
                 // Apply replacement at specific index
-                newContent = newContent.substring(0, m.index) + linkText + newContent.substring(m.index! + m.length);
+                newContent = newContent.substring(0, m.index) + linkText + newContent.substring(m.index + m.length);
                 modified = true;
             } else {
                 new Notice(`❌ Failed to save ${m.url}: ${result.error}`);
@@ -488,7 +559,7 @@ export default class BaizerPlugin extends Plugin {
         }
     }
 
-    private queueGuardianCheck(editor: any, info: any) {
+    private queueGuardianCheck(editor: Editor, info: MarkdownView | MarkdownFileInfo) {
         // 用户打字即取消待确认的升级:停留被打破,说明不再是「卡住」。
         this.clearGuardianEscalationTimer();
         if (this.guardianCheckTimer !== null) {
@@ -529,7 +600,7 @@ export default class BaizerPlugin extends Plugin {
         }, delay);
     }
 
-    private async runAutoGuardianCheck(editor: any) {
+    private async runAutoGuardianCheck(editor: Editor) {
         if (!this.settings.guardianAutoMode) {
             this.logGuardianAuto('auto skipped', { reason: 'auto-disabled' });
             return;
@@ -537,7 +608,7 @@ export default class BaizerPlugin extends Plugin {
 
         const cursor = editor.getCursor();
         const lineNumber = cursor.line + 1;
-        const view = (editor as any).cm as EditorView;
+        const view = (editor as EditorWithCm).cm;
         const activePath = this.app.workspace.getActiveFile?.()?.path || '';
         if (!view) {
             this.logGuardianAuto('auto skipped', {
@@ -693,9 +764,9 @@ export default class BaizerPlugin extends Plugin {
             if (result.quality.weak) {
                 this.maybeScheduleEscalation(editor, GUARDIAN_WEAK_COMPLETION_REASON);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             // 被单飞 abort（新输入触发了新请求）属正常丢弃，不显示为错误。
-            if (error?.name === 'AbortError') {
+            if (isAbortThrown(error)) {
                 this.logGuardianAuto('completion aborted', {
                     requestSeq,
                     reason: 'superseded',
@@ -725,7 +796,7 @@ export default class BaizerPlugin extends Plugin {
      * 锚点 key:文件路径 + 行号 + 该行全文。行内容/行号一变即视为换位置,
      * 用于区分「停在原地没辙」与「正在往下写」。
      */
-    private guardianAnchorKey(editor: any, activePath: string): string {
+    private guardianAnchorKey(editor: Editor, activePath: string): string {
         const cursor = editor.getCursor();
         return `${activePath}|${cursor.line}|${editor.getLine(cursor.line) || ''}`;
     }
@@ -741,7 +812,7 @@ export default class BaizerPlugin extends Plugin {
      * 快补无果后,若属 A+B 类且开关开、锚点未升过,起 1.2s 停留确认;
      * 计时结束时光标仍在原锚点(用户没走也没打字)才升级到深补全。一锚点只升一次。
      */
-    private maybeScheduleEscalation(editor: any, reason: string): void {
+    private maybeScheduleEscalation(editor: Editor, reason: string): void {
         const activePath = this.app.workspace.getActiveFile?.()?.path || '';
         const anchorKey = this.guardianAnchorKey(editor, activePath);
 
@@ -787,13 +858,13 @@ export default class BaizerPlugin extends Plugin {
      * - 'escalation'(快补无果/平庸自动升级):系统主动给 → 光标处「deep thinking…」ghost,
      *   一打字即中断(abort 在途请求 + ghost 由 docChanged 自动清),无果给可见 ghost 回执。
      */
-    private async runDeepGuardianCheck(editor: any, source: 'manual' | 'escalation' = 'manual') {
+    private async runDeepGuardianCheck(editor: Editor, source: 'manual' | 'escalation' = 'manual') {
         const isEscalation = source === 'escalation';
         if (!this.settings.enableGuardian) {
             if (!isEscalation) new Notice('Baizer Guardian 未启用，请先在设置中开启。');
             return;
         }
-        const view = (editor as any).cm as EditorView;
+        const view = (editor as EditorWithCm).cm;
         if (!view) return;
 
         const activePath = this.app.workspace.getActiveFile?.()?.path || '';
@@ -888,9 +959,9 @@ export default class BaizerPlugin extends Plugin {
                 result.line,
                 this.shouldShowGuardianGutter() ? GuardianState.HasSuggestion : GuardianState.Idle,
             );
-        } catch (error: any) {
+        } catch (error: unknown) {
             notice?.hide();
-            if (error?.name === 'AbortError') {
+            if (isAbortThrown(error)) {
                 if (isEscalation) hideGhostText(view);
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
@@ -898,7 +969,7 @@ export default class BaizerPlugin extends Plugin {
             if (isEscalation) {
                 hideGhostText(view);
             } else {
-                new Notice(`深度补全失败：${error?.message || 'unknown'}`);
+                new Notice(`深度补全失败：${thrownMessage(error) || 'unknown'}`);
             }
             logger.error('Deep completion failed', error, 'Baizer Guardian', { requestSeq, activePath });
             updateGuardianState(view, lineNumber, GuardianState.Error);
@@ -909,7 +980,7 @@ export default class BaizerPlugin extends Plugin {
         }
     }
 
-    private logGuardianAuto(message: string, metadata?: Record<string, any>, level: 'info' | 'warn' | 'debug' = 'info') {
+    private logGuardianAuto(message: string, metadata?: Record<string, unknown>, level: 'info' | 'warn' | 'debug' = 'info') {
         const safeMetadata = {
             autoMode: this.settings.guardianAutoMode,
             enabled: this.settings.enableGuardian,
@@ -925,7 +996,7 @@ export default class BaizerPlugin extends Plugin {
         }
     }
 
-    private formatGuardianLogMetadata(metadata: Record<string, any>): string {
+    private formatGuardianLogMetadata(metadata: Record<string, unknown>): string {
         const keys = [
             'requestSeq',
             'reason',
@@ -963,7 +1034,7 @@ export default class BaizerPlugin extends Plugin {
         return parts.length ? ` ${parts.join(' ')}` : '';
     }
 
-    private formatGuardianLogValue(value: any): string {
+    private formatGuardianLogValue(value: unknown): string {
         if (Array.isArray(value)) return `[${value.join(',')}]`;
         if (typeof value === 'string') return JSON.stringify(value);
         return String(value);
@@ -996,7 +1067,7 @@ export default class BaizerPlugin extends Plugin {
         return this.settings.guardianUIStyle === 'gutter' || this.settings.guardianUIStyle === 'hybrid';
     }
 
-    async runGuardianCheck(editor: any, info: any, manualInstruction?: string) {
+    async runGuardianCheck(editor: Editor, info: MarkdownView | MarkdownFileInfo | null, manualInstruction?: string) {
         if (!this.settings.enableGuardian) {
             this.logGuardianAuto(manualInstruction ? 'manual skipped' : 'auto skipped', {
                 reason: 'guardian-disabled',
@@ -1008,132 +1079,29 @@ export default class BaizerPlugin extends Plugin {
             return;
         }
 
-        // Auto Mode Check: If not manual instruction and auto mode is disabled, skip.
-        if (!manualInstruction && !this.settings.guardianAutoMode) return;
-
         const cursor = editor.getCursor();
         const lineNumber = cursor.line + 1;
-        const view = (editor as any).cm as EditorView;
-
+        const view = (editor as EditorWithCm).cm;
         if (!view) return;
-
-        // Check Global Guardian Mode (Paused/Active)
-        const isGuardianEnabled = view.state.field(guardianModeField);
-        if (!manualInstruction && !isGuardianEnabled) return;
-
-        const line = editor.getLine(cursor.line);
-        // For auto mode, ensure line has content. For manual mode, we might process empty lines too.
-        if (!manualInstruction && (!line.trim() || line.trim().length < 3)) return;
-
-        // Get context: Last 10 lines (approx) to provide better context
-        const startLine = Math.max(0, cursor.line - 10);
-        const contextLines = [];
-        for (let i = startLine; i <= cursor.line; i++) {
-            contextLines.push(editor.getLine(i));
-        }
-        const contextText = contextLines.join('\n');
-
+        const document = view.state.doc;
+        const isStale = () => view.state.doc !== document
+            || editor.getCursor().line !== cursor.line || editor.getCursor().ch !== cursor.ch;
         updateGuardianState(view, lineNumber, GuardianState.Thinking);
-
         try {
-            let prompt = "";
-            let systemPromptOverride = "";
-
-            if (manualInstruction) {
-                prompt = `User Instruction: "${manualInstruction}"
-Context:
-"${contextText}"
-
-Please execute the instruction.
-- If it's an edit, return JSON: {"type":"edit", "suggestion":"REPLACED_TEXT"}
-- If it's a question, return JSON: {"type":"answer", "suggestion":"ANSWER_TEXT"}
-- If no action needed, return JSON: {"type":"none"}
-- Ensure the suggestion uses proper Markdown formatting.`;
-                systemPromptOverride = "You are a helpful assistant. Return ONLY JSON.";
-            } else {
-                // Generalized Co-writer Prompt
-                prompt = `Role: ${this.settings.systemPrompt || "You are a helpful AI assistant."}
-Task: You are a helpful co-writer. Complete the user's thought or continue the text naturally.
-
-Context:
-${contextText}
-
-Instructions:
-1. Suggest a continuation that flows naturally based on the context.
-2. Do NOT repeat the input text.
-3. If the text is complete or you have no good suggestion, return "type": "none".
-4. Output JSON: {"type": "completion", "suggestion": "MARKDOWN_FORMATTED_TEXT"}
-5. Ensure the suggestion uses proper Markdown formatting (bold, italic, lists, code blocks) where appropriate.`;
-            }
-
-            const obsidianContext = await new ObsidianContextService(this.app).collect();
-            const response = await requestGuardianResponse(this.modelService, {
-                prompt,
-                systemPromptOverride,
-                obsidianContext,
-                userProfile: null,
+            const obsidianContext = await this.guardianContextService.collect();
+            const result = await this.guardianCompletionService.completeManual({
+                editor, instruction: manualInstruction, obsidianContext, isStale,
             });
-
-            // 提取第一个完整 JSON 对象（平衡括号计数，避免贪婪 regex 抓到多余内容）
-            let data: any;
-            const braceStart = response.indexOf('{');
-            if (braceStart === -1) {
+            if (isStale()) return;
+            if (result.type === 'none') {
                 updateGuardianState(view, lineNumber, GuardianState.Idle);
                 return;
             }
-            let depth = 0;
-            let inString = false;
-            let escape = false;
-            let jsonEnd = -1;
-            for (let i = braceStart; i < response.length; i++) {
-                const ch = response[i];
-                if (escape) { escape = false; continue; }
-                if (ch === '\\' && inString) { escape = true; continue; }
-                if (ch === '"') { inString = !inString; continue; }
-                if (inString) continue;
-                if (ch === '{') depth++;
-                else if (ch === '}') { depth--; if (depth === 0) { jsonEnd = i; break; } }
-            }
-            if (jsonEnd === -1) {
-                updateGuardianState(view, lineNumber, GuardianState.Idle);
-                return;
-            }
-            try {
-                data = JSON.parse(response.substring(braceStart, jsonEnd + 1));
-            } catch {
-                updateGuardianState(view, lineNumber, GuardianState.Idle);
-                return;
-            }
-
-            // For edits/suggestions
-            if (data.suggestion && typeof data.suggestion === 'string') {
-                // Re-validate position as document might have changed
-                const currentLineCount = view.state.doc.lines;
-                if (lineNumber > currentLineCount) {
-                    console.warn("Guardian: Line number out of bounds after generation.");
-                    updateGuardianState(view, lineNumber, GuardianState.Idle);
-                    return;
-                }
-
-                const currentLine = view.state.doc.line(lineNumber);
-                const safeCh = Math.min(cursor.ch, currentLine.length);
-
-                logger.debug('Showing ghost text', 'Guardian', { suggestion: data.suggestion, line: lineNumber, ch: safeCh });
-                this.presentGuardianSuggestion(view, data.suggestion, lineNumber, safeCh);
-                updateGuardianState(view, lineNumber, GuardianState.HasSuggestion);
-            } else {
-                // console.warn("Guardian: Invalid suggestion data", data);
-                updateGuardianState(view, lineNumber, GuardianState.Idle);
-            }
-
-            if (data.type === 'none') {
-                updateGuardianState(view, lineNumber, GuardianState.Idle);
-                return;
-            }
-
-        } catch (error: any) {
-            console.error("Guardian Error:", error);
-            updateGuardianState(view, lineNumber, GuardianState.Error);
+            this.presentGuardianSuggestion(view, result.suggestion, result.line, result.ch);
+            updateGuardianState(view, lineNumber, GuardianState.HasSuggestion);
+        } catch (error) {
+            logger.error('Guardian manual request failed', error, 'Guardian');
+            if (!isStale()) updateGuardianState(view, lineNumber, GuardianState.Error);
         }
     }
 }

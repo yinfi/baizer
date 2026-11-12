@@ -1,7 +1,7 @@
 /**
  * test/pi-native-model.test.ts
  *
- * 纯构造断言，零网络依赖。验证 buildGeminiModel / buildOpenAICompatModel /
+ * 纯构造断言，零网络依赖。验证 buildOpenAICompatModel / buildAnthropicModel /
  * createNativeStreamFn 的字段正确性。
  *
  * 运行：npx tsx --tsconfig tsconfig.test.json test/pi-native-model.test.ts
@@ -47,17 +47,6 @@ async function test(name: string, fn: () => Promise<void> | void) {
 
 // ---- 公共 fixture ----
 
-function makeGeminiConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
-  return {
-    type: 'gemini',
-    label: 'Google Gemini',
-    apiKey: 'test-api-key',
-    baseUrl: '',
-    model: 'gemini-2.5-flash',
-    ...overrides,
-  };
-}
-
 function makeOpenAIConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
   return {
     type: 'openai-compatible',
@@ -69,56 +58,45 @@ function makeOpenAIConfig(overrides: Partial<ProviderConfig> = {}): ProviderConf
   };
 }
 
+function makeAnthropicConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
+  return {
+    type: 'anthropic',
+    label: 'Anthropic',
+    apiKey: 'sk-ant-test',
+    baseUrl: 'https://api.anthropic.com',
+    model: 'claude-sonnet-4-5',
+    ...overrides,
+  };
+}
+
 // ---- 测试套件 ----
 
 async function runTests() {
   console.log('=== Pi Native Model Tests ===');
 
   const {
-    buildGeminiModel,
     buildOpenAICompatModel,
+    buildAnthropicModel,
+    supportsAdaptiveThinking,
     isOpenCodeGoBaseUrl,
     buildOpenCodeGoHeaders,
   } = await import('../src/runtime/pi/pi-native-model');
 
-  // (a) Gemini Model 字段正确性
-  await test('buildGeminiModel: api / provider / baseUrl 字段正确', () => {
-    const model = buildGeminiModel(makeGeminiConfig(), 100000, 'medium');
-    expect(model.api).toBe('google-generative-ai');
-    expect(model.provider).toBe('google');
-    expect(model.baseUrl).toBe('https://generativelanguage.googleapis.com');
+  // (a) OpenAI-compatible Model 字段正确性
+  await test('buildOpenAICompatModel: id / name 取自 config.model', () => {
+    const model = buildOpenAICompatModel(makeOpenAIConfig({ model: 'gpt-4o-mini' }), undefined, undefined);
+    expect(model.id).toBe('gpt-4o-mini');
+    expect(model.name).toBe('gpt-4o-mini');
   });
 
-  await test('buildGeminiModel: id / name 取自 config.model', () => {
-    const model = buildGeminiModel(makeGeminiConfig({ model: 'gemini-2.5-pro' }), undefined, undefined);
-    expect(model.id).toBe('gemini-2.5-pro');
-    expect(model.name).toBe('gemini-2.5-pro');
-  });
-
-  await test('buildGeminiModel: contextWindow 使用传入值', () => {
-    const model = buildGeminiModel(makeGeminiConfig(), 200000, 'medium');
-    expect(model.contextWindow).toBe(200000);
-  });
-
-  await test('buildGeminiModel: reasoning=true 当 thinkingLevel=medium', () => {
-    const model = buildGeminiModel(makeGeminiConfig(), 100000, 'medium');
-    expect(model.reasoning).toBe(true);
-  });
-
-  await test('buildGeminiModel: input 包含 text 和 image', () => {
-    const model = buildGeminiModel(makeGeminiConfig(), 100000, 'medium');
+  await test('buildOpenAICompatModel: input 包含 text 和 image', () => {
+    const model = buildOpenAICompatModel(makeOpenAIConfig(), 100000, 'medium');
     expect(model.input).toEqual(['text', 'image']);
   });
 
-  await test('buildGeminiModel: cost 全为 0', () => {
-    const model = buildGeminiModel(makeGeminiConfig(), 100000, 'medium');
+  await test('buildOpenAICompatModel: cost 全为 0', () => {
+    const model = buildOpenAICompatModel(makeOpenAIConfig(), 100000, 'medium');
     expect(model.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-  });
-
-  await test('buildGeminiModel: thinkingLevelMap 未设置（undefined）', () => {
-    const model = buildGeminiModel(makeGeminiConfig(), 100000, 'medium');
-    // Gemini 不显式设置 thinkingLevelMap，让 pi google provider 用内置默认值
-    expect(model.thinkingLevelMap).toBeUndefined();
   });
 
   // (b) OpenAI-compatible Model 字段正确性
@@ -201,23 +179,25 @@ async function runTests() {
   });
 
   // (c) thinkingLevel → reasoning 映射
-  await test("thinkingLevel='off' → reasoning=false（Gemini）", () => {
-    const model = buildGeminiModel(makeGeminiConfig(), 100000, 'off');
-    expect(model.reasoning).toBe(false);
-  });
-
+  // 两种存活协议共用同一条判据（thinkingLevel !== 'off'），故每个档位在
+  // OpenAI-compatible 上验一遍；Anthropic 侧由 (f) 的 off/medium/undefined 覆盖。
   await test("thinkingLevel='off' → reasoning=false（OpenAI-compat）", () => {
     const model = buildOpenAICompatModel(makeOpenAIConfig(), 100000, 'off');
     expect(model.reasoning).toBe(false);
   });
 
-  await test("thinkingLevel='minimal' → reasoning=true", () => {
-    const model = buildGeminiModel(makeGeminiConfig(), 100000, 'minimal');
+  await test("thinkingLevel='minimal' → reasoning=true（OpenAI-compat）", () => {
+    const model = buildOpenAICompatModel(makeOpenAIConfig(), 100000, 'minimal');
     expect(model.reasoning).toBe(true);
   });
 
-  await test("thinkingLevel='low' → reasoning=true", () => {
-    const model = buildGeminiModel(makeGeminiConfig(), 100000, 'low');
+  await test("thinkingLevel='low' → reasoning=true（OpenAI-compat）", () => {
+    const model = buildOpenAICompatModel(makeOpenAIConfig(), 100000, 'low');
+    expect(model.reasoning).toBe(true);
+  });
+
+  await test("thinkingLevel='medium' → reasoning=true（OpenAI-compat）", () => {
+    const model = buildOpenAICompatModel(makeOpenAIConfig(), 100000, 'medium');
     expect(model.reasoning).toBe(true);
   });
 
@@ -232,15 +212,15 @@ async function runTests() {
   });
 
   await test('thinkingLevel=undefined → reasoning=true（与 pi-provider-bridge 对齐）', () => {
-    const gemini = buildGeminiModel(makeGeminiConfig(), 100000, undefined);
     const openai = buildOpenAICompatModel(makeOpenAIConfig(), 100000, undefined);
-    expect(gemini.reasoning).toBe(true);
+    const anthropic = buildAnthropicModel(makeAnthropicConfig(), 100000, undefined);
     expect(openai.reasoning).toBe(true);
+    expect(anthropic.reasoning).toBe(true);
   });
 
   // (d) contextWindow 缺省回落
-  await test('contextWindow=undefined → 回落到 100000（Gemini）', () => {
-    const model = buildGeminiModel(makeGeminiConfig(), undefined, 'medium');
+  await test('contextWindow=undefined → 回落到 100000（OpenAI-compat）', () => {
+    const model = buildOpenAICompatModel(makeOpenAIConfig(), undefined, 'medium');
     expect(model.contextWindow).toBe(100000);
   });
 
@@ -287,6 +267,108 @@ async function runTests() {
       undefined,
     );
     expect(result).toEqual({ 'x-api-version': '2024-01' });
+  });
+
+  // (f) Anthropic Messages：buildAnthropicModel
+  // （构造器与 makeAnthropicConfig 已在文件上方取好，供 (c) 的 undefined 档共用。）
+
+  await test('buildAnthropicModel: api / provider / baseUrl 字段正确', () => {
+    const model = buildAnthropicModel(makeAnthropicConfig(), 100000, 'medium');
+    expect(model.api).toBe('anthropic-messages');
+    expect(model.provider).toBe('anthropic');
+    expect(model.baseUrl).toBe('https://api.anthropic.com');
+  });
+
+  await test('buildAnthropicModel: baseUrl 缺省/纯空白回落到官方端点，且不带 /v1', () => {
+    // pi 的 SDK 自己拼 /v1/messages；baseUrl 若已含 /v1 会变成 /v1/v1/messages
+    expect(buildAnthropicModel(makeAnthropicConfig({ baseUrl: '' }), 100000, 'medium').baseUrl)
+      .toBe('https://api.anthropic.com');
+    expect(buildAnthropicModel(makeAnthropicConfig({ baseUrl: '   ' }), 100000, 'medium').baseUrl)
+      .toBe('https://api.anthropic.com');
+  });
+
+  await test('buildAnthropicModel: 自定义 baseUrl 去掉首尾空白后保留', () => {
+    const model = buildAnthropicModel(makeAnthropicConfig({ baseUrl: ' https://gw.example.com ' }), 100000, 'medium');
+    expect(model.baseUrl).toBe('https://gw.example.com');
+  });
+
+  await test('buildAnthropicModel: id / name 取自 config.model', () => {
+    const model = buildAnthropicModel(makeAnthropicConfig({ model: 'claude-opus-4-5' }), 100000, 'medium');
+    expect(model.id).toBe('claude-opus-4-5');
+    expect(model.name).toBe('claude-opus-4-5');
+  });
+
+  await test('buildAnthropicModel: input 支持 text + image，成本字段全 0', () => {
+    const model = buildAnthropicModel(makeAnthropicConfig(), 100000, 'medium');
+    expect(model.input).toEqual(['text', 'image']);
+    expect(model.cost.input).toBe(0);
+    expect(model.cost.output).toBe(0);
+    expect(model.cost.cacheRead).toBe(0);
+    expect(model.cost.cacheWrite).toBe(0);
+  });
+
+  await test('buildAnthropicModel: thinkingLevelMap 的值是 Anthropic effort 档位', () => {
+    const m = buildAnthropicModel(makeAnthropicConfig(), 100000, 'medium').thinkingLevelMap!;
+    expect(m.off).toBe(null);
+    expect(m.minimal).toBe('low');
+    expect(m.low).toBe('low');
+    expect(m.medium).toBe('medium');
+    expect(m.high).toBe('high');
+    expect(m.xhigh).toBe('xhigh');
+  });
+
+  await test('buildAnthropicModel: maxTokens 固定 8192（跨任意兼容网关的安全值）', () => {
+    expect(buildAnthropicModel(makeAnthropicConfig(), 100000, 'medium').maxTokens).toBe(8192);
+  });
+
+  await test('buildAnthropicModel: contextWindow 缺省回落 100000，传入值优先', () => {
+    expect(buildAnthropicModel(makeAnthropicConfig(), undefined, 'medium').contextWindow).toBe(100000);
+    expect(buildAnthropicModel(makeAnthropicConfig(), 0, 'medium').contextWindow).toBe(100000);
+    expect(buildAnthropicModel(makeAnthropicConfig(), 200000, 'medium').contextWindow).toBe(200000);
+  });
+
+  await test("buildAnthropicModel: thinkingLevel='off' → reasoning=false，其余为 true", () => {
+    expect(buildAnthropicModel(makeAnthropicConfig(), 100000, 'off').reasoning).toBe(false);
+    expect(buildAnthropicModel(makeAnthropicConfig(), 100000, 'medium').reasoning).toBe(true);
+    expect(buildAnthropicModel(makeAnthropicConfig(), 100000, undefined).reasoning).toBe(true);
+  });
+
+  await test('buildAnthropicModel: 仅 adaptive 家族带 compat.forceAdaptiveThinking', () => {
+    // budget_tokens 家族不加 compat：pi 走 thinking:{type:'enabled', budget_tokens}
+    const budget = buildAnthropicModel(makeAnthropicConfig({ model: 'claude-sonnet-4-5' }), 100000, 'medium');
+    expect(budget.compat).toBeUndefined();
+    // adaptive 家族：pi 走 thinking:{type:'adaptive'} + output_config.effort
+    const adaptive = buildAnthropicModel(makeAnthropicConfig({ model: 'claude-sonnet-5' }), 100000, 'medium');
+    expect((adaptive.compat as any)?.forceAdaptiveThinking).toBe(true);
+  });
+
+  await test('supportsAdaptiveThinking: 命中 adaptive 家族', () => {
+    expect(supportsAdaptiveThinking('claude-fable-5')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-haiku-5-5')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-opus-4-6')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-opus-4-7')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-opus-4-8')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-opus-5')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-sonnet-4-6')).toBe(true);
+    expect(supportsAdaptiveThinking('claude-sonnet-5')).toBe(true);
+  });
+
+  await test('supportsAdaptiveThinking: 网关前缀 / 大小写 / 空白都能识别', () => {
+    expect(supportsAdaptiveThinking('anthropic/claude-sonnet-5')).toBe(true);
+    expect(supportsAdaptiveThinking('CLAUDE-SONNET-5')).toBe(true);
+    expect(supportsAdaptiveThinking('openrouter:claude-opus-5')).toBe(true);
+    expect(supportsAdaptiveThinking('  claude-sonnet-5  ')).toBe(true);
+  });
+
+  await test('supportsAdaptiveThinking: 不误伤 budget_tokens 家族与空值', () => {
+    expect(supportsAdaptiveThinking('claude-sonnet-4-5')).toBe(false);
+    expect(supportsAdaptiveThinking('claude-sonnet-4-5-20250929')).toBe(false);
+    expect(supportsAdaptiveThinking('claude-opus-4-5')).toBe(false);
+    expect(supportsAdaptiveThinking('claude-haiku-4-5')).toBe(false);
+    expect(supportsAdaptiveThinking('gpt-4o')).toBe(false);
+    expect(supportsAdaptiveThinking('deepseek-chat')).toBe(false);
+    expect(supportsAdaptiveThinking(undefined)).toBe(false);
+    expect(supportsAdaptiveThinking('')).toBe(false);
   });
 
 }

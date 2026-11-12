@@ -25,6 +25,45 @@ async function test(name: string, fn: () => Promise<void>) {
   }
 }
 
+function assert(condition: boolean, message: string) {
+  if (!condition) throw new Error(message);
+}
+
+/** 假的已解码音频：恒定幅度 = 没有静音段，切点只能落在 45 s 上限上，窗口可手算。 */
+function fakeDecoded(seconds: number, sampleRate: number, amplitude = 0.5) {
+  const samples = new Float32Array(Math.round(seconds * sampleRate)).fill(amplitude);
+  return {
+    sampleRate,
+    length: samples.length,
+    channelCount: 1,
+    getChannelData: () => samples,
+  };
+}
+
+function bilibiliAudioStub(html: string, audioBytes: number[]) {
+  return async (options: any) => {
+    if (options.url === html) {
+      return {
+        status: 200,
+        text: '<script>window.__playinfo__={"data":{"dash":{"audio":[{"baseUrl":"https://media.example/long.m4s"}]}}}</script>',
+        headers: {},
+        arrayBuffer: new ArrayBuffer(0),
+        json: {},
+      };
+    }
+    if (options.url === 'https://media.example/long.m4s') {
+      return {
+        status: 200,
+        text: '',
+        headers: {},
+        arrayBuffer: new Uint8Array(audioBytes).buffer,
+        json: {},
+      };
+    }
+    throw new Error(`Unexpected URL ${options.url}`);
+  };
+}
+
 async function runTests() {
   console.log('=== video-transcription Tests ===');
   const { createVideoTranscriptionService } = await import('../src/services/video-transcription');
@@ -120,51 +159,438 @@ async function runTests() {
     }
   });
 
-  await test('uses Gemini inline audio input when provider type is gemini', async () => {
-    let capturedParts: any[] = [];
+  await test('transcribes through the OpenAI-compatible endpoint of the configured provider', async () => {
+    // 自定义网关：端点必须是「该 provider 的 baseUrl + /audio/transcriptions」，
+    // 而不是硬编码的 OpenAI 官方地址（旧的 Gemini inlineData 旁路已随协议移除）。
+    let transcriptionRequestUrl = '';
     const service = createVideoTranscriptionService({
       requestUrl: async (options: any) => {
-        if (options.url === 'https://www.bilibili.com/video/BVgemini') {
+        if (options.url === 'https://www.bilibili.com/video/BVgateway') {
           return {
             status: 200,
-            text: '<script>window.__playinfo__={"data":{"dash":{"audio":[{"baseUrl":"https://media.example/gemini-audio.m4a"}]}}}</script>',
+            text: '<script>window.__playinfo__={"data":{"dash":{"audio":[{"baseUrl":"https://media.example/gw-audio.m4a"}]}}}</script>',
             headers: {},
             arrayBuffer: new ArrayBuffer(0),
             json: {},
           };
         }
-        if (options.url === 'https://media.example/gemini-audio.m4a') {
+        if (options.url === 'https://media.example/gw-audio.m4a') {
           return {
             status: 200,
             text: '',
             headers: {},
-            arrayBuffer: new Uint8Array([9, 8, 7]).buffer,
+            arrayBuffer: new Uint8Array([5, 5]).buffer,
             json: {},
           };
         }
         throw new Error(`Unexpected URL ${options.url}`);
       },
-      createGeminiModel: (_provider: any) => ({
-        generateContent: async (parts: any[]) => {
-          capturedParts = parts;
-          return {
-            response: {
-              text: () => 'gemini transcript text',
-            },
-          };
-        },
-      }),
+      fetchImpl: async (url: string, _init: any) => {
+        transcriptionRequestUrl = String(url);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ text: 'gateway transcript text' }),
+        } as any;
+      },
     });
 
     const result = await service.transcribeFromVideoUrl({
-      url: 'https://www.bilibili.com/video/BVgemini',
+      url: 'https://www.bilibili.com/video/BVgateway',
       platform: 'bilibili',
-      provider: DEFAULT_PROVIDERS.gemini,
+      provider: {
+        type: 'openai-compatible',
+        label: 'Gateway',
+        apiKey: 'sk-gw',
+        baseUrl: 'https://gw.example.com/v1/',
+        model: 'whisper-1',
+      },
     });
 
-    expect(capturedParts.length).toBe(2);
-    expect(capturedParts[1].inlineData.mimeType).toContain('audio');
-    expect(result.text).toContain('gemini transcript text');
+    expect(transcriptionRequestUrl).toBe('https://gw.example.com/v1/audio/transcriptions');
+    expect(result.text).toContain('gateway transcript text');
+  });
+
+  await test('has no Gemini / Google inline-audio path left', async () => {
+    // 协议移除后这里只剩 Whisper 一条路。若有人把 google SDK 分支加回来，
+    // 这条断言会连同 bundle-size 里的「Google SDK 不在包里」一起变红。
+    const { readFileSync } = await import('fs');
+    const source = readFileSync('src/services/video-transcription.ts', 'utf8');
+    // 只看代码：该文件头部仍会说明「历史上有一条 Gemini 分支，已随协议移除」，
+    // 那是变更记录，不是可达路径。故块注释与行注释都要先去掉。
+    const code = source
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .map(line => line.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+    for (const forbidden of ['gemini', 'generative-ai', 'inlineData', 'generateContent', 'toBase64']) {
+      expect(code.toLowerCase().includes(forbidden.toLowerCase())).toBe(false);
+    }
+    // 依赖面里也不该再有注入 Gemini 模型的口子。
+    expect(code.includes('createGeminiModel')).toBe(false);
+  });
+  await test('splits long audio into bounded chunks and offsets every segment onto the whole track', async () => {
+    const requests: Array<{ url: string; form: any; headers: any }> = [];
+    const service = createVideoTranscriptionService({
+      requestUrl: bilibiliAudioStub('https://www.bilibili.com/video/BVchunked', [9, 9, 9]),
+      // 100 s @ 1 kHz：帧长 20 个样本，恒定 0.5 幅度下没有任何静音段。
+      decodeAudio: async () => fakeDecoded(100, 100),
+      fetchImpl: async (url: any, init: any) => {
+        requests.push({ url: String(url), form: init.body, headers: init.headers });
+        const payloads = [
+          { text: 'alpha', segments: [{ start: 0, end: 5, text: 'alpha' }] },
+          { text: 'beta', segments: [{ start: 1, end: 6, text: 'beta' }] },
+          { text: 'gamma', segments: [{ start: 0, end: 2, text: 'gamma' }] },
+        ];
+        return { ok: true, status: 200, json: async () => payloads[requests.length - 1] } as any;
+      },
+    });
+
+    const result = await service.transcribeFromVideoUrl({
+      url: 'https://www.bilibili.com/video/BVchunked',
+      platform: 'bilibili',
+      provider: DEFAULT_PROVIDERS.openai,
+      asr: {
+        baseUrl: 'http://localhost:9000/v1',
+        apiKey: '',
+        model: 'custom-asr-model',
+        language: 'zh',
+        source: 'settings',
+      },
+    });
+
+    assert(result.mode === 'chunked', `expected chunked mode, got ${result.mode}`);
+    assert(result.chunkCount === 3, `expected 3 chunks, got ${result.chunkCount}`);
+    assert(result.durationSec === 100, `expected 100 s, got ${result.durationSec}`);
+    assert(result.warnings.length === 0, `unexpected warnings: ${result.warnings.join(' | ')}`);
+    // 分片的 start/end 是相对该片的，必须把窗口起点加回去：0 / 45+1 / 90+0。
+    assert(
+      result.segments.map((segment) => segment.start).join(',') === '0,46,90',
+      `segment offsets: ${result.segments.map((segment) => segment.start).join(',')}`,
+    );
+    assert(result.text === 'alpha beta gamma', `text: ${result.text}`);
+
+    assert(requests.length === 3, `expected 3 requests, got ${requests.length}`);
+    assert(
+      requests.every((request) => request.url === 'http://localhost:9000/v1/audio/transcriptions'),
+      'endpoint must come from the configured ASR base URL',
+    );
+    assert(requests.every((request) => request.form.get('model') === 'custom-asr-model'), 'model form field');
+    assert(requests.every((request) => request.form.get('language') === 'zh'), 'language form field');
+    assert(requests.every((request) => request.form.get('response_format') === 'verbose_json'), 'response_format');
+    assert(
+      requests.every((request) => !request.headers || !request.headers.Authorization),
+      'no Authorization header should be sent when no key is configured',
+    );
+
+    // 单片体积上限：45 s * 100 Hz * 2 B + 44 B WAV 头 = 9044 B。
+    for (const request of requests) {
+      const file = request.form.get('file');
+      assert(file && typeof file.size === 'number', 'file part missing from the multipart body');
+      assert(file.size <= 9044, `chunk is ${file.size} B, over the 9044 B bound`);
+    }
+  });
+
+  await test('falls back to one whole-track request and reports it when the audio cannot be decoded', async () => {
+    let postedBody: any = null;
+    const service = createVideoTranscriptionService({
+      requestUrl: bilibiliAudioStub('https://www.bilibili.com/video/BVnodecode', [1, 2, 3, 4]),
+      // 刻意不注入 decodeAudio：Node 里没有 Web Audio，默认解码器必然抛错。
+      fetchImpl: async (_url: any, init: any) => {
+        postedBody = init.body;
+        return { ok: true, status: 200, json: async () => ({ text: 'whole track text' }) } as any;
+      },
+    });
+
+    const result = await service.transcribeFromVideoUrl({
+      url: 'https://www.bilibili.com/video/BVnodecode',
+      platform: 'bilibili',
+      provider: DEFAULT_PROVIDERS.openai,
+    });
+
+    assert(result.mode === 'single', `expected single mode, got ${result.mode}`);
+    assert(result.chunkCount === 1, 'single mode must report one request');
+    assert(result.warnings.length === 1, `expected exactly one warning, got ${result.warnings.length}`);
+    assert(
+      result.warnings[0].includes('could not be decoded'),
+      `warning must explain the fallback: ${result.warnings[0]}`,
+    );
+    assert(result.text === 'whole track text', `text: ${result.text}`);
+    assert(postedBody.get('file').size === 4, 'fallback must post the original container bytes');
+    assert(postedBody.get('file').type === 'audio/mp4', 'fallback must keep the original MIME type');
+  });
+
+  await test('retries without response_format when the endpoint rejects that parameter', async () => {
+    // 有的 OpenAI 方言实现会对不认识的 response_format 直接回 400。改动前这个 POST 只带
+    // model，所以「参数被拒」必须降级重试，而不是让升级后的用户彻底转写不了。
+    const formats: Array<string | null> = [];
+    const service = createVideoTranscriptionService({
+      requestUrl: bilibiliAudioStub('https://www.bilibili.com/video/BVnoformat', [4, 4]),
+      decodeAudio: async () => fakeDecoded(100, 100),
+      fetchImpl: async (_url: any, init: any) => {
+        const format = init.body.get('response_format');
+        formats.push(format);
+        if (format === 'verbose_json') {
+          return { ok: false, status: 400, text: async () => 'unknown parameter: response_format' } as any;
+        }
+        return { ok: true, status: 200, json: async () => ({ text: 'plain text' }) } as any;
+      },
+    });
+
+    const result = await service.transcribeFromVideoUrl({
+      url: 'https://www.bilibili.com/video/BVnoformat',
+      platform: 'bilibili',
+      provider: DEFAULT_PROVIDERS.openai,
+    });
+
+    assert(result.mode === 'chunked', `expected chunked mode, got ${result.mode}`);
+    assert(formats[0] === 'verbose_json', `the first request must try verbose_json, got ${formats[0]}`);
+    // 第一片确认端点不收这个参数之后，后面每一片都不该再撞一次 400。
+    assert(
+      formats.slice(1).every((format) => format === null),
+      `later requests must drop the rejected parameter: ${JSON.stringify(formats)}`,
+    );
+    assert(formats.length === 4, `expected 1 rejected + 3 successful requests, got ${formats.length}`);
+    assert(
+      result.warnings.some((warning) => warning.includes('verbose_json')),
+      `the degradation must be reported to the user: ${JSON.stringify(result.warnings)}`,
+    );
+    // 没有 segments 时退化成「一片一个时间戳」，时间轴本身仍然在。
+    assert(result.segments.length === 3, `expected one segment per chunk, got ${result.segments.length}`);
+  });
+
+  await test('does not retry a rejection that has nothing to do with response_format', async () => {
+    let calls = 0;
+    const service = createVideoTranscriptionService({
+      requestUrl: bilibiliAudioStub('https://www.bilibili.com/video/BVunauth', [6]),
+      decodeAudio: async () => fakeDecoded(100, 100),
+      fetchImpl: async () => {
+        calls += 1;
+        return { ok: false, status: 401, text: async () => 'invalid api key' } as any;
+      },
+    });
+
+    try {
+      await service.transcribeFromVideoUrl({
+        url: 'https://www.bilibili.com/video/BVunauth',
+        platform: 'bilibili',
+        provider: DEFAULT_PROVIDERS.openai,
+      });
+      throw new Error('Expected transcription to fail');
+    } catch (e: any) {
+      assert(e.message.includes('401'), `must carry the status: ${e.message}`);
+      // 鉴权失败与 response_format 无关：去掉参数重试只会把同一个 401 再打一遍。
+      assert(calls === 1, `must not retry a 401, got ${calls} calls`);
+    }
+  });
+
+  await test('names the failing chunk and the endpoint response when one chunk request fails', async () => {
+    let calls = 0;
+    const service = createVideoTranscriptionService({
+      requestUrl: bilibiliAudioStub('https://www.bilibili.com/video/BVchunkfail', [7, 7]),
+      decodeAudio: async () => fakeDecoded(100, 100),
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 2) {
+          return { ok: false, status: 500, text: async () => 'upstream exploded' } as any;
+        }
+        return { ok: true, status: 200, json: async () => ({ text: 'ok' }) } as any;
+      },
+    });
+
+    try {
+      await service.transcribeFromVideoUrl({
+        url: 'https://www.bilibili.com/video/BVchunkfail',
+        platform: 'bilibili',
+        provider: DEFAULT_PROVIDERS.openai,
+      });
+      throw new Error('Expected transcription to fail');
+    } catch (e: any) {
+      assert(e.message.includes('chunk 2/3'), `must name the chunk: ${e.message}`);
+      assert(e.message.includes('00:45-01:30'), `must name the window: ${e.message}`);
+      assert(e.message.includes('500'), `must carry the status: ${e.message}`);
+      assert(e.message.includes('upstream exploded'), `must carry the body: ${e.message}`);
+    }
+  });
+
+  await test('refuses to post to a chat provider endpoint and explains why', async () => {
+    const service = createVideoTranscriptionService({
+      requestUrl: async () => {
+        throw new Error('must not fetch the page without a transcription endpoint');
+      },
+      fetchImpl: async () => {
+        throw new Error('must not post anywhere');
+      },
+    });
+
+    try {
+      await service.transcribeFromVideoUrl({
+        url: 'https://www.bilibili.com/video/BVnoendpoint',
+        platform: 'bilibili',
+        provider: DEFAULT_PROVIDERS.anthropic,
+      });
+      throw new Error('Expected transcription to fail');
+    } catch (e: any) {
+      assert(
+        e.message.includes('No transcription endpoint is configured'),
+        `message must explain the missing endpoint: ${e.message}`,
+      );
+    }
+  });
+
+  await test('resolves the transcription endpoint from settings, from the provider, or not at all', async () => {
+    const { resolveAsrConfig, DEFAULT_ASR_MODEL } = await import('../src/mcp/types');
+
+    const explicit = resolveAsrConfig({
+      asr: {
+        asrBaseUrl: 'http://127.0.0.1:8080/v1',
+        asrApiKey: 'local-key',
+        asrModel: 'sensevoice-small',
+        asrLanguage: 'zh',
+      },
+      provider: DEFAULT_PROVIDERS.openai,
+    });
+    assert(!!explicit, 'explicit config must resolve');
+    assert(explicit!.baseUrl === 'http://127.0.0.1:8080/v1', 'explicit baseUrl wins');
+    assert(explicit!.apiKey === 'local-key', 'explicit key wins');
+    assert(explicit!.model === 'sensevoice-small', 'explicit model wins');
+    assert(explicit!.language === 'zh', 'explicit language wins');
+    assert(explicit!.source === 'settings', 'source must be settings');
+
+    const inherited = resolveAsrConfig({
+      provider: { ...DEFAULT_PROVIDERS.openai, apiKey: 'sk-x', baseUrl: 'https://gw.example.com/v1' },
+    });
+    assert(!!inherited, 'provider fallback must resolve for openai-compatible');
+    assert(inherited!.baseUrl === 'https://gw.example.com/v1', 'inherited baseUrl');
+    assert(inherited!.apiKey === 'sk-x', 'inherited key');
+    assert(inherited!.model === DEFAULT_ASR_MODEL, 'inherited model must be the historical default');
+    assert(inherited!.source === 'provider', 'source must be provider');
+
+    // Anthropic 的 baseUrl 上没有 /audio/transcriptions：回退过去只会得到 404，
+    // 而真正的原因是「没配转写端点」，所以这里必须返回 null 而不是一个假端点。
+    assert(resolveAsrConfig({ provider: DEFAULT_PROVIDERS.anthropic }) === null, 'anthropic must not be reused');
+    assert(resolveAsrConfig({}) === null, 'no provider and no settings must not resolve');
+    assert(
+      resolveAsrConfig({ provider: { ...DEFAULT_PROVIDERS.openai, baseUrl: '   ' } }) === null,
+      'blank base URL must not resolve',
+    );
+  });
+
+  await test('formats segment timestamps as mm:ss and h:mm:ss', async () => {
+    const { formatTimestamp, formatTimestampedTranscript } = await import('../src/services/video-transcription');
+
+    assert(formatTimestamp(0) === '00:00', formatTimestamp(0));
+    assert(formatTimestamp(65) === '01:05', formatTimestamp(65));
+    assert(formatTimestamp(3725) === '1:02:05', formatTimestamp(3725));
+
+    const rendered = formatTimestampedTranscript([
+      { start: 0, end: 3, text: 'hello' },
+      { start: 65, end: 68, text: '  world  ' },
+      { start: 70, end: 71, text: '   ' },
+    ]);
+    assert(rendered === '[00:00] hello\n[01:05] world', JSON.stringify(rendered));
+    assert(formatTimestampedTranscript([]) === '', 'no segments must render as an empty string');
+  });
+
+  await test('explains an empty transcription instead of reporting success', async () => {
+    const service = createVideoTranscriptionService({
+      requestUrl: bilibiliAudioStub('https://www.bilibili.com/video/BVempty', [3, 3]),
+      decodeAudio: async () => fakeDecoded(100, 100),
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ text: '' }) }) as any,
+    });
+
+    try {
+      await service.transcribeFromVideoUrl({
+        url: 'https://www.bilibili.com/video/BVempty',
+        platform: 'bilibili',
+        provider: DEFAULT_PROVIDERS.openai,
+      });
+      throw new Error('Expected transcription to fail');
+    } catch (e: any) {
+      assert(e.message.includes('empty text'), `message: ${e.message}`);
+    }
+  });
+
+  await test('parseTranscriptionPayload tolerates malformed payloads and segment fields', async () => {
+    const { parseTranscriptionPayload } = await import('../src/services/video-transcription');
+    const window = { startSec: 10, endSec: 20 };
+
+    for (const payload of [null, undefined, 'text', 42, [], {}, { segments: 'nope', text: 5 }]) {
+      const parsed = parseTranscriptionPayload(payload, window);
+      assert(parsed.text === '' && parsed.segments.length === 0, `payload ${JSON.stringify(payload)} -> ${JSON.stringify(parsed)}`);
+    }
+
+    // 脏段被跳过（null / 非字符串 text / 空白 text），好段保留；缺失或非数字时间戳回退到窗口边界。
+    const parsed = parseTranscriptionPayload({
+      segments: [null, 'x', { text: 7 }, { text: '   ' }, { text: ' ok ', start: 'abc' }, { text: 'timed', start: 1, end: 2 }],
+      text: 'flat',
+    }, window);
+    assert(parsed.segments.length === 2, `segments: ${JSON.stringify(parsed.segments)}`);
+    assert(parsed.segments[0].start === 10 && parsed.segments[0].end === 20 && parsed.segments[0].text === 'ok', JSON.stringify(parsed.segments[0]));
+    assert(parsed.segments[1].start === 11 && parsed.segments[1].end === 12, JSON.stringify(parsed.segments[1]));
+    assert(parsed.text === 'flat', `text: ${parsed.text}`);
+
+    // 只有扁平 text：退化成覆盖整个窗口的一段。
+    const flatOnly = parseTranscriptionPayload({ text: ' hello ' }, window);
+    assert(flatOnly.segments.length === 1 && flatOnly.segments[0].text === 'hello', JSON.stringify(flatOnly));
+  });
+
+  await test('rejects malformed bilibili playinfo with a clear error instead of crashing', async () => {
+    const cases = [
+      '<script>window.__playinfo__={"data":{"dash":{"audio":"oops"}}}</script>',
+      '<script>window.__playinfo__={"data":{"dash":{"audio":[]}}}</script>',
+      '<script>window.__playinfo__={"data":{"dash":{"audio":[null,{"baseUrl":123},{"backupUrl":"not-array"}]}}}</script>',
+      '<script>window.__playinfo__={"data":null}</script>',
+    ];
+    for (const html of cases) {
+      const service = createVideoTranscriptionService({
+        requestUrl: async () => ({ status: 200, text: html, headers: {}, arrayBuffer: new ArrayBuffer(0), json: {} }) as any,
+      });
+      try {
+        await service.transcribeFromVideoUrl({
+          url: 'https://www.bilibili.com/video/BVbad',
+          platform: 'bilibili',
+          provider: DEFAULT_PROVIDERS.openai,
+        });
+        throw new Error('Expected failure');
+      } catch (e: any) {
+        assert(e.message.includes('Unable to resolve audio stream URL'), `case ${html}: ${e.message}`);
+      }
+    }
+  });
+
+  await test('falls back to backupUrl and skips non-audio / malformed youtube formats', async () => {
+    const seen: string[] = [];
+    const bilibili = createVideoTranscriptionService({
+      requestUrl: async (options: any) => {
+        seen.push(options.url);
+        if (options.url === 'https://www.bilibili.com/video/BVbackup') {
+          return { status: 200, text: '<script>window.__playinfo__={"data":{"dash":{"audio":[{"backupUrl":["https://media.example/backup.m4s"]}]}}}</script>', headers: {}, arrayBuffer: new ArrayBuffer(0), json: {} } as any;
+        }
+        return { status: 200, text: '', headers: {}, arrayBuffer: new Uint8Array([1]).buffer, json: {} } as any;
+      },
+      decodeAudio: async () => fakeDecoded(10, 100),
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ text: 'x' }) }) as any,
+    });
+    await bilibili.transcribeFromVideoUrl({ url: 'https://www.bilibili.com/video/BVbackup', platform: 'bilibili', provider: DEFAULT_PROVIDERS.openai });
+    assert(seen.includes('https://media.example/backup.m4s'), `requested: ${seen.join(',')}`);
+
+    const html = 'var ytInitialPlayerResponse = {"streamingData":{"adaptiveFormats":[null,{"mimeType":5,"url":"https://bad"},{"mimeType":"video/mp4","url":"https://video"},{"mimeType":"audio/mp4","url":"https://media.example/yt.m4a"}]}};';
+    const youtubeSeen: string[] = [];
+    const youtube = createVideoTranscriptionService({
+      requestUrl: async (options: any) => {
+        youtubeSeen.push(options.url);
+        if (options.url === 'https://www.youtube.com/watch?v=abc') {
+          return { status: 200, text: html, headers: {}, arrayBuffer: new ArrayBuffer(0), json: {} } as any;
+        }
+        return { status: 200, text: '', headers: {}, arrayBuffer: new Uint8Array([1]).buffer, json: {} } as any;
+      },
+      decodeAudio: async () => fakeDecoded(10, 100),
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ text: 'x' }) }) as any,
+    });
+    await youtube.transcribeFromVideoUrl({ url: 'https://www.youtube.com/watch?v=abc', platform: 'youtube', provider: DEFAULT_PROVIDERS.openai });
+    assert(youtubeSeen.includes('https://media.example/yt.m4a'), `requested: ${youtubeSeen.join(',')}`);
   });
 }
 

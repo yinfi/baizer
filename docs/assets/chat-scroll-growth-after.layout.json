@@ -1,0 +1,287 @@
+{
+  "label": "chat-scroll-growth-after",
+  "phase": "after",
+  "revision": "2212d6f",
+  "capturedAt": "2026-11-04T14:27:49.015Z",
+  "out": "chat-scroll-growth-after.png",
+  "scenario": {
+    "name": "layout-growth-threshold",
+    "seedCount": 12,
+    "streamChunks": 3,
+    "scrollAnchorFraction": 0.35,
+    "viewport": {
+      "width": 1440,
+      "height": 960
+    },
+    "viewWidth": 520,
+    "sidebarHeight": 900,
+    "theme": "dark",
+    "locale": "zh"
+  },
+  "host": {
+    "platform": "win32",
+    "node": "v24.16.0",
+    "exe": "Obsidian.exe",
+    "exeFileVersion": "1.7.7"
+  },
+  "steps": [
+    {
+      "locale": {
+        "changed": false,
+        "previous": "zh"
+      }
+    },
+    {
+      "modals": {
+        "trust": {
+          "present": false,
+          "clicked": null
+        },
+        "closed": [],
+        "releaseNotes": 0
+      }
+    },
+    {
+      "plugin": {
+        "steps": [
+          "loadManifests"
+        ],
+        "error": null,
+        "loaded": true
+      }
+    },
+    {
+      "pluginLoaded": true
+    },
+    {
+      "openView": {
+        "viewType": "baizer-shell-view"
+      }
+    },
+    {
+      "fitViewWidth": {
+        "splitWidth": 544,
+        "viewWidth": 520
+      }
+    },
+    {
+      "seedA": {
+        "count": 12,
+        "scrollHeight": 2619
+      }
+    },
+    {
+      "followAToBottom": {
+        "scrollTop": 2281,
+        "maxScrollTop": 2281
+      }
+    },
+    {
+      "fixture": {
+        "height": 600,
+        "scrollHeight": 3476,
+        "scrollTop": 2280
+      }
+    },
+    {
+      "stream": true
+    }
+  ],
+  "limitations": [],
+  "vault": {
+    "pluginManifest": {
+      "id": "baizer",
+      "name": "Baizer",
+      "version": "1.5.0",
+      "minAppVersion": "1.7.2",
+      "description": "Chat with your vault, get inline AI completions, and compile your notes into a searchable knowledge base.",
+      "author": "yinfie",
+      "authorUrl": "https://github.com/yinfi",
+      "isDesktopOnly": false
+    }
+  },
+  "scenarioData": {
+    "beforeStream": {
+      "appVersion": null,
+      "pluginVersion": "1.5.0",
+      "locale": "zh",
+      "activeTabId": "tab-1793802474694-7kvyju",
+      "tabCount": 1,
+      "viewRect": {
+        "x": 908,
+        "y": 82,
+        "width": 520,
+        "height": 846
+      },
+      "splitRect": {
+        "x": 896,
+        "y": 30,
+        "width": 544,
+        "height": 930
+      },
+      "outputRect": {
+        "x": 922,
+        "y": 183,
+        "width": 492,
+        "height": 580
+      },
+      "scrollTop": 2280,
+      "maxScrollTop": 2896,
+      "distanceFromBottom": 616,
+      "scrollHeight": 3476,
+      "clientHeight": 580,
+      "unreadBar": {
+        "present": true,
+        "visible": false,
+        "text": "有新输出 · 回到最新",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "buttonRect": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "withinViewport": false
+      },
+      "follow": {
+        "following": true,
+        "unread": false
+      },
+      "horizontalOverflow": false,
+      "documentOverflow": false
+    }
+  },
+  "beforeStream": {
+    "appVersion": null,
+    "pluginVersion": "1.5.0",
+    "locale": "zh",
+    "activeTabId": "tab-1793802474694-7kvyju",
+    "tabCount": 1,
+    "viewRect": {
+      "x": 908,
+      "y": 82,
+      "width": 520,
+      "height": 846
+    },
+    "splitRect": {
+      "x": 896,
+      "y": 30,
+      "width": 544,
+      "height": 930
+    },
+    "outputRect": {
+      "x": 922,
+      "y": 183,
+      "width": 492,
+      "height": 580
+    },
+    "scrollTop": 2280,
+    "maxScrollTop": 2896,
+    "distanceFromBottom": 616,
+    "scrollHeight": 3476,
+    "clientHeight": 580,
+    "unreadBar": {
+      "present": true,
+      "visible": false,
+      "text": "有新输出 · 回到最新",
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "buttonRect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "withinViewport": false
+    },
+    "follow": {
+      "following": true,
+      "unread": false
+    },
+    "horizontalOverflow": false,
+    "documentOverflow": false
+  },
+  "afterStream": {
+    "appVersion": null,
+    "pluginVersion": "1.5.0",
+    "locale": "zh",
+    "activeTabId": "tab-1793802474694-7kvyju",
+    "tabCount": 1,
+    "viewRect": {
+      "x": 908,
+      "y": 82,
+      "width": 520,
+      "height": 846
+    },
+    "splitRect": {
+      "x": 896,
+      "y": 30,
+      "width": 544,
+      "height": 930
+    },
+    "outputRect": {
+      "x": 922,
+      "y": 183,
+      "width": 492,
+      "height": 532
+    },
+    "scrollTop": 2281,
+    "maxScrollTop": 3022,
+    "distanceFromBottom": 741,
+    "scrollHeight": 3554,
+    "clientHeight": 532,
+    "unreadBar": {
+      "present": true,
+      "visible": true,
+      "text": "有新输出 · 回到最新",
+      "rect": {
+        "x": 922,
+        "y": 727,
+        "width": 492,
+        "height": 36
+      },
+      "buttonRect": {
+        "x": 1102,
+        "y": 731,
+        "width": 132,
+        "height": 30
+      },
+      "withinViewport": true
+    },
+    "follow": {
+      "following": false,
+      "unread": true
+    },
+    "horizontalOverflow": false,
+    "documentOverflow": false
+  },
+  "assertions": {
+    "scenario": "layout-growth-threshold",
+    "followingBefore": true,
+    "preStreamAboveThreshold": true,
+    "viewportStayedAtReadingAnchor": true,
+    "pausedAfterGrowth": true,
+    "unreadEntryVisible": true
+  },
+  "screenshot": {
+    "path": "chat-scroll-growth-after.png",
+    "bytes": 73751,
+    "width": 520,
+    "height": 846,
+    "clip": {
+      "x": 936,
+      "y": 82,
+      "width": 520,
+      "height": 846
+    }
+  }
+}

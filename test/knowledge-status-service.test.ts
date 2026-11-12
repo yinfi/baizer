@@ -1,7 +1,7 @@
 import { App, TFile } from 'obsidian';
 import { computeContentHash } from '../src/knowledge/compiler';
 import { computeSchemaHash } from '../src/knowledge/ontology';
-import { KnowledgeStatusService } from '../src/knowledge/status-service';
+import { GLOBAL_COUNTS_TTL_MS, KnowledgeStatusService } from '../src/knowledge/status-service';
 
 function expect(actual: any) {
   return {
@@ -43,6 +43,12 @@ type MockEntry = {
   frontmatter?: Record<string, any>;
 };
 
+type MockAppStats = {
+  markdownFilesCalls: number;
+  readCalls: string[];
+  fileCacheCalls: string[];
+};
+
 function createFile(path: string): TFile {
   const file = new TFile();
   file.path = path;
@@ -53,6 +59,11 @@ function createFile(path: string): TFile {
 
 function createKnowledgeApp(entries: MockEntry[]) {
   const records = new Map<string, MockEntry & { file: TFile }>();
+  const stats: MockAppStats = {
+    markdownFilesCalls: 0,
+    readCalls: [],
+    fileCacheCalls: [],
+  };
 
   for (const entry of entries) {
     records.set(entry.path, {
@@ -62,23 +73,30 @@ function createKnowledgeApp(entries: MockEntry[]) {
     });
   }
 
-  return {
-    app: {
-      vault: {
-        getMarkdownFiles: () => Array.from(records.values())
+  const app = {
+    vault: {
+      getMarkdownFiles: () => {
+        stats.markdownFilesCalls++;
+        return Array.from(records.values())
           .filter((entry) => entry.file.extension === 'md')
-          .map((entry) => entry.file),
-        getAbstractFileByPath: (path: string) => records.get(path)?.file || null,
-        read: async (file: TFile) => records.get(file.path)?.content || '',
+          .map((entry) => entry.file);
       },
-      metadataCache: {
-        getFileCache: (file: TFile) => {
-          const entry = records.get(file.path);
-          return entry ? { frontmatter: entry.frontmatter } : null;
-        },
+      getAbstractFileByPath: (path: string) => records.get(path)?.file || null,
+      read: async (file: TFile) => {
+        stats.readCalls.push(file.path);
+        return records.get(file.path)?.content || '';
       },
-    } as unknown as App,
-  };
+    },
+    metadataCache: {
+      getFileCache: (file: TFile) => {
+        stats.fileCacheCalls.push(file.path);
+        const entry = records.get(file.path);
+        return entry ? { frontmatter: entry.frontmatter } : null;
+      },
+    },
+  } as unknown as App;
+
+  return { app, records, stats };
 }
 
 console.log('=== Knowledge Status Service Tests ===');
@@ -209,6 +227,236 @@ async function runTests() {
       failed: 1,
       stale: 1,
     });
+  });
+
+  await test('getGlobalCounts caches counts within TTL and skips re-traversal', async () => {
+    const { app, records, stats } = createKnowledgeApp([
+      {
+        path: 'Projects/Pending.md',
+        content: '# Pending',
+        frontmatter: {
+          knowledge_status: 'pending',
+        },
+      },
+      {
+        path: 'Projects/Failed.md',
+        content: '# Failed',
+        frontmatter: {
+          knowledge_status: 'failed',
+        },
+      },
+    ]);
+
+    const service = new KnowledgeStatusService(app, {
+      watchedFolders: ['Projects'],
+      wikiFolder: 'Knowledge Wiki',
+    });
+
+    expect(GLOBAL_COUNTS_TTL_MS).toBe(30_000);
+    expect(await service.getGlobalCounts()).toEqual({
+      pending: 1,
+      failed: 1,
+      stale: 0,
+    });
+
+    const traversalCallsAfterFirst = stats.markdownFilesCalls;
+    const fileCacheCallsAfterFirst = stats.fileCacheCalls.length;
+    expect(traversalCallsAfterFirst).toBe(1);
+    expect(fileCacheCallsAfterFirst > 0).toBe(true);
+
+    // 改动底层数据：若 TTL 内重新遍历，计数会变成 pending=0/failed=2
+    records.get('Projects/Pending.md')!.frontmatter = { knowledge_status: 'failed' };
+
+    expect(await service.getGlobalCounts()).toEqual({
+      pending: 1,
+      failed: 1,
+      stale: 0,
+    });
+    expect(stats.markdownFilesCalls).toBe(traversalCallsAfterFirst);
+    expect(stats.fileCacheCalls.length).toBe(fileCacheCallsAfterFirst);
+  });
+
+  await test('getGlobalCounts forceFresh recomputes and reflects changed data', async () => {
+    const { app, records, stats } = createKnowledgeApp([
+      {
+        path: 'Projects/Pending.md',
+        content: '# Pending',
+        frontmatter: {
+          knowledge_status: 'pending',
+        },
+      },
+    ]);
+
+    const service = new KnowledgeStatusService(app, {
+      watchedFolders: ['Projects'],
+      wikiFolder: 'Knowledge Wiki',
+    });
+
+    expect(await service.getGlobalCounts()).toEqual({
+      pending: 1,
+      failed: 0,
+      stale: 0,
+    });
+    const traversalCallsAfterFirst = stats.markdownFilesCalls;
+
+    records.get('Projects/Pending.md')!.frontmatter = { knowledge_status: 'failed' };
+
+    // TTL 内非强制调用仍命中缓存
+    expect(await service.getGlobalCounts()).toEqual({
+      pending: 1,
+      failed: 0,
+      stale: 0,
+    });
+    expect(stats.markdownFilesCalls).toBe(traversalCallsAfterFirst);
+
+    // forceFresh 绕过缓存，并反映改动后的数据
+    expect(await service.getGlobalCounts({ forceFresh: true })).toEqual({
+      pending: 0,
+      failed: 1,
+      stale: 0,
+    });
+    expect(stats.markdownFilesCalls).toBe(traversalCallsAfterFirst + 1);
+  });
+
+  await test('concurrent getGlobalCounts calls share a single traversal', async () => {
+    const summaryPath = 'Knowledge Wiki/Articles/ksrc_concurrent.md';
+    const { app, stats } = createKnowledgeApp([
+      {
+        path: 'Projects/Pending.md',
+        content: '# Pending',
+        frontmatter: {
+          knowledge_status: 'pending',
+        },
+      },
+      {
+        path: 'Projects/Stale.md',
+        content: '# Stale\nnew body',
+        frontmatter: {
+          knowledge_status: 'done',
+          knowledge_summary: summaryPath,
+        },
+      },
+      {
+        path: summaryPath,
+        content: '# Stale Summary',
+        frontmatter: {
+          compiled_at: '2026-05-13T10:00:00Z',
+          content_hash: computeContentHash('# Stale\nold body'),
+        },
+      },
+      {
+        path: 'Projects/Unregistered.md',
+        content: '# Unregistered',
+      },
+    ]);
+
+    const service = new KnowledgeStatusService(app, {
+      watchedFolders: ['Projects'],
+      wikiFolder: 'Knowledge Wiki',
+    });
+
+    const [first, second] = await Promise.all([
+      service.getGlobalCounts(),
+      service.getGlobalCounts(),
+    ]);
+
+    expect(first).toEqual({ pending: 1, failed: 0, stale: 1 });
+    expect(second).toEqual({ pending: 1, failed: 0, stale: 1 });
+    // 只遍历一次：getMarkdownFiles 只调用一次，stale 笔记正文也只读取一次
+    expect(stats.markdownFilesCalls).toBe(1);
+    expect(stats.readCalls.filter((path) => path === 'Projects/Stale.md').length).toBe(1);
+  });
+
+  await test('updateConfig invalidates counts only when the scan scope changes', async () => {
+    const { app, stats } = createKnowledgeApp([
+      {
+        path: 'Projects/Pending.md',
+        content: '# Pending',
+        frontmatter: {
+          knowledge_status: 'pending',
+        },
+      },
+      {
+        path: 'Research/Failed.md',
+        content: '# Failed',
+        frontmatter: {
+          knowledge_status: 'failed',
+        },
+      },
+    ]);
+
+    const service = new KnowledgeStatusService(app, {
+      watchedFolders: ['Projects'],
+      wikiFolder: 'Knowledge Wiki',
+    });
+
+    expect(await service.getGlobalCounts()).toEqual({
+      pending: 1,
+      failed: 0,
+      stale: 0,
+    });
+    const traversalCallsAfterFirst = stats.markdownFilesCalls;
+
+    // 相同扫描范围（数组为新实例）不失效缓存
+    service.updateConfig({ watchedFolders: ['Projects'], wikiFolder: 'Knowledge Wiki' });
+    expect(await service.getGlobalCounts()).toEqual({
+      pending: 1,
+      failed: 0,
+      stale: 0,
+    });
+    expect(stats.markdownFilesCalls).toBe(traversalCallsAfterFirst);
+
+    // 监听目录真正变化：立即失效，下一次调用重新遍历并计入 Research/Failed.md
+    service.updateConfig({ watchedFolders: ['Projects', 'Research'] });
+    expect(await service.getGlobalCounts()).toEqual({
+      pending: 1,
+      failed: 1,
+      stale: 0,
+    });
+    expect(stats.markdownFilesCalls).toBe(traversalCallsAfterFirst + 1);
+
+    // wiki 目录变化同样失效
+    service.updateConfig({ wikiFolder: 'Other Wiki' });
+    expect(await service.getGlobalCounts()).toEqual({
+      pending: 1,
+      failed: 1,
+      stale: 0,
+    });
+    expect(stats.markdownFilesCalls).toBe(traversalCallsAfterFirst + 2);
+  });
+
+  await test('invalidateGlobalCounts makes the next call re-traverse', async () => {
+    const { app, records, stats } = createKnowledgeApp([
+      {
+        path: 'Projects/Pending.md',
+        content: '# Pending',
+        frontmatter: {
+          knowledge_status: 'pending',
+        },
+      },
+    ]);
+
+    const service = new KnowledgeStatusService(app, {
+      watchedFolders: ['Projects'],
+      wikiFolder: 'Knowledge Wiki',
+    });
+
+    expect(await service.getGlobalCounts()).toEqual({
+      pending: 1,
+      failed: 0,
+      stale: 0,
+    });
+    const traversalCallsAfterFirst = stats.markdownFilesCalls;
+
+    records.get('Projects/Pending.md')!.frontmatter = { knowledge_status: 'failed' };
+    service.invalidateGlobalCounts();
+
+    expect(await service.getGlobalCounts()).toEqual({
+      pending: 0,
+      failed: 1,
+      stale: 0,
+    });
+    expect(stats.markdownFilesCalls).toBe(traversalCallsAfterFirst + 1);
   });
 
   await test('getNoteStatus keeps content-current summaries done when only ontology schema changed', async () => {

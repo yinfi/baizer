@@ -146,8 +146,8 @@ Baizer 不是在 Obsidian 上外挂一个聊天框。它是一条闭环:**采集
 **Baizer 会把你的笔记内容发送到你自己配置的 AI 服务商。** 这里的每一项功能都
 以此为前提 —— 没有纯本地模式。
 
-- **发往哪里:**只发往你自己配置的服务商端点(Google Gemini、OpenAI、DeepSeek、
-  Qwen,或任意 OpenAI 兼容的 base URL)。绝不发往任何 Baizer 运营的服务器 ——
+- **发往哪里:**只发往你自己配置的服务商端点(OpenAI、DeepSeek、Qwen、Anthropic,
+  或任意 OpenAI 兼容的 base URL)。绝不发往任何 Baizer 运营的服务器 ——
   这样的服务器并不存在。
 - **发送什么:**具体功能所需的 prompt 上下文,即笔记内容、选中文本、库内搜索
   结果。Guardian 会在你打字时发送光标周围的文本。
@@ -171,10 +171,12 @@ Baizer 把运行数据放在 vault 内:
 
 ## 支持的 Provider
 
-- Google Gemini
-- OpenAI 兼容 provider,包括 OpenAI、DeepSeek、Qwen 及自定义 base URL
+- OpenAI 兼容 provider,包括 OpenAI、DeepSeek、Qwen 及自定义 base URL —— Chat Completions 或 Responses
+- Anthropic,走原生 Messages 协议 —— 官方 `api.anthropic.com` 或任意兼容网关
 
 Provider 能力(图片输入、自定义 base URL 等)在代码中声明,不同后端可用功能有差异。设置变更(provider/模型/密钥/上下文窗口/思考等级)在下一轮生效,因为模型句柄每次调用都会重建。
+
+协议映射、base URL 规则(Anthropic 不带 `/v1`)、思考与 prompt 缓存的开关条件、已知限制,以及被移除的 provider 类型如何迁移,见 [docs/architecture/providers.md](docs/architecture/providers.md)。
 
 ## 开发
 

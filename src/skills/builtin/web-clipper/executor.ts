@@ -1,13 +1,27 @@
 import type { App } from 'obsidian';
 import * as obsidian from 'obsidian';
 import { Readability } from '@mozilla/readability';
-import { Tool, ToolContext } from '../../types';
+import { Tool, ToolArgs, ToolContext, ToolResult } from '../../types';
+import { strArg } from '../../tool-args';
 import { ToolRegistry } from '../../tool-registry';
 import { BuiltinExecutor } from '../../skill-registry';
-import { ProviderConfig } from '../../../mcp/types';
+import {
+  NO_ASR_ENDPOINT_MESSAGE,
+  ProviderConfig,
+  ResolvedAsrConfig as ResolvedAsrConfigForExecutor,
+  resolveAsrConfig,
+} from '../../../mcp/types';
 import * as videoUtils from '../../../utils/video_utils';
 import { resolveSavedNotePath } from '../../../mcp/save-path';
-import { createVideoTranscriptionService } from '../../../services/video-transcription';
+import type { ModelService } from '../../../services/model-service';
+import {
+  AudioTranscriptionResult,
+  createVideoTranscriptionService,
+  formatTimestampedTranscript,
+} from '../../../services/video-transcription';
+
+/** 本 skill 只用到 ModelService 的无状态生成能力（main.ts 注入真 ModelService）。 */
+type SummaryModel = Pick<ModelService, 'generate'>;
 
 interface WebClipperDeps {
   getVideoTranscript: typeof videoUtils.getVideoTranscript;
@@ -18,7 +32,8 @@ interface WebClipperDeps {
     url: string;
     platform: 'youtube' | 'bilibili';
     provider: ProviderConfig;
-  }) => Promise<{ text: string; audioUrl: string }>;
+    asr: ResolvedAsrConfigForExecutor;
+  }) => Promise<AudioTranscriptionResult>;
 }
 
 const transcriptionService = createVideoTranscriptionService();
@@ -41,7 +56,7 @@ function extractTags(text: string): string[] {
 }
 
 function sanitizeTitle(title: string): string {
-  let clean = title.replace(/[\\/:*?"<>|#^\[\]]/g, '-').replace(/\s+/g, ' ').trim();
+  let clean = title.replace(/[\\/:*?"<>|#^[\]]/g, '-').replace(/\s+/g, ' ').trim();
   if (!clean || clean.replace(/-/g, '').trim().length === 0) {
     const now = new Date();
     clean = `Clipping ${now.toISOString().split('T')[0]} ${now.getHours()}-${now.getMinutes()}-${now.getSeconds()}`;
@@ -71,7 +86,7 @@ async function ensureFolder(app: App, path: string): Promise<void> {
   if (!folder || app.vault.getAbstractFileByPath(folder)) return;
   try {
     await app.vault.createFolder(folder);
-  } catch (_) {
+  } catch {
     // Folder may already exist when multiple saves race.
   }
 }
@@ -138,7 +153,7 @@ function buildVideoSummaryContent(opts: {
 }
 
 async function summarizeTranscript(
-  modelService: any,
+  modelService: SummaryModel,
   transcript: { title: string; text: string },
 ): Promise<string | null> {
   if (!modelService || typeof modelService.generate !== 'function') return null;
@@ -161,13 +176,13 @@ Task:
     const clean = typeof summary === 'string' ? summary.trim() : '';
     if (!clean || clean.startsWith('Error:')) return null;
     return clean;
-  } catch (_) {
+  } catch {
     return null;
   }
 }
 
 async function summarizeVideoMetadata(
-  modelService: any,
+  modelService: SummaryModel,
   video: { title: string; description?: string },
 ): Promise<string | null> {
   if (!modelService || typeof modelService.generate !== 'function') return null;
@@ -190,18 +205,63 @@ Task:
     const clean = typeof summary === 'string' ? summary.trim() : '';
     if (!clean || clean.startsWith('Error:')) return null;
     return clean;
-  } catch (_) {
+  } catch {
     return null;
   }
 }
 
+/**
+ * 没有转录文本可写时的落点 —— 也就是改动前「平台没给字幕」走的同一条路：
+ * 有模型就让模型读标题/描述，没有就退化成纯链接笔记。
+ *
+ * 抽成函数是为了让「解析不出转写端点」那一支也能回到这里。门禁改动把这类用户
+ * （只配了 Anthropic、又没填转写端点）从原来的元数据摘要路径上拦了下来；
+ * 如果不显式回到这里，他们拿到的摘要会从「模型摘要」掉成
+ * buildMetadataFallbackSummary 的句子切分 —— 而他们本来什么设置都没改。
+ */
+async function buildNonTranscriptContent(params: {
+  transcript: videoUtils.VideoTranscript;
+  finalUrl: string;
+  baseTags: string[];
+  modelService: SummaryModel;
+  deps: WebClipperDeps;
+}): Promise<string> {
+  const { transcript, finalUrl, baseTags, modelService, deps } = params;
+
+  if (modelService && (transcript.description || transcript.title)) {
+    deps.notice(`Summarizing ${transcript.platform} video from metadata...`);
+    const summary = await summarizeVideoMetadata(modelService, {
+      title: transcript.title,
+      description: transcript.description,
+    });
+
+    return buildVideoSummaryContent({
+      title: transcript.title,
+      finalUrl,
+      author: transcript.author || transcript.platform,
+      tags: baseTags,
+      summary: summary || buildMetadataFallbackSummary(transcript.title, transcript.description),
+      excerptText: transcript.description || transcript.title,
+      excerptHeading: 'Video Description',
+    });
+  }
+
+  deps.notice('Saving video link...');
+  return buildVideoLinkContent(
+    transcript.title,
+    finalUrl,
+    transcript.author || transcript.platform,
+    baseTags,
+  );
+}
+
 async function saveVideo(
   url: string,
-  args: any,
+  filenameArg: string | undefined,
   ctx: ToolContext,
-  modelService: any,
+  modelService: SummaryModel,
   deps: WebClipperDeps,
-): Promise<any> {
+): Promise<ToolResult | null> {
   const transcript = await deps.getVideoTranscript(url);
   if (!transcript) return null;
 
@@ -224,66 +284,89 @@ async function saveVideo(
       excerptText: transcript.text,
       excerptHeading: 'Transcript Excerpt',
     });
-  } else if (transcript.needsTranscription && activeProvider?.type === 'openai-compatible') {
-    deps.notice(`Transcribing ${transcript.platform} audio...`);
-    try {
-      const transcription = await deps.transcribeVideoAudio({
-        url: finalUrl,
-        platform: transcript.platform,
-        provider: activeProvider,
-      });
-      const summary = await summarizeTranscript(modelService, {
-        title: transcript.title,
-        text: transcription.text,
-      });
+  } else if (transcript.needsTranscription) {
+    // 门禁从「activeProvider.type === 'openai-compatible'」改成「能否解析出转写端点」。
+    // 改动的理由：只配 Anthropic 的用户此前走不进这个分支，转写能力对他们等于不存在；
+    // 而「能不能转写」与「用哪个对话 provider」本来就是两件事 —— 转写端点是独立可配的。
+    // 什么都没配的 OpenAI 兼容用户仍然沿用 provider 的 baseUrl/apiKey，行为不变。
+    const asrConfig = resolveAsrConfig({
+      asr: ctx.settings,
+      provider: activeProvider,
+    });
 
-      content = buildVideoSummaryContent({
-        title: transcript.title,
+    if (!asrConfig) {
+      // 做不了就说做不了：明确告知原因与去处，而不是安静地退化成「只有元数据」的笔记。
+      // 但「没有转写端点」不等于「这篇笔记只能差一档」：仍然走与「平台没给字幕」
+      // 完全相同的元数据摘要路径，否则这次门禁改动会顺手把这类用户的摘要质量降一级。
+      deps.notice(NO_ASR_ENDPOINT_MESSAGE);
+      content = await buildNonTranscriptContent({
+        transcript,
         finalUrl,
-        author: transcript.author || transcript.platform,
-        tags: baseTags,
-        summary: summary || buildTranscriptFallbackSummary(transcription.text),
-        excerptText: transcription.text,
-        excerptHeading: 'Transcript Excerpt',
+        baseTags,
+        modelService,
+        deps,
       });
-    } catch (_) {
-      content = buildVideoSummaryContent({
-        title: transcript.title,
-        finalUrl,
-        author: transcript.author || transcript.platform,
-        tags: baseTags,
-        summary: buildMetadataFallbackSummary(transcript.title, transcript.description),
-        excerptText: transcript.description || transcript.title,
-        excerptHeading: 'Video Description',
-      });
+    } else {
+      deps.notice(`Transcribing ${transcript.platform} audio...`);
+      try {
+        const transcription = await deps.transcribeVideoAudio({
+          url: finalUrl,
+          platform: transcript.platform,
+          provider: activeProvider,
+          asr: asrConfig,
+        });
+
+        // 非致命说明（例如「解码失败，已回退整轨提交」）也要让用户看见。
+        for (const warning of transcription.warnings ?? []) {
+          deps.notice(warning);
+        }
+
+        const summary = await summarizeTranscript(modelService, {
+          title: transcript.title,
+          text: transcription.text,
+        });
+
+        // 有段级结果就用带时间戳的形式落进笔记（这是本次改造的可见产出之一）；
+        // 端点没回 segments 时才退回改动前的扁平文本。
+        const timestamped = formatTimestampedTranscript(transcription.segments || []);
+
+        content = buildVideoSummaryContent({
+          title: transcript.title,
+          finalUrl,
+          author: transcript.author || transcript.platform,
+          tags: baseTags,
+          summary: summary || buildTranscriptFallbackSummary(transcription.text),
+          excerptText: timestamped || transcription.text,
+          excerptHeading: timestamped ? 'Timestamped Transcript' : 'Transcript Excerpt',
+        });
+      } catch (error) {
+        // 改动前这里是 catch (_)：用户看到「Transcribing ...」之后拿到的是一篇
+        // 既没有转录、也不说明原因的笔记。失败必须可见，且必须带原因。
+        const reason = error instanceof Error && error.message ? error.message : String(error);
+        deps.notice(`Transcription failed: ${reason}`);
+        content = buildVideoSummaryContent({
+          title: transcript.title,
+          finalUrl,
+          author: transcript.author || transcript.platform,
+          tags: baseTags,
+          summary: buildMetadataFallbackSummary(transcript.title, transcript.description),
+          excerptText: `> [!warning] Audio transcription failed\n> ${reason}\n\n${transcript.description || transcript.title}`,
+          excerptHeading: 'Video Description',
+        });
+      }
     }
-  } else if (modelService && (transcript.description || transcript.title)) {
-    deps.notice(`Summarizing ${transcript.platform} video from metadata...`);
-    const summary = await summarizeVideoMetadata(modelService, {
-      title: transcript.title,
-      description: transcript.description,
-    });
-
-    content = buildVideoSummaryContent({
-      title: transcript.title,
-      finalUrl,
-      author: transcript.author || transcript.platform,
-      tags: baseTags,
-      summary: summary || buildMetadataFallbackSummary(transcript.title, transcript.description),
-      excerptText: transcript.description || transcript.title,
-      excerptHeading: 'Video Description',
-    });
   } else {
-    deps.notice('Saving video link...');
-    content = buildVideoLinkContent(
-      transcript.title,
+    // 既没有字幕、也没有可走的转写路径：模型读元数据，或者退化成纯链接。
+    content = await buildNonTranscriptContent({
+      transcript,
       finalUrl,
-      transcript.author || transcript.platform,
       baseTags,
-    );
+      modelService,
+      deps,
+    });
   }
 
-  let filename = sanitizeTitle(args.filename || transcript.title);
+  let filename = sanitizeTitle(filenameArg || transcript.title);
   if (!filename.endsWith('.md')) filename += '.md';
   const finalPath = resolveSavedNotePath(
     filename,
@@ -299,7 +382,7 @@ async function saveVideo(
   return { success: true, path: finalPath, message: `Video Note Saved: ${finalPath}` };
 }
 
-async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebClipperDeps): Promise<any> {
+async function saveWebpage(url: string, filenameArg: string | undefined, ctx: ToolContext, deps: WebClipperDeps): Promise<ToolResult> {
   const response = await deps.requestUrl({
     url,
     headers: {
@@ -360,7 +443,7 @@ async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebCl
       jsContent.querySelectorAll('script, style').forEach(node => node.remove());
       try {
         markdown = deps.htmlToMarkdown(jsContent.innerHTML);
-      } catch (_) {
+      } catch {
         markdown = '';
       }
     }
@@ -371,7 +454,7 @@ async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebCl
       .forEach(sel => {
         try {
           doc.querySelectorAll(sel).forEach(node => node.remove());
-        } catch (_) {
+        } catch {
           // Ignore invalid selectors for unusual HTML fragments.
         }
       });
@@ -381,13 +464,13 @@ async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebCl
     if (article?.content) {
       try {
         markdown = deps.htmlToMarkdown(article.content);
-      } catch (_) {
+      } catch {
         markdown = '';
       }
     } else {
       try {
         markdown = deps.htmlToMarkdown(html);
-      } catch (_) {
+      } catch {
         markdown = '';
       }
     }
@@ -397,7 +480,7 @@ async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebCl
     throw new Error('Failed to convert webpage content to Markdown');
   }
 
-  let filename = args.filename || title;
+  let filename = filenameArg || title;
   if (!filename.endsWith('.md')) filename += '.md';
   const finalPath = resolveSavedNotePath(
     filename,
@@ -416,7 +499,7 @@ async function saveWebpage(url: string, args: any, ctx: ToolContext, deps: WebCl
   return { success: true, path: finalPath, message: `Webpage Saved: ${finalPath}` };
 }
 
-export function createSaveWebpageTool(modelService: any, deps: WebClipperDeps = defaultDeps): Tool {
+export function createSaveWebpageTool(modelService: SummaryModel, deps: WebClipperDeps = defaultDeps): Tool {
   return {
     name: 'save_webpage',
     description: 'Save a webpage or video transcript to a new note.',
@@ -435,26 +518,28 @@ export function createSaveWebpageTool(modelService: any, deps: WebClipperDeps = 
       if (ctx.signal?.aborted) {
         return { success: false, error: 'Aborted before saving note', aborted: true };
       }
+      const url = strArg(args, 'url') ?? '';
+      const filename = strArg(args, 'filename');
       try {
-        const videoResult = await saveVideo(args.url, args, ctx, modelService, deps);
+        const videoResult = await saveVideo(url, filename, ctx, modelService, deps);
         if (videoResult) return videoResult;
-        return await saveWebpage(args.url, args, ctx, deps);
-      } catch (e: any) {
-        return { success: false, error: e.message };
+        return await saveWebpage(url, filename, ctx, deps);
+      } catch (e: unknown) {
+        return { success: false, error: e instanceof Error ? e.message : String(e) };
       }
     },
   };
 }
 
-export function createExecutor(modelService: any): BuiltinExecutor {
+export function createExecutor(modelService: SummaryModel): BuiltinExecutor {
   const tool = createSaveWebpageTool(modelService);
   return {
-    async execute(args: any, ctx: ToolContext) {
+    async execute(args: ToolArgs, ctx: ToolContext) {
       return tool.execute(args, ctx);
     },
   };
 }
 
-export function registerTools(registry: ToolRegistry, modelService: any): void {
+export function registerTools(registry: ToolRegistry, modelService: SummaryModel): void {
   registry.register(createSaveWebpageTool(modelService));
 }

@@ -27,7 +27,7 @@ Baizer is not a chatbot bolted onto Obsidian. It is a single loop where every st
 AI handles ingestion, not just download.
 
 - **Web & articles**: `save_webpage` fetches a page, runs Readability to isolate the body, and converts it to clean Markdown with YAML frontmatter (`created`, `source`, `author`, `tags`), with extra handling for site-specific layouts.
-- **Video**: YouTube and Bilibili URLs are resolved to their transcripts/subtitles, then summarized by the model into a readable note.
+- **Video**: YouTube and Bilibili URLs are resolved to their transcripts/subtitles, then summarized by the model into a readable note. When a video has no subtitles, the audio is transcribed through a configurable OpenAI-compatible `/audio/transcriptions` endpoint (Settings -> Capture): the track is decoded to 16 kHz mono, split into silence-snapped chunks of at most 45 s, and the result keeps segment timestamps.
 - **Live search**: `web_search` pulls fresh results from the web (DuckDuckGo) when the answer isn't in the vault yet, returned as cited Markdown links.
 
 ### 2. Process — understand and reshape
@@ -148,8 +148,8 @@ Skill-backed commands: `/save <url>` (web-clipper), `/wiki:query` (knowledge). T
 **Baizer sends your note content to the AI provider you configure.** That is how
 every feature here works — there is no local-only mode.
 
-- **Where it goes:** only to the provider endpoint you set up yourself (Google
-  Gemini, OpenAI, DeepSeek, Qwen, or any OpenAI-compatible base URL). Never to a
+- **Where it goes:** only to the provider endpoint you set up yourself (OpenAI,
+  DeepSeek, Qwen, Anthropic, or any OpenAI-compatible base URL). Never to a
   Baizer-operated server — there isn't one.
 - **What goes:** the notes, selections, and vault search results that a given
   feature needs as prompt context. Guardian sends surrounding text as you type.
@@ -173,10 +173,12 @@ Baizer keeps operational data inside the vault:
 
 ## Supported Providers
 
-- Google Gemini
-- OpenAI-compatible providers, including OpenAI, DeepSeek, Qwen, and custom base URLs
+- OpenAI-compatible providers, including OpenAI, DeepSeek, Qwen, and custom base URLs — Chat Completions or Responses
+- Anthropic, over the native Messages protocol — the official `api.anthropic.com` or any compatible gateway
 
 Provider capabilities (image input, custom base URL, etc.) are declared in code, so available features can differ by backend. Settings changes (provider/model/key/context window/thinking level) take effect on the next turn because the model handle is rebuilt each call.
+
+See [docs/architecture/providers.md](docs/architecture/providers.md) for the protocol mapping, the base-URL rules (Anthropic takes no `/v1`), how thinking and prompt caching are gated, the known limits, and how a provider type that is no longer supported is migrated on load.
 
 ## Development
 

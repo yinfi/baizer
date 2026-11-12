@@ -18,7 +18,7 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Skills': '技能',
     'Enable or disable individual skills (availability, separate from permissions).': '启用或禁用单个技能（仅控制可用性，与权限相互独立）。',
     'Capture': '采集',
-    'Inbox, clipping storage, WeChat import, and URL capture.': '收件箱、剪藏存储、微信导入与 URL 采集。',
+    'Inbox, clipping storage, WeChat import, URL capture, and video transcription.': '收件箱、剪藏存储、微信导入、URL 采集与视频转写。',
     'Knowledge': '知识库',
     'Source folders, output folder, compile state, and ontology.': '源文件夹、输出文件夹、编译状态与本体。',
     'Guardian': 'Guardian',
@@ -27,6 +27,42 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Workbench theme, font size, and opacity.': '工作台主题、字号与不透明度。',
     'Plugin Skills': '插件技能',
     'Skill generation, excluded plugins, and startup scanning.': '技能生成、排除的插件与启动扫描。',
+
+    // ── 声明式设置页（1.13 分区子页 / 服务商子页）──
+    'Needs attention': '需要关注',
+    'Review this on the {section} page.': '请到「{section}」页面处理。',
+    'No providers configured. Add one to get started.': '还没有配置服务商。先添加一个。',
+    'Add provider': '添加服务商',
+    'Active provider': '当前服务商',
+    'Inactive provider': '未启用',
+    'No model selected': '未选择模型',
+    'Use this provider': '使用此服务商',
+    'AI requests use this provider.': 'AI 请求使用此服务商。',
+    'Make this the provider that AI requests use.': '将 AI 请求切换到此服务商。',
+    'Pick a model from the list once the endpoint returns it, or type the model ID directly.': '端点返回模型列表后可从列表选择，也可以直接输入模型 ID。',
+    'One "Header-Name: value" per line. Use {{conversationId}} to send the current conversation ID; it is skipped for one-off calls that have no conversation.': '每行一条 "Header-Name: value"。用 {{conversationId}} 发送当前对话 ID；没有对话的一次性调用会跳过它。',
+    'Connection test': '连接测试',
+    'Runtime': '运行时',
+    'System prompt': '系统提示词',
+    'Sent to the model at the start of every conversation.': '每次对话开始时发送给模型。',
+    'Replace your custom system prompt with the default.': '用默认系统提示词覆盖当前自定义内容。',
+    'Recall': '召回',
+    'Browse memory': '浏览记忆',
+    'Search, review, and delete remembered memories.': '搜索、查看与删除已记住的记忆。',
+    'What the current switches allow.': '当前开关实际允许的操作。',
+    'Allow Reading Plugin Config Values': '允许读取插件配置值',
+    'Let AI read third-party plugin configuration values. When off, only key names and types are returned. API keys, tokens, and secrets are always redacted regardless of this setting.': '允许 AI 读取第三方插件的配置值。关闭时只返回键名与类型；无论此设置如何，API Key、令牌与密钥始终脱敏。',
+    'Disable Execution Confirmation': '关闭执行确认',
+    'Turn off confirmation? AI will write files and run commands without asking each time.': '关闭确认？AI 将不再每次都询问就写入文件或运行命令。',
+    'Grant AI permission to execute commands from other plugins? This can trigger destructive plugin actions on your behalf.': '允许 AI 执行其它插件的命令？这可能代表你触发破坏性的插件操作。',
+    'Use this URL scheme from iOS Shortcuts or Android automation. Fallback command: Save URL from clipboard.': '在 iOS 快捷指令或 Android 自动化中使用此 URL scheme。备用命令：从剪贴板保存 URL。',
+    'Ontology status': '本体状态',
+    'Current ontology schema and stale-article counts.': '当前本体结构与待重编译文章计数。',
+    'Open the ontology schema file to review or edit it.': '打开本体结构文件进行查看或编辑。',
+    'Create the ontology schema from the compiled wiki when there is enough content.': '编译内容足够时，从知识库生成本体结构。',
+    'Show what discovery would produce without writing the schema.': '预览发现结果，但不写入本体结构。',
+    'Queue stale notes for recompilation.': '把过期笔记标记为待重新编译。',
+    'Workbench panel opacity, from 50% to 100%.': '工作台面板不透明度（50% 到 100%）。',
 
     // ── 头部与搜索 ──
     'A cleaner control center for provider setup, runtime behavior, and plugin capabilities.': '更清爽的控制中心：服务商配置、运行时行为与插件能力。',
@@ -73,6 +109,10 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Cleared all remembered Hindsight memory.': '已清除所有 Hindsight 记忆。',
     'Memory service is not available.': '记忆服务不可用。',
     'Failed to load memory.': '加载记忆失败。',
+    'Memory request timed out. Please try again.':
+        '记忆加载超时，请重试。',
+    'Memory is unavailable until the active provider has an API key. Add one on the Connection page, then press Refresh.':
+        '记忆功能暂不可用：当前服务商尚未配置 API Key。请到连接页添加后，再点击刷新。',
 
     // ── 连接 ──
     'No active provider found.': '未找到激活的服务商。',
@@ -84,11 +124,11 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Test': '测试',
     'Custom Headers': '自定义请求头',
     'Custom headers': '自定义请求头',
-    'One "Header-Name: value" per line. Use {{conversationId}} to send the current conversation ID (e.g. for opencode.ai Go: x-opencode-session: {{conversationId}}).':
-        '每行一条 "Header-Name: value"。用 {{conversationId}} 占位符发送当前会话 ID（例如 opencode.ai Go 要求：x-opencode-session: {{conversationId}}）。',
+    'One "Header-Name: value" per line. Use {{conversationId}} to send the current conversation ID.':
+        '每行一条 "Header-Name: value"。用 {{conversationId}} 占位符发送当前会话 ID。',
+    'Sent with every request to this provider. The {{conversationId}} placeholder is skipped for one-off calls that have no conversation.':
+        '每次向该服务商发请求时都会带上。对于没有会话的一次性调用，{{conversationId}} 占位符会被跳过。',
     'API Endpoint': 'API 端点',
-    'Default Gemini endpoint': '默认 Gemini 端点',
-    'Gemini API': 'Gemini API',
     'OpenAI-compatible': 'OpenAI 兼容',
     'Select a model': '选择模型',
     'Loading models...': '加载模型列表中…',
@@ -117,6 +157,80 @@ export const ZH_MESSAGES: Record<string, string> = {
     ': connection successful.': '：连接成功。',
     'Connection failed': '连接失败',
     'Connection failed. Check API key, base URL, and model.': '连接失败。请检查 API Key、Base URL 与模型。',
+
+    // ── 连接：重做后的分组、字段命名与就地校验 ──
+    // 分组标题即配置流程顺序：身份与协议 → 地址与凭证 → 模型 → 测试结果。
+    'Provider identity and protocol': '服务商身份与协议',
+    'Connection address and credentials': '连接地址与凭证',
+    'Test result': '测试结果',
+    // 「API 类型」= OpenAI 方言；「服务地址（Base URL）」= 地址。此前两侧都叫「API 端点」。
+    'API type (Chat Completions / Responses)': 'API 类型（Chat Completions / Responses）',
+    'Service address (Base URL)': '服务地址（Base URL）',
+    'Anthropic Messages API': 'Anthropic Messages API',
+    'Custom headers (advanced)': '自定义请求头（高级）',
+    // 与权限区的 'Required'(需要) 分开：这里是「必填」字段标记，语义不同。
+    'Required field': '必填',
+    'Actual request path: {path}': '实际请求路径：{path}',
+    'The service address must NOT include /v1 — the Anthropic SDK appends /v1/messages itself. The official endpoint is https://api.anthropic.com.':
+        '服务地址**不要**带 /v1 —— Anthropic SDK 会自行追加 /v1/messages。官方端点是 https://api.anthropic.com。',
+    'The service address usually ends with /v1 — the OpenAI SDK appends /chat/completions itself, so do not paste the full request path.':
+        '服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /chat/completions，不要把完整请求路径粘进来。',
+    'The service address usually ends with /v1 — the OpenAI SDK appends /responses itself, so do not paste the full request path.':
+        '服务地址通常以 /v1 结尾 —— OpenAI SDK 会自行追加 /responses，不要把完整请求路径粘进来。',
+    'The wire protocol this provider speaks.': '该服务商使用的线协议。',
+    'The wire protocol this provider speaks. Switching it only shows the fields that apply.':
+        '该服务商使用的线协议。切换后只显示适用于该协议的字段。',
+    'Shown in the provider list. An empty name is rejected instead of silently keeping the old one.':
+        '显示在服务商列表中。名称为空会就地报错，而不是悄悄改回旧名称。',
+    'Stored locally and hidden by default. Use Reveal to check it; Clear asks for confirmation.':
+        '仅保存在本地，默认隐藏。用「显示」查看，用「清除」清空（会二次确认）。',
+    // 就地校验
+    'Provider name is required.': '服务商名称不能为空。',
+    'Base URL is required.': '服务地址不能为空。',
+    'Base URL must start with http:// or https:// and must not contain spaces.':
+        '服务地址必须以 http:// 或 https:// 开头，且不能包含空格。',
+    'Base URL must not include the request path — remove /chat/completions or /responses.':
+        '服务地址不能包含请求路径 —— 请去掉 /chat/completions 或 /responses。',
+    'Base URL must not include the request path — remove /v1/messages.':
+        '服务地址不能包含请求路径 —— 请去掉 /v1/messages。',
+    'For Anthropic the base URL must not include /v1 — the SDK appends /v1/messages. Use https://api.anthropic.com.':
+        'Anthropic 的服务地址不能带 /v1 —— SDK 会追加 /v1/messages。请使用 https://api.anthropic.com。',
+    'missing ":" — write "Header-Name: value"': '缺少「:」——请写成 "Header-Name: value"',
+    'missing header name': '缺少请求头名称',
+    'duplicate header name, the last one wins': '请求头名称重复，以最后一行为准',
+    'Custom headers: {issues}. Those lines are ignored; the rest are kept.':
+        '自定义请求头：{issues}。这些行会被忽略，其余行照常保存。',
+    // 模型字段
+    'Model ID': '模型 ID',
+    'Model list': '模型列表',
+    'Refresh list': '刷新列表',
+    'No models listed': '没有列出模型',
+    'No API key yet — you can type the model ID by hand; the list loads once a key is set.':
+        '尚未配置 API Key —— 可以直接手填模型 ID；配置密钥后即可拉取列表。',
+    // 模型列表的四种来源状态（listed / listing-unsupported / missing-key / error）文案各不相同：
+    // 能力缺口不能被说成故障，真故障也不能被"手动输入即可"糊过去。
+    'This endpoint does not support listing models. Type the model ID by hand — this does not mean the model cannot generate.':
+        '该端点不支持列出模型。可直接手填模型 ID —— 这不代表该模型无法生成。',
+    'Could not load the model list: {reason}. Type the model ID by hand.':
+        '未能获取模型列表：{reason}。可直接手填模型 ID。',
+    'This endpoint returned no models. Type the model ID by hand — the listed suggestions are built in, not from this endpoint.':
+        '该端点没有返回任何模型。可直接手填模型 ID —— 下拉里的候选是内置建议，并非该端点列出。',
+    'unknown error': '未知错误',
+    'Suggested models (not listed by this endpoint)': '候选模型（并非该端点列出）',
+    '{count} models listed. Pick one or type an ID.': '已列出 {count} 个模型。可从中选择，也可直接输入 ID。',
+    'Type the model ID directly, or pick one from the list once the endpoint returns it.':
+        '可直接输入模型 ID；端点返回列表后也可从列表中选择。',
+    // 连接测试：区分「列不出模型」与「无法生成」
+    'Checks whether the model list is reachable at {url}. It does not run a generation, so a pass means "the endpoint answers", not "the model can generate".':
+        '检查 {url} 的模型列表是否可达。它不会真正发起生成，所以通过只说明「端点有响应」，不代表「模型能生成」。',
+    '{label}: model list reachable at {url}. Only the endpoint was verified, not generation.':
+        '{label}：模型列表可达（{url}）。这里只验证了端点，未验证生成。',
+    // 「端点活着但不提供模型清单」既不能报成成功（会与模型输入框的「不支持列出模型」自相矛盾），
+    // 也不能报成失败（端点确实答了）。单独一句，明说生成能力未被验证。
+    '{label}: the endpoint at {url} answers, but it does not offer a model list. Generation was NOT verified — type the model ID by hand and try a real request.':
+        '{label}：{url} 有响应，但不提供模型列表。**生成能力未被验证** —— 请直接手填模型 ID，并发一次真实请求确认。',
+    '{label}: could not reach the model list at {url}. Models cannot be listed — this does not prove the model cannot generate. Check the API key and service address, or type the model ID by hand.':
+        '{label}：无法访问模型列表（{url}）。这只能说明「列不出模型」，不能证明「模型无法生成」。请检查 API Key 与服务地址，或直接手填模型 ID。',
 
     // ── 行为（运行时）──
     'Context Window Limit': '上下文窗口上限',
@@ -216,6 +330,17 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Preview': '预览',
 
     // ── 采集 ──
+    'Video transcription': '视频转写',
+    'Transcription endpoint (Base URL)': '转写端点（Base URL）',
+    'Base URL of an OpenAI-compatible /audio/transcriptions service. Leave empty to reuse the active OpenAI-compatible provider. The endpoint path is appended by the plugin, so include /v1 if your service needs it.': 'OpenAI 方言的 /audio/transcriptions 服务的 Base URL。留空则沿用当前 OpenAI 兼容 provider。端点路径由插件追加，因此服务需要 /v1 时要自己写上。',
+    'Transcription API key': '转写 API Key',
+    'Leave empty to reuse the API key of the active provider when it is OpenAI-compatible. Services on localhost usually need no key.': '留空则在该 provider 为 OpenAI 兼容时沿用它的 API Key。跑在本机的服务通常不需要 Key。',
+    '(reuse provider key)': '（沿用 provider 的 Key）',
+    'Transcription model': '转写模型',
+    'Model name sent to the endpoint. Defaults to whisper-1, which is what earlier versions hardcoded.': '发送给端点的模型名。默认 whisper-1，即旧版本写死的值。',
+    'Transcription language': '转写语言',
+    'ISO-639-1 code such as zh or en. Leave empty to let the endpoint detect the language.': 'ISO-639-1 语言代码，如 zh、en。留空则由端点自行判断。',
+    'WeChat capture': '微信采集',
     'WeChat Inbox Path': '微信收件箱路径',
     'The file to monitor for new WeChat links.': '用于监测新微信链接的文件。',
     'WeChat Storage Path': '微信存储路径',
@@ -271,6 +396,7 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Off': '关闭',
 
     // ── 新增服务商模态框 ──
+    'Add Provider': '新增服务商',
     'Add OpenAI Compatible Provider': '添加 OpenAI 兼容服务商',
     'Provider Name': '服务商名称',
     'Display name (for example: SiliconFlow, Groq, Ollama)': '显示名称（例如：SiliconFlow、Groq、Ollama）',
@@ -416,12 +542,12 @@ export const ZH_MESSAGES: Record<string, string> = {
     // 'Low'/'High' 已在「思考强度」分区定义(低/高),此处 risk 徽标复用,不重复登记。
     'Medium': '中',
     'Show editor preview': '在编辑器中预览',
-    'Approve delete': '批准删除',
-    'Approve create': '批准创建',
-    'Approve move': '批准移动',
-    'Approve rename': '批准重命名',
-    'Approve edit': '批准修改',
-    'Approve action': '批准操作',
+    'Approve this delete': '批准本次删除',
+    'Approve this create': '批准本次创建',
+    'Approve this move': '批准本次移动',
+    'Approve this rename': '批准本次重命名',
+    'Approve this edit': '批准本次修改',
+    'Approve this action': '批准本次操作',
     'Approval needed: delete content': '需要审批:删除内容',
     'Approval needed: create content': '需要审批:创建内容',
     'Approval needed: move file': '需要审批:移动文件',
@@ -429,6 +555,36 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Approval needed: modify current note': '需要审批:修改当前笔记',
     'Approval needed: run plugin command': '需要审批:执行插件操作',
     'Approval needed: confirm operation': '需要审批:确认操作',
+    'Processing…': '处理中…',
+    'Approved and executed successfully': '已批准，执行成功',
+    'Approved but execution failed': '已批准，但执行失败',
+    'Rejected — no changes were made': '已拒绝，未执行任何更改',
+    'Execution result is unknown': '执行结果未知',
+    'Reason': '原因',
+    'Check result': '检查结果',
+    'No write was performed.': '未执行任何写入。',
+    'The action failed.': '操作失败。',
+    'High-risk action: this will': '高风险操作：将',
+    '. Approving executes it immediately and may not be undoable.': '。批准后将立即执行，且可能无法撤销。',
+    'delete': '删除',
+    'create': '创建',
+    'move': '移动',
+    'rename': '重命名',
+    'modify': '修改',
+    'run a plugin command': '执行插件命令',
+    'execute': '执行',
+    'This approval belongs to another conversation, so it was not executed.': '该审批属于另一个会话，未执行。',
+    'The action was interrupted before its result was recorded. Check the target before retrying.': '操作中断，结果未记录。请先检查目标状态再重试。',
+    'Could not verify the result. Check the target manually.': '无法核实结果，请手动检查目标状态。',
+    'Cannot verify the result automatically. Check the target manually.': '无法自动核实结果，请手动检查目标状态。',
+    // #76：结果未知的核实结论、审计写盘失败提示。卡片上的英文硬编码一律走这里。
+    'The action ran but its result was not recorded. Check the target manually.': '操作已执行，但结果未记录。请手动检查目标。',
+    'The action started but never reported a result. Check the target before retrying.': '操作已开始执行但没有返回结果。请先检查目标状态再重试。',
+    'The execution record has expired, so the result cannot be verified. Check the target manually.': '执行记录已过期，无法核实结果。请手动检查目标。',
+    'No successful execution record was found. Verify the target, then retry.': '未找到成功执行记录。请先检查目标状态再重试。',
+    'The action completed successfully.': '操作已成功完成。',
+    'The audit log entry was not written.': '审计日志未写入。',
+    'This action already completed, so it was not run again. Check the target to review the result.': '该操作已完成，未重复执行。请检查目标查看结果。',
 
     // ── 消息操作栏(message-renderer)──
     'Copy message': '复制消息',
@@ -449,6 +605,9 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Feedback: what to improve': '反馈:哪里需要改进',
     'Improve answer': '改进重答',
     'Undo': '撤销',
+    'Generation failed': '生成失败',
+    'Stopped — the answer is incomplete': '已停止，答案不完整',
+    'Restore draft': '恢复草稿',
 
     // ── 选区 AI(action-registry / inline-diff / rewrite-runner / selection-menu)──
     'Polish': '润色',
@@ -495,8 +654,12 @@ export const ZH_MESSAGES: Record<string, string> = {
     'Cannot regenerate: the source plugin is on the exclude list.': '无法重新生成:来源插件在排除名单中。',
     'Could not regenerate the skill for {plugin}: {reason}': '{plugin} 的技能重新生成失败:{reason}',
     'unknown reason': '原因未知',
+    'Settings action failed': '设置操作失败',
     'Deleted the skill for {plugin}.': '已删除 {plugin} 的技能。',
     'Failed to delete the skill for {plugin}.': '删除 {plugin} 的技能失败。',
+
+    // ── ShellView 聊天滚动 ──
+    'New output · Back to latest': '有新输出 · 回到最新',
 
     // ── ShellView 分支/重试提示(Notice)──
     'Cannot switch branch.': '无法切换分支。',

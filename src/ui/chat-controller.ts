@@ -1,7 +1,8 @@
-﻿import { App, MarkdownView, TFile } from 'obsidian';
+import { App, MarkdownView, TFile } from 'obsidian';
 import { ModelService } from '../services/model-service';
-import { StreamEvent } from '../models/interfaces';
+import { ChatTurnOutcome, StreamEvent } from '../models/interfaces';
 import { logger } from '../utils/logger';
+import { detach } from '../utils/promise-guard';
 import { t } from '../i18n/zh';
 import {
     buildFileWriteFailureMessage,
@@ -12,15 +13,84 @@ import {
     isSuccessfulWriteToolResult,
 } from '../utils/file-operation-contract';
 import { ApprovalRequest } from './approval-card';
+import {
+    ApprovalExecutionOutcome,
+    ApprovalOutcome,
+    ApprovalState,
+} from '../services/approval-execution';
 import { buildSelectionPreview } from './diff/change-preview';
 import { ChatMessage } from './types';
-import { WorkspaceEditSummary } from '../services/workspace-edit-service';
+import { WorkspaceEditResult, WorkspaceEditSummary } from '../services/workspace-edit-service';
 import { PLUGIN_ID } from '../mcp/types';
+import { ChatContextItem } from '../models/interfaces';
+import { MemoryStats, MemoryView, MemoryViewRequest } from '../memory/types';
+import { MemoryRecord } from '../memory/hindsight-types';
+import { KnowledgeRuntime } from '../knowledge/runtime';
+import { ToolRegistry } from '../skills/tool-registry';
+import { ChangePreview } from './diff/change-preview';
+import { thrownMessage } from '../utils/thrown-message';
+
+/** 工具/命令结果的松散公共字段。现有工具契约未导出统一类型,这里只声明 UI 实际消费的成员。 */
+interface ToolResultPayload {
+    approval_required?: boolean;
+    requestId?: string;
+    action: string;
+    target: string;
+    args: Record<string, unknown>;
+    message?: string;
+    preview?: ChangePreview;
+    error?: string;
+    success?: boolean;
+    status?: string;
+    path?: string;
+    kind?: never;
+    detail?: string;
+    completedAt?: number;
+    retryable?: boolean;
+    result?: unknown;
+    workspaceEdit?: WorkspaceEditSummary;
+}
+
+/**
+ * 流事件里的 tool_result.result 类型为 unknown(可能是 null/字符串/对象)。
+ * 非对象一律视为空对象:所有消费点都只读可选字段,与此前对 null/原始值的 `?.` 读取等价。
+ */
+function asToolResultPayload(value: unknown): ToolResultPayload {
+    return (typeof value === 'object' && value !== null ? value : {}) as ToolResultPayload;
+}
+
+/** Obsidian App 上未在公开 d.ts 暴露的内部命令 API。 */
+type AppWithCommands = App & {
+    commands: { executeCommandById(commandId: string): boolean };
+};
+
+/** Obsidian App 上未在公开 d.ts 暴露的插件宿主 API(只取 UI 实际用到的插件成员)。 */
+type AppWithPluginHost = App & {
+    plugins?: {
+        plugins?: Record<string, {
+            toolRegistry?: ToolRegistry;
+            knowledgeRuntime?: KnowledgeRuntime;
+        }>;
+    };
+};
 
 /** 记录一条消息时告知宿主的事实(ADR 0002:记录与绘制分离)。 */
 export interface MessageAddedOptions {
     /** 该消息已随 stream 事件上屏,宿主只记录、不重画。 */
     alreadyRendered?: boolean;
+}
+
+/**
+ * 一轮请求的完整现场:原文、上下文(含文件/图片附件)、选区。
+ * 失败/取消后据此恢复草稿并按原请求重试;不把「用户等待期间的新输入」覆盖掉。
+ */
+export interface ChatTurnRequest {
+    query: string;
+    context: ChatContextItem[];
+    selection: string;
+    source: 'shell' | 'selection-menu';
+    /** 失败/取消时记下的 AI 消息 id,重试时用于原地替换它。 */
+    messageId?: string;
 }
 
 export interface ChatControllerOptions {
@@ -34,6 +104,10 @@ export interface ChatControllerOptions {
     conversationId?: string;
     /** 消息已记入本控制器的列表(唯一作者)。宿主据此更新自己的只读投影。 */
     onMessageAdded?: (message: ChatMessage, options?: MessageAddedOptions) => void;
+    /** 消息已从本控制器的列表移除(重试替换失败消息时)。宿主同步删投影。 */
+    onMessageRemoved?: (messageId: string) => void;
+    /** 已存在消息的字段被更新(审批状态流转)。宿主据此同步投影并原位重画卡片。 */
+    onMessageUpdated?: (message: ChatMessage) => void;
     onStatusChanged?: (isResponding: boolean) => void;
     onStreamEvent?: (event: StreamEvent) => void;
     /** /clear 时触发:宿主清空该 tab 的可见历史(tab.state)并重渲。 */
@@ -50,6 +124,8 @@ export class ChatController {
     private messages: ChatMessage[] = [];
     // private isResponding: boolean = false; // Unused
     private onMessageAdded?: (message: ChatMessage, options?: MessageAddedOptions) => void;
+    private onMessageRemoved?: (messageId: string) => void;
+    private onMessageUpdated?: (message: ChatMessage) => void;
     private onStatusChanged?: (isResponding: boolean) => void;
     private onStreamEvent?: (event: StreamEvent) => void;
     private onClear?: () => void;
@@ -57,9 +133,15 @@ export class ChatController {
     private onWorkspaceEditUndone?: (edit: WorkspaceEditSummary) => void;
     private onWorkspaceEditUndoFailed?: (message: string) => void;
     private activeStreamController: AbortController | null = null;
+    /**
+     * 失败/取消的请求现场,按落下的 AI 消息 id 索引。
+     * 重试按原请求与上下文恢复;只在内存里保留最近若干条,刷新后由 UI 从相邻
+     * user 消息回退推导(上下文不可恢复时至少原文可重试)。
+     */
+    private retryRequests = new Map<string, ChatTurnRequest>();
 
     // 文件搜索缓存
-    private fileSearchCache: { term: string; results: any[]; timestamp: number } | null = null;
+    private fileSearchCache: { term: string; results: TFile[]; timestamp: number } | null = null;
     private readonly FILE_SEARCH_CACHE_TTL = 5000; // 5绉掔紦瀛?
     private fileSearchCacheCleanupTimer: number | null = null;
 
@@ -68,6 +150,8 @@ export class ChatController {
         this.api = options.api;
         this.conversationId = options.conversationId;
         this.onMessageAdded = options.onMessageAdded;
+        this.onMessageRemoved = options.onMessageRemoved;
+        this.onMessageUpdated = options.onMessageUpdated;
         this.onStatusChanged = options.onStatusChanged;
         this.onStreamEvent = options.onStreamEvent;
         this.onClear = options.onClear;
@@ -83,6 +167,53 @@ export class ChatController {
 
     public getMessages(): ChatMessage[] {
         return [...this.messages];
+    }
+
+    /** 宿主替换流事件回调(选择浮窗复用同一控制器实例时用)。 */
+    public setStreamEventHook(hook?: (event: StreamEvent) => void) {
+        this.onStreamEvent = hook;
+    }
+
+    /** 宿主替换「消息已记录」回调。 */
+    public setMessageAddedHook(hook?: (message: ChatMessage, options?: MessageAddedOptions) => void) {
+        this.onMessageAdded = hook;
+    }
+
+    /** 宿主替换「忙碌状态」回调。 */
+    public setStatusChangedHook(hook?: (isResponding: boolean) => void) {
+        this.onStatusChanged = hook;
+    }
+
+    /**
+     * 接管一批宿主投影里已有的消息(从持久会话恢复、分支投影重建)。
+     *
+     * 这些消息不是本轮经 onMessageAdded 新建的,但宿主已持有同一批投影,所以这里
+     * 不回调、不重画,只把所有权收归本列表,避免出现「投影有、owner 没有」的分叉。
+     * 不接管的话,恢复会话后 👍/👎 按 id 回查必然落空,又回到静默空操作(ADR 0002)。
+     */
+    public adoptMessages(messages: ChatMessage[]) {
+        this.messages = messages.map(message => this.normalizeAdoptedApproval(message));
+        // 视图销毁/应用重启可能留下 status=running 的审批：用执行登记表/审计记录
+        // 把「还在跑」「已结束」「未知」区分开，绝不在恢复时盲目重放写入。
+        void this.reconcileRunningApprovals();
+    }
+
+    /**
+     * 旧会话快照里的审批请求没有 id（本票之前的结构）。恢复时补一个稳定身份，
+     * 否则执行登记表无法去重，重挂载后的第二次点击可能重复写盘。
+     */
+    private normalizeAdoptedApproval(message: ChatMessage): ChatMessage {
+        if (!message.approval || message.approval.id) return { ...message };
+        const next: ChatMessage = {
+            ...message,
+            approval: {
+                ...message.approval,
+                id: createApprovalRequestId(),
+                conversationId: message.approval.conversationId ?? this.conversationId,
+            },
+        };
+        this.onMessageUpdated?.(next);
+        return next;
     }
 
     public clearHistory() {
@@ -120,38 +251,113 @@ export class ChatController {
 
     public async processCommand(
         query: string,
-        context: any[] | string = [],
+        context: ChatContextItem[] | string = [],
         selection: string = '',
         source: 'shell' | 'selection-menu' = 'shell',
         displayText?: string,
-    ) {
-        if (!query.trim()) return;
+    ): Promise<ChatTurnOutcome | undefined> {
+        if (!query.trim()) return undefined;
         const normalizedContext = this.normalizeContextItems(context);
 
         // 1. Handle Commands
         if (query.startsWith('/')) {
             await this.handleSlashCommand(query);
-            return;
+            return undefined;
         }
 
         // 2. Normal Chat
-        // 显示层与 prompt 层分离:query 是发给模型的完整 prompt(可能已装配上下文),
-        // displayText 是给用户看的干净意图(如「解释:xxx」)。缺省时二者一致(shell 场景)。
-        this.addMessage('user', displayText ?? query);
+        return this.runTurn(query, normalizedContext, selection, source, displayText ?? query, true);
+    }
+
+    /**
+     * 按原请求重试一次失败/取消的轮次。
+     * - 不重复插入 user 消息:同一请求只应出现一次;
+     * - 先移除失败/取消时落下的 AI 消息,让新答案原地替换它;
+     * - 处理中调用直接返回(幂等),双击不会产生两个在途请求。
+     */
+    public async retryTurn(request: ChatTurnRequest): Promise<ChatTurnOutcome | undefined> {
+        if (this.isRunActive()) return undefined;
+        if (request.messageId) {
+            this.retryRequests.delete(request.messageId);
+            if (this.messages.some(message => message.id === request.messageId)) {
+                this.removeMessage(request.messageId);
+            }
+        }
+        return this.runTurn(
+            request.query,
+            this.normalizeContextItems(request.context),
+            request.selection,
+            request.source,
+            undefined,
+            false,
+        );
+    }
+
+    /** 取某条失败/取消消息对应的原请求现场(含附件上下文)。无记录时返回 null。 */
+    public getRetryRequest(messageId: string): ChatTurnRequest | null {
+        const request = this.retryRequests.get(messageId);
+        if (!request) return null;
+        return { ...request, context: request.context.map(item => ({ ...item })) };
+    }
+
+    /** 记下失败/取消请求现场,供失败卡片的「重试 / 恢复草稿」使用。 */
+    private rememberRetryRequest(messageId: string, request: ChatTurnRequest) {
+        this.retryRequests.set(messageId, {
+            ...request,
+            context: request.context.map(item => ({ ...item })),
+            messageId,
+        });
+        // 只保留最近 20 条,避免长会话里失败记录无限增长。
+        while (this.retryRequests.size > 20) {
+            const oldest = this.retryRequests.keys().next().value;
+            if (oldest === undefined) break;
+            this.retryRequests.delete(oldest);
+        }
+    }
+
+    /** 从唯一作者列表移除一条消息,并通知宿主同步投影(重试替换失败消息时用)。 */
+    private removeMessage(messageId: string) {
+        const index = this.messages.findIndex(message => message.id === messageId);
+        if (index < 0) return;
+        this.messages.splice(index, 1);
+        this.onMessageRemoved?.(messageId);
+    }
+
+    /**
+     * 单轮流式执行。processCommand 与 retryTurn 共用同一实现,保证终态记录、
+     * 错误处理与 ADR 0002 的「先记录后发 done」顺序只有一份。
+     * @param recordUserMessage 重试时为 false:原 user 消息已在列表里,不再重复插入。
+     */
+    private async runTurn(
+        query: string,
+        normalizedContext: ChatContextItem[],
+        selection: string,
+        source: 'shell' | 'selection-menu',
+        displayText: string | undefined,
+        recordUserMessage: boolean,
+    ): Promise<ChatTurnOutcome> {
+        if (recordUserMessage) {
+            // 显示层与 prompt 层分离:query 是发给模型的完整 prompt(可能已装配上下文),
+            // displayText 是给用户看的干净意图(如「解释:xxx」)。缺省时二者一致(shell 场景)。
+            this.addMessage('user', displayText ?? query);
+        }
         // 阶段B:记住本轮 user 消息 id,done 事件带回 entryIds 后回填 sessionEntryId 锚定。
-        const userMessageId = this.messages[this.messages.length - 1]?.id;
+        const userMessageId = recordUserMessage ? this.messages[this.messages.length - 1]?.id : undefined;
         this.setResponding(true);
         const streamController = new AbortController();
         this.activeStreamController = streamController;
+        const request: ChatTurnRequest = { query, context: normalizedContext, selection, source };
         let fullText = '';
         let turnEntryIds: { userEntryId?: string; assistantEntryId?: string } | undefined;
-        // 本轮是否已记过 ai 回复。正常收尾在 done 时记,中断在 catch 里记,二者互斥。
+        // 本轮是否已记过 ai 回复。正常收尾在 done 时记,中断/失败在 catch 里记,二者互斥。
         let assistantRecorded = false;
         // 正文是否被缓冲(待审批 / 写请求未落地),即屏幕上还没显示过。
         // 必须提到与 fullText 同一作用域:catch 里的中断路径也要读它,
         // 否则会记下一条用户从未见过的回复(它标 alreadyRendered,宿主不画,
         // 于是只在切 tab 重渲时凭空出现)。
         let textWithheld = false;
+        // 本轮终态:唯一来源是 runtime 的 done/error 事件;异常路径在此显式收口。
+        let turnOutcome: ChatTurnOutcome = 'completed';
 
         try {
             if (this.onStreamEvent) {
@@ -160,7 +366,7 @@ export class ChatController {
                 let attemptedFileWrite = false;
                 let successfulFileWrite = false;
                 let lastWriteError = '';
-                const writeToolArgs = new Map<string, any[]>();
+                const writeToolArgs = new Map<string, Record<string, unknown>[]>();
                 const bufferedTextEvents: StreamEvent[] = [];
                 // 阶段1:跨轮上下文由 Harness session 维护,UI 不再回灌 priorMessages。
                 const stream = source === 'shell'
@@ -176,23 +382,24 @@ export class ChatController {
 
                     if (event.type === 'tool_result') {
                         const args = this.shiftToolArgs(writeToolArgs, event.name);
-                        this.handleWorkspaceEditResult(event.result);
+                        const toolResult = asToolResultPayload(event.result);
+                        this.handleWorkspaceEditResult(toolResult);
                         if (this.isFileWriteTool(event.name)) {
                             attemptedFileWrite = true;
-                            if (this.isSuccessfulToolResult(event.result)) {
+                            if (this.isSuccessfulToolResult(toolResult)) {
                                 successfulFileWrite = true;
                             } else {
-                                const error = this.getWriteToolError(event.result);
+                                const error = this.getWriteToolError(toolResult);
                                 if (error) lastWriteError = error;
                             }
                         }
-                        const nextApproval = this.toApprovalRequest(event.result);
+                        const nextApproval = this.toApprovalRequest(toolResult);
                         if (nextApproval) {
                             approvalRequest = nextApproval;
                             this.addApprovalMessage(nextApproval);
                         } else if (this.isFileWriteTool(event.name)) {
-                            if (!event.result?.workspaceEdit) {
-                                await this.openFileFromToolResult(event.name, event.result, args);
+                            if (!toolResult.workspaceEdit) {
+                                await this.openFileFromToolResult(event.name, toolResult, args);
                             }
                             if (successfulFileWrite && bufferedTextEvents.length > 0) {
                                 for (const bufferedEvent of bufferedTextEvents) {
@@ -216,6 +423,7 @@ export class ChatController {
                         const suppressed = !!approvalRequest || (isWriteRequest && !successfulFileWrite);
                         fullText = approvalRequest ? '' : event.text;
                         turnEntryIds = event.entryIds;
+                        turnOutcome = event.outcome ?? (event.interrupted ? 'cancelled' : 'completed');
                         // 回填 user 消息的 entry 锚定(ai 消息紧随其后创建时一并打)。
                         if (turnEntryIds?.userEntryId && userMessageId) {
                             const userMsg = this.messages.find(m => m.id === userMessageId);
@@ -225,25 +433,39 @@ export class ChatController {
                         // 所以记录必须先于 done 事件发出,否则它只能拿到上一轮的消息。
                         // 抑制态(待审批 / 写请求未落地)不落 ai 消息:审批由卡片承载,
                         // 写失败在循环后落一条 system 警告。
-                        // 空正文也不落:该列表现在是渲染来源,一条空 ai 消息会在重渲时
-                        // 变成一个带操作栏的空气泡(纯工具轮次可能没有最终正文)。
-                        if (!suppressed && fullText) {
-                            this.recordStreamedReply(fullText, {
+                        // 空正文的取消也要落:否则回放时看不到「已停止,答案不完整」的终态。
+                        const cancelled = turnOutcome === 'cancelled';
+                        if (!suppressed && (fullText || cancelled)) {
+                            const messageId = this.recordStreamedReply(fullText, {
                                 assistantEntryId: turnEntryIds?.assistantEntryId,
+                                outcome: turnOutcome,
+                                interrupted: cancelled,
                             });
                             assistantRecorded = true;
+                            if (cancelled) this.rememberRetryRequest(messageId, request);
                         }
                         this.onStreamEvent(suppressed ? { ...event, text: '' } : event);
-                    } else if (event.type === 'tool_call' || event.type === 'tool_result' || event.type === 'step_boundary') {
-                        this.onStreamEvent(event);
                     } else if (event.type === 'error') {
+                        // 失败终态:即使首 token 前失败、没有任何正文,也落一条 ai 消息,
+                        // 让回放/切会话后仍有「失败原因 + 重试」入口,而不是永久 Thinking。
+                        if (!assistantRecorded) {
+                            const messageId = this.recordStreamedReply(textWithheld ? '' : fullText, {
+                                outcome: 'failed',
+                                failureReason: event.message,
+                            });
+                            assistantRecorded = true;
+                            this.rememberRetryRequest(messageId, request);
+                        }
+                        this.onStreamEvent(event);
+                        turnOutcome = 'failed';
+                        // shell 由失败卡承载原因;其他宿主没有卡片时保留旧提示。
+                        if (source !== 'shell') this.addMessage('system', `Error: ${event.message}`);
+                        break;
+                    } else if (event.type === 'tool_call' || event.type === 'tool_result' || event.type === 'step_boundary') {
                         this.onStreamEvent(event);
                     }
 
-                    if (event.type === 'error') {
-                        this.addMessage('system', `Error: ${event.message}`);
-                        return;
-                    } else if (event.type === 'text_delta') {
+                    if (event.type === 'text_delta') {
                         fullText += event.content;
                     } else if (event.type === 'tool_call') {
                         // 与底层 runtime 对齐:工具调用前的正文是该步过程叙述,
@@ -252,16 +474,30 @@ export class ChatController {
                         fullText = '';
                     }
                 }
-                if (!approvalRequest) {
+                if (turnOutcome !== 'failed' && !approvalRequest) {
                     if (isWriteRequest && !successfulFileWrite) {
                         this.addMessage(
                             'system',
                             this.getFileWriteFailureMessage(attemptedFileWrite, lastWriteError)
                         );
                     } else if (!assistantRecorded && fullText && !textWithheld) {
-                        // 流正常收尾但没有 done 事件(runtime 提前结束):仍把已有正文记为
-                        // 一条中断的回复,否则这段文字只存在于屏幕上、不在任何列表里。
-                        this.recordStreamedReply(fullText, { interrupted: true });
+                        // 流正常收尾但没有 done 事件(runtime 提前结束):按「不完整」处理,
+                        // 记一条取消终态的回复,不伪装成成功完成。
+                        const messageId = this.recordStreamedReply(fullText, {
+                            outcome: 'cancelled',
+                            interrupted: true,
+                        });
+                        assistantRecorded = true;
+                        this.rememberRetryRequest(messageId, request);
+                        turnOutcome = 'cancelled';
+                        // 没有 done 事件时也要通知宿主收尾,否则流容器停在半路、
+                        // 不渲染终态卡片,输入区也不会恢复。
+                        this.onStreamEvent?.({
+                            type: 'done',
+                            text: fullText,
+                            outcome: 'cancelled',
+                            interrupted: true,
+                        });
                     }
                 }
             } else {
@@ -271,33 +507,53 @@ export class ChatController {
                     : await this.api.chat(query, normalizedContext, selection, source, undefined, undefined, undefined, this.conversationId);
                 this.addMessage('ai', response);
             }
-        } catch (error: any) {
-            if (this.isAbortError(error)) {
-                // 中断路径过去只发 done 事件、不记消息:宿主的投影里有这条回复,
-                // 本列表里没有,两份内容因此分叉(ADR 0002)。改为走同一个记录入口。
-                // textWithheld 时不记:那段正文还在缓冲里、屏幕上从没出现过,
+        } catch (error: unknown) {
+            // 用户中止时 SDK 可能抛 APIUserAbortError(name 不是 'AbortError'),
+            // 但 controller 自己的 signal 一定已 aborted —— 以它为准,别把取消记成失败。
+            if (this.isAbortError(error) || streamController.signal.aborted) {
+                // 中断路径走同一个记录入口(ADR 0002),并显式标 cancelled 终态。
+                // textWithheld 时不记正文:那段内容还在缓冲里、屏幕上从没出现过,
                 // 记下来就成了一条只在重渲时冒出来的幽灵回复。
-                if (!assistantRecorded && fullText && !textWithheld) {
-                    this.recordStreamedReply(fullText, { interrupted: true });
+                if (!assistantRecorded) {
+                    const messageId = this.recordStreamedReply(textWithheld ? '' : fullText, {
+                        outcome: 'cancelled',
+                        interrupted: true,
+                    });
+                    assistantRecorded = true;
+                    this.rememberRetryRequest(messageId, request);
                 }
-                // done.text 同样要挡:宿主的 finalizeStream 会把它渲染进流容器,
-                // 并给它挂一个 id 对不上任何列表的操作栏(👍/👎/重试全部空操作)。
-                // 与正常 done 路径的抑制态一致——那里也是发 text: ''。
+                // done.text 同样要挡:宿主的 finalizeStream 会把它渲染进流容器。
                 this.onStreamEvent?.({
                     type: 'done',
                     text: textWithheld ? '' : fullText,
+                    outcome: 'cancelled',
                     interrupted: true,
                 });
-                this.addMessage('system', 'Response stopped.');
-                return;
+                turnOutcome = 'cancelled';
+                return turnOutcome;
             }
-            this.handleError(error);
+            // 非中止异常:显式失败终态 + 失败原因。shell 由失败卡呈现,不再叠加 system 行。
+            const failureMessage = thrownMessage(error) || 'Unknown error occurred.';
+            if (!assistantRecorded) {
+                const messageId = this.recordStreamedReply(textWithheld ? '' : fullText, {
+                    outcome: 'failed',
+                    failureReason: failureMessage,
+                });
+                assistantRecorded = true;
+                this.rememberRetryRequest(messageId, request);
+                // 与流内 error 事件一致:通知宿主收尾并渲染失败卡。
+                this.onStreamEvent?.({ type: 'error', message: failureMessage, outcome: 'failed' });
+            }
+            logger.error('Chat error', error, 'ChatController');
+            if (source !== 'shell') this.addMessage('system', `Error: ${failureMessage}`);
+            turnOutcome = 'failed';
         } finally {
             if (this.activeStreamController === streamController) {
                 this.activeStreamController = null;
             }
             this.setResponding(false);
         }
+        return turnOutcome;
     }
 
     private async handleSlashCommand(query: string) {
@@ -306,16 +562,20 @@ export class ChatController {
 
         this.addMessage('user', query);
 
-        const skillCommands = typeof (this.api as any).getSkillCommands === 'function'
-            ? (this.api as any).getSkillCommands()
+        const skillCommands = typeof this.api.getSkillCommands === 'function'
+            ? this.api.getSkillCommands()
             : [];
-        const matchedSkillCommand = skillCommands.find((entry: any) => entry.command === cmd);
+        const matchedSkillCommand = skillCommands.find(entry => entry.command === cmd);
 
-        if (matchedSkillCommand && typeof (this.api as any).executeSlashSkillCommand === 'function') {
+        if (matchedSkillCommand && typeof this.api.executeSlashSkillCommand === 'function') {
             try {
-                const result = await (this.api as any).executeSlashSkillCommand(cmd, argStr.trim(), this.conversationId);
-                this.handleStructuredResult(result);
-            } catch (error: any) {
+                const result: unknown = await this.api.executeSlashSkillCommand(cmd, argStr.trim(), this.conversationId);
+                if (typeof result === 'string') {
+                    this.addMessage('system', result);
+                } else {
+                    this.handleStructuredResult(asToolResultPayload(result));
+                }
+            } catch (error: unknown) {
                 this.handleError(error);
             }
             return;
@@ -331,23 +591,25 @@ export class ChatController {
             case '/profile':
                 await this.handleMemory(argStr || 'overview', '/profile');
                 break;
-            case '/tools':
+            case '/tools': {
                 const tools = this.api.getAvailableTools();
-                const toolsList = tools.map((t: any) => `- **${t.name}**: ${t.description}`).join('\n');
+                const toolsList = tools.map((t) => `- **${t.name}**: ${t.description}`).join('\n');
                 this.addMessage('system', `## Available Tools\n\n${toolsList}`);
                 break;
+            }
             case '/file-back':
         // 后台执行，不阻塞主流程
-                this.runFileBackInBackground(argStr.trim());
+                // runFileBackInBackground 自己 try/catch 并以系统消息告知用户；detach 兜底其余意外 reject。
+                detach(this.runFileBackInBackground(argStr.trim()), 'ChatController');
                 break;
             case '/wiki:compile':
                 await this.handleWikiCompile(argStr);
                 break;
             case '/wiki:index':
-                (this.app as any).commands.executeCommandById(`${PLUGIN_ID}:knowledge-open-index`);
+                (this.app as AppWithCommands).commands.executeCommandById(`${PLUGIN_ID}:knowledge-open-index`);
                 break;
             case '/wiki:lint':
-                (this.app as any).commands.executeCommandById(`${PLUGIN_ID}:knowledge-lint`);
+                (this.app as AppWithCommands).commands.executeCommandById(`${PLUGIN_ID}:knowledge-lint`);
                 break;
             case '/forget':
                 await this.handleForget(argStr, '/forget');
@@ -379,16 +641,15 @@ export class ChatController {
      * 内置命令优先(本方法只在 switch 落到 default 时才调),满足冲突时内置优先的约定。
      */
     private async handleUserCommandOrUnknown(cmd: string, argStr: string) {
-        const execUser = (this.api as any).executeUserCommand;
-        if (typeof execUser === 'function') {
+        if (typeof this.api.executeUserCommand === 'function') {
             this.setResponding(true);
             try {
-                const result = await execUser.call(this.api, cmd, argStr.trim());
+                const result = await this.api.executeUserCommand(cmd, argStr.trim());
                 if (result?.handled) {
                     this.addMessage('ai', result.message ?? '');
                     return;
                 }
-            } catch (error: any) {
+            } catch (error: unknown) {
                 this.handleError(error);
                 return;
             } finally {
@@ -398,15 +659,19 @@ export class ChatController {
         this.addMessage('system', `Unknown command: ${cmd}`);
     }
 
-    private formatSlashCommandResult(result: any): string {
+    private formatSlashCommandResult(result: ToolResultPayload | string): string {
         if (typeof result === 'string') return result;
         if (result?.message && typeof result.message === 'string') return result.message;
         return `\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
     }
 
-    private toApprovalRequest(result: any): ApprovalRequest | null {
+    private toApprovalRequest(result: ToolResultPayload): ApprovalRequest | null {
         if (!result?.approval_required) return null;
         return {
+            id: typeof result.requestId === 'string' && result.requestId
+                ? result.requestId
+                : createApprovalRequestId(),
+            conversationId: this.conversationId,
             action: result.action,
             target: result.target,
             args: result.args || {},
@@ -415,7 +680,7 @@ export class ChatController {
         };
     }
 
-    private handleStructuredResult(result: any, action?: string, args: Record<string, any> = {}) {
+    private handleStructuredResult(result: ToolResultPayload, action?: string, args: Record<string, unknown> = {}) {
         const approvalRequest = this.toApprovalRequest(result);
         if (approvalRequest) {
             this.addApprovalMessage(approvalRequest);
@@ -431,22 +696,257 @@ export class ChatController {
         this.addMessage('system', this.formatSlashCommandResult(result));
     }
 
-    public async approveApproval(request: ApprovalRequest) {
+    /**
+     * 批准一条审批消息。
+     *
+     * 按消息 id（而不是卡片 DOM）定位请求：消息里的 request.id 是执行登记表的键，
+     * 所以双击、键盘重复触发、重挂载后的第二次点击都只会执行一次。
+     */
+    public async approveApproval(messageId: string) {
+        await this.runApproval(messageId, false);
+    }
+
+    /** 失败后的显式重试；只允许 failed 且 retryable 的终态。 */
+    public async retryApproval(messageId: string) {
+        await this.runApproval(messageId, true);
+    }
+
+    /**
+     * 拒绝：不执行任何工具调用，只把请求标记为 rejected 并留在消息流里。
+     */
+    public rejectApproval(messageId: string) {
+        const message = this.findApprovalMessage(messageId);
+        if (!message) return;
+        const state = message.approvalState ?? { status: 'pending' };
+        if (state.status !== 'pending') return;
+
+        this.updateApprovalState(messageId, {
+            status: 'rejected',
+            outcome: {
+                status: 'rejected',
+                detail: t('No write was performed.'),
+                target: message.approval?.target,
+                completedAt: Date.now(),
+            },
+        });
+    }
+
+    /**
+     * 结果未知时先核实，不直接重放写入。
+     * 执行登记表里还有 in-flight Promise 就等它；否则查审计记录判断「是否执行过」。
+     */
+    public async recheckApproval(messageId: string) {
+        const message = this.findApprovalMessage(messageId);
+        const request = message?.approval;
+        if (!message || !request) return;
+        const state = message.approvalState ?? { status: 'pending' };
+        if (state.status !== 'unknown') return;
+
+        if (typeof this.api.reconcileApprovedAction !== 'function') {
+            this.updateApprovalState(messageId, {
+                ...state,
+                status: 'unknown',
+                outcome: {
+                    ...state.outcome,
+                    status: 'unknown',
+                    detail: t('Cannot verify the result automatically. Check the target manually.'),
+                    retryable: false,
+                    completedAt: Date.now(),
+                },
+            });
+            return;
+        }
+
         this.setResponding(true);
         try {
-            // 传 conversationId:批准后的真实结果由 ModelService 回灌进该会话的 pi session,
-            // 使下一轮模型看到动作已执行而非停留在审批占位上失忆。
-            const result = await (this.api as any).executeApprovedAction(request.action, request.args, this.conversationId);
-            this.handleStructuredResult(result, request.action, request.args);
-        } catch (error: any) {
-            this.handleError(error);
+            const outcome = await this.api.reconcileApprovedAction(
+                request.id,
+                request.action,
+                request.args,
+                this.conversationId,
+                // 消息创建时间用于区分「记录已过期」：审计状态被上限淘汰后不能再假设「没执行过」。
+                { requestedAt: message.timestamp },
+            );
+            this.applyExecutionOutcome(messageId, request, outcome);
+        } catch (error: unknown) {
+            this.updateApprovalState(messageId, {
+                status: 'unknown',
+                outcome: {
+                    status: 'unknown',
+                    error: thrownMessage(error) || String(error),
+                    detail: t('Could not verify the result. Check the target manually.'),
+                    retryable: false,
+                    completedAt: Date.now(),
+                },
+            });
         } finally {
             this.setResponding(false);
         }
     }
 
-    public cancelApproval(request: ApprovalRequest) {
-        this.addMessage('system', `Cancelled: ${request.target}`);
+    private async runApproval(messageId: string, retry: boolean) {
+        const message = this.findApprovalMessage(messageId);
+        const request = message?.approval;
+        if (!message || !request) return;
+
+        const state = message.approvalState ?? { status: 'pending' };
+        const allowed = retry
+            ? state.status === 'failed' && state.outcome?.retryable !== false
+            : state.status === 'pending';
+        if (!allowed) return;
+
+        if (!this.approvalBelongsToThisConversation(request)) {
+            this.updateApprovalState(messageId, {
+                status: 'failed',
+                outcome: {
+                    status: 'failed',
+                    detail: t('This approval belongs to another conversation, so it was not executed.'),
+                    retryable: false,
+                    completedAt: Date.now(),
+                },
+            });
+            return;
+        }
+
+        // 先落 running 再执行：即使视图随后被销毁，重新挂载时也不会把 pending 当成可再次点击。
+        this.updateApprovalState(messageId, { status: 'running' });
+        this.setResponding(true);
+        try {
+            // 传 conversationId:批准后的真实结果由 ModelService 回灌进该会话的 pi session,
+            // 使下一轮模型看到动作已执行而非停留在审批占位上失忆。
+            const result = await this.api.executeApprovedAction(
+                request.action,
+                request.args,
+                this.conversationId,
+                { requestId: request.id, retry },
+            );
+            this.applyExecutionOutcome(messageId, request, result);
+        } catch (error: unknown) {
+            this.updateApprovalState(messageId, {
+                status: 'unknown',
+                outcome: {
+                    status: 'unknown',
+                    error: thrownMessage(error) || String(error),
+                    detail: t('The action was interrupted before its result was recorded. Check the target before retrying.'),
+                    retryable: false,
+                    completedAt: Date.now(),
+                },
+            });
+        } finally {
+            this.setResponding(false);
+        }
+    }
+
+    private applyExecutionOutcome(
+        messageId: string,
+        request: ApprovalRequest,
+        execution: ApprovalExecutionOutcome | ToolResultPayload,
+    ) {
+        const outcome = this.toApprovalOutcome(execution, request);
+        this.updateApprovalState(messageId, { status: outcome.status, outcome });
+        if (outcome.status === 'succeeded') {
+            const raw = (execution?.kind === 'approval-execution' ? execution.result : execution) as ToolResultPayload;
+            void this.openFileFromToolResult(request.action, raw, request.args);
+        }
+    }
+
+    private toApprovalOutcome(
+        execution: ApprovalExecutionOutcome | ToolResultPayload,
+        request: ApprovalRequest,
+    ): ApprovalOutcome {
+        if (execution?.kind === 'approval-execution') {
+            return {
+                status: execution.status,
+                detail: execution.detail,
+                error: execution.error,
+                target: execution.target ?? request.target,
+                completedAt: execution.completedAt ?? Date.now(),
+                retryable: execution.retryable,
+            };
+        }
+
+        // 兼容测试桩/旧调用方返回的裸工具结果。
+        const succeeded = execution?.success === true || execution?.status === 'success';
+        return {
+            status: succeeded ? 'succeeded' : 'failed',
+            detail: succeeded ? execution?.message : undefined,
+            error: succeeded ? undefined : (execution?.error || execution?.message || t('The action failed.')),
+            target: request.target,
+            completedAt: Date.now(),
+            retryable: !succeeded,
+        };
+    }
+
+    private findApprovalMessage(messageId: string): ChatMessage | undefined {
+        return this.messages.find(message => message.id === messageId && !!message.approval);
+    }
+
+    private approvalBelongsToThisConversation(request: ApprovalRequest): boolean {
+        // 旧快照可能没有 conversationId；有值时必须是当前会话，防止把 A 会话的请求在 B 会话执行。
+        return !request.conversationId
+            || !this.conversationId
+            || request.conversationId === this.conversationId;
+    }
+
+    private updateApprovalState(messageId: string, approvalState: ApprovalState) {
+        const index = this.messages.findIndex(message => message.id === messageId);
+        if (index < 0) return;
+        const next: ChatMessage = { ...this.messages[index], approvalState };
+        this.messages[index] = next;
+        this.onMessageUpdated?.(next);
+    }
+
+    /**
+     * 恢复投影时处理 status=running 的审批：
+     * - 登记表里仍在跑 → 等它结束并落终态；
+     * - 登记表有结果 → 直接落终态；
+     * - 都没有 → 查审计记录；查不到才标记为「未执行，可安全重试」。
+     */
+    private async reconcileRunningApprovals() {
+        const running = this.messages.filter(
+            message => message.approval && message.approvalState?.status === 'running',
+        );
+        if (running.length === 0) return;
+        if (typeof this.api.reconcileApprovedAction !== 'function') {
+            for (const message of running) {
+                this.updateApprovalState(message.id, {
+                    status: 'unknown',
+                    outcome: {
+                        status: 'unknown',
+                        detail: t('The action was interrupted before its result was recorded. Check the target before retrying.'),
+                        retryable: false,
+                        completedAt: Date.now(),
+                    },
+                });
+            }
+            return;
+        }
+
+        for (const message of running) {
+            const request = message.approval;
+            if (!request) continue;
+            try {
+                const outcome = await this.api.reconcileApprovedAction(
+                    request.id,
+                    request.action,
+                    request.args,
+                    this.conversationId,
+                    { requestedAt: message.timestamp },
+                );
+                this.applyExecutionOutcome(message.id, request, outcome);
+            } catch (error: unknown) {
+                this.updateApprovalState(message.id, {
+                    status: 'unknown',
+                    outcome: {
+                        status: 'unknown',
+                        error: thrownMessage(error) || String(error),
+                        detail: t('Could not verify the result. Check the target manually.'),
+                        retryable: false,
+                        completedAt: Date.now(),
+                    },
+                });
+            }
+        }
     }
 
     public cancelActiveStream(): boolean {
@@ -470,14 +970,13 @@ export class ChatController {
         if (!this.activeStreamController || this.activeStreamController.signal.aborted) {
             return false;
         }
-        const steer = (this.api as any).steerActiveRun;
-        if (typeof steer !== 'function') return false;
+        if (typeof this.api.steerActiveRun !== 'function') return false;
 
         // 必须听 steer 的回话,不能只看自己的 activeStreamController:
         // 后者在调 chatStream 之前就置位,而 harness 要到 queryStream 内部
         // 若干 await 之后才 register。这段窗口里补话会被丢弃,
         // 若仍渲染用户气泡,用户会以为发出去了。
-        if (steer.call(this.api, trimmed) !== true) return false;
+        if (this.api.steerActiveRun(trimmed) !== true) return false;
 
         this.addMessage('user', trimmed);
         return true;
@@ -488,47 +987,45 @@ export class ChatController {
         return !!this.activeStreamController && !this.activeStreamController.signal.aborted;
     }
 
-    public async undoWorkspaceEdit(editId: string): Promise<any> {
-        const undo = (this.api as any).undoWorkspaceEdit;
-        if (typeof undo !== 'function') {
+    public async undoWorkspaceEdit(editId: string): Promise<WorkspaceEditResult> {
+        if (typeof this.api.undoWorkspaceEdit !== 'function') {
             const message = 'Workspace edit undo is not available.';
             this.onWorkspaceEditUndoFailed?.(message);
             return { success: false, error: message };
         }
 
         try {
-            const result = await undo.call(this.api, editId);
+            const result = await this.api.undoWorkspaceEdit(editId);
             if (result?.success && result?.edit) {
                 this.onWorkspaceEditUndone?.(result.edit);
             } else {
                 this.onWorkspaceEditUndoFailed?.(result?.error || 'Unable to undo workspace edit.');
             }
             return result;
-        } catch (error: any) {
-            const message = error?.message || 'Unable to undo workspace edit.';
+        } catch (error: unknown) {
+            const message = thrownMessage(error) || 'Unable to undo workspace edit.';
             this.onWorkspaceEditUndoFailed?.(message);
             return { success: false, error: message };
         }
     }
 
-    public async undoAllWorkspaceEdits(editIds?: string[]): Promise<any[]> {
+    public async undoAllWorkspaceEdits(editIds?: string[]): Promise<WorkspaceEditResult[]> {
         if (editIds?.length) {
-            const results: any[] = [];
+            const results: WorkspaceEditResult[] = [];
             for (const editId of editIds) {
                 results.push(await this.undoWorkspaceEdit(editId));
             }
             return results;
         }
 
-        const undoAll = (this.api as any).undoAllWorkspaceEdits;
-        if (typeof undoAll !== 'function') {
+        if (typeof this.api.undoAllWorkspaceEdits !== 'function') {
             const message = 'Workspace edit undo is not available.';
             this.onWorkspaceEditUndoFailed?.(message);
             return [{ success: false, error: message }];
         }
 
         try {
-            const results = await undoAll.call(this.api);
+            const results = await this.api.undoAllWorkspaceEdits();
             for (const result of results || []) {
                 if (result?.success && result?.edit) {
                     this.onWorkspaceEditUndone?.(result.edit);
@@ -537,8 +1034,8 @@ export class ChatController {
                 }
             }
             return results || [];
-        } catch (error: any) {
-            const message = error?.message || 'Unable to undo workspace edits.';
+        } catch (error: unknown) {
+            const message = thrownMessage(error) || 'Unable to undo workspace edits.';
             this.onWorkspaceEditUndoFailed?.(message);
             return [{ success: false, error: message }];
         }
@@ -563,9 +1060,8 @@ export class ChatController {
         apply: () => void | Promise<void>;
     }) {
         await options.apply();
-        const recordDirectWrite = (this.api as any).recordDirectWrite;
-        if (typeof recordDirectWrite === 'function') {
-            await recordDirectWrite.call(this.api, {
+        if (typeof this.api.recordDirectWrite === 'function') {
+            await this.api.recordDirectWrite({
                 action: options.action,
                 target: options.target,
                 previousContent: options.previousContent,
@@ -605,16 +1101,15 @@ export class ChatController {
         const trimmedReason = reason.trim();
 
         // 1. 存教训(失败不应阻断重答,仅记日志)。
-        const retainLesson = (this.api as any).retainLesson;
-        if (typeof retainLesson === 'function' && trimmedReason) {
+        if (typeof this.api.retainLesson === 'function' && trimmedReason) {
             try {
-                await retainLesson.call(this.api, {
+                await this.api.retainLesson({
                     userInput,
                     rejectedOutput: targetMsg.content,
                     reason: trimmedReason,
                     source: 'shell',
                 });
-            } catch (error: any) {
+            } catch (error: unknown) {
                 logger.error('Retain lesson failed', error, 'ChatController');
             }
         }
@@ -681,7 +1176,7 @@ export class ChatController {
         return isFileWriteToolName(name);
     }
 
-    private shiftToolArgs(toolArgs: Map<string, any[]>, name: string): any {
+    private shiftToolArgs(toolArgs: Map<string, Record<string, unknown>[]>, name: string): Record<string, unknown> {
         const calls = toolArgs.get(name);
         if (!calls || calls.length === 0) return {};
         const args = calls.shift() || {};
@@ -689,20 +1184,20 @@ export class ChatController {
         return args;
     }
 
-    private isSuccessfulToolResult(result: any): boolean {
+    private isSuccessfulToolResult(result: ToolResultPayload): boolean {
         return isSuccessfulWriteToolResult(result);
     }
 
-    private handleWorkspaceEditResult(result: any): void {
+    private handleWorkspaceEditResult(result: ToolResultPayload): void {
         if (!result?.workspaceEdit) return;
         this.onWorkspaceEdit?.(result.workspaceEdit);
     }
 
-    private getResultPath(action: string, result: any, args: Record<string, any>): string {
+    private getResultPath(action: string, result: ToolResultPayload, args: Record<string, unknown>): string {
         return getFileWriteResultPath(action, result, args);
     }
 
-    private getWriteToolError(result: any): string {
+    private getWriteToolError(result: ToolResultPayload): string {
         return getFileWriteError(result);
     }
 
@@ -710,7 +1205,7 @@ export class ChatController {
         return buildFileWriteFailureMessage(attemptedWrite, lastError);
     }
 
-    private async openFileFromToolResult(action: string, result: any, args: Record<string, any> = {}) {
+    private async openFileFromToolResult(action: string, result: ToolResultPayload, args: Record<string, unknown> = {}) {
         if (!this.isSuccessfulToolResult(result)) return;
         const path = this.getResultPath(action, result, args);
         if (!path) return;
@@ -738,9 +1233,9 @@ export class ChatController {
             sessionEntryId?: string;
             metadata?: ChatMessage['metadata'];
         },
-    ) {
+    ): ChatMessage {
         const msg: ChatMessage = {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            id: Date.now().toString() + Math.random().toString(36).slice(2, 11),
             role,
             content,
             timestamp: Date.now(),
@@ -752,25 +1247,43 @@ export class ChatController {
         if (this.onMessageAdded) {
             this.onMessageAdded(msg, { alreadyRendered: extra?.alreadyRendered === true });
         }
+        return msg;
     }
 
     /**
      * 记录一条流式 ai 回复。正文已随 text_delta 上屏,故标 alreadyRendered——
      * 宿主只把它写进投影,不再画第二遍(ADR 0002)。
+     * 终态(outcome)与失败原因随消息持久化,回放时才能还原失败/取消,而不是默认成功。
+     * @returns 新消息 id,供失败卡片按消息定位重试现场。
      */
     private recordStreamedReply(
         text: string,
-        options: { assistantEntryId?: string; interrupted?: boolean } = {},
-    ) {
-        this.addMessage('ai', text, undefined, {
+        options: {
+            assistantEntryId?: string;
+            interrupted?: boolean;
+            outcome?: ChatTurnOutcome;
+            failureReason?: string;
+        } = {},
+    ): string {
+        const metadata: ChatMessage['metadata'] = {};
+        if (options.outcome) metadata.outcome = options.outcome;
+        if (options.failureReason) metadata.failureReason = options.failureReason;
+        if (options.interrupted) metadata.interrupted = true;
+        const msg = this.addMessage('ai', text, undefined, {
             sessionEntryId: options.assistantEntryId,
-            metadata: options.interrupted ? { interrupted: true } : undefined,
+            metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
             alreadyRendered: true,
         });
+        return msg.id;
     }
 
     private addApprovalMessage(request: ApprovalRequest) {
-        this.addMessage('system', request.message, request);
+        const enriched: ApprovalRequest = {
+            ...request,
+            id: request.id || createApprovalRequestId(),
+            conversationId: request.conversationId ?? this.conversationId,
+        };
+        this.addMessage('system', enriched.message, enriched);
     }
 
     private setResponding(status: boolean) {
@@ -780,18 +1293,21 @@ export class ChatController {
         }
     }
 
-    private handleError(error: any) {
+    private handleError(error: unknown) {
         logger.error('Chat error', error, 'ChatController');
         let msg = 'Unknown error occurred.';
-        if (error.message) msg = error.message;
+        const message = thrownMessage(error);
+        if (message) msg = message;
         this.addMessage('system', `Error: ${msg}`);
     }
 
-    private isAbortError(error: any): boolean {
-        return error?.name === 'AbortError';
+    private isAbortError(error: unknown): boolean {
+        // 与旧实现 `error?.name === 'AbortError'` 对齐：对象与函数抛出值都按 name 识别。
+        return (typeof error === 'object' && error !== null || typeof error === 'function')
+            && 'name' in error && error.name === 'AbortError';
     }
 
-    private normalizeContextItems(context: any[] | string): any[] {
+    private normalizeContextItems(context: ChatContextItem[] | string): ChatContextItem[] {
         if (Array.isArray(context)) {
             return context;
         }
@@ -818,7 +1334,7 @@ export class ChatController {
         const targetMsg = this.messages.find(m => m.id === msgId && m.role === 'ai');
         if (!targetMsg) return;
 
-        const toolRegistry = (this.app as any).plugins?.plugins?.[PLUGIN_ID]?.toolRegistry;
+        const toolRegistry = (this.app as AppWithPluginHost).plugins?.plugins?.[PLUGIN_ID]?.toolRegistry;
         if (toolRegistry?.execute) {
             try {
                 const result = await toolRegistry.execute('file_back_knowledge', this.buildFileBackArgs(targetMsg));
@@ -829,9 +1345,9 @@ export class ChatController {
                     this.addMessage('system', `Archive failed: ${result?.error || 'Unknown error'}`);
                 }
                 return;
-            } catch (error: any) {
+            } catch (error: unknown) {
                 logger.error('File-back failed', error, 'ChatController');
-                this.addMessage('system', `Archive failed: ${error?.message || 'Unknown error'}`);
+                this.addMessage('system', `Archive failed: ${thrownMessage(error) || 'Unknown error'}`);
                 return;
             }
         }
@@ -839,7 +1355,7 @@ export class ChatController {
         const fileBackPrompt = `用户对以下回答点赞，请将其归档到知识库。使用 file_back_knowledge 工具，提取标题和核心内容，并提取相关的 topics 主题标签。\n\n回答内容：\n${targetMsg.content}`;
         this.api.chat(fileBackPrompt, [], '').then(() => {
             this.addMessage('system', 'Archived to the knowledge wiki.');
-        }).catch((error: any) => {
+        }).catch((error: unknown) => {
             logger.error('File-back failed', error, 'ChatController');
         });
     }
@@ -922,7 +1438,7 @@ export class ChatController {
         }
 
         if (mode === 'overview' || mode === 'raw') {
-            await this.renderMemoryView({ mode: mode as 'overview' | 'raw', limit: 10 }, note);
+            await this.renderMemoryView({ mode, limit: 10 }, note);
             return;
         }
 
@@ -934,14 +1450,13 @@ export class ChatController {
         this.addMessage('system', 'Usage: `/memory [overview|observations|search <query>|forget <field|all>]`');
     }
 
-    private async renderMemoryView(request: any, prefix: string = '') {
-        const getMemoryView = (this.api as any).getMemoryView;
-        if (typeof getMemoryView !== 'function') {
+    private async renderMemoryView(request: MemoryViewRequest, prefix: string = '') {
+        if (typeof this.api.getMemoryView !== 'function') {
             this.addMessage('system', `${prefix}No memory data available.`);
             return;
         }
 
-        const view = await getMemoryView.call(this.api, request);
+        const view = await this.api.getMemoryView(request);
         if (!view) {
             this.addMessage('system', `${prefix}No memory data available.`);
             return;
@@ -950,8 +1465,8 @@ export class ChatController {
         this.addMessage('system', `${prefix}${this.formatMemoryView(view, request)}`);
     }
 
-    private formatMemoryView(view: any, request: any): string {
-        const stats = view.stats || {};
+    private formatMemoryView(view: MemoryView, request: MemoryViewRequest): string {
+        const stats: Partial<MemoryStats> = view.stats || {};
         const lines = [
             '## Hindsight Memory',
             '',
@@ -981,7 +1496,7 @@ export class ChatController {
         return lines.join('\n');
     }
 
-    private appendMemoryRecords(lines: string[], title: string, records: any[], showMeta: boolean) {
+    private appendMemoryRecords(lines: string[], title: string, records: MemoryRecord[], showMeta: boolean) {
         lines.push('', `### ${title}`);
         if (!records || records.length === 0) {
             lines.push('- No matching memories.');
@@ -1001,7 +1516,7 @@ export class ChatController {
      * 溯源(provenance):把每条记忆的来源与时间透出,回答"这条为什么被记住/何时记的"。
      * 数据已在 record 上(source.kind / mentionedAt),此前从不展示。返回以 ", " 开头的片段(便于拼接)。
      */
-    private formatProvenance(record: any): string {
+    private formatProvenance(record: MemoryRecord): string {
         const parts: string[] = [];
         const kind = record?.source?.kind;
         if (kind) {
@@ -1050,7 +1565,7 @@ export class ChatController {
 
         // 遗留 UserProfile 已退役(#6):/forget 现在只作用于 Hindsight 记忆。
         // 旧实现还会 updateProfile 清空 profile 字段,但那是 write-only 死状态、对召回零影响,一并删除。
-        if (typeof (this.api as any).forgetMemory !== 'function') {
+        if (typeof this.api.forgetMemory !== 'function') {
             this.addMessage('system', `${compatibilityNote}No user memory data available.`);
             return;
         }
@@ -1061,7 +1576,7 @@ export class ChatController {
             return;
         }
 
-        const result = await (this.api as any).forgetMemory(f);
+        const result = await this.api.forgetMemory(f);
         const fallback = f === 'all' ? 'Cleared all remembered user data.' : `Forgot memory field: ${f}`;
         this.addMessage('system', `${compatibilityNote}${result?.message || fallback}`);
     }
@@ -1086,8 +1601,8 @@ export class ChatController {
             const leaf = this.app.workspace.getLeaf(false);
             await leaf.openFile(file);
             this.addMessage('system', `${t('Created and opened:')} [[${path}]]`);
-        } catch (e: any) {
-            this.addMessage('system', `${t('Failed to create:')} ${e.message}`);
+        } catch (e: unknown) {
+            this.addMessage('system', `${t('Failed to create:')} ${thrownMessage(e)}`);
         }
     }
 
@@ -1114,8 +1629,8 @@ export class ChatController {
                 'slash-edit',
             );
             this.addMessage('ai', result);
-        } catch (e: any) {
-            this.addMessage('system', `${t('Edit failed:')} ${e.message}`);
+        } catch (e: unknown) {
+            this.addMessage('system', `${t('Edit failed:')} ${thrownMessage(e)}`);
         } finally {
             this.setResponding(false);
         }
@@ -1135,8 +1650,8 @@ export class ChatController {
             { command: '/wiki:lint', description: 'Run the knowledge wiki health check' },
             { command: '/help', description: 'Show this help message' },
         ];
-        const skillCommands = typeof (this.api as any).getSkillCommands === 'function'
-            ? (this.api as any).getSkillCommands()
+        const skillCommands = typeof this.api.getSkillCommands === 'function'
+            ? this.api.getSkillCommands()
             : [];
 
         let help = `## Shell Commands\n\n`;
@@ -1147,18 +1662,18 @@ export class ChatController {
         if (skillCommands.length > 0) {
             help += `\n\n## Skill Commands\n\n`;
             help += skillCommands
-                .map((entry: any) => `- \`${entry.command}\` — ${entry.description}`)
+                .map((entry) => `- \`${entry.command}\` — ${entry.description}`)
                 .join('\n');
         }
 
         // 用户自定义命令(.obsidian/baizer-commands/*.md)。同步快照,启动预热后有值。
-        const userCommands = typeof (this.api as any).getUserCommandsSync === 'function'
-            ? (this.api as any).getUserCommandsSync()
+        const userCommands = typeof this.api.getUserCommandsSync === 'function'
+            ? this.api.getUserCommandsSync()
             : [];
         if (userCommands.length > 0) {
             help += `\n\n## User Commands\n\n`;
             help += userCommands
-                .map((entry: any) => `- \`${entry.command}\` - ${entry.description}`)
+                .map((entry) => `- \`${entry.command}\` - ${entry.description}`)
                 .join('\n');
         }
 
@@ -1168,7 +1683,7 @@ export class ChatController {
 
     private async handleWikiCompile(pathArg: string) {
         const path = pathArg.trim();
-        const plugin = (this.app as any).plugins?.plugins?.[PLUGIN_ID];
+        const plugin = (this.app as AppWithPluginHost).plugins?.plugins?.[PLUGIN_ID];
         const runtime = plugin?.knowledgeRuntime;
 
         if (!runtime) {
@@ -1200,11 +1715,19 @@ export class ChatController {
                 const r = await runtime.compileByPath(path);
                 this.addMessage('system', `${t('Done: registered')} ${r.registered}, ${t('succeeded')} ${r.success}, ${t('failed')} ${r.failed}`);
             }
-        } catch (e: any) {
-            this.addMessage('system', `${t('Compile failed:')} ${e.message}`);
+        } catch (e: unknown) {
+            this.addMessage('system', `${t('Compile failed:')} ${thrownMessage(e)}`);
         } finally {
             this.setResponding(false);
         }
     }
 }
 
+
+/**
+ * 审批请求身份：时间戳 + 随机后缀，随消息投影持久化。
+ * 不用数组下标/消息 id，因为请求在会话快照里要独立于 presentation 存在。
+ */
+function createApprovalRequestId(): string {
+    return `approval-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}

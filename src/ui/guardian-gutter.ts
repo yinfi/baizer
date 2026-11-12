@@ -56,7 +56,7 @@ const guardianLineStateField = StateField.define<{ line: number; state: Guardian
 
 // Guardian Gutter Marker
 class GuardianDotMarker extends GutterMarker {
-    constructor(private state: GuardianState, private view: EditorView) {
+    constructor(private state: GuardianState, private view: EditorView | null) {
         super();
     }
 
@@ -68,16 +68,15 @@ class GuardianDotMarker extends GutterMarker {
     }
 
     toDOM() {
-        const dot = document.createElement('div');
-        dot.className = `guardian-gutter-marker guardian-${this.state}`;
+        const dot = createDiv({ cls: `guardian-gutter-marker guardian-${this.state}` });
 
         // Click handler to toggle mode
         dot.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
 
-            const currentMode = this.view.state.field(guardianModeField);
-            this.view.dispatch({
+            const currentMode = this.view!.state.field(guardianModeField);
+            this.view!.dispatch({
                 effects: setGuardianMode.of(!currentMode)
             });
         };
@@ -113,7 +112,7 @@ interface GuardianMarkerState {
 // StateField to manage Gutter Markers (Follows Cursor)
 const guardianMarkerField = StateField.define<GuardianMarkerState>({
     create() {
-        return { set: RangeSet.empty, effectiveState: GuardianState.Idle, from: -1 };
+        return { set: RangeSet.of<GutterMarker>([]), effectiveState: GuardianState.Idle, from: -1 };
     },
 
     update(prev, tr) {
@@ -160,7 +159,7 @@ const guardianMarkerField = StateField.define<GuardianMarkerState>({
         // SIMPLER: Just use a global window event or similar? No, that's messy.
         // Better: The `gutter` extension allows `domEventHandlers`. We can handle clicks there!
 
-        const marker = new GuardianDotMarker(effectiveState, null as any); // View will be handled in domEventHandlers
+        const marker = new GuardianDotMarker(effectiveState, null); // View will be handled in domEventHandlers
         return {
             set: RangeSet.of([marker.range(lineBlock.from)]),
             effectiveState,

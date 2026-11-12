@@ -1,8 +1,10 @@
 // test/knowledge/linter.test.ts
 
+import { App, TFile } from 'obsidian';
 import {
   LintIssue,
   LintIssueSeverity,
+  KnowledgeLinter,
   buildHealthReportContent,
   checkMissingSummaries,
   checkLowConfidenceExtractions,
@@ -25,6 +27,19 @@ function expect(actual: any) {
 function test(name: string, fn: () => void) {
   try { fn(); console.log(`  ✓ ${name}`); }
   catch (e: any) { console.error(`  ✗ ${name}: ${e.message}`); process.exit(1); }
+}
+
+async function testAsync(name: string, fn: () => Promise<void>) {
+  try { await fn(); console.log(`  ✓ ${name}`); }
+  catch (e: any) { console.error(`  ✗ ${name}: ${e.message}`); process.exit(1); }
+}
+
+function mockFile(path: string): TFile {
+  const file = new TFile();
+  file.path = path;
+  file.basename = path.split('/').pop()?.replace(/\.md$/, '') || path;
+  file.extension = 'md';
+  return file;
 }
 
 console.log('=== Knowledge Linter Tests ===');
@@ -81,4 +96,37 @@ test('buildHealthReportContent with no issues shows clean report', () => {
   expect(content).toContain('知识库健康状况良好');
 });
 
-console.log('All linter tests passed!');
+async function runLintTests(): Promise<void> {
+  await testAsync('runLint tolerates wrong-typed frontmatter fields', async () => {
+    const doneFile = mockFile('Notes/a.md');
+    const wikiFallback = mockFile('Wiki/Articles/a.md');
+    const wikiOk = mockFile('Wiki/Articles/b.md');
+    const caches = new Map<unknown, unknown>([
+      [doneFile, { frontmatter: { knowledge_status: 'done', knowledge_summary: 42 } }],
+      [wikiFallback, { frontmatter: { knowledge_generated: true, title: 7, review_flags: 'not-json', concepts: 123 } }],
+      [wikiOk, { frontmatter: { knowledge_generated: 'true', title: 'B title', review_flags: '["uncertain"]', concepts: '["c1"]' } }],
+    ]);
+    const app = {
+      vault: { getFiles: () => [doneFile, wikiFallback, wikiOk], getMarkdownFiles: () => [doneFile] },
+      metadataCache: { getFileCache: (f: unknown) => caches.get(f) ?? null },
+    } as unknown as App;
+
+    const issues = await new KnowledgeLinter(app, 'Wiki').runLint();
+
+    const lowConfidence = issues.filter(i => i.type === 'low_confidence');
+    expect(lowConfidence.length).toBe(1);
+    expect(lowConfidence[0].message).toContain('B title');
+    expect(lowConfidence[0].filePath).toBe('Wiki/Articles/b.md');
+
+    const orphans = issues.filter(i => i.type === 'orphan_concept');
+    expect(orphans.length).toBe(1);
+    expect(orphans[0].message).toContain('c1');
+
+    // 数字类型 knowledge_summary 视为缺失，不应被当成存在的路径
+    expect(issues.filter(i => i.type === 'missing_summary').length).toBe(0);
+  });
+
+  console.log('All linter tests passed!');
+}
+
+void runLintTests();

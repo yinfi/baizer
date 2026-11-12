@@ -12,7 +12,9 @@ import {
   SkillCommandEntry,
   ActivatedSkill,
   ResolvedSkill,
+  ToolArgs,
   ToolContext,
+  ToolResult,
 } from './types';
 import { ToolRegistry } from './tool-registry';
 import { logger } from '../utils/logger';
@@ -32,7 +34,7 @@ import {
 
 /** 内置 Skill 的 executor：direct 模式（斜杠命令）时执行逻辑。 */
 export interface BuiltinExecutor {
-  execute(args: any, ctx: ToolContext): Promise<any>;
+  execute(args: ToolArgs, ctx: ToolContext): Promise<ToolResult>;
 }
 
 /** 注册表内部条目：skill 模型 + sidecar + 可选 executor + 来源标记。 */
@@ -118,7 +120,7 @@ export class SkillRegistry {
           entry.loaded.skill.filePath = path;
           console.warn(`[SkillRegistry] Ignoring invalid materialized builtin skill "${name}".`);
         }
-      } catch (e) {
+      } catch {
         // 物化失败：回退到确定性路径，read_skill 仍可尝试读；记录告警不阻断。
         entry.loaded.skill.filePath = builtinSkillFilePath(name, skillsDir);
         console.warn(`[SkillRegistry] Failed to materialize builtin skill "${name}"`);
@@ -189,7 +191,7 @@ export class SkillRegistry {
       try {
         const content = await adapter.read(filePath);
         if (this.registerUserFromMd(content, filePath)) count++;
-      } catch (e) {
+      } catch {
         console.warn(`[SkillRegistry] Failed to load user skill: ${filePath}`);
       }
     }

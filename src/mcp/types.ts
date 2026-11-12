@@ -3,6 +3,8 @@ import { OntologyUpdateMode } from "../knowledge/types";
 import { Locale } from "../i18n/zh";
 import type { KnowledgeRuntime } from "../knowledge/runtime";
 import type { ToolRegistry } from "../skills/tool-registry";
+import type { ModelService } from "../services/model-service";
+import type { DerivedSkillStatus } from "../skills/builtin/plugin-ctrl/plugin-watcher";
 
 // ===== 品牌配置 — 改名只需改这里 =====
 export const PLUGIN_ID = 'baizer';
@@ -13,20 +15,50 @@ export const PLUGIN_DATA_DIR = `.obsidian/${PLUGIN_ID}`;
 
 declare module "obsidian" {
     interface App {
+        /** Obsidian 未公开：插件宿主。getPlugin 返回第三方插件实例，形状由各插件自定义（外部数据）。 */
         plugins: {
             manifests: Record<string, PluginManifest>;
             enabledPlugins: Set<string>;
-            getPlugin(id: string): any;
+            getPlugin(id: string): Record<string, unknown> | null | undefined;
         };
         commands: {
             listCommands(): Command[];
             executeCommandById(id: string): boolean;
         };
+        /**
+         * Obsidian 未公开：设置面板宿主。只声明实际用到的成员。
+         * 热键页签在 openTabById('hotkeys') 之后才有 activeTab。
+         */
+        setting: {
+            open(): void;
+            openTabById(id: string): void;
+            activeTab: { setQuery(query: string): void };
+        };
+        /** Obsidian 未公开：核心插件（bases 等）的开关状态。 */
+        internalPlugins?: {
+            plugins?: Record<string, { enabled: boolean } | undefined>;
+        };
+    }
+    interface MetadataCache {
+        /** Obsidian 未公开：是否已完成首次索引（未初始化时 `resolved` 事件才是可靠信号）。 */
+        initialized?: boolean;
     }
 }
 
 // --- Provider 配置 ---
-export type ProviderType = 'gemini' | 'openai-compatible';
+/**
+ * provider 使用的线协议（wire protocol）。
+ * - 'openai-compatible' : OpenAI 兼容接口，端点方言由 apiFlavor 决定
+ * - 'anthropic'         : Anthropic 原生 Messages 协议（api = 'anthropic-messages'，
+ *                         POST {baseUrl}/v1/messages，认证头 x-api-key + anthropic-version）
+ *
+ * 两种协议各自独立，互不伪装：anthropic 不是 openai-compatible 的一个 flavor。
+ *
+ * 历史上还有第三种 'gemini'（Google Generative AI），已被移除 —— 它会把
+ * @google/genai 与 pi-ai 的 google-generative-ai api 拖进单文件 bundle，而
+ * Obsidian Sync Standard 不同步超过 5MB 的文件。见 pruneUnsupportedProviders。
+ */
+export type ProviderType = 'openai-compatible' | 'anthropic';
 
 /**
  * OpenAI 兼容协议下的具体 API 端点方言。
@@ -42,9 +74,15 @@ export interface ProviderConfig {
     type: ProviderType;
     label: string;
     apiKey: string;
+    /**
+     * 服务地址（Base URL）——**不含端点路径**，端点由各协议 SDK/实现自行追加。
+     * - openai-compatible : OpenAI SDK 的 baseURL，SDK 追加 /chat/completions 或 /responses
+     * - anthropic         : Anthropic SDK 的 baseURL，SDK 追加 /v1/messages
+     *                       （故官方端点写 https://api.anthropic.com，不要再带 /v1）
+     */
     baseUrl: string;
     model: string;
-    /** OpenAI 兼容协议的 API 端点方言；缺省 = 'completions'。见 OpenAIApiFlavor。 */
+    /** OpenAI 兼容协议的 API 端点方言；缺省 = 'completions'。见 OpenAIApiFlavor。仅对 type='openai-compatible' 有意义。 */
     apiFlavor?: OpenAIApiFlavor;
     /**
      * 随每次 LLM 请求附带的自定义 header（某些 OpenAI 兼容端点要求的非标准 header，
@@ -56,13 +94,6 @@ export interface ProviderConfig {
 }
 
 export const DEFAULT_PROVIDERS: Record<string, ProviderConfig> = {
-    'gemini': {
-        type: 'gemini',
-        label: 'Google Gemini',
-        apiKey: '',
-        baseUrl: '',
-        model: 'gemini-2.5-flash'
-    },
     'openai': {
         type: 'openai-compatible',
         label: 'OpenAI',
@@ -83,6 +114,15 @@ export const DEFAULT_PROVIDERS: Record<string, ProviderConfig> = {
         apiKey: '',
         baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         model: 'qwen-turbo'
+    },
+    'anthropic': {
+        type: 'anthropic',
+        label: 'Anthropic',
+        apiKey: '',
+        // 官方端点不带 /v1：Anthropic SDK 会自行追加 /v1/messages。
+        // 兼容网关（实现 Anthropic Messages 协议）改这里即可。
+        baseUrl: 'https://api.anthropic.com',
+        model: 'claude-sonnet-4-5'
     }
 };
 
@@ -182,6 +222,21 @@ export interface PluginSettings {
     wechatInboxPath: string;
     wechatStoragePath: string;
 
+    // --- 🎧 Video Transcription (ASR) ---
+    /**
+     * 转写端点（Base URL，**不含端点路径**，插件追加 /audio/transcriptions）。
+     * 留空 = 沿用当前 provider 的 baseUrl，但仅当它是 openai-compatible ——
+     * Anthropic 的地址上没有 /audio/transcriptions，回退过去只会得到 404。
+     * 只配了 Anthropic 的用户在这里填一个 OpenAI 方言的转写服务即可转写。
+     */
+    asrBaseUrl: string;
+    /** 转写端点的 API Key。留空 = 沿用当前 provider 的 apiKey（回环/自建服务通常不需要）。 */
+    asrApiKey: string;
+    /** 转写模型。留空 = 'whisper-1'（改动前写死的值）。 */
+    asrModel: string;
+    /** 音频语言（ISO-639-1，如 'zh' / 'en'）。留空 = 交给端点自动判断。 */
+    asrLanguage: string;
+
     // --- 📚 Knowledge Compiler ---
     knowledgeSourceFolders: string[];
     knowledgeAutoCompile: boolean;
@@ -211,9 +266,13 @@ export interface PluginSettings {
     pluginSkillExcludeList: string[];
 }
 
+/** 转写模型的内置默认值。改动前它被写死在 video-transcription.ts 里。 */
+export const DEFAULT_ASR_MODEL = 'whisper-1';
+
 export const DEFAULT_SETTINGS: PluginSettings = {
     // Core
-    activeProvider: 'gemini',
+    // 'openai' 是 DEFAULT_PROVIDERS 的第一项：'gemini' 被移除后它就是新的出厂默认。
+    activeProvider: 'openai',
     providers: { ...DEFAULT_PROVIDERS },
     deletedProviderIds: [],
     contextWindow: 100000,
@@ -266,6 +325,14 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     wechatInboxPath: 'Inbox.md',
     wechatStoragePath: 'Clippings',
 
+    // Video transcription (ASR)
+    // 两个空串 + 空模型 = 与改动前完全一致的行为：沿用 provider 的地址与 key，模型 whisper-1。
+    // 既有 OpenAI 兼容用户不需要做任何事；只配 Anthropic 的用户填上 asrBaseUrl 即可转写。
+    asrBaseUrl: '',
+    asrApiKey: '',
+    asrModel: DEFAULT_ASR_MODEL,
+    asrLanguage: '',
+
     // Knowledge Compiler
     knowledgeSourceFolders: [],
     knowledgeAutoCompile: false,
@@ -302,9 +369,122 @@ export function mergeProviderDefaults(
     return merged;
 }
 
+/**
+ * 判断一个持久化配置里的 provider.type 是否仍受支持。
+ *
+ * 入参刻意收成 unknown：它直接面对 data.json 的内容，可能是历史类型、
+ * 拼错的值或干脆不是字符串，调用方不该为了调用它先做一次不安全的断言。
+ */
+export function isSupportedProviderType(type: unknown): type is ProviderType {
+    return type === 'openai-compatible' || type === 'anthropic';
+}
+
+/**
+ * 丢弃协议已不支持的 provider 条目（历史上 type:'gemini' 的配置是主要来源）。
+ *
+ * 为什么是「丢弃」而不是「留着」：留下的条目会在 ModelService.buildModelForConfig
+ * 的 default 分支被降级成 OpenAI-compatible，于是用户得到一个「名字还叫 Gemini、
+ * 实际按 OpenAI 协议去请求 Google 端点」的坏 provider —— 报错指向的是协议错误，
+ * 而真正的原因是这份配置已经不可能工作。
+ *
+ * 判据只看 config.type，不看 map 的 key：用户把一个自建 OpenAI 兼容服务命名为
+ * "my-gemini" 是完全合法的，不该被误删。
+ *
+ * 纯函数，loadSettings 与测试共用同一份判据。
+ */
+export function pruneUnsupportedProviders(
+    providers: Record<string, ProviderConfig> = {}
+): Record<string, ProviderConfig> {
+    const kept: Record<string, ProviderConfig> = {};
+
+    for (const [id, config] of Object.entries(providers)) {
+        if (config && isSupportedProviderType(config.type)) {
+            kept[id] = config;
+        }
+    }
+
+    return kept;
+}
+
+/**
+ * 读取旧版扁平设置（data.json 里没有 providers、只有 provider + 各家 xxxApiKey）
+ * 里的字符串字段，配合调用处的 `|| 默认值` 使用。
+ *
+ * 与 isSupportedProviderType 同样的理由：入参直接面对 data.json，可能是数字、对象，
+ * 或干脆是别的写法，调用方不该为了调用它先做一次不安全的断言。返回 undefined 表示
+ * 「这里没有可用的字符串」，默认值由调用方决定。
+ *
+ * 注意这是一处有意的行为收口：旧实现写作 `old.openaiApiKey || ''`，脏数据下的
+ * `apiKey: 123` 会被原样写进 ProviderConfig；现在这类值按「未设置」处理。
+ * 字符串（含空串）与旧实现逐值一致——空串仍会走调用处的 `|| 默认值`。
+ */
+export function legacyFlatString(value: unknown): string | undefined {
+    return typeof value === 'string' ? value : undefined;
+}
+
+/** 转写端点与模型的可配置覆盖项。空字符串一律表示「沿用 provider / 内置默认」。 */
+export interface AsrOverrides {
+    asrBaseUrl?: string;
+    asrApiKey?: string;
+    asrModel?: string;
+    asrLanguage?: string;
+}
+
+export interface ResolvedAsrConfig {
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    language: string;
+    /** 'settings' = 用户在设置里显式配了端点；'provider' = 沿用 openai-compatible provider。 */
+    source: 'settings' | 'provider';
+}
+
+/**
+ * 无法解析出转写端点时的说明。
+ *
+ * 门禁从「provider 类型」改成「有没有端点」之后，这句话就是用户唯一能看到的线索，
+ * 因此它必须同时说清「为什么没做」与「怎么才能做」。
+ */
+export const NO_ASR_ENDPOINT_MESSAGE =
+    'No transcription endpoint is configured. Set the transcription endpoint (Base URL) in Settings -> Capture, '
+    + 'or switch to an OpenAI-compatible provider whose base URL serves /audio/transcriptions.';
+
+/**
+ * 解析实际要打的转写端点。
+ *
+ * 顺序刻意如此：用户显式配置 > 沿用当前 openai-compatible provider > 放弃。
+ * 「沿用 provider」这一条是既有用户零迁移的保证：什么都没配的 OpenAI 兼容用户，
+ * 行为与改动前完全一致（同一个 baseUrl、同一个 key、同一个 whisper-1）。
+ *
+ * 反过来，Anthropic provider 的 baseUrl 上没有 /audio/transcriptions，所以**不**回退到它 ——
+ * 否则用户会收到一个指向 api.anthropic.com 的 404，而真正的原因是「没配转写端点」。
+ *
+ * 纯函数，与 mergeProviderDefaults / pruneUnsupportedProviders 同类：只看配置，不碰 DOM、不碰网络。
+ */
+export function resolveAsrConfig(params: {
+    asr?: AsrOverrides | null;
+    provider?: ProviderConfig | null;
+}): ResolvedAsrConfig | null {
+    const explicitBaseUrl = (params.asr?.asrBaseUrl ?? '').trim();
+    const provider = params.provider ?? null;
+    const providerFallback = provider && provider.type === 'openai-compatible' ? provider : null;
+
+    const baseUrl = explicitBaseUrl || (providerFallback?.baseUrl ?? '').trim();
+    if (!baseUrl) return null;
+
+    return {
+        baseUrl,
+        apiKey: (params.asr?.asrApiKey ?? '').trim() || (providerFallback?.apiKey ?? '').trim(),
+        model: (params.asr?.asrModel ?? '').trim() || DEFAULT_ASR_MODEL,
+        language: (params.asr?.asrLanguage ?? '').trim(),
+        source: explicitBaseUrl ? 'settings' : 'provider',
+    };
+}
+
 export interface IPlugin extends Plugin {
     settings: PluginSettings;
-    modelService: any;
+    /** 具体实现是 ModelService（main.ts 的 BaizerPlugin 已声明为该类型）。 */
+    modelService: ModelService;
     saveSettings(): Promise<void>;
     // 轻量落盘：仅写盘，不重建 provider/guardian/knowledge（纯 UI 字段用）。
     saveSettingsLight?(): Promise<void>;
@@ -312,8 +492,9 @@ export interface IPlugin extends Plugin {
     applyLanguageChange?(locale: Locale): Promise<void>;
     // 派生技能的管理入口（设置页读对账状态、重新生成、删除）。
     // 用最小结构类型而非 import PluginWatcher：types.ts 是底层模块，不该反向依赖 skills 层。
+    // 状态记录只做 import type（编译期擦除，无运行时依赖）。
     pluginWatcher?: {
-        getDerivedSkillStatuses(): any[];
+        getDerivedSkillStatuses(): DerivedSkillStatus[];
         getGenerationFailures(): ReadonlyMap<string, string>;
         // 返回值不写 any：设置页据 regenerated / blocker 决定提示哪一种结局，
         // any 会让日后改字段名时静默退化成「每次成功都报失败」。
