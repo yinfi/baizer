@@ -552,6 +552,34 @@ const stubNodeBuiltinDynamicImports = {
 
 const prod = (process.argv[2] === "production");
 
+/**
+ * 反馈功能的内置凭据（Q2=B）。
+ *
+ * token 只能经构建期环境变量注入 bundle：**绝不进 git 源码**。它在构建产物里是
+ * 明文字面量，随发行包公开——这是已拍板的前提，不是缺陷；因此本文件里不得出现
+ * 任何把它描述为「加密」或「安全保护」的措辞。
+ *
+ * 缺失时的行为分三层：
+ *   - 发布路径（BAIZER_RELEASE=1，由 release.yml 设置）：**构建失败**。静默发布一个
+ *     反馈功能不可用的版本，要等下一轮发布才能修。
+ *   - 本地 `npm run build`：允许通过但输出明确警告（开发时不阻塞）。
+ *   - 运行时：给出「未配置」提示，不呈现一个必然失败的确认流程。
+ */
+const feedbackToken = (process.env.BAIZER_FEEDBACK_TOKEN || "").trim();
+if (!feedbackToken) {
+	if (process.env.BAIZER_RELEASE === "1") {
+		console.error(
+			"BAIZER_RELEASE=1 but BAIZER_FEEDBACK_TOKEN is empty. Refusing to build a release "
+			+ "whose feedback feature cannot work. Set the repository secret before publishing.",
+		);
+		process.exit(1);
+	}
+	console.warn(
+		"[baizer] BAIZER_FEEDBACK_TOKEN is not set — the feedback feature will report "
+		+ "\"not configured\" at runtime. This is expected for local builds.",
+	);
+}
+
 await mkdir(outputDir, { recursive: true });
 
 const context = await esbuild.context({
@@ -560,6 +588,10 @@ const context = await esbuild.context({
 	},
 	entryPoints: ["main.ts"],
 	bundle: true,
+	define: {
+		// 只注入这一个标识符；源码里没有别处会看到 token。
+		__BAIZER_FEEDBACK_TOKEN__: JSON.stringify(feedbackToken),
+	},
 	external: [
 		"obsidian",
 		"electron",

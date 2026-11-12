@@ -54,6 +54,13 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
   }
 
   async *queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown> {
+    // BR1.1 的 fail-closed 分支：反馈会话拿不到 feedback 技能时**本轮不发起模型调用**。
+    // 带着四个工具却没有 SKILL.md 里那几条提示词层安全规则跑一轮，等于把安全规则换成
+    // 「模型自己看着办」——那会把一个能力隔离问题变成一个行为约束问题。
+    if (turn.blockedReason) {
+      yield { type: 'error', message: turn.blockedReason, outcome: 'failed' };
+      return;
+    }
     if (!this.deps.nativeChatFactory) {
       throw new Error('HarnessChatRuntime requires deps.nativeChatFactory to build a model handle');
     }
@@ -68,6 +75,8 @@ export class HarnessChatRuntime extends BaseChatRuntime implements ChatRuntime {
       skillRegistry: this.deps.skillRegistry,
       workspaceEditService: this.deps.workspaceEditService,
       skillScope,
+      // 工具执行期兜底靠它给草稿打 sourceConversationId、并识别串台（BR1.6）。
+      conversationId: turn.conversationId,
     });
 
     // 阶段1:优先复用 sessionManager 持有的长生命持久化会话(跨轮上下文由它派生,跨重启可恢复)。

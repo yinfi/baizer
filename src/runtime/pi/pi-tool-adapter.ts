@@ -17,6 +17,8 @@ export interface AdaptToolDefinitionsInput {
   skillRegistry?: Pick<SkillRegistry, 'activateSkill'> | null;
   workspaceEditService?: Pick<WorkspaceEditService, 'executeWorkspaceTool'> | null;
   skillScope: PiSkillScope;
+  /** 本次工具调用所属会话；写入类反馈工具用它给草稿打 sourceConversationId。 */
+  conversationId?: string;
 }
 
 export function inferToolExecutionMode(name: string, tool?: Partial<Tool>): PiToolExecutionMode {
@@ -82,7 +84,7 @@ async function executeBaizerTool(
     return input.workspaceEditService.executeWorkspaceTool(name, args);
   }
 
-  return input.toolRegistry.execute(name, args, signal);
+  return input.toolRegistry.execute(name, args, signal, { conversationId: input.conversationId });
 }
 
 function stringifyToolResponse(response: unknown): string {

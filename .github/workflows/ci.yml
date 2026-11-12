@@ -3,14 +3,28 @@ name: CI
 on:
   push:
     branches: [main]
+  # 不按基分支过滤：`branches` 在这里过滤的是**基分支**，一旦链路里出现 stacked PR
+  # （base 是另一个功能分支而非 main），CI 就一次都不会触发——守卫的接线因此从未被
+  # 真实 CI 验证过。PR 无论指向哪里都该跑 CI。
   pull_request:
-    branches: [main]
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 —— 守卫要扫「本次变更的提交范围」，浅克隆里 base 提交不在本地，
+      # 脚本会退回全量历史（多扫不漏扫，但慢）。
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # 凭据守卫：反馈功能的内置 token 只能来自构建期 secret，绝不能进任何提交。
+      # 扫的是**提交范围**而不是工作树——「先提交 token、再在同一 PR 里删掉」终态是
+      # 干净的，但 token 已进历史，GitHub 的 secret scanning 一样会撤销它，而现象是
+      # 「昨天还好，今天所有用户静默 401」，无人干预也会挂，极难定位。
+      # 放在最前面：命中即快速失败，不必等 npm ci / build。
+      - name: Guard against committed credentials
+        run: ./scripts/guard-credentials.sh --range "${{ github.event.pull_request.base.sha || github.event.before }}..HEAD"
 
       - name: Setup Node.js
         uses: actions/setup-node@v7

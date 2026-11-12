@@ -4929,3 +4929,82 @@ textarea.shell-input {
     white-space: pre-wrap;
     word-break: break-word;
 }
+
+/* ── 反馈：对外发布的确认区（external-publish 预览） ──
+   标题与正文从 request.args 渲染、编辑写回它，因此这里只是可编辑控件的外观，
+   不承载任何状态。 */
+.shell-external-publish {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.shell-external-publish-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+}
+
+.shell-external-publish-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.shell-external-publish-field-label {
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
+}
+
+.shell-external-publish-input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--baizer-border);
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface-muted);
+    color: var(--text-normal);
+    font-family: var(--font-interface);
+    font-size: var(--font-ui-small);
+    line-height: 1.4;
+    resize: vertical;
+}
+
+.shell-external-publish-body .shell-external-publish-input {
+    min-height: 140px;
+    white-space: pre-wrap;
+}
+
+.shell-external-publish-readonly {
+    padding: 6px 8px;
+    border-radius: var(--baizer-radius-s);
+    background: var(--baizer-surface-muted);
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.shell-external-publish-warnings {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+    border-left: 3px solid var(--text-error);
+    border-radius: var(--baizer-radius-s);
+    background: color-mix(in srgb, var(--text-error) 9%, transparent);
+}
+
+.shell-external-publish-warning {
+    color: var(--text-error);
+    font-size: var(--font-smallest);
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+/* 反馈 tab 的徽标：与普通对话区分开，避免用户误以为它是正在进行的聊天。 */
+.baizer-tab-badge.is-feedback {
+    border: 1px dashed var(--interactive-accent);
+}

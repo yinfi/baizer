@@ -30,6 +30,15 @@ Examples:
 - plugin inspection
 - knowledge query and file-back
 
+A tool may declare `visibility: 'feedback-session'`, which keeps it out of the
+tool list every conversation sees. `ToolRegistry.getAllDefinitions()` **excludes**
+those tools by default (`includeFeedbackTools` opts them back in), so the default
+is fail-closed: a tool added later with that visibility cannot leak into ordinary
+chats by someone forgetting to update a call site. Only the feedback session's
+assembly point opts in. This is deliberately stronger than an execution-time gate
+like `allowPluginControl` — the model never sees the tool at all, rather than
+seeing it and being refused.
+
 ### Skills
 
 Skills are registered in `SkillRegistry`.
@@ -41,7 +50,7 @@ They provide:
 - keyword-based intent routing
 - tool subsets plus workflow instructions
 
-Seven built-in skills are registered in `main.ts`, each from a
+Eight built-in skills are registered in `main.ts`, each from a
 `src/skills/builtin/<name>/SKILL.md`:
 
 - `web-search`
@@ -51,6 +60,13 @@ Seven built-in skills are registered in `main.ts`, each from a
 - `obsidian-bases`
 - `plugin-ctrl`
 - `knowledge`
+- `feedback`
+
+`feedback` is the odd one out: it is never discovered. It carries
+`disable-model-invocation` and is excluded from `<available_skills>`, because it
+is only ever force-activated inside a dedicated feedback tab (`forcedSkillName`).
+Listing it in ordinary conversations would invite the model to read it and then
+run a turn with neither its clarification policy nor its four tools.
 
 User-defined `SKILL.md` files can also be loaded from the vault, out of
 `.obsidian/baizer/skills/`.

@@ -101,11 +101,36 @@ export interface ChatRuntimeDeps {
   getUserCommandEntries?: () => Array<{ command: string; description: string }>;
 }
 
+/**
+ * 一次对话轮的可选开关。
+ *
+ * 做成末尾的一个对象而不是继续加位置参数：`chatStream` 已有 8 个位置参数，
+ * 再加两个没人读得懂；将来若要整体收敛成单一 options 对象，收敛点也是这里。
+ */
+export interface ChatTurnOptions {
+  /**
+   * 反馈会话的干净会话开关（BR1.2）。为真时本轮既不注入长期记忆召回与 Mental Model，
+   * 也不注入当前笔记/反链等环境上下文，且本轮结束后不写入长期记忆（BR1.3）。
+   *
+   * 只对显式传 true 的轮次生效，普通对话的记忆与上下文行为一字不改。
+   */
+  isolatedContext?: boolean;
+  /** 对本轮整段会话强制激活的技能名（反馈会话为 'feedback'）。 */
+  forcedSkillName?: string;
+}
+
 export interface ChatTurnRequest {
   userMessage: string;
   contextItems: ChatContextItem[];
   selection?: string;
   forcedSkillName?: string;
+  /**
+   * 反馈会话的隔离开关。见 ChatTurnOptions.isolatedContext。
+   * 与 PreparedChatTurn 上的同名字段必须**两处都有**：retain 短路发生在
+   * HarnessChatRuntime 里，它拿到的是 PreparedChatTurn——只在请求侧加字段会在
+   * 透传链上断掉一环。
+   */
+  isolatedContext?: boolean;
   source?: GenerationSource;
   obsidianContext?: ObsidianContextSnapshot;
   userProfile?: UserProfile | null;
@@ -151,10 +176,20 @@ export interface PreparedChatTurn {
   systemPromptOverride?: string;
   /** 透传自 ChatTurnRequest,供 runtime 取该会话专属的持久 session(见 ChatTurnRequest.conversationId)。 */
   conversationId?: string;
+  /** 透传自 ChatTurnRequest.isolatedContext。retain 短路与工具集组装都读它。 */
+  isolatedContext?: boolean;
+  /**
+   * 非空表示本轮**不应发起模型调用**，直接把这个原因作为失败终态呈现给用户。
+   *
+   * 目前唯一的来源是 BR1.1 的 fail-closed 分支：反馈会话拿不到 feedback 技能时，
+   * 带着工具却没有 SKILL.md 里那几条提示词层安全规则跑一轮，等于把安全规则换成
+   * 「模型自己看着办」——宁可明确拒绝这一轮。
+   */
+  blockedReason?: string;
 }
 
 export interface ChatRuntime {
-  getTools(): ToolDefinition[];
+  getTools(options?: { includeFeedbackTools?: boolean }): ToolDefinition[];
   prepareTurn(request: ChatTurnRequest): Promise<PreparedChatTurn>;
   query(turn: PreparedChatTurn): Promise<string>;
   queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown>;

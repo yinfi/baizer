@@ -32,11 +32,13 @@ function isRenameRequest(request: ApprovalRequest): boolean {
 
 // 只有「有新内容可在编辑器里预览」的操作才提供 🎯 聚焦预览按钮。
 // 移动/重命名/删除/插件命令没有可预览的正文,点了只会弹「无预览」(截图问题 2)。
-function previewSupportsEditorPreview(preview?: ChangePreview): boolean {
+// 对外发布同样没有「编辑器里的对应位置」——它要发到 GitHub，聚焦到当前笔记毫无意义。
+export function previewSupportsEditorPreview(preview?: ChangePreview): boolean {
   if (!preview) return true; // 未知预览类型:保守保留按钮
   return preview.kind !== 'note-rename'
     && preview.kind !== 'note-delete'
-    && preview.kind !== 'plugin-command';
+    && preview.kind !== 'plugin-command'
+    && preview.kind !== 'external-publish';
 }
 
 export interface ApprovalRequest {
@@ -64,6 +66,11 @@ interface ApprovalCardHandlers {
   /** 结果未知时先核实（查登记表/审计记录），不直接重试。 */
   onRecheck?: () => void | Promise<void>;
   onFocusPreview?: () => void | Promise<void>;
+  /**
+   * 对外发布预览里的就地编辑。写回 `request.args`——它是随消息快照持久化的结构，
+   * 因此重挂载 / 切 tab / 重启后卡片重新渲染出的字节与将要提交的字节逐字节相同。
+   */
+  onEditPublishArgs?: (patch: { title?: string; body?: string }) => void;
   setIcon?: (el: HTMLElement, icon: string) => void;
   /** 渲染后把消息 id 写到卡片上，供宿主原位更新。 */
   messageId?: string;
@@ -125,7 +132,12 @@ export function renderApprovalCard(
   }
 
   if (request.preview && !isRename) {
-    renderChangePreviewCard(card, request.preview);
+    renderChangePreviewCard(card, request.preview, {
+      // 可编辑字节的唯一权威就是 request.args：卡片从它渲染、编辑写回它、执行提交它。
+      args: request.args,
+      editable: status === 'pending',
+      onEdit: handlers.onEditPublishArgs,
+    });
   }
 
   if (status === 'pending' || status === 'running') {

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Report a problem by talking about it.** The Workbench header gains a feedback
+  button (and a `Send feedback` command) that opens a dedicated Feedback tab. You
+  describe what went wrong; the agent asks only what it cannot infer, checks the
+  repository for an existing issue, and renders a report from the repository's own
+  issue template fields. Nothing is published until you approve it on a card that
+  shows the exact title and body, both editable in place — what you approve is
+  byte-for-byte what gets posted. Every issue is opened under the maintainer's
+  account, so it does not show who filed it; leave contact details in the body if
+  you want to be reachable, knowing that doing so publishes them. The credential is
+  supplied by the plugin build, never by you: there is nothing to configure, and the
+  token ships inside the plugin (see `SECURITY.md`). Failed submissions are kept
+  locally so a flaky network never costs you a carefully written report, and the
+  feature reports itself as unavailable rather than pretending to work when the
+  build has no credential.
+
 - **Video transcription is configurable, chunked, timestamped and honest.**
   The ASR endpoint (base URL, API key, model, language) is set in Settings ->
   Capture instead of being hardcoded to `whisper-1` on the active provider's
@@ -81,6 +96,16 @@ _[English](#changelog) · 简体中文_
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 ## [Unreleased]
+
+- **用对话的方式报问题。** 工作台头部新增反馈入口（以及「发送反馈」命令），点击后打开
+  一个专用的反馈 tab。你用大白话描述遇到的问题，智能体只问那些从对话里推断不出来的
+  信息，先去仓库里查有没有相同的 issue，然后按仓库自己的 issue 模板字段渲染一份报告。
+  **在你于卡片上确认之前，什么都不会发布**——卡片展示完整的标题与正文、两者都可就地
+  编辑，你批准的就是逐字节发出去的那一份。所有 issue 都以发布方账号发出，不显示提交者
+  身份；想被追问就在正文里留下联系方式，但要清楚留下即等于公开它。凭据由插件构建提供，
+  不需要你配置任何东西，token 随插件一起分发（见 `SECURITY.md`）。提交失败的内容会留在
+  本地，一次网络抖动不会让你白写；本次构建没有内置凭据时，功能会如实报告「未配置」，
+  而不是假装能用。
 
 - **视频转写现在可配置、会切片、带时间戳，并且失败可见。**
   ASR 端点（Base URL、API Key、模型、语言）改为在「设置 -> 采集」里配置，

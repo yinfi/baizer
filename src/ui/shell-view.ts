@@ -79,6 +79,8 @@ export class ShellView extends ItemView {
     private tabManager: TabManager;
     private tabBar: TabBar | null = null;
     private tabBarContainerEl: HTMLElement | null = null;
+    // 对外发布预览的就地编辑：逐击键都落盘会把 conversations.json 写爆，故防抖。
+    private approvalPublishPersistTimer: number | null = null;
     // 头部作用域胶囊:显示当前作用笔记名(绿点=已作用/灰=无作用域)。
     private scopePillEl: HTMLElement | null = null;
     private scopePillNameEl: HTMLElement | null = null;
@@ -1266,6 +1268,10 @@ export class ShellView extends ItemView {
                         await this.showApprovalPreviewInEditor(message.approval);
                     }
                 },
+                onEditApprovalPublish: (message, patch) => {
+                    this.chatController.applyApprovalPublishEdit(message.id, patch);
+                    this.scheduleApprovalPublishPersist();
+                },
                 onFeedbackUp: async (message) => {
                     await this.chatController.recordPositiveFeedback(message.id);
                     await this.refreshKnowledgeStatusPanel();
@@ -1376,6 +1382,10 @@ export class ShellView extends ItemView {
     }
 
     async onClose() {
+        if (this.approvalPublishPersistTimer !== null) {
+            window.clearTimeout(this.approvalPublishPersistTimer);
+            this.approvalPublishPersistTimer = null;
+        }
         await this.persistAllTabs();
         this.stopHeartbeat();
         // 释放思考计时器,避免视图关闭后 interval 泄漏。
@@ -1563,9 +1573,40 @@ export class ShellView extends ItemView {
             event.stopPropagation();
             void this.toggleHistoryMenu();
         });
+        // 反馈入口与「历史」「设置」并列。关闭反馈功能时按钮不渲染（BR8.2 默认开启）。
+        if (this.plugin?.settings?.feedbackEnabled !== false) {
+            this.createHeaderActionButton(actions, t('Send feedback'), 'message-square-plus', 'shell-feedback-btn', (event) => {
+                event.stopPropagation();
+                void this.openFeedbackTab();
+            });
+        }
         this.createHeaderActionButton(actions, 'Settings', 'settings', 'shell-settings-btn', () => {
             this.openPluginSettings();
         });
+    }
+
+    /**
+     * 打开一个反馈 tab。
+     *
+     * 按钮与命令面板走同一条路径（避免两处各写一遍）。kind 置为 'feedback' 是
+     * 「是否反馈会话」的唯一事实来源：它随会话快照持久化，重启后仍被认作反馈会话。
+     */
+    public async openFeedbackTab(): Promise<void> {
+        if (this.tabManager.getActiveTab()?.kind === 'feedback') {
+            this.inputEl?.focus();
+            return;
+        }
+        this.scrollFollow?.prepareForSessionSwitch();
+        await this.persistActiveTab();
+        const tab = this.tabManager.createTab(undefined, { kind: 'feedback', title: t('Feedback') });
+        this.activateTabSession(tab.id);
+        this.applyTabMetadata(tab);
+        this.resetStreamState();
+        this.renderActiveTabMessages();
+        this.scrollFollow?.activateSession(tab.id, 'new');
+        this.hideHistoryMenu();
+        this.updateTabBar();
+        this.inputEl?.focus();
     }
 
     private createHeaderActionButton(
@@ -1985,9 +2026,18 @@ export class ShellView extends ItemView {
             app: this.app,
             api: this.modelService,
             conversationId: id,
+            // 会话种类决定这一整个会话是不是反馈会话：每轮都带 isolatedContext，
+            // 且工具集按 feedback-session 可见性组装（BR1.1 / BR1.2）。
+            feedbackSession: this.tabManager.getAllTabs().find(tab => tab.id === id)?.kind === 'feedback',
             onMessageAdded: (msg, options) => this.handleTabMessageAdded(id, msg, options),
             onMessageRemoved: (messageId) => this.handleTabMessageRemoved(id, messageId),
             onMessageUpdated: (msg) => this.handleTabMessageUpdated(id, msg),
+            onApprovalRejected: (message) => {
+                const draftId = message.approval?.args?.draftId;
+                if (typeof draftId === 'string') {
+                    this.plugin?.markFeedbackDraftRejected?.(draftId);
+                }
+            },
             onStatusChanged: (status) => this.handleTabStatusChanged(id, status),
             onStreamEvent: (event) => this.handleTabStreamEvent(id, event),
             onClear: () => this.handleTabClear(id),
@@ -2209,7 +2259,24 @@ export class ShellView extends ItemView {
     }
 
     private updateTabBar() {
-        this.tabBar?.update(this.tabManager.toTabBarItems());
+        const items = this.tabManager.toTabBarItems().map(item => {
+            if (item.kind !== 'feedback') return item;
+            // 终态标识是纯投影：事实来源是 FeedbackDraft，不写会话快照。
+            const outcome = this.plugin?.feedbackOutcome?.(item.id);
+            return outcome ? { ...item, feedbackOutcome: outcome } : item;
+        });
+        this.tabBar?.update(items);
+    }
+
+    /** 对外发布预览的就地编辑落定后，防抖持久化消息快照。 */
+    private scheduleApprovalPublishPersist() {
+        if (this.approvalPublishPersistTimer !== null) {
+            window.clearTimeout(this.approvalPublishPersistTimer);
+        }
+        this.approvalPublishPersistTimer = window.setTimeout(() => {
+            this.approvalPublishPersistTimer = null;
+            void this.persistActiveTab();
+        }, 400);
     }
 
     private async toggleHistoryMenu() {

@@ -11,7 +11,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      # fetch-depth: 0 —— 发布前扫全量历史，浅克隆没有历史可扫。
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # 凭据守卫（与 ci.yml 同一个脚本，此处扫全量历史而非本次范围）：tag 可以直接
+      # 推送、未必经过 CI，而发布是本仓库唯一会把内置 token 送到所有用户手上的动作。
+      # 全量扫描是这里唯一能挡住「token 曾经进过历史、后来被删掉」的形态——
+      # 那种情况下工作树干净，但 token 已被 secret scanning 标记。
+      - name: Guard against committed credentials
+        run: ./scripts/guard-credentials.sh --history
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -22,7 +32,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # 凭据 preflight：非空校验 + 一次 GET /repos/yinfi/baizer 探活。非空校验挡不住
+      # 「secret 里是一个已撤销的 token」——那会发布一个所有用户都 401 的版本。
+      - name: Verify feedback credentials
+        env:
+          BAIZER_FEEDBACK_TOKEN: ${{ secrets.BAIZER_FEEDBACK_TOKEN }}
+        run: node scripts/feedback-release-preflight.mjs
+
+      # BAIZER_RELEASE=1 让 esbuild 在凭据缺失时直接构建失败：发布路径不允许静默产出
+      # 一个反馈功能不可用的版本。token 经 secrets 注入，GitHub Actions 会自动 mask
+      # 来自 secrets 的值，因此构建日志不会泄漏它。
       - name: Build
+        env:
+          BAIZER_RELEASE: '1'
+          BAIZER_FEEDBACK_TOKEN: ${{ secrets.BAIZER_FEEDBACK_TOKEN }}
         run: npm run build
 
       - name: Test
