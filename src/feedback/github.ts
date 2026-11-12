@@ -175,7 +175,10 @@ export class GithubClient {
    * 澄清结果时叠加不可预期的延迟。
    */
   async searchIssues(terms: string): Promise<GithubResult<IssueCandidate[]>> {
-    const query = encodeURIComponent(`repo:${this.deps.repo} ${terms} in:title,body`);
+    // `is:issue` 是硬性要求，不是过滤条件：GitHub 的 /search/issues 缺它会直接 422
+    // （"Query must include 'is:issue' or 'is:pull-request'"），且该 422 会被
+    // classifyHttpFailure 归成 rejected，把语法错误误报成「仓库规则拒绝」。
+    const query = encodeURIComponent(`repo:${this.deps.repo} is:issue ${terms} in:title,body`);
     const url = `https://api.github.com/search/issues?q=${query}&per_page=5&sort=updated`;
     const result = await this.send({ url, method: 'GET', headers: this.headers() });
     if (!result.ok) return result;

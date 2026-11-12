@@ -22,7 +22,7 @@ import {
   type TemplateField,
 } from '../src/feedback/issue-template';
 import { computeDedupKey } from '../src/feedback/drafts';
-import { classifyHttpFailure, parseRetryAfter, sanitizeExternalText, toCandidates } from '../src/feedback/github';
+import { classifyHttpFailure, GithubClient, parseRetryAfter, sanitizeExternalText, toCandidates } from '../src/feedback/github';
 import { buildErrorDigest } from '../src/feedback/diagnostics';
 import { isConfigDirPath, isPluginBundlePath, isReadDeniedPath } from '../src/permissions/read-guard';
 import { looksLikeCredential } from '../src/utils/credential-pattern';
@@ -232,6 +232,27 @@ async function runTests() {
 
   await test('sanitizeExternalText truncates to 200 characters', () => {
     expectEqual(sanitizeExternalText('y'.repeat(500)).length, 200, 'truncation');
+  });
+
+  // GitHub 的 /search/issues 缺 is:issue 会直接 422，且被归成 rejected 后表现为
+  // 「仓库规则拒绝」——去重因此静默失效。这条断言把查询串锁死，防止再次漏掉。
+  await test('the issue search query carries is:issue', async () => {
+    const seen: string[] = [];
+    const client = new GithubClient({
+      request: async (options) => {
+        seen.push(options.url);
+        return { status: 200, text: JSON.stringify({ items: [] }) };
+      },
+      token: () => 'test-token',
+      repo: 'yinfi/baizer',
+    });
+
+    const result = await client.searchIssues('blank sidebar');
+    expect(result.ok, 'the search must be attempted');
+    expectEqual(seen.length, 1, 'exactly one request');
+    const decoded = decodeURIComponent(seen[0]);
+    expect(decoded.includes('is:issue'), `the query must include is:issue: ${decoded}`);
+    expect(decoded.includes('in:title,body'), `the search scope must stay in:title,body: ${decoded}`);
   });
 
   await test('the read guard rejects the config directory and the plugin bundle explicitly', () => {
