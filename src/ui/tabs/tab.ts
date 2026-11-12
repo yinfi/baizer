@@ -1,6 +1,6 @@
 import { ConversationSnapshot } from '../types';
 import { ChatState } from '../state/chat-state';
-import { TabData, TabId } from './types';
+import { TabData, TabId, TabKind } from './types';
 
 interface CreateTabDataOptions {
     id: TabId;
@@ -8,6 +8,8 @@ interface CreateTabDataOptions {
     title: string;
     isActive: boolean;
     snapshot?: ConversationSnapshot;
+    /** 新建 tab 时的会话种类；快照存在时以快照为准（恢复点，BR1.6）。 */
+    kind?: TabKind;
 }
 
 export function createTabData(options: CreateTabDataOptions): TabData {
@@ -24,6 +26,7 @@ export function createTabData(options: CreateTabDataOptions): TabData {
         id: options.id,
         index: options.index,
         title: options.title,
+        kind: options.snapshot?.kind ?? options.kind ?? 'chat',
         createdAt: options.snapshot?.createdAt,
         updatedAt: options.snapshot?.updatedAt,
         pinnedAt: options.snapshot?.pinnedAt,

@@ -74,4 +74,9 @@ export interface ConversationSnapshot {
     messages: ChatMessage[];
     currentNote?: string;
     pinnedAt?: number;
+    /**
+     * 会话种类（BR1.6）。随快照一起持久化与恢复——只靠内存里的 tab 集合，
+     * 重启后恢复的反馈会话就不再是反馈会话。缺失即 'chat'。
+     */
+    kind?: 'chat' | 'feedback';
 }

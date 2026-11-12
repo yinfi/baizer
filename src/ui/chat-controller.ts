@@ -27,6 +27,8 @@ import { MemoryStats, MemoryView, MemoryViewRequest } from '../memory/types';
 import { MemoryRecord } from '../memory/hindsight-types';
 import { KnowledgeRuntime } from '../knowledge/runtime';
 import { ToolRegistry } from '../skills/tool-registry';
+import { FEEDBACK_SKILL_NAME } from '../skills/types';
+import { recordFeedbackError } from '../feedback/diagnostics';
 import { ChangePreview } from './diff/change-preview';
 import { thrownMessage } from '../utils/thrown-message';
 
@@ -108,6 +110,18 @@ export interface ChatControllerOptions {
     onMessageRemoved?: (messageId: string) => void;
     /** 已存在消息的字段被更新(审批状态流转)。宿主据此同步投影并原位重画卡片。 */
     onMessageUpdated?: (message: ChatMessage) => void;
+    /**
+     * 反馈会话的开关。为真时每一轮都带 turnOptions.isolatedContext，
+     * 使 runtime 跳过记忆注入与环境上下文、并在本轮结束后不写入长期记忆。
+     */
+    feedbackSession?: boolean;
+    /**
+     * 审批卡上的对外发布编辑落定。宿主据此把新字节持久化（消息快照）。
+     * 编辑本身已就地写回 request.args，这里只负责通知宿主。
+     */
+    onApprovalPublishEdited?: (message: ChatMessage) => void;
+    /** 用户拒绝了审批。反馈草稿据此回到 draft（保留，可继续对话后重提）。 */
+    onApprovalRejected?: (message: ChatMessage) => void;
     onStatusChanged?: (isResponding: boolean) => void;
     onStreamEvent?: (event: StreamEvent) => void;
     /** /clear 时触发:宿主清空该 tab 的可见历史(tab.state)并重渲。 */
@@ -126,6 +140,9 @@ export class ChatController {
     private onMessageAdded?: (message: ChatMessage, options?: MessageAddedOptions) => void;
     private onMessageRemoved?: (messageId: string) => void;
     private onMessageUpdated?: (message: ChatMessage) => void;
+    private readonly feedbackSession: boolean;
+    private onApprovalPublishEdited?: (message: ChatMessage) => void;
+    private onApprovalRejected?: (message: ChatMessage) => void;
     private onStatusChanged?: (isResponding: boolean) => void;
     private onStreamEvent?: (event: StreamEvent) => void;
     private onClear?: () => void;
@@ -152,6 +169,9 @@ export class ChatController {
         this.onMessageAdded = options.onMessageAdded;
         this.onMessageRemoved = options.onMessageRemoved;
         this.onMessageUpdated = options.onMessageUpdated;
+        this.feedbackSession = options.feedbackSession === true;
+        this.onApprovalPublishEdited = options.onApprovalPublishEdited;
+        this.onApprovalRejected = options.onApprovalRejected;
         this.onStatusChanged = options.onStatusChanged;
         this.onStreamEvent = options.onStreamEvent;
         this.onClear = options.onClear;
@@ -370,8 +390,8 @@ export class ChatController {
                 const bufferedTextEvents: StreamEvent[] = [];
                 // 阶段1:跨轮上下文由 Harness session 维护,UI 不再回灌 priorMessages。
                 const stream = source === 'shell'
-                    ? this.api.chatStream(query, normalizedContext, selection, 'shell', undefined, undefined, streamController.signal, this.conversationId)
-                    : this.api.chatStream(query, normalizedContext, selection, source, undefined, undefined, streamController.signal, this.conversationId);
+                    ? this.api.chatStream(query, normalizedContext, selection, 'shell', undefined, undefined, streamController.signal, this.conversationId, this.turnOptions())
+                    : this.api.chatStream(query, normalizedContext, selection, source, undefined, undefined, streamController.signal, this.conversationId, this.turnOptions());
                 for await (const event of stream) {
                     if (event.type === 'tool_call' && this.isFileWriteTool(event.name)) {
                         attemptedFileWrite = true;
@@ -456,6 +476,9 @@ export class ChatController {
                             assistantRecorded = true;
                             this.rememberRetryRequest(messageId, request);
                         }
+                        // 记进诊断用的错误环形缓冲：报障时它是 issue 里唯一能说明
+                        // 「控制台里到底报了什么」的字段。只存原文，输出前才脱敏。
+                        recordFeedbackError({ surface: source, message: event.message });
                         this.onStreamEvent(event);
                         turnOutcome = 'failed';
                         // shell 由失败卡承载原因;其他宿主没有卡片时保留旧提示。
@@ -503,8 +526,8 @@ export class ChatController {
             } else {
                 // 阶段1:跨轮上下文由 Harness session 维护,UI 不再回灌 priorMessages。
                 const response = source === 'shell'
-                    ? await this.api.chat(query, normalizedContext, selection, 'shell', undefined, undefined, undefined, this.conversationId)
-                    : await this.api.chat(query, normalizedContext, selection, source, undefined, undefined, undefined, this.conversationId);
+                    ? await this.api.chat(query, normalizedContext, selection, 'shell', undefined, undefined, undefined, this.conversationId, this.turnOptions())
+                    : await this.api.chat(query, normalizedContext, selection, source, undefined, undefined, undefined, this.conversationId, this.turnOptions());
                 this.addMessage('ai', response);
             }
         } catch (error: unknown) {
@@ -729,6 +752,9 @@ export class ChatController {
                 completedAt: Date.now(),
             },
         });
+        // 草稿回到 draft（保留，可继续对话后重提）——否则它会一直挂在「待确认」，
+        // 既占未提交上限，也在草稿列表里显示成一件还没定论的事。
+        this.onApprovalRejected?.(message);
     }
 
     /**
@@ -894,6 +920,30 @@ export class ChatController {
         const next: ChatMessage = { ...this.messages[index], approvalState };
         this.messages[index] = next;
         this.onMessageUpdated?.(next);
+    }
+
+    /**
+     * 反馈会话每轮都带的开关。普通会话返回 undefined，运行时的记忆与上下文行为一字不改。
+     */
+    private turnOptions(): { isolatedContext: boolean; forcedSkillName: string } | undefined {
+        return this.feedbackSession
+            ? { isolatedContext: true, forcedSkillName: FEEDBACK_SKILL_NAME }
+            : undefined;
+    }
+
+    /**
+     * 审批卡上的就地编辑落定。
+     *
+     * 字节已经**就地**写回 `request.args`（同一个对象，卡片与执行读的是它），这里只
+     * 通知宿主把消息快照持久化——重挂载后卡片重新渲染出的字节因此与将要提交的字节相同。
+     */
+    public applyApprovalPublishEdit(messageId: string, patch: { title?: string; body?: string }) {
+        const message = this.findApprovalMessage(messageId);
+        if (!message?.approval) return;
+        const args = message.approval.args;
+        if (typeof patch.title === 'string') args.title = patch.title;
+        if (typeof patch.body === 'string') args.body = patch.body;
+        this.onApprovalPublishEdited?.(message);
     }
 
     /**

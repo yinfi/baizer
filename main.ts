@@ -1,7 +1,7 @@
-import { Plugin, Notice, Editor, MarkdownView, MarkdownFileInfo, TFile, addIcon } from 'obsidian';
+import { Plugin, Notice, Editor, MarkdownView, MarkdownFileInfo, TFile, addIcon, requestUrl } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import { ModelService } from './src/services/model-service';
-import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, mergeProviderDefaults, pruneUnsupportedProviders, legacyFlatString } from './src/mcp/types';
+import { PluginSettings, DEFAULT_SETTINGS, VIEW_TYPE_SHELL, PLUGIN_NAME, PLUGIN_ID, mergeProviderDefaults, pruneUnsupportedProviders, legacyFlatString } from './src/mcp/types';
 import { setLocale, Locale } from './src/i18n/zh';
 import { SettingTab } from './src/settings';
 import { ShellView } from './src/ui/shell-view';
@@ -31,6 +31,11 @@ import jsonCanvasSkillMd from './src/skills/builtin/json-canvas/SKILL.md';
 import obsidianBasesSkillMd from './src/skills/builtin/obsidian-bases/SKILL.md';
 import { PluginWatcher } from './src/skills/builtin/plugin-ctrl/plugin-watcher';
 import { PluginSkillGenerator } from './src/skills/builtin/plugin-ctrl/skill-generator';
+import { FeedbackDraftStore } from './src/feedback/drafts';
+import { GithubClient, describeFailure } from './src/feedback/github';
+import { registerFeedbackTools } from './src/feedback/tools';
+import { FEEDBACK_REPO, getFeedbackToken, isFeedbackConfigured } from './src/feedback/config';
+import feedbackSkillMd from './src/skills/builtin/feedback/SKILL.md';
 import { InboxAutosaveCoordinator } from './src/services/inbox-autosave';
 import { registerBaizerClipProtocolHandler } from './src/services/clip-protocol';
 import { saveClipText } from './src/services/clip-input';
@@ -95,6 +100,12 @@ export default class BaizerPlugin extends Plugin {
     guardianContextService: ObsidianContextService;
     toolRegistry: ToolRegistry;
     skillRegistry: SkillRegistry;
+    /**
+     * 反馈草稿存储。**插件单实例持有**——提交前的同步原子认领要求草稿集合是进程内
+     * 共享的同一份内存对象，不是每次执行重新读盘。
+     */
+    feedbackDrafts: FeedbackDraftStore;
+    private feedbackClient: GithubClient | null = null;
     private editorExtensionsRegistered = false;
     // 非 private：设置页要读对账状态、触发重新生成与删除（派生技能的唯一管理入口）。
     pluginWatcher: PluginWatcher | null = null;
@@ -149,6 +160,31 @@ export default class BaizerPlugin extends Plugin {
         registerJsonCanvasTools(this.toolRegistry);
         registerObsidianBasesTools(this.toolRegistry);
 
+        // 反馈：草稿存储（从 data.json 恢复，变更即落盘）+ GitHub 客户端 + 四个工具。
+        // 内置 token 由构建期注入；本地构建未注入时为空串，运行时给出「未配置」提示。
+        this.feedbackDrafts = new FeedbackDraftStore({
+            persist: (drafts) => {
+                this.settings.feedbackDrafts = drafts;
+                return this.saveSettingsLight();
+            },
+        });
+        this.feedbackDrafts.hydrate(this.settings.feedbackDrafts);
+        this.feedbackClient = new GithubClient({
+            request: (options) => requestUrl({
+                url: options.url,
+                method: options.method ?? 'GET',
+                headers: options.headers,
+                body: options.body,
+                throw: options.throw === true,
+            }),
+            token: getFeedbackToken,
+            repo: FEEDBACK_REPO,
+        });
+        registerFeedbackTools(this.toolRegistry, {
+            client: this.feedbackClient,
+            drafts: this.feedbackDrafts,
+        });
+
         // 注册 Skill（从 SKILL.md，executor 为 noop — instructions 注入模式）
         this.skillRegistry.registerBuiltinFromMd(webSearchSkillMd, webSearchSkillExecutor);
         this.skillRegistry.registerBuiltinFromMd(webClipperSkillMd, createWebClipperSkillExecutor(this.modelService));
@@ -158,6 +194,8 @@ export default class BaizerPlugin extends Plugin {
         // 可用性由 settings.disabledSkills 控制，与读写权限正交——
         // 不再用 allowPluginControl 决定 plugin-ctrl 是否可用。
         this.skillRegistry.registerBuiltinFromMd(pluginCtrlSkillMd, pluginCtrlSkillExecutor);
+        // 反馈技能：只在专用反馈 tab 里经 forcedSkillName 强制激活，不进普通会话的发现清单。
+        this.skillRegistry.registerBuiltinFromMd(feedbackSkillMd, { execute: async () => ({ ok: true }) });
 
         logger.info(`SkillRegistry initialized: ${this.toolRegistry.size} tools, ${this.skillRegistry.listSkills().length} skills`, 'Baizer');
 
@@ -238,6 +276,12 @@ export default class BaizerPlugin extends Plugin {
             id: 'open-shell',
             name: `Open ${PLUGIN_NAME}`,
             callback: () => { void this.activateView(); },
+        });
+        // 让用户在笔记编辑中、Guardian 使用中也能发起反馈，不必先打开 Workbench。
+        this.addCommand({
+            id: `${PLUGIN_ID}:feedback`,
+            name: 'Send feedback',
+            callback: () => { void this.openFeedbackTab(); },
         });
         this.addCommand({
             id: 'save-url-from-clipboard',
@@ -362,6 +406,71 @@ export default class BaizerPlugin extends Plugin {
         }
 
         await workspace.revealLeaf(leaf);
+    }
+
+    /**
+     * 打开反馈 tab（头部按钮与命令面板共用同一条路径）。
+     *
+     * 未配置内置凭据时给出明确提示而不打开一个必然失败的会话（BR5.5）。
+     */
+    async openFeedbackTab() {
+        if (!this.settings.feedbackEnabled) {
+            new Notice('Feedback is disabled in settings.');
+            return;
+        }
+        if (!isFeedbackConfigured()) {
+            new Notice('Feedback is not configured in this build.');
+            return;
+        }
+        await this.activateView();
+        const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_SHELL)[0];
+        const view = leaf?.view;
+        if (view instanceof ShellView) {
+            await view.openFeedbackTab();
+        }
+    }
+
+    /** 反馈会话的终态标识：派生自草稿存储，不在会话快照上另存一份（BR4.5）。 */
+    feedbackOutcome(conversationId: string): { issueNumber: number } | undefined {
+        const draft = this.feedbackDrafts?.findSubmittedByConversation(conversationId);
+        const issueNumber = draft?.submittedIssueNumber;
+        return typeof issueNumber === 'number' ? { issueNumber } : undefined;
+    }
+
+    /** 用户拒绝了审批卡：草稿回到 draft，保留可继续对话后重提。 */
+    markFeedbackDraftRejected(draftId: string): void {
+        this.feedbackDrafts?.markRejected(draftId);
+    }
+
+    /** 设置页的「测试连接」：验证凭据有效、仓库可达、Issues 已开启。 */
+    async testFeedbackConnection(): Promise<{ ok: boolean; message: string }> {
+        if (!isFeedbackConfigured()) return { ok: false, message: 'Feedback is not configured in this build.' };
+        if (!this.feedbackClient) return { ok: false, message: 'Feedback is not ready yet.' };
+        const result = await this.feedbackClient.probeRepo();
+        if (!result.ok) return { ok: false, message: describeFailure(result.error.category) };
+        return result.data.issuesEnabled
+            ? { ok: true, message: 'Connection OK: the credential works, the repository is reachable, and Issues are enabled.' }
+            : { ok: false, message: 'The repository is reachable but its Issues are disabled.' };
+    }
+
+    /** 待提交草稿（设置页列表用）。只给展示字段，不带正文全文。 */
+    listFeedbackDrafts(): Array<{ id: string; label: string; status: string; error?: string; updatedAt: string }> {
+        return (this.feedbackDrafts?.list() ?? [])
+            .filter(draft => draft.status !== 'submitted')
+            .map(draft => ({
+                id: draft.id,
+                label: draft.kind === 'issue_comment'
+                    ? `#${draft.targetIssueNumber ?? '?'}`
+                    : (draft.title || draft.body.split('\n')[0] || 'Untitled'),
+                status: draft.status,
+                error: draft.lastError?.category,
+                updatedAt: draft.updatedAt,
+            }));
+    }
+
+    /** 用户删除一条暂存草稿（整条移除，不留残影）。 */
+    deleteFeedbackDraft(id: string): void {
+        this.feedbackDrafts?.remove(id);
     }
 
     activateGuardianModal() {

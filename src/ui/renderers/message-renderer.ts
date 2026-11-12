@@ -21,6 +21,8 @@ interface MessageRendererOptions {
   onApprovalRetry?: (message: ChatMessage) => void | Promise<void>;
   onApprovalRecheck?: (message: ChatMessage) => void | Promise<void>;
   onFocusApprovalPreview?: (message: ChatMessage) => void | Promise<void>;
+  /** 对外发布预览里的就地编辑：把标题/正文的新值写回审批请求的 args。 */
+  onEditApprovalPublish?: (message: ChatMessage, patch: { title?: string; body?: string }) => void;
   onCopy?: (content: string, message: ChatMessage) => void | Promise<void>;
   /** 点赞:用户认可该回答,归档到知识库。 */
   onFeedbackUp?: (message: ChatMessage) => void | Promise<void>;
@@ -124,6 +126,7 @@ export class MessageRenderer {
       onRetry: () => this.options.onApprovalRetry?.(message),
       onRecheck: () => this.options.onApprovalRecheck?.(message),
       onFocusPreview: () => this.options.onFocusApprovalPreview?.(message),
+      onEditPublishArgs: (patch) => this.options.onEditApprovalPublish?.(message, patch),
     }, message.approvalState ?? { status: 'pending' });
   }
 

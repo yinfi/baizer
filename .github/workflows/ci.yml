@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # 不按基分支过滤：`branches` 在这里过滤的是**基分支**，一旦链路里出现 stacked PR
+  # （base 是另一个功能分支而非 main），CI 就一次都不会触发——守卫的接线因此从未被
+  # 真实 CI 验证过。PR 无论指向哪里都该跑 CI。
   pull_request:
-    branches: [main]
 
 jobs:
   build-and-test:

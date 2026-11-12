@@ -38,6 +38,9 @@ export class ConversationController {
       modelId: tab.modelId || this.deps.getModelId(),
       currentNote: tab.currentNote || this.deps.getCurrentNotePath?.(),
       pinnedAt: tab.pinnedAt,
+      // BR1.6 的写入点：会话种类必须落进快照，否则重启后恢复的反馈 tab
+      // 不再是反馈会话，工具可见范围与上下文隔离双双失效。
+      kind: tab.kind,
       messages,
     };
 

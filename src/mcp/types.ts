@@ -264,6 +264,19 @@ export interface PluginSettings {
     // --- 🔌 Plugin Skill Generator ---
     autoGeneratePluginSkills: boolean;
     pluginSkillExcludeList: string[];
+
+    // --- 💬 Feedback ---
+    /**
+     * 反馈功能开关。默认开启：用户零配置、每次对外写入前都有显式确认，
+     * 不存在静默对外发帖的风险；默认关闭会重新引入本功能要解决的发现性问题。
+     */
+    feedbackEnabled: boolean;
+    /**
+     * 反馈草稿。**这不是设置，而是随 data.json 一起落盘的插件数据**——
+     * 它承载「用户已经确认过、可能还没提交成功」的内容，使关闭会话、提交失败、
+     * 插件重启都不丢用户输入。放在这里是因为本插件只有 data.json 一处持久化。
+     */
+    feedbackDrafts?: unknown;
 }
 
 /** 转写模型的内置默认值。改动前它被写死在 video-transcription.ts 里。 */
@@ -350,7 +363,10 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 
     // Plugin Skill Generator
     autoGeneratePluginSkills: true,
-    pluginSkillExcludeList: []
+    pluginSkillExcludeList: [],
+
+    // Feedback（默认开启，用户零配置；见 PluginSettings.feedbackEnabled 的说明）
+    feedbackEnabled: true,
 };
 
 export function mergeProviderDefaults(
@@ -507,5 +523,21 @@ export interface IPlugin extends Plugin {
         deleteDerivedSkill(pluginId: string): Promise<boolean>;
     } | null;
     knowledgeRuntime: KnowledgeRuntime | null;
+    /**
+     * 反馈会话的终态标识。**派生自草稿存储**（sourceConversationId === tabId 且
+     * status === 'submitted'），不在会话快照上另存一份——两处真相会在「提交成功但
+     * 快照未落盘」时不一致，而其中一处正是给用户看的那个。
+     */
+    feedbackOutcome?(conversationId: string): { issueNumber: number } | undefined;
+    /** 打开一个反馈 tab。头部按钮与命令面板走同一条路径。 */
+    openFeedbackTab?(): Promise<void>;
+    /** 用户拒绝了某张反馈审批卡：草稿回到 draft，保留可继续对话后重提。 */
+    markFeedbackDraftRejected?(draftId: string): void;
+    /** 设置页「测试连接」：验证凭据有效、仓库可达、Issues 已开启，不回显 token。 */
+    testFeedbackConnection?(): Promise<{ ok: boolean; message: string }>;
+    /** 设置页的待提交草稿列表（仅展示字段，不含正文全文）。 */
+    listFeedbackDrafts?(): Array<{ id: string; label: string; status: string; error?: string; updatedAt: string }>;
+    /** 删除一条暂存草稿（整条移除）。 */
+    deleteFeedbackDraft?(id: string): void;
     toolRegistry: ToolRegistry;
 }

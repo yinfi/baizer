@@ -21,6 +21,7 @@ import type {
     DerivedSkillStatus,
 } from './skills/builtin/plugin-ctrl/plugin-watcher';
 import { t, Locale } from './i18n/zh';
+import { FEEDBACK_REPO, isFeedbackConfigured } from './feedback/config';
 import { thrownMessage } from './utils/thrown-message';
 import { logger } from './utils/logger';
 import { detach } from './utils/promise-guard';
@@ -36,7 +37,8 @@ export type SettingsSectionId =
     | 'knowledge'
     | 'guardian'
     | 'appearance'
-    | 'plugin-skills';
+    | 'plugin-skills'
+    | 'feedback';
 
 export type SettingsBadgeTone = 'warning' | 'danger' | 'muted' | 'accent' | 'success';
 
@@ -323,6 +325,7 @@ function getSettingsSections(): SettingsSectionMeta[] {
     { id: 'guardian', title: t('Guardian'), description: t('Inline writing assistance, trigger mode, and ignored folders.'), keywords: ['guardian', 'auto mode', 'manual mode', 'ignored folders', 'sensitivity', 'selection', 'toolbar', 'selection toolbar', '守护', '行内补全', '幽灵文本', '灵敏度', '补全', '选中', '工具条', '选中工具条'] },
     { id: 'appearance', title: t('Appearance'), description: t('Workbench theme, font size, and opacity.'), keywords: ['appearance', 'theme', 'font', 'opacity', 'terminal', 'workbench', 'language', 'locale', '外观', '语言'] },
     { id: 'plugin-skills', title: t('Plugin Skills'), description: t('Skill generation, excluded plugins, and startup scanning.'), keywords: ['plugin', 'skills', 'generator', 'exclude', 'startup', '插件'] },
+    { id: 'feedback', title: t('Feedback'), description: t('Send a report to GitHub: feature toggle, target repository, credential status, and pending drafts.'), keywords: ['feedback', 'issue', 'github', 'bug report', 'draft', '反馈', '问题', '草稿'] },
     ];
 }
 
@@ -1248,6 +1251,7 @@ export class SettingTab extends PluginSettingTab {
             this.buildGuardianPage(),
             this.buildAppearancePage(),
             this.buildPluginSkillsPage(),
+            this.buildFeedbackPage(),
         ];
     }
 
@@ -2844,6 +2848,80 @@ export class SettingTab extends PluginSettingTab {
         const parts = [row.versionLabel, ...row.badges];
         if (row.failureReason) parts.push(`${t('Last generation failed')}: ${row.failureReason}`);
         return parts.join(' · ');
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // 反馈：开关 + 只读的仓库与凭据状态 + 测试连接 + 待提交草稿列表。
+    //
+    // 凭据一律只读：token 由构建期注入，用户不提供、插件不回显。给一个 token 输入框
+    // 会让用户以为凭据由自己提供，与既定形态相反。
+    // ────────────────────────────────────────────────────────────────────────
+
+    private buildFeedbackPage(): SettingDefinitionPage {
+        const meta = getSectionMeta('feedback');
+        const configured = isFeedbackConfigured();
+        const drafts = this.plugin.listFeedbackDrafts?.() ?? [];
+        const draftItems: SettingGroupItem[] = drafts.length
+            ? drafts.map(draft => ({
+                name: draft.label,
+                desc: `${t('Status')}: ${draft.status}${draft.error ? ` · ${draft.error}` : ''} · ${draft.updatedAt}`,
+                render: (setting: Setting) => {
+                    setting.addButton(button => button
+                        .setButtonText(t('Delete'))
+                        .setDestructive()
+                        .onClick(() => {
+                            this.plugin.deleteFeedbackDraft?.(draft.id);
+                            this.update();
+                        }));
+                },
+            }))
+            : [{ name: t('No pending drafts.') }];
+
+        return {
+            type: 'page',
+            name: meta.title,
+            desc: meta.description,
+            items: [
+                {
+                    name: t('Enable feedback'),
+                    desc: t('Adds a Feedback entry to the Workbench header and a "Send feedback" command.'),
+                    control: { type: 'toggle', key: 'feedbackEnabled' },
+                },
+                {
+                    name: t('Target repository'),
+                    desc: `https://github.com/${FEEDBACK_REPO}`,
+                },
+                {
+                    name: t('Credentials'),
+                    desc: configured
+                        ? t('Built in — supplied by the plugin build, never by you.')
+                        : t('Not configured in this build. Feedback is unavailable.'),
+                },
+                {
+                    name: t('Test connection'),
+                    desc: t('Checks that the built-in credential works, the repository is reachable, and Issues are enabled.'),
+                    render: (setting: Setting) => {
+                        setting.addButton(button => button
+                            .setButtonText(t('Test connection'))
+                            .setDisabled(!configured)
+                            .onClick(async () => {
+                                button.setDisabled(true);
+                                try {
+                                    const result = await this.plugin.testFeedbackConnection?.();
+                                    new Notice(result?.message ?? t('Feedback is not ready yet.'));
+                                } finally {
+                                    button.setDisabled(!configured);
+                                }
+                            }));
+                    },
+                },
+                {
+                    type: 'group',
+                    heading: t('Pending drafts'),
+                    items: draftItems,
+                },
+            ],
+        };
     }
 
     private renderDerivedSkillRow(setting: Setting, row: DerivedSkillRow): void {

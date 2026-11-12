@@ -1,6 +1,6 @@
 import { ConversationSnapshot } from '../types';
 import { createTabData } from './tab';
-import { TabBarItem, TabData, TabId } from './types';
+import { TabBarItem, TabData, TabId, TabKind } from './types';
 
 interface TabManagerOptions {
     createId?: () => TabId;
@@ -18,7 +18,7 @@ export class TabManager {
         this.onChanged = options.onChanged;
     }
 
-    createTab(snapshot?: ConversationSnapshot): TabData {
+    createTab(snapshot?: ConversationSnapshot, options: { kind?: TabKind; title?: string } = {}): TabData {
         for (const tab of this.tabs) {
             tab.isActive = false;
         }
@@ -26,9 +26,10 @@ export class TabManager {
         const tab = createTabData({
             id: snapshot?.id ?? this.createId(),
             index: this.tabs.length + 1,
-            title: snapshot?.title || `Chat ${this.nextUntitledNumber++}`,
+            title: snapshot?.title || options.title || `Chat ${this.nextUntitledNumber++}`,
             isActive: true,
             snapshot,
+            kind: options.kind,
         });
         this.tabs.push(tab);
         this.reindex();
@@ -105,6 +106,7 @@ export class TabManager {
             id: tab.id,
             index: tab.index,
             title: tab.title,
+            kind: tab.kind,
             isActive: tab.isActive,
             isStreaming: tab.isStreaming,
             needsAttention: tab.needsAttention,

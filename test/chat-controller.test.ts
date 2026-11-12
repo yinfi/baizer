@@ -354,6 +354,7 @@ async function runTests() {
     // 阶段1:UI 不再回灌 priorMessages。阶段A:末位透传 conversationId
     // (obsidianContext/userProfile/systemPromptOverride/conversationId 均为 undefined,
     //  此 controller 未配置 conversationId)。
+    // 反馈会话开关是末位参数:普通会话不传,运行时的记忆与上下文行为一字不改。
     expect(chatCalls).toEqual([[
       'Explain this',
       [{
@@ -365,6 +366,7 @@ async function runTests() {
       }],
       'alpha',
       'shell',
+      undefined,
       undefined,
       undefined,
       undefined,

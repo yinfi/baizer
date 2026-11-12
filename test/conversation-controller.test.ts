@@ -98,6 +98,8 @@ async function runTests() {
       providerId: 'deepseek',
       modelId: 'deepseek-chat',
       currentNote: 'Notes/active.md',
+      // 会话种类随快照持久化（BR1.6）：普通 tab 落 'chat'。
+      kind: 'chat',
       messages: [
         {
           id: 'm1',

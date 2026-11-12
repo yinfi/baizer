@@ -10,6 +10,7 @@ import {
 } from '../../skill-files';
 import { getPluginCommandPreconditions } from './executor';
 import { logger } from '../../../utils/logger';
+import { looksLikeCredential } from '../../../utils/credential-pattern';
 
 // ==================== 类型 ====================
 
@@ -208,6 +209,10 @@ export class PluginSkillGenerator {
         const val = match[1];
         // 过滤常见噪音词
         if (val.includes(pluginId) || val.length < 3) continue;
+        // 凭据过滤：抽取结果会写进生成的 SKILL.md，而模型能经 read_skill 读到它。
+        // 当前正则恰好不匹配 GitHub token 的字符集（含大写与下划线）——那是运气，
+        // 不是设计；这条判定才是设计。
+        if (looksLikeCredential(val)) continue;
         if (['function', 'object', 'string', 'number', 'boolean',
              'undefined', 'default', 'module', 'exports', 'require',
              'prototype', 'constructor', 'class'].includes(val)) continue;

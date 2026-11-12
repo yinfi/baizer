@@ -10,6 +10,8 @@ import {
 import { evaluateGenerationQuality } from '../services/generation-quality';
 import { formatGenerationPlanBlock, GenerationStrategyService } from '../services/generation-strategy-service';
 import { PreparedChatTurn, ChatRuntime, ChatRuntimeDeps, ChatTurnRequest } from './runtime-types';
+import { FEEDBACK_SKILL_NAME, FEEDBACK_TOOL_NAMES } from '../skills/types';
+import { t } from '../i18n/zh';
 import { logger } from '../utils/logger';
 import type { ContextItem as SnapshotContextItem } from '../services/context-manager';
 
@@ -71,8 +73,8 @@ export abstract class BaseChatRuntime implements ChatRuntime {
 
   constructor(protected deps: ChatRuntimeDeps) { }
 
-  getTools(): ToolDefinition[] {
-    return this.buildSkillModeTools();
+  getTools(options?: { includeFeedbackTools?: boolean }): ToolDefinition[] {
+    return this.buildSkillModeTools(undefined, options);
   }
 
   abstract query(turn: PreparedChatTurn): Promise<string>;
@@ -80,9 +82,14 @@ export abstract class BaseChatRuntime implements ChatRuntime {
   abstract queryStream(turn: PreparedChatTurn, signal?: AbortSignal): AsyncGenerator<StreamEvent, void, unknown>;
 
   async prepareTurn(request: ChatTurnRequest): Promise<PreparedChatTurn> {
+    // 反馈会话是干净会话：不注入长期记忆召回与 Mental Model（BR1.2），
+    // 也不写入长期记忆（BR1.3，短路在 retainCompletedTurn 里）。
+    // 这是会话级的显式开关，只对声明为反馈会话的轮次生效——普通对话的记忆行为一字不改。
+    const isolated = request.isolatedContext === true;
+
     let memoryContext = '';
     let mentalModelBlock = '';
-    if (this.deps.memoryManager) {
+    if (this.deps.memoryManager && !isolated) {
       await this.deps.memoryManager.ready();
       // 两者独立,并行取:recall 受 BM25 词法门控(与 query 相关),
       // Mental Models 无条件注入(高层用户画像,即便与本轮 query 无词法重叠也应在场)。
@@ -97,6 +104,10 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     }
 
     const activeSkill = this.resolveForcedSkill(request);
+    // BR1.1 的 fail-closed 分支：反馈会话拿不到 feedback 技能（不存在，或被用户在
+    // 设置里禁用——内置技能有逐项开关，点一下即可触发）时，绝不退回全量工具集。
+    // 工具集收窄到「四个反馈工具 ∪ read_skill」，并且本轮不发起模型调用。
+    const blockedReason = isolated && !activeSkill ? this.feedbackUnavailableReason() : undefined;
     const obsidianContext = request.source
       ? this.createFallbackObsidianContext(request)
       : undefined;
@@ -132,11 +143,14 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     // [B] 用户给出短确认/延续性回复（"需要"、"用第二个"等）且存在对话历史时，
     // 剔除自动注入的环境上下文（当前笔记/反链），避免它盖过对话意图把模型带偏。
     // 用户显式选择的上下文与编辑器选区始终保留。
+    // 反馈会话则无条件剔除环境上下文——它连用户显式选择的那部分也不该带（BR1.2）。
     const isContinuation = this.isContinuationMessage(request.userMessage)
       && await this.resolveHasPriorContext(request);
-    const promptContextItems = isContinuation
+    const promptContextItems = isolated
       ? this.stripAmbientContext(request.contextItems)
-      : request.contextItems;
+      : isContinuation
+        ? this.stripAmbientContext(request.contextItems)
+        : request.contextItems;
 
     systemPrompt += `[Context: ${this.formatContextItems(promptContextItems)}]\n`;
     // [A] 仅当仍带有自动注入的环境上下文时，附上"以对话为准"的定性说明。
@@ -150,7 +164,9 @@ export abstract class BaseChatRuntime implements ChatRuntime {
       systemPrompt += `[Skill Instructions]\n${activeSkill.instructions}\n`;
     } else {
       // 自主发现（B 方案）：注入 pi 原生 skill 清单，模型按需 read_skill 拿完整正文。
-      const skillList = this.deps.skillRegistry.getSkillSummaryText();
+      // 反馈技能不在清单里：它只在专用反馈 tab 里强制激活，列出来只会把模型引向
+      // 一条没有澄清策略、也没有那四个工具的死路。
+      const skillList = this.deps.skillRegistry.getSkillSummaryText({ exclude: [FEEDBACK_SKILL_NAME] });
       if (skillList) {
         systemPrompt += `${skillList}\n`;
         // 覆盖 pi 清单里“读取 skill 文件”的原生措辞：本插件的 skill 存放于隐藏目录，
@@ -174,7 +190,7 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     return {
       prompt: request.userMessage,
       systemPrompt,
-      tools: this.buildSkillModeTools(activeSkill),
+      tools: this.buildSkillModeTools(activeSkill, { includeFeedbackTools: isolated }),
       userRequest: request.userMessage,
       memoryContext,
       activeSkillName: activeSkill?.skillName,
@@ -190,6 +206,8 @@ export abstract class BaseChatRuntime implements ChatRuntime {
       writingProfile,
       systemPromptOverride: request.systemPromptOverride,
       conversationId: request.conversationId,
+      isolatedContext: isolated,
+      blockedReason,
     };
   }
 
@@ -340,10 +358,16 @@ If no listed command fits, suggest a plain-language request instead.
   // 模型再也读不到/切不到别的 skill。口径与运行中 steering 的 ActiveRunController 一致。
   private static readonly ALWAYS_AVAILABLE_TOOL_NAMES = ['read_skill'];
 
-  private buildSkillModeTools(activeSkill?: { tools: ToolDefinition[] } | null): ToolDefinition[] {
+  private buildSkillModeTools(
+    activeSkill?: { tools: ToolDefinition[] } | null,
+    options?: { includeFeedbackTools?: boolean },
+  ): ToolDefinition[] {
     // B 方案：不再注入 use_skill 元工具。skill 发现走 system prompt 的 <available_skills>
     // 清单 + read_skill 工具。无激活 skill 时给全量集（read_skill 已在其中）。
     if (!activeSkill?.tools?.length) {
+      // 反馈会话走不了「全量集」这条默认路径：那是本设计里唯一会把全部 vault 读工具
+      // 交到反馈会话手里的通路，而触发条件只是设置页点一下禁用开关（BR1.1）。
+      if (options?.includeFeedbackTools) return this.feedbackFallbackTools();
       return [...this.deps.toolRegistry.getAllDefinitions()];
     }
     // 强制激活收窄到该 skill 的工具子集，但补回 read_skill 等元能力（去重），
@@ -356,6 +380,19 @@ If no listed command fits, suggest a plain-language request instead.
       if (def) tools.push(def);
     }
     return tools;
+  }
+
+  /** fail-closed 工具集：四个反馈工具 ∪ read_skill。刻意不含任何 vault 读工具。 */
+  private feedbackFallbackTools(): ToolDefinition[] {
+    return this.deps.toolRegistry.getDefinitions([
+      ...FEEDBACK_TOOL_NAMES,
+      ...BaseChatRuntime.ALWAYS_AVAILABLE_TOOL_NAMES,
+    ]);
+  }
+
+  /** 反馈会话拿不到技能时的用户可见提示（BR1.1）。 */
+  private feedbackUnavailableReason(): string {
+    return t('Feedback is unavailable right now: the "feedback" skill is disabled. Enable it under Settings → Skills, then try again.');
   }
 
   /**
@@ -407,6 +444,10 @@ If no listed command fits, suggest a plain-language request instead.
     // 阶段1:会话持久化由 AgentHarness 完成(prompt() 已把 user/assistant 追加进 session),
     // 此处不再自己落盘。仅保留把本轮原文交给长期记忆(Hindsight)——它与 session 正交。
     const userRequest = turn.userRequest || turn.prompt;
+
+    // BR1.3 反馈会话对记忆系统既不读也不写：写入会让一次性的报障对话污染后续普通对话
+    // 的召回，并使反馈内容经记忆回流到不受 BR1.2 约束的链路。
+    if (turn.isolatedContext) return;
 
     if (!this.deps.memoryManager) return;
 
