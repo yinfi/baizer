@@ -304,7 +304,7 @@ async function runTests() {
     const prevMemPath = ['.obsidian', ['obsidian', 'cli'].join('-') + '-memory', 'memories.json'].join('/');
     const { app } = createApp({});
     (app.vault.adapter as any).write(prevMemPath, JSON.stringify([
-      { text: 'My token is ghp_abcdefghij1234567890 for the repo.', type: 'world' },
+      { text: 'My token is ghp_abcdefghij12 for the repo.', type: 'world' },
     ]));
 
     const { importPreviousMemoryFiles, migrateLegacyMemory } = await import('../src/memory/hindsight-migration');
@@ -317,7 +317,7 @@ async function runTests() {
     const memories = await store.listMemories();
     const joined = JSON.stringify(memories);
     expect(joined).toContain('[REDACTED]');
-    expect(joined.includes('ghp_abcdefghij1234567890')).toBe(false);
+    expect(joined.includes('ghp_abcdefghij12')).toBe(false);
   });
 
   // ---- 第3项:去重(近义改写不堆叠)----
