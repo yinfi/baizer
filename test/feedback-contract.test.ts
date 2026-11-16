@@ -168,10 +168,61 @@ async function runTests() {
     expect(first.ok && second.ok, 'both renders must succeed');
     expectEqual(first, second, 'identical inputs must produce byte-identical output');
     const body = first.ok ? first.body : '';
-    expect(body.startsWith('### What happened'), 'the section order must follow the template');
-    expect(body.includes('### Where it happened\n\nSomewhere else / not sure'),
+    expect(body.startsWith('## What happened'), 'the section order must follow the template');
+    expect(body.includes('## Environment\n\n| | |\n|---|---|\n| Baizer | 1.7.2 |\n| Obsidian | 1.9.0 |\n| Platform | Windows |\n| Provider | OpenAI |'),
+      'the four environment fields render as one table, not four sections');
+    expect(body.includes('## Environment') && body.indexOf('## Environment') < body.indexOf('## Where it happened'),
+      'the environment table sits right before the surface section');
+    expect(body.includes('## Where it happened\n\nSomewhere else / not sure'),
       'a missing dropdown falls back to the documented value');
-    expect(body.includes('### Console output\n\n无'), 'a missing optional section is filled explicitly');
+    expect(body.includes('## Console output\n\n无'), 'a missing optional section stays plain text, not fenced');
+  });
+
+  await test('the console field is fenced as a shell block when present', () => {
+    const diagnostics = {
+      pluginVersion: '1.7.2',
+      obsidianVersion: '1.9.0',
+      platform: 'Windows',
+      provider: 'OpenAI' as const,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const fields = {
+      'what-happened': 'The sidebar is blank.',
+      repro: '1. Open\n2. Look',
+      'plugin-version': '1.7.2',
+      'obsidian-version': '1.9.0',
+      platform: 'Windows',
+      provider: 'OpenAI',
+      console: 'TypeError: boom',
+    };
+    const result = renderIssueBody({ type: 'bug', fields, diagnostics });
+    expect(result.ok, 'render must succeed');
+    const body = result.ok ? result.body : '';
+    expect(body.includes('## Console output\n\n```shell\nTypeError: boom\n```'),
+      'a present console value is wrapped in a shell fence, matching the template\'s render: shell');
+  });
+
+  await test('a feature request also renders the environment table', () => {
+    const diagnostics = {
+      pluginVersion: '1.7.2',
+      obsidianVersion: '1.9.0',
+      platform: 'Windows',
+      provider: 'OpenAI' as const,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const fields = {
+      problem: 'The feedback tab is hard to find.',
+      'plugin-version': '1.7.2',
+      'obsidian-version': '1.9.0',
+      platform: 'Windows',
+      provider: 'OpenAI',
+      surface: 'Something new',
+    };
+    const result = renderIssueBody({ type: 'enhancement', fields, diagnostics });
+    expect(result.ok, 'render must succeed');
+    const body = result.ok ? result.body : '';
+    expect(body.includes('## Environment\n\n| | |\n|---|---|\n| Baizer | 1.7.2 |\n| Obsidian | 1.9.0 |\n| Platform | Windows |\n| Provider | OpenAI |'),
+      'feature requests carry the same environment table as bug reports');
   });
 
   await test('a missing required field fails the render instead of silently filling 无', () => {

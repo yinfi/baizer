@@ -217,7 +217,7 @@ async function runTests() {
     expectEqual(args.title, 'Sidebar is blank', 'the title must be folded to a single line');
     expectEqual(args.labels, ['bug'], 'labels come from the type');
     expectEqual(args.draftId !== '', true, 'the payload must carry the draft id');
-    expect(typeof args.body === 'string' && (args.body as string).includes('### Steps to reproduce'),
+    expect(typeof args.body === 'string' && (args.body as string).includes('## Steps to reproduce'),
       'the body must be rendered from the repository template fields');
   });
 

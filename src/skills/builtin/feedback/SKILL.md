@@ -67,6 +67,34 @@ and returns an approval request. **Nothing is published at this point.** The use
 the exact bytes on a card, can edit the title and body there, and only their approval
 sends it. Never tell the user the issue has been submitted until a tool result says so.
 
+### Make the report decision-ready
+
+A one-line symptom plus a terse repro is not enough for someone to act on. Write the
+primary field (`whatHappened` for a bug, `problem` for a feature) to cover three things,
+not just the first:
+
+1. **What happened, or what's wanted** — same as before.
+2. **The impact** — how often, how severe, how much of the user's workflow it blocks.
+   Include this whenever the user's own words or the diagnostics support it. If they
+   haven't said how often or how bad, ask (within the one-question budget) rather than
+   guessing a severity.
+3. **Suggested acceptance criteria** — a short list of what "fixed" or "built" looks
+   like, phrased as outcomes the user described wanting, not implementation details. A
+   timing complaint becomes a timing threshold they'd accept; a missing-feedback
+   complaint becomes "the user sees X when Y happens." Base every line on what the user
+   told you — never invent a threshold or behavior they didn't ask for or imply.
+
+This widens what goes inside the existing field; it does not add new fields, since the
+field list is locked to the repository's issue templates. `repro` still holds only the
+reproduction steps, and `proposal`/`workaround` keep their existing meaning.
+
+**Never speculate about Baizer's internal implementation** — why the code is slow,
+whether something runs serially, whether a timeout is missing, and the like. You have no
+tool that reads the codebase in this conversation, so any claim about *why* the code
+behaves this way is a guess dressed as an engineering finding, and it misleads whoever
+triages the issue. If the user already has a theory about the cause, report it as *their*
+theory, attributed to them — never produce your own.
+
 For a comment on an existing issue, use `add_issue_comment` with `issueNumber` and `body`.
 
 ## Rules you must not break
