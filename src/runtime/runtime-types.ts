@@ -99,6 +99,13 @@ export interface ChatRuntimeDeps {
    * 避免模型误以为这些命令不存在。由 ModelService 提供(读 PromptTemplateService 缓存)。
    */
   getUserCommandEntries?: () => Array<{ command: string; description: string }>;
+  /**
+   * 反馈会话的内置凭据是否可用（构建期注入）。缺省读构建期常量。
+   *
+   * 做成注入点是为了可测：单测环境（tsx 直接跑源码）永远读不到构建期 define，
+   * 若写死读常量，所有「技能可解析的反馈轮不应被 block」的断言都会误判为 block。
+   */
+  isFeedbackConfigured?: () => boolean;
 }
 
 /**

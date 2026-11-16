@@ -99,11 +99,12 @@ function buildHarness(options: { disabledSkills?: string[] } = {}): Harness {
   };
 }
 
-function buildRuntime(harness: Harness) {
+function buildRuntime(harness: Harness, isConfigured: () => boolean = () => true) {
   return createChatRuntime({
     memoryManager: null,
     toolRegistry: harness.toolRegistry,
     skillRegistry: harness.skillRegistry,
+    isFeedbackConfigured: isConfigured,
   });
 }
 
@@ -183,6 +184,23 @@ async function runTests() {
     expectEqual(prepared.isolatedContext, true, 'isolatedContext must reach the retain short-circuit');
   });
 
+  // 工作流 7.1a：凭据缺失时必须确定性短路。否则模型会照常进入澄清，然后在工具返回
+  // NOT_CONFIGURED 之后自己手写一份 issue 正文，绕过「确认后才发布」的设计。
+  await test('an unconfigured build blocks the feedback turn before any model call', async () => {
+    const harness = buildHarness();
+    const runtime = buildRuntime(harness, () => false);
+    const prepared = await runtime.prepareTurn({
+      userMessage: 'the sidebar is blank',
+      contextItems: [],
+      isolatedContext: true,
+      forcedSkillName: FEEDBACK_SKILL_NAME,
+    });
+    expect(!!prepared.blockedReason, 'a missing credential must block the turn');
+    // 短路必须发生在模型调用之前：工具集仍然是 fail-closed 的那一套。
+    expectEqual(prepared.tools.map(tool => tool.name).sort(), [...FEEDBACK_TOOL_NAMES, 'read_skill'].sort(),
+      'the blocked turn must keep the fail-closed tool set');
+  });
+
   await test('create_github_issue renders a payload and asks for approval without publishing', async () => {
     const harness = buildHarness();
     const result = await harness.toolRegistry.execute('create_github_issue', {
@@ -199,7 +217,7 @@ async function runTests() {
     expectEqual(args.title, 'Sidebar is blank', 'the title must be folded to a single line');
     expectEqual(args.labels, ['bug'], 'labels come from the type');
     expectEqual(args.draftId !== '', true, 'the payload must carry the draft id');
-    expect(typeof args.body === 'string' && (args.body as string).includes('### Steps to reproduce'),
+    expect(typeof args.body === 'string' && (args.body as string).includes('## Steps to reproduce'),
       'the body must be rendered from the repository template fields');
   });
 
