@@ -110,7 +110,9 @@ Built-in commands in Baizer (handled in `src/ui/chat-controller.ts`; skill comma
 - `@` prefix - File autocomplete
 - `/` prefix - Command autocomplete
 
-## Hotkeys
+## Suggested Hotkeys
+
+Not bound by default; assign them in Settings → Hotkeys.
 
 - `Mod+J` - Open Baizer
 - `Mod+Shift+G` - Guardian manual trigger

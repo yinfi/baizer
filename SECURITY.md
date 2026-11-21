@@ -36,16 +36,20 @@ Baizer runs entirely inside your Obsidian client. It is important to understand
 its trust boundaries:
 
 - **API keys** you configure are stored in the plugin's local `data.json` inside
-  your vault's `.obsidian` folder. They are sent only to the AI provider
-  endpoints you configure (e.g. OpenAI, DeepSeek, Alibaba DashScope) — never to
-  any Baizer-operated server. Baizer has **no telemetry and no data collection**.
-- **Vault content** is sent to your configured AI provider as part of prompts.
+  your vault's `.obsidian` folder. They are sent to the AI provider endpoints you
+  configure (e.g. OpenAI, DeepSeek, Alibaba DashScope) — never to any
+  Baizer-operated server. Baizer has **no telemetry and no data collection**.
+- **Vault content** is sent to your configured AI provider as part of prompts,
+  together with recalled memory, prior turns, ambient context, and tool output.
   Review your provider's data-usage policy before enabling features on sensitive
   notes.
+- **Other outbound requests:** search queries go to DuckDuckGo; clipping fetches
+  the URL you supply; video links resolve through YouTube or Bilibili; with
+  plugin control enabled, plugin metadata is read from GitHub.
 - **AI-initiated file writes** are governed by the permission and confirmation
-  settings. `.obsidian` writes are always blocked. When enabling broad write
-  scope or disabling confirmations, you accept the risk of AI-initiated vault
-  mutations.
+  settings. AI-initiated `.obsidian` writes are always blocked. When enabling
+  broad write scope or disabling confirmations, you accept the risk of
+  AI-initiated vault mutations.
 
 When reporting, please treat any credentials or private vault content as
 sensitive and avoid pasting real API keys or personal notes into reports.
@@ -86,13 +90,17 @@ Baizer 处于活跃开发阶段,安全修复仅应用于最新发布版本。
 
 Baizer 完全运行在你的 Obsidian 客户端内。请理解其信任边界:
 
-- **API 密钥**保存在你库内 `.obsidian` 目录下插件的本地 `data.json` 中。它仅
-  发送给你所配置的 AI 服务端点(如 OpenAI、DeepSeek、阿里云 DashScope),
+- **API 密钥**保存在你库内 `.obsidian` 目录下插件的本地 `data.json` 中。它发送给你所
+  配置的 AI 服务端点(如 OpenAI、DeepSeek、阿里云 DashScope),
   **绝不会**发往任何由 Baizer 运营的服务器。Baizer **无遥测、无数据收集**。
-- **库内容**会作为提示词的一部分发送给你配置的 AI 服务商。在敏感笔记上启用
-  功能前,请先了解你的服务商的数据使用政策。
-- **AI 发起的文件写入**受权限与确认设置约束。对 `.obsidian` 的写入始终被阻止。
-  当你启用宽泛写入范围或关闭确认时,即表示你接受 AI 发起库变更的风险。
+- **库内容**会作为提示词的一部分发送给你配置的 AI 服务商,其中还包括召回的
+  记忆、历史回合、环境上下文与工具返回内容。在敏感笔记上启用功能前,请先了解
+  你的服务商的数据使用政策。
+- **其他出站请求:** 搜索词会发往 DuckDuckGo;网页抓取会访问你提供的 URL;
+  视频链接会经 YouTube 或 Bilibili 解析;启用插件控制时,插件元数据会从
+  GitHub 读取。
+- **AI 发起的文件写入**受权限与确认设置约束。AI 发起的 `.obsidian` 写入始终被
+  阻止。当你启用宽泛写入范围或关闭确认时,即表示你接受 AI 发起库变更的风险。
 
 报告时,请将任何凭据或私密库内容视为敏感信息,避免在报告中粘贴真实的 API
 密钥或个人笔记。
