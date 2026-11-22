@@ -234,6 +234,32 @@ async function runTests() {
     expectEqual(result.ok, false, 'a bug without "what happened" must not render');
   });
 
+  await test('a missing environment field fails the render even though it is rendered as a table', () => {
+    // 四项环境字段虽然合并成表格渲染、不占独立小节，仍参与必填校验：
+    // 缺一个就必须渲染失败，而不是静默变成「无」。
+    const result = renderIssueBody({
+      type: 'bug',
+      fields: {
+        'what-happened': 'Guardian never suggested anything.',
+        repro: '1. Open a note\n2. Start typing',
+        'plugin-version': '1.7.2',
+        'obsidian-version': '1.9.0',
+        platform: 'Linux',
+      },
+      diagnostics: {
+        pluginVersion: '1.7.2',
+        obsidianVersion: '1.9.0',
+        platform: 'Linux',
+        provider: 'OpenAI' as const,
+        generatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
+    expectEqual(result.ok, false, 'a bug without provider must not render');
+    const error = result.ok ? '' : result.error;
+    expect(error.includes('provider') && error.includes('Provider'),
+      'the error must name the Provider field');
+  });
+
   await test('the title is folded to a single line while the body keeps its bytes', () => {
     expectEqual(singleLine('Line one\n\nLine two'), 'Line one Line two', 'title folding');
   });

@@ -111,14 +111,17 @@ function fallbackFor(field: TemplateField): string {
  * 四项环境诊断字段合并进一张表格渲染，而不是各占一个小节——原来 8 个小节平铺，
  * 环境信息被拆得比正文本身还碎，不像一份正常的 GitHub issue。
  *
- * 两个模板的字段清单都不含这四个 id（它们是 payload.ts 由诊断快照单独拼入的），
- * 所以表格的位置固定在「声明字段渲完、surface 之前」，而不是由 templateFields
- * 的顺序决定；两个模板都以 surface 收尾，这个位置对两者一致。
+ * 表格固定插在 surface 之前，是因为**两个模板都声明了 surface 字段**，这个锚点在
+ * bug / feature 两条路径上位置一致（bug：surface 之后还有 console；feature：surface
+ * 是最后一个）。
+ *
+ * 这四个 id 只由 bug 模板声明（均为 required、无 fallback），feature 模板从不声明；
+ * feature 侧的取值全部来自 input.fields——payload.ts 会把 diagnosticFields(snapshot)
+ * 合并进去。所以表格读的是 input.fields，而不是 templateFields 的字段清单。
  *
  * 行标签 ≠ 字段 label：'Baizer'/'Obsidian' 比 'Baizer version'/'Obsidian version'
  * 在表格里更紧凑，不影响同源测试（它只比对 templateFields 的 label，不比对这里）。
- * 缺失一律按「无」填充——这四项从不是 templateFields 里的「必填」字段，没有
- * 「渲染失败」的语境。
+ * 缺失一律按「无」填充。
  */
 const ENVIRONMENT_FIELD_ROWS: Array<{ id: string; label: string }> = [
   { id: 'plugin-version', label: 'Baizer' },
@@ -178,9 +181,10 @@ export type IssueRenderResult =
  * 必填字段缺失即失败——不静默填「无」，否则 issue 会变成一句「XX 不好使」。
  *
  * 四项环境字段不再各占一个小节，合并进 surface 字段前的一张 `## Environment`
- * 表格；两个模板都以 surface 收尾，这个锚点在 bug / feature 两条路径上位置一致
- * （feature 的字段清单本就不含这四个 id，表格完全来自 input.fields 里诊断快照
- * 塞的值，与模板字段无关——这正是「功能请求也要带环境信息」的落地方式）。
+ * 表格；两个模板都声明了 surface 字段，这个锚点在 bug / feature 两条路径上位置一致
+ * （bug 的 surface 之后还有 console，feature 的 surface 收尾）。这四个 id 只由 bug
+ * 模板声明并校验；feature 模板不含它们，表格完全来自 input.fields 里诊断快照塞的值，
+ * 与模板字段无关——这正是「功能请求也要带环境信息」的落地方式。
  */
 export function renderIssueBody(input: IssueRenderInput): IssueRenderResult {
   const fields = templateFields(input.type);
@@ -197,9 +201,10 @@ export function renderIssueBody(input: IssueRenderInput): IssueRenderResult {
     }
 
     if (field.id === 'surface') {
-      // 环境表格固定插在 surface 前：两个模板都以 surface 收尾，锚点位置一致，
-      // 且表格直接读 input.fields（诊断快照），与 field.id 是否在模板里声明无关——
-      // 这正是 feature 报告也带环境信息的落地方式。
+      // 环境表格固定插在 surface 前：两个模板都声明了 surface 字段，锚点位置一致
+      // （bug 的 surface 之后还有 console，feature 的 surface 收尾），且表格直接读
+      // input.fields（诊断快照），与 field.id 是否在模板里声明无关——这正是 feature
+      // 报告也带环境信息的落地方式。
       sections.push(buildEnvironmentSection(input.fields));
     }
 
