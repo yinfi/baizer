@@ -10,7 +10,8 @@ import {
 import { evaluateGenerationQuality } from '../services/generation-quality';
 import { formatGenerationPlanBlock, GenerationStrategyService } from '../services/generation-strategy-service';
 import { PreparedChatTurn, ChatRuntime, ChatRuntimeDeps, ChatTurnRequest } from './runtime-types';
-import { FEEDBACK_SKILL_NAME, FEEDBACK_TOOL_NAMES } from '../skills/types';
+import { ActivatedSkill, FEEDBACK_SKILL_NAME, FEEDBACK_TOOL_NAMES } from '../skills/types';
+import { isFeedbackConfigured } from '../feedback/config';
 import { t } from '../i18n/zh';
 import { logger } from '../utils/logger';
 import type { ContextItem as SnapshotContextItem } from '../services/context-manager';
@@ -107,7 +108,9 @@ export abstract class BaseChatRuntime implements ChatRuntime {
     // BR1.1 的 fail-closed 分支：反馈会话拿不到 feedback 技能（不存在，或被用户在
     // 设置里禁用——内置技能有逐项开关，点一下即可触发）时，绝不退回全量工具集。
     // 工具集收窄到「四个反馈工具 ∪ read_skill」，并且本轮不发起模型调用。
-    const blockedReason = isolated && !activeSkill ? this.feedbackUnavailableReason() : undefined;
+    // 凭据缺失同理（工作流 7.1a）：照常进入澄清的话，模型会在工具返回 NOT_CONFIGURED
+    // 之后自己手写一份 issue 正文，绕过「确认后才发布」的设计。
+    const blockedReason = isolated ? this.feedbackBlockedReason(activeSkill) : undefined;
     const obsidianContext = request.source
       ? this.createFallbackObsidianContext(request)
       : undefined;
@@ -393,6 +396,16 @@ If no listed command fits, suggest a plain-language request instead.
   /** 反馈会话拿不到技能时的用户可见提示（BR1.1）。 */
   private feedbackUnavailableReason(): string {
     return t('Feedback is unavailable right now: the "feedback" skill is disabled. Enable it under Settings → Skills, then try again.');
+  }
+
+  /**
+   * 反馈会话的确定性短路：技能不可用、或本次构建未注入凭据时，只回一句明确提示，
+   * 不发起模型调用（BR1.1 / 工作流 7.1a）。
+   */
+  private feedbackBlockedReason(activeSkill: ActivatedSkill | null): string | undefined {
+    if (!activeSkill) return this.feedbackUnavailableReason();
+    const configured = this.deps.isFeedbackConfigured ?? isFeedbackConfigured;
+    return configured() ? undefined : t('Not configured in this build. Feedback is unavailable.');
   }
 
   /**

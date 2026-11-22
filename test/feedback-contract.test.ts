@@ -22,7 +22,7 @@ import {
   type TemplateField,
 } from '../src/feedback/issue-template';
 import { computeDedupKey } from '../src/feedback/drafts';
-import { classifyHttpFailure, parseRetryAfter, sanitizeExternalText, toCandidates } from '../src/feedback/github';
+import { classifyHttpFailure, GithubClient, parseRetryAfter, sanitizeExternalText, toCandidates } from '../src/feedback/github';
 import { buildErrorDigest } from '../src/feedback/diagnostics';
 import { isConfigDirPath, isPluginBundlePath, isReadDeniedPath } from '../src/permissions/read-guard';
 import { looksLikeCredential } from '../src/utils/credential-pattern';
@@ -168,10 +168,61 @@ async function runTests() {
     expect(first.ok && second.ok, 'both renders must succeed');
     expectEqual(first, second, 'identical inputs must produce byte-identical output');
     const body = first.ok ? first.body : '';
-    expect(body.startsWith('### What happened'), 'the section order must follow the template');
-    expect(body.includes('### Where it happened\n\nSomewhere else / not sure'),
+    expect(body.startsWith('## What happened'), 'the section order must follow the template');
+    expect(body.includes('## Environment\n\n| | |\n|---|---|\n| Baizer | 1.7.2 |\n| Obsidian | 1.9.0 |\n| Platform | Windows |\n| Provider | OpenAI |'),
+      'the four environment fields render as one table, not four sections');
+    expect(body.includes('## Environment') && body.indexOf('## Environment') < body.indexOf('## Where it happened'),
+      'the environment table sits right before the surface section');
+    expect(body.includes('## Where it happened\n\nSomewhere else / not sure'),
       'a missing dropdown falls back to the documented value');
-    expect(body.includes('### Console output\n\n无'), 'a missing optional section is filled explicitly');
+    expect(body.includes('## Console output\n\n无'), 'a missing optional section stays plain text, not fenced');
+  });
+
+  await test('the console field is fenced as a shell block when present', () => {
+    const diagnostics = {
+      pluginVersion: '1.7.2',
+      obsidianVersion: '1.9.0',
+      platform: 'Windows',
+      provider: 'OpenAI' as const,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const fields = {
+      'what-happened': 'The sidebar is blank.',
+      repro: '1. Open\n2. Look',
+      'plugin-version': '1.7.2',
+      'obsidian-version': '1.9.0',
+      platform: 'Windows',
+      provider: 'OpenAI',
+      console: 'TypeError: boom',
+    };
+    const result = renderIssueBody({ type: 'bug', fields, diagnostics });
+    expect(result.ok, 'render must succeed');
+    const body = result.ok ? result.body : '';
+    expect(body.includes('## Console output\n\n```shell\nTypeError: boom\n```'),
+      'a present console value is wrapped in a shell fence, matching the template\'s render: shell');
+  });
+
+  await test('a feature request also renders the environment table', () => {
+    const diagnostics = {
+      pluginVersion: '1.7.2',
+      obsidianVersion: '1.9.0',
+      platform: 'Windows',
+      provider: 'OpenAI' as const,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const fields = {
+      problem: 'The feedback tab is hard to find.',
+      'plugin-version': '1.7.2',
+      'obsidian-version': '1.9.0',
+      platform: 'Windows',
+      provider: 'OpenAI',
+      surface: 'Something new',
+    };
+    const result = renderIssueBody({ type: 'enhancement', fields, diagnostics });
+    expect(result.ok, 'render must succeed');
+    const body = result.ok ? result.body : '';
+    expect(body.includes('## Environment\n\n| | |\n|---|---|\n| Baizer | 1.7.2 |\n| Obsidian | 1.9.0 |\n| Platform | Windows |\n| Provider | OpenAI |'),
+      'feature requests carry the same environment table as bug reports');
   });
 
   await test('a missing required field fails the render instead of silently filling 无', () => {
@@ -181,6 +232,32 @@ async function runTests() {
       diagnostics: { pluginVersion: '1', obsidianVersion: '1', platform: 'Linux', provider: 'OpenAI', generatedAt: '' },
     });
     expectEqual(result.ok, false, 'a bug without "what happened" must not render');
+  });
+
+  await test('a missing environment field fails the render even though it is rendered as a table', () => {
+    // 四项环境字段虽然合并成表格渲染、不占独立小节，仍参与必填校验：
+    // 缺一个就必须渲染失败，而不是静默变成「无」。
+    const result = renderIssueBody({
+      type: 'bug',
+      fields: {
+        'what-happened': 'Guardian never suggested anything.',
+        repro: '1. Open a note\n2. Start typing',
+        'plugin-version': '1.7.2',
+        'obsidian-version': '1.9.0',
+        platform: 'Linux',
+      },
+      diagnostics: {
+        pluginVersion: '1.7.2',
+        obsidianVersion: '1.9.0',
+        platform: 'Linux',
+        provider: 'OpenAI' as const,
+        generatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
+    expectEqual(result.ok, false, 'a bug without provider must not render');
+    const error = result.ok ? '' : result.error;
+    expect(error.includes('provider') && error.includes('Provider'),
+      'the error must name the Provider field');
   });
 
   await test('the title is folded to a single line while the body keeps its bytes', () => {
@@ -232,6 +309,27 @@ async function runTests() {
 
   await test('sanitizeExternalText truncates to 200 characters', () => {
     expectEqual(sanitizeExternalText('y'.repeat(500)).length, 200, 'truncation');
+  });
+
+  // GitHub 的 /search/issues 缺 is:issue 会直接 422，且被归成 rejected 后表现为
+  // 「仓库规则拒绝」——去重因此静默失效。这条断言把查询串锁死，防止再次漏掉。
+  await test('the issue search query carries is:issue', async () => {
+    const seen: string[] = [];
+    const client = new GithubClient({
+      request: async (options) => {
+        seen.push(options.url);
+        return { status: 200, text: JSON.stringify({ items: [] }) };
+      },
+      token: () => 'test-token',
+      repo: 'yinfi/baizer',
+    });
+
+    const result = await client.searchIssues('blank sidebar');
+    expect(result.ok, 'the search must be attempted');
+    expectEqual(seen.length, 1, 'exactly one request');
+    const decoded = decodeURIComponent(seen[0]);
+    expect(decoded.includes('is:issue'), `the query must include is:issue: ${decoded}`);
+    expect(decoded.includes('in:title,body'), `the search scope must stay in:title,body: ${decoded}`);
   });
 
   await test('the read guard rejects the config directory and the plugin bundle explicitly', () => {
